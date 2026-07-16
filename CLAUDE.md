@@ -268,7 +268,8 @@ Environment variables, documented in `.env.example`, never committed with values
 ANTHROPIC_API_KEY        # required
 AGENT_MODEL              # default claude-sonnet-4-6
 JUDGE_MODEL              # pinned independently, changes require ADR note
-PLATFORM_URL             # MCP + REST base
+PLATFORM_MCP_URL         # MCP JSON-RPC endpoint (platform runs MCP as its own process)
+PLATFORM_REST_URL        # versioned REST endpoint (same host as MCP today)
 PLATFORM_TOKEN           # scoped service-account token, least privilege
 PLATFORM_WEBHOOK_SECRET  # HMAC verification for alert ingress
 DATABASE_URL             # agent's own Postgres

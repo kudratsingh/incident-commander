@@ -64,13 +64,13 @@ class TestTransitionsRegistry:
             else:
                 assert state in TRANSITIONS
 
-    def test_stubs_raise_not_implemented(self, run_state: RunState) -> None:
-        for state in IncidentState:
-            if state.is_terminal:
-                continue
+    def test_stubs_raise_not_implemented(self, run_state: RunState, now: datetime) -> None:
+        # TRIAGE is now real; every other non-terminal state is still stubbed.
+        stubbed = [s for s in IncidentState if not s.is_terminal and s is not IncidentState.TRIAGE]
+        for state in stubbed:
             state_run = run_state.model_copy(update={"state": state})
             with pytest.raises(NotImplementedError):
-                TRANSITIONS[state](state_run)
+                TRANSITIONS[state](state_run, now)
 
 
 class TestDispatch:
@@ -78,10 +78,12 @@ class TestDispatch:
         "state",
         [IncidentState.RESOLVED, IncidentState.ESCALATED, IncidentState.FAILED],
     )
-    def test_terminal_state_rejected(self, run_state: RunState, state: IncidentState) -> None:
+    def test_terminal_state_rejected(
+        self, run_state: RunState, now: datetime, state: IncidentState
+    ) -> None:
         state_run = run_state.model_copy(update={"state": state})
         with pytest.raises(TerminalStateError):
-            dispatch(state_run)
+            dispatch(state_run, now)
 
     def test_disallowed_transition_rejected(
         self,
@@ -89,12 +91,12 @@ class TestDispatch:
         now: datetime,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        def bad_transition(rs: RunState) -> RunState:
-            return rs.with_state(IncidentState.REMEDIATING, now)
+        def bad_transition(rs: RunState, at: datetime) -> RunState:
+            return rs.with_state(IncidentState.REMEDIATING, at)
 
         monkeypatch.setitem(TRANSITIONS, IncidentState.TRIAGE, bad_transition)
         with pytest.raises(InvalidTransitionError, match="disallowed"):
-            dispatch(run_state)
+            dispatch(run_state, now)
 
     def test_allowed_transition_returned(
         self,
@@ -102,9 +104,9 @@ class TestDispatch:
         now: datetime,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        def good_transition(rs: RunState) -> RunState:
-            return rs.with_state(IncidentState.INVESTIGATING, now)
+        def good_transition(rs: RunState, at: datetime) -> RunState:
+            return rs.with_state(IncidentState.INVESTIGATING, at)
 
         monkeypatch.setitem(TRANSITIONS, IncidentState.TRIAGE, good_transition)
-        result = dispatch(run_state)
+        result = dispatch(run_state, now)
         assert result.state is IncidentState.INVESTIGATING

@@ -9,12 +9,14 @@ silent transition. Transition bodies are stubbed here and land in follow-on PRs.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
 from incident_commander.agent.state import IncidentState, RunState
+from incident_commander.agent.triage import transition_triage
 
-Transition = Callable[[RunState], RunState]
+Transition = Callable[[RunState, datetime], RunState]
 
 
 ALLOWED_TRANSITIONS: dict[IncidentState, frozenset[IncidentState]] = {
@@ -69,7 +71,7 @@ class TerminalStateError(RuntimeError):
 
 
 def _stub(name: str) -> Transition:
-    def transition(run_state: RunState) -> RunState:
+    def transition(run_state: RunState, at: datetime) -> RunState:
         raise NotImplementedError(
             f"{name} transition not implemented; see docs/ADR/0002 and Phase 0 exit criteria"
         )
@@ -78,7 +80,7 @@ def _stub(name: str) -> Transition:
 
 
 TRANSITIONS: dict[IncidentState, Transition] = {
-    IncidentState.TRIAGE: _stub("triage"),
+    IncidentState.TRIAGE: transition_triage,
     IncidentState.INVESTIGATING: _stub("investigate"),
     IncidentState.PLANNING: _stub("plan"),
     IncidentState.AWAITING_APPROVAL: _stub("await_approval"),
@@ -87,7 +89,7 @@ TRANSITIONS: dict[IncidentState, Transition] = {
 }
 
 
-def dispatch(run_state: RunState) -> RunState:
+def dispatch(run_state: RunState, at: datetime) -> RunState:
     """Run one transition from the current state.
 
     Raises ``TerminalStateError`` if called on a terminal state,
@@ -96,7 +98,7 @@ def dispatch(run_state: RunState) -> RunState:
     if run_state.state.is_terminal:
         raise TerminalStateError(f"dispatch called on terminal state {run_state.state.value}")
     transition = TRANSITIONS[run_state.state]
-    next_run_state = transition(run_state)
+    next_run_state = transition(run_state, at)
     allowed = ALLOWED_TRANSITIONS[run_state.state]
     if next_run_state.state not in allowed:
         raise InvalidTransitionError(

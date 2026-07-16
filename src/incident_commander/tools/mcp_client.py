@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Mapping
 from itertools import count
-from typing import Any, Final
+from typing import Any, Final, Protocol
 
 import httpx
 from pydantic import BaseModel, ConfigDict
@@ -125,3 +125,9 @@ def make_client(settings: Settings) -> MCPClient:
         base_url=str(settings.platform_mcp_url),
         token=settings.platform_token.get_secret_value(),
     )
+
+
+class MCPClientProtocol(Protocol):
+    """Structural type for anything a transition can call to invoke a tool."""
+
+    def call_tool(self, name: str, arguments: Mapping[str, Any]) -> ToolResult: ...

@@ -44,14 +44,15 @@ test-e2e:
 eval:
 	uv run python -m evals.runner
 
-eval-reg:
-	@echo "TODO(phase-1): run regression eval subset"
+eval-reg: eval
+	uv run python -m evals.regression
 
 demo:
 	@echo "TODO(phase-0): docker compose up + inject scenario + stream investigation"
 
-baseline:
-	@echo "TODO(phase-1): recompute and commit evals/reports/baseline.json"
+baseline: eval
+	cp evals/reports/latest.json evals/reports/baseline.json
+	@echo "Baseline updated. git add + commit evals/reports/baseline.json to bless."
 
 clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache build dist *.egg-info

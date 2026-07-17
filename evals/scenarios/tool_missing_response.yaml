@@ -1,0 +1,25 @@
+# Actionable alert with no canned tool response — MCP error path.
+
+name: tool_missing_response
+description: >
+  Actionable alert but the fake platform has no canned response for the tool.
+  Exercises the MCPError escalation path: the transition catches -32601
+  (method not found), records the reason, and escalates without incrementing
+  the budget.
+
+tags: [read-only, phase-0, tool-error]
+
+alert:
+  source: platform.kafka
+  severity: high
+  fingerprint: consumer_lag_high
+  group: payments-consumer
+
+# No canned_tool_responses on purpose.
+
+expectation:
+  name: tool_missing_response
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - "tool error"
+  max_tool_calls: 0

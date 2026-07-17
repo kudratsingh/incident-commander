@@ -1,0 +1,29 @@
+# Medium-severity actionable alert. Below critical but above the noise floor.
+
+name: consumer_lag_medium
+description: >
+  Medium-severity alert on consumer lag. Not paging-grade but still actionable —
+  agent probes and escalates the finding.
+
+tags: [read-only, phase-0, kafka]
+
+alert:
+  source: platform.kafka
+  severity: medium
+  fingerprint: consumer_lag_warning
+  group: notifications-consumer
+
+canned_tool_responses:
+  get_consumer_lag:
+    content:
+      - type: text
+        text: '{"group":"notifications-consumer","lag":500,"timestamp":"2026-07-16T12:15:00Z"}'
+    is_error: false
+
+expectation:
+  name: consumer_lag_medium
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - notifications-consumer
+    - lag
+  max_tool_calls: 5

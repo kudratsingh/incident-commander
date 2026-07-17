@@ -1,0 +1,29 @@
+# Canned tool response has is_error=True — INVESTIGATING escalates without parsing.
+
+name: tool_result_marked_error
+description: >
+  The platform's tool returns is_error=True (partial failure, degraded response).
+  INVESTIGATING should treat this as an inconclusive probe and escalate rather
+  than parsing garbage.
+
+tags: [read-only, phase-0, tool-error]
+
+alert:
+  source: platform.kafka
+  severity: high
+  fingerprint: consumer_lag_high
+  group: billing-consumer
+
+canned_tool_responses:
+  get_consumer_lag:
+    content:
+      - type: text
+        text: 'partial failure querying kafka'
+    is_error: true
+
+expectation:
+  name: tool_result_marked_error
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - "is_error=True"
+  max_tool_calls: 0

@@ -1,0 +1,294 @@
+{
+  "generated_at": "2026-07-17T03:40:18.905577Z",
+  "total": 11,
+  "passed": 11,
+  "failed": 0,
+  "outcomes": [
+    {
+      "scenario": "consumer_lag_healthy_zero",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "consumer_lag_healthy_zero",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "consumer_lag_high",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "consumer_lag_high",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "consumer_lag_medium",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "consumer_lag_medium",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "consumer_lag_missing_group",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "consumer_lag_missing_group",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "consumer_lag_payments_critical",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "consumer_lag_payments_critical",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "noise_info_severity",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_info_severity",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "noise_low_severity",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_low_severity",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "noise_missing_severity",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_missing_severity",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "tool_missing_response",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "tool_missing_response",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "tool_output_schema_mismatch",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "tool_output_schema_mismatch",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "tool_result_marked_error",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "tool_result_marked_error",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          }
+        ]
+      }
+    }
+  ]
+}

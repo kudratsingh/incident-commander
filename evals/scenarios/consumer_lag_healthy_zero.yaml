@@ -1,0 +1,31 @@
+# A high-severity alert whose actual reading shows zero lag — likely false positive.
+# Agent still escalates so a human can decide.
+
+name: consumer_lag_healthy_zero
+description: >
+  Paging alert says consumer_lag_high but the probed reading is zero. This is a
+  false-positive from the platform's alarm side; the agent shouldn't invent a
+  remediation, it should attach the finding and escalate.
+
+tags: [read-only, phase-0, kafka, false-positive]
+
+alert:
+  source: platform.kafka
+  severity: high
+  fingerprint: consumer_lag_high
+  group: reports-consumer
+
+canned_tool_responses:
+  get_consumer_lag:
+    content:
+      - type: text
+        text: '{"group":"reports-consumer","lag":0,"timestamp":"2026-07-16T12:10:00Z"}'
+    is_error: false
+
+expectation:
+  name: consumer_lag_healthy_zero
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - reports-consumer
+    - '"lag":0'
+  max_tool_calls: 5

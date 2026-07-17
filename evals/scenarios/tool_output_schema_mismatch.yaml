@@ -1,0 +1,29 @@
+# Canned response returns an invalid output shape — INVESTIGATING escalates.
+
+name: tool_output_schema_mismatch
+description: >
+  Canned response returns a payload that violates GetConsumerLagOutput (lag is
+  negative). Verifies the typed registry catches malformed platform output
+  before it becomes evidence.
+
+tags: [read-only, phase-0, schema-defense]
+
+alert:
+  source: platform.kafka
+  severity: high
+  fingerprint: consumer_lag_high
+  group: billing-consumer
+
+canned_tool_responses:
+  get_consumer_lag:
+    content:
+      - type: text
+        text: '{"group":"billing-consumer","lag":-99,"timestamp":"2026-07-16T12:25:00Z"}'
+    is_error: false
+
+expectation:
+  name: tool_output_schema_mismatch
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - "output parse failed"
+  max_tool_calls: 0

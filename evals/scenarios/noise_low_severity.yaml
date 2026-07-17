@@ -1,0 +1,21 @@
+# Low-severity noise — agent should escalate at TRIAGE without a probe.
+
+name: noise_low_severity
+description: >
+  Low-severity signal that shouldn't consume the tool budget. Verifies TRIAGE
+  filters noise before INVESTIGATING gets a chance to run.
+
+tags: [read-only, phase-0, noise]
+
+alert:
+  source: platform.canary
+  severity: low
+  fingerprint: canary_blip
+  group: billing-consumer
+
+expectation:
+  name: noise_low_severity
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - "classified as escalated"
+  max_tool_calls: 0

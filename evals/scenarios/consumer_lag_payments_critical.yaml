@@ -1,0 +1,29 @@
+# Payments consumer showing severe lag. Different group than the baseline scenario.
+
+name: consumer_lag_payments_critical
+description: >
+  Payments consumer lag crosses paging threshold. Verifies the agent
+  parametrizes the probe by the alert's group field, not a hardcoded value.
+
+tags: [read-only, phase-0, kafka, group-variation]
+
+alert:
+  source: platform.kafka
+  severity: critical
+  fingerprint: consumer_lag_high
+  group: payments-consumer
+
+canned_tool_responses:
+  get_consumer_lag:
+    content:
+      - type: text
+        text: '{"group":"payments-consumer","lag":25000,"timestamp":"2026-07-16T12:05:00Z"}'
+    is_error: false
+
+expectation:
+  name: consumer_lag_payments_critical
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - payments-consumer
+    - lag
+  max_tool_calls: 5

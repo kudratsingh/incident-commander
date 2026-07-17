@@ -1,0 +1,29 @@
+# High-severity alert without a group field — INVESTIGATING falls back to "unknown".
+
+name: consumer_lag_missing_group
+description: >
+  Actionable alert whose payload doesn't name a group. INVESTIGATING falls back
+  to "unknown" so the probe still executes (rather than crashing on a missing
+  field), and the response is scoped to that fallback.
+
+tags: [read-only, phase-0, defensive]
+
+alert:
+  source: platform.kafka
+  severity: high
+  fingerprint: consumer_lag_high
+
+canned_tool_responses:
+  get_consumer_lag:
+    content:
+      - type: text
+        text: '{"group":"unknown","lag":42,"timestamp":"2026-07-16T12:20:00Z"}'
+    is_error: false
+
+expectation:
+  name: consumer_lag_missing_group
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - unknown
+    - lag
+  max_tool_calls: 5

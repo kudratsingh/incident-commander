@@ -1,0 +1,21 @@
+# Info-severity noise — also filtered at TRIAGE.
+
+name: noise_info_severity
+description: >
+  Info-level signal from a routine health probe. Should be filtered at TRIAGE
+  without incurring a tool call.
+
+tags: [read-only, phase-0, noise]
+
+alert:
+  source: platform.healthcheck
+  severity: info
+  fingerprint: health_ping
+  group: unknown
+
+expectation:
+  name: noise_info_severity
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - "classified as escalated"
+  max_tool_calls: 0

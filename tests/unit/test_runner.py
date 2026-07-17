@@ -9,7 +9,14 @@ from pydantic import SecretStr
 
 from evals.fakes import CannedMCPClient
 from evals.graders.deterministic import ScenarioExpectation
-from evals.runner import RunReport, run_all, run_scenario, write_report
+from evals.runner import (
+    RunReport,
+    Trajectory,
+    run_all,
+    run_scenario,
+    write_report,
+    write_trajectories,
+)
 from evals.scenarios.schema import Scenario
 from incident_commander.agent.state import IncidentState
 from incident_commander.api.schemas import AlertPayload
@@ -78,20 +85,20 @@ def _bad_expectation_scenario() -> Scenario:
 
 class TestRunScenario:
     def test_probe_scenario_escalates_and_passes(self) -> None:
-        outcome = run_scenario(_passing_scenario(), _test_settings())
-        assert outcome.final_state is IncidentState.ESCALATED
-        assert outcome.tool_calls_used == 1
-        assert outcome.report.passed is True
+        result = run_scenario(_passing_scenario(), _test_settings())
+        assert result.outcome.final_state is IncidentState.ESCALATED
+        assert result.outcome.tool_calls_used == 1
+        assert result.outcome.report.passed is True
 
     def test_noise_scenario_short_circuits_at_triage(self) -> None:
-        outcome = run_scenario(_noise_scenario(), _test_settings())
-        assert outcome.final_state is IncidentState.ESCALATED
-        assert outcome.tool_calls_used == 0
+        result = run_scenario(_noise_scenario(), _test_settings())
+        assert result.outcome.final_state is IncidentState.ESCALATED
+        assert result.outcome.tool_calls_used == 0
 
     def test_mismatched_expectation_fails(self) -> None:
-        outcome = run_scenario(_bad_expectation_scenario(), _test_settings())
-        assert outcome.report.passed is False
-        assert outcome.final_state is IncidentState.ESCALATED
+        result = run_scenario(_bad_expectation_scenario(), _test_settings())
+        assert result.outcome.report.passed is False
+        assert result.outcome.final_state is IncidentState.ESCALATED
 
     def test_actionable_with_no_canned_response_escalates_on_tool_error(self) -> None:
         scenario = Scenario(
@@ -102,21 +109,37 @@ class TestRunScenario:
                 expected_terminal_state=IncidentState.ESCALATED,
             ),
         )
-        outcome = run_scenario(scenario, _test_settings())
-        assert outcome.final_state is IncidentState.ESCALATED
-        # Tool call raised MCPError before the budget increment.
-        assert outcome.tool_calls_used == 0
+        result = run_scenario(scenario, _test_settings())
+        assert result.outcome.final_state is IncidentState.ESCALATED
+        assert result.outcome.tool_calls_used == 0
 
     def test_clock_injection(self) -> None:
         fixed = datetime(2026, 1, 1, tzinfo=UTC)
-        outcome = run_scenario(_passing_scenario(), _test_settings(), clock=lambda: fixed)
-        assert outcome.report.passed is True
+        result = run_scenario(_passing_scenario(), _test_settings(), clock=lambda: fixed)
+        assert result.outcome.report.passed is True
+
+    def test_trajectory_captures_initial_and_transitions(self) -> None:
+        result = run_scenario(_passing_scenario(), _test_settings())
+        trajectory = result.trajectory
+        # TRIAGE (initial) + INVESTIGATING (from triage) + ESCALATED (from investigate)
+        states = [rs.state for rs in trajectory.checkpoints]
+        assert states == [
+            IncidentState.TRIAGE,
+            IncidentState.INVESTIGATING,
+            IncidentState.ESCALATED,
+        ]
+        assert trajectory.scenario == "consumer_lag_pass"
+
+    def test_trajectory_for_noise_only_two_checkpoints(self) -> None:
+        result = run_scenario(_noise_scenario(), _test_settings())
+        states = [rs.state for rs in result.trajectory.checkpoints]
+        assert states == [IncidentState.TRIAGE, IncidentState.ESCALATED]
 
 
 class TestRunAll:
     def test_counts_passed_and_failed(self) -> None:
         scenarios = [_passing_scenario(), _bad_expectation_scenario()]
-        report = run_all(scenarios, _test_settings())
+        report, trajectories = run_all(scenarios, _test_settings())
         assert report.total == 2
         assert report.passed == 1
         assert report.failed == 1
@@ -124,36 +147,57 @@ class TestRunAll:
             "consumer_lag_pass",
             "misexpected",
         }
+        assert len(trajectories) == 2
 
     def test_empty_scenario_list(self) -> None:
-        report = run_all([], _test_settings())
+        report, trajectories = run_all([], _test_settings())
         assert report.total == 0
-        assert report.passed == 0
-        assert report.failed == 0
+        assert trajectories == ()
 
-    def test_shipped_scenario_passes(self) -> None:
+    def test_shipped_scenarios_pass(self) -> None:
         from evals.scenarios.loader import load_scenarios
 
         scenarios = load_scenarios(Path(__file__).resolve().parents[2] / "evals" / "scenarios")
-        report = run_all(scenarios, _test_settings())
+        report, _ = run_all(scenarios, _test_settings())
         assert report.failed == 0
         assert report.passed == len(scenarios)
+        assert report.total >= 10  # taxonomy expansion floor
 
 
 class TestWriteReport:
     def test_round_trip_json(self, tmp_path: Path) -> None:
-        report = run_all([_passing_scenario()], _test_settings())
+        report, _ = run_all([_passing_scenario()], _test_settings())
         target = tmp_path / "latest.json"
         write_report(report, target)
         loaded = RunReport.model_validate_json(target.read_text())
         assert loaded == report
 
     def test_creates_parent_directory(self, tmp_path: Path) -> None:
-        report = run_all([_passing_scenario()], _test_settings())
+        report, _ = run_all([_passing_scenario()], _test_settings())
         target = tmp_path / "nested" / "reports" / "latest.json"
         write_report(report, target)
         assert target.exists()
         assert json.loads(target.read_text())["total"] == 1
+
+
+class TestWriteTrajectories:
+    def test_writes_one_file_per_trajectory(self, tmp_path: Path) -> None:
+        _, trajectories = run_all([_passing_scenario(), _noise_scenario()], _test_settings())
+        write_trajectories(trajectories, directory=tmp_path)
+        files = sorted(p.name for p in tmp_path.iterdir())
+        assert files == ["consumer_lag_pass.json", "noise_alert.json"]
+
+    def test_round_trip_trajectory(self, tmp_path: Path) -> None:
+        _, trajectories = run_all([_passing_scenario()], _test_settings())
+        write_trajectories(trajectories, directory=tmp_path)
+        loaded = Trajectory.model_validate_json((tmp_path / "consumer_lag_pass.json").read_text())
+        assert loaded == trajectories[0]
+
+    def test_creates_directory(self, tmp_path: Path) -> None:
+        _, trajectories = run_all([_passing_scenario()], _test_settings())
+        target = tmp_path / "nested" / "trajectories"
+        write_trajectories(trajectories, directory=target)
+        assert (target / "consumer_lag_pass.json").exists()
 
 
 class TestCannedMCPClient:

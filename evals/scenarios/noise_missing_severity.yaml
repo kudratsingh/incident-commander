@@ -1,0 +1,19 @@
+# Alert with no severity field — defaults to "unknown", TRIAGE filters as noise.
+
+name: noise_missing_severity
+description: >
+  Malformed alert missing the severity field. Should default to "unknown" and
+  be filtered at TRIAGE — treats missing signals defensively.
+
+tags: [read-only, phase-0, noise, defensive]
+
+alert:
+  source: platform.unknown
+  fingerprint: no_severity
+
+expectation:
+  name: noise_missing_severity
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - "classified as escalated"
+  max_tool_calls: 0

@@ -40,4 +40,4 @@ htmlcov/
 # Eval and trajectory artifacts
 evals/trajectories/*
 !evals/trajectories/.gitkeep
-evals/reports/latest/
+evals/reports/latest.json

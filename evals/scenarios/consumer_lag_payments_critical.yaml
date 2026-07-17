@@ -20,6 +20,34 @@ canned_tool_responses:
         text: '{"group":"payments-consumer","lag":25000,"timestamp":"2026-07-16T12:05:00Z"}'
     is_error: false
 
+canned_llm_responses:
+  investigation_planner:
+    - hypotheses:
+        - name: consumer_saturation
+          confidence: 0.6
+          reasoning: >
+            Critical severity on payments-consumer suggests it is behind.
+      next_action:
+        kind: probe
+        tool_name: get_consumer_lag
+        arguments:
+          group: payments-consumer
+    - hypotheses:
+        - name: consumer_saturation
+          confidence: 0.9
+          reasoning: >
+            Lag of 25000 confirms the payments consumer is severely backlogged.
+      next_action:
+        kind: stop
+        reason: sufficient evidence for handoff
+  briefing_writer:
+    - findings: >
+        payments-consumer lag reads 25000 messages against a paging threshold.
+        Consumer is not keeping up with input rate.
+      recommendation: >
+        Check whether payments-consumer pod is running and whether upstream
+        producer volume spiked in the last 15 minutes.
+
 expectation:
   name: consumer_lag_payments_critical
   expected_terminal_state: escalated

@@ -21,6 +21,26 @@ canned_tool_responses:
         text: 'partial failure querying kafka'
     is_error: true
 
+canned_llm_responses:
+  investigation_planner:
+    - hypotheses:
+        - name: consumer_saturation
+          confidence: 0.5
+          reasoning: >
+            Need current lag to confirm; probing billing-consumer.
+      next_action:
+        kind: probe
+        tool_name: get_consumer_lag
+        arguments:
+          group: billing-consumer
+  briefing_writer:
+    - findings: >
+        The get_consumer_lag probe returned is_error=True from the platform
+        side, so the lag reading is not trustworthy.
+      recommendation: >
+        Retry manually after the platform-side Kafka client recovers, or fall
+        back to CloudWatch's consumer-lag metric for a second reading.
+
 expectation:
   name: tool_result_marked_error
   expected_terminal_state: escalated

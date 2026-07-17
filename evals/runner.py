@@ -15,12 +15,14 @@ from evals.graders.deterministic import GradeReport, grade
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
 from incident_commander.agent.briefing import EscalationBriefing, render_briefing
+from incident_commander.agent.briefing_enrichment import enrich_briefing
 from incident_commander.agent.factory import start_run
-from incident_commander.agent.investigation import make_investigate
+from incident_commander.agent.investigation import make_llm_investigate
 from incident_commander.agent.loop import run_to_completion
 from incident_commander.agent.orchestrator import TRANSITIONS, Transition
 from incident_commander.agent.state import IncidentState, RunState
 from incident_commander.config import Settings
+from incident_commander.llm.fakes import CannedLLMClient
 from incident_commander.persistence.memory import InMemoryCheckpointer
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -78,13 +80,25 @@ def run_scenario(
     settings: Settings,
     clock: Callable[[], datetime] | None = None,
 ) -> ScenarioResult:
-    """Drive one scenario end-to-end and grade the result."""
+    """Drive one scenario end-to-end and grade the result.
+
+    Uses ``CannedMCPClient`` for tool calls and ``CannedLLMClient`` for both
+    the investigation planner and the briefing writer, each with its own
+    per-scenario response queue keyed under ``canned_llm_responses``.
+    """
     tick = clock or (lambda: datetime.now(UTC))
     now = tick()
 
-    client = CannedMCPClient(scenario.canned_tool_responses)
+    mcp_client = CannedMCPClient(scenario.canned_tool_responses)
+    investigation_llm = CannedLLMClient(
+        scenario.canned_llm_responses.get("investigation_planner", [])
+    )
+    briefing_llm = CannedLLMClient(scenario.canned_llm_responses.get("briefing_writer", []))
+
     transitions: dict[IncidentState, Transition] = dict(TRANSITIONS)
-    transitions[IncidentState.INVESTIGATING] = make_investigate(client)
+    transitions[IncidentState.INVESTIGATING] = make_llm_investigate(
+        mcp_client, investigation_llm, model=settings.agent_model
+    )
 
     checkpointer = InMemoryCheckpointer()
     run = start_run(scenario.alert.model_dump(), settings, now)
@@ -107,6 +121,8 @@ def run_scenario(
         checkpoints=tuple(checkpointer.history(final.incident_id)),
     )
     briefing = render_briefing(final)
+    if briefing_llm.has_remaining:
+        briefing = enrich_briefing(briefing, briefing_llm, model=settings.agent_model)
     return ScenarioResult(outcome=outcome, trajectory=trajectory, briefing=briefing)
 
 

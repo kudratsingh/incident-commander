@@ -29,7 +29,7 @@ from incident_commander.agent.state import (
     IncidentState,
     RunState,
 )
-from incident_commander.llm.client import LLMClientProtocol
+from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError, ToolResult
 from incident_commander.tools.registry import TOOL_REGISTRY
@@ -133,7 +133,7 @@ def make_llm_investigate(
 
             try:
                 run_state, step = _plan_next_step(run_state, at, llm_client, model)
-            except (ValueError, ValidationError) as err:
+            except (ValueError, ValidationError, LLMError) as err:
                 return _escalate_investigation(run_state, at, f"planner output invalid: {err}")
 
             action = step.next_action

@@ -1,10 +1,10 @@
-# High-severity alert without a group field — INVESTIGATING falls back to "unknown".
+# High-severity alert without a group field — planner probes with the fallback group.
 
 name: consumer_lag_missing_group
 description: >
-  Actionable alert whose payload doesn't name a group. INVESTIGATING falls back
-  to "unknown" so the probe still executes (rather than crashing on a missing
-  field), and the response is scoped to that fallback.
+  Actionable alert whose payload doesn't name a group. The planner still probes
+  something reasonable using the alert-source context; here we canned an
+  "unknown" fallback response.
 
 tags: [read-only, phase-0, defensive]
 
@@ -19,6 +19,36 @@ canned_tool_responses:
       - type: text
         text: '{"group":"unknown","lag":42,"timestamp":"2026-07-16T12:20:00Z"}'
     is_error: false
+
+canned_llm_responses:
+  investigation_planner:
+    - hypotheses:
+        - name: undiscriminated_alert
+          confidence: 0.4
+          reasoning: >
+            Alert lacks a group field; probing with "unknown" as a best effort.
+      next_action:
+        kind: probe
+        tool_name: get_consumer_lag
+        arguments:
+          group: unknown
+    - hypotheses:
+        - name: undiscriminated_alert
+          confidence: 0.6
+          reasoning: >
+            Fallback probe returned a small lag but the alert payload is missing
+            enough context to confirm which consumer is at fault.
+      next_action:
+        kind: stop
+        reason: alert payload incomplete; human decision required
+  briefing_writer:
+    - findings: >
+        The paging alert did not name a consumer group. A fallback probe against
+        "unknown" returned lag=42, but the alert payload is too thin to attribute
+        the signal.
+      recommendation: >
+        Ask the alert-source owner to include the consumer group in future
+        payloads; in the meantime, spot-check the top three lag-prone groups.
 
 expectation:
   name: consumer_lag_missing_group

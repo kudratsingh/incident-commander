@@ -1,11 +1,10 @@
-# Actionable alert with no canned tool response — MCP error path.
+# Actionable alert with no canned tool response — MCP error path escalates.
 
 name: tool_missing_response
 description: >
   Actionable alert but the fake platform has no canned response for the tool.
   Exercises the MCPError escalation path: the transition catches -32601
-  (method not found), records the reason, and escalates without incrementing
-  the budget.
+  (method not found), records the reason, and escalates.
 
 tags: [read-only, phase-0, tool-error]
 
@@ -16,6 +15,26 @@ alert:
   group: payments-consumer
 
 # No canned_tool_responses on purpose.
+
+canned_llm_responses:
+  investigation_planner:
+    - hypotheses:
+        - name: consumer_saturation
+          confidence: 0.5
+          reasoning: >
+            Paging alert on payments-consumer; check current lag reading.
+      next_action:
+        kind: probe
+        tool_name: get_consumer_lag
+        arguments:
+          group: payments-consumer
+  briefing_writer:
+    - findings: >
+        Attempted probe against get_consumer_lag failed at the transport layer;
+        the platform has no response configured for this tool in this scenario.
+      recommendation: >
+        Escalate to the platform-tooling team; the tool surface is missing a
+        response path for payments-consumer.
 
 expectation:
   name: tool_missing_response

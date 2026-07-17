@@ -1,4 +1,4 @@
-# Low-severity noise — agent should escalate at TRIAGE without a probe.
+# Low-severity noise — agent escalates at TRIAGE without a probe.
 
 name: noise_low_severity
 description: >
@@ -12,6 +12,14 @@ alert:
   severity: low
   fingerprint: canary_blip
   group: billing-consumer
+
+canned_llm_responses:
+  briefing_writer:
+    - findings: >
+        Alert severity classified as low; no investigation was warranted.
+      recommendation: >
+        Confirm the canary_blip fingerprint should not page and adjust the
+        alerting rule if this fires again within the noise window.
 
 expectation:
   name: noise_low_severity

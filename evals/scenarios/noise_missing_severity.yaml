@@ -11,6 +11,15 @@ alert:
   source: platform.unknown
   fingerprint: no_severity
 
+canned_llm_responses:
+  briefing_writer:
+    - findings: >
+        Alert arrived without a severity field. Treated as unknown/noise and
+        not investigated.
+      recommendation: >
+        Ask the alert source to include a severity field; malformed alerts
+        cannot be triaged safely.
+
 expectation:
   name: noise_missing_severity
   expected_terminal_state: escalated

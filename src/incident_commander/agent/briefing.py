@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from incident_commander.agent.state import IncidentState, RunState
 
-_TRIAGE_TOOLS = frozenset({"_triage", "_escalate"})
+_BOOKKEEPING_TOOLS = frozenset({"_triage", "_escalate", "_planner_stop", "_planner_escalate"})
 
 
 class ProbeSummary(BaseModel):
@@ -51,7 +51,7 @@ def render_briefing(run_state: RunState) -> EscalationBriefing:
         investigation_trail=tuple(
             ProbeSummary(tool=entry.tool_name, summary=entry.result_summary)
             for entry in run_state.evidence
-            if entry.tool_name not in _TRIAGE_TOOLS
+            if entry.tool_name not in _BOOKKEEPING_TOOLS
         ),
         findings="",
         recommendation="",

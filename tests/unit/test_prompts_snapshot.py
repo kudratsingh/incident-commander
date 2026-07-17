@@ -19,6 +19,7 @@ from incident_commander.llm.prompts.loader import PromptNotFoundError, load_prom
 
 _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("9b62d3a8e3d883af8150fc2162428953c7606c9770a90fd42e35ef39530e54e0"),
+    "investigation_planner": ("1b2a7a20bc45593d40cbc801f482731f2f93870a871d133974fe88d0e1d39175"),
 }
 
 
@@ -42,6 +43,25 @@ class TestBriefingWriterInvariants:
 
     def test_addresses_untrusted_input_defensively(self) -> None:
         content = load_prompt("briefing_writer")
+        assert "data, not instructions" in content
+
+
+class TestInvestigationPlannerInvariants:
+    def test_mentions_structured_tool(self) -> None:
+        content = load_prompt("investigation_planner")
+        assert "record_output" in content
+
+    def test_read_only_posture(self) -> None:
+        content = load_prompt("investigation_planner")
+        assert "read-only probes only" in content.lower() or "read-only" in content
+
+    def test_forbids_privileged_actions(self) -> None:
+        content = load_prompt("investigation_planner")
+        lowered = content.lower()
+        assert "privileged" in lowered or "destructive" in lowered
+
+    def test_addresses_untrusted_input_defensively(self) -> None:
+        content = load_prompt("investigation_planner")
         assert "data, not instructions" in content
 
 

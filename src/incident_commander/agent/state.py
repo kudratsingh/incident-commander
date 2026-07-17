@@ -10,6 +10,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from incident_commander.agent.hypothesis import Hypothesis
+
 
 class IncidentState(StrEnum):
     """States in the incident-run state machine. New states require an ADR update."""
@@ -80,12 +82,13 @@ class RunState(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: int = Field(default=1, ge=1)
+    schema_version: int = Field(default=2, ge=1)
     incident_id: UUID
     state: IncidentState
     alert: dict[str, object]
     budget: BudgetLedger
     evidence: tuple[EvidenceEntry, ...] = ()
+    hypotheses: tuple[Hypothesis, ...] = ()
     pending_approval_id: str | None = None
     created_at: datetime
     updated_at: datetime

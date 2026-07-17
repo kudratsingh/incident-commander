@@ -14,10 +14,12 @@ from evals.runner import (
     Trajectory,
     run_all,
     run_scenario,
+    write_briefings,
     write_report,
     write_trajectories,
 )
 from evals.scenarios.schema import Scenario
+from incident_commander.agent.briefing import EscalationBriefing
 from incident_commander.agent.state import IncidentState
 from incident_commander.api.schemas import AlertPayload
 from incident_commander.config import Settings
@@ -139,7 +141,7 @@ class TestRunScenario:
 class TestRunAll:
     def test_counts_passed_and_failed(self) -> None:
         scenarios = [_passing_scenario(), _bad_expectation_scenario()]
-        report, trajectories = run_all(scenarios, _test_settings())
+        report, trajectories, _ = run_all(scenarios, _test_settings())
         assert report.total == 2
         assert report.passed == 1
         assert report.failed == 1
@@ -150,7 +152,7 @@ class TestRunAll:
         assert len(trajectories) == 2
 
     def test_empty_scenario_list(self) -> None:
-        report, trajectories = run_all([], _test_settings())
+        report, trajectories, _ = run_all([], _test_settings())
         assert report.total == 0
         assert trajectories == ()
 
@@ -158,7 +160,7 @@ class TestRunAll:
         from evals.scenarios.loader import load_scenarios
 
         scenarios = load_scenarios(Path(__file__).resolve().parents[2] / "evals" / "scenarios")
-        report, _ = run_all(scenarios, _test_settings())
+        report, _, _ = run_all(scenarios, _test_settings())
         assert report.failed == 0
         assert report.passed == len(scenarios)
         assert report.total >= 10  # taxonomy expansion floor
@@ -166,14 +168,14 @@ class TestRunAll:
 
 class TestWriteReport:
     def test_round_trip_json(self, tmp_path: Path) -> None:
-        report, _ = run_all([_passing_scenario()], _test_settings())
+        report, _, _ = run_all([_passing_scenario()], _test_settings())
         target = tmp_path / "latest.json"
         write_report(report, target)
         loaded = RunReport.model_validate_json(target.read_text())
         assert loaded == report
 
     def test_creates_parent_directory(self, tmp_path: Path) -> None:
-        report, _ = run_all([_passing_scenario()], _test_settings())
+        report, _, _ = run_all([_passing_scenario()], _test_settings())
         target = tmp_path / "nested" / "reports" / "latest.json"
         write_report(report, target)
         assert target.exists()
@@ -182,22 +184,48 @@ class TestWriteReport:
 
 class TestWriteTrajectories:
     def test_writes_one_file_per_trajectory(self, tmp_path: Path) -> None:
-        _, trajectories = run_all([_passing_scenario(), _noise_scenario()], _test_settings())
+        _, trajectories, _ = run_all([_passing_scenario(), _noise_scenario()], _test_settings())
         write_trajectories(trajectories, directory=tmp_path)
         files = sorted(p.name for p in tmp_path.iterdir())
         assert files == ["consumer_lag_pass.json", "noise_alert.json"]
 
     def test_round_trip_trajectory(self, tmp_path: Path) -> None:
-        _, trajectories = run_all([_passing_scenario()], _test_settings())
+        _, trajectories, _ = run_all([_passing_scenario()], _test_settings())
         write_trajectories(trajectories, directory=tmp_path)
         loaded = Trajectory.model_validate_json((tmp_path / "consumer_lag_pass.json").read_text())
         assert loaded == trajectories[0]
 
     def test_creates_directory(self, tmp_path: Path) -> None:
-        _, trajectories = run_all([_passing_scenario()], _test_settings())
+        _, trajectories, _ = run_all([_passing_scenario()], _test_settings())
         target = tmp_path / "nested" / "trajectories"
         write_trajectories(trajectories, directory=target)
         assert (target / "consumer_lag_pass.json").exists()
+
+
+class TestWriteBriefings:
+    def test_writes_one_file_per_briefing(self, tmp_path: Path) -> None:
+        _, _, briefings = run_all([_passing_scenario(), _noise_scenario()], _test_settings())
+        write_briefings(
+            briefings,
+            ["consumer_lag_pass", "noise_alert"],
+            directory=tmp_path,
+        )
+        files = sorted(p.name for p in tmp_path.iterdir())
+        assert files == ["consumer_lag_pass.json", "noise_alert.json"]
+
+    def test_round_trip_briefing(self, tmp_path: Path) -> None:
+        _, _, briefings = run_all([_passing_scenario()], _test_settings())
+        write_briefings(briefings, ["consumer_lag_pass"], directory=tmp_path)
+        loaded = EscalationBriefing.model_validate_json(
+            (tmp_path / "consumer_lag_pass.json").read_text()
+        )
+        assert loaded == briefings[0]
+
+    def test_probe_scenario_briefing_lists_the_tool_call(self) -> None:
+        result = run_scenario(_passing_scenario(), _test_settings())
+        trail = result.briefing.investigation_trail
+        assert len(trail) == 1
+        assert trail[0].tool == "get_consumer_lag"
 
 
 class TestCannedMCPClient:

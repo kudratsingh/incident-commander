@@ -14,6 +14,7 @@ from evals.fakes import CannedMCPClient
 from evals.graders.deterministic import GradeReport, grade
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
+from incident_commander.agent.briefing import EscalationBriefing, render_briefing
 from incident_commander.agent.factory import start_run
 from incident_commander.agent.investigation import make_investigate
 from incident_commander.agent.loop import run_to_completion
@@ -26,6 +27,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SCENARIOS_DIR = _REPO_ROOT / "evals" / "scenarios"
 _REPORTS_DIR = _REPO_ROOT / "evals" / "reports"
 _TRAJECTORIES_DIR = _REPO_ROOT / "evals" / "trajectories"
+_BRIEFINGS_DIR = _REPO_ROOT / "evals" / "briefings"
 _LATEST_REPORT = _REPORTS_DIR / "latest.json"
 
 
@@ -64,10 +66,11 @@ class Trajectory(BaseModel):
 
 @dataclass(frozen=True)
 class ScenarioResult:
-    """What ``run_scenario`` returns — outcome is aggregated; trajectory is per-run."""
+    """What ``run_scenario`` returns — outcome is aggregated; trajectory + briefing are per-run."""
 
     outcome: ScenarioOutcome
     trajectory: Trajectory
+    briefing: EscalationBriefing
 
 
 def run_scenario(
@@ -103,17 +106,19 @@ def run_scenario(
         incident_id=str(final.incident_id),
         checkpoints=tuple(checkpointer.history(final.incident_id)),
     )
-    return ScenarioResult(outcome=outcome, trajectory=trajectory)
+    briefing = render_briefing(final)
+    return ScenarioResult(outcome=outcome, trajectory=trajectory, briefing=briefing)
 
 
 def run_all(
     scenarios: Iterable[Scenario],
     settings: Settings,
     clock: Callable[[], datetime] | None = None,
-) -> tuple[RunReport, tuple[Trajectory, ...]]:
+) -> tuple[RunReport, tuple[Trajectory, ...], tuple[EscalationBriefing, ...]]:
     results = tuple(run_scenario(s, settings, clock) for s in scenarios)
     outcomes = tuple(r.outcome for r in results)
     trajectories = tuple(r.trajectory for r in results)
+    briefings = tuple(r.briefing for r in results)
     passed = sum(1 for o in outcomes if o.report.passed)
     failed = len(outcomes) - passed
     report = RunReport(
@@ -123,7 +128,7 @@ def run_all(
         failed=failed,
         outcomes=outcomes,
     )
-    return report, trajectories
+    return report, trajectories, briefings
 
 
 def write_report(report: RunReport, path: Path = _LATEST_REPORT) -> None:
@@ -140,6 +145,17 @@ def write_trajectories(
     directory.mkdir(parents=True, exist_ok=True)
     for trajectory in trajectories:
         (directory / f"{trajectory.scenario}.json").write_text(trajectory.model_dump_json(indent=2))
+
+
+def write_briefings(
+    briefings: Iterable[EscalationBriefing],
+    scenario_names: Iterable[str],
+    directory: Path = _BRIEFINGS_DIR,
+) -> None:
+    """Serialize each briefing to ``<directory>/<scenario>.json``."""
+    directory.mkdir(parents=True, exist_ok=True)
+    for briefing, name in zip(briefings, scenario_names, strict=True):
+        (directory / f"{name}.json").write_text(briefing.model_dump_json(indent=2))
 
 
 def _eval_defaults() -> Settings:
@@ -171,9 +187,10 @@ def _print_summary(report: RunReport) -> None:
 def main() -> int:
     scenarios = load_scenarios(_SCENARIOS_DIR)
     settings = _eval_defaults()
-    report, trajectories = run_all(scenarios, settings)
+    report, trajectories, briefings = run_all(scenarios, settings)
     write_report(report)
     write_trajectories(trajectories)
+    write_briefings(briefings, (s.name for s in scenarios))
     _print_summary(report)
     return 0 if report.failed == 0 else 1
 

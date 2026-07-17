@@ -22,6 +22,10 @@ class CannedLLMClient:
         self._index = 0
         self.calls: list[tuple[str, str]] = []
 
+    @property
+    def has_remaining(self) -> bool:
+        return self._index < len(self._outputs)
+
     def call[T: BaseModel](
         self,
         system_prompt: str,

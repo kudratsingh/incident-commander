@@ -20,6 +20,34 @@ canned_tool_responses:
         text: '{"group":"notifications-consumer","lag":500,"timestamp":"2026-07-16T12:15:00Z"}'
     is_error: false
 
+canned_llm_responses:
+  investigation_planner:
+    - hypotheses:
+        - name: mild_backlog
+          confidence: 0.5
+          reasoning: >
+            Medium severity on notifications consumer; need lag reading.
+      next_action:
+        kind: probe
+        tool_name: get_consumer_lag
+        arguments:
+          group: notifications-consumer
+    - hypotheses:
+        - name: mild_backlog
+          confidence: 0.75
+          reasoning: >
+            Lag of 500 messages is present but not urgent.
+      next_action:
+        kind: stop
+        reason: mild lag observed; human should decide on urgency
+  briefing_writer:
+    - findings: >
+        notifications-consumer shows a lag of 500 messages, above the warning
+        threshold but not paging.
+      recommendation: >
+        Watch the trend for the next 15 minutes; escalate to paging if lag
+        continues to grow.
+
 expectation:
   name: consumer_lag_medium
   expected_terminal_state: escalated

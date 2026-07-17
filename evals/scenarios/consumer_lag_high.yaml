@@ -1,5 +1,5 @@
 # Baseline eval scenario: severe Kafka consumer lag on the billing group.
-# The agent should probe get_consumer_lag and escalate with the finding.
+# Agent probes get_consumer_lag once, then escalates with the finding.
 
 name: consumer_lag_high
 description: >
@@ -21,6 +21,38 @@ canned_tool_responses:
       - type: text
         text: '{"group":"billing-consumer","lag":10000,"timestamp":"2026-07-16T12:00:00Z"}'
     is_error: false
+
+canned_llm_responses:
+  investigation_planner:
+    - hypotheses:
+        - name: consumer_saturation
+          confidence: 0.55
+          reasoning: >
+            Paging severity on billing consumer suggests the consumer is falling
+            behind. Need to check the current lag value to confirm.
+      next_action:
+        kind: probe
+        tool_name: get_consumer_lag
+        arguments:
+          group: billing-consumer
+    - hypotheses:
+        - name: consumer_saturation
+          confidence: 0.88
+          reasoning: >
+            Lag reading of 10000 messages confirms the billing consumer is
+            severely backlogged.
+      next_action:
+        kind: stop
+        reason: >
+          Confidence sufficient for handoff; no other read tools would refine
+          the diagnosis.
+  briefing_writer:
+    - findings: >
+        The billing-consumer Kafka group has a lag of 10000 messages, consistent
+        with the paging alert. The consumer is behind its input rate.
+      recommendation: >
+        Verify the billing-consumer pod is running and check whether processing
+        time per message has increased in the last 10 minutes.
 
 expectation:
   name: consumer_lag_high

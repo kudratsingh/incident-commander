@@ -13,6 +13,14 @@ alert:
   fingerprint: health_ping
   group: unknown
 
+canned_llm_responses:
+  briefing_writer:
+    - findings: >
+        Info-level health_ping alert; not investigated.
+      recommendation: >
+        Verify the healthcheck fingerprint is expected to fire at info level
+        and consider filtering at the ingress if it is not actionable.
+
 expectation:
   name: noise_info_severity
   expected_terminal_state: escalated

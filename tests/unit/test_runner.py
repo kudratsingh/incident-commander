@@ -60,6 +60,43 @@ def _passing_scenario() -> Scenario:
                 ],
             )
         },
+        canned_llm_responses={
+            "investigation_planner": [
+                {
+                    "hypotheses": [
+                        {
+                            "name": "consumer_saturation",
+                            "confidence": 0.55,
+                            "reasoning": "Paging severity on billing consumer.",
+                        }
+                    ],
+                    "next_action": {
+                        "kind": "probe",
+                        "tool_name": "get_consumer_lag",
+                        "arguments": {"group": "billing"},
+                    },
+                },
+                {
+                    "hypotheses": [
+                        {
+                            "name": "consumer_saturation",
+                            "confidence": 0.85,
+                            "reasoning": "Lag reading confirms saturation.",
+                        }
+                    ],
+                    "next_action": {
+                        "kind": "stop",
+                        "reason": "confidence sufficient",
+                    },
+                },
+            ],
+            "briefing_writer": [
+                {
+                    "findings": "billing consumer lag observed at 42 messages",
+                    "recommendation": "verify billing consumer pod",
+                }
+            ],
+        },
     )
 
 
@@ -103,6 +140,8 @@ class TestRunScenario:
         assert result.outcome.final_state is IncidentState.ESCALATED
 
     def test_actionable_with_no_canned_response_escalates_on_tool_error(self) -> None:
+        # Planner proposes a probe, but the fake MCP has no canned response —
+        # the tool call raises MCPError and the transition escalates.
         scenario = Scenario(
             name="missing_response",
             alert=AlertPayload(source="platform", severity="high", group="billing"),
@@ -110,6 +149,24 @@ class TestRunScenario:
                 name="missing_response",
                 expected_terminal_state=IncidentState.ESCALATED,
             ),
+            canned_llm_responses={
+                "investigation_planner": [
+                    {
+                        "hypotheses": [
+                            {
+                                "name": "x",
+                                "confidence": 0.5,
+                                "reasoning": "probe once",
+                            }
+                        ],
+                        "next_action": {
+                            "kind": "probe",
+                            "tool_name": "get_consumer_lag",
+                            "arguments": {"group": "billing"},
+                        },
+                    }
+                ],
+            },
         )
         result = run_scenario(scenario, _test_settings())
         assert result.outcome.final_state is IncidentState.ESCALATED

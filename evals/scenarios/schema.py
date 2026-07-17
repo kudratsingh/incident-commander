@@ -9,6 +9,8 @@ one-probe shape; more elaborate matching lands with multi-probe scenarios.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from evals.graders.deterministic import ScenarioExpectation
@@ -27,3 +29,4 @@ class Scenario(BaseModel):
     alert: AlertPayload
     expectation: ScenarioExpectation
     canned_tool_responses: dict[str, ToolResult] = Field(default_factory=dict)
+    canned_llm_responses: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)

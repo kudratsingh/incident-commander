@@ -22,6 +22,38 @@ canned_tool_responses:
         text: '{"group":"reports-consumer","lag":0,"timestamp":"2026-07-16T12:10:00Z"}'
     is_error: false
 
+canned_llm_responses:
+  investigation_planner:
+    - hypotheses:
+        - name: consumer_saturation
+          confidence: 0.6
+          reasoning: >
+            Paging alert on reports-consumer; need lag reading to confirm.
+      next_action:
+        kind: probe
+        tool_name: get_consumer_lag
+        arguments:
+          group: reports-consumer
+    - hypotheses:
+        - name: alerting_false_positive
+          confidence: 0.75
+          reasoning: >
+            Lag reading is 0; the alerting rule may be misconfigured or firing
+            on a spike that has already recovered.
+      next_action:
+        kind: stop
+        reason: >
+          Lag reading contradicts alert; human should reconcile with the
+          alerting rule.
+  briefing_writer:
+    - findings: >
+        Alert reports consumer_lag_high on reports-consumer, but the probed
+        lag reading is 0 messages. Likely a false positive or a spike that
+        recovered before probing.
+      recommendation: >
+        Reconcile the paging rule for reports-consumer against the current lag
+        metric and consider tightening the recovery window before re-arming.
+
 expectation:
   name: consumer_lag_healthy_zero
   expected_terminal_state: escalated

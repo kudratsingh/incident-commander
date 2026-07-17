@@ -1,0 +1,24 @@
+# Baseline eval scenario: severe Kafka consumer lag on the billing group.
+# The agent should probe get_consumer_lag and escalate with the finding.
+
+name: consumer_lag_high
+description: >
+  Kafka consumer lag on the billing group crosses the paging threshold.
+  For Phase 0 (read-only), the agent runs one probe and escalates to a human
+  with the finding attached.
+
+tags: [read-only, phase-0, kafka]
+
+alert:
+  source: platform.kafka
+  severity: high
+  fingerprint: consumer_lag_high
+  group: billing-consumer
+
+expectation:
+  name: consumer_lag_high
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - billing-consumer
+    - lag
+  max_tool_calls: 5

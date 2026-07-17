@@ -89,15 +89,21 @@ TRANSITIONS: dict[IncidentState, Transition] = {
 }
 
 
-def dispatch(run_state: RunState, at: datetime) -> RunState:
+def dispatch(
+    run_state: RunState,
+    at: datetime,
+    transitions: dict[IncidentState, Transition] | None = None,
+) -> RunState:
     """Run one transition from the current state.
 
-    Raises ``TerminalStateError`` if called on a terminal state,
-    ``InvalidTransitionError`` if the transition produces a disallowed successor.
+    ``transitions`` overrides the module-level registry so callers can wire
+    dependency-bound transitions (e.g. a factory-produced ``INVESTIGATING``
+    closure) without mutating the global. Defaults to ``TRANSITIONS``.
     """
     if run_state.state.is_terminal:
         raise TerminalStateError(f"dispatch called on terminal state {run_state.state.value}")
-    transition = TRANSITIONS[run_state.state]
+    registry = TRANSITIONS if transitions is None else transitions
+    transition = registry[run_state.state]
     next_run_state = transition(run_state, at)
     allowed = ALLOWED_TRANSITIONS[run_state.state]
     if next_run_state.state not in allowed:

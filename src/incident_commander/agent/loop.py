@@ -9,6 +9,7 @@ from typing import Final
 from incident_commander.agent.orchestrator import (
     Checkpointer,
     TerminalStateError,
+    Transition,
     dispatch,
 )
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
@@ -41,12 +42,14 @@ def run_to_completion(
     clock: Callable[[], datetime],
     checkpointer: Checkpointer | None = None,
     max_steps: int = _DEFAULT_MAX_STEPS,
+    transitions: dict[IncidentState, Transition] | None = None,
 ) -> RunState:
     """Dispatch until the run reaches a terminal state.
 
     Writes a checkpoint on entry and after every subsequent transition.
     Exhausted budget short-circuits to ``ESCALATED`` with an evidence entry.
     ``max_steps`` bounds runaway bugs; 100 is generous for a real investigation.
+    ``transitions`` overrides the module-level registry for dependency wiring.
     """
     if run_state.state.is_terminal:
         raise TerminalStateError(
@@ -62,7 +65,7 @@ def run_to_completion(
         if run_state.budget.is_exhausted:
             run_state = _escalate(run_state, "budget exhausted", clock())
         else:
-            run_state = dispatch(run_state, clock())
+            run_state = dispatch(run_state, clock(), transitions=transitions)
         if checkpointer is not None:
             checkpointer.write(run_state)
         steps += 1

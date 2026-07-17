@@ -40,4 +40,6 @@ htmlcov/
 # Eval and trajectory artifacts
 evals/trajectories/*
 !evals/trajectories/.gitkeep
+evals/briefings/*
+!evals/briefings/.gitkeep
 evals/reports/latest.json

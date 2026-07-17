@@ -42,7 +42,7 @@ test-e2e:
 	@echo "TODO(phase-0+): compose up incident-platform + agent, inject scenario, assert audit"
 
 eval:
-	@echo "TODO(phase-1): run full eval suite via evals/runner.py"
+	uv run python -m evals.runner
 
 eval-reg:
 	@echo "TODO(phase-1): run regression eval subset"

@@ -15,6 +15,13 @@ alert:
   fingerprint: consumer_lag_high
   group: billing-consumer
 
+canned_tool_responses:
+  get_consumer_lag:
+    content:
+      - type: text
+        text: '{"group":"billing-consumer","lag":10000,"timestamp":"2026-07-16T12:00:00Z"}'
+    is_error: false
+
 expectation:
   name: consumer_lag_high
   expected_terminal_state: escalated

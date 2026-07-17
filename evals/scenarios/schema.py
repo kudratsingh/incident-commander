@@ -1,10 +1,10 @@
 """Scenario schema. A scenario is a triggering alert plus a scored expectation.
 
-Scenarios drive the eval runner (Phase 1b): the runner starts a run from the
-alert, drives the state machine to a terminal state, and calls the grader with
-the scenario's ``expectation``. Canned tool responses (needed to run the agent
-offline against a fake platform) are a runner concern and live outside this
-schema so scenario files stay small and readable.
+Scenarios drive the eval runner: the runner starts a run from the alert, drives
+the state machine to a terminal state, and calls the grader with the scenario's
+``expectation``. Canned tool responses let the runner exercise the agent offline
+against a fake platform — one response per tool name is enough for Phase 0's
+one-probe shape; more elaborate matching lands with multi-probe scenarios.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from evals.graders.deterministic import ScenarioExpectation
 from incident_commander.api.schemas import AlertPayload
+from incident_commander.tools.mcp_client import ToolResult
 
 
 class Scenario(BaseModel):
@@ -25,3 +26,4 @@ class Scenario(BaseModel):
     tags: tuple[str, ...] = ()
     alert: AlertPayload
     expectation: ScenarioExpectation
+    canned_tool_responses: dict[str, ToolResult] = Field(default_factory=dict)

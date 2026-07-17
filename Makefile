@@ -33,7 +33,7 @@ test-unit:
 	uv run pytest tests/unit
 
 test-integration:
-	@if [ -d tests/integration ]; then uv run pytest tests/integration; else echo "no integration tests yet"; fi
+	uv run pytest tests/integration
 
 test-contract:
 	@echo "TODO(phase-3): contract snapshot diff against pinned platform image"

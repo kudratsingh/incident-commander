@@ -1,0 +1,63 @@
+# Orders consumer paging alert. New group variation.
+
+name: consumer_lag_orders_high
+description: >
+  Paging alert on orders-consumer. Standard probe → escalate flow, different
+  group than the billing baseline.
+
+tags: [read-only, phase-0, kafka, group-variation]
+
+alert:
+  source: platform.kafka
+  severity: high
+  fingerprint: consumer_lag_high
+  group: orders-consumer
+
+canned_tool_responses:
+  get_consumer_lag:
+    content:
+      - type: text
+        text: '{"group":"orders-consumer","lag":7500,"timestamp":"2026-07-17T14:00:00Z"}'
+    is_error: false
+
+canned_llm_responses:
+  investigation_planner:
+    - hypotheses:
+        - name: consumer_saturation
+          confidence: 0.55
+          reasoning: >
+            Paging severity on orders-consumer suggests it is behind. Need lag.
+      next_action:
+        kind: probe
+        tool_name: get_consumer_lag
+        arguments:
+          group: orders-consumer
+    - hypotheses:
+        - name: consumer_saturation
+          confidence: 0.85
+          reasoning: >
+            Lag of 7500 confirms orders-consumer is backlogged.
+      next_action:
+        kind: stop
+        reason: confidence sufficient for handoff
+  briefing_writer:
+    - findings: >
+        orders-consumer Kafka group has a lag of 7500 messages, consistent with
+        the paging alert. Consumer is behind its input rate.
+      recommendation: >
+        Verify orders-consumer pod is running and check whether processing time
+        per message has increased in the last 10 minutes.
+  briefing_judge:
+    - groundedness: 0.9
+      actionability: 0.85
+      reasoning: >
+        Findings ground in the 7500 lag reading; recommendation names two
+        concrete verification steps for orders-consumer.
+
+expectation:
+  name: consumer_lag_orders_high
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - orders-consumer
+    - lag
+  max_tool_calls: 5

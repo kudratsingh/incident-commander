@@ -1,0 +1,35 @@
+# Info-severity noise on the orders group. Combines noise filter with group variation.
+
+name: noise_info_orders
+description: >
+  Routine info-level ping tagged to orders-consumer. Should be filtered at
+  TRIAGE without probing.
+
+tags: [read-only, phase-0, noise, group-variation]
+
+alert:
+  source: platform.healthcheck
+  severity: info
+  fingerprint: health_ping
+  group: orders-consumer
+
+canned_llm_responses:
+  briefing_writer:
+    - findings: >
+        Info-level health_ping alert tagged to orders-consumer; not investigated.
+      recommendation: >
+        Verify the healthcheck fingerprint is expected to fire at info level
+        for orders-consumer; consider filtering at the ingress if it is noise.
+  briefing_judge:
+    - groundedness: 0.9
+      actionability: 0.75
+      reasoning: >
+        Findings match the noise-filter outcome for the orders context;
+        recommendation names a concrete ingress-filter action.
+
+expectation:
+  name: noise_info_orders
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - "classified as escalated"
+  max_tool_calls: 0

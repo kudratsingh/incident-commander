@@ -1,0 +1,50 @@
+# Planner opts to stop on iteration 1 without probing.
+# Tests StopAction on the first LLM call.
+
+name: planner_stops_immediately
+description: >
+  The planner decides the alert is unambiguous enough (or the tools aren't
+  useful enough) to skip probing entirely and escalate immediately. Verifies
+  the loop handles zero-probe StopAction cleanly.
+
+tags: [read-only, phase-0, immediate-stop]
+
+alert:
+  source: platform.custom
+  severity: high
+  fingerprint: opaque_paging_signal
+  group: opaque-source
+
+# No canned tool response — planner shouldn't need one.
+
+canned_llm_responses:
+  investigation_planner:
+    - hypotheses:
+        - name: opaque_paging_signal
+          confidence: 0.65
+          reasoning: >
+            Alert fingerprint is opaque and no discriminating tool exists on
+            the current surface. Human should investigate directly.
+      next_action:
+        kind: stop
+        reason: no discriminating probe available on current tool surface
+  briefing_writer:
+    - findings: >
+        Alert fingerprint opaque_paging_signal has no matching investigation
+        tool on the current agent surface. No probes were run.
+      recommendation: >
+        Ask the alert-source owner for a runbook or the meaning of the
+        opaque_paging_signal fingerprint before deciding on a response.
+  briefing_judge:
+    - groundedness: 0.85
+      actionability: 0.75
+      reasoning: >
+        Findings correctly note the missing tool coverage; recommendation names
+        a concrete next step (ask alert-source owner for a runbook).
+
+expectation:
+  name: planner_stops_immediately
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - "planner stop"
+  max_tool_calls: 0

@@ -1,0 +1,80 @@
+# Planner probes twice; hypothesis confidence shifts across probes.
+
+name: multi_probe_hypothesis_evolution
+description: >
+  Two probes: first with modest confidence, second refines to a specific
+  hypothesis. Tests that hypotheses stored on RunState reflect the latest
+  ranked list (not the union across iterations).
+
+tags: [read-only, phase-2, multi-probe, hypothesis-evolution]
+
+alert:
+  source: platform.kafka
+  severity: high
+  fingerprint: consumer_lag_high
+  group: payments-consumer
+
+canned_tool_responses:
+  get_consumer_lag:
+    content:
+      - type: text
+        text: '{"group":"payments-consumer","lag":8000,"timestamp":"2026-07-17T15:00:00Z"}'
+    is_error: false
+
+canned_llm_responses:
+  investigation_planner:
+    - hypotheses:
+        - name: consumer_saturation
+          confidence: 0.5
+          reasoning: >
+            Paging alert on payments-consumer; multiple causes possible.
+        - name: producer_spike
+          confidence: 0.4
+          reasoning: >
+            Elevated lag could also be a temporary producer-side spike.
+      next_action:
+        kind: probe
+        tool_name: get_consumer_lag
+        arguments:
+          group: payments-consumer
+    - hypotheses:
+        - name: producer_spike
+          confidence: 0.65
+          reasoning: >
+            Probing again shortly after suggests the initial signal reflected
+            a transient producer surge rather than a stuck consumer.
+      next_action:
+        kind: probe
+        tool_name: get_consumer_lag
+        arguments:
+          group: payments-consumer
+    - hypotheses:
+        - name: producer_spike
+          confidence: 0.85
+          reasoning: >
+            Repeat reading did not grow further; the pattern is a transient
+            producer surge, not a stuck consumer.
+      next_action:
+        kind: stop
+        reason: producer-spike hypothesis confident; escalate for observation
+  briefing_writer:
+    - findings: >
+        payments-consumer lag at 8000 messages appears stable rather than
+        growing, most consistent with a transient producer-side surge.
+      recommendation: >
+        Watch the payments producer's rate for the next 15 minutes; if it does
+        not drop, page the payments team to investigate upstream volume.
+  briefing_judge:
+    - groundedness: 0.9
+      actionability: 0.85
+      reasoning: >
+        Findings track hypothesis evolution across probes; recommendation gives
+        a concrete 15-minute watch window and named escalation contact.
+
+expectation:
+  name: multi_probe_hypothesis_evolution
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - payments-consumer
+    - lag
+  max_tool_calls: 5

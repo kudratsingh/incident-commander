@@ -1,0 +1,63 @@
+# Analytics consumer critical severity. Group variation.
+
+name: consumer_lag_analytics_critical
+description: >
+  Analytics consumer at critical severity — worst-tier paging alert. Verifies
+  planner treats critical as a strong prior.
+
+tags: [read-only, phase-0, kafka, group-variation]
+
+alert:
+  source: platform.kafka
+  severity: critical
+  fingerprint: consumer_lag_high
+  group: analytics-consumer
+
+canned_tool_responses:
+  get_consumer_lag:
+    content:
+      - type: text
+        text: '{"group":"analytics-consumer","lag":50000,"timestamp":"2026-07-17T14:15:00Z"}'
+    is_error: false
+
+canned_llm_responses:
+  investigation_planner:
+    - hypotheses:
+        - name: consumer_saturation
+          confidence: 0.7
+          reasoning: >
+            Critical severity on analytics-consumer indicates severe backlog.
+      next_action:
+        kind: probe
+        tool_name: get_consumer_lag
+        arguments:
+          group: analytics-consumer
+    - hypotheses:
+        - name: consumer_saturation
+          confidence: 0.95
+          reasoning: >
+            Lag of 50000 confirms critical backlog on analytics-consumer.
+      next_action:
+        kind: stop
+        reason: confidence very high; human escalation warranted immediately
+  briefing_writer:
+    - findings: >
+        analytics-consumer shows a critical-tier lag of 50000 messages. Consumer
+        is severely behind and cannot catch up at current rate.
+      recommendation: >
+        Page the analytics team immediately; scale the consumer replica count
+        or roll back the last consumer deploy if one occurred in the last hour.
+  briefing_judge:
+    - groundedness: 0.9
+      actionability: 0.9
+      reasoning: >
+        Findings quote the 50000 lag reading; recommendation names three
+        concrete actions (page team, scale replicas, check rollback candidate).
+
+expectation:
+  name: consumer_lag_analytics_critical
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - analytics-consumer
+    - lag
+  max_tool_calls: 5

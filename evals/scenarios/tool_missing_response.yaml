@@ -35,6 +35,12 @@ canned_llm_responses:
       recommendation: >
         Escalate to the platform-tooling team; the tool surface is missing a
         response path for payments-consumer.
+  briefing_judge:
+    - groundedness: 0.85
+      actionability: 0.75
+      reasoning: >
+        Findings correctly attribute the failure to the transport layer;
+        recommendation names the platform-tooling team as the concrete owner.
 
 expectation:
   name: tool_missing_response

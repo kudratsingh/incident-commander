@@ -47,6 +47,12 @@ canned_llm_responses:
       recommendation: >
         Watch the trend for the next 15 minutes; escalate to paging if lag
         continues to grow.
+  briefing_judge:
+    - groundedness: 0.9
+      actionability: 0.75
+      reasoning: >
+        Findings mirror the 500-lag reading; recommendation gives a concrete
+        watch window but is less specific about what would trigger paging.
 
 expectation:
   name: consumer_lag_medium

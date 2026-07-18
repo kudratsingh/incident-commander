@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, SecretStr
 
 from evals.fakes import CannedMCPClient
 from evals.graders.deterministic import GradeReport, grade
+from evals.graders.llm_judge import JudgeScore, judge_briefing
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
 from incident_commander.agent.briefing import EscalationBriefing, render_briefing
@@ -42,6 +43,7 @@ class ScenarioOutcome(BaseModel):
     final_state: IncidentState
     tool_calls_used: int
     report: GradeReport
+    judge_score: JudgeScore | None = None
 
 
 class RunReport(BaseModel):
@@ -53,6 +55,9 @@ class RunReport(BaseModel):
     total: int
     passed: int
     failed: int
+    judged_count: int = 0
+    judge_useful_count: int = 0
+    judge_mean_overall: float | None = None
     outcomes: tuple[ScenarioOutcome, ...]
 
 
@@ -94,6 +99,7 @@ def run_scenario(
         scenario.canned_llm_responses.get("investigation_planner", [])
     )
     briefing_llm = CannedLLMClient(scenario.canned_llm_responses.get("briefing_writer", []))
+    judge_llm = CannedLLMClient(scenario.canned_llm_responses.get("briefing_judge", []))
 
     transitions: dict[IncidentState, Transition] = dict(TRANSITIONS)
     transitions[IncidentState.INVESTIGATING] = make_llm_investigate(
@@ -109,12 +115,6 @@ def run_scenario(
         checkpointer=checkpointer,
     )
     report = grade(final, scenario.expectation)
-    outcome = ScenarioOutcome(
-        scenario=scenario.name,
-        final_state=final.state,
-        tool_calls_used=final.budget.tool_calls_used,
-        report=report,
-    )
     trajectory = Trajectory(
         scenario=scenario.name,
         incident_id=str(final.incident_id),
@@ -123,6 +123,16 @@ def run_scenario(
     briefing = render_briefing(final)
     if briefing_llm.has_remaining:
         briefing = enrich_briefing(briefing, briefing_llm, model=settings.agent_model)
+    judge_score: JudgeScore | None = None
+    if judge_llm.has_remaining:
+        judge_score = judge_briefing(briefing, judge_llm, model=settings.judge_model)
+    outcome = ScenarioOutcome(
+        scenario=scenario.name,
+        final_state=final.state,
+        tool_calls_used=final.budget.tool_calls_used,
+        report=report,
+        judge_score=judge_score,
+    )
     return ScenarioResult(outcome=outcome, trajectory=trajectory, briefing=briefing)
 
 
@@ -137,11 +147,26 @@ def run_all(
     briefings = tuple(r.briefing for r in results)
     passed = sum(1 for o in outcomes if o.report.passed)
     failed = len(outcomes) - passed
+    judged = tuple(o for o in outcomes if o.judge_score is not None)
+    judged_count = len(judged)
+    judge_useful_count = sum(
+        1 for o in judged if o.judge_score is not None and o.judge_score.is_useful
+    )
+    judge_mean_overall: float | None
+    if judged_count == 0:
+        judge_mean_overall = None
+    else:
+        judge_mean_overall = (
+            sum(o.judge_score.overall for o in judged if o.judge_score is not None) / judged_count
+        )
     report = RunReport(
         generated_at=datetime.now(UTC),
         total=len(outcomes),
         passed=passed,
         failed=failed,
+        judged_count=judged_count,
+        judge_useful_count=judge_useful_count,
+        judge_mean_overall=judge_mean_overall,
         outcomes=outcomes,
     )
     return report, trajectories, briefings
@@ -191,9 +216,17 @@ def _eval_defaults() -> Settings:
 
 def _print_summary(report: RunReport) -> None:
     print(f"scenarios: {report.total}, passed: {report.passed}, failed: {report.failed}")
+    if report.judged_count > 0 and report.judge_mean_overall is not None:
+        print(
+            f"judge: {report.judge_useful_count}/{report.judged_count} useful, "
+            f"mean overall {report.judge_mean_overall:.2f}"
+        )
     for outcome in report.outcomes:
         mark = "PASS" if outcome.report.passed else "FAIL"
-        print(f"  {mark} {outcome.scenario}")
+        judge_hint = ""
+        if outcome.judge_score is not None:
+            judge_hint = f"  (judge: {outcome.judge_score.overall:.2f})"
+        print(f"  {mark} {outcome.scenario}{judge_hint}")
         if not outcome.report.passed:
             for dim in outcome.report.dimensions:
                 if not dim.passed:

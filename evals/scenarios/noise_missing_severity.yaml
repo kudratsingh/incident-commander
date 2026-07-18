@@ -19,6 +19,12 @@ canned_llm_responses:
       recommendation: >
         Ask the alert source to include a severity field; malformed alerts
         cannot be triaged safely.
+  briefing_judge:
+    - groundedness: 0.85
+      actionability: 0.7
+      reasoning: >
+        Findings capture the missing-severity condition; recommendation gives a
+        concrete request to the alert source.
 
 expectation:
   name: noise_missing_severity

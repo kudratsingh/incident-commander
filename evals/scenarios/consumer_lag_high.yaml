@@ -53,6 +53,13 @@ canned_llm_responses:
       recommendation: >
         Verify the billing-consumer pod is running and check whether processing
         time per message has increased in the last 10 minutes.
+  briefing_judge:
+    - groundedness: 0.9
+      actionability: 0.85
+      reasoning: >
+        Findings quote the billing-consumer lag reading directly from the trail;
+        recommendation names two concrete verification steps a human can perform
+        in minutes.
 
 expectation:
   name: consumer_lag_high

@@ -20,6 +20,12 @@ canned_llm_responses:
       recommendation: >
         Verify the healthcheck fingerprint is expected to fire at info level
         and consider filtering at the ingress if it is not actionable.
+  briefing_judge:
+    - groundedness: 0.9
+      actionability: 0.75
+      reasoning: >
+        Findings match the info-level noise filter; recommendation names the
+        healthcheck fingerprint and a concrete filter-at-ingress step.
 
 expectation:
   name: noise_info_severity

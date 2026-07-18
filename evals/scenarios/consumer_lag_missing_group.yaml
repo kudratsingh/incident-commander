@@ -49,6 +49,13 @@ canned_llm_responses:
       recommendation: >
         Ask the alert-source owner to include the consumer group in future
         payloads; in the meantime, spot-check the top three lag-prone groups.
+  briefing_judge:
+    - groundedness: 0.85
+      actionability: 0.8
+      reasoning: >
+        Findings correctly note the missing group and the fallback lag=42
+        reading; recommendation names two concrete steps (alert-source owner
+        request + top-three spot check).
 
 expectation:
   name: consumer_lag_missing_group

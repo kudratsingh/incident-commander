@@ -1,8 +1,11 @@
 {
-  "generated_at": "2026-07-17T06:54:29.670834Z",
+  "generated_at": "2026-07-18T00:25:19.275972Z",
   "total": 11,
   "passed": 11,
   "failed": 0,
+  "judged_count": 11,
+  "judge_useful_count": 11,
+  "judge_mean_overall": 0.8318181818181819,
   "outcomes": [
     {
       "scenario": "consumer_lag_healthy_zero",
@@ -28,6 +31,11 @@
             "detail": "used 1 tool calls, cap 5"
           }
         ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.8,
+        "reasoning": "Findings acknowledge the tension between the paging alert and the 0-lag reading; recommendation names a specific reconciliation task.\n"
       }
     },
     {
@@ -54,6 +62,11 @@
             "detail": "used 1 tool calls, cap 5"
           }
         ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.85,
+        "reasoning": "Findings quote the billing-consumer lag reading directly from the trail; recommendation names two concrete verification steps a human can perform in minutes.\n"
       }
     },
     {
@@ -80,6 +93,11 @@
             "detail": "used 1 tool calls, cap 5"
           }
         ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.75,
+        "reasoning": "Findings mirror the 500-lag reading; recommendation gives a concrete watch window but is less specific about what would trigger paging.\n"
       }
     },
     {
@@ -106,6 +124,11 @@
             "detail": "used 1 tool calls, cap 5"
           }
         ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.8,
+        "reasoning": "Findings correctly note the missing group and the fallback lag=42 reading; recommendation names two concrete steps (alert-source owner request + top-three spot check).\n"
       }
     },
     {
@@ -132,6 +155,11 @@
             "detail": "used 1 tool calls, cap 5"
           }
         ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.85,
+        "reasoning": "Findings ground in the 25000-lag reading; recommendation offers two concrete verification steps against the payments consumer.\n"
       }
     },
     {
@@ -158,6 +186,11 @@
             "detail": "used 0 tool calls, cap 0"
           }
         ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.75,
+        "reasoning": "Findings match the info-level noise filter; recommendation names the healthcheck fingerprint and a concrete filter-at-ingress step.\n"
       }
     },
     {
@@ -184,6 +217,11 @@
             "detail": "used 0 tool calls, cap 0"
           }
         ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.75,
+        "reasoning": "Findings correctly reflect the noise-filter outcome; recommendation names the canary_blip fingerprint and a concrete alerting-rule action.\n"
       }
     },
     {
@@ -210,6 +248,11 @@
             "detail": "used 0 tool calls, cap 0"
           }
         ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.7,
+        "reasoning": "Findings capture the missing-severity condition; recommendation gives a concrete request to the alert source.\n"
       }
     },
     {
@@ -236,6 +279,11 @@
             "detail": "used 0 tool calls, cap 0"
           }
         ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.75,
+        "reasoning": "Findings correctly attribute the failure to the transport layer; recommendation names the platform-tooling team as the concrete owner.\n"
       }
     },
     {
@@ -262,6 +310,11 @@
             "detail": "used 0 tool calls, cap 0"
           }
         ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.8,
+        "reasoning": "Findings identify the schema violation precisely; recommendation names both a concrete bug-file target and a CloudWatch fallback path.\n"
       }
     },
     {
@@ -288,6 +341,11 @@
             "detail": "used 0 tool calls, cap 0"
           }
         ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.85,
+        "reasoning": "Findings quote the is_error=True response accurately; recommendation offers two concrete fallback steps (manual retry + CloudWatch metric).\n"
       }
     }
   ]

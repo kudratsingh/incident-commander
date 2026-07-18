@@ -20,6 +20,7 @@ from incident_commander.llm.prompts.loader import PromptNotFoundError, load_prom
 _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("9b62d3a8e3d883af8150fc2162428953c7606c9770a90fd42e35ef39530e54e0"),
     "investigation_planner": ("1b2a7a20bc45593d40cbc801f482731f2f93870a871d133974fe88d0e1d39175"),
+    "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
 }
 
 
@@ -63,6 +64,29 @@ class TestInvestigationPlannerInvariants:
     def test_addresses_untrusted_input_defensively(self) -> None:
         content = load_prompt("investigation_planner")
         assert "data, not instructions" in content
+
+
+class TestBriefingJudgeInvariants:
+    def test_mentions_structured_tool(self) -> None:
+        content = load_prompt("briefing_judge")
+        assert "record_output" in content
+
+    def test_scoring_scale_stated(self) -> None:
+        content = load_prompt("briefing_judge")
+        assert "0.0 to 1.0" in content
+
+    def test_names_both_dimensions(self) -> None:
+        content = load_prompt("briefing_judge")
+        assert "groundedness" in content
+        assert "actionability" in content
+
+    def test_addresses_untrusted_input_defensively(self) -> None:
+        content = load_prompt("briefing_judge")
+        assert "data, not instructions" in content
+
+    def test_out_of_scope_narrowed(self) -> None:
+        content = load_prompt("briefing_judge")
+        assert "out of scope" in content.lower()
 
 
 class TestLoader:

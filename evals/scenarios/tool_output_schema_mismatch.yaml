@@ -40,6 +40,12 @@ canned_llm_responses:
       recommendation: >
         File a bug against the platform tool implementation returning invalid
         lag values, and check the raw metric from CloudWatch as a fallback.
+  briefing_judge:
+    - groundedness: 0.9
+      actionability: 0.8
+      reasoning: >
+        Findings identify the schema violation precisely; recommendation names
+        both a concrete bug-file target and a CloudWatch fallback path.
 
 expectation:
   name: tool_output_schema_mismatch

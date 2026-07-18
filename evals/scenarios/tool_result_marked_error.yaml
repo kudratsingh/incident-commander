@@ -40,6 +40,12 @@ canned_llm_responses:
       recommendation: >
         Retry manually after the platform-side Kafka client recovers, or fall
         back to CloudWatch's consumer-lag metric for a second reading.
+  briefing_judge:
+    - groundedness: 0.85
+      actionability: 0.85
+      reasoning: >
+        Findings quote the is_error=True response accurately; recommendation
+        offers two concrete fallback steps (manual retry + CloudWatch metric).
 
 expectation:
   name: tool_result_marked_error

@@ -53,6 +53,12 @@ canned_llm_responses:
       recommendation: >
         Reconcile the paging rule for reports-consumer against the current lag
         metric and consider tightening the recovery window before re-arming.
+  briefing_judge:
+    - groundedness: 0.85
+      actionability: 0.8
+      reasoning: >
+        Findings acknowledge the tension between the paging alert and the 0-lag
+        reading; recommendation names a specific reconciliation task.
 
 expectation:
   name: consumer_lag_healthy_zero

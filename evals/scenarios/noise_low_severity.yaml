@@ -20,6 +20,12 @@ canned_llm_responses:
       recommendation: >
         Confirm the canary_blip fingerprint should not page and adjust the
         alerting rule if this fires again within the noise window.
+  briefing_judge:
+    - groundedness: 0.9
+      actionability: 0.75
+      reasoning: >
+        Findings correctly reflect the noise-filter outcome; recommendation
+        names the canary_blip fingerprint and a concrete alerting-rule action.
 
 expectation:
   name: noise_low_severity

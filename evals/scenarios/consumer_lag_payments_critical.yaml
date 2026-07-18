@@ -47,6 +47,12 @@ canned_llm_responses:
       recommendation: >
         Check whether payments-consumer pod is running and whether upstream
         producer volume spiked in the last 15 minutes.
+  briefing_judge:
+    - groundedness: 0.9
+      actionability: 0.85
+      reasoning: >
+        Findings ground in the 25000-lag reading; recommendation offers two
+        concrete verification steps against the payments consumer.
 
 expectation:
   name: consumer_lag_payments_critical

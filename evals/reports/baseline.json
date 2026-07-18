@@ -1,12 +1,43 @@
 {
-  "generated_at": "2026-07-18T00:25:19.275972Z",
-  "total": 11,
-  "passed": 11,
+  "generated_at": "2026-07-18T00:31:46.547304Z",
+  "total": 19,
+  "passed": 19,
   "failed": 0,
-  "judged_count": 11,
-  "judge_useful_count": 11,
-  "judge_mean_overall": 0.8318181818181819,
+  "judged_count": 19,
+  "judge_useful_count": 19,
+  "judge_mean_overall": 0.8421052631578947,
   "outcomes": [
+    {
+      "scenario": "consumer_lag_analytics_critical",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "consumer_lag_analytics_critical",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.9,
+        "reasoning": "Findings quote the 50000 lag reading; recommendation names three concrete actions (page team, scale replicas, check rollback candidate).\n"
+      }
+    },
     {
       "scenario": "consumer_lag_healthy_zero",
       "final_state": "escalated",
@@ -132,6 +163,37 @@
       }
     },
     {
+      "scenario": "consumer_lag_orders_high",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "consumer_lag_orders_high",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.85,
+        "reasoning": "Findings ground in the 7500 lag reading; recommendation names two concrete verification steps for orders-consumer.\n"
+      }
+    },
+    {
       "scenario": "consumer_lag_payments_critical",
       "final_state": "escalated",
       "tool_calls_used": 1,
@@ -163,6 +225,130 @@
       }
     },
     {
+      "scenario": "consumer_lag_shipping_extreme",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "consumer_lag_shipping_extreme",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.85,
+        "reasoning": "Findings correctly frame the extreme lag as consumer-stopped rather than slow-processing; recommendation names two concrete checks.\n"
+      }
+    },
+    {
+      "scenario": "multi_probe_billing",
+      "final_state": "escalated",
+      "tool_calls_used": 2,
+      "report": {
+        "scenario": "multi_probe_billing",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 2 tool calls, cap 5"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.85,
+        "reasoning": "Findings capture both probes and the sustained-lag conclusion; recommendation names two concrete verification steps.\n"
+      }
+    },
+    {
+      "scenario": "multi_probe_hypothesis_evolution",
+      "final_state": "escalated",
+      "tool_calls_used": 2,
+      "report": {
+        "scenario": "multi_probe_hypothesis_evolution",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 2 tool calls, cap 5"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.85,
+        "reasoning": "Findings track hypothesis evolution across probes; recommendation gives a concrete 15-minute watch window and named escalation contact.\n"
+      }
+    },
+    {
+      "scenario": "noise_info_orders",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_info_orders",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.75,
+        "reasoning": "Findings match the noise-filter outcome for the orders context; recommendation names a concrete ingress-filter action.\n"
+      }
+    },
+    {
       "scenario": "noise_info_severity",
       "final_state": "escalated",
       "tool_calls_used": 0,
@@ -191,6 +377,37 @@
         "groundedness": 0.9,
         "actionability": 0.75,
         "reasoning": "Findings match the info-level noise filter; recommendation names the healthcheck fingerprint and a concrete filter-at-ingress step.\n"
+      }
+    },
+    {
+      "scenario": "noise_low_analytics",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_low_analytics",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.75,
+        "reasoning": "Findings mirror the noise-filter outcome; recommendation names the canary_blip fingerprint and a concrete alerting-rule action.\n"
       }
     },
     {
@@ -253,6 +470,37 @@
         "groundedness": 0.85,
         "actionability": 0.7,
         "reasoning": "Findings capture the missing-severity condition; recommendation gives a concrete request to the alert source.\n"
+      }
+    },
+    {
+      "scenario": "planner_stops_immediately",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "planner_stops_immediately",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.75,
+        "reasoning": "Findings correctly note the missing tool coverage; recommendation names a concrete next step (ask alert-source owner for a runbook).\n"
       }
     },
     {

@@ -1,0 +1,65 @@
+# Extreme lag reading — millions of messages behind. Tests large-number handling.
+
+name: consumer_lag_shipping_extreme
+description: >
+  Shipping consumer with an extreme lag reading (millions of messages). Verifies
+  large integer handling in the typed output and the planner's response to
+  clearly-catastrophic evidence.
+
+tags: [read-only, phase-0, kafka, extreme-value]
+
+alert:
+  source: platform.kafka
+  severity: critical
+  fingerprint: consumer_lag_high
+  group: shipping-consumer
+
+canned_tool_responses:
+  get_consumer_lag:
+    content:
+      - type: text
+        text: '{"group":"shipping-consumer","lag":2500000,"timestamp":"2026-07-17T14:30:00Z"}'
+    is_error: false
+
+canned_llm_responses:
+  investigation_planner:
+    - hypotheses:
+        - name: consumer_saturation
+          confidence: 0.7
+          reasoning: >
+            Critical severity on shipping-consumer suggests severe backlog.
+      next_action:
+        kind: probe
+        tool_name: get_consumer_lag
+        arguments:
+          group: shipping-consumer
+    - hypotheses:
+        - name: consumer_outage
+          confidence: 0.9
+          reasoning: >
+            Lag of 2500000 is far beyond a slow-consumer explanation; the
+            consumer likely stopped processing entirely.
+      next_action:
+        kind: stop
+        reason: extreme backlog; escalate for outage response
+  briefing_writer:
+    - findings: >
+        shipping-consumer lag reads 2500000 messages — a magnitude consistent
+        with a stopped consumer rather than slow processing.
+      recommendation: >
+        Check whether shipping-consumer pod is running at all; if it is, check
+        for a deployment or config change in the last hour.
+  briefing_judge:
+    - groundedness: 0.9
+      actionability: 0.85
+      reasoning: >
+        Findings correctly frame the extreme lag as consumer-stopped rather
+        than slow-processing; recommendation names two concrete checks.
+
+expectation:
+  name: consumer_lag_shipping_extreme
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - shipping-consumer
+    - '2500000'
+  max_tool_calls: 5

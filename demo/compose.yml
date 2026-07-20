@@ -1,0 +1,68 @@
+# Live demo: minimal platform footprint sufficient for read-only MCP.
+#
+# Pinned to the incident-platform v0.1.0 release by digest so the agent's
+# contract expectations don't shift under us. Bump the digest whenever the
+# platform ships a new release and rerun `make eval-live` to catch drift.
+#
+# Services:
+#   postgres  — platform's system of record (agent uses its own DB, not this)
+#   redis     — platform's cache / pub-sub
+#   platform  — MCP process only (the REST/frontend surfaces aren't needed
+#               for read-only eval)
+#
+# The agent process is not part of this compose. It runs on the host so
+# `make eval-live` can reach the MCP endpoint at http://localhost:8001/mcp.
+
+name: incident-commander-demo
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: incident_platform
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  platform:
+    # incident-platform v0.1.0. Do not switch to `:latest` — the whole point
+    # of pinning by digest is that a platform-side prompt or schema change
+    # can't shift agent behavior without an explicit bump here.
+    image: ghcr.io/kudratsingh/incident-platform@sha256:a1940afa9072b9b7eb0bd56d44a3ffe11fc6aea39d39e4921da705cf6f63f4de
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -c
+      - "alembic upgrade head && uvicorn app.mcp.standalone:app --host 0.0.0.0 --port 8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s

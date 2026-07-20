@@ -25,6 +25,9 @@ from incident_commander.agent.state import IncidentState, RunState
 from incident_commander.config import Settings
 from incident_commander.llm.fakes import CannedLLMClient
 from incident_commander.persistence.memory import InMemoryCheckpointer
+from incident_commander.tools.mcp_client import MCPClient, MCPClientProtocol, make_client
+
+_EVAL_PLACEHOLDER_HOST = "eval.local"
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SCENARIOS_DIR = _REPO_ROOT / "evals" / "scenarios"
@@ -80,6 +83,14 @@ class ScenarioResult:
     briefing: EscalationBriefing
 
 
+class LiveMCPUnavailable(RuntimeError):
+    """Scenario needs live MCP but PLATFORM_MCP_URL is still the eval placeholder."""
+
+
+def _is_offline_placeholder(url: str) -> bool:
+    return _EVAL_PLACEHOLDER_HOST in url
+
+
 def run_scenario(
     scenario: Scenario,
     settings: Settings,
@@ -94,7 +105,19 @@ def run_scenario(
     tick = clock or (lambda: datetime.now(UTC))
     now = tick()
 
-    mcp_client = CannedMCPClient(scenario.canned_tool_responses)
+    mcp_client: MCPClientProtocol
+    live_client: MCPClient | None = None
+    if scenario.use_live_mcp:
+        if _is_offline_placeholder(str(settings.platform_mcp_url)):
+            raise LiveMCPUnavailable(
+                f"scenario {scenario.name} requires live MCP but "
+                f"PLATFORM_MCP_URL is the offline placeholder"
+            )
+        live_client = make_client(settings)
+        mcp_client = live_client
+    else:
+        mcp_client = CannedMCPClient(scenario.canned_tool_responses)
+
     investigation_llm = CannedLLMClient(
         scenario.canned_llm_responses.get("investigation_planner", [])
     )
@@ -106,26 +129,31 @@ def run_scenario(
         mcp_client, investigation_llm, model=settings.agent_model
     )
 
-    checkpointer = InMemoryCheckpointer()
-    run = start_run(scenario.alert.model_dump(), settings, now)
-    final = run_to_completion(
-        run,
-        clock=tick,
-        transitions=transitions,
-        checkpointer=checkpointer,
-    )
-    report = grade(final, scenario.expectation)
-    trajectory = Trajectory(
-        scenario=scenario.name,
-        incident_id=str(final.incident_id),
-        checkpoints=tuple(checkpointer.history(final.incident_id)),
-    )
-    briefing = render_briefing(final)
-    if briefing_llm.has_remaining:
-        briefing = enrich_briefing(briefing, briefing_llm, model=settings.agent_model)
-    judge_score: JudgeScore | None = None
-    if judge_llm.has_remaining:
-        judge_score = judge_briefing(briefing, judge_llm, model=settings.judge_model)
+    try:
+        checkpointer = InMemoryCheckpointer()
+        run = start_run(scenario.alert.model_dump(), settings, now)
+        final = run_to_completion(
+            run,
+            clock=tick,
+            transitions=transitions,
+            checkpointer=checkpointer,
+        )
+        report = grade(final, scenario.expectation)
+        trajectory = Trajectory(
+            scenario=scenario.name,
+            incident_id=str(final.incident_id),
+            checkpoints=tuple(checkpointer.history(final.incident_id)),
+        )
+        briefing = render_briefing(final)
+        if briefing_llm.has_remaining:
+            briefing = enrich_briefing(briefing, briefing_llm, model=settings.agent_model)
+        judge_score: JudgeScore | None = None
+        if judge_llm.has_remaining:
+            judge_score = judge_briefing(briefing, judge_llm, model=settings.judge_model)
+    finally:
+        if live_client is not None:
+            live_client.close()
+
     outcome = ScenarioOutcome(
         scenario=scenario.name,
         final_state=final.state,
@@ -141,7 +169,13 @@ def run_all(
     settings: Settings,
     clock: Callable[[], datetime] | None = None,
 ) -> tuple[RunReport, tuple[Trajectory, ...], tuple[EscalationBriefing, ...]]:
-    results = tuple(run_scenario(s, settings, clock) for s in scenarios)
+    offline = _is_offline_placeholder(str(settings.platform_mcp_url))
+    results: list[ScenarioResult] = []
+    for scenario in scenarios:
+        if scenario.use_live_mcp and offline:
+            # Skip cleanly; the summary line notes the count.
+            continue
+        results.append(run_scenario(scenario, settings, clock))
     outcomes = tuple(r.outcome for r in results)
     trajectories = tuple(r.trajectory for r in results)
     briefings = tuple(r.briefing for r in results)
@@ -214,8 +248,10 @@ def _eval_defaults() -> Settings:
     )
 
 
-def _print_summary(report: RunReport) -> None:
+def _print_summary(report: RunReport, skipped_live: int = 0) -> None:
     print(f"scenarios: {report.total}, passed: {report.passed}, failed: {report.failed}")
+    if skipped_live > 0:
+        print(f"skipped: {skipped_live} live scenarios (PLATFORM_MCP_URL is offline placeholder)")
     if report.judged_count > 0 and report.judge_mean_overall is not None:
         print(
             f"judge: {report.judge_useful_count}/{report.judged_count} useful, "
@@ -233,14 +269,27 @@ def _print_summary(report: RunReport) -> None:
                     print(f"    - {dim.dimension.value}: {dim.detail}")
 
 
+def _settings_for_mode(live: bool) -> Settings:
+    """Live mode reads real env; offline uses the eval placeholder."""
+    if live:
+        return Settings()  # type: ignore[call-arg]
+    return _eval_defaults()
+
+
 def main() -> int:
+    live = "--live" in sys.argv[1:]
+    settings = _settings_for_mode(live)
     scenarios = load_scenarios(_SCENARIOS_DIR)
-    settings = _eval_defaults()
+    offline = _is_offline_placeholder(str(settings.platform_mcp_url))
+    skipped_live = sum(1 for s in scenarios if s.use_live_mcp and offline)
+    # run_all skips live scenarios internally when offline.
     report, trajectories, briefings = run_all(scenarios, settings)
     write_report(report)
     write_trajectories(trajectories)
-    write_briefings(briefings, (s.name for s in scenarios))
-    _print_summary(report)
+    # Write briefings only for scenarios that actually ran.
+    ran_names = [o.scenario for o in report.outcomes]
+    write_briefings(briefings, ran_names)
+    _print_summary(report, skipped_live=skipped_live)
     return 0 if report.failed == 0 else 1
 
 

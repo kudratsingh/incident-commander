@@ -1,4 +1,4 @@
-.PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-reg demo baseline clean
+.PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-reg demo demo-down baseline clean
 
 help:
 	@echo "Targets:"
@@ -9,9 +9,11 @@ help:
 	@echo "  test-integration integration tests only"
 	@echo "  test-contract    diff platform tool schemas against snapshot"
 	@echo "  test-e2e         full compose end-to-end (spends tokens)"
-	@echo "  eval             full eval suite (writes report)"
+	@echo "  eval             full eval suite offline (writes report)"
+	@echo "  eval-live        run eval suite against live platform (needs .env)"
 	@echo "  eval-reg         regression eval subset"
-	@echo "  demo             compose up + inject scenario + stream investigation"
+	@echo "  demo             compose up (platform pinned by digest) + live scenario"
+	@echo "  demo-down        stop demo compose services"
 	@echo "  baseline         recompute and commit eval baseline"
 	@echo "  clean            remove build artifacts and caches"
 
@@ -44,11 +46,19 @@ test-e2e:
 eval:
 	uv run python -m evals.runner
 
+eval-live:
+	uv run python -m evals.runner --live
+
 eval-reg: eval
 	uv run python -m evals.regression
 
 demo:
-	@echo "TODO(phase-0): docker compose up + inject scenario + stream investigation"
+	docker compose -f demo/compose.yml up -d --wait
+	uv run python -m evals.runner --live
+	@echo "Demo done. Stop with 'make demo-down'."
+
+demo-down:
+	docker compose -f demo/compose.yml down -v
 
 baseline: eval
 	cp evals/reports/latest.json evals/reports/baseline.json

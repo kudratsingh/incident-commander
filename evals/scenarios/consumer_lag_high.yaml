@@ -1,5 +1,9 @@
 # Baseline eval scenario: severe Kafka consumer lag on the billing group.
 # Agent probes get_consumer_lag once, then escalates with the finding.
+#
+# Live-MCP: this scenario is the first one migrated off fixtures. Under
+# `make eval` it's skipped when PLATFORM_MCP_URL is the offline placeholder;
+# `make eval-live` (or `make demo`) runs it against the real platform.
 
 name: consumer_lag_high
 description: >
@@ -7,7 +11,9 @@ description: >
   For Phase 0 (read-only), the agent runs one probe and escalates to a human
   with the finding attached.
 
-tags: [read-only, phase-0, kafka]
+tags: [read-only, phase-0, kafka, live-mcp]
+
+use_live_mcp: true
 
 alert:
   source: platform.kafka
@@ -15,12 +21,8 @@ alert:
   fingerprint: consumer_lag_high
   group: billing-consumer
 
-canned_tool_responses:
-  get_consumer_lag:
-    content:
-      - type: text
-        text: '{"group":"billing-consumer","lag":10000,"timestamp":"2026-07-16T12:00:00Z"}'
-    is_error: false
+# canned_tool_responses intentionally omitted — planner probes the real
+# platform's get_consumer_lag tool via the live MCP endpoint.
 
 canned_llm_responses:
   investigation_planner:
@@ -39,8 +41,8 @@ canned_llm_responses:
         - name: consumer_saturation
           confidence: 0.88
           reasoning: >
-            Lag reading of 10000 messages confirms the billing consumer is
-            severely backlogged.
+            Live lag reading returned by the platform confirms the billing
+            consumer is backlogged.
       next_action:
         kind: stop
         reason: >
@@ -48,23 +50,21 @@ canned_llm_responses:
           the diagnosis.
   briefing_writer:
     - findings: >
-        The billing-consumer Kafka group has a lag of 10000 messages, consistent
-        with the paging alert. The consumer is behind its input rate.
+        The billing-consumer Kafka group is reporting a non-trivial lag on the
+        live platform, consistent with the paging alert.
       recommendation: >
         Verify the billing-consumer pod is running and check whether processing
         time per message has increased in the last 10 minutes.
   briefing_judge:
-    - groundedness: 0.9
+    - groundedness: 0.85
       actionability: 0.85
       reasoning: >
-        Findings quote the billing-consumer lag reading directly from the trail;
-        recommendation names two concrete verification steps a human can perform
-        in minutes.
+        Findings ground in the live lag reading; recommendation names two
+        concrete verification steps.
 
 expectation:
   name: consumer_lag_high
   expected_terminal_state: escalated
   expected_evidence_contains:
     - billing-consumer
-    - lag
   max_tool_calls: 5

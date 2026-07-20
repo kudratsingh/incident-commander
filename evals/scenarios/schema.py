@@ -30,3 +30,8 @@ class Scenario(BaseModel):
     expectation: ScenarioExpectation
     canned_tool_responses: dict[str, ToolResult] = Field(default_factory=dict)
     canned_llm_responses: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    # When True the runner ignores ``canned_tool_responses`` and builds a real
+    # ``MCPClient`` against ``settings.platform_mcp_url``. Scenarios using this
+    # flag are skipped by ``make eval`` when the URL is still the offline
+    # placeholder — ``make eval-live`` (or an env with a real URL) runs them.
+    use_live_mcp: bool = False

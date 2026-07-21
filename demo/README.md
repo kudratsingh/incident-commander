@@ -10,6 +10,11 @@ agent against real HTTP tool calls instead of canned fixtures.
   pinned `v0.1.0` platform image is amd64-only; the compose file pins
   `platform: linux/amd64` so it runs under emulation until the platform
   ships a multi-arch build.
+- Host port 8001 free. If you already have a native platform (or anything
+  else) on 8001, either kill it or set `DEMO_MCP_HOST_PORT` in `.env` to a
+  free port and update `PLATFORM_MCP_URL` to match — see `.env.example`.
+  Alternatively, if the thing on 8001 IS a platform you want to test
+  against, skip `make demo` entirely and use `make eval-live` directly.
 - `.env` with `PLATFORM_TOKEN=sa_...` (a service-account token issued by the
   platform under scopes `telemetry:read` + `incidents:read`).
 - Anthropic API key isn't required for `make demo` — LLM calls in eval mode

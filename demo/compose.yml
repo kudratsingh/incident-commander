@@ -49,8 +49,11 @@ services:
     # cold start, correct output). Drop this line when the platform ships a
     # multi-arch build (docker buildx --platform linux/amd64,linux/arm64).
     platform: linux/amd64
+    # Host port is env-configurable so a native platform (or anything else)
+    # on 8001 doesn't collide. Override with DEMO_MCP_HOST_PORT and match
+    # PLATFORM_MCP_URL in .env accordingly.
     ports:
-      - "8001:8001"
+      - "${DEMO_MCP_HOST_PORT:-8001}:8001"
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
       REDIS_URL: redis://redis:6379/0

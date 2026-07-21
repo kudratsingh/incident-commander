@@ -32,7 +32,7 @@ canned_llm_responses:
         kind: probe
         tool_name: get_consumer_lag
         arguments:
-          group: billing-consumer
+          consumer_group: billing-consumer
   briefing_writer:
     - findings: >
         The get_consumer_lag probe returned is_error=True from the platform

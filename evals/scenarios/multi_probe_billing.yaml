@@ -19,7 +19,7 @@ canned_tool_responses:
   get_consumer_lag:
     content:
       - type: text
-        text: '{"group":"billing-consumer","lag":15000,"timestamp":"2026-07-17T14:45:00Z"}'
+        text: '{"consumer_group":"billing-consumer","lag":15000,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
     is_error: false
 
 canned_llm_responses:
@@ -33,7 +33,7 @@ canned_llm_responses:
         kind: probe
         tool_name: get_consumer_lag
         arguments:
-          group: billing-consumer
+          consumer_group: billing-consumer
     - hypotheses:
         - name: consumer_saturation
           confidence: 0.7
@@ -44,7 +44,7 @@ canned_llm_responses:
         kind: probe
         tool_name: get_consumer_lag
         arguments:
-          group: billing-consumer
+          consumer_group: billing-consumer
     - hypotheses:
         - name: consumer_saturation
           confidence: 0.9

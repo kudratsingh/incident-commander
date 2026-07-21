@@ -35,13 +35,17 @@ class TestMakeInvestigate:
     def test_happy_path_escalates_with_evidence(self, run_state: RunState, now: datetime) -> None:
         client = _FakeMCPClient(
             lambda _n, _a: _canned_result(
-                {"group": "billing", "lag": 42, "timestamp": now.isoformat()}
+                {
+                    "consumer_group": "billing",
+                    "lag": 42,
+                    "cache_key": "kafka:consumer_lag:worker-dispatcher",
+                }
             )
         )
         transition = make_investigate(client)
         run = _with_alert(
             run_state.model_copy(update={"state": IncidentState.INVESTIGATING}),
-            {"group": "billing"},
+            {"consumer_group": "billing"},
         )
         result = transition(run, now)
 
@@ -49,19 +53,23 @@ class TestMakeInvestigate:
         assert len(result.evidence) == 1
         entry = result.evidence[0]
         assert entry.tool_name == "get_consumer_lag"
-        assert entry.arguments == {"group": "billing"}
+        assert entry.arguments == {"consumer_group": "billing"}
         assert "lag" in entry.result_summary
 
     def test_budget_incremented_by_one(self, run_state: RunState, now: datetime) -> None:
         client = _FakeMCPClient(
             lambda _n, _a: _canned_result(
-                {"group": "billing", "lag": 0, "timestamp": now.isoformat()}
+                {
+                    "consumer_group": "billing",
+                    "lag": 0,
+                    "cache_key": "kafka:consumer_lag:worker-dispatcher",
+                }
             )
         )
         transition = make_investigate(client)
         run = _with_alert(
             run_state.model_copy(update={"state": IncidentState.INVESTIGATING}),
-            {"group": "billing"},
+            {"consumer_group": "billing"},
         )
         result = transition(run, now)
         assert result.budget.tool_calls_used == run.budget.tool_calls_used + 1
@@ -69,21 +77,29 @@ class TestMakeInvestigate:
     def test_calls_tool_with_group_from_alert(self, run_state: RunState, now: datetime) -> None:
         client = _FakeMCPClient(
             lambda _n, _a: _canned_result(
-                {"group": "payments", "lag": 1, "timestamp": now.isoformat()}
+                {
+                    "consumer_group": "payments",
+                    "lag": 1,
+                    "cache_key": "kafka:consumer_lag:worker-dispatcher",
+                }
             )
         )
         transition = make_investigate(client)
         run = _with_alert(
             run_state.model_copy(update={"state": IncidentState.INVESTIGATING}),
-            {"group": "payments"},
+            {"consumer_group": "payments"},
         )
         transition(run, now)
-        assert client.calls == [("get_consumer_lag", {"group": "payments"})]
+        assert client.calls == [("get_consumer_lag", {"consumer_group": "payments"})]
 
     def test_missing_group_uses_unknown(self, run_state: RunState, now: datetime) -> None:
         client = _FakeMCPClient(
             lambda _n, _a: _canned_result(
-                {"group": "unknown", "lag": 0, "timestamp": now.isoformat()}
+                {
+                    "consumer_group": "unknown",
+                    "lag": 0,
+                    "cache_key": "kafka:consumer_lag:worker-dispatcher",
+                }
             )
         )
         transition = make_investigate(client)
@@ -92,7 +108,8 @@ class TestMakeInvestigate:
             {"source": "billing"},
         )
         transition(run, now)
-        assert client.calls[0][1] == {"group": "unknown"}
+        # No consumer_group in alert → default to platform's worker-dispatcher.
+        assert client.calls[0][1] == {"consumer_group": "worker-dispatcher"}
 
     def test_mcp_error_escalates_with_reason(self, run_state: RunState, now: datetime) -> None:
         def raise_error(_n: str, _a: Mapping[str, Any]) -> ToolResult:
@@ -101,7 +118,7 @@ class TestMakeInvestigate:
         transition = make_investigate(_FakeMCPClient(raise_error))
         run = _with_alert(
             run_state.model_copy(update={"state": IncidentState.INVESTIGATING}),
-            {"group": "billing"},
+            {"consumer_group": "billing"},
         )
         result = transition(run, now)
         assert result.state is IncidentState.ESCALATED
@@ -114,7 +131,7 @@ class TestMakeInvestigate:
         transition = make_investigate(_FakeMCPClient(raise_error))
         run = _with_alert(
             run_state.model_copy(update={"state": IncidentState.INVESTIGATING}),
-            {"group": "billing"},
+            {"consumer_group": "billing"},
         )
         result = transition(run, now)
         assert result.budget.tool_calls_used == run.budget.tool_calls_used
@@ -127,7 +144,7 @@ class TestMakeInvestigate:
         )
         run = _with_alert(
             run_state.model_copy(update={"state": IncidentState.INVESTIGATING}),
-            {"group": "billing"},
+            {"consumer_group": "billing"},
         )
         result = transition(run, now)
         assert result.state is IncidentState.ESCALATED
@@ -139,7 +156,7 @@ class TestMakeInvestigate:
         )
         run = _with_alert(
             run_state.model_copy(update={"state": IncidentState.INVESTIGATING}),
-            {"group": "billing"},
+            {"consumer_group": "billing"},
         )
         result = transition(run, now)
         assert result.state is IncidentState.ESCALATED
@@ -147,11 +164,11 @@ class TestMakeInvestigate:
 
     def test_invalid_output_shape_escalates(self, run_state: RunState, now: datetime) -> None:
         transition = make_investigate(
-            _FakeMCPClient(lambda _n, _a: _canned_result({"group": "billing", "lag": -1}))
+            _FakeMCPClient(lambda _n, _a: _canned_result({"consumer_group": "billing", "lag": -1}))
         )
         run = _with_alert(
             run_state.model_copy(update={"state": IncidentState.INVESTIGATING}),
-            {"group": "billing"},
+            {"consumer_group": "billing"},
         )
         result = transition(run, now)
         assert result.state is IncidentState.ESCALATED
@@ -160,13 +177,17 @@ class TestMakeInvestigate:
     def test_transition_leaves_input_unchanged(self, run_state: RunState, now: datetime) -> None:
         client = _FakeMCPClient(
             lambda _n, _a: _canned_result(
-                {"group": "billing", "lag": 0, "timestamp": now.isoformat()}
+                {
+                    "consumer_group": "billing",
+                    "lag": 0,
+                    "cache_key": "kafka:consumer_lag:worker-dispatcher",
+                }
             )
         )
         transition = make_investigate(client)
         run = _with_alert(
             run_state.model_copy(update={"state": IncidentState.INVESTIGATING}),
-            {"group": "billing"},
+            {"consumer_group": "billing"},
         )
         original_used = run.budget.tool_calls_used
         _ = transition(run, now)

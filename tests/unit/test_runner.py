@@ -56,7 +56,10 @@ def _passing_scenario() -> Scenario:
                 content=[
                     {
                         "type": "text",
-                        "text": '{"group":"billing","lag":42,"timestamp":"2026-07-16T12:00:00Z"}',
+                        "text": (
+                            '{"consumer_group":"billing","lag":42,'
+                            '"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+                        ),
                     }
                 ],
             )
@@ -74,7 +77,7 @@ def _passing_scenario() -> Scenario:
                     "next_action": {
                         "kind": "probe",
                         "tool_name": "get_consumer_lag",
-                        "arguments": {"group": "billing"},
+                        "arguments": {"consumer_group": "billing"},
                     },
                 },
                 {
@@ -163,7 +166,7 @@ class TestRunScenario:
                         "next_action": {
                             "kind": "probe",
                             "tool_name": "get_consumer_lag",
-                            "arguments": {"group": "billing"},
+                            "arguments": {"consumer_group": "billing"},
                         },
                     }
                 ],

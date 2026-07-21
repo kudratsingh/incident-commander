@@ -1,5 +1,3 @@
-from datetime import datetime
-
 import pytest
 from pydantic import ValidationError
 
@@ -12,31 +10,49 @@ from incident_commander.tools.registry import (
 
 
 class TestGetConsumerLagInput:
-    def test_valid_group(self) -> None:
-        model = GetConsumerLagInput(group="billing-consumer")
-        assert model.group == "billing-consumer"
+    def test_default_group_matches_platform_default(self) -> None:
+        model = GetConsumerLagInput()
+        assert model.consumer_group == "worker-dispatcher"
+
+    def test_explicit_group(self) -> None:
+        model = GetConsumerLagInput(consumer_group="event-log")
+        assert model.consumer_group == "event-log"
 
     def test_empty_group_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            GetConsumerLagInput(group="")
+            GetConsumerLagInput(consumer_group="")
 
     def test_extra_field_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            GetConsumerLagInput.model_validate({"group": "x", "extra": "y"})
+            GetConsumerLagInput.model_validate({"consumer_group": "x", "extra": "y"})
 
 
 class TestGetConsumerLagOutput:
-    def test_valid_payload(self, now: datetime) -> None:
-        model = GetConsumerLagOutput(group="billing", lag=42, timestamp=now)
+    def test_valid_payload(self) -> None:
+        model = GetConsumerLagOutput(
+            consumer_group="worker-dispatcher",
+            lag=42,
+            cache_key="kafka:consumer_lag:worker-dispatcher",
+        )
         assert model.lag == 42
 
-    def test_negative_lag_rejected(self, now: datetime) -> None:
-        with pytest.raises(ValidationError):
-            GetConsumerLagOutput(group="billing", lag=-1, timestamp=now)
+    def test_null_lag_accepted(self) -> None:
+        # Platform returns null when cache is empty or expired.
+        model = GetConsumerLagOutput(
+            consumer_group="worker-dispatcher",
+            lag=None,
+            cache_key="(no cache key for group 'worker-dispatcher')",
+        )
+        assert model.lag is None
 
-    def test_extra_field_ignored(self, now: datetime) -> None:
+    def test_extra_field_ignored(self) -> None:
         model = GetConsumerLagOutput.model_validate(
-            {"group": "billing", "lag": 0, "timestamp": now, "unknown_field": True}
+            {
+                "consumer_group": "worker-dispatcher",
+                "lag": 0,
+                "cache_key": "kafka:consumer_lag:worker-dispatcher",
+                "unknown_field": True,
+            }
         )
         assert model.lag == 0
 

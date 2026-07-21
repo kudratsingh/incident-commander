@@ -1,15 +1,11 @@
-# Baseline eval scenario: severe Kafka consumer lag on the billing group.
-# Agent probes get_consumer_lag once, then escalates with the finding.
-#
-# Live-MCP: this scenario is the first one migrated off fixtures. Under
-# `make eval` it's skipped when PLATFORM_MCP_URL is the offline placeholder;
-# `make eval-live` (or `make demo`) runs it against the real platform.
+# Baseline eval scenario: consumer lag on the worker-dispatcher group.
+# First scenario running against the real platform.
 
 name: consumer_lag_high
 description: >
-  Kafka consumer lag on the billing group crosses the paging threshold.
-  For Phase 0 (read-only), the agent runs one probe and escalates to a human
-  with the finding attached.
+  Kafka consumer lag alert on the worker-dispatcher group. Only group the
+  platform exposes today (Wave 1); more arrive with later waves.
+  For Phase 0 (read-only), the agent runs one probe and escalates.
 
 tags: [read-only, phase-0, kafka, live-mcp]
 
@@ -19,10 +15,7 @@ alert:
   source: platform.kafka
   severity: high
   fingerprint: consumer_lag_high
-  group: billing-consumer
-
-# canned_tool_responses intentionally omitted — planner probes the real
-# platform's get_consumer_lag tool via the live MCP endpoint.
+  consumer_group: worker-dispatcher
 
 canned_llm_responses:
   investigation_planner:
@@ -30,41 +23,41 @@ canned_llm_responses:
         - name: consumer_saturation
           confidence: 0.55
           reasoning: >
-            Paging severity on billing consumer suggests the consumer is falling
-            behind. Need to check the current lag value to confirm.
+            Paging severity on worker-dispatcher suggests the consumer is
+            falling behind. Probe for the current lag.
       next_action:
         kind: probe
         tool_name: get_consumer_lag
         arguments:
-          group: billing-consumer
+          consumer_group: worker-dispatcher
     - hypotheses:
         - name: consumer_saturation
-          confidence: 0.88
+          confidence: 0.7
           reasoning: >
-            Live lag reading returned by the platform confirms the billing
-            consumer is backlogged.
+            Platform returned the live lag reading; whether it's a spike or
+            sustained is not knowable from one point without another tool.
       next_action:
         kind: stop
         reason: >
-          Confidence sufficient for handoff; no other read tools would refine
-          the diagnosis.
+          Only one read tool available today; escalate the live reading to a
+          human for judgment.
   briefing_writer:
     - findings: >
-        The billing-consumer Kafka group is reporting a non-trivial lag on the
-        live platform, consistent with the paging alert.
+        Live lag reading for the worker-dispatcher Kafka group was fetched
+        from the platform via get_consumer_lag.
       recommendation: >
-        Verify the billing-consumer pod is running and check whether processing
-        time per message has increased in the last 10 minutes.
+        Compare the lag reading against the paging threshold and check the
+        worker process's recent CPU / restart history before intervening.
   briefing_judge:
     - groundedness: 0.85
-      actionability: 0.85
+      actionability: 0.8
       reasoning: >
-        Findings ground in the live lag reading; recommendation names two
+        Findings ground in the live tool response; recommendation names two
         concrete verification steps.
 
 expectation:
   name: consumer_lag_high
   expected_terminal_state: escalated
   expected_evidence_contains:
-    - billing-consumer
+    - worker-dispatcher
   max_tool_calls: 5

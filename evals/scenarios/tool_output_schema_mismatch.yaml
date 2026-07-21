@@ -2,9 +2,9 @@
 
 name: tool_output_schema_mismatch
 description: >
-  Canned response returns a payload that violates GetConsumerLagOutput (lag is
-  negative). Verifies the typed registry catches malformed platform output
-  before it becomes evidence.
+  Canned response returns a payload that violates GetConsumerLagOutput
+  (required cache_key field missing). Verifies the typed registry catches
+  malformed platform output before it becomes evidence.
 
 tags: [read-only, phase-0, schema-defense]
 
@@ -18,7 +18,7 @@ canned_tool_responses:
   get_consumer_lag:
     content:
       - type: text
-        text: '{"group":"billing-consumer","lag":-99,"timestamp":"2026-07-16T12:25:00Z"}'
+        text: '{"consumer_group":"billing-consumer","lag":42}'
     is_error: false
 
 canned_llm_responses:
@@ -32,11 +32,12 @@ canned_llm_responses:
         kind: probe
         tool_name: get_consumer_lag
         arguments:
-          group: billing-consumer
+          consumer_group: billing-consumer
   briefing_writer:
     - findings: >
         The get_consumer_lag response for billing-consumer violated the
-        expected output schema (negative lag). The reading was discarded.
+        expected output schema (required cache_key field missing).
+        The reading was discarded.
       recommendation: >
         File a bug against the platform tool implementation returning invalid
         lag values, and check the raw metric from CloudWatch as a fallback.

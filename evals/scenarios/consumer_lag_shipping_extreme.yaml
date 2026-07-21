@@ -18,7 +18,7 @@ canned_tool_responses:
   get_consumer_lag:
     content:
       - type: text
-        text: '{"group":"shipping-consumer","lag":2500000,"timestamp":"2026-07-17T14:30:00Z"}'
+        text: '{"consumer_group":"shipping-consumer","lag":2500000,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
     is_error: false
 
 canned_llm_responses:
@@ -32,7 +32,7 @@ canned_llm_responses:
         kind: probe
         tool_name: get_consumer_lag
         arguments:
-          group: shipping-consumer
+          consumer_group: shipping-consumer
     - hypotheses:
         - name: consumer_outage
           confidence: 0.9

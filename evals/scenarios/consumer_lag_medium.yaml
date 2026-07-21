@@ -17,7 +17,7 @@ canned_tool_responses:
   get_consumer_lag:
     content:
       - type: text
-        text: '{"group":"notifications-consumer","lag":500,"timestamp":"2026-07-16T12:15:00Z"}'
+        text: '{"consumer_group":"notifications-consumer","lag":500,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
     is_error: false
 
 canned_llm_responses:
@@ -31,7 +31,7 @@ canned_llm_responses:
         kind: probe
         tool_name: get_consumer_lag
         arguments:
-          group: notifications-consumer
+          consumer_group: notifications-consumer
     - hypotheses:
         - name: mild_backlog
           confidence: 0.75

@@ -31,7 +31,11 @@ def _consumer_lag_response(group: str, lag: int) -> ToolResult:
             {
                 "type": "text",
                 "text": json.dumps(
-                    {"group": group, "lag": lag, "timestamp": "2026-07-16T12:00:00Z"}
+                    {
+                        "consumer_group": group,
+                        "lag": lag,
+                        "cache_key": "kafka:consumer_lag:worker-dispatcher",
+                    }
                 ),
             }
         ]
@@ -52,7 +56,7 @@ def _probe_then_stop_llm(group: str = "billing") -> CannedLLMClient:
                 "next_action": {
                     "kind": "probe",
                     "tool_name": "get_consumer_lag",
-                    "arguments": {"group": group},
+                    "arguments": {"consumer_group": group},
                 },
             },
             {
@@ -180,7 +184,8 @@ class TestErrorPaths:
                 content=[
                     {
                         "type": "text",
-                        "text": '{"group":"billing","lag":-99,"timestamp":"2026-07-16T12:00:00Z"}',
+                        # Missing required `cache_key` field triggers schema mismatch.
+                        "text": '{"consumer_group":"billing","lag":42}',
                     }
                 ]
             )
@@ -220,7 +225,7 @@ class TestBudgetGuards:
             "next_action": {
                 "kind": "probe",
                 "tool_name": "get_consumer_lag",
-                "arguments": {"group": "billing"},
+                "arguments": {"consumer_group": "billing"},
             },
         }
         llm = CannedLLMClient([endless_probe] * 10)

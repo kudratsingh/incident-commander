@@ -45,8 +45,12 @@ def make_investigate(
 
     def transition_investigate(run_state: RunState, at: datetime) -> RunState:
         spec = TOOL_REGISTRY[_TOOL_NAME]
-        group = str(run_state.alert.get("group", "unknown"))
-        arguments = spec.input_model.model_validate({"group": group}).model_dump()
+        # Accept legacy `group` field for backward-compat with older alert
+        # producers; platform's tool arg is `consumer_group`.
+        raw = run_state.alert.get("consumer_group") or run_state.alert.get("group")
+        arguments = spec.input_model.model_validate(
+            {"consumer_group": str(raw)} if raw else {}
+        ).model_dump()
 
         try:
             result = mcp_client.call_tool(_TOOL_NAME, arguments)

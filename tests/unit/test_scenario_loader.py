@@ -28,7 +28,7 @@ class TestLoadScenario:
         assert scenario.name == "consumer_lag_high"
         assert scenario.alert.severity == "high"
         assert scenario.expectation.expected_terminal_state is IncidentState.ESCALATED
-        assert "billing-consumer" in scenario.expectation.expected_evidence_contains
+        assert "worker-dispatcher" in scenario.expectation.expected_evidence_contains
         assert scenario.expectation.max_tool_calls == 5
 
     def test_loads_valid_string_via_tmp_file(self, tmp_path: Path) -> None:

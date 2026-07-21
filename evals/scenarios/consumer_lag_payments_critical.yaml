@@ -17,7 +17,7 @@ canned_tool_responses:
   get_consumer_lag:
     content:
       - type: text
-        text: '{"group":"payments-consumer","lag":25000,"timestamp":"2026-07-16T12:05:00Z"}'
+        text: '{"consumer_group":"payments-consumer","lag":25000,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
     is_error: false
 
 canned_llm_responses:
@@ -31,7 +31,7 @@ canned_llm_responses:
         kind: probe
         tool_name: get_consumer_lag
         arguments:
-          group: payments-consumer
+          consumer_group: payments-consumer
     - hypotheses:
         - name: consumer_saturation
           confidence: 0.9

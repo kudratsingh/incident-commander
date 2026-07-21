@@ -22,8 +22,9 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: incident_platform
-    ports:
-      - "5432:5432"
+    # No host port binding — the platform service reaches postgres over the
+    # compose network. Publishing 5432:5432 collides with a host-side postgres
+    # (common on dev machines). Same rationale for redis below.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -32,8 +33,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # No host port binding — see postgres above.
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

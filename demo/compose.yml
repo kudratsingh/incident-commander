@@ -45,6 +45,10 @@ services:
     # of pinning by digest is that a platform-side prompt or schema change
     # can't shift agent behavior without an explicit bump here.
     image: ghcr.io/kudratsingh/incident-platform@sha256:a1940afa9072b9b7eb0bd56d44a3ffe11fc6aea39d39e4921da705cf6f63f4de
+    # v0.1.0 is amd64-only. On Apple Silicon this runs under Rosetta (slower
+    # cold start, correct output). Drop this line when the platform ships a
+    # multi-arch build (docker buildx --platform linux/amd64,linux/arm64).
+    platform: linux/amd64
     ports:
       - "8001:8001"
     environment:

@@ -6,6 +6,10 @@ agent against real HTTP tool calls instead of canned fixtures.
 ## Prereqs
 
 - Docker Desktop running.
+- On Apple Silicon, Rosetta 2 (Docker Desktop enables this by default). The
+  pinned `v0.1.0` platform image is amd64-only; the compose file pins
+  `platform: linux/amd64` so it runs under emulation until the platform
+  ships a multi-arch build.
 - `.env` with `PLATFORM_TOKEN=sa_...` (a service-account token issued by the
   platform under scopes `telemetry:read` + `incidents:read`).
 - Anthropic API key isn't required for `make demo` — LLM calls in eval mode

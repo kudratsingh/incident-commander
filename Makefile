@@ -1,4 +1,4 @@
-.PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-reg demo demo-down bootstrap-token baseline clean
+.PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-reg demo demo-down bootstrap-token snapshot baseline clean
 
 help:
 	@echo "Targets:"
@@ -15,6 +15,7 @@ help:
 	@echo "  demo             compose up (platform pinned by digest) + live scenario"
 	@echo "  demo-down        stop demo compose services"
 	@echo "  bootstrap-token  mint a service-account token against a running platform"
+	@echo "  snapshot         regenerate contracts/platform-tools.snapshot.json from live"
 	@echo "  baseline         recompute and commit eval baseline"
 	@echo "  clean            remove build artifacts and caches"
 
@@ -39,7 +40,7 @@ test-integration:
 	uv run pytest tests/integration
 
 test-contract:
-	@echo "TODO(phase-3): contract snapshot diff against pinned platform image"
+	uv run pytest tests/integration/test_contract_snapshot.py -v
 
 test-e2e:
 	@echo "TODO(phase-0+): compose up incident-platform + agent, inject scenario, assert audit"
@@ -63,6 +64,9 @@ demo-down:
 
 bootstrap-token:
 	uv run python scripts/bootstrap_agent_token.py
+
+snapshot:
+	uv run python scripts/snapshot_platform_tools.py
 
 baseline: eval
 	cp evals/reports/latest.json evals/reports/baseline.json

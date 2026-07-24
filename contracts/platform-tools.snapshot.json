@@ -1,0 +1,475 @@
+{
+  "tools": [
+    {
+      "name": "get_consumer_lag",
+      "description": "Read the last-emitted Kafka consumer lag for one of the platform's consumer groups. Values come from the metrics loop's Redis cache — no live Kafka query. Returns null when the cache is empty.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "description": "No arguments today. The `consumer_group` field is a forward hook\n— once we expose more groups than `worker-dispatcher` (Wave 2), the\nagent will pass a specific group name. Defaulting to\n`worker-dispatcher` preserves the read shape until then.",
+        "properties": {
+          "consumer_group": {
+            "default": "worker-dispatcher",
+            "description": "Kafka consumer group to inspect. Only 'worker-dispatcher' is exposed today.",
+            "title": "Consumer Group",
+            "type": "string"
+          }
+        },
+        "title": "GetConsumerLagInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_dag_state",
+      "description": "Fetch the immediate dependency graph around one job — direct parents and direct children with statuses. Use to answer 'why is this job waiting?' or 'what will unblock if I replay?'",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "description": "Seed job. Its parents (dependencies) and children (dependents) are traversed one hop each direction.",
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "GetDagStateInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_deploy_history",
+      "description": "Return what version + revision is running right now (a single 'current' entry). Deploy history over time is a planned follow-up that needs a `deploy_markers` table. Today the agent gets the source of truth for what's live.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "_EmptyIn",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_incident",
+      "description": "Fetch full details for one incident by id, including the `extra_data` blob the emitting source attached.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "GetIncidentInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_postgres_health",
+      "description": "Ping the primary database and read a small set of activity stats. Falls back cleanly on non-Postgres backends (SQLite in tests) — the `dialect` field tells the agent what it looked at.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "_EmptyIn",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_redis_health",
+      "description": "Ping Redis and read a short list of stats from INFO. Never raises — an `ok=false` result *is* the interesting signal.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "_EmptyIn",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_trace",
+      "description": "Fetch every artifact carrying a given trace_id — job rows plus audit-log rows if `include_audit=true`. Useful for building a cold-start context around one incident: the trace is the correlation key that stitches the browser → API → worker → DB path.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "trace_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Trace Id",
+            "type": "string"
+          },
+          "include_audit": {
+            "default": true,
+            "description": "Include audit rows sharing this trace_id.",
+            "title": "Include Audit",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "trace_id"
+        ],
+        "title": "GetTraceInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "invalidate_cache_key",
+      "description": "Delete one Redis key (allowlisted prefixes only). Use to force refresh of a stale cache after fixing the underlying data. Idempotent — a follow-up call finds nothing to delete and returns `deleted=false`.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "description": "Exact Redis key to delete. Must start with one of ['cache:', 'jobs:cache:', 'kafka:consumer_lag:', 'read_model:'].",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 255,
+            "minLength": 8,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "idempotency_key"
+        ],
+        "title": "InvalidateCacheKeyInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_active_alerts",
+      "description": "List unresolved alerts scoped to the caller's tenant. Alerts come from platform sources (SLO breach, DLQ threshold, chaos runs, etc.). Prefer receiving the HMAC-signed webhook if you can — this endpoint is a poll fallback.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "severity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Filter by severity: `info`, `warning`, `critical`. Omit for all.",
+            "title": "Severity"
+          },
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "ListActiveAlertsInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_audit_events",
+      "description": "Read the immutable audit log for the caller's tenant. Every user + agent + chaos action lands here — use it to reconcile state after a restart or to check what an operator did before the current incident. Filter by `action`, `action_prefix` (e.g. `agent.`), or `principal_type` (`user` vs `service_account`).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Exact action match (e.g. `agent.tool_invoked`).",
+            "title": "Action"
+          },
+          "action_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Prefix match against the action string. Useful for whole streams — `agent.` covers all agent activity, `chaos.` covers chaos, `service_account.` covers principal lifecycle. Ignored when `action` is set.",
+            "title": "Action Prefix"
+          },
+          "principal_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Filter to `user` (human) or `service_account` (machine) actors. Omit for both.",
+            "title": "Principal Type"
+          },
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "ListAuditEventsInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_dlq_messages",
+      "description": "List jobs currently in the dead-letter state, most recent first. Includes the LLM triage row for each job when the platform has one, so the agent can build on the first-pass analysis instead of starting from raw error strings.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "job_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Filter to one job type (e.g. `csv_upload`, `report_gen`).",
+            "title": "Job Type"
+          },
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "ListDlqMessagesInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_incidents",
+      "description": "List incidents (alerts) scoped to the caller's tenant. Defaults to unresolved; pass `include_resolved=true` to see history. Superset of `list_active_alerts` — that tool is the cheap poll path when you know you want unresolved only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "include_resolved": {
+            "default": false,
+            "description": "When true, include incidents that have been resolved. Useful for reviewing history; the default matches how `list_active_alerts` behaves.",
+            "title": "Include Resolved",
+            "type": "boolean"
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Filter to `info`, `warning`, or `critical`.",
+            "title": "Severity"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Filter by source string (e.g. `slo:completion`).",
+            "title": "Source"
+          },
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "ListIncidentsInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "pause_dag",
+      "description": "Pause promotion of WAITING children in the DAG rooted at `root_job_id`. The DependencyResolver consumer checks the pause key before promoting; while set, no child promotes. Effect self-cleans on TTL (default 10 minutes). Idempotent.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "root_job_id": {
+            "description": "Root of the DAG to pause. Any WAITING child whose chain of parents reaches this root won't be promoted while the flag is set.",
+            "format": "uuid",
+            "title": "Root Job Id",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 600,
+            "description": "How long the pause is active. Default 10 minutes.",
+            "maximum": 3600,
+            "minimum": 1,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 255,
+            "minLength": 8,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "root_job_id",
+          "idempotency_key"
+        ],
+        "title": "PauseDagInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "replay_dlq_messages",
+      "description": "Replay dead-lettered jobs through the existing job-submission path — resets retry counts and re-publishes to job.submitted. Uses the same code path as the admin Replay button. Idempotent.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "job_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Restrict replay to one job type. Omit to include every dead-lettered job in the tenant.",
+            "title": "Job Type"
+          },
+          "limit": {
+            "default": 25,
+            "description": "Maximum number of jobs to replay in one call. Applied after the DB fetch.",
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 255,
+            "minLength": 8,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "idempotency_key"
+        ],
+        "title": "ReplayDlqMessagesInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "restart_consumer_group",
+      "description": "Clear the chaos kill flag on a Kafka consumer group so its supervisor will restart it. Paired with `kill_consumer`; use this to end a chaos run cleanly. Idempotent — repeat calls with the same idempotency_key are safe.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "consumer_group": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Consumer Group",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "description": "Caller-supplied token. Repeat calls with the same value + same arguments return the same result without re-executing.",
+            "maxLength": 255,
+            "minLength": 8,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "consumer_group",
+          "idempotency_key"
+        ],
+        "title": "RestartConsumerGroupInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "search_traces",
+      "description": "Scan recent jobs by status / type / recency and return the matching trace_ids so the agent can drill into each with `get_trace`. Cheap — hits the jobs table with the usual indexes.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "job_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Job Type"
+          },
+          "since_hours": {
+            "anyOf": [
+              {
+                "maximum": 168,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only include jobs whose `created_at` is within the last N hours. Omit for no time bound.",
+            "title": "Since Hours"
+          },
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "SearchTracesInput",
+        "type": "object"
+      }
+    }
+  ]
+}

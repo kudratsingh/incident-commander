@@ -16,7 +16,9 @@ agent against real HTTP tool calls instead of canned fixtures.
   Alternatively, if the thing on 8001 IS a platform you want to test
   against, skip `make demo` entirely and use `make eval-live` directly.
 - `.env` with `PLATFORM_TOKEN=sa_...` (a service-account token issued by the
-  platform under scopes `telemetry:read` + `incidents:read`).
+  platform under scopes `telemetry:read` + `incidents:read`). If you don't
+  have one yet: `make bootstrap-token` against a running platform mints one
+  and prints the two `.env` lines to copy. Idempotent.
 - Anthropic API key isn't required for `make demo` — LLM calls in eval mode
   are served from per-scenario canned responses. If you want to swap the LLM
   path to real API too, set `ANTHROPIC_API_KEY` and remove the scenario's

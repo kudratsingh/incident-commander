@@ -1,4 +1,4 @@
-.PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-reg demo demo-down baseline clean
+.PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-reg demo demo-down bootstrap-token baseline clean
 
 help:
 	@echo "Targets:"
@@ -14,6 +14,7 @@ help:
 	@echo "  eval-reg         regression eval subset"
 	@echo "  demo             compose up (platform pinned by digest) + live scenario"
 	@echo "  demo-down        stop demo compose services"
+	@echo "  bootstrap-token  mint a service-account token against a running platform"
 	@echo "  baseline         recompute and commit eval baseline"
 	@echo "  clean            remove build artifacts and caches"
 
@@ -59,6 +60,9 @@ demo:
 
 demo-down:
 	docker compose -f demo/compose.yml down -v
+
+bootstrap-token:
+	uv run python scripts/bootstrap_agent_token.py
 
 baseline: eval
 	cp evals/reports/latest.json evals/reports/baseline.json

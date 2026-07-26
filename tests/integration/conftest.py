@@ -36,7 +36,7 @@ def _docker_reachable() -> bool:
 def _postgres_container() -> Iterator[str]:
     if not _docker_reachable():
         pytest.skip("Docker daemon not reachable; skipping Postgres integration tests")
-    from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]
+    from testcontainers.postgres import PostgresContainer
 
     container = PostgresContainer("postgres:16-alpine")
     container.start()

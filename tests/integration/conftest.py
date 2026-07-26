@@ -24,7 +24,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 def _docker_reachable() -> bool:
     try:
-        import docker  # type: ignore[import-untyped]
+        import docker  # type: ignore[import-untyped, unused-ignore]
 
         docker.from_env().ping()
     except Exception:
@@ -36,7 +36,7 @@ def _docker_reachable() -> bool:
 def _postgres_container() -> Iterator[str]:
     if not _docker_reachable():
         pytest.skip("Docker daemon not reachable; skipping Postgres integration tests")
-    from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]
+    from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped, unused-ignore] # noqa: E501, I001
 
     container = PostgresContainer("postgres:16-alpine")
     container.start()

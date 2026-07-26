@@ -106,3 +106,27 @@ class TestInvestigationStep:
                     "extra_field": "boom",
                 }
             )
+
+    def test_next_action_coerced_from_json_string(self) -> None:
+        """Anthropic tool-use sometimes emits nested oneOf fields as JSON strings."""
+        step = InvestigationStep.model_validate(
+            {
+                "hypotheses": [{"name": "a", "confidence": 0.9, "reasoning": "r"}],
+                "next_action": (
+                    '{"kind": "probe", "tool_name": "get_consumer_lag", '
+                    '"arguments": {"consumer_group": "worker-dispatcher"}}'
+                ),
+            }
+        )
+        assert isinstance(step.next_action, ProbeAction)
+        assert step.next_action.tool_name == "get_consumer_lag"
+
+    def test_next_action_coerced_from_json_string_stop(self) -> None:
+        step = InvestigationStep.model_validate(
+            {
+                "hypotheses": [{"name": "a", "confidence": 0.9, "reasoning": "r"}],
+                "next_action": '{"kind": "stop", "reason": "done"}',
+            }
+        )
+        assert isinstance(step.next_action, StopAction)
+        assert step.next_action.reason == "done"

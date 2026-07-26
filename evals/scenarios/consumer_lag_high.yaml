@@ -7,9 +7,10 @@ description: >
   platform exposes today (Wave 1); more arrive with later waves.
   For Phase 0 (read-only), the agent runs one probe and escalates.
 
-tags: [read-only, phase-0, kafka, live-mcp]
+tags: [read-only, phase-0, kafka, live-mcp, live-llm]
 
 use_live_mcp: true
+use_live_llm: true
 
 alert:
   source: platform.kafka
@@ -59,5 +60,9 @@ expectation:
   name: consumer_lag_high
   expected_terminal_state: escalated
   expected_evidence_contains:
+    # `cache_key` only appears in the parsed GetConsumerLagOutput; matching
+    # on it rules out the false-green case where the planner errored and its
+    # error string happened to leak the alert's group name.
+    - cache_key
     - worker-dispatcher
   max_tool_calls: 5

@@ -35,3 +35,9 @@ class Scenario(BaseModel):
     # flag are skipped by ``make eval`` when the URL is still the offline
     # placeholder — ``make eval-live`` (or an env with a real URL) runs them.
     use_live_mcp: bool = False
+    # When True the runner ignores ``canned_llm_responses`` and builds a real
+    # ``LLMClient`` against ``settings.anthropic_api_key`` for the planner,
+    # briefing writer, and judge. Scenarios using this flag are skipped when
+    # the API key is the offline placeholder. Non-deterministic — regression
+    # gate does not apply.
+    use_live_llm: bool = False

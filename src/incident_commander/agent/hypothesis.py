@@ -8,9 +8,10 @@ forces the model to satisfy it via ``tool_choice=record_output``.
 
 from __future__ import annotations
 
+import json
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Hypothesis(BaseModel):
@@ -52,3 +53,15 @@ class InvestigationStep(BaseModel):
 
     hypotheses: tuple[Hypothesis, ...] = Field(min_length=1)
     next_action: NextAction
+
+    @field_validator("next_action", mode="before")
+    @classmethod
+    def _coerce_string_action(cls, value: Any) -> Any:
+        """Anthropic's tool-use sometimes emits nested oneOf fields as JSON strings.
+
+        Coerce to a dict before the discriminated-union validator runs so the
+        planner works uniformly across API providers and prompt-shape variants.
+        """
+        if isinstance(value, str):
+            return json.loads(value)
+        return value

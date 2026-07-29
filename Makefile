@@ -49,7 +49,8 @@ eval:
 	uv run python -m evals.runner
 
 eval-live:
-	uv run python -m evals.runner --live
+	EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live
+	@echo "Full LLM + MCP traces in evals/traces/*.jsonl"
 
 eval-reg: eval
 	uv run python -m evals.regression

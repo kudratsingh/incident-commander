@@ -52,6 +52,7 @@ class MCPClient:
         retry_base_delay: float = _DEFAULT_RETRY_BASE_DELAY,
         transport: httpx.BaseTransport | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        tracer: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._headers = {
@@ -66,6 +67,7 @@ class MCPClient:
         self._retry_base_delay = retry_base_delay
         self._sleep = sleep
         self._ids = count(1)
+        self._tracer = tracer
 
     def close(self) -> None:
         self._client.close()
@@ -82,8 +84,32 @@ class MCPClient:
         return list(tools) if isinstance(tools, list) else []
 
     def call_tool(self, name: str, arguments: Mapping[str, Any]) -> ToolResult:
-        result = self._call("tools/call", {"name": name, "arguments": dict(arguments)})
-        return ToolResult.model_validate(result)
+        started = time.monotonic()
+        args_dict = dict(arguments)
+        try:
+            result = self._call("tools/call", {"name": name, "arguments": args_dict})
+        except Exception as exc:
+            if self._tracer is not None:
+                self._tracer(
+                    {
+                        "tool_name": name,
+                        "arguments": args_dict,
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "duration_seconds": time.monotonic() - started,
+                    }
+                )
+            raise
+        tool_result = ToolResult.model_validate(result)
+        if self._tracer is not None:
+            self._tracer(
+                {
+                    "tool_name": name,
+                    "arguments": args_dict,
+                    "result": tool_result.model_dump(mode="json"),
+                    "duration_seconds": time.monotonic() - started,
+                }
+            )
+        return tool_result
 
     def _call(self, method: str, params: Mapping[str, Any]) -> dict[str, Any]:
         body = {
@@ -119,11 +145,15 @@ class MCPClient:
         raise RuntimeError("unreachable: retry loop exited without response")
 
 
-def make_client(settings: Settings) -> MCPClient:
+def make_client(
+    settings: Settings,
+    tracer: Callable[[dict[str, Any]], None] | None = None,
+) -> MCPClient:
     """Build a client from Settings — the app-code entry point."""
     return MCPClient(
         base_url=str(settings.platform_mcp_url),
         token=settings.platform_token.get_secret_value(),
+        tracer=tracer,
     )
 
 

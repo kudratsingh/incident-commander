@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from evals.graders.deterministic import GradeReport, grade
 from evals.graders.llm_judge import JudgeScore, judge_briefing
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
+from evals.tracing import JsonlTracer, tracer_for
 from incident_commander.agent.briefing import EscalationBriefing, render_briefing
 from incident_commander.agent.briefing_enrichment import enrich_briefing
 from incident_commander.agent.factory import start_run
@@ -37,6 +39,7 @@ _REPORTS_DIR = _REPO_ROOT / "evals" / "reports"
 _TRAJECTORIES_DIR = _REPO_ROOT / "evals" / "trajectories"
 _BRIEFINGS_DIR = _REPO_ROOT / "evals" / "briefings"
 _LATEST_REPORT = _REPORTS_DIR / "latest.json"
+_TRACE_DIR_ENV = "EVAL_TRACE_DIR"
 
 
 class ScenarioOutcome(BaseModel):
@@ -117,10 +120,31 @@ def run_scenario(
         settings.anthropic_api_key.get_secret_value()
     )
 
+    # Tracing (opt-in): when EVAL_TRACE_DIR is set, capture every LLM +
+    # MCP call for this scenario into a JSONL file. Only wires into the
+    # live clients — canned clients are already deterministic.
+    tracer: JsonlTracer | None = None
+    trace_dir_env = os.environ.get(_TRACE_DIR_ENV)
+    if trace_dir_env:
+        tracer = tracer_for(scenario.name, Path(trace_dir_env))
+        tracer.write(
+            {
+                "kind": "scenario_start",
+                "scenario": scenario.name,
+                "live_mcp": live_mcp_available,
+                "live_llm": live_llm_available,
+                "model": settings.agent_model,
+                "judge_model": settings.judge_model,
+            }
+        )
+
     mcp_client: MCPClientProtocol
     live_mcp_client: MCPClient | None = None
     if live_mcp_available:
-        live_mcp_client = make_client(settings)
+        live_mcp_client = make_client(
+            settings,
+            tracer=tracer.mcp_hook() if tracer else None,
+        )
         mcp_client = live_mcp_client
     else:
         mcp_client = CannedMCPClient(scenario.canned_tool_responses)
@@ -129,12 +153,21 @@ def run_scenario(
     briefing_llm: LLMClientProtocol
     judge_llm: LLMClientProtocol
     if live_llm_available:
-        # Same underlying client for all three roles — prompt + output_model
-        # at each call site is what distinguishes them.
-        shared_llm = LLMClient(api_key=settings.anthropic_api_key.get_secret_value())
-        investigation_llm = shared_llm
-        briefing_llm = shared_llm
-        judge_llm = shared_llm
+        api_key = settings.anthropic_api_key.get_secret_value()
+        # One underlying HTTP client per role so each gets its own tracer
+        # hook label — that's what makes the JSONL readable per role.
+        investigation_llm = LLMClient(
+            api_key=api_key,
+            tracer=tracer.llm_hook("investigation_planner") if tracer else None,
+        )
+        briefing_llm = LLMClient(
+            api_key=api_key,
+            tracer=tracer.llm_hook("briefing_writer") if tracer else None,
+        )
+        judge_llm = LLMClient(
+            api_key=api_key,
+            tracer=tracer.llm_hook("briefing_judge") if tracer else None,
+        )
     else:
         investigation_llm = CannedLLMClient(
             scenario.canned_llm_responses.get("investigation_planner", [])
@@ -172,6 +205,16 @@ def run_scenario(
             isinstance(judge_llm, CannedLLMClient) and judge_llm.has_remaining
         ):
             judge_score = judge_briefing(briefing, judge_llm, model=settings.judge_model)
+    except Exception as exc:
+        if tracer is not None:
+            tracer.write(
+                {
+                    "kind": "scenario_end",
+                    "scenario": scenario.name,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+        raise
     finally:
         if live_mcp_client is not None:
             live_mcp_client.close()
@@ -183,6 +226,16 @@ def run_scenario(
         report=report,
         judge_score=judge_score,
     )
+    if tracer is not None:
+        tracer.write(
+            {
+                "kind": "scenario_end",
+                "scenario": scenario.name,
+                "final_state": final.state.value,
+                "tool_calls_used": final.budget.tool_calls_used,
+                "passed": report.passed,
+            }
+        )
     return ScenarioResult(outcome=outcome, trajectory=trajectory, briefing=briefing)
 
 

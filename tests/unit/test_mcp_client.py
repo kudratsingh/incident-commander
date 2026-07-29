@@ -167,3 +167,46 @@ class TestJsonRpcIds:
             client.list_tools()
             client.list_tools()
         assert seen_ids == [1, 2, 3]
+
+
+class TestTracer:
+    def test_tracer_receives_tool_name_arguments_and_result(self) -> None:
+        captured: list[dict[str, Any]] = []
+
+        def handler(_r: httpx.Request) -> httpx.Response:
+            return _rpc_ok({"content": [{"type": "text", "text": "ok"}], "isError": False})
+
+        client = MCPClient(
+            base_url=_BASE_URL,
+            token="svc-token",
+            max_attempts=1,
+            retry_base_delay=0.0,
+            transport=httpx.MockTransport(handler),
+            sleep=lambda _s: None,
+            tracer=captured.append,
+        )
+        with client:
+            client.call_tool("get_consumer_lag", {"group": "billing"})
+        assert len(captured) == 1
+        record = captured[0]
+        assert record["tool_name"] == "get_consumer_lag"
+        assert record["arguments"] == {"group": "billing"}
+        assert record["result"]["content"] == [{"type": "text", "text": "ok"}]
+        assert record["duration_seconds"] >= 0
+
+    def test_tracer_captures_error(self) -> None:
+        captured: list[dict[str, Any]] = []
+
+        client = MCPClient(
+            base_url=_BASE_URL,
+            token="svc-token",
+            max_attempts=1,
+            retry_base_delay=0.0,
+            transport=httpx.MockTransport(lambda _r: _rpc_error(-32602, "bad args")),
+            sleep=lambda _s: None,
+            tracer=captured.append,
+        )
+        with client, pytest.raises(MCPError):
+            client.call_tool("get_consumer_lag", {})
+        assert len(captured) == 1
+        assert captured[0]["error"].startswith("MCPError")

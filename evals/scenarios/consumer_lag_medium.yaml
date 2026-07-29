@@ -5,7 +5,10 @@ description: >
   Medium-severity alert on consumer lag. Not paging-grade but still actionable —
   agent probes and escalates the finding.
 
-tags: [read-only, phase-0, kafka]
+tags: [read-only, phase-0, kafka, live-mcp, live-llm]
+
+use_live_mcp: true
+use_live_llm: true
 
 alert:
   source: platform.kafka

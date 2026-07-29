@@ -5,7 +5,9 @@ description: >
   Malformed alert missing the severity field. Should default to "unknown" and
   be filtered at TRIAGE — treats missing signals defensively.
 
-tags: [read-only, phase-0, noise, defensive]
+tags: [read-only, phase-0, noise, defensive, live-llm]
+
+use_live_llm: true
 
 alert:
   source: platform.unknown

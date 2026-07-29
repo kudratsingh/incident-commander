@@ -5,7 +5,10 @@ description: >
   Analytics consumer at critical severity — worst-tier paging alert. Verifies
   planner treats critical as a strong prior.
 
-tags: [read-only, phase-0, kafka, group-variation]
+tags: [read-only, phase-0, kafka, group-variation, live-mcp, live-llm]
+
+use_live_mcp: true
+use_live_llm: true
 
 alert:
   source: platform.kafka

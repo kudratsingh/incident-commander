@@ -85,14 +85,6 @@ class ScenarioResult:
     briefing: EscalationBriefing
 
 
-class LiveMCPUnavailable(RuntimeError):
-    """Scenario needs live MCP but PLATFORM_MCP_URL is still the eval placeholder."""
-
-
-class LiveLLMUnavailable(RuntimeError):
-    """Scenario needs live LLM but ANTHROPIC_API_KEY is still the eval placeholder."""
-
-
 def _is_offline_placeholder(url: str) -> bool:
     return _EVAL_PLACEHOLDER_HOST in url
 
@@ -115,14 +107,19 @@ def run_scenario(
     tick = clock or (lambda: datetime.now(UTC))
     now = tick()
 
+    # use_live_* means "prefer live if env is real, else fall back to canned."
+    # Nothing skips just because env is placeholder — canned data is the
+    # deterministic offline fallback for `make eval` / CI.
+    live_mcp_available = scenario.use_live_mcp and not _is_offline_placeholder(
+        str(settings.platform_mcp_url)
+    )
+    live_llm_available = scenario.use_live_llm and not _is_offline_api_key(
+        settings.anthropic_api_key.get_secret_value()
+    )
+
     mcp_client: MCPClientProtocol
     live_mcp_client: MCPClient | None = None
-    if scenario.use_live_mcp:
-        if _is_offline_placeholder(str(settings.platform_mcp_url)):
-            raise LiveMCPUnavailable(
-                f"scenario {scenario.name} requires live MCP but "
-                f"PLATFORM_MCP_URL is the offline placeholder"
-            )
+    if live_mcp_available:
         live_mcp_client = make_client(settings)
         mcp_client = live_mcp_client
     else:
@@ -131,14 +128,9 @@ def run_scenario(
     investigation_llm: LLMClientProtocol
     briefing_llm: LLMClientProtocol
     judge_llm: LLMClientProtocol
-    if scenario.use_live_llm:
-        if _is_offline_api_key(settings.anthropic_api_key.get_secret_value()):
-            raise LiveLLMUnavailable(
-                f"scenario {scenario.name} requires live LLM but "
-                f"ANTHROPIC_API_KEY is the offline placeholder"
-            )
-        # Same underlying client works for all three roles — the prompt +
-        # output_model at each call site is what distinguishes them.
+    if live_llm_available:
+        # Same underlying client for all three roles — prompt + output_model
+        # at each call site is what distinguishes them.
         shared_llm = LLMClient(api_key=settings.anthropic_api_key.get_secret_value())
         investigation_llm = shared_llm
         briefing_llm = shared_llm
@@ -199,15 +191,9 @@ def run_all(
     settings: Settings,
     clock: Callable[[], datetime] | None = None,
 ) -> tuple[RunReport, tuple[Trajectory, ...], tuple[EscalationBriefing, ...]]:
-    offline_mcp = _is_offline_placeholder(str(settings.platform_mcp_url))
-    offline_llm = _is_offline_api_key(settings.anthropic_api_key.get_secret_value())
-    results: list[ScenarioResult] = []
-    for scenario in scenarios:
-        if scenario.use_live_mcp and offline_mcp:
-            continue
-        if scenario.use_live_llm and offline_llm:
-            continue
-        results.append(run_scenario(scenario, settings, clock))
+    # run_scenario falls back to canned when env is placeholder; nothing
+    # is skipped here.
+    results = [run_scenario(scenario, settings, clock) for scenario in scenarios]
     outcomes = tuple(r.outcome for r in results)
     trajectories = tuple(r.trajectory for r in results)
     briefings = tuple(r.briefing for r in results)
@@ -280,11 +266,11 @@ def _eval_defaults() -> Settings:
     )
 
 
-def _print_summary(report: RunReport, skipped_live: int = 0) -> None:
+def _print_summary(report: RunReport, degraded_to_canned: int = 0) -> None:
     print(f"scenarios: {report.total}, passed: {report.passed}, failed: {report.failed}")
-    if skipped_live > 0:
+    if degraded_to_canned > 0:
         print(
-            f"skipped: {skipped_live} live scenarios "
+            f"degraded: {degraded_to_canned} scenarios fell back to canned "
             "(PLATFORM_MCP_URL or ANTHROPIC_API_KEY is offline placeholder)"
         )
     if report.judged_count > 0 and report.judge_mean_overall is not None:
@@ -317,17 +303,15 @@ def main() -> int:
     scenarios = load_scenarios(_SCENARIOS_DIR)
     offline_mcp = _is_offline_placeholder(str(settings.platform_mcp_url))
     offline_llm = _is_offline_api_key(settings.anthropic_api_key.get_secret_value())
-    skipped_live = sum(
+    degraded_to_canned = sum(
         1 for s in scenarios if (s.use_live_mcp and offline_mcp) or (s.use_live_llm and offline_llm)
     )
-    # run_all skips live scenarios internally when offline.
     report, trajectories, briefings = run_all(scenarios, settings)
     write_report(report)
     write_trajectories(trajectories)
-    # Write briefings only for scenarios that actually ran.
     ran_names = [o.scenario for o in report.outcomes]
     write_briefings(briefings, ran_names)
-    _print_summary(report, skipped_live=skipped_live)
+    _print_summary(report, degraded_to_canned=degraded_to_canned)
     return 0 if report.failed == 0 else 1
 
 

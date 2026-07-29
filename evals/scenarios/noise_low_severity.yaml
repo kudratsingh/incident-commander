@@ -5,7 +5,9 @@ description: >
   Low-severity signal that shouldn't consume the tool budget. Verifies TRIAGE
   filters noise before INVESTIGATING gets a chance to run.
 
-tags: [read-only, phase-0, noise]
+tags: [read-only, phase-0, noise, live-llm]
+
+use_live_llm: true
 
 alert:
   source: platform.canary

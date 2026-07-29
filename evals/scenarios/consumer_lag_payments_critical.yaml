@@ -5,7 +5,10 @@ description: >
   Payments consumer lag crosses paging threshold. Verifies the agent
   parametrizes the probe by the alert's group field, not a hardcoded value.
 
-tags: [read-only, phase-0, kafka, group-variation]
+tags: [read-only, phase-0, kafka, group-variation, live-mcp, live-llm]
+
+use_live_mcp: true
+use_live_llm: true
 
 alert:
   source: platform.kafka

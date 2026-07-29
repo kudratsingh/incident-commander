@@ -1,0 +1,67 @@
+# Cache miss spike alert — planner probes get_redis_health.
+
+name: redis_saturation
+description: >
+  Cache miss spike alert. Planner probes get_redis_health to see whether
+  Redis is degraded or memory-pressured before escalating.
+
+tags: [read-only, phase-3, cache, live-mcp, live-llm]
+
+use_live_mcp: true
+use_live_llm: true
+
+alert:
+  source: platform.cache
+  severity: high
+  fingerprint: cache_miss_spike
+  service: redis
+
+canned_tool_responses:
+  get_redis_health:
+    content:
+      - type: text
+        text: '{"ok":true,"ping_latency_ms":1.2,"connected_clients":250,"used_memory_bytes":1073741824,"used_memory_human":"1.00G","keyspace_hits":10000,"keyspace_misses":50000}'
+    is_error: false
+
+canned_llm_responses:
+  investigation_planner:
+    - hypotheses:
+        - name: cache_thrashing
+          confidence: 0.55
+          reasoning: >
+            Cache miss spike; probe redis health to check hit/miss ratio and
+            memory pressure.
+      next_action:
+        kind: probe
+        tool_name: get_redis_health
+        arguments: {}
+    - hypotheses:
+        - name: cache_thrashing
+          confidence: 0.85
+          reasoning: >
+            Hit/miss ratio is 10k/50k (16%) — cache is thrashing. Memory usage
+            is 1GB with 250 clients; ping is healthy.
+      next_action:
+        kind: stop
+        reason: cache thrash confirmed; human should decide on eviction policy
+  briefing_writer:
+    - findings: >
+        Redis is up (ping 1.2ms) but the hit rate collapsed to 16% (10k hits /
+        50k misses). Working set likely exceeds cache capacity.
+      recommendation: >
+        Review the recent workload for a hot key set that no longer fits;
+        consider increasing memory or adjusting eviction policy.
+  briefing_judge:
+    - groundedness: 0.9
+      actionability: 0.85
+      reasoning: >
+        Findings ground in the hit/miss numbers; recommendation names two
+        concrete mitigations.
+
+expectation:
+  name: redis_saturation
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    # Structural key from RedisHealthOutput — present live or canned.
+    - keyspace
+  max_tool_calls: 5

@@ -6,7 +6,10 @@ description: >
   something reasonable using the alert-source context; here we canned an
   "unknown" fallback response.
 
-tags: [read-only, phase-0, defensive]
+tags: [read-only, phase-0, defensive, live-mcp, live-llm]
+
+use_live_mcp: true
+use_live_llm: true
 
 alert:
   source: platform.kafka

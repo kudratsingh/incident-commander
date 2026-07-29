@@ -18,6 +18,15 @@ alert:
   fingerprint: consumer_lag_high
   consumer_group: worker-dispatcher
 
+# Canned fallback for offline `make eval` — mirrors what the live platform
+# returns so the offline determinism check stays green even for live scenarios.
+canned_tool_responses:
+  get_consumer_lag:
+    content:
+      - type: text
+        text: '{"consumer_group":"worker-dispatcher","lag":1200,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+    is_error: false
+
 canned_llm_responses:
   investigation_planner:
     - hypotheses:

@@ -1,0 +1,65 @@
+# Database latency alert — planner probes get_postgres_health.
+
+name: postgres_slow
+description: >
+  API latency alert points at the database. Planner probes get_postgres_health
+  to check ping + connection count before escalating.
+
+tags: [read-only, phase-3, database, live-mcp, live-llm]
+
+use_live_mcp: true
+use_live_llm: true
+
+alert:
+  source: platform.db
+  severity: high
+  fingerprint: db_latency_high
+  service: postgres
+
+canned_tool_responses:
+  get_postgres_health:
+    content:
+      - type: text
+        text: '{"ok":true,"ping_latency_ms":420.5,"active_connections":95,"dialect":"postgresql"}'
+    is_error: false
+
+canned_llm_responses:
+  investigation_planner:
+    - hypotheses:
+        - name: db_saturation
+          confidence: 0.55
+          reasoning: >
+            DB latency alert; probe postgres health for ping + connection stats.
+      next_action:
+        kind: probe
+        tool_name: get_postgres_health
+        arguments: {}
+    - hypotheses:
+        - name: db_saturation
+          confidence: 0.8
+          reasoning: >
+            Ping is 420ms (slow) with 95 active connections — approaching pool
+            saturation. DB is degraded but not down.
+      next_action:
+        kind: stop
+        reason: DB degraded; escalate to human for scaling decision
+  briefing_writer:
+    - findings: >
+        Postgres ping latency is 420ms (usual baseline < 20ms) with 95 active
+        connections — the DB is degraded but still responsive.
+      recommendation: >
+        Check for long-running queries and consider raising the connection
+        pool limit or scaling the DB tier.
+  briefing_judge:
+    - groundedness: 0.9
+      actionability: 0.85
+      reasoning: >
+        Findings quote the ping + connection numbers; recommendation names
+        two concrete diagnostic and mitigation steps.
+
+expectation:
+  name: postgres_slow
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - postgres
+  max_tool_calls: 5

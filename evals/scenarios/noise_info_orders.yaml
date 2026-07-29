@@ -5,7 +5,9 @@ description: >
   Routine info-level ping tagged to orders-consumer. Should be filtered at
   TRIAGE without probing.
 
-tags: [read-only, phase-0, noise, group-variation]
+tags: [read-only, phase-0, noise, group-variation, live-llm]
+
+use_live_llm: true
 
 alert:
   source: platform.healthcheck

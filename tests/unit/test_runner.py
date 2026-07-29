@@ -10,7 +10,6 @@ from pydantic import SecretStr
 from evals.fakes import CannedMCPClient
 from evals.graders.deterministic import ScenarioExpectation
 from evals.runner import (
-    LiveMCPUnavailable,
     RunReport,
     Trajectory,
     run_all,
@@ -221,54 +220,38 @@ class TestRunAll:
         from evals.scenarios.loader import load_scenarios
 
         scenarios = load_scenarios(Path(__file__).resolve().parents[2] / "evals" / "scenarios")
-        # Live-mcp scenarios are skipped by run_all when PLATFORM_MCP_URL is
-        # the offline placeholder — the offline path must still stay green.
-        offline_eligible = [s for s in scenarios if not s.use_live_mcp]
+        # Every shipped scenario has canned fallback data, so all of them
+        # run — and pass — in offline mode.
         report, _, _ = run_all(scenarios, _test_settings())
         assert report.failed == 0
-        assert report.passed == len(offline_eligible)
         assert report.total >= 10  # taxonomy expansion floor
 
 
 class TestLiveMcpDispatch:
-    def _live_scenario(self) -> Scenario:
-        return Scenario(
-            name="live_probe",
-            alert=AlertPayload(source="platform.kafka", severity="high", group="billing"),
-            expectation=ScenarioExpectation(
-                name="live_probe",
-                expected_terminal_state=IncidentState.ESCALATED,
-            ),
-            use_live_mcp=True,
-        )
+    def _live_scenario_with_canned_fallback(self) -> Scenario:
+        # A live-mcp scenario that also ships canned data — this is the
+        # required shape so offline `make eval` stays deterministic.
+        base = _passing_scenario()
+        return base.model_copy(update={"name": "live_probe", "use_live_mcp": True})
 
-    def test_run_scenario_raises_when_offline_placeholder(self) -> None:
-        import pytest
+    def test_run_scenario_falls_back_to_canned_when_offline_placeholder(self) -> None:
+        # Placeholder MCP URL => canned client is used, scenario still runs.
+        result = run_scenario(self._live_scenario_with_canned_fallback(), _test_settings())
+        assert result.outcome.final_state is IncidentState.ESCALATED
+        assert result.outcome.report.passed is True
 
-        scenario = self._live_scenario()
-        with pytest.raises(LiveMCPUnavailable, match="live MCP"):
-            run_scenario(scenario, _test_settings())
-
-    def test_run_all_skips_live_when_offline_placeholder(self) -> None:
-        live = self._live_scenario()
+    def test_run_all_runs_every_scenario_even_when_offline(self) -> None:
+        live = self._live_scenario_with_canned_fallback()
         canned = _passing_scenario()
         report, _, _ = run_all([live, canned], _test_settings())
-        # Only the canned scenario ran.
-        assert report.total == 1
-        assert report.outcomes[0].scenario == "consumer_lag_pass"
+        assert report.total == 2
+        assert {o.scenario for o in report.outcomes} == {"live_probe", "consumer_lag_pass"}
 
-    def test_run_all_with_real_url_would_attempt_live(self) -> None:
-        # We can't hit a real platform in unit tests, but flipping the URL off
-        # the placeholder means run_all no longer skips — it hands the scenario
-        # to run_scenario, which then builds a real client. We assert only up
-        # to the dispatch point via an isolated run_scenario call using a fake.
-        # The URL check is what matters here; the actual HTTP interaction is
-        # covered by end-to-end runs (`make eval-live` / `make demo`).
-        settings = _test_settings(platform_mcp_url="http://real.host:8001/mcp")
-        canned = _passing_scenario()
-        # Canned scenarios must still run cleanly even when the URL isn't a
+    def test_canned_scenario_ignores_real_platform_url(self) -> None:
+        # A canned scenario must still run cleanly even when the URL isn't a
         # placeholder — the URL only matters for use_live_mcp scenarios.
-        report, _, _ = run_all([canned], settings)
+        settings = _test_settings(platform_mcp_url="http://real.host:8001/mcp")
+        report, _, _ = run_all([_passing_scenario()], settings)
         assert report.total == 1
         assert report.passed == 1
 

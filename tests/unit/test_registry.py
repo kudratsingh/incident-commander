@@ -25,8 +25,6 @@ from incident_commander.tools.registry import (
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SNAPSHOT_PATH = _REPO_ROOT / "contracts" / "platform-tools.snapshot.json"
 
-# Tier-1 write actions are on the platform surface but not registered here.
-# They land alongside the approvals flow in Phase 6.
 _TIER1_ACTIONS = frozenset(
     {
         "invalidate_cache_key",
@@ -44,20 +42,22 @@ def snapshot() -> dict[str, Any]:
 
 
 class TestCoverage:
-    def test_registry_covers_every_read_tool_in_snapshot(self, snapshot: dict[str, Any]) -> None:
+    def test_registry_covers_every_snapshot_tool(self, snapshot: dict[str, Any]) -> None:
         snapshot_names = {t["name"] for t in snapshot["tools"]}
-        read_tool_names = snapshot_names - _TIER1_ACTIONS
-        assert set(TOOL_REGISTRY) == read_tool_names, (
+        # kill_consumer is a chaos-only tool exposed by the platform but never
+        # invoked by the agent — that's chaos-injection, not remediation.
+        expected = snapshot_names - {"kill_consumer"}
+        assert set(TOOL_REGISTRY) == expected, (
             f"Registry drift vs snapshot. "
-            f"Missing: {read_tool_names - set(TOOL_REGISTRY)}. "
-            f"Extra: {set(TOOL_REGISTRY) - read_tool_names}."
+            f"Missing: {expected - set(TOOL_REGISTRY)}. "
+            f"Extra: {set(TOOL_REGISTRY) - expected}."
         )
 
-    def test_registry_omits_tier1_actions(self) -> None:
+    def test_all_tier1_actions_are_registered(self) -> None:
         for action in _TIER1_ACTIONS:
-            assert action not in TOOL_REGISTRY, (
-                f"{action} is a Tier-1 write action; Phase 6 registers these "
-                "alongside the approvals flow."
+            assert action in TOOL_REGISTRY, (
+                f"{action} is a Tier-1 write action and must be registered "
+                "for the remediation planner (Phase 6)."
             )
 
 

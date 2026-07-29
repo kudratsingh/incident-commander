@@ -1,6 +1,6 @@
 # Live demo: minimal platform footprint sufficient for read-only MCP.
 #
-# Pinned to the incident-platform v0.1.0 release by digest so the agent's
+# Pinned to the incident-platform v0.2.1 release by digest so the agent's
 # contract expectations don't shift under us. Bump the digest whenever the
 # platform ships a new release and rerun `make eval-live` to catch drift.
 #
@@ -41,11 +41,11 @@ services:
       retries: 5
 
   platform:
-    # incident-platform v0.1.0. Do not switch to `:latest` — the whole point
+    # incident-platform v0.2.1. Do not switch to `:latest` — the whole point
     # of pinning by digest is that a platform-side prompt or schema change
     # can't shift agent behavior without an explicit bump here.
-    image: ghcr.io/kudratsingh/incident-platform@sha256:a1940afa9072b9b7eb0bd56d44a3ffe11fc6aea39d39e4921da705cf6f63f4de
-    # v0.1.0 is amd64-only. On Apple Silicon this runs under Rosetta (slower
+    image: ghcr.io/kudratsingh/incident-platform@sha256:ead9c78f2d1d219e82b031bd08208f3a6fafb58901f74f86c6f5127c3e9e1c0e
+    # v0.2.1 is amd64-only. On Apple Silicon this runs under Rosetta (slower
     # cold start, correct output). Drop this line when the platform ships a
     # multi-arch build (docker buildx --platform linux/amd64,linux/arm64).
     platform: linux/amd64
@@ -58,6 +58,11 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
       REDIS_URL: redis://redis:6379/0
       ENVIRONMENT: development
+      # v0.2.1+: auto-seed the eval fixture pack (consumer groups, DLQ jobs,
+      # incidents, DAG jobs, traces, deploys) on every boot. Idempotent —
+      # existing rows are left alone. See /app/eval-fixtures-pins.json in
+      # the container for the pinned UUIDs the agent scenarios reference.
+      SEED_EVAL_FIXTURES: "true"
     depends_on:
       postgres:
         condition: service_healthy

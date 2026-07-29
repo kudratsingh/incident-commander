@@ -178,6 +178,55 @@ class TestErrorPaths:
         assert any("tool error" in e.result_summary for e in escalations)
         assert result.budget.tool_calls_used == 0
 
+    def test_uuid_probe_arguments_are_json_stringified(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """UUID fields must serialize to strings so httpx.json can encode them.
+
+        Regression: an earlier `.model_dump()` (missing `mode="json"`) left
+        UUID objects in the arguments dict — the live saga_stuck scenario
+        crashed the entire eval batch on `get_dag_state({"job_id": UUID(...)})`.
+        """
+        captured: dict[str, Any] = {}
+
+        def handler(name: str, arguments: Mapping[str, Any]) -> ToolResult:
+            captured["args"] = dict(arguments)
+            return ToolResult(
+                content=[
+                    {
+                        "type": "text",
+                        "text": (
+                            '{"seed_id":"33333333-3333-3333-3333-333333333333",'
+                            '"nodes":[],"edges":[]}'
+                        ),
+                    }
+                ]
+            )
+
+        mcp = _FakeMCPClient(handler)
+        llm = CannedLLMClient(
+            [
+                {
+                    "hypotheses": [{"name": "x", "confidence": 0.6, "reasoning": "r"}],
+                    "next_action": {
+                        "kind": "probe",
+                        "tool_name": "get_dag_state",
+                        "arguments": {"job_id": "33333333-3333-3333-3333-333333333333"},
+                    },
+                },
+                {
+                    "hypotheses": [{"name": "x", "confidence": 0.9, "reasoning": "r"}],
+                    "next_action": {"kind": "stop", "reason": "done"},
+                },
+            ]
+        )
+        transition = make_llm_investigate(mcp, llm, model="m")
+        transition(_investigating(run_state), now)
+        # The arguments passed to the MCP client must be JSON-encodable —
+        # a UUID object would fail httpx.json under the hood.
+        assert isinstance(captured["args"]["job_id"], str)
+        json.dumps(captured["args"])  # would raise TypeError if not encodable
+
     def test_output_schema_mismatch_escalates(self, run_state: RunState, now: datetime) -> None:
         mcp = _FakeMCPClient(
             lambda _n, _a: ToolResult(

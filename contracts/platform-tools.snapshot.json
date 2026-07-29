@@ -2,14 +2,13 @@
   "tools": [
     {
       "name": "get_consumer_lag",
-      "description": "Read the last-emitted Kafka consumer lag for one of the platform's consumer groups. Values come from the metrics loop's Redis cache — no live Kafka query. Returns null when the cache is empty.",
+      "description": "Read the last-emitted Kafka consumer lag for one of the platform's consumer groups. Values come from a Redis cache — no live Kafka query. Returns null when the cache is empty. Advertised groups include worker-dispatcher (real platform group) plus 7 eval-seed groups (billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer).",
       "inputSchema": {
         "additionalProperties": false,
-        "description": "No arguments today. The `consumer_group` field is a forward hook\n— once we expose more groups than `worker-dispatcher` (Wave 2), the\nagent will pass a specific group name. Defaulting to\n`worker-dispatcher` preserves the read shape until then.",
         "properties": {
           "consumer_group": {
             "default": "worker-dispatcher",
-            "description": "Kafka consumer group to inspect. Only 'worker-dispatcher' is exposed today.",
+            "description": "Kafka consumer group to inspect. Seeded groups: worker-dispatcher, billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer. Any other name is accepted and returns lag: null when the platform has no cached value for it.",
             "title": "Consumer Group",
             "type": "string"
           }
@@ -40,11 +39,33 @@
     },
     {
       "name": "get_deploy_history",
-      "description": "Return what version + revision is running right now (a single 'current' entry). Deploy history over time is a planned follow-up that needs a `deploy_markers` table. Today the agent gets the source of truth for what's live.",
+      "description": "Return recent deploys, newest first. Prefers the `deploy_markers` table; falls back to a single-entry env snapshot when unseeded. Useful for correlating incidents with a recent deploy — the seed script annotates one row with a `notes` string for exactly this hypothesis-testing use case.",
       "inputSchema": {
         "additionalProperties": false,
-        "properties": {},
-        "title": "_EmptyIn",
+        "properties": {
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Filter to one environment (e.g. `prod`, `staging`). Omit for cross-env history.",
+            "title": "Environment"
+          },
+          "limit": {
+            "default": 20,
+            "description": "Maximum number of deploy markers to return.",
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "GetDeployHistoryInput",
         "type": "object"
       }
     },

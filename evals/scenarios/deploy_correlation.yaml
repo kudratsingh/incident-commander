@@ -20,7 +20,7 @@ canned_tool_responses:
   get_deploy_history:
     content:
       - type: text
-        text: '{"total":3,"entries":[{"version":"v1.42.0","started_at":"2026-07-28T10:00:00Z","env":"prod","notes":"correlated with billing failures"},{"version":"v1.41.9","started_at":"2026-07-27T14:00:00Z","env":"prod","notes":""},{"version":"v1.41.8","started_at":"2026-07-26T09:00:00Z","env":"prod","notes":""}]}'
+        text: '{"total":3,"source":"deploy_markers","entries":[{"version":"v1.42.0","deployed_at":"2026-07-28T10:00:00Z","environment":"prod","notes":"correlated with billing failures"},{"version":"v1.41.9","deployed_at":"2026-07-27T14:00:00Z","environment":"prod","notes":null},{"version":"v1.41.8","deployed_at":"2026-07-26T09:00:00Z","environment":"prod","notes":null}]}'
     is_error: false
 
 canned_llm_responses:

@@ -205,6 +205,16 @@ def run_scenario(
             isinstance(judge_llm, CannedLLMClient) and judge_llm.has_remaining
         ):
             judge_score = judge_briefing(briefing, judge_llm, model=settings.judge_model)
+    except Exception as exc:
+        if tracer is not None:
+            tracer.write(
+                {
+                    "kind": "scenario_end",
+                    "scenario": scenario.name,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+        raise
     finally:
         if live_mcp_client is not None:
             live_mcp_client.close()

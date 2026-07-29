@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-29T00:27:51.699805Z",
+  "generated_at": "2026-07-29T03:41:15.643600Z",
   "total": 28,
   "passed": 28,
   "failed": 0,
@@ -85,7 +85,7 @@
           {
             "dimension": "evidence",
             "passed": true,
-            "detail": "all 2 expected signals found"
+            "detail": "all 1 expected signals found"
           },
           {
             "dimension": "budget",
@@ -178,7 +178,7 @@
           {
             "dimension": "evidence",
             "passed": true,
-            "detail": "all 2 expected signals found"
+            "detail": "all 1 expected signals found"
           },
           {
             "dimension": "budget",
@@ -400,7 +400,7 @@
           {
             "dimension": "budget",
             "passed": true,
-            "detail": "used 1 tool calls, cap 5"
+            "detail": "used 1 tool calls, cap 6"
           }
         ]
       },

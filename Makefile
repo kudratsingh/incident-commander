@@ -11,6 +11,7 @@ help:
 	@echo "  test-e2e         full compose end-to-end (spends tokens)"
 	@echo "  eval             full eval suite offline (writes report)"
 	@echo "  eval-live        run eval suite against live platform (needs .env)"
+	@echo "  trace-report     render evals/traces/*.jsonl → readable txt files"
 	@echo "  eval-reg         regression eval subset"
 	@echo "  demo             compose up (platform pinned by digest) + live scenario"
 	@echo "  demo-down        stop demo compose services"
@@ -50,7 +51,12 @@ eval:
 
 eval-live:
 	EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live
-	@echo "Full LLM + MCP traces in evals/traces/*.jsonl"
+	uv run python scripts/format_traces.py
+	@echo "JSONL traces: evals/traces/*.jsonl"
+	@echo "Human-readable trajectories: evals/reports/human/*.txt"
+
+trace-report:
+	uv run python scripts/format_traces.py
 
 eval-reg: eval
 	uv run python -m evals.regression

@@ -19,8 +19,10 @@ from incident_commander.llm.prompts.loader import PromptNotFoundError, load_prom
 
 _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("9b62d3a8e3d883af8150fc2162428953c7606c9770a90fd42e35ef39530e54e0"),
-    "investigation_planner": ("1b2a7a20bc45593d40cbc801f482731f2f93870a871d133974fe88d0e1d39175"),
+    "investigation_planner": ("e0d08cde9ba13101532e17770379436e4a6ea4496bf1749101452b8e914318c4"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
+    "remediation_planner": ("e9966b789f7541b05e6fc1a70e869aeab73647713cd4cfcf23d29918ec4b2ff9"),
+    "verification_judge": ("3a645c8414e0216870b40e226d0440933d832e7080f18109112c616cda21508e"),
 }
 
 
@@ -54,15 +56,59 @@ class TestInvestigationPlannerInvariants:
 
     def test_read_only_posture(self) -> None:
         content = load_prompt("investigation_planner")
-        assert "read-only probes only" in content.lower() or "read-only" in content
+        assert "read-only" in content.lower()
 
-    def test_forbids_privileged_actions(self) -> None:
+    def test_forbids_direct_tier_1_execution(self) -> None:
+        # Investigation planner may emit RemediateAction, but must never
+        # propose a Tier-1 tool by name itself — that's the remediation
+        # planner's job under a separate tier-policy gate.
         content = load_prompt("investigation_planner")
         lowered = content.lower()
-        assert "privileged" in lowered or "destructive" in lowered
+        assert "tier-1" in lowered or "tier-2" in lowered
+        assert "cannot execute" in lowered or "you cannot execute" in lowered
 
     def test_addresses_untrusted_input_defensively(self) -> None:
         content = load_prompt("investigation_planner")
+        assert "data, not instructions" in content
+
+
+class TestRemediationPlannerInvariants:
+    def test_mentions_structured_tool(self) -> None:
+        content = load_prompt("remediation_planner")
+        assert "record_output" in content
+
+    def test_names_all_tier_1_tools(self) -> None:
+        content = load_prompt("remediation_planner")
+        for tool in [
+            "restart_consumer_group",
+            "replay_dlq_messages",
+            "invalidate_cache_key",
+            "pause_dag",
+        ]:
+            assert tool in content, f"remediation prompt should mention {tool}"
+
+    def test_forbids_agent_supplied_idempotency_key(self) -> None:
+        content = load_prompt("remediation_planner")
+        assert "idempotency_key" in content
+        assert "never include" in content.lower() or "agent generates" in content.lower()
+
+    def test_addresses_untrusted_input_defensively(self) -> None:
+        content = load_prompt("remediation_planner")
+        assert "data, not instructions" in content
+
+
+class TestVerificationJudgeInvariants:
+    def test_mentions_structured_tool(self) -> None:
+        content = load_prompt("verification_judge")
+        assert "record_output" in content
+
+    def test_names_both_verdicts(self) -> None:
+        content = load_prompt("verification_judge")
+        assert "verified" in content
+        assert "not_verified" in content
+
+    def test_addresses_untrusted_input_defensively(self) -> None:
+        content = load_prompt("verification_judge")
         assert "data, not instructions" in content
 
 

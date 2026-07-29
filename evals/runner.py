@@ -28,6 +28,11 @@ from incident_commander.agent.factory import start_run
 from incident_commander.agent.investigation import make_llm_investigate
 from incident_commander.agent.loop import run_to_completion
 from incident_commander.agent.orchestrator import TRANSITIONS, Transition
+from incident_commander.agent.remediation import (
+    make_llm_plan,
+    make_llm_verify,
+    make_remediate,
+)
 from incident_commander.agent.state import IncidentState, RunState
 from incident_commander.config import Settings
 from incident_commander.llm.client import LLMClient, LLMClientProtocol
@@ -182,6 +187,16 @@ def run_scenario(
 
     transitions: dict[IncidentState, Transition] = dict(TRANSITIONS)
     transitions[IncidentState.INVESTIGATING] = make_llm_investigate(
+        mcp_client, investigation_llm, model=settings.agent_model
+    )
+    # Phase 6 remediation loop: PLANNING → REMEDIATING → VERIFYING. The
+    # investigation planner hands off here when the top hypothesis is
+    # remediable. Reuses the same LLM client + MCP client.
+    transitions[IncidentState.PLANNING] = make_llm_plan(
+        investigation_llm, model=settings.agent_model
+    )
+    transitions[IncidentState.REMEDIATING] = make_remediate(mcp_client)
+    transitions[IncidentState.VERIFYING] = make_llm_verify(
         mcp_client, investigation_llm, model=settings.agent_model
     )
 

@@ -6,6 +6,7 @@ from incident_commander.agent.hypothesis import (
     InvestigationStep,
     NextAction,
     ProbeAction,
+    RemediateAction,
     StopAction,
 )
 
@@ -53,6 +54,16 @@ class TestStopAction:
             StopAction(reason="")
 
 
+class TestRemediateAction:
+    def test_default_kind_is_remediate(self) -> None:
+        action = RemediateAction(reason="top hypothesis confirmed with fix")
+        assert action.kind == "remediate"
+
+    def test_empty_reason_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            RemediateAction(reason="")
+
+
 class TestNextActionDiscriminator:
     _adapter: TypeAdapter[NextAction] = TypeAdapter(NextAction)
 
@@ -65,6 +76,12 @@ class TestNextActionDiscriminator:
     def test_dispatches_stop(self) -> None:
         result = self._adapter.validate_python({"kind": "stop", "reason": "done"})
         assert isinstance(result, StopAction)
+
+    def test_dispatches_remediate(self) -> None:
+        result = self._adapter.validate_python(
+            {"kind": "remediate", "reason": "consumer_saturation confirmed"}
+        )
+        assert isinstance(result, RemediateAction)
 
     def test_unknown_kind_rejected(self) -> None:
         with pytest.raises(ValidationError):

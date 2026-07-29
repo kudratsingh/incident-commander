@@ -1,0 +1,65 @@
+# DLQ growth alert — planner uses list_dlq_messages to see what's stuck.
+
+name: dlq_backlog
+description: >
+  Dead-letter queue depth crossed the warning threshold. The planner probes
+  list_dlq_messages to see what's stuck before escalating with the summary.
+
+tags: [read-only, phase-3, dlq, live-mcp, live-llm]
+
+use_live_mcp: true
+use_live_llm: true
+
+alert:
+  source: platform.dlq
+  severity: high
+  fingerprint: dlq_depth_warning
+  queue: dlq
+
+canned_tool_responses:
+  list_dlq_messages:
+    content:
+      - type: text
+        text: '{"total":3,"items":[{"id":"job-1","type":"send_email","error_message":"connection refused","retry_count":3,"created_at":"2026-07-28T10:00:00Z","triage":{"summary":"downstream mailer offline","is_retryable":true,"confidence":0.8}}]}'
+    is_error: false
+
+canned_llm_responses:
+  investigation_planner:
+    - hypotheses:
+        - name: dependency_offline
+          confidence: 0.5
+          reasoning: >
+            DLQ depth crossed threshold; probe the queue to see what's stuck.
+      next_action:
+        kind: probe
+        tool_name: list_dlq_messages
+        arguments: {}
+    - hypotheses:
+        - name: dependency_offline
+          confidence: 0.8
+          reasoning: >
+            DLQ contains retry-exhausted email jobs failing with connection refused.
+      next_action:
+        kind: stop
+        reason: root-cause candidate identified; hand off for retry/repair
+  briefing_writer:
+    - findings: >
+        The DLQ holds 3 retry-exhausted send_email jobs failing with
+        "connection refused". Triage suggests the downstream mailer is offline.
+      recommendation: >
+        Verify the mailer service is up; once healthy, replay the DLQ jobs
+        via the platform's replay action.
+  briefing_judge:
+    - groundedness: 0.85
+      actionability: 0.8
+      reasoning: >
+        Findings quote the DLQ triage summary; recommendation names concrete
+        service to verify and the replay action.
+
+expectation:
+  name: dlq_backlog
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    # Structural keys from ListDlqMessagesOutput — present live or canned.
+    - items
+  max_tool_calls: 5

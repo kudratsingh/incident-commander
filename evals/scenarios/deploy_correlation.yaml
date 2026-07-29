@@ -1,0 +1,65 @@
+# Suspected bad-deploy alert — planner uses get_deploy_history to correlate.
+
+name: deploy_correlation
+description: >
+  Errors started spiking shortly after a service rollout. The planner probes
+  get_deploy_history to check whether a recent deploy correlates in time.
+
+tags: [read-only, phase-3, deploy, live-mcp, live-llm]
+
+use_live_mcp: true
+use_live_llm: true
+
+alert:
+  source: platform.api
+  severity: high
+  fingerprint: post_deploy_error_spike
+  service: billing-api
+
+canned_tool_responses:
+  get_deploy_history:
+    content:
+      - type: text
+        text: '{"total":3,"entries":[{"version":"v1.42.0","started_at":"2026-07-28T10:00:00Z","env":"prod","notes":"correlated with billing failures"},{"version":"v1.41.9","started_at":"2026-07-27T14:00:00Z","env":"prod","notes":""},{"version":"v1.41.8","started_at":"2026-07-26T09:00:00Z","env":"prod","notes":""}]}'
+    is_error: false
+
+canned_llm_responses:
+  investigation_planner:
+    - hypotheses:
+        - name: bad_deploy
+          confidence: 0.6
+          reasoning: >
+            Error spike labeled post_deploy suggests a recent rollout is at
+            fault; probe deploy history to confirm timing.
+      next_action:
+        kind: probe
+        tool_name: get_deploy_history
+        arguments: {}
+    - hypotheses:
+        - name: bad_deploy
+          confidence: 0.85
+          reasoning: >
+            v1.42.0 shipped 15 minutes before the alert fired and is annotated
+            with billing-failure correlation.
+      next_action:
+        kind: stop
+        reason: bad-deploy hypothesis confirmed; human should decide rollback
+  briefing_writer:
+    - findings: >
+        v1.42.0 shipped to prod 15 minutes before the billing-api error spike;
+        deploy history annotates it as correlated with billing failures.
+      recommendation: >
+        Consider rolling back to v1.41.9 while the v1.42.0 change is diagnosed.
+  briefing_judge:
+    - groundedness: 0.9
+      actionability: 0.85
+      reasoning: >
+        Findings cite the deploy timing + annotation; recommendation names a
+        concrete rollback target.
+
+expectation:
+  name: deploy_correlation
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+    - deploy
+  max_tool_calls: 5

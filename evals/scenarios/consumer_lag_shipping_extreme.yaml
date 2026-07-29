@@ -6,7 +6,10 @@ description: >
   large integer handling in the typed output and the planner's response to
   clearly-catastrophic evidence.
 
-tags: [read-only, phase-0, kafka, extreme-value]
+tags: [read-only, phase-0, kafka, extreme-value, live-mcp, live-llm]
+
+use_live_mcp: true
+use_live_llm: true
 
 alert:
   source: platform.kafka

@@ -7,7 +7,10 @@ description: >
   updated confidence. Verifies the investigation loop iterates cleanly and
   budget accounting handles multiple probes.
 
-tags: [read-only, phase-2, multi-probe, iteration]
+tags: [read-only, phase-2, multi-probe, iteration, live-mcp, live-llm]
+
+use_live_mcp: true
+use_live_llm: true
 
 alert:
   source: platform.kafka

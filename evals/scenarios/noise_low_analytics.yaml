@@ -5,7 +5,9 @@ description: >
   Low-severity signal on analytics-consumer that shouldn't consume the tool
   budget. Verifies TRIAGE noise filter is group-agnostic.
 
-tags: [read-only, phase-0, noise, group-variation]
+tags: [read-only, phase-0, noise, group-variation, live-llm]
+
+use_live_llm: true
 
 alert:
   source: platform.canary

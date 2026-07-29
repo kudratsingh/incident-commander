@@ -6,7 +6,10 @@ description: >
   hypothesis. Tests that hypotheses stored on RunState reflect the latest
   ranked list (not the union across iterations).
 
-tags: [read-only, phase-2, multi-probe, hypothesis-evolution]
+tags: [read-only, phase-2, multi-probe, hypothesis-evolution, live-mcp, live-llm]
+
+use_live_mcp: true
+use_live_llm: true
 
 alert:
   source: platform.kafka

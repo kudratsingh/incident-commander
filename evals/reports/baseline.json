@@ -1,12 +1,43 @@
 {
-  "generated_at": "2026-07-21T00:26:59.598794Z",
-  "total": 18,
-  "passed": 18,
+  "generated_at": "2026-07-29T00:27:51.699805Z",
+  "total": 28,
+  "passed": 28,
   "failed": 0,
-  "judged_count": 18,
-  "judge_useful_count": 18,
-  "judge_mean_overall": 0.8402777777777778,
+  "judged_count": 28,
+  "judge_useful_count": 28,
+  "judge_mean_overall": 0.8482142857142857,
   "outcomes": [
+    {
+      "scenario": "alert_storm",
+      "final_state": "escalated",
+      "tool_calls_used": 2,
+      "report": {
+        "scenario": "alert_storm",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 2 tool calls, cap 6"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.9,
+        "reasoning": "Findings summarize the storm shape and the deploy correlation; recommendation names a concrete corrective action.\n"
+      }
+    },
     {
       "scenario": "consumer_lag_analytics_critical",
       "final_state": "escalated",
@@ -67,6 +98,37 @@
         "groundedness": 0.85,
         "actionability": 0.8,
         "reasoning": "Findings acknowledge the tension between the paging alert and the 0-lag reading; recommendation names a specific reconciliation task.\n"
+      }
+    },
+    {
+      "scenario": "consumer_lag_high",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "consumer_lag_high",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.8,
+        "reasoning": "Findings ground in the live tool response; recommendation names two concrete verification steps.\n"
       }
     },
     {
@@ -222,6 +284,130 @@
         "groundedness": 0.9,
         "actionability": 0.85,
         "reasoning": "Findings correctly frame the extreme lag as consumer-stopped rather than slow-processing; recommendation names two concrete checks.\n"
+      }
+    },
+    {
+      "scenario": "deploy_correlation",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "deploy_correlation",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.85,
+        "reasoning": "Findings cite the deploy timing + annotation; recommendation names a concrete rollback target.\n"
+      }
+    },
+    {
+      "scenario": "dlq_backlog",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "dlq_backlog",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.8,
+        "reasoning": "Findings quote the DLQ triage summary; recommendation names concrete service to verify and the replay action.\n"
+      }
+    },
+    {
+      "scenario": "failed_traces_scan",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "failed_traces_scan",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.85,
+        "reasoning": "Findings ground in the search results; recommendation focuses on the specific worker rather than platform-wide diagnostics.\n"
+      }
+    },
+    {
+      "scenario": "incidents_overview",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "incidents_overview",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.8,
+        "reasoning": "Findings summarize the two-incident cluster; recommendation names the right investigative direction.\n"
       }
     },
     {
@@ -473,6 +659,99 @@
       }
     },
     {
+      "scenario": "postgres_slow",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "postgres_slow",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.85,
+        "reasoning": "Findings quote the ping + connection numbers; recommendation names two concrete diagnostic and mitigation steps.\n"
+      }
+    },
+    {
+      "scenario": "redis_saturation",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "redis_saturation",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.85,
+        "reasoning": "Findings ground in the hit/miss numbers; recommendation names two concrete mitigations.\n"
+      }
+    },
+    {
+      "scenario": "saga_stuck",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "saga_stuck",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.85,
+        "reasoning": "Findings walk through the DAG state accurately; recommendation names both a diagnostic step and a corrective action.\n"
+      }
+    },
+    {
       "scenario": "tool_missing_response",
       "final_state": "escalated",
       "tool_calls_used": 0,
@@ -563,6 +842,37 @@
         "groundedness": 0.85,
         "actionability": 0.85,
         "reasoning": "Findings quote the is_error=True response accurately; recommendation offers two concrete fallback steps (manual retry + CloudWatch metric).\n"
+      }
+    },
+    {
+      "scenario": "trace_investigation",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "trace_investigation",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.85,
+        "reasoning": "Findings ground in the trace's retry history and error message; recommendation names concrete mitigations.\n"
       }
     }
   ]

@@ -54,7 +54,14 @@ class LLMClientProtocol(Protocol):
 
 
 class LLMClient:
-    """Real Anthropic client. Tests use ``CannedLLMClient`` from ``llm.fakes``."""
+    """Real Anthropic client. Tests use ``CannedLLMClient`` from ``llm.fakes``.
+
+    Pass ``tracer`` to capture per-call payloads for offline inspection —
+    used by the eval runner to write JSONL trace files under
+    ``EVAL_TRACE_DIR``. The tracer receives a dict with ``request``,
+    ``response`` (raw Anthropic Message), ``output`` (parsed dict), and
+    ``duration_seconds`` after every successful call.
+    """
 
     def __init__(
         self,
@@ -63,11 +70,13 @@ class LLMClient:
         retry_base_delay: float = 1.0,
         sleep: Callable[[float], None] = time.sleep,
         client: anthropic.Anthropic | None = None,
+        tracer: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self._client = client or anthropic.Anthropic(api_key=api_key)
         self._max_attempts = max_attempts
         self._retry_base_delay = retry_base_delay
         self._sleep = sleep
+        self._tracer = tracer
 
     def call[T: BaseModel](
         self,
@@ -99,15 +108,28 @@ class LLMClient:
         }
         last_exc: Exception | None = None
         for attempt in range(self._max_attempts):
+            started = time.monotonic()
             try:
                 response = self._client.messages.create(**request_body)
-                return self._parse(response, output_model)
             except anthropic.APIConnectionError as err:
                 last_exc = err
             except anthropic.APIStatusError as err:
                 if err.status_code < 500:
                     raise
                 last_exc = err
+            else:
+                result = self._parse(response, output_model)
+                if self._tracer is not None:
+                    self._tracer(
+                        {
+                            "request": request_body,
+                            "response": response.model_dump(mode="json"),
+                            "output": result.output.model_dump(mode="json"),
+                            "output_model": output_model.__name__,
+                            "duration_seconds": time.monotonic() - started,
+                        }
+                    )
+                return result
             if attempt < self._max_attempts - 1:
                 self._sleep(self._retry_base_delay * (2**attempt))
         assert last_exc is not None

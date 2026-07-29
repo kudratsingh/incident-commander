@@ -42,4 +42,6 @@ evals/trajectories/*
 !evals/trajectories/.gitkeep
 evals/briefings/*
 !evals/briefings/.gitkeep
+evals/traces/*
+!evals/traces/.gitkeep
 evals/reports/latest.json

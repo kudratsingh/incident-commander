@@ -191,3 +191,55 @@ class TestRetries:
                 model="claude-sonnet-4-6",
             )
         assert sdk.messages.create.call_count == 2
+
+
+class TestTracer:
+    def test_tracer_receives_request_response_output(self) -> None:
+        sdk = MagicMock()
+        response = _tool_use_message({"label": "ok", "confidence": 0.9})
+        response.model_dump.return_value = {"content": [{"type": "tool_use"}]}
+        sdk.messages.create.return_value = response
+        captured: list[dict[str, Any]] = []
+        client = LLMClient(
+            api_key="test",
+            max_attempts=1,
+            retry_base_delay=0.0,
+            sleep=lambda _s: None,
+            client=sdk,
+            tracer=captured.append,
+        )
+        client.call(
+            system_prompt="sys",
+            user_message="hi",
+            output_model=_SampleOutput,
+            model="claude-sonnet-4-6",
+        )
+        assert len(captured) == 1
+        record = captured[0]
+        assert record["request"]["model"] == "claude-sonnet-4-6"
+        assert record["request"]["messages"] == [{"role": "user", "content": "hi"}]
+        assert record["response"] == {"content": [{"type": "tool_use"}]}
+        assert record["output"] == {"label": "ok", "confidence": 0.9}
+        assert record["output_model"] == "_SampleOutput"
+        assert record["duration_seconds"] >= 0
+
+    def test_tracer_not_called_on_error(self) -> None:
+        sdk = MagicMock()
+        sdk.messages.create.side_effect = anthropic.APIConnectionError(request=MagicMock())
+        captured: list[dict[str, Any]] = []
+        client = LLMClient(
+            api_key="test",
+            max_attempts=1,
+            retry_base_delay=0.0,
+            sleep=lambda _s: None,
+            client=sdk,
+            tracer=captured.append,
+        )
+        with pytest.raises(anthropic.APIConnectionError):
+            client.call(
+                system_prompt="s",
+                user_message="u",
+                output_model=_SampleOutput,
+                model="claude-sonnet-4-6",
+            )
+        assert captured == []

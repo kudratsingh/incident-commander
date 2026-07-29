@@ -45,3 +45,5 @@ evals/briefings/*
 evals/traces/*
 !evals/traces/.gitkeep
 evals/reports/latest.json
+evals/reports/human/*
+!evals/reports/human/.gitkeep

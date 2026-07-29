@@ -211,6 +211,42 @@ class TestRunAll:
         }
         assert len(trajectories) == 2
 
+    def test_one_crashing_scenario_does_not_abort_batch(self, monkeypatch: Any) -> None:
+        """Regression: earlier `run_all` propagated the first scenario's exception,
+        wiping every scenario that hadn't run yet. Live-eval batches now survive
+        a per-scenario crash by capturing it as a failed outcome and continuing.
+        """
+        from evals import runner as runner_module
+
+        real_run_scenario = runner_module.run_scenario
+        crashed_names: list[str] = []
+
+        def flaky_run_scenario(scenario: Scenario, *args: Any, **kwargs: Any) -> Any:
+            if scenario.name == "consumer_lag_pass":
+                # Second scenario in the batch — simulate the platform 500ing.
+                crashed_names.append(scenario.name)
+                raise RuntimeError("simulated platform outage")
+            return real_run_scenario(scenario, *args, **kwargs)
+
+        monkeypatch.setattr(runner_module, "run_scenario", flaky_run_scenario)
+        report, trajectories, briefings = runner_module.run_all(
+            [_noise_scenario(), _passing_scenario(), _bad_expectation_scenario()],
+            _test_settings(),
+        )
+        assert report.total == 3
+        assert crashed_names == ["consumer_lag_pass"]
+        # The crashed scenario is captured as a failed outcome, not dropped.
+        outcomes_by_name = {o.scenario: o for o in report.outcomes}
+        assert outcomes_by_name["consumer_lag_pass"].report.passed is False
+        assert "simulated platform outage" in (
+            outcomes_by_name["consumer_lag_pass"].report.dimensions[0].detail
+        )
+        # The other two scenarios ran normally.
+        assert outcomes_by_name["noise_alert"].final_state == IncidentState.ESCALATED
+        assert outcomes_by_name["misexpected"].report.passed is False
+        assert len(trajectories) == 3
+        assert len(briefings) == 3
+
     def test_empty_scenario_list(self) -> None:
         report, trajectories, _ = run_all([], _test_settings())
         assert report.total == 0

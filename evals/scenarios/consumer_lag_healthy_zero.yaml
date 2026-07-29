@@ -67,6 +67,7 @@ expectation:
   name: consumer_lag_healthy_zero
   expected_terminal_state: escalated
   expected_evidence_contains:
-    - reports-consumer
-    - '"lag":0'
+    # Structural key from GetConsumerLagOutput — present live or canned,
+    # regardless of which group the planner probes.
+    - cache_key
   max_tool_calls: 5

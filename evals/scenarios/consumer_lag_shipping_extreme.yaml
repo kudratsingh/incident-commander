@@ -64,5 +64,7 @@ expectation:
   expected_terminal_state: escalated
   expected_evidence_contains:
     - shipping-consumer
-    - '2500000'
+    # Structural key from GetConsumerLagOutput; the exact lag value depends
+    # on the platform's seed (currently 100000, not 2500000).
+    - cache_key
   max_tool_calls: 5

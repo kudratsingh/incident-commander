@@ -12,7 +12,12 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, SecretStr
 
 from evals.fakes import CannedMCPClient
-from evals.graders.deterministic import GradeReport, grade
+from evals.graders.deterministic import (
+    DimensionResult,
+    GradeDimension,
+    GradeReport,
+    grade,
+)
 from evals.graders.llm_judge import JudgeScore, judge_briefing
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
@@ -239,14 +244,62 @@ def run_scenario(
     return ScenarioResult(outcome=outcome, trajectory=trajectory, briefing=briefing)
 
 
+def _crashed_result(scenario: Scenario, exc: BaseException) -> ScenarioResult:
+    """Synthesize a failed ScenarioResult when run_scenario raises.
+
+    One crashing scenario should not take out the whole suite — live-eval
+    runs across dozens of scenarios and a single flaky platform call
+    (network blip, unseeded fixture) would otherwise wipe every result
+    that hadn't run yet. The synthesized report carries the error string
+    so it's visible in the summary + written to disk.
+    """
+    error_detail = f"{type(exc).__name__}: {exc}"
+    report = GradeReport(
+        scenario=scenario.name,
+        passed=False,
+        dimensions=(
+            DimensionResult(
+                dimension=GradeDimension.OUTCOME,
+                passed=False,
+                detail=f"scenario crashed: {error_detail}",
+            ),
+        ),
+    )
+    outcome = ScenarioOutcome(
+        scenario=scenario.name,
+        final_state=IncidentState.TRIAGE,
+        tool_calls_used=0,
+        report=report,
+        judge_score=None,
+    )
+    trajectory = Trajectory(
+        scenario=scenario.name,
+        incident_id="00000000-0000-0000-0000-000000000000",
+        checkpoints=(),
+    )
+    briefing = EscalationBriefing(
+        incident_id="00000000-0000-0000-0000-000000000000",
+        final_state=IncidentState.TRIAGE,
+        alert_summary=f"crashed: {error_detail}",
+    )
+    return ScenarioResult(outcome=outcome, trajectory=trajectory, briefing=briefing)
+
+
 def run_all(
     scenarios: Iterable[Scenario],
     settings: Settings,
     clock: Callable[[], datetime] | None = None,
 ) -> tuple[RunReport, tuple[Trajectory, ...], tuple[EscalationBriefing, ...]]:
     # run_scenario falls back to canned when env is placeholder; nothing
-    # is skipped here.
-    results = [run_scenario(scenario, settings, clock) for scenario in scenarios]
+    # is skipped here. Per-scenario crashes are captured as failed outcomes
+    # so the batch keeps running — see _crashed_result.
+    results: list[ScenarioResult] = []
+    for scenario in scenarios:
+        try:
+            results.append(run_scenario(scenario, settings, clock))
+        except Exception as exc:  # noqa: BLE001 — deliberate: don't abort suite
+            print(f"  CRASH {scenario.name}: {type(exc).__name__}: {exc}")
+            results.append(_crashed_result(scenario, exc))
     outcomes = tuple(r.outcome for r in results)
     trajectories = tuple(r.trajectory for r in results)
     briefings = tuple(r.briefing for r in results)

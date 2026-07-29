@@ -14,13 +14,15 @@ alert:
   source: platform.dag
   severity: high
   fingerprint: saga_stalled
-  job_id: 33333333-3333-3333-3333-333333333333
+  # Pinned seed UUID from the platform's eval fixture manifest
+  # (scripts/seed_eval_fixtures.py::collect_pins → dag.seed_job_id).
+  job_id: 25220882-1820-5cd3-b09b-f866ff5823c9
 
 canned_tool_responses:
   get_dag_state:
     content:
       - type: text
-        text: '{"seed_id":"33333333-3333-3333-3333-333333333333","nodes":[{"id":"n1","type":"reserve_inventory","status":"succeeded","retry_count":0,"created_at":"2026-07-28T10:00:00Z"},{"id":"n2","type":"charge_card","status":"running","retry_count":2,"created_at":"2026-07-28T10:01:00Z"},{"id":"n3","type":"ship_order","status":"pending","retry_count":0,"created_at":"2026-07-28T10:01:00Z"}],"edges":[{"from_id":"n1","to_id":"n2"},{"from_id":"n2","to_id":"n3"}]}'
+        text: '{"seed_id":"25220882-1820-5cd3-b09b-f866ff5823c9","nodes":[{"id":"n1","type":"reserve_inventory","status":"succeeded","retry_count":0,"created_at":"2026-07-28T10:00:00Z"},{"id":"n2","type":"charge_card","status":"running","retry_count":2,"created_at":"2026-07-28T10:01:00Z"},{"id":"n3","type":"ship_order","status":"pending","retry_count":0,"created_at":"2026-07-28T10:01:00Z"}],"edges":[{"from_id":"n1","to_id":"n2"},{"from_id":"n2","to_id":"n3"}]}'
     is_error: false
 
 canned_llm_responses:
@@ -35,7 +37,7 @@ canned_llm_responses:
         kind: probe
         tool_name: get_dag_state
         arguments:
-          job_id: 33333333-3333-3333-3333-333333333333
+          job_id: 25220882-1820-5cd3-b09b-f866ff5823c9
     - hypotheses:
         - name: stuck_saga_node
           confidence: 0.85

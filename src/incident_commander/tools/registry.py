@@ -77,20 +77,29 @@ class GetDagStateOutput(BaseModel):
 # --- get_deploy_history --------------------------------------------------
 
 
+class GetDeployHistoryInput(BaseModel):
+    model_config = _EMPTY_CONFIG
+    environment: str | None = None
+    limit: int = Field(default=20, ge=1, le=100)
+
+
 class DeployEntry(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
     version: str
     revision: str | None = None
     image_tag: str | None = None
-    started_at: datetime
-    env: str
-    notes: str = ""
+    deployed_at: datetime
+    environment: str
+    notes: str | None = None
 
 
 class GetDeployHistoryOutput(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
     total: int
     entries: list[DeployEntry]
+    # v0.2.1+: platform advertises where the entries came from
+    # ("deploy_markers" table vs env-based fallback).
+    source: str | None = None
 
 
 # --- get_incident + list_incidents --------------------------------------
@@ -333,7 +342,9 @@ class ToolSpec:
 TOOL_REGISTRY: Final[dict[str, ToolSpec]] = {
     "get_consumer_lag": ToolSpec("get_consumer_lag", GetConsumerLagInput, GetConsumerLagOutput),
     "get_dag_state": ToolSpec("get_dag_state", GetDagStateInput, GetDagStateOutput),
-    "get_deploy_history": ToolSpec("get_deploy_history", _EmptyInput, GetDeployHistoryOutput),
+    "get_deploy_history": ToolSpec(
+        "get_deploy_history", GetDeployHistoryInput, GetDeployHistoryOutput
+    ),
     "get_incident": ToolSpec("get_incident", GetIncidentInput, GetIncidentOutput),
     "get_postgres_health": ToolSpec("get_postgres_health", _EmptyInput, PostgresHealthOutput),
     "get_redis_health": ToolSpec("get_redis_health", _EmptyInput, RedisHealthOutput),

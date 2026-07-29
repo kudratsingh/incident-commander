@@ -195,7 +195,9 @@ def _execute_probe(
     """Call the tool the planner picked. On any failure, escalate with the reason."""
     spec = TOOL_REGISTRY[action.tool_name]
     try:
-        arguments = spec.input_model.model_validate(action.arguments).model_dump()
+        # mode="json" so UUID/datetime fields serialize to str/isoformat —
+        # httpx.json can't encode raw UUID objects.
+        arguments = spec.input_model.model_validate(action.arguments).model_dump(mode="json")
     except ValidationError as err:
         return _escalate_investigation(
             run_state, at, f"probe arguments invalid for {action.tool_name}: {err}"

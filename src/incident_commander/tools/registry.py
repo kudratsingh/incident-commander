@@ -1,12 +1,14 @@
-"""Typed schemas for the platform's MCP read tools (Wave 1 + Wave 2).
+"""Typed schemas for every platform MCP tool the agent uses.
 
 Schemas are hand-written but mirror the platform's Pydantic models tool-for-tool
 (source: ``incident-platform/backend/app/mcp/tools/*.py``). Drift is caught by
 ``contracts/platform-tools.snapshot.json`` + the contract diff test.
 
-This file covers **read** tools only. Tier-1 write actions (``pause_dag``,
-``invalidate_cache_key``, ``replay_dlq_messages``, ``restart_consumer_group``)
-are on the platform's surface but land in Phase 6 alongside the approvals flow.
+Read tools (Wave 1 + Wave 2) are unrestricted. Tier-1 write actions
+(``pause_dag``, ``invalidate_cache_key``, ``replay_dlq_messages``,
+``restart_consumer_group``) are registered here for the remediation loop
+(Phase 6) but tier policy in ``policies.py`` gates when the agent may
+invoke them — the investigation planner cannot propose Tier-1 actions.
 """
 
 from __future__ import annotations
@@ -327,6 +329,75 @@ class ListDlqMessagesOutput(BaseModel):
     items: list[DlqEntry]
 
 
+# --- Tier-1 write actions (remediation) ---------------------------------
+#
+# The platform enforces authz + idempotency + audit for every call to these.
+# Agent-side, tier policy (``policies.py``) bars the investigation planner
+# from proposing them; only the remediation planner may.
+
+
+class RestartConsumerGroupInput(BaseModel):
+    model_config = _EMPTY_CONFIG
+    consumer_group: str = Field(min_length=1, max_length=128)
+    idempotency_key: str = Field(min_length=8, max_length=255)
+
+
+class RestartConsumerGroupOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    consumer_group: str
+    kill_key_cleared: bool
+    kill_key: str
+    accepted: bool
+
+
+class PauseDagInput(BaseModel):
+    model_config = _EMPTY_CONFIG
+    root_job_id: UUID
+    ttl_seconds: int = Field(default=600, ge=1, le=3600)
+    idempotency_key: str = Field(min_length=8, max_length=255)
+
+
+class PauseDagOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    root_job_id: str
+    pause_key: str
+    ttl_seconds: int
+    accepted: bool
+
+
+class ReplayDlqMessagesInput(BaseModel):
+    model_config = _EMPTY_CONFIG
+    job_type: str | None = None
+    limit: int = Field(default=25, ge=1, le=200)
+    idempotency_key: str = Field(min_length=8, max_length=255)
+
+
+class ReplayedJob(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    id: str
+    type: str
+
+
+class ReplayDlqMessagesOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    requested: int
+    replayed: int
+    failed: int
+    jobs: list[ReplayedJob]
+
+
+class InvalidateCacheKeyInput(BaseModel):
+    model_config = _EMPTY_CONFIG
+    key: str = Field(min_length=1, max_length=512)
+    idempotency_key: str = Field(min_length=8, max_length=255)
+
+
+class InvalidateCacheKeyOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    key: str
+    deleted: bool
+
+
 # --- Registry ------------------------------------------------------------
 
 
@@ -340,6 +411,7 @@ class ToolSpec:
 
 
 TOOL_REGISTRY: Final[dict[str, ToolSpec]] = {
+    # Read tools (Wave 1 + Wave 2) — investigation planner may propose freely.
     "get_consumer_lag": ToolSpec("get_consumer_lag", GetConsumerLagInput, GetConsumerLagOutput),
     "get_dag_state": ToolSpec("get_dag_state", GetDagStateInput, GetDagStateOutput),
     "get_deploy_history": ToolSpec(
@@ -356,4 +428,15 @@ TOOL_REGISTRY: Final[dict[str, ToolSpec]] = {
     "list_dlq_messages": ToolSpec("list_dlq_messages", ListDlqMessagesInput, ListDlqMessagesOutput),
     "list_incidents": ToolSpec("list_incidents", ListIncidentsInput, ListIncidentsOutput),
     "search_traces": ToolSpec("search_traces", SearchTracesInput, SearchTracesOutput),
+    # Tier-1 write actions — remediation planner only. Guarded by policies.py.
+    "restart_consumer_group": ToolSpec(
+        "restart_consumer_group", RestartConsumerGroupInput, RestartConsumerGroupOutput
+    ),
+    "pause_dag": ToolSpec("pause_dag", PauseDagInput, PauseDagOutput),
+    "replay_dlq_messages": ToolSpec(
+        "replay_dlq_messages", ReplayDlqMessagesInput, ReplayDlqMessagesOutput
+    ),
+    "invalidate_cache_key": ToolSpec(
+        "invalidate_cache_key", InvalidateCacheKeyInput, InvalidateCacheKeyOutput
+    ),
 }

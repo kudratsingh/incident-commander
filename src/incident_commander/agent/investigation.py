@@ -21,6 +21,7 @@ from pydantic import BaseModel, ValidationError
 from incident_commander.agent.hypothesis import (
     InvestigationStep,
     ProbeAction,
+    RemediateAction,
     StopAction,
 )
 from incident_commander.agent.state import (
@@ -32,6 +33,7 @@ from incident_commander.agent.state import (
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError, ToolResult
+from incident_commander.tools.policies import Tier, tools_at_or_below
 from incident_commander.tools.registry import TOOL_REGISTRY
 
 _TOOL_NAME: Final[str] = "get_consumer_lag"
@@ -143,6 +145,8 @@ def make_llm_investigate(
             action = step.next_action
             if isinstance(action, StopAction):
                 return _finalize(run_state, at, action.reason)
+            if isinstance(action, RemediateAction):
+                return _handoff_to_planning(run_state, at, action.reason)
 
             if action.tool_name not in TOOL_REGISTRY:
                 return _escalate_investigation(
@@ -278,6 +282,23 @@ def _escalate_investigation(run_state: RunState, at: datetime, reason: str) -> R
     )
 
 
+def _handoff_to_planning(run_state: RunState, at: datetime, reason: str) -> RunState:
+    """Planner said the top hypothesis is remediable. Hand off to PLANNING."""
+    entry = EvidenceEntry(
+        tool_name="_planner_remediate",
+        arguments={"reason": reason},
+        result_summary=f"planner handoff to PLANNING: {reason}",
+        timestamp=at,
+    )
+    return run_state.model_copy(
+        update={
+            "state": IncidentState.PLANNING,
+            "updated_at": at,
+            "evidence": (*run_state.evidence, entry),
+        }
+    )
+
+
 def _add_tokens(budget: BudgetLedger, tokens: int) -> BudgetLedger:
     return budget.model_copy(update={"tokens_used": budget.tokens_used + tokens})
 
@@ -297,8 +318,11 @@ def _format_planner_context(run_state: RunState) -> str:
     else:
         lines.append("Evidence so far: (none)")
     lines.append("")
-    lines.append("Available tools:")
-    for name in sorted(TOOL_REGISTRY):
+    # Investigation planner sees read tools only (Tier.READ). Tier-1 tools
+    # are executed by the REMEDIATING transition; the planner emits a
+    # RemediateAction to hand off, it does not call them directly.
+    lines.append("Available tools (read-only probes):")
+    for name in sorted(tools_at_or_below(Tier.READ)):
         spec = TOOL_REGISTRY[name]
         schema = spec.input_model.model_json_schema()
         lines.append(f"  - {name}: input_schema={json.dumps(schema, sort_keys=True)}")

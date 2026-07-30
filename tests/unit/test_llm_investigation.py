@@ -144,6 +144,38 @@ class TestImmediateStop:
         assert mcp.calls == []
 
 
+class TestRemediateHandoff:
+    def test_planner_remediate_transitions_to_planning(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        mcp = _FakeMCPClient(lambda _n, _a: _consumer_lag_response("billing", 42))
+        llm = CannedLLMClient(
+            [
+                {
+                    "hypotheses": [
+                        {
+                            "name": "consumer_saturation",
+                            "confidence": 0.9,
+                            "reasoning": "top hypothesis clear",
+                        }
+                    ],
+                    "next_action": {
+                        "kind": "remediate",
+                        "reason": "consumer_saturation confirmed; restart_consumer_group applies",
+                    },
+                }
+            ]
+        )
+        transition = make_llm_investigate(mcp, llm, model="m")
+        result = transition(_investigating(run_state), now)
+        assert result.state is IncidentState.PLANNING
+        handoffs = [e for e in result.evidence if e.tool_name == "_planner_remediate"]
+        assert len(handoffs) == 1
+        assert "consumer_saturation confirmed" in handoffs[0].result_summary
+        # Hypotheses carried forward for the remediation planner to consume.
+        assert result.hypotheses[0].name == "consumer_saturation"
+
+
 class TestErrorPaths:
     def test_unknown_tool_from_planner_escalates(self, run_state: RunState, now: datetime) -> None:
         mcp = _FakeMCPClient(lambda _n, _a: _consumer_lag_response("billing", 42))

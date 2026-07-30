@@ -82,7 +82,7 @@ class RunState(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: int = Field(default=2, ge=1)
+    schema_version: int = Field(default=3, ge=1)
     incident_id: UUID
     state: IncidentState
     alert: dict[str, object]
@@ -90,6 +90,10 @@ class RunState(BaseModel):
     evidence: tuple[EvidenceEntry, ...] = ()
     hypotheses: tuple[Hypothesis, ...] = ()
     pending_approval_id: str | None = None
+    # v3+: set by the PLANNING transition, consumed by REMEDIATING + VERIFYING.
+    # Untyped ``dict`` here (not ``RemediationPlan``) so state.py stays free of
+    # remediation-loop imports; remediation.py validates it on read.
+    remediation_plan: dict[str, object] | None = None
     created_at: datetime
     updated_at: datetime
 

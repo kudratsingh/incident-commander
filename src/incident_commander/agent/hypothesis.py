@@ -43,7 +43,21 @@ class StopAction(BaseModel):
     reason: str = Field(min_length=1)
 
 
-NextAction = Annotated[ProbeAction | StopAction, Field(discriminator="kind")]
+class RemediateAction(BaseModel):
+    """Root cause confirmed — hand off to the remediation planner.
+
+    Emitted when the top hypothesis has enough confidence AND a known
+    Tier-1 fix. The PLANNING state picks the concrete action tool +
+    verify probe; the investigation planner just signals the handoff.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["remediate"] = "remediate"
+    reason: str = Field(min_length=1)
+
+
+NextAction = Annotated[ProbeAction | StopAction | RemediateAction, Field(discriminator="kind")]
 
 
 class InvestigationStep(BaseModel):

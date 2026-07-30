@@ -39,6 +39,9 @@ from incident_commander.tools.policies import Tier, tier_of
 from incident_commander.tools.registry import TOOL_REGISTRY
 
 _IDEMPOTENCY_KEY_LEN: Final[int] = 32
+# One Tier-1 attempt per incident. If the first attempt didn't fix it,
+# a human should look at the escalation briefing before we try again.
+_MAX_REMEDIATION_ATTEMPTS: Final[int] = 1
 
 
 class RemediationPlan(BaseModel):
@@ -120,6 +123,16 @@ def make_llm_plan(
             return _escalate_remediation(
                 run_state, at, "planning entered with no hypotheses on RunState"
             )
+        if run_state.remediation_attempts >= _MAX_REMEDIATION_ATTEMPTS:
+            # A prior attempt didn't verify; don't retry autonomously.
+            # A human reviewing the escalation briefing decides next steps.
+            return _escalate_remediation(
+                run_state,
+                at,
+                f"remediation attempt cap reached "
+                f"({run_state.remediation_attempts}/{_MAX_REMEDIATION_ATTEMPTS}); "
+                "human decision required",
+            )
 
         top = run_state.hypotheses[0]
         try:
@@ -192,6 +205,17 @@ def _load_plan(run_state: RunState) -> RemediationPlan | None:
     return RemediationPlan.model_validate(raw)
 
 
+def _action_already_executed(run_state: RunState, action_tool: str) -> bool:
+    """True when the evidence log records a prior invocation of ``action_tool``.
+
+    Used by REMEDIATING as a crash-recovery signal: if the checkpoint after
+    the tool call was written but the state transition to VERIFYING wasn't,
+    we'd re-enter REMEDIATING with the action already executed. This lets
+    the transition short-circuit to VERIFYING without a duplicate call.
+    """
+    return any(entry.tool_name == action_tool for entry in run_state.evidence)
+
+
 def _format_plan_context(run_state: RunState, top_hypothesis_name: str) -> str:
     hypotheses_dump = json.dumps([h.model_dump() for h in run_state.hypotheses], indent=2)
     evidence_dump = "\n".join(
@@ -241,6 +265,29 @@ def make_remediate(
                 run_state, at, "REMEDIATING entered with no remediation_plan"
             )
 
+        # Crash-recovery reconciliation: if the last checkpoint was after
+        # we already executed this action (evidence log has an entry for
+        # plan.action_tool since PLANNING), skip re-execution. Platform
+        # idempotency makes re-execution safe, but skipping keeps the
+        # trajectory clean and avoids a duplicate audit entry.
+        if _action_already_executed(run_state, plan.action_tool):
+            entry = EvidenceEntry(
+                tool_name="_remediate_reconciled",
+                arguments={"action_tool": plan.action_tool},
+                result_summary=(
+                    f"reconciled: {plan.action_tool} was already invoked this incident; "
+                    "skipping re-execution and re-verifying"
+                ),
+                timestamp=at,
+            )
+            return run_state.model_copy(
+                update={
+                    "state": IncidentState.VERIFYING,
+                    "evidence": (*run_state.evidence, entry),
+                    "updated_at": at,
+                }
+            )
+
         spec = TOOL_REGISTRY[plan.action_tool]
         idempotency_key = build_idempotency_key(
             str(run_state.incident_id), plan.action_tool, plan.action_arguments
@@ -287,6 +334,7 @@ def make_remediate(
             update={
                 "state": IncidentState.VERIFYING,
                 "budget": new_budget,
+                "remediation_attempts": run_state.remediation_attempts + 1,
                 "evidence": (*run_state.evidence, entry),
                 "updated_at": at,
             }

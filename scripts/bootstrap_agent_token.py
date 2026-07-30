@@ -30,7 +30,15 @@ DEFAULT_PASSWORD = "demo-agent-pass-123"  # noqa: S105 - dev-only placeholder
 DEFAULT_POSTGRES_CONTAINER = "incident-platform-postgres-1"
 DEFAULT_MCP_URL = "http://localhost:8001/mcp"
 SERVICE_ACCOUNT_NAME = "incident-commander"
-SERVICE_ACCOUNT_SCOPES = ["telemetry:read", "incidents:read"]
+# Phase 6+ needs actions:execute (Tier-1 remediation) and chaos:invoke
+# (chaos setup for live-eval prep). Keeping the read scopes so the
+# investigation path still works.
+SERVICE_ACCOUNT_SCOPES = [
+    "telemetry:read",
+    "incidents:read",
+    "actions:execute",
+    "chaos:invoke",
+]
 
 _SAFE_EMAIL = re.compile(r"^[A-Za-z0-9._+@-]+$")
 
@@ -81,6 +89,15 @@ def _login(client: httpx.Client, email: str, password: str) -> str:
 
 
 def _create_or_get_sa(client: httpx.Client, jwt: str, name: str, scopes: list[str]) -> str:
+    """Create the service account, or reuse the existing one — widening
+    its scopes to ``scopes`` if it exists with a narrower set.
+
+    Wider-scope widening uses the platform's
+    ``PATCH /admin/service-accounts/{id}`` endpoint (v0.3.0+). Older
+    platforms don't have PATCH — the script falls back to reusing the
+    existing scopes and prints a warning, so a stale platform doesn't
+    crash the whole flow.
+    """
     headers = {"Authorization": f"Bearer {jwt}"}
     r = client.post(
         "/admin/service-accounts",
@@ -89,7 +106,7 @@ def _create_or_get_sa(client: httpx.Client, jwt: str, name: str, scopes: list[st
     )
     if r.status_code in (200, 201):
         sa_id: str = r.json()["id"]
-        print(f"created service account {name} (id={sa_id})")
+        print(f"created service account {name} (id={sa_id}) with scopes={scopes}")
         return sa_id
     if r.status_code == 409:
         r2 = client.get("/admin/service-accounts", headers=headers)
@@ -97,7 +114,35 @@ def _create_or_get_sa(client: httpx.Client, jwt: str, name: str, scopes: list[st
         for sa in r2.json()["items"]:
             if sa["name"] == name:
                 existing_id: str = sa["id"]
-                print(f"service account {name} exists (id={existing_id}), reusing")
+                existing_scopes: list[str] = sa.get("scopes", [])
+                if set(existing_scopes) >= set(scopes):
+                    print(
+                        f"service account {name} exists (id={existing_id}) "
+                        f"with scopes={sorted(existing_scopes)}, reusing"
+                    )
+                    return existing_id
+                missing = sorted(set(scopes) - set(existing_scopes))
+                print(
+                    f"service account {name} exists (id={existing_id}) with "
+                    f"scopes={sorted(existing_scopes)}; widening to include {missing}"
+                )
+                patch = client.patch(
+                    f"/admin/service-accounts/{existing_id}",
+                    json={"scopes": scopes},
+                    headers=headers,
+                )
+                if patch.status_code in (200, 204):
+                    print(f"widened scopes on {name} to {sorted(scopes)}")
+                elif patch.status_code == 404:
+                    # Old platform (pre-v0.3.0) — no PATCH route. Warn but
+                    # keep the flow going with the existing narrower scopes.
+                    print(
+                        f"WARNING: platform lacks PATCH /admin/service-accounts/{{id}} "
+                        f"(pre-v0.3.0). Existing scopes {sorted(existing_scopes)} kept; "
+                        f"chaos / actions calls will 403 until platform is upgraded."
+                    )
+                else:
+                    patch.raise_for_status()
                 return existing_id
         raise RuntimeError(f"{name} conflicted but not present in listing")
     r.raise_for_status()

@@ -41,11 +41,11 @@ services:
       retries: 5
 
   platform:
-    # incident-platform v0.2.1. Do not switch to `:latest` — the whole point
+    # incident-platform v0.3.0. Do not switch to `:latest` — the whole point
     # of pinning by digest is that a platform-side prompt or schema change
     # can't shift agent behavior without an explicit bump here.
-    image: ghcr.io/kudratsingh/incident-platform@sha256:ead9c78f2d1d219e82b031bd08208f3a6fafb58901f74f86c6f5127c3e9e1c0e
-    # v0.2.1 is amd64-only. On Apple Silicon this runs under Rosetta (slower
+    image: ghcr.io/kudratsingh/incident-platform@sha256:5a890ed69ebdf1b046ffe32a2e3f3f2639a5e5d38b9e2fe51217739a4fbed53a
+    # v0.3.0 is amd64-only. On Apple Silicon this runs under Rosetta (slower
     # cold start, correct output). Drop this line when the platform ships a
     # multi-arch build (docker buildx --platform linux/amd64,linux/arm64).
     platform: linux/amd64
@@ -63,6 +63,12 @@ services:
       # existing rows are left alone. See /app/eval-fixtures-pins.json in
       # the container for the pinned UUIDs the agent scenarios reference.
       SEED_EVAL_FIXTURES: "true"
+      # v0.3.0+: register the 5 chaos hooks (kill_consumer, poison_message,
+      # saturate_redis, inject_latency, bad_deploy). Required for the
+      # `make chaos-*` targets and the live remediation-loop scenarios
+      # that need a real broken state to fix. Triple-gated on the
+      # platform side — refuses to enable in prod. See docs/runbook.md.
+      CHAOS_ENABLED: "true"
     depends_on:
       postgres:
         condition: service_healthy

@@ -1,4 +1,4 @@
-.PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-reg trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore demo demo-down bootstrap-token snapshot baseline clean
+.PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-live-remediation eval-reg trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore demo demo-down bootstrap-token snapshot baseline clean
 
 help:
 	@echo "Targets:"
@@ -11,6 +11,7 @@ help:
 	@echo "  test-e2e         full compose end-to-end (spends tokens)"
 	@echo "  eval             full eval suite offline (writes report)"
 	@echo "  eval-live        run eval suite against live platform (needs .env)"
+	@echo "  eval-live-remediation  run only remediate_* scenarios live (~\$$0.35)"
 	@echo "  trace-report     render evals/traces/*.jsonl → readable txt files"
 	@echo "  chaos-help       list chaos setup subcommands (kill-consumer, etc.)"
 	@echo "  eval-reg         regression eval subset"
@@ -55,6 +56,14 @@ eval-live:
 	uv run python scripts/format_traces.py
 	@echo "JSONL traces: evals/traces/*.jsonl"
 	@echo "Human-readable trajectories: evals/reports/human/*.txt"
+
+# Filtered live run — same as eval-live but only runs scenarios whose
+# name contains the substring. Cost ~$0.35 for the 5 remediate_* scenarios
+# vs ~$1.60 for the full suite. Pair with `make chaos-*` first for a
+# real broken state to fix.
+eval-live-remediation:
+	EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live --only remediate_
+	uv run python scripts/format_traces.py
 
 trace-report:
 	uv run python scripts/format_traces.py

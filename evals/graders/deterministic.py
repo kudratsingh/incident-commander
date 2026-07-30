@@ -1,10 +1,12 @@
 """Deterministic grader for a completed agent run.
 
-Scores three dimensions with pure logic — no LLM in the loop:
+Scores four dimensions with pure logic — no LLM in the loop:
 
 * ``outcome``  — did the run reach the expected terminal state?
 * ``evidence`` — do required signals appear in the evidence ledger?
 * ``budget``   — did the run stay within the tool-call cap?
+* ``action``   — for remediation scenarios, did the specific Tier-1
+  tool actually fire? Trivially passes when the expectation is unset.
 
 Aggregate ``passed`` is the conjunction. The scenario runner (Phase 1) will
 call ``grade()`` per run and aggregate reports; regression gating (Phase 1)
@@ -24,6 +26,7 @@ class GradeDimension(StrEnum):
     OUTCOME = "outcome"
     EVIDENCE = "evidence"
     BUDGET = "budget"
+    ACTION = "action"
 
 
 class ScenarioExpectation(BaseModel):
@@ -35,6 +38,11 @@ class ScenarioExpectation(BaseModel):
     expected_terminal_state: IncidentState
     expected_evidence_contains: tuple[str, ...] = ()
     max_tool_calls: int | None = None
+    # Phase 6: for remediation scenarios, assert this specific Tier-1
+    # tool actually fired (matched by ``EvidenceEntry.tool_name``).
+    # Left unset for read-only scenarios so the ACTION dimension passes
+    # trivially.
+    expected_action_tool: str | None = None
 
 
 class DimensionResult(BaseModel):
@@ -59,6 +67,7 @@ def grade(run: RunState, expectation: ScenarioExpectation) -> GradeReport:
         _grade_outcome(run, expectation),
         _grade_evidence(run, expectation),
         _grade_budget(run, expectation),
+        _grade_action(run, expectation),
     )
     return GradeReport(
         scenario=expectation.name,
@@ -109,3 +118,27 @@ def _grade_budget(run: RunState, exp: ScenarioExpectation) -> DimensionResult:
     passed = run.budget.tool_calls_used <= exp.max_tool_calls
     detail = f"used {run.budget.tool_calls_used} tool calls, cap {exp.max_tool_calls}"
     return DimensionResult(dimension=GradeDimension.BUDGET, passed=passed, detail=detail)
+
+
+def _grade_action(run: RunState, exp: ScenarioExpectation) -> DimensionResult:
+    if exp.expected_action_tool is None:
+        return DimensionResult(
+            dimension=GradeDimension.ACTION,
+            passed=True,
+            detail="no action expectation set",
+        )
+    hits = [e for e in run.evidence if e.tool_name == exp.expected_action_tool]
+    if not hits:
+        called = sorted({e.tool_name for e in run.evidence if not e.tool_name.startswith("_")})
+        return DimensionResult(
+            dimension=GradeDimension.ACTION,
+            passed=False,
+            detail=(
+                f"expected action {exp.expected_action_tool} was not called; tools called: {called}"
+            ),
+        )
+    return DimensionResult(
+        dimension=GradeDimension.ACTION,
+        passed=True,
+        detail=f"expected action {exp.expected_action_tool} was called {len(hits)}× ",
+    )

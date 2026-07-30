@@ -94,6 +94,10 @@ class RunState(BaseModel):
     # Untyped ``dict`` here (not ``RemediationPlan``) so state.py stays free of
     # remediation-loop imports; remediation.py validates it on read.
     remediation_plan: dict[str, object] | None = None
+    # v3+: incremented each time REMEDIATING actually executes an action.
+    # Cap enforced by the remediation loop — after the max is hit, PLANNING
+    # forces ESCALATED instead of proposing a retry.
+    remediation_attempts: int = Field(default=0, ge=0)
     created_at: datetime
     updated_at: datetime
 

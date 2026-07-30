@@ -1,4 +1,4 @@
-.PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-reg demo demo-down bootstrap-token snapshot baseline clean
+.PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-reg trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore demo demo-down bootstrap-token snapshot baseline clean
 
 help:
 	@echo "Targets:"
@@ -12,6 +12,7 @@ help:
 	@echo "  eval             full eval suite offline (writes report)"
 	@echo "  eval-live        run eval suite against live platform (needs .env)"
 	@echo "  trace-report     render evals/traces/*.jsonl → readable txt files"
+	@echo "  chaos-help       list chaos setup subcommands (kill-consumer, etc.)"
 	@echo "  eval-reg         regression eval subset"
 	@echo "  demo             compose up (platform pinned by digest) + live scenario"
 	@echo "  demo-down        stop demo compose services"
@@ -57,6 +58,32 @@ eval-live:
 
 trace-report:
 	uv run python scripts/format_traces.py
+
+# --- Chaos setup helpers (live-eval prep) -------------------------------
+# All wrap scripts/chaos_setup.py. Effects self-clean on TTL. Requires
+# PLATFORM_MCP_URL + PLATFORM_TOKEN (with chaos:invoke scope) in env.
+# See docs/runbook.md for the full workflow.
+
+chaos-help:
+	uv run python scripts/chaos_setup.py --help
+
+chaos-kill-consumer:
+	uv run python scripts/chaos_setup.py kill-consumer
+
+chaos-poison:
+	uv run python scripts/chaos_setup.py poison-message
+
+chaos-saturate:
+	uv run python scripts/chaos_setup.py saturate-redis
+
+chaos-latency:
+	uv run python scripts/chaos_setup.py inject-latency
+
+chaos-bad-deploy:
+	uv run python scripts/chaos_setup.py bad-deploy
+
+chaos-restore:
+	uv run python scripts/chaos_setup.py restore-consumer
 
 eval-reg: eval
 	uv run python -m evals.regression

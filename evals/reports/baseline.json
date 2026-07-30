@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-07-30T02:09:23.576007Z",
-  "total": 31,
-  "passed": 31,
+  "generated_at": "2026-07-30T02:35:58.396982Z",
+  "total": 33,
+  "passed": 33,
   "failed": 0,
-  "judged_count": 31,
-  "judge_useful_count": 31,
-  "judge_mean_overall": 0.8524193548387097,
+  "judged_count": 33,
+  "judge_useful_count": 33,
+  "judge_mean_overall": 0.8537878787878788,
   "outcomes": [
     {
       "scenario": "alert_storm",
@@ -905,6 +905,78 @@
         "groundedness": 0.9,
         "actionability": 0.9,
         "reasoning": "Findings ground in the DLQ list and the replay response; recommendation gives a concrete monitoring window and next step.\n"
+      }
+    },
+    {
+      "scenario": "remediate_runaway_saga_success",
+      "final_state": "resolved",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "remediate_runaway_saga_success",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state resolved matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "expected action pause_dag was called 1× "
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.85,
+        "reasoning": "Findings ground in the DAG state and the pause response; recommendation names both the investigation direction and the follow-up compensation flow if the automatic recovery doesn't happen.\n"
+      }
+    },
+    {
+      "scenario": "remediate_stale_cache_success",
+      "final_state": "resolved",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "remediate_stale_cache_success",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state resolved matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "expected action invalidate_cache_key was called 1× "
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.85,
+        "reasoning": "Findings ground in the health probe stats and the invalidation result; recommendation names a concrete monitoring window plus an investigation direction if the problem recurs.\n"
       }
     },
     {

@@ -1,0 +1,152 @@
+# Eval methodology
+
+How we design, score, and iterate on eval scenarios for the Incident Commander agent. Written after the Phase-6 live-eval runs surfaced a design gap between our scenarios and real platform signal — see [Case study: DLQ categorization discovery](#case-study-dlq-categorization-discovery) for the specific lesson.
+
+## What eval proves
+
+The eval suite is the product's proof. Every scenario answers one of three questions:
+
+1. **Investigation quality** — given an alert, does the agent gather the right evidence and produce a well-grounded briefing?
+2. **Remediation correctness** — when the agent chooses to act, does it pick the right Tier-1 tool with the right arguments?
+3. **Escalation discipline** — when evidence is ambiguous or maps to no Tier-1 fix, does the agent hand off cleanly with a useful briefing?
+
+The agent passing #3 (a "good escalation") matters as much as passing #2 (a "good remediation"). Auto-fixing when you shouldn't is worse than escalating when you didn't need to.
+
+## Scenario shape
+
+Each scenario is one YAML file under `evals/scenarios/`. Minimum required fields:
+
+```yaml
+name: consumer_lag_high
+alert:
+  source: platform.kafka
+  severity: high
+  fingerprint: consumer_lag_high
+  consumer_group: worker-dispatcher
+expectation:
+  expected_terminal_state: escalated  # or resolved
+```
+
+Optional fields drive richer grading:
+
+- `expected_evidence_contains: [<substring>, ...]` — grader checks the evidence corpus
+- `expected_action_tool: restart_consumer_group` — for remediation scenarios, asserts a specific Tier-1 tool was invoked
+- `max_tool_calls: 5` — budget cap
+- `use_live_mcp: true` / `use_live_llm: true` — flip from canned to live for real-platform / real-LLM verification
+- `canned_tool_responses: {tool_name: {...}}` — canned platform responses for offline determinism
+- `canned_llm_responses: {role: [{...}]}` — canned LLM outputs per role, keyed by `investigation_planner` / `remediation_planner` / `verification_judge` / `briefing_writer` / `briefing_judge`
+
+## Grading dimensions
+
+`evals/graders/deterministic.py` scores four dimensions with pure logic:
+
+| Dimension | What it checks | When it applies |
+|---|---|---|
+| `OUTCOME` | Terminal state matches `expected_terminal_state` | Every scenario |
+| `EVIDENCE` | Every string in `expected_evidence_contains` appears somewhere in the evidence corpus | Only if the expectation is set |
+| `BUDGET` | `budget.tool_calls_used <= max_tool_calls` | Only if the expectation is set |
+| `ACTION` | Some evidence entry has `tool_name == expected_action_tool` | Only if the expectation is set — Phase 6 addition for remediation scenarios |
+
+A separate LLM judge (`evals/graders/llm_judge.py`, Haiku) scores briefing quality on `groundedness` + `actionability`. Judge scores are informational — they don't gate the pass/fail. Deterministic dimensions do.
+
+## Live vs canned modes
+
+Every scenario has a `use_live_*` pair of flags. The runner interprets them as **preferences**:
+
+- `use_live_mcp: true` → prefer live platform if `PLATFORM_MCP_URL` is real; else fall back to `canned_tool_responses`
+- `use_live_llm: true` → prefer live Anthropic if `ANTHROPIC_API_KEY` is real; else fall back to `canned_llm_responses`
+
+No scenario ever "skips" — every one runs in both modes. This is why `make eval` (offline, CI-safe) exercises the same 33 scenarios `make eval-live` does.
+
+Four scenarios are deliberately canned-only (`use_live_mcp: false` + `use_live_llm: false`): they test agent-side error handling that a real platform doesn't produce (`tool_missing_response`, `tool_output_schema_mismatch`, `tool_result_marked_error`, `planner_stops_immediately`).
+
+## Trace outputs
+
+Every live run writes three coordinated views per scenario:
+
+```
+evals/traces/<scenario>.jsonl         ← raw LLM + MCP request/response
+evals/trajectories/<scenario>.json    ← state-machine checkpoints per transition
+evals/briefings/<scenario>.json       ← final human-facing artifact
+evals/reports/human/<scenario>.txt    ← readable stepwise render (auto-generated)
+evals/reports/latest.json             ← aggregate report
+evals/reports/baseline.json           ← last-blessed baseline (regression gate)
+```
+
+The `evals/reports/human/*.txt` files are the fastest path to understand one run — every LLM call is a labeled step with full system prompt, user message, and parsed output.
+
+## Regression gating
+
+`make eval-reg` runs the suite offline and compares against `evals/reports/baseline.json`. Behavior-changing PRs that touch prompts, tools, policy tiers, or the pinned model must pass. When a scenario's expectation legitimately shifts (new tool, new prompt, new grader dim), `make baseline` regenerates the baseline — commit the diff so the reviewer sees the metric movement.
+
+## When live and offline disagree
+
+Live runs can pass while offline runs fail (canned data went stale) or offline can pass while live fails (platform evolved). Both are signals:
+
+- **Offline drift**: rerun the scenario live, capture new `canned_tool_responses` from the actual platform response, commit the updated YAML.
+- **Live drift**: platform-side change moved a field or renamed a tool. Bump `contracts/platform-tools.snapshot.json` via `make snapshot`, update `src/incident_commander/tools/registry.py` to match.
+
+## Case study: DLQ categorization discovery
+
+The first live runs of the Phase-6 remediation scenarios surfaced a real design gap. Documenting here as the reference example for what live-eval is supposed to catch.
+
+### What we designed
+
+Scenario `remediate_dlq_backlog_success`:
+- Alert: `dlq_depth_warning` (high DLQ count)
+- Expected agent behavior: probe DLQ → confirm poison messages → emit `remediate` → PLANNING picks `replay_dlq_messages` → VERIFYING sees DLQ shorter → **RESOLVED**
+- Expected action tool: `replay_dlq_messages`
+
+### What happened live
+
+Chaos setup fired `poison-message` to populate the DLQ. Platform's seed DLQ also contained pre-existing real-error jobs. Agent's investigation planner ran 5 iterations:
+
+| Iter | Top hypothesis | Confidence | Decision |
+|---|---|---|---|
+| 1 | `poison-message-dlq-backlog` | 0.65 | Probe `list_dlq_messages` |
+| 2 | **`smtp-relay-down-downstream-unavailable`** | **0.82** | Probe `get_deploy_history` |
+| 3 | `smtp-relay-down-post-deploy` | 0.82 | Probe `get_trace` |
+| 4 | same | 0.82 | Probe `list_active_alerts` |
+| 5 | same | 0.82 | Probe `get_consumer_lag` |
+
+Then escalated. `replay_dlq_messages` was never called. Judge scored the briefing 0.90.
+
+### Why the agent was right
+
+The DLQ contained:
+- `csv_upload` job: `ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382` — a **real data bug**, not a poison message
+- SMTP-related failures pointing at a downstream dependency issue
+
+Neither is a "replay-safe" case. Blindly calling `replay_dlq_messages` on this DLQ would re-fail every job — the underlying causes weren't transient. The LLM correctly refused to force-fit a wrong fix and escalated with a useful briefing identifying the specific stuck jobs.
+
+**Confidence was above the 0.7 threshold** (0.82) — but the hypothesis name (`smtp-relay-down-...`) didn't map to any of the 4 Tier-1 fix categories the prompt lists (`consumer_saturation`, `poison_message`, `stale_cache`, `runaway_saga`). The agent knew to escalate rather than round-peg into a Tier-1 tool.
+
+### Why the eval "failed"
+
+The scenario's `expected_action_tool: replay_dlq_messages` assumed replay is always right for DLQ backlogs. In reality, replay is right only for *specific* DLQ causes. The scenario design was too coarse.
+
+### What we're doing about it
+
+Three coordinated changes (in flight as of 2026-07-30, pending platform v0.4.0):
+
+**Platform side:**
+1. **Categorize DLQ seed data + triage output.** Add `remediation_hint` field per entry: `replay_safe` / `wait_and_replay` / `human_required`. Chaos hook `poison_message` should produce `replay_safe`; a new `chaos-seed-bad-data` should produce `human_required`.
+2. **More granular Tier-1 tools.** `replay_dlq_by_ids([id, ...])` for targeted replay, `replay_dlq_by_category("replay_safe")` for bulk-but-filtered, `mark_dlq_permanent(id, reason)` to remove unfixable entries from the active DLQ.
+
+**Agent side:**
+3. **Split the scenario** into category-specific tests: `remediate_dlq_replay_safe_success` (all replay-safe → replay), `remediate_dlq_mixed_partial` (mixed → replay safe ones, escalate rest), `remediate_dlq_all_persistent_escalates` (all real bugs → escalate cleanly). Update the remediation planner prompt to consume `remediation_hint`.
+
+### The lesson
+
+**Eval scenarios must match the shape of real signal**, not the shape we wish the signal had. The scenario prompt told the agent "DLQ high → replay it"; real DLQ contents told the agent "these are bugs, don't replay." The agent listened to the evidence, not the prompt. That's a feature.
+
+This is exactly what live-eval is for — surfacing the mismatch between design-time assumptions and runtime reality. Offline canned evals never would have caught it because the canned DLQ data was tuned to match the expected outcome.
+
+## What eval doesn't cover (yet)
+
+- **Adversarial robustness** — Phase 7. Injection payloads in log lines, DLQ bodies, trace metadata.
+- **Memory lift** — Phase 4. Repeat-pattern scenarios with memory on vs off.
+- **Cost drift** — Phase 8. Per-incident token + $ ceilings alerting on trend changes.
+- **Cross-tenant isolation** — Phase 8+. Multi-SA runs against the same platform.
+
+These are called out where relevant in the scenario YAML `tags:` field (`phase-7-adversarial`, etc.) so the roadmap is visible from the eval directory itself.

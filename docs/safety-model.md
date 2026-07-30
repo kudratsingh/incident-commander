@@ -69,6 +69,14 @@ No `TIER_2` tools ship today. When they land, they use the platform's propose/ap
 
 Every escalation carries the failure reason on evidence. `EscalationBriefing` (rendered by the briefing writer + judged by the judge) is the artifact a human reads.
 
+## Evidence-driven caution is a feature
+
+The remediation prompt lists 4 hypothesis-to-fix mappings: `consumer_saturation → restart_consumer_group`, `poison_message → replay_dlq_messages`, `stale_cache → invalidate_cache_key`, `runaway_saga → pause_dag`. It also says: _"Prefer `remediate` over `stop` when the top hypothesis has confidence > 0.7 and matches a Tier-1 fix category. If none match, `stop` and let a human handle it."_
+
+The important word is **matches**. If the LLM's top hypothesis is above the confidence threshold but its *name* doesn't map to one of the 4 categories (e.g., `smtp-relay-down-post-deploy`, `database-cpu-saturation`, `hot-key-eviction`), the agent correctly refuses to force-fit a wrong fix and escalates. The first live-eval remediation run surfaced this exact case — the agent read real DLQ contents, identified them as downstream-outage failures rather than poison messages, and escalated with a well-graded briefing instead of blindly replaying jobs that would just re-fail.
+
+This is intentional. Aggressive auto-remediation with an unmapped hypothesis is worse than a clean escalation with a useful briefing. When live-eval "fails" because the agent chose escalate over remediate, first check whether the LLM was actually being smart — the trace's hypothesis chain usually tells you. See [docs/eval-methodology.md#case-study-dlq-categorization-discovery](eval-methodology.md#case-study-dlq-categorization-discovery) for the full example.
+
 ## Budgets
 
 `BudgetLedger` on `RunState` caps every incident:

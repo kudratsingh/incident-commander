@@ -160,6 +160,8 @@ def run_scenario(
         mcp_client = CannedMCPClient(scenario.canned_tool_responses)
 
     investigation_llm: LLMClientProtocol
+    remediation_planner_llm: LLMClientProtocol
+    verification_judge_llm: LLMClientProtocol
     briefing_llm: LLMClientProtocol
     judge_llm: LLMClientProtocol
     if live_llm_available:
@@ -169,6 +171,14 @@ def run_scenario(
         investigation_llm = LLMClient(
             api_key=api_key,
             tracer=tracer.llm_hook("investigation_planner") if tracer else None,
+        )
+        remediation_planner_llm = LLMClient(
+            api_key=api_key,
+            tracer=tracer.llm_hook("remediation_planner") if tracer else None,
+        )
+        verification_judge_llm = LLMClient(
+            api_key=api_key,
+            tracer=tracer.llm_hook("verification_judge") if tracer else None,
         )
         briefing_llm = LLMClient(
             api_key=api_key,
@@ -182,6 +192,12 @@ def run_scenario(
         investigation_llm = CannedLLMClient(
             scenario.canned_llm_responses.get("investigation_planner", [])
         )
+        remediation_planner_llm = CannedLLMClient(
+            scenario.canned_llm_responses.get("remediation_planner", [])
+        )
+        verification_judge_llm = CannedLLMClient(
+            scenario.canned_llm_responses.get("verification_judge", [])
+        )
         briefing_llm = CannedLLMClient(scenario.canned_llm_responses.get("briefing_writer", []))
         judge_llm = CannedLLMClient(scenario.canned_llm_responses.get("briefing_judge", []))
 
@@ -189,15 +205,15 @@ def run_scenario(
     transitions[IncidentState.INVESTIGATING] = make_llm_investigate(
         mcp_client, investigation_llm, model=settings.agent_model
     )
-    # Phase 6 remediation loop: PLANNING → REMEDIATING → VERIFYING. The
-    # investigation planner hands off here when the top hypothesis is
-    # remediable. Reuses the same LLM client + MCP client.
+    # Phase 6 remediation loop: PLANNING → REMEDIATING → VERIFYING. Each
+    # role gets its own LLM client so canned queues stay role-partitioned
+    # and live tracer records label each call by role.
     transitions[IncidentState.PLANNING] = make_llm_plan(
-        investigation_llm, model=settings.agent_model
+        remediation_planner_llm, model=settings.agent_model
     )
     transitions[IncidentState.REMEDIATING] = make_remediate(mcp_client)
     transitions[IncidentState.VERIFYING] = make_llm_verify(
-        mcp_client, investigation_llm, model=settings.agent_model
+        mcp_client, verification_judge_llm, model=settings.agent_model
     )
 
     try:

@@ -120,6 +120,66 @@ class TestBudgetDimension:
         assert _dim(report, GradeDimension.BUDGET).passed is True
 
 
+class TestActionDimension:
+    def test_no_expectation_passes_trivially(self, run_state: RunState, now: datetime) -> None:
+        run = _with_terminal(run_state, IncidentState.ESCALATED, ())
+        exp = ScenarioExpectation(name="s", expected_terminal_state=IncidentState.ESCALATED)
+        report = grade(run, exp)
+        action = _dim(report, GradeDimension.ACTION)
+        assert action.passed is True
+        assert "no action expectation" in action.detail
+
+    def test_expected_action_present_passes(self, run_state: RunState, now: datetime) -> None:
+        evidence = (
+            _evidence(now, "get_consumer_lag", '{"lag":15000}'),
+            _evidence(now, "restart_consumer_group", '{"accepted":true}'),
+        )
+        run = _with_terminal(run_state, IncidentState.RESOLVED, evidence)
+        exp = ScenarioExpectation(
+            name="s",
+            expected_terminal_state=IncidentState.RESOLVED,
+            expected_action_tool="restart_consumer_group",
+        )
+        report = grade(run, exp)
+        assert _dim(report, GradeDimension.ACTION).passed is True
+
+    def test_expected_action_missing_fails_with_tool_list(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # Only a read tool was called — no remediation happened.
+        evidence = (_evidence(now, "get_consumer_lag", '{"lag":15000}'),)
+        run = _with_terminal(run_state, IncidentState.ESCALATED, evidence)
+        exp = ScenarioExpectation(
+            name="s",
+            expected_terminal_state=IncidentState.ESCALATED,
+            expected_action_tool="restart_consumer_group",
+        )
+        report = grade(run, exp)
+        action = _dim(report, GradeDimension.ACTION)
+        assert action.passed is False
+        assert "restart_consumer_group" in action.detail
+        assert "get_consumer_lag" in action.detail
+
+    def test_action_dimension_ignores_internal_pseudo_tools(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # `_planner_stop` etc. shouldn't clutter the "tools called" list on
+        # failure — they're state-machine bookkeeping, not real tool calls.
+        evidence = (
+            _evidence(now, "_planner_stop", "planner stop: done"),
+            _evidence(now, "get_consumer_lag", '{"lag":0}'),
+        )
+        run = _with_terminal(run_state, IncidentState.ESCALATED, evidence)
+        exp = ScenarioExpectation(
+            name="s",
+            expected_terminal_state=IncidentState.ESCALATED,
+            expected_action_tool="restart_consumer_group",
+        )
+        detail = _dim(grade(run, exp), GradeDimension.ACTION).detail
+        assert "_planner_stop" not in detail
+        assert "get_consumer_lag" in detail
+
+
 class TestAggregate:
     def test_all_dimensions_pass_report_passes(self, run_state: RunState, now: datetime) -> None:
         evidence = (_evidence(now, "get_consumer_lag", '{"lag":0}'),)
@@ -133,7 +193,8 @@ class TestAggregate:
         report = grade(run, exp)
         assert report.passed is True
         assert report.scenario == "happy"
-        assert len(report.dimensions) == 3
+        # OUTCOME, EVIDENCE, BUDGET, ACTION (ACTION added in Phase 6).
+        assert len(report.dimensions) == 4
 
     def test_any_dimension_fails_report_fails(self, run_state: RunState, now: datetime) -> None:
         run = _with_terminal(run_state, IncidentState.RESOLVED)

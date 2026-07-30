@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-07-29T00:27:51.699805Z",
-  "total": 28,
-  "passed": 28,
+  "generated_at": "2026-07-30T02:09:23.576007Z",
+  "total": 31,
+  "passed": 31,
   "failed": 0,
-  "judged_count": 28,
-  "judge_useful_count": 28,
-  "judge_mean_overall": 0.8482142857142857,
+  "judged_count": 31,
+  "judge_useful_count": 31,
+  "judge_mean_overall": 0.8524193548387097,
   "outcomes": [
     {
       "scenario": "alert_storm",
@@ -29,6 +29,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 2 tool calls, cap 6"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -60,6 +65,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 1 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -85,12 +95,17 @@
           {
             "dimension": "evidence",
             "passed": true,
-            "detail": "all 2 expected signals found"
+            "detail": "all 1 expected signals found"
           },
           {
             "dimension": "budget",
             "passed": true,
             "detail": "used 1 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -122,6 +137,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 1 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -153,6 +173,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 1 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -178,12 +203,17 @@
           {
             "dimension": "evidence",
             "passed": true,
-            "detail": "all 2 expected signals found"
+            "detail": "all 1 expected signals found"
           },
           {
             "dimension": "budget",
             "passed": true,
             "detail": "used 1 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -215,6 +245,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 1 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -246,6 +281,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 1 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -277,6 +317,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 1 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -308,6 +353,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 1 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -339,6 +389,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 1 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -370,6 +425,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 1 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -400,7 +460,12 @@
           {
             "dimension": "budget",
             "passed": true,
-            "detail": "used 1 tool calls, cap 5"
+            "detail": "used 1 tool calls, cap 6"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -432,6 +497,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 2 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -463,6 +533,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 2 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -494,6 +569,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -525,6 +605,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -556,6 +641,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -587,6 +677,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -618,6 +713,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -649,6 +749,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -680,6 +785,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 1 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -711,6 +821,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 1 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -718,6 +833,114 @@
         "groundedness": 0.9,
         "actionability": 0.85,
         "reasoning": "Findings ground in the hit/miss numbers; recommendation names two concrete mitigations.\n"
+      }
+    },
+    {
+      "scenario": "remediate_consumer_lag_success",
+      "final_state": "resolved",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "remediate_consumer_lag_success",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state resolved matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "expected action restart_consumer_group was called 1× "
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.85,
+        "reasoning": "Findings ground in the two lag readings and the restart action; recommendation names a concrete monitoring window + escalation criterion.\n"
+      }
+    },
+    {
+      "scenario": "remediate_dlq_backlog_success",
+      "final_state": "resolved",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "remediate_dlq_backlog_success",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state resolved matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "expected action replay_dlq_messages was called 1× "
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.9,
+        "reasoning": "Findings ground in the DLQ list and the replay response; recommendation gives a concrete monitoring window and next step.\n"
+      }
+    },
+    {
+      "scenario": "remediate_verify_fails",
+      "final_state": "escalated",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "remediate_verify_fails",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "expected action restart_consumer_group was called 1× "
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.9,
+        "reasoning": "Findings correctly identify the failed remediation attempt; recommendation names three specific things to check next.\n"
       }
     },
     {
@@ -742,6 +965,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 1 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -773,6 +1001,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -804,6 +1037,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -835,6 +1073,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },
@@ -866,6 +1109,11 @@
             "dimension": "budget",
             "passed": true,
             "detail": "used 1 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
           }
         ]
       },

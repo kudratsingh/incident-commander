@@ -25,7 +25,7 @@ The three categories dictate the tool:
 | `remediation_hint` | Action tool | Notes |
 |---|---|---|
 | `replay_safe` | `replay_dlq_by_ids` (up to 50 ids) or `replay_dlq_by_category` with `category='replay_safe'` for bulk | Immediate replay. The underlying failure was a poison-message or transient cause the consumer can now handle. |
-| `wait_and_replay` | `replay_dlq_by_ids` (up to 50 ids) | These will be replayed immediately for now; a follow-up field (`delay_seconds`) is planned. Do not emit a delay parameter — the platform's schema will refuse unknown fields. If evidence strongly suggests the external dependency is still down (e.g., `list_active_alerts` shows the downstream 503 spike is ongoing), consider `stop` and let a human decide when to retry. |
+| `wait_and_replay` | `replay_dlq_by_ids` with `delay_seconds` set (300 for SMTP/API transients, 60 for network blips, 600 max) | The platform holds the timer — schedules the replay at `now + delay_seconds`. Agent's job ends after scheduling; verification runs against the shortened DLQ. If `list_active_alerts` shows the downstream is still degrading (not recovering), consider a longer delay or `stop` for human review. |
 | `human_required` | `mark_dlq_permanent` — one call per job_id, with a full-sentence `reason` — then `stop` (escalate). **Never** call any replay tool on a `human_required` entry. The platform refuses `replay_dlq_by_category` with `category='human_required'`. |
 
 **Mixed DLQs** (multiple categories in one investigation): pick the most impactful action. If replay_safe entries exist, replay those. Leave wait_and_replay / human_required for the human briefing. One `RemediationPlan` targets one action tool — subsequent PRs may split into multiple.

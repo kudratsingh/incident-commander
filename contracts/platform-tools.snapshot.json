@@ -616,6 +616,21 @@
             "title": "Max Replays",
             "type": "integer"
           },
+          "delay_seconds": {
+            "anyOf": [
+              {
+                "maximum": 3600,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "If set, the platform defers each replay by this many seconds. Use with `wait_and_replay` when the underlying dependency needs a moment to recover. Omit for immediate replay. Cap of 1 hour.",
+            "title": "Delay Seconds"
+          },
           "idempotency_key": {
             "maxLength": 255,
             "minLength": 8,
@@ -633,7 +648,7 @@
     },
     {
       "name": "replay_dlq_by_ids",
-      "description": "Replay a specific set of DLQ jobs by ID. Safer than `replay_dlq_messages(job_type, limit)` when the agent has already picked entries from `list_dlq_messages`. Each replay hits the existing JobService path (reset retry_count, re-publish to job.submitted via the outbox). Returns per-id success + error so a partial replay is observable. Idempotent.",
+      "description": "Replay a specific set of DLQ jobs by ID. Safer than `replay_dlq_messages(job_type, limit)` when the agent has already picked entries from `list_dlq_messages`. Immediate replay hits the existing JobService path (reset retry_count, re-publish to job.submitted via the outbox). Pass `delay_seconds` (1..3600) to defer the enqueue for the `wait_and_replay` category — the platform schedules on a Redis ZSET and a worker loop fires the replay when the delay elapses. Returns per-id outcome so a partial replay is observable. Idempotent.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -647,6 +662,21 @@
             "minItems": 1,
             "title": "Job Ids",
             "type": "array"
+          },
+          "delay_seconds": {
+            "anyOf": [
+              {
+                "maximum": 3600,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "If set, the platform defers the enqueue for this many seconds before re-publishing to `job.submitted`. Use for `wait_and_replay` category entries where an external dependency needs time to recover. Omit for immediate replay. Cap of 1 hour keeps scheduled work from lingering past the incident's natural lifecycle.",
+            "title": "Delay Seconds"
           },
           "idempotency_key": {
             "maxLength": 255,

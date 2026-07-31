@@ -28,7 +28,7 @@ canned_tool_responses:
   replay_dlq_by_category:
     content:
     - type: text
-      text: '{"category":"replay_safe","requested":1,"replayed":1,"failed":0,"jobs":[{"id":"dddddddd-4444-4444-4444-000000000001","type":"send_email"}]}'
+      text: '{"category":"replay_safe","matched":1,"replayed":1,"scheduled":0,"failed":0,"job_ids":["dddddddd-4444-4444-4444-000000000001"],"execute_at":null}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

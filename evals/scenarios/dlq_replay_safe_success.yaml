@@ -25,7 +25,7 @@ canned_tool_responses:
   replay_dlq_by_category:
     content:
     - type: text
-      text: '{"category":"replay_safe","requested":3,"replayed":3,"failed":0,"jobs":[{"id":"aaaaaaaa-1111-1111-1111-000000000001","type":"send_email"},{"id":"aaaaaaaa-1111-1111-1111-000000000002","type":"send_email"},{"id":"aaaaaaaa-1111-1111-1111-000000000003","type":"send_email"}]}'
+      text: '{"category":"replay_safe","matched":3,"replayed":3,"scheduled":0,"failed":0,"job_ids":["aaaaaaaa-1111-1111-1111-000000000001","aaaaaaaa-1111-1111-1111-000000000002","aaaaaaaa-1111-1111-1111-000000000003"],"execute_at":null}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

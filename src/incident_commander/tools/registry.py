@@ -381,24 +381,43 @@ class ReplayDlqMessagesInput(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=255)
 
 
-class ReplayedJob(BaseModel):
+class LegacyReplayedJob(BaseModel):
+    """Per-job entry inside the legacy ``replay_dlq_messages.jobs[]``.
+
+    Just ``id`` + ``type``, no per-job outcome. Kept for back-compat
+    with the older tool; ``replay_dlq_by_ids`` (v0.4.0+) uses the
+    richer ``ReplayedJobResult`` below.
+    """
+
     model_config = ConfigDict(extra="ignore", frozen=True)
     id: str
     type: str
-    # v0.4.1+: per-job scheduling status. When the caller passed
-    # ``delay_seconds``, ``scheduled`` is True and ``execute_at`` carries
-    # the epoch-seconds timestamp of the deferred enqueue. Immediate
-    # replays leave both at their defaults.
-    scheduled: bool = False
-    execute_at: float | None = None
 
 
 class ReplayDlqMessagesOutput(BaseModel):
+    """Output for the legacy ``replay_dlq_messages`` tool (pre-v0.4.0)."""
+
     model_config = ConfigDict(extra="ignore", frozen=True)
     requested: int
     replayed: int
     failed: int
-    jobs: list[ReplayedJob]
+    jobs: list[LegacyReplayedJob]
+
+
+class ReplayedJobResult(BaseModel):
+    """Per-job outcome inside ``replay_dlq_by_ids.results[]`` (v0.4.4+).
+
+    ``ok`` distinguishes "platform accepted the replay" from "platform
+    rejected it" (e.g. job wasn't in a replayable state). ``scheduled``
+    + ``execute_at`` are set when the caller passed ``delay_seconds``.
+    """
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    id: str
+    ok: bool
+    error: str | None = None
+    scheduled: bool = False
+    execute_at: float | None = None
 
 
 class InvalidateCacheKeyInput(BaseModel):
@@ -439,16 +458,20 @@ class ReplayDlqByIdsInput(BaseModel):
 
 
 class ReplayDlqByIdsOutput(BaseModel):
+    """Output shape from v0.4.4 platform.
+
+    ``requested`` == input job_ids count. ``replayed`` + ``scheduled`` +
+    ``failed`` sum to ``requested``. Per-job outcome lives in
+    ``results[]`` — that's where an operator finds which specific ids
+    were rejected and why.
+    """
+
     model_config = ConfigDict(extra="ignore", frozen=True)
     requested: int
     replayed: int
+    scheduled: int
     failed: int
-    jobs: list[ReplayedJob]
-    # v0.4.1+: count of jobs deferred vs immediate. When delay_seconds was
-    # set, all successfully-processed jobs land in the scheduled count and
-    # ``replayed`` reflects immediate-only. Sum: replayed + scheduled +
-    # failed <= requested.
-    scheduled: int = 0
+    results: list[ReplayedJobResult]
 
 
 class ReplayDlqByCategoryInput(BaseModel):
@@ -465,13 +488,23 @@ class ReplayDlqByCategoryInput(BaseModel):
 
 
 class ReplayDlqByCategoryOutput(BaseModel):
+    """Output shape from v0.4.4 platform.
+
+    ``matched`` (not requested) — how many DLQ rows the category filter
+    hit. ``replayed`` + ``scheduled`` + ``failed`` sum to ``matched``.
+    ``job_ids[]`` lists the specific ids that were processed.
+    ``execute_at`` is set when the caller passed ``delay_seconds``
+    (single epoch for the bulk operation; per-job in the by-ids tool).
+    """
+
     model_config = ConfigDict(extra="ignore", frozen=True)
     category: str
-    requested: int
+    matched: int
     replayed: int
+    scheduled: int
     failed: int
-    jobs: list[ReplayedJob]
-    scheduled: int = 0
+    job_ids: list[str]
+    execute_at: float | None = None
 
 
 class MarkDlqPermanentInput(BaseModel):
@@ -487,10 +520,21 @@ class MarkDlqPermanentInput(BaseModel):
 
 
 class MarkDlqPermanentOutput(BaseModel):
+    """Output shape from v0.4.4 platform.
+
+    ``previous_hint`` shows what the categorizer had classified this
+    entry as before the mark. ``remediation_hint`` is always
+    ``'human_required'`` after the call (that's the whole point).
+    ``already_marked`` tells the operator whether this call was a
+    no-op (repeat call with the same idempotency_key OR the entry was
+    already ``human_required``).
+    """
+
     model_config = ConfigDict(extra="ignore", frozen=True)
     job_id: str
-    marked: bool
-    reason: str
+    previous_hint: str | None = None
+    remediation_hint: str
+    already_marked: bool
 
 
 # --- Registry ------------------------------------------------------------

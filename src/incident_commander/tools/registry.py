@@ -385,6 +385,12 @@ class ReplayedJob(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
     id: str
     type: str
+    # v0.4.1+: per-job scheduling status. When the caller passed
+    # ``delay_seconds``, ``scheduled`` is True and ``execute_at`` carries
+    # the epoch-seconds timestamp of the deferred enqueue. Immediate
+    # replays leave both at their defaults.
+    scheduled: bool = False
+    execute_at: float | None = None
 
 
 class ReplayDlqMessagesOutput(BaseModel):
@@ -425,13 +431,11 @@ class ReplayDlqByIdsInput(BaseModel):
     model_config = _EMPTY_CONFIG
     job_ids: list[UUID] = Field(min_length=1, max_length=50)
     idempotency_key: str = Field(min_length=8, max_length=255)
-    # ``delay_seconds`` is the platform PR in flight (v0.4.1+). Adding it
-    # here now would break the contract test — platform schema has
-    # ``additionalProperties: false`` and would 400 on the extra field.
-    # Wait for the snapshot to include it, then add in a follow-up PR.
-    # For now the ``wait_and_replay`` category flows through the same
-    # tool with immediate replay (agent's remediation prompt calls this
-    # out as the interim behavior).
+    # v0.4.1+: platform defers each replay by ``delay_seconds`` when set.
+    # Cap of 1 hour keeps scheduled work from lingering past the incident's
+    # natural lifecycle. Omit for immediate replay. Used for
+    # ``wait_and_replay`` category — external dependency needs recovery time.
+    delay_seconds: int | None = Field(default=None, ge=1, le=3600)
 
 
 class ReplayDlqByIdsOutput(BaseModel):
@@ -440,6 +444,11 @@ class ReplayDlqByIdsOutput(BaseModel):
     replayed: int
     failed: int
     jobs: list[ReplayedJob]
+    # v0.4.1+: count of jobs deferred vs immediate. When delay_seconds was
+    # set, all successfully-processed jobs land in the scheduled count and
+    # ``replayed`` reflects immediate-only. Sum: replayed + scheduled +
+    # failed <= requested.
+    scheduled: int = 0
 
 
 class ReplayDlqByCategoryInput(BaseModel):
@@ -451,7 +460,8 @@ class ReplayDlqByCategoryInput(BaseModel):
     job_type: str | None = None
     max_replays: int = Field(default=20, ge=1, le=100)
     idempotency_key: str = Field(min_length=8, max_length=255)
-    # See ReplayDlqByIdsInput — delay_seconds pending v0.4.1.
+    # v0.4.1+: same delay semantics as replay_dlq_by_ids.
+    delay_seconds: int | None = Field(default=None, ge=1, le=3600)
 
 
 class ReplayDlqByCategoryOutput(BaseModel):
@@ -461,6 +471,7 @@ class ReplayDlqByCategoryOutput(BaseModel):
     replayed: int
     failed: int
     jobs: list[ReplayedJob]
+    scheduled: int = 0
 
 
 class MarkDlqPermanentInput(BaseModel):

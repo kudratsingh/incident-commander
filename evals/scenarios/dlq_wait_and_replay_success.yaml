@@ -1,16 +1,16 @@
-# DLQ has wait_and_replay entries → agent replays via ids → RESOLVED.
+# DLQ has wait_and_replay entries → agent schedules delayed replay → RESOLVED.
 #
-# NOTE: platform delay_seconds is a follow-up PR (v0.4.1). Until it ships,
-# the agent replays immediately and relies on the platform DLQ + retry loop
-# if the underlying dependency is still down. Scenario expects the immediate
-# replay behavior; when delay_seconds lands, expectations tighten.
+# v0.4.1+: platform holds the timer via delay_seconds on replay_dlq_by_ids.
+# Agent picks 300s (5 min) as the default for SMTP/API transients. Verify
+# confirms the scheduled count matches the requested count and the DLQ
+# is drained of those ids.
 
 name: dlq_wait_and_replay_success
 description: >
   DLQ has entries hinted wait_and_replay (transient downstream failures).
-  Agent replays them via replay_dlq_by_ids. The active_alerts probe
-  confirms the downstream is recovering (a mitigating alert is present
-  but resolving). Verify shows the specific ids are gone from the DLQ.
+  Agent schedules a delayed replay via replay_dlq_by_ids(delay_seconds=300).
+  Platform holds the timer — schedules the replays at now+5min. Verify
+  confirms the ids are out of the active DLQ.
 
 tags: [phase-6, remediation, dlq, categorization, wait-and-replay, live-mcp, live-llm]
 
@@ -31,7 +31,7 @@ canned_tool_responses:
   replay_dlq_by_ids:
     content:
       - type: text
-        text: '{"requested":2,"replayed":2,"failed":0,"jobs":[{"id":"bbbbbbbb-2222-2222-2222-000000000001","type":"send_email"},{"id":"bbbbbbbb-2222-2222-2222-000000000002","type":"send_email"}]}'
+        text: '{"requested":2,"replayed":0,"failed":0,"scheduled":2,"jobs":[{"id":"bbbbbbbb-2222-2222-2222-000000000001","type":"send_email","scheduled":true,"execute_at":1753868400.0},{"id":"bbbbbbbb-2222-2222-2222-000000000002","type":"send_email","scheduled":true,"execute_at":1753868400.0}]}'
     is_error: false
 
 canned_llm_responses:
@@ -50,11 +50,11 @@ canned_llm_responses:
           confidence: 0.85
           reasoning: >
             Both entries hint=wait_and_replay (SMTP transient timeouts).
-            Immediate replay is acceptable — platform DLQ handles re-failure
-            if the dependency is still down.
+            Schedule a delayed replay (5 min) so the platform holds the
+            timer — SMTP will likely recover in that window.
       next_action:
         kind: remediate
-        reason: wait_and_replay entries — immediate replay via ids
+        reason: wait_and_replay entries — schedule delayed replay via ids
   remediation_planner:
     - target_hypothesis: transient_downstream_failure
       action_tool: replay_dlq_by_ids
@@ -62,25 +62,34 @@ canned_llm_responses:
         job_ids:
           - bbbbbbbb-2222-2222-2222-000000000001
           - bbbbbbbb-2222-2222-2222-000000000002
+        delay_seconds: 300
       verify_tool: list_dlq_messages
       verify_arguments:
         remediation_hint: wait_and_replay
         limit: 50
       verify_expectation: >
-        After replay, the two specific job_ids should be out of the DLQ
-        list. If they return within minutes with the same error, the
-        downstream is still down and the situation warrants human review.
+        After scheduling, the platform's response should show scheduled=2
+        with per-job execute_at timestamps ~5 minutes in the future. The
+        DLQ list filtered by wait_and_replay should shrink; the platform
+        removes the entries from the active DLQ once the delayed replay
+        is enqueued (or on next tick).
   verification_judge:
     - verdict: verified
-      reasoning: replay_dlq_by_ids returned requested=replayed=2, failed=0.
+      reasoning: >
+        replay_dlq_by_ids returned scheduled=2 with per-job execute_at
+        timestamps. Platform is holding the timer — no agent-side wait
+        needed. Follow-up probe of the DLQ shows the wait_and_replay
+        filter drained.
   briefing_writer:
     - findings: >
         DLQ had 2 wait_and_replay entries (SMTP transient timeouts).
-        Replayed via replay_dlq_by_ids; platform confirmed 2/2 replayed.
+        Scheduled a 5-minute-delayed replay via replay_dlq_by_ids; platform
+        confirmed 2 scheduled with execute_at ~5 min out. Platform holds
+        the timer end-to-end.
       recommendation: >
         Monitor SMTP relay health for 15 minutes. If jobs return to DLQ
-        with the same error, page the SMTP relay owner — the dependency
-        is not recovering on its own.
+        after the scheduled retry, page the SMTP relay owner — the
+        dependency is not recovering on its own.
   briefing_judge:
     - groundedness: 0.9
       actionability: 0.85
@@ -92,5 +101,10 @@ expectation:
   expected_action_tool: replay_dlq_by_ids
   expected_evidence_contains:
     - wait_and_replay
+    # v0.4.1: assert the platform response echoes a scheduled count and
+    # per-job execute_at timestamps — proves delay_seconds was set and
+    # the platform is holding the timer.
+    - '"scheduled":2'
+    - execute_at
     - verified
   max_tool_calls: 5

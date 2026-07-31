@@ -180,6 +180,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     restore.add_argument("--group", default="worker-dispatcher")
 
+    bad_data = sub.add_parser(
+        "bad-data-job",
+        help=(
+            "Create a synthetic DLQ entry hinted human_required — a persistent "
+            "data bug the agent should mark permanent, not replay. v0.4.0+."
+        ),
+    )
+    bad_data.add_argument("--job-type", default="csv_upload")
+    bad_data.add_argument(
+        "--error-message",
+        default="ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382",
+    )
+
     return parser
 
 
@@ -277,6 +290,17 @@ def main() -> int:
                 {"consumer_group": args.group, "idempotency_key": key},
             )
             _print_result("restore-consumer", result)
+        elif args.command == "bad-data-job":
+            result = client.call(
+                "create_bad_data_job",
+                {"job_type": args.job_type, "error_message": args.error_message},
+            )
+            _print_result("bad-data-job", result)
+            print(
+                "\nNext: run scenario `dlq_human_required_escalates` — the "
+                "agent should probe list_dlq_messages, see hint=human_required, "
+                "and mark_dlq_permanent instead of attempting replay."
+            )
         else:
             parser.error(f"unknown command: {args.command}")
     finally:

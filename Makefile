@@ -1,4 +1,4 @@
-.PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-live-remediation eval-reg trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore demo demo-down bootstrap-token snapshot baseline clean
+.PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-live-remediation eval-reg trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
 
 help:
 	@echo "Targets:"
@@ -93,6 +93,9 @@ chaos-bad-deploy:
 
 chaos-restore:
 	uv run python scripts/chaos_setup.py restore-consumer
+
+chaos-bad-data-job:
+	uv run python scripts/chaos_setup.py bad-data-job
 
 eval-reg: eval
 	uv run python -m evals.regression

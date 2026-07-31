@@ -298,6 +298,10 @@ class ListAuditEventsOutput(BaseModel):
 class ListDlqMessagesInput(BaseModel):
     model_config = _EMPTY_CONFIG
     job_type: str | None = None
+    # v0.4.0+: filter to entries in one remediation category.
+    # Values: replay_safe, wait_and_replay, human_required.
+    # Omit for all categories (including uncategorized).
+    remediation_hint: str | None = None
     limit: int = Field(default=50, ge=1, le=200)
 
 
@@ -320,6 +324,11 @@ class DlqEntry(BaseModel):
     updated_at: datetime | None = None
     trace_id: str | None = None
     triage: DlqTriageSummary | None = None
+    # v0.4.0+: platform's category classification for the remediation
+    # planner. When null, the agent falls back to LLM classification from
+    # ``error_message`` + ``triage``. Values: replay_safe, wait_and_replay,
+    # human_required. Drives the routing in the remediation planner prompt.
+    remediation_hint: str | None = None
     extra: dict[str, Any] | None = None
 
 
@@ -398,6 +407,81 @@ class InvalidateCacheKeyOutput(BaseModel):
     deleted: bool
 
 
+# --- v0.4.0 DLQ categorization tools ------------------------------------
+#
+# Replaces the coarse ``replay_dlq_messages`` for category-aware runs:
+# - ``replay_dlq_by_ids`` — targeted, cap 50 per call
+# - ``replay_dlq_by_category`` — bulk, filtered to replay_safe / wait_and_replay
+# - ``mark_dlq_permanent`` — for entries the agent classifies as human_required
+#
+# ``delay_seconds`` on both replay tools is agent-side optional (defaults None,
+# meaning immediate). When set, the platform schedules the enqueue via its
+# scheduler — used for ``wait_and_replay`` category where the external
+# dependency needs recovery time. Platform-owned scheduling (per ADR: the
+# platform owns durable state, not the agent).
+
+
+class ReplayDlqByIdsInput(BaseModel):
+    model_config = _EMPTY_CONFIG
+    job_ids: list[UUID] = Field(min_length=1, max_length=50)
+    idempotency_key: str = Field(min_length=8, max_length=255)
+    # ``delay_seconds`` is the platform PR in flight (v0.4.1+). Adding it
+    # here now would break the contract test — platform schema has
+    # ``additionalProperties: false`` and would 400 on the extra field.
+    # Wait for the snapshot to include it, then add in a follow-up PR.
+    # For now the ``wait_and_replay`` category flows through the same
+    # tool with immediate replay (agent's remediation prompt calls this
+    # out as the interim behavior).
+
+
+class ReplayDlqByIdsOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    requested: int
+    replayed: int
+    failed: int
+    jobs: list[ReplayedJob]
+
+
+class ReplayDlqByCategoryInput(BaseModel):
+    model_config = _EMPTY_CONFIG
+    category: str = Field(
+        description="Must be 'replay_safe' or 'wait_and_replay'. "
+        "Platform refuses 'human_required' with error code dlq_category_refused."
+    )
+    job_type: str | None = None
+    max_replays: int = Field(default=20, ge=1, le=100)
+    idempotency_key: str = Field(min_length=8, max_length=255)
+    # See ReplayDlqByIdsInput — delay_seconds pending v0.4.1.
+
+
+class ReplayDlqByCategoryOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    category: str
+    requested: int
+    replayed: int
+    failed: int
+    jobs: list[ReplayedJob]
+
+
+class MarkDlqPermanentInput(BaseModel):
+    model_config = _EMPTY_CONFIG
+    job_id: UUID
+    reason: str = Field(
+        min_length=8,
+        max_length=1024,
+        description="Full sentence explaining why the entry is not replayable. "
+        "Written to the audit log for the human review path.",
+    )
+    idempotency_key: str = Field(min_length=8, max_length=255)
+
+
+class MarkDlqPermanentOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    job_id: str
+    marked: bool
+    reason: str
+
+
 # --- Registry ------------------------------------------------------------
 
 
@@ -438,5 +522,14 @@ TOOL_REGISTRY: Final[dict[str, ToolSpec]] = {
     ),
     "invalidate_cache_key": ToolSpec(
         "invalidate_cache_key", InvalidateCacheKeyInput, InvalidateCacheKeyOutput
+    ),
+    # v0.4.0 DLQ categorization tools — remediation planner routes on
+    # ``DlqEntry.remediation_hint`` between these.
+    "replay_dlq_by_ids": ToolSpec("replay_dlq_by_ids", ReplayDlqByIdsInput, ReplayDlqByIdsOutput),
+    "replay_dlq_by_category": ToolSpec(
+        "replay_dlq_by_category", ReplayDlqByCategoryInput, ReplayDlqByCategoryOutput
+    ),
+    "mark_dlq_permanent": ToolSpec(
+        "mark_dlq_permanent", MarkDlqPermanentInput, MarkDlqPermanentOutput
     ),
 }

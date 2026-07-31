@@ -21,7 +21,7 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("9b62d3a8e3d883af8150fc2162428953c7606c9770a90fd42e35ef39530e54e0"),
     "investigation_planner": ("e0d08cde9ba13101532e17770379436e4a6ea4496bf1749101452b8e914318c4"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
-    "remediation_planner": ("e9966b789f7541b05e6fc1a70e869aeab73647713cd4cfcf23d29918ec4b2ff9"),
+    "remediation_planner": ("308fd591daebaaaecd4775c50836b7f5431c44fb3f9ca21313d480a6adabf362"),
     "verification_judge": ("3a645c8414e0216870b40e226d0440933d832e7080f18109112c616cda21508e"),
 }
 
@@ -78,14 +78,31 @@ class TestRemediationPlannerInvariants:
         assert "record_output" in content
 
     def test_names_all_tier_1_tools(self) -> None:
+        # v0.4.0+: prompt now advertises the categorized replay tools
+        # (replay_dlq_by_ids, replay_dlq_by_category, mark_dlq_permanent)
+        # in place of the coarse replay_dlq_messages. Old tool is still
+        # in the registry for back-compat but not steered by the prompt.
         content = load_prompt("remediation_planner")
         for tool in [
             "restart_consumer_group",
-            "replay_dlq_messages",
+            "replay_dlq_by_ids",
+            "replay_dlq_by_category",
+            "mark_dlq_permanent",
             "invalidate_cache_key",
             "pause_dag",
         ]:
             assert tool in content, f"remediation prompt should mention {tool}"
+
+    def test_teaches_hint_based_routing(self) -> None:
+        # The prompt must tell the LLM to trust the platform's remediation_hint
+        # field before falling back to LLM classification. Without this, the
+        # prompt drifts back to "poison-message-DLQ → replay" logic that
+        # ignores per-entry categorization (Phase 6 case-study finding).
+        content = load_prompt("remediation_planner")
+        assert "remediation_hint" in content
+        assert "replay_safe" in content
+        assert "wait_and_replay" in content
+        assert "human_required" in content
 
     def test_forbids_agent_supplied_idempotency_key(self) -> None:
         content = load_prompt("remediation_planner")

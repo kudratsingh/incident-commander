@@ -46,6 +46,11 @@ _TIER_1_TOOLS: Final[frozenset[str]] = frozenset(
         "pause_dag",
         "replay_dlq_messages",
         "invalidate_cache_key",
+        # v0.4.0 DLQ categorization tools. All idempotent, all bounded by
+        # platform-side scope check (actions:execute) + tier policy here.
+        "replay_dlq_by_ids",
+        "replay_dlq_by_category",
+        "mark_dlq_permanent",
     }
 )
 

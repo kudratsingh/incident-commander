@@ -62,7 +62,7 @@ eval-live:
 # vs ~$1.60 for the full suite. Pair with `make chaos-*` first for a
 # real broken state to fix.
 eval-live-remediation:
-	EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live --only remediate_
+	EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live --only remediate_,dlq_
 	uv run python scripts/format_traces.py
 
 trace-report:

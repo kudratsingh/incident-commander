@@ -434,31 +434,42 @@ def _settings_for_mode(live: bool) -> Settings:
     return _eval_defaults()
 
 
-def _parse_only(argv: list[str]) -> str | None:
-    """Extract a scenario name-substring filter from ``--only <pattern>``.
+def _parse_only(argv: list[str]) -> list[str]:
+    """Extract scenario name-substring filters from ``--only <pattern>``.
 
-    Kept as a manual parse so we don't pull in argparse for one flag —
-    the runner has been argv-driven since Phase 0.
+    Accepts multiple patterns via repeated ``--only`` flags or as a
+    comma-separated single value. A scenario matches if any pattern
+    appears in its name. Empty list means "no filter" (run all).
+
+    Examples:
+        --only remediate_               → single filter
+        --only remediate_,dlq_          → two filters (comma-separated)
+        --only remediate_ --only dlq_   → two filters (repeated flag)
     """
+    patterns: list[str] = []
     for i, arg in enumerate(argv):
+        raw = None
         if arg == "--only" and i + 1 < len(argv):
-            return argv[i + 1]
-        if arg.startswith("--only="):
-            return arg.split("=", 1)[1]
-    return None
+            raw = argv[i + 1]
+        elif arg.startswith("--only="):
+            raw = arg.split("=", 1)[1]
+        if raw is not None:
+            patterns.extend(p.strip() for p in raw.split(",") if p.strip())
+    return patterns
 
 
 def main() -> int:
     live = "--live" in sys.argv[1:]
-    only = _parse_only(sys.argv[1:])
+    only_patterns = _parse_only(sys.argv[1:])
     settings = _settings_for_mode(live)
     scenarios = load_scenarios(_SCENARIOS_DIR)
-    if only:
-        scenarios = [s for s in scenarios if only in s.name]
+    if only_patterns:
+        # OR-match: scenario keeps if any pattern is a substring of its name.
+        scenarios = [s for s in scenarios if any(p in s.name for p in only_patterns)]
         if not scenarios:
-            print(f"no scenarios matched --only={only!r}")
+            print(f"no scenarios matched --only={only_patterns}")
             return 2
-        print(f"filter --only={only!r} → {len(scenarios)} scenario(s)")
+        print(f"filter --only={only_patterns} → {len(scenarios)} scenario(s)")
     offline_mcp = _is_offline_placeholder(str(settings.platform_mcp_url))
     offline_llm = _is_offline_api_key(settings.anthropic_api_key.get_secret_value())
     degraded_to_canned = sum(

@@ -44,9 +44,18 @@ def snapshot() -> dict[str, Any]:
 class TestCoverage:
     def test_registry_covers_every_snapshot_tool(self, snapshot: dict[str, Any]) -> None:
         snapshot_names = {t["name"] for t in snapshot["tools"]}
-        # kill_consumer is a chaos-only tool exposed by the platform but never
-        # invoked by the agent — that's chaos-injection, not remediation.
-        expected = snapshot_names - {"kill_consumer"}
+        # Chaos tools live on the platform but the agent never invokes them
+        # via the typed registry — they're operator concerns wrapped by
+        # scripts/chaos_setup.py (raw httpx, outside the agent trust boundary).
+        chaos_tools = {
+            "kill_consumer",
+            "poison_message",
+            "saturate_redis",
+            "inject_latency",
+            "bad_deploy",
+            "create_bad_data_job",  # v0.4.0 addition
+        }
+        expected = snapshot_names - chaos_tools
         assert set(TOOL_REGISTRY) == expected, (
             f"Registry drift vs snapshot. "
             f"Missing: {expected - set(TOOL_REGISTRY)}. "

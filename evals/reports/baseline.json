@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-07-30T02:35:58.396982Z",
-  "total": 33,
-  "passed": 33,
+  "generated_at": "2026-07-31T01:02:01.350998Z",
+  "total": 37,
+  "passed": 37,
   "failed": 0,
-  "judged_count": 33,
-  "judge_useful_count": 33,
-  "judge_mean_overall": 0.8537878787878788,
+  "judged_count": 37,
+  "judge_useful_count": 37,
+  "judge_mean_overall": 0.8574324324324325,
   "outcomes": [
     {
       "scenario": "alert_storm",
@@ -34,6 +34,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -70,6 +75,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -106,6 +116,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -142,6 +157,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -178,6 +198,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -214,6 +239,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -250,6 +280,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -286,6 +321,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -322,6 +362,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -358,6 +403,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -394,6 +444,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -401,6 +456,170 @@
         "groundedness": 0.85,
         "actionability": 0.8,
         "reasoning": "Findings quote the DLQ triage summary; recommendation names concrete service to verify and the replay action.\n"
+      }
+    },
+    {
+      "scenario": "dlq_human_required_escalates",
+      "final_state": "resolved",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "dlq_human_required_escalates",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state resolved matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "expected action mark_dlq_permanent was called 1× "
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no replay attempts on 2 forbidden job_ids"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.9,
+        "reasoning": "Findings cite the specific rows + files; recommendation gives the data team a concrete next step.\n"
+      }
+    },
+    {
+      "scenario": "dlq_mixed_partial",
+      "final_state": "resolved",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "dlq_mixed_partial",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state resolved matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "expected action replay_dlq_by_category was called 1× "
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no replay attempts on 1 forbidden job_ids"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.9,
+        "reasoning": "Findings correctly separate the three categories; recommendation gives specific next steps for each outstanding entry.\n"
+      }
+    },
+    {
+      "scenario": "dlq_replay_safe_success",
+      "final_state": "resolved",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "dlq_replay_safe_success",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state resolved matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "expected action replay_dlq_by_category was called 1× "
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.85,
+        "reasoning": "Findings + recommendation ground in the replay response."
+      }
+    },
+    {
+      "scenario": "dlq_wait_and_replay_success",
+      "final_state": "resolved",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "dlq_wait_and_replay_success",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state resolved matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "expected action replay_dlq_by_ids was called 1× "
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.85,
+        "reasoning": "Grounds in the replay response and the follow-up watch plan."
       }
     },
     {
@@ -430,6 +649,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -466,6 +690,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -502,6 +731,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -538,6 +772,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -574,6 +813,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -610,6 +854,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -646,6 +895,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -682,6 +936,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -718,6 +977,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -754,6 +1018,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -790,6 +1059,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -826,6 +1100,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -862,6 +1141,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "expected action restart_consumer_group was called 1× "
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -898,6 +1182,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "expected action replay_dlq_messages was called 1× "
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -934,6 +1223,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "expected action pause_dag was called 1× "
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -970,6 +1264,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "expected action invalidate_cache_key was called 1× "
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -1006,6 +1305,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "expected action restart_consumer_group was called 1× "
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -1042,6 +1346,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -1078,6 +1387,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -1114,6 +1428,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -1150,6 +1469,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },
@@ -1186,6 +1510,11 @@
             "dimension": "action",
             "passed": true,
             "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
           }
         ]
       },

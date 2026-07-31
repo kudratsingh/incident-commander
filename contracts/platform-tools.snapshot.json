@@ -1,6 +1,71 @@
 {
   "tools": [
     {
+      "name": "bad_deploy",
+      "description": "[chaos: environment_wide] Simulate a bad deploy landing: fires a `critical` alert with source `chaos:bad_deploy` and sets Redis flag `chaos:bad_deploy` for `ttl_seconds`. Today the observable signal is the alert; wiring the flag into a real bad-behaviour path is a follow-up that needs deploy_markers.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "default": "chaos:bad_deploy",
+            "description": "Short label written on the alert + Redis flag. Lets multiple concurrent chaos runs distinguish their signals.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 600,
+            "description": "How long the Redis flag stays active. Default 10 minutes.",
+            "maximum": 3600,
+            "minimum": 1,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional free-form context recorded on the alert.",
+            "title": "Note"
+          }
+        },
+        "title": "BadDeployInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "create_bad_data_job",
+      "description": "[chaos: environment_wide] Inject a synthetic DLQ entry with `remediation_hint=human_required`. Complement to `poison_message` (which produces `replay_safe` entries) — gives the agent a persistent-bug case to reach the escalate-not-replay branch. Written directly to jobs; doesn't touch Kafka.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "job_type": {
+            "default": "csv_upload",
+            "description": "Type stamped on the synthetic job. Should match a real processor type so the agent's downstream reasoning stays plausible.",
+            "title": "Job Type",
+            "type": "string"
+          },
+          "error_message": {
+            "default": "ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382",
+            "description": "Realistic error string. Default matches the same shape as the seed fixture's persistent-bug entry.",
+            "maxLength": 2048,
+            "title": "Error Message",
+            "type": "string"
+          }
+        },
+        "title": "CreateBadDataJobInput",
+        "type": "object"
+      }
+    },
+    {
       "name": "get_consumer_lag",
       "description": "Read the last-emitted Kafka consumer lag for one of the platform's consumer groups. Values come from a Redis cache — no live Kafka query. Returns null when the cache is empty. Advertised groups include worker-dispatcher (real platform group) plus 7 eval-seed groups (billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer).",
       "inputSchema": {
@@ -135,6 +200,43 @@
       }
     },
     {
+      "name": "inject_latency",
+      "description": "[chaos: single_consumer] Force one consumer group to sleep `latency_ms` before each Kafka poll. Effect self-cleans when the TTL expires. Watch `get_consumer_lag` — the group's lag will grow until the latency is removed.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "consumer_group": {
+            "description": "Consumer group to slow down.",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Consumer Group",
+            "type": "string"
+          },
+          "latency_ms": {
+            "description": "Milliseconds to sleep before every poll iteration. Practical range 100 (barely noticeable) to 5000 (obvious backpressure). Cap at 60000 keeps runaway latency from causing Kafka session-timeout kicks — see kafka_session_timeout_ms.",
+            "maximum": 60000,
+            "minimum": 1,
+            "title": "Latency Ms",
+            "type": "integer"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "description": "How long the injected latency stays active. Default 5 minutes.",
+            "maximum": 3600,
+            "minimum": 1,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "consumer_group",
+          "latency_ms"
+        ],
+        "title": "InjectLatencyInput",
+        "type": "object"
+      }
+    },
+    {
       "name": "invalidate_cache_key",
       "description": "Delete one Redis key (allowlisted prefixes only). Use to force refresh of a stale cache after fixing the underlying data. Idempotent — a follow-up call finds nothing to delete and returns `deleted=false`.",
       "inputSchema": {
@@ -159,6 +261,35 @@
           "idempotency_key"
         ],
         "title": "InvalidateCacheKeyInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "kill_consumer",
+      "description": "[chaos: single_consumer] Shut down one Kafka consumer group by setting a Redis flag the consumer's poll loop checks each iteration. The consumer exits cleanly; the worker's supervisor decides whether to restart. Effect lasts for `ttl_seconds` (default 300).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "consumer_group": {
+            "description": "Kafka consumer group id to shut down. Examples: 'worker-dispatcher', 'audit-writer', 'event-log'.",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Consumer Group",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "description": "How long the kill flag stays active. After this the consumer's next restart succeeds. Default 5 minutes.",
+            "maximum": 3600,
+            "minimum": 1,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "consumer_group"
+        ],
+        "title": "KillConsumerInput",
         "type": "object"
       }
     },
@@ -252,7 +383,7 @@
     },
     {
       "name": "list_dlq_messages",
-      "description": "List jobs currently in the dead-letter state, most recent first. Includes the LLM triage row for each job when the platform has one, so the agent can build on the first-pass analysis instead of starting from raw error strings.",
+      "description": "List jobs currently in the dead-letter state, most recent first. Each entry carries `remediation_hint` (`replay_safe`, `wait_and_replay`, `human_required`, or null) so the agent can pick a strategy without re-reasoning about the error string. Filter by `remediation_hint=<value>` to isolate one category — e.g. pass `replay_safe` before calling `replay_dlq_by_category`. Also includes the LLM triage row when present.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -268,6 +399,19 @@
             "default": null,
             "description": "Filter to one job type (e.g. `csv_upload`, `report_gen`).",
             "title": "Job Type"
+          },
+          "remediation_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Filter to entries the agent should treat one way. Values: `replay_safe`, `wait_and_replay`, `human_required`. Omit for all categories (including uncategorized).",
+            "title": "Remediation Hint"
           },
           "limit": {
             "default": 50,
@@ -332,6 +476,41 @@
       }
     },
     {
+      "name": "mark_dlq_permanent",
+      "description": "Flag a DLQ entry as `human_required` — pulls it out of future `replay_dlq_by_category` scans and writes the operator's reason to the audit trail. Use when analysis shows a persistent bug that auto-replay would just re-hit. Doesn't change job.status — the entry stays in DLQ, just won't be auto-replayed. Idempotent.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "description": "DLQ job to mark. Must be a real job in the caller's tenant with status=dead_letter.",
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the entry is not replayable. Recorded on the audit row for the human review path — write a full sentence.",
+            "maxLength": 1024,
+            "minLength": 8,
+            "title": "Reason",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 255,
+            "minLength": 8,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "reason",
+          "idempotency_key"
+        ],
+        "title": "MarkDlqPermanentInput",
+        "type": "object"
+      }
+    },
+    {
       "name": "pause_dag",
       "description": "Pause promotion of WAITING children in the DAG rooted at `root_job_id`. The DependencyResolver consumer checks the pause key before promoting; while set, no child promotes. Effect self-cleans on TTL (default 10 minutes). Idempotent.",
       "inputSchema": {
@@ -363,6 +542,124 @@
           "idempotency_key"
         ],
         "title": "PauseDagInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "poison_message",
+      "description": "[chaos: single_consumer] Publish a schema-invalid payload to one Kafka topic AND drop a synthetic `replay_safe` DLQ entry the agent's remediation loop can act on. Bypasses producer-side validation; real consumers log-and-drop schema errors rather than routing to DLQ, so the synthetic row makes the effect observable through `list_dlq_messages`.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "topic": {
+            "description": "Kafka topic name. Examples: 'job.submitted', 'job.progress'. The message will fail schema validation on the consumer side because we pass a payload the schema rejects.",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Topic",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "description": "Payload to send. Defaults to `{}`, which fails every topic's schema because they all require specific fields.",
+            "title": "Payload",
+            "type": "object"
+          },
+          "partition_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional Kafka message key. Omit to let the broker hash by partition round-robin.",
+            "title": "Partition Key"
+          }
+        },
+        "required": [
+          "topic"
+        ],
+        "title": "PoisonMessageInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "replay_dlq_by_category",
+      "description": "Bulk-replay every DLQ entry in one remediation category (`replay_safe` or `wait_and_replay`). Refuses `human_required` — those must go through a human review path. Bounded by `max_replays` (default 20). Idempotent.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "description": "Which remediation category to replay. Must be `replay_safe` or `wait_and_replay`. `human_required` is refused — those need a human review path.",
+            "title": "Category",
+            "type": "string"
+          },
+          "job_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional narrowing to one job type in the category.",
+            "title": "Job Type"
+          },
+          "max_replays": {
+            "default": 20,
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Max Replays",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 255,
+            "minLength": 8,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "idempotency_key"
+        ],
+        "title": "ReplayDlqByCategoryInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "replay_dlq_by_ids",
+      "description": "Replay a specific set of DLQ jobs by ID. Safer than `replay_dlq_messages(job_type, limit)` when the agent has already picked entries from `list_dlq_messages`. Each replay hits the existing JobService path (reset retry_count, re-publish to job.submitted via the outbox). Returns per-id success + error so a partial replay is observable. Idempotent.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "job_ids": {
+            "description": "Explicit job IDs to replay. Cap of 50 per call — the agent should chunk larger sets across multiple calls with distinct idempotency_keys.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Job Ids",
+            "type": "array"
+          },
+          "idempotency_key": {
+            "maxLength": 255,
+            "minLength": 8,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_ids",
+          "idempotency_key"
+        ],
+        "title": "ReplayDlqByIdsInput",
         "type": "object"
       }
     },
@@ -432,6 +729,41 @@
           "idempotency_key"
         ],
         "title": "RestartConsumerGroupInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "saturate_redis",
+      "description": "[chaos: shared_dependency] Write a configurable number of keys to Redis to induce memory pressure and potential eviction. Every key expires after `ttl_seconds` (default 60) so the effect self-cleans. Watch `get_redis_health` for used_memory + evicted keys.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "num_keys": {
+            "default": 1000,
+            "description": "How many keys to write.",
+            "maximum": 100000,
+            "minimum": 1,
+            "title": "Num Keys",
+            "type": "integer"
+          },
+          "value_bytes": {
+            "default": 1024,
+            "description": "Byte size of each value. Total footprint is ~num_keys × value_bytes plus key-name overhead.",
+            "maximum": 1048576,
+            "minimum": 16,
+            "title": "Value Bytes",
+            "type": "integer"
+          },
+          "ttl_seconds": {
+            "default": 60,
+            "description": "TTL on every key — no permanent damage. Default 60s.",
+            "maximum": 3600,
+            "minimum": 1,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "title": "SaturateRedisInput",
         "type": "object"
       }
     },

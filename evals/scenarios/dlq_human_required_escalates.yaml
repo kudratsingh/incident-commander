@@ -27,7 +27,7 @@ canned_tool_responses:
   mark_dlq_permanent:
     content:
     - type: text
-      text: '{"job_id":"cccccccc-3333-3333-3333-000000000001","marked":true,"reason":"CSV parse error at row 15382 requires source-data fix"}'
+      text: '{"job_id":"cccccccc-3333-3333-3333-000000000001","previous_hint":"human_required","remediation_hint":"human_required","already_marked":false}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

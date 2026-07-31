@@ -24,7 +24,8 @@ canned_tool_responses:
 canned_llm_responses:
   investigation_planner:
     - hypotheses:
-        - name: consumer_saturation
+        - category: consumer_saturation
+          name: consumer_saturation
           confidence: 0.5
           reasoning: >
             Standard paging alert; probe for lag reading.

@@ -19,7 +19,7 @@ from incident_commander.llm.prompts.loader import PromptNotFoundError, load_prom
 
 _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("9b62d3a8e3d883af8150fc2162428953c7606c9770a90fd42e35ef39530e54e0"),
-    "investigation_planner": ("e0d08cde9ba13101532e17770379436e4a6ea4496bf1749101452b8e914318c4"),
+    "investigation_planner": ("519cecc6dca82dc1db60179e83e60d8290aa639bd38cc29ba39e697ad4208bae"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
     "remediation_planner": ("2cd22f35c052ed5addf4ee956f1c2be17168f83130895efa96a5ca99cb9052a0"),
     "verification_judge": ("3a645c8414e0216870b40e226d0440933d832e7080f18109112c616cda21508e"),
@@ -55,8 +55,11 @@ class TestInvestigationPlannerInvariants:
         assert "record_output" in content
 
     def test_read_only_posture(self) -> None:
-        content = load_prompt("investigation_planner")
-        assert "read-only" in content.lower()
+        # Post-hardening: prompt talks about "read tool" / "read-tier"
+        # (per the tier taxonomy in policies.py) rather than the older
+        # "read-only" phrasing.
+        content = load_prompt("investigation_planner").lower()
+        assert "read tool" in content or "read-tier" in content or "read-only" in content
 
     def test_forbids_direct_tier_1_execution(self) -> None:
         # Investigation planner may emit RemediateAction, but must never

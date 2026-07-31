@@ -1,73 +1,70 @@
-# A high-severity alert whose actual reading shows zero lag — likely false positive.
-# Agent still escalates so a human can decide.
-
 name: consumer_lag_healthy_zero
-description: >
-  Paging alert says consumer_lag_high but the probed reading is zero. This is a
-  false-positive from the platform's alarm side; the agent shouldn't invent a
-  remediation, it should attach the finding and escalate.
+description: 'Paging alert says consumer_lag_high but the probed reading is zero. This is a false-positive from the platform''s alarm side; the agent shouldn''t invent a remediation, it should attach the
+  finding and escalate.
 
-tags: [read-only, phase-0, kafka, false-positive, live-mcp, live-llm]
-
+  '
+tags:
+- read-only
+- phase-0
+- kafka
+- false-positive
+- live-mcp
+- live-llm
 use_live_mcp: true
 use_live_llm: true
-
 alert:
   source: platform.kafka
   severity: high
   fingerprint: consumer_lag_high
   group: reports-consumer
-
 canned_tool_responses:
   get_consumer_lag:
     content:
-      - type: text
-        text: '{"consumer_group":"reports-consumer","lag":0,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+    - type: text
+      text: '{"consumer_group":"reports-consumer","lag":0,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
     is_error: false
-
 canned_llm_responses:
   investigation_planner:
-    - hypotheses:
-        - name: consumer_saturation
-          confidence: 0.6
-          reasoning: >
-            Paging alert on reports-consumer; need lag reading to confirm.
-      next_action:
-        kind: probe
-        tool_name: get_consumer_lag
-        arguments:
-          consumer_group: reports-consumer
-    - hypotheses:
-        - name: alerting_false_positive
-          confidence: 0.75
-          reasoning: >
-            Lag reading is 0; the alerting rule may be misconfigured or firing
-            on a spike that has already recovered.
-      next_action:
-        kind: stop
-        reason: >
-          Lag reading contradicts alert; human should reconcile with the
-          alerting rule.
-  briefing_writer:
-    - findings: >
-        Alert reports consumer_lag_high on reports-consumer, but the probed
-        lag reading is 0 messages. Likely a false positive or a spike that
-        recovered before probing.
-      recommendation: >
-        Reconcile the paging rule for reports-consumer against the current lag
-        metric and consider tightening the recovery window before re-arming.
-  briefing_judge:
-    - groundedness: 0.85
-      actionability: 0.8
-      reasoning: >
-        Findings acknowledge the tension between the paging alert and the 0-lag
-        reading; recommendation names a specific reconciliation task.
+  - hypotheses:
+    - category: consumer_saturation
+      name: consumer_saturation
+      confidence: 0.6
+      reasoning: 'Paging alert on reports-consumer; need lag reading to confirm.
 
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: reports-consumer
+  - hypotheses:
+    - category: unknown
+      name: alerting_false_positive
+      confidence: 0.75
+      reasoning: 'Lag reading is 0; the alerting rule may be misconfigured or firing on a spike that has already recovered.
+
+        '
+    next_action:
+      kind: stop
+      reason: 'Lag reading contradicts alert; human should reconcile with the alerting rule.
+
+        '
+  briefing_writer:
+  - findings: 'Alert reports consumer_lag_high on reports-consumer, but the probed lag reading is 0 messages. Likely a false positive or a spike that recovered before probing.
+
+      '
+    recommendation: 'Reconcile the paging rule for reports-consumer against the current lag metric and consider tightening the recovery window before re-arming.
+
+      '
+  briefing_judge:
+  - groundedness: 0.85
+    actionability: 0.8
+    reasoning: 'Findings acknowledge the tension between the paging alert and the 0-lag reading; recommendation names a specific reconciliation task.
+
+      '
 expectation:
   name: consumer_lag_healthy_zero
   expected_terminal_state: escalated
   expected_evidence_contains:
-    # Structural key from GetConsumerLagOutput — present live or canned,
-    # regardless of which group the planner probes.
-    - cache_key
+  - cache_key
   max_tool_calls: 5

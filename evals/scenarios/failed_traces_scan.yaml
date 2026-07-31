@@ -1,67 +1,65 @@
-# Recent-failures scan — planner uses search_traces to find failing jobs.
-
 name: failed_traces_scan
-description: >
-  Alert says "failure rate elevated" without a specific trace. Planner probes
-  search_traces to find recent failed jobs before escalating.
+description: 'Alert says "failure rate elevated" without a specific trace. Planner probes search_traces to find recent failed jobs before escalating.
 
-tags: [read-only, phase-3, trace, search, live-mcp, live-llm]
-
+  '
+tags:
+- read-only
+- phase-3
+- trace
+- search
+- live-mcp
+- live-llm
 use_live_mcp: true
 use_live_llm: true
-
 alert:
   source: platform.jobs
   severity: high
   fingerprint: failure_rate_high
-
 canned_tool_responses:
   search_traces:
     content:
-      - type: text
-        text: '{"matches":[{"trace_id":"trace-a","job_id":"job-a","job_type":"send_email","status":"failed","created_at":"2026-07-28T10:05:00Z"},{"trace_id":"trace-b","job_id":"job-b","job_type":"send_email","status":"failed","created_at":"2026-07-28T10:06:00Z"}]}'
+    - type: text
+      text: '{"matches":[{"trace_id":"trace-a","job_id":"job-a","job_type":"send_email","status":"failed","created_at":"2026-07-28T10:05:00Z"},{"trace_id":"trace-b","job_id":"job-b","job_type":"send_email","status":"failed","created_at":"2026-07-28T10:06:00Z"}]}'
     is_error: false
-
 canned_llm_responses:
   investigation_planner:
-    - hypotheses:
-        - name: job_type_regression
-          confidence: 0.5
-          reasoning: >
-            Failure-rate alert without a specific trace; search recent failed
-            jobs to see if one type dominates.
-      next_action:
-        kind: probe
-        tool_name: search_traces
-        arguments:
-          status: failed
-          since_hours: 1
-    - hypotheses:
-        - name: job_type_regression
-          confidence: 0.8
-          reasoning: >
-            Failed jobs are all send_email — regression is localized to one
-            job type rather than platform-wide.
-      next_action:
-        kind: stop
-        reason: single job type failing; human should inspect that worker
-  briefing_writer:
-    - findings: >
-        Recent failures are dominated by send_email jobs (2 of 2 matches in
-        the last hour). Regression appears localized to that worker.
-      recommendation: >
-        Check the send_email worker's recent deploys and downstream mailer
-        health before broadening the investigation.
-  briefing_judge:
-    - groundedness: 0.9
-      actionability: 0.85
-      reasoning: >
-        Findings ground in the search results; recommendation focuses on the
-        specific worker rather than platform-wide diagnostics.
+  - hypotheses:
+    - category: unknown
+      name: job_type_regression
+      confidence: 0.5
+      reasoning: 'Failure-rate alert without a specific trace; search recent failed jobs to see if one type dominates.
 
+        '
+    next_action:
+      kind: probe
+      tool_name: search_traces
+      arguments:
+        status: failed
+        since_hours: 1
+  - hypotheses:
+    - category: unknown
+      name: job_type_regression
+      confidence: 0.8
+      reasoning: "Failed jobs are all send_email \u2014 regression is localized to one job type rather than platform-wide.\n"
+    next_action:
+      kind: stop
+      reason: single job type failing; human should inspect that worker
+  briefing_writer:
+  - findings: 'Recent failures are dominated by send_email jobs (2 of 2 matches in the last hour). Regression appears localized to that worker.
+
+      '
+    recommendation: 'Check the send_email worker''s recent deploys and downstream mailer health before broadening the investigation.
+
+      '
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.85
+    reasoning: 'Findings ground in the search results; recommendation focuses on the specific worker rather than platform-wide diagnostics.
+
+      '
 expectation:
   name: failed_traces_scan
   expected_terminal_state: escalated
   expected_evidence_contains:
-    - trace
+  - trace
   max_tool_calls: 5

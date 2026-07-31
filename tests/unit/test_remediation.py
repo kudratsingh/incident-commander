@@ -16,7 +16,7 @@ from uuid import UUID
 
 import pytest
 
-from incident_commander.agent.hypothesis import Hypothesis
+from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
 from incident_commander.agent.remediation import (
     RemediationPlan,
     build_idempotency_key,
@@ -128,7 +128,14 @@ class TestPlanning:
         transition = make_llm_plan(llm, model=_MODEL)
         run = _run_state(
             state=IncidentState.PLANNING,
-            hypotheses=(Hypothesis(name="consumer_saturation", confidence=0.85, reasoning="r"),),
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.CONSUMER_SATURATION,
+                    name="consumer_saturation",
+                    confidence=0.85,
+                    reasoning="r",
+                ),
+            ),
         )
         result = transition(run, _now())
         assert result.state is IncidentState.REMEDIATING
@@ -143,27 +150,53 @@ class TestPlanning:
         assert any("no hypotheses" in e.result_summary for e in result.evidence)
 
     def test_non_tier_1_action_escalates(self) -> None:
-        # Planner picked a read tool as the action — guardrail should catch it.
+        # Post-hardening: RemediationPlan.action_tool is Literal-typed to
+        # Tier-1 tools. A read-tool value is a schema violation; Pydantic
+        # rejects at validation time. The make_llm_plan ValidationError
+        # catch escalates with a "planner LLM invalid" reason mentioning
+        # the rejected value.
         bad = _plan_dict(action_tool="get_consumer_lag")
         transition = make_llm_plan(self._canned_planner(bad), model=_MODEL)
         run = _run_state(
             state=IncidentState.PLANNING,
-            hypotheses=(Hypothesis(name="x", confidence=0.9, reasoning="r"),),
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.CONSUMER_SATURATION,
+                    name="x",
+                    confidence=0.9,
+                    reasoning="r",
+                ),
+            ),
         )
         result = transition(run, _now())
         assert result.state is IncidentState.ESCALATED
-        assert any("non-Tier-1" in e.result_summary for e in result.evidence)
+        assert any(
+            "get_consumer_lag" in e.result_summary or "invalid" in e.result_summary
+            for e in result.evidence
+        )
 
     def test_unknown_action_tool_escalates(self) -> None:
+        # Post-hardening: same rejection path as the non-Tier-1 test.
+        # "made_up_action" is not in the Tier1ToolName Literal.
         bad = _plan_dict(action_tool="made_up_action")
         transition = make_llm_plan(self._canned_planner(bad), model=_MODEL)
         run = _run_state(
             state=IncidentState.PLANNING,
-            hypotheses=(Hypothesis(name="x", confidence=0.9, reasoning="r"),),
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.CONSUMER_SATURATION,
+                    name="x",
+                    confidence=0.9,
+                    reasoning="r",
+                ),
+            ),
         )
         result = transition(run, _now())
         assert result.state is IncidentState.ESCALATED
-        assert any("unknown action tool" in e.result_summary for e in result.evidence)
+        assert any(
+            "made_up_action" in e.result_summary or "invalid" in e.result_summary
+            for e in result.evidence
+        )
 
     def test_non_read_verify_tool_escalates(self) -> None:
         # Planner picked a Tier-1 write action as the verify tool.
@@ -171,11 +204,24 @@ class TestPlanning:
         transition = make_llm_plan(self._canned_planner(bad), model=_MODEL)
         run = _run_state(
             state=IncidentState.PLANNING,
-            hypotheses=(Hypothesis(name="x", confidence=0.9, reasoning="r"),),
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.CONSUMER_SATURATION,
+                    name="x",
+                    confidence=0.9,
+                    reasoning="r",
+                ),
+            ),
         )
         result = transition(run, _now())
         assert result.state is IncidentState.ESCALATED
-        assert any("verify tool must be read-only" in e.result_summary for e in result.evidence)
+        # Post-hardening: RemediationPlan.verify_tool is Literal-typed
+        # to read tools. A Tier-1 write value is rejected by Pydantic; the
+        # planner LLM catch escalates.
+        assert any(
+            "restart_consumer_group" in e.result_summary or "invalid" in e.result_summary
+            for e in result.evidence
+        )
 
 
 class TestRemediating:
@@ -432,7 +478,14 @@ class TestAttemptCap:
         transition = make_llm_plan(llm, model=_MODEL)
         run = _run_state(
             state=IncidentState.PLANNING,
-            hypotheses=(Hypothesis(name="consumer_saturation", confidence=0.85, reasoning="r"),),
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.CONSUMER_SATURATION,
+                    name="consumer_saturation",
+                    confidence=0.85,
+                    reasoning="r",
+                ),
+            ),
             remediation_attempts=0,
         )
         result = transition(run, _now())
@@ -445,7 +498,14 @@ class TestAttemptCap:
         transition = make_llm_plan(llm, model=_MODEL)
         run = _run_state(
             state=IncidentState.PLANNING,
-            hypotheses=(Hypothesis(name="x", confidence=0.9, reasoning="r"),),
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.CONSUMER_SATURATION,
+                    name="x",
+                    confidence=0.9,
+                    reasoning="r",
+                ),
+            ),
             remediation_attempts=1,
         )
         result = transition(run, _now())

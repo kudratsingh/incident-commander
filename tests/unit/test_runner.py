@@ -68,6 +68,7 @@ def _passing_scenario() -> Scenario:
                 {
                     "hypotheses": [
                         {
+                            "category": "consumer_saturation",
                             "name": "consumer_saturation",
                             "confidence": 0.55,
                             "reasoning": "Paging severity on billing consumer.",
@@ -82,6 +83,7 @@ def _passing_scenario() -> Scenario:
                 {
                     "hypotheses": [
                         {
+                            "category": "consumer_saturation",
                             "name": "consumer_saturation",
                             "confidence": 0.85,
                             "reasoning": "Lag reading confirms saturation.",
@@ -157,6 +159,7 @@ class TestRunScenario:
                     {
                         "hypotheses": [
                             {
+                                "category": "unknown",
                                 "name": "x",
                                 "confidence": 0.5,
                                 "reasoning": "probe once",

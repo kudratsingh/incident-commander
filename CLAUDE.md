@@ -128,17 +128,22 @@ All design documentation lives in `docs/` and ships with the code that implement
 
 ```text
 docs/
-├── ADR/                   # numbered decision records, MADR format, never edited after acceptance
+├── ADR/                        # numbered decision records, MADR format, never edited after acceptance
 │   └── 0001-external-client-architecture.md
-├── eval-methodology.md    # scenario taxonomy, grader design, metric definitions, judge pinning
-├── threat-model.md        # prompt injection surfaces, mitigations, adversarial suite mapping
-├── safety-model.md        # tiers, approval flow, budgets, fail-open behavior
-├── memory-design.md       # what is stored, retrieval policy, forgetting policy
-├── runbook.md             # operating the agent itself: deploys, rollbacks, kill switch
-└── interview-map.md       # component → JD skill → talking points, kept current
+├── lessons/                    # case studies of things that went wrong or almost went wrong
+│   └── phase-6-hardening.md   # free-form Hypothesis.name → schema tightening
+├── architecture-principles.md  # rules for future PRs: structural > prose, single source of truth, etc.
+├── eval-methodology.md         # scenario taxonomy, grader design, metric definitions, judge pinning
+├── threat-model.md             # prompt injection surfaces, mitigations, adversarial suite mapping
+├── safety-model.md             # tiers, approval flow, budgets, fail-open behavior
+├── memory-design.md            # what is stored, retrieval policy, forgetting policy
+├── runbook.md                  # operating the agent itself: deploys, rollbacks, kill switch
+└── interview-map.md            # component → JD skill → talking points, kept current
 ```
 
 ADR process: any decision that constrains future work gets an ADR before or with the implementing PR. Status flow is proposed, accepted, superseded. Seeded ADR queue: 0001 external client architecture, 0002 hand-rolled state machine vs LangGraph, 0003 platform-enforced approvals, 0004 eval-first development and regression gating, 0005 memory schema and retrieval, 0006 prompt caching economics, 0007 contract snapshot testing and platform pinning, 0008 adversarial robustness posture.
+
+Before opening a PR touching schemas, prompts, or the state machine, read [`docs/architecture-principles.md`](docs/architecture-principles.md). It codifies the rules that came out of past PRs — most importantly "default to the structural fix, not the band-aid." When you hit a symptom that a prompt tweak would patch, the first design conversation is whether the schema should reject the class of bug instead. See [`docs/lessons/phase-6-hardening.md`](docs/lessons/phase-6-hardening.md) for the case study that produced this rule.
 
 ## Testing standards
 

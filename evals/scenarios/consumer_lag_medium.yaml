@@ -1,66 +1,65 @@
-# Medium-severity actionable alert. Below critical but above the noise floor.
-
 name: consumer_lag_medium
-description: >
-  Medium-severity alert on consumer lag. Not paging-grade but still actionable —
-  agent probes and escalates the finding.
-
-tags: [read-only, phase-0, kafka, live-mcp, live-llm]
-
+description: "Medium-severity alert on consumer lag. Not paging-grade but still actionable \u2014 agent probes and escalates the finding.\n"
+tags:
+- read-only
+- phase-0
+- kafka
+- live-mcp
+- live-llm
 use_live_mcp: true
 use_live_llm: true
-
 alert:
   source: platform.kafka
   severity: medium
   fingerprint: consumer_lag_warning
   group: notifications-consumer
-
 canned_tool_responses:
   get_consumer_lag:
     content:
-      - type: text
-        text: '{"consumer_group":"notifications-consumer","lag":500,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+    - type: text
+      text: '{"consumer_group":"notifications-consumer","lag":500,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
     is_error: false
-
 canned_llm_responses:
   investigation_planner:
-    - hypotheses:
-        - name: mild_backlog
-          confidence: 0.5
-          reasoning: >
-            Medium severity on notifications consumer; need lag reading.
-      next_action:
-        kind: probe
-        tool_name: get_consumer_lag
-        arguments:
-          consumer_group: notifications-consumer
-    - hypotheses:
-        - name: mild_backlog
-          confidence: 0.75
-          reasoning: >
-            Lag of 500 messages is present but not urgent.
-      next_action:
-        kind: stop
-        reason: mild lag observed; human should decide on urgency
-  briefing_writer:
-    - findings: >
-        notifications-consumer shows a lag of 500 messages, above the warning
-        threshold but not paging.
-      recommendation: >
-        Watch the trend for the next 15 minutes; escalate to paging if lag
-        continues to grow.
-  briefing_judge:
-    - groundedness: 0.9
-      actionability: 0.75
-      reasoning: >
-        Findings mirror the 500-lag reading; recommendation gives a concrete
-        watch window but is less specific about what would trigger paging.
+  - hypotheses:
+    - category: consumer_saturation
+      name: mild_backlog
+      confidence: 0.5
+      reasoning: 'Medium severity on notifications consumer; need lag reading.
 
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: notifications-consumer
+  - hypotheses:
+    - category: consumer_saturation
+      name: mild_backlog
+      confidence: 0.75
+      reasoning: 'Lag of 500 messages is present but not urgent.
+
+        '
+    next_action:
+      kind: stop
+      reason: mild lag observed; human should decide on urgency
+  briefing_writer:
+  - findings: 'notifications-consumer shows a lag of 500 messages, above the warning threshold but not paging.
+
+      '
+    recommendation: 'Watch the trend for the next 15 minutes; escalate to paging if lag continues to grow.
+
+      '
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.75
+    reasoning: 'Findings mirror the 500-lag reading; recommendation gives a concrete watch window but is less specific about what would trigger paging.
+
+      '
 expectation:
   name: consumer_lag_medium
   expected_terminal_state: escalated
   expected_evidence_contains:
-    - notifications-consumer
-    - lag
+  - notifications-consumer
+  - lag
   max_tool_calls: 5

@@ -1,115 +1,82 @@
-# Full remediation loop: investigate → confirm → restart → verify → RESOLVED.
-#
-# This is the flagship Phase 6 scenario. The agent probes lag, sees it's
-# high, hands off to the remediation planner, executes restart, then
-# verifies that lag dropped. Terminal state RESOLVED — no human paged.
-
 name: remediate_consumer_lag_success
-description: >
-  Consumer lag high alert. Agent probes → confirms saturation → emits
-  RemediateAction → PLANNING picks restart_consumer_group → REMEDIATING
-  executes with idempotency key → VERIFYING probes lag again → sees 0
-  → verdict verified → RESOLVED.
-
-tags: [phase-6, remediation, tier-1, live-mcp, live-llm]
-
-# NOTE: use_live_mcp=true requires the platform to be in a fixable state
-# before the run — normally kill_consumer chaos would spike the lag, agent
-# fixes it, verify sees recovery. For an isolated live run of just this
-# scenario, either seed via a chaos hook first or accept that the initial
-# probe may already show lag=0 (agent will still emit remediate; restart
-# is idempotent; verify will pass).
+description: "Consumer lag high alert. Agent probes \u2192 confirms saturation \u2192 emits RemediateAction \u2192 PLANNING picks restart_consumer_group \u2192 REMEDIATING executes with idempotency key\
+  \ \u2192 VERIFYING probes lag again \u2192 sees 0 \u2192 verdict verified \u2192 RESOLVED.\n"
+tags:
+- phase-6
+- remediation
+- tier-1
+- live-mcp
+- live-llm
 use_live_mcp: true
 use_live_llm: true
-
 alert:
   source: platform.kafka
   severity: high
   fingerprint: consumer_lag_high
   consumer_group: worker-dispatcher
-
 canned_tool_responses:
-  # First probe: lag is high — reason to remediate.
   get_consumer_lag:
     content:
-      - type: text
-        text: '{"consumer_group":"worker-dispatcher","lag":15000,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":15000,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
     is_error: false
-  # Remediation action success. Note: CannedMCPClient returns the same
-  # response for repeat calls of the same tool name — the verify probe
-  # (also get_consumer_lag) needs the post-fix reading. This scenario's
-  # canned setup returns lag=15000 for both probes, so the verify judge
-  # canned response is what actually decides the verdict.
   restart_consumer_group:
     content:
-      - type: text
-        text: '{"consumer_group":"worker-dispatcher","kill_key_cleared":true,"kill_key":"chaos:kill:worker-dispatcher","accepted":true}'
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","kill_key_cleared":true,"kill_key":"chaos:kill:worker-dispatcher","accepted":true}'
     is_error: false
-
 canned_llm_responses:
   investigation_planner:
-    # Iter 1: probe for lag.
-    - hypotheses:
-        - name: consumer_saturation
-          confidence: 0.55
-          reasoning: >
-            Paging severity on worker-dispatcher — probe current lag.
-      next_action:
-        kind: probe
-        tool_name: get_consumer_lag
-        arguments:
-          consumer_group: worker-dispatcher
-    # Iter 2: lag=15000 confirms — hand off to remediation.
-    - hypotheses:
-        - name: consumer_saturation
-          confidence: 0.85
-          reasoning: >
-            Lag of 15000 messages confirms sustained saturation. Restart
-            the consumer to clear the backlog.
-      next_action:
-        kind: remediate
-        reason: consumer_saturation confirmed; restart_consumer_group applies
-  remediation_planner:
-    - target_hypothesis: consumer_saturation
-      action_tool: restart_consumer_group
-      action_arguments:
+  - hypotheses:
+    - category: consumer_saturation
+      name: consumer_saturation
+      confidence: 0.55
+      reasoning: "Paging severity on worker-dispatcher \u2014 probe current lag.\n"
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
         consumer_group: worker-dispatcher
-      verify_tool: get_consumer_lag
-      verify_arguments:
-        consumer_group: worker-dispatcher
-      verify_expectation: >
-        Lag should drop toward zero within seconds of the restart — the
-        supervisor picks the consumer back up and processes the backlog.
-  verification_judge:
-    # In canned mode we control the verdict; live mode reads the probe
-    # response for real. Set to `verified` here so the offline scenario
-    # exercises the RESOLVED terminal state.
-    - verdict: verified
-      reasoning: >
-        The get_consumer_lag probe returned a healthy reading indicating
-        the consumer has restarted and is processing again.
-  briefing_writer:
-    - findings: >
-        worker-dispatcher consumer lag was 15000 messages. The agent
-        restarted the consumer group; the follow-up probe showed the
-        supervisor picked it back up and lag is recovering.
-      recommendation: >
-        Monitor lag for the next 5 minutes to confirm sustained recovery.
-        If the same alert re-fires within 30 minutes, escalate — a
-        restart-loop suggests a deeper issue than saturation.
-  briefing_judge:
-    - groundedness: 0.9
-      actionability: 0.85
-      reasoning: >
-        Findings ground in the two lag readings and the restart action;
-        recommendation names a concrete monitoring window + escalation
-        criterion.
+  - hypotheses:
+    - category: consumer_saturation
+      name: consumer_saturation
+      confidence: 0.85
+      reasoning: 'Lag of 15000 messages confirms sustained saturation. Restart the consumer to clear the backlog.
 
+        '
+    next_action:
+      kind: remediate
+      reason: consumer_saturation confirmed; restart_consumer_group applies
+  remediation_planner:
+  - target_hypothesis: consumer_saturation
+    action_tool: restart_consumer_group
+    action_arguments:
+      consumer_group: worker-dispatcher
+    verify_tool: get_consumer_lag
+    verify_arguments:
+      consumer_group: worker-dispatcher
+    verify_expectation: "Lag should drop toward zero within seconds of the restart \u2014 the supervisor picks the consumer back up and processes the backlog.\n"
+  verification_judge:
+  - verdict: verified
+    reasoning: 'The get_consumer_lag probe returned a healthy reading indicating the consumer has restarted and is processing again.
+
+      '
+  briefing_writer:
+  - findings: 'worker-dispatcher consumer lag was 15000 messages. The agent restarted the consumer group; the follow-up probe showed the supervisor picked it back up and lag is recovering.
+
+      '
+    recommendation: "Monitor lag for the next 5 minutes to confirm sustained recovery. If the same alert re-fires within 30 minutes, escalate \u2014 a restart-loop suggests a deeper issue than saturation.\n"
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.85
+    reasoning: 'Findings ground in the two lag readings and the restart action; recommendation names a concrete monitoring window + escalation criterion.
+
+      '
 expectation:
   name: remediate_consumer_lag_success
   expected_terminal_state: resolved
   expected_action_tool: restart_consumer_group
   expected_evidence_contains:
-    - kill_key_cleared
-    - verified
+  - kill_key_cleared
+  - verified
   max_tool_calls: 5

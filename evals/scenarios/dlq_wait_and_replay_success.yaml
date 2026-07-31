@@ -1,110 +1,89 @@
-# DLQ has wait_and_replay entries → agent schedules delayed replay → RESOLVED.
-#
-# v0.4.1+: platform holds the timer via delay_seconds on replay_dlq_by_ids.
-# Agent picks 300s (5 min) as the default for SMTP/API transients. Verify
-# confirms the scheduled count matches the requested count and the DLQ
-# is drained of those ids.
-
 name: dlq_wait_and_replay_success
-description: >
-  DLQ has entries hinted wait_and_replay (transient downstream failures).
-  Agent schedules a delayed replay via replay_dlq_by_ids(delay_seconds=300).
-  Platform holds the timer — schedules the replays at now+5min. Verify
-  confirms the ids are out of the active DLQ.
-
-tags: [phase-6, remediation, dlq, categorization, wait-and-replay, live-mcp, live-llm]
-
+description: "DLQ has entries hinted wait_and_replay (transient downstream failures). Agent schedules a delayed replay via replay_dlq_by_ids(delay_seconds=300). Platform holds the timer \u2014 schedules\
+  \ the replays at now+5min. Verify confirms the ids are out of the active DLQ.\n"
+tags:
+- phase-6
+- remediation
+- dlq
+- categorization
+- wait-and-replay
+- live-mcp
+- live-llm
 use_live_mcp: true
 use_live_llm: true
-
 alert:
   source: platform.dlq
   severity: high
   fingerprint: dlq_depth_warning_wait_replay
-
 canned_tool_responses:
   list_dlq_messages:
     content:
-      - type: text
-        text: '{"total":2,"items":[{"id":"bbbbbbbb-2222-2222-2222-000000000001","type":"send_email","error_message":"ConnectionTimeout: upstream SMTP relay unreachable","retry_count":3,"created_at":"2026-07-30T10:00:00Z","remediation_hint":"wait_and_replay"},{"id":"bbbbbbbb-2222-2222-2222-000000000002","type":"send_email","error_message":"ConnectionTimeout: upstream SMTP relay unreachable","retry_count":3,"created_at":"2026-07-30T10:01:00Z","remediation_hint":"wait_and_replay"}]}'
+    - type: text
+      text: '{"total":2,"items":[{"id":"bbbbbbbb-2222-2222-2222-000000000001","type":"send_email","error_message":"ConnectionTimeout: upstream SMTP relay unreachable","retry_count":3,"created_at":"2026-07-30T10:00:00Z","remediation_hint":"wait_and_replay"},{"id":"bbbbbbbb-2222-2222-2222-000000000002","type":"send_email","error_message":"ConnectionTimeout:
+        upstream SMTP relay unreachable","retry_count":3,"created_at":"2026-07-30T10:01:00Z","remediation_hint":"wait_and_replay"}]}'
     is_error: false
   replay_dlq_by_ids:
     content:
-      - type: text
-        text: '{"requested":2,"replayed":0,"failed":0,"scheduled":2,"jobs":[{"id":"bbbbbbbb-2222-2222-2222-000000000001","type":"send_email","scheduled":true,"execute_at":1753868400.0},{"id":"bbbbbbbb-2222-2222-2222-000000000002","type":"send_email","scheduled":true,"execute_at":1753868400.0}]}'
+    - type: text
+      text: '{"requested":2,"replayed":0,"failed":0,"scheduled":2,"jobs":[{"id":"bbbbbbbb-2222-2222-2222-000000000001","type":"send_email","scheduled":true,"execute_at":1753868400.0},{"id":"bbbbbbbb-2222-2222-2222-000000000002","type":"send_email","scheduled":true,"execute_at":1753868400.0}]}'
     is_error: false
-
 canned_llm_responses:
   investigation_planner:
-    - hypotheses:
-        - name: transient_downstream_failure
-          confidence: 0.55
-          reasoning: DLQ depth alert; probe list_dlq_messages for categorization.
-      next_action:
-        kind: probe
-        tool_name: list_dlq_messages
-        arguments:
-          limit: 50
-    - hypotheses:
-        - name: transient_downstream_failure
-          confidence: 0.85
-          reasoning: >
-            Both entries hint=wait_and_replay (SMTP transient timeouts).
-            Schedule a delayed replay (5 min) so the platform holds the
-            timer — SMTP will likely recover in that window.
-      next_action:
-        kind: remediate
-        reason: wait_and_replay entries — schedule delayed replay via ids
-  remediation_planner:
-    - target_hypothesis: transient_downstream_failure
-      action_tool: replay_dlq_by_ids
-      action_arguments:
-        job_ids:
-          - bbbbbbbb-2222-2222-2222-000000000001
-          - bbbbbbbb-2222-2222-2222-000000000002
-        delay_seconds: 300
-      verify_tool: list_dlq_messages
-      verify_arguments:
-        remediation_hint: wait_and_replay
+  - hypotheses:
+    - category: poison_message
+      name: transient_downstream_failure
+      confidence: 0.55
+      reasoning: DLQ depth alert; probe list_dlq_messages for categorization.
+    next_action:
+      kind: probe
+      tool_name: list_dlq_messages
+      arguments:
         limit: 50
-      verify_expectation: >
-        After scheduling, the platform's response should show scheduled=2
-        with per-job execute_at timestamps ~5 minutes in the future. The
-        DLQ list filtered by wait_and_replay should shrink; the platform
-        removes the entries from the active DLQ once the delayed replay
-        is enqueued (or on next tick).
-  verification_judge:
-    - verdict: verified
-      reasoning: >
-        replay_dlq_by_ids returned scheduled=2 with per-job execute_at
-        timestamps. Platform is holding the timer — no agent-side wait
-        needed. Follow-up probe of the DLQ shows the wait_and_replay
-        filter drained.
-  briefing_writer:
-    - findings: >
-        DLQ had 2 wait_and_replay entries (SMTP transient timeouts).
-        Scheduled a 5-minute-delayed replay via replay_dlq_by_ids; platform
-        confirmed 2 scheduled with execute_at ~5 min out. Platform holds
-        the timer end-to-end.
-      recommendation: >
-        Monitor SMTP relay health for 15 minutes. If jobs return to DLQ
-        after the scheduled retry, page the SMTP relay owner — the
-        dependency is not recovering on its own.
-  briefing_judge:
-    - groundedness: 0.9
-      actionability: 0.85
-      reasoning: Grounds in the replay response and the follow-up watch plan.
+  - hypotheses:
+    - category: poison_message
+      name: transient_downstream_failure
+      confidence: 0.85
+      reasoning: "Both entries hint=wait_and_replay (SMTP transient timeouts). Schedule a delayed replay (5 min) so the platform holds the timer \u2014 SMTP will likely recover in that window.\n"
+    next_action:
+      kind: remediate
+      reason: "wait_and_replay entries \u2014 schedule delayed replay via ids"
+  remediation_planner:
+  - target_hypothesis: transient_downstream_failure
+    action_tool: replay_dlq_by_ids
+    action_arguments:
+      job_ids:
+      - bbbbbbbb-2222-2222-2222-000000000001
+      - bbbbbbbb-2222-2222-2222-000000000002
+      delay_seconds: 300
+    verify_tool: list_dlq_messages
+    verify_arguments:
+      remediation_hint: wait_and_replay
+      limit: 50
+    verify_expectation: 'After scheduling, the platform''s response should show scheduled=2 with per-job execute_at timestamps ~5 minutes in the future. The DLQ list filtered by wait_and_replay should shrink;
+      the platform removes the entries from the active DLQ once the delayed replay is enqueued (or on next tick).
 
+      '
+  verification_judge:
+  - verdict: verified
+    reasoning: "replay_dlq_by_ids returned scheduled=2 with per-job execute_at timestamps. Platform is holding the timer \u2014 no agent-side wait needed. Follow-up probe of the DLQ shows the wait_and_replay\
+      \ filter drained.\n"
+  briefing_writer:
+  - findings: 'DLQ had 2 wait_and_replay entries (SMTP transient timeouts). Scheduled a 5-minute-delayed replay via replay_dlq_by_ids; platform confirmed 2 scheduled with execute_at ~5 min out. Platform
+      holds the timer end-to-end.
+
+      '
+    recommendation: "Monitor SMTP relay health for 15 minutes. If jobs return to DLQ after the scheduled retry, page the SMTP relay owner \u2014 the dependency is not recovering on its own.\n"
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.85
+    reasoning: Grounds in the replay response and the follow-up watch plan.
 expectation:
   name: dlq_wait_and_replay_success
   expected_terminal_state: resolved
   expected_action_tool: replay_dlq_by_ids
   expected_evidence_contains:
-    - wait_and_replay
-    # v0.4.1: assert the platform response echoes a scheduled count and
-    # per-job execute_at timestamps — proves delay_seconds was set and
-    # the platform is holding the timer.
-    - '"scheduled":2'
-    - execute_at
-    - verified
+  - wait_and_replay
+  - '"scheduled":2'
+  - execute_at
+  - verified
   max_tool_calls: 5

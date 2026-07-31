@@ -1,66 +1,68 @@
-# Payments consumer showing severe lag. Different group than the baseline scenario.
-
 name: consumer_lag_payments_critical
-description: >
-  Payments consumer lag crosses paging threshold. Verifies the agent
-  parametrizes the probe by the alert's group field, not a hardcoded value.
+description: 'Payments consumer lag crosses paging threshold. Verifies the agent parametrizes the probe by the alert''s group field, not a hardcoded value.
 
-tags: [read-only, phase-0, kafka, group-variation, live-mcp, live-llm]
-
+  '
+tags:
+- read-only
+- phase-0
+- kafka
+- group-variation
+- live-mcp
+- live-llm
 use_live_mcp: true
 use_live_llm: true
-
 alert:
   source: platform.kafka
   severity: critical
   fingerprint: consumer_lag_high
   group: payments-consumer
-
 canned_tool_responses:
   get_consumer_lag:
     content:
-      - type: text
-        text: '{"consumer_group":"payments-consumer","lag":25000,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+    - type: text
+      text: '{"consumer_group":"payments-consumer","lag":25000,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
     is_error: false
-
 canned_llm_responses:
   investigation_planner:
-    - hypotheses:
-        - name: consumer_saturation
-          confidence: 0.6
-          reasoning: >
-            Critical severity on payments-consumer suggests it is behind.
-      next_action:
-        kind: probe
-        tool_name: get_consumer_lag
-        arguments:
-          consumer_group: payments-consumer
-    - hypotheses:
-        - name: consumer_saturation
-          confidence: 0.9
-          reasoning: >
-            Lag of 25000 confirms the payments consumer is severely backlogged.
-      next_action:
-        kind: stop
-        reason: sufficient evidence for handoff
-  briefing_writer:
-    - findings: >
-        payments-consumer lag reads 25000 messages against a paging threshold.
-        Consumer is not keeping up with input rate.
-      recommendation: >
-        Check whether payments-consumer pod is running and whether upstream
-        producer volume spiked in the last 15 minutes.
-  briefing_judge:
-    - groundedness: 0.9
-      actionability: 0.85
-      reasoning: >
-        Findings ground in the 25000-lag reading; recommendation offers two
-        concrete verification steps against the payments consumer.
+  - hypotheses:
+    - category: consumer_saturation
+      name: consumer_saturation
+      confidence: 0.6
+      reasoning: 'Critical severity on payments-consumer suggests it is behind.
 
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: payments-consumer
+  - hypotheses:
+    - category: consumer_saturation
+      name: consumer_saturation
+      confidence: 0.9
+      reasoning: 'Lag of 25000 confirms the payments consumer is severely backlogged.
+
+        '
+    next_action:
+      kind: stop
+      reason: sufficient evidence for handoff
+  briefing_writer:
+  - findings: 'payments-consumer lag reads 25000 messages against a paging threshold. Consumer is not keeping up with input rate.
+
+      '
+    recommendation: 'Check whether payments-consumer pod is running and whether upstream producer volume spiked in the last 15 minutes.
+
+      '
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.85
+    reasoning: 'Findings ground in the 25000-lag reading; recommendation offers two concrete verification steps against the payments consumer.
+
+      '
 expectation:
   name: consumer_lag_payments_critical
   expected_terminal_state: escalated
   expected_evidence_contains:
-    - payments-consumer
-    - lag
+  - payments-consumer
+  - lag
   max_tool_calls: 5

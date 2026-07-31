@@ -20,7 +20,8 @@ alert:
 canned_llm_responses:
   investigation_planner:
     - hypotheses:
-        - name: opaque_paging_signal
+        - category: unknown
+          name: opaque_paging_signal
           confidence: 0.65
           reasoning: >
             Alert fingerprint is opaque and no discriminating tool exists on

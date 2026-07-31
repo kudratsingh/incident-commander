@@ -1,82 +1,82 @@
-# Alert storm — planner uses list_active_alerts + list_audit_events to triage.
-
 name: alert_storm
-description: >
-  Many alerts fire in a short window. Planner probes list_active_alerts to
-  see the full storm shape, then list_audit_events to check whether an
-  actor (deploy, config change) triggered it.
+description: 'Many alerts fire in a short window. Planner probes list_active_alerts to see the full storm shape, then list_audit_events to check whether an actor (deploy, config change) triggered it.
 
-tags: [read-only, phase-3, alerts, audit, live-mcp, live-llm]
-
+  '
+tags:
+- read-only
+- phase-3
+- alerts
+- audit
+- live-mcp
+- live-llm
 use_live_mcp: true
 use_live_llm: true
-
 alert:
   source: platform.alerts
   severity: critical
   fingerprint: alert_storm_meta
-
 canned_tool_responses:
   list_active_alerts:
     content:
-      - type: text
-        text: '{"total":5,"alerts":[{"id":"a1","severity":"critical","source":"platform.api","title":"5xx spike","fired_at":"2026-07-28T10:00:00Z"},{"id":"a2","severity":"high","source":"platform.db","title":"latency high","fired_at":"2026-07-28T10:01:00Z"},{"id":"a3","severity":"high","source":"platform.kafka","title":"consumer lag","fired_at":"2026-07-28T10:01:00Z"},{"id":"a4","severity":"high","source":"platform.dlq","title":"dlq growth","fired_at":"2026-07-28T10:02:00Z"},{"id":"a5","severity":"medium","source":"platform.cache","title":"cache miss","fired_at":"2026-07-28T10:03:00Z"}]}'
+    - type: text
+      text: '{"total":5,"alerts":[{"id":"a1","severity":"critical","source":"platform.api","title":"5xx spike","fired_at":"2026-07-28T10:00:00Z"},{"id":"a2","severity":"high","source":"platform.db","title":"latency
+        high","fired_at":"2026-07-28T10:01:00Z"},{"id":"a3","severity":"high","source":"platform.kafka","title":"consumer lag","fired_at":"2026-07-28T10:01:00Z"},{"id":"a4","severity":"high","source":"platform.dlq","title":"dlq
+        growth","fired_at":"2026-07-28T10:02:00Z"},{"id":"a5","severity":"medium","source":"platform.cache","title":"cache miss","fired_at":"2026-07-28T10:03:00Z"}]}'
     is_error: false
   list_audit_events:
     content:
-      - type: text
-        text: '{"total":1,"events":[{"id":"e1","action":"deploy.completed","principal_type":"ci","principal_id":"ci-bot","created_at":"2026-07-28T09:58:00Z","extra_data":{"version":"v1.42.0"}}]}'
+    - type: text
+      text: '{"total":1,"events":[{"id":"e1","action":"deploy.completed","principal_type":"ci","principal_id":"ci-bot","created_at":"2026-07-28T09:58:00Z","extra_data":{"version":"v1.42.0"}}]}'
     is_error: false
-
 canned_llm_responses:
   investigation_planner:
-    - hypotheses:
-        - name: cascading_failure
-          confidence: 0.5
-          reasoning: >
-            Critical meta-alert about many firing alerts; probe list_active_alerts
-            to see the shape.
-      next_action:
-        kind: probe
-        tool_name: list_active_alerts
-        arguments: {}
-    - hypotheses:
-        - name: cascading_failure
-          confidence: 0.7
-          reasoning: >
-            Five alerts across api/db/kafka/dlq/cache in a 3-minute window;
-            check audit events for a triggering action.
-      next_action:
-        kind: probe
-        tool_name: list_audit_events
-        arguments:
-          action_prefix: deploy
-    - hypotheses:
-        - name: cascading_failure
-          confidence: 0.9
-          reasoning: >
-            Deploy v1.42.0 completed 2 minutes before the storm — high-confidence
-            trigger candidate.
-      next_action:
-        kind: stop
-        reason: deploy-triggered cascade; human should decide rollback
-  briefing_writer:
-    - findings: >
-        Five alerts fired within 3 minutes across api, db, kafka, dlq, and
-        cache. A deploy of v1.42.0 completed 2 minutes before the first alert.
-      recommendation: >
-        Roll back v1.42.0 pending root-cause analysis; the correlation across
-        subsystems suggests a shared code path was affected.
-  briefing_judge:
-    - groundedness: 0.9
-      actionability: 0.9
-      reasoning: >
-        Findings summarize the storm shape and the deploy correlation;
-        recommendation names a concrete corrective action.
+  - hypotheses:
+    - category: unknown
+      name: cascading_failure
+      confidence: 0.5
+      reasoning: 'Critical meta-alert about many firing alerts; probe list_active_alerts to see the shape.
 
+        '
+    next_action:
+      kind: probe
+      tool_name: list_active_alerts
+      arguments: {}
+  - hypotheses:
+    - category: unknown
+      name: cascading_failure
+      confidence: 0.7
+      reasoning: 'Five alerts across api/db/kafka/dlq/cache in a 3-minute window; check audit events for a triggering action.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: list_audit_events
+      arguments:
+        action_prefix: deploy
+  - hypotheses:
+    - category: unknown
+      name: cascading_failure
+      confidence: 0.9
+      reasoning: "Deploy v1.42.0 completed 2 minutes before the storm \u2014 high-confidence trigger candidate.\n"
+    next_action:
+      kind: stop
+      reason: deploy-triggered cascade; human should decide rollback
+  briefing_writer:
+  - findings: 'Five alerts fired within 3 minutes across api, db, kafka, dlq, and cache. A deploy of v1.42.0 completed 2 minutes before the first alert.
+
+      '
+    recommendation: 'Roll back v1.42.0 pending root-cause analysis; the correlation across subsystems suggests a shared code path was affected.
+
+      '
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.9
+    reasoning: 'Findings summarize the storm shape and the deploy correlation; recommendation names a concrete corrective action.
+
+      '
 expectation:
   name: alert_storm
   expected_terminal_state: escalated
   expected_evidence_contains:
-    - alert
+  - alert
   max_tool_calls: 6

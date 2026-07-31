@@ -1,71 +1,65 @@
-# High-severity alert without a group field — planner probes with the fallback group.
-
 name: consumer_lag_missing_group
-description: >
-  Actionable alert whose payload doesn't name a group. The planner still probes
-  something reasonable using the alert-source context; here we canned an
-  "unknown" fallback response.
+description: 'Actionable alert whose payload doesn''t name a group. The planner still probes something reasonable using the alert-source context; here we canned an "unknown" fallback response.
 
-tags: [read-only, phase-0, defensive, live-mcp, live-llm]
-
+  '
+tags:
+- read-only
+- phase-0
+- defensive
+- live-mcp
+- live-llm
 use_live_mcp: true
 use_live_llm: true
-
 alert:
   source: platform.kafka
   severity: high
   fingerprint: consumer_lag_high
-
 canned_tool_responses:
   get_consumer_lag:
     content:
-      - type: text
-        text: '{"consumer_group":"unknown","lag":42,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+    - type: text
+      text: '{"consumer_group":"unknown","lag":42,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
     is_error: false
-
 canned_llm_responses:
   investigation_planner:
-    - hypotheses:
-        - name: undiscriminated_alert
-          confidence: 0.4
-          reasoning: >
-            Alert lacks a group field; probing with "unknown" as a best effort.
-      next_action:
-        kind: probe
-        tool_name: get_consumer_lag
-        arguments:
-          consumer_group: unknown
-    - hypotheses:
-        - name: undiscriminated_alert
-          confidence: 0.6
-          reasoning: >
-            Fallback probe returned a small lag but the alert payload is missing
-            enough context to confirm which consumer is at fault.
-      next_action:
-        kind: stop
-        reason: alert payload incomplete; human decision required
-  briefing_writer:
-    - findings: >
-        The paging alert did not name a consumer group. A fallback probe against
-        "unknown" returned lag=42, but the alert payload is too thin to attribute
-        the signal.
-      recommendation: >
-        Ask the alert-source owner to include the consumer group in future
-        payloads; in the meantime, spot-check the top three lag-prone groups.
-  briefing_judge:
-    - groundedness: 0.85
-      actionability: 0.8
-      reasoning: >
-        Findings correctly note the missing group and the fallback lag=42
-        reading; recommendation names two concrete steps (alert-source owner
-        request + top-three spot check).
+  - hypotheses:
+    - category: unknown
+      name: undiscriminated_alert
+      confidence: 0.4
+      reasoning: 'Alert lacks a group field; probing with "unknown" as a best effort.
 
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: unknown
+  - hypotheses:
+    - category: unknown
+      name: undiscriminated_alert
+      confidence: 0.6
+      reasoning: 'Fallback probe returned a small lag but the alert payload is missing enough context to confirm which consumer is at fault.
+
+        '
+    next_action:
+      kind: stop
+      reason: alert payload incomplete; human decision required
+  briefing_writer:
+  - findings: 'The paging alert did not name a consumer group. A fallback probe against "unknown" returned lag=42, but the alert payload is too thin to attribute the signal.
+
+      '
+    recommendation: 'Ask the alert-source owner to include the consumer group in future payloads; in the meantime, spot-check the top three lag-prone groups.
+
+      '
+  briefing_judge:
+  - groundedness: 0.85
+    actionability: 0.8
+    reasoning: 'Findings correctly note the missing group and the fallback lag=42 reading; recommendation names two concrete steps (alert-source owner request + top-three spot check).
+
+      '
 expectation:
   name: consumer_lag_missing_group
   expected_terminal_state: escalated
   expected_evidence_contains:
-    # Live LLM often falls back to the platform's default "worker-dispatcher"
-    # group here rather than probing "unknown" — reasonable behavior. Loosen
-    # to the structural key that any get_consumer_lag response carries.
-    - cache_key
+  - cache_key
   max_tool_calls: 5

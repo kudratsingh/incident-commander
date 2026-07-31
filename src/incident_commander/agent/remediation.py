@@ -27,6 +27,7 @@ from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from incident_commander.agent.hypothesis import ReadToolName
 from incident_commander.agent.state import (
     EvidenceEntry,
     IncidentState,
@@ -38,6 +39,20 @@ from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError
 from incident_commander.tools.policies import Tier, tier_of
 from incident_commander.tools.registry import TOOL_REGISTRY
 
+# Every Tier-1 tool the platform exposes today. Kept hand-listed for the
+# same reason as ``ReadToolName`` in hypothesis.py — Pydantic Literals need
+# literal string args at import time. Drift caught by a unit test that
+# compares to ``tools_at_or_below(Tier.TIER_1) - tools_at_or_below(Tier.READ)``.
+Tier1ToolName = Literal[
+    "invalidate_cache_key",
+    "mark_dlq_permanent",
+    "pause_dag",
+    "replay_dlq_by_category",
+    "replay_dlq_by_ids",
+    "replay_dlq_messages",
+    "restart_consumer_group",
+]
+
 _IDEMPOTENCY_KEY_LEN: Final[int] = 32
 # One Tier-1 attempt per incident. If the first attempt didn't fix it,
 # a human should look at the escalation briefing before we try again.
@@ -45,7 +60,13 @@ _MAX_REMEDIATION_ATTEMPTS: Final[int] = 1
 
 
 class RemediationPlan(BaseModel):
-    """One remediation plan: action + verification."""
+    """One remediation plan: action + verification.
+
+    ``action_tool`` and ``verify_tool`` are Literal-typed against the
+    registry, so the JSON schema exposed to the LLM only accepts real
+    tool names. The runtime tier check in ``make_llm_plan`` remains as
+    defense-in-depth against registry-drift scenarios.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -53,17 +74,15 @@ class RemediationPlan(BaseModel):
         min_length=1,
         description="Name of the hypothesis this plan addresses.",
     )
-    action_tool: str = Field(
-        min_length=1,
-        description="Tier-1 tool to invoke. Must be in the tier-1 allowlist.",
+    action_tool: Tier1ToolName = Field(
+        description="Tier-1 tool to invoke. Enum-constrained by the schema.",
     )
     action_arguments: dict[str, Any] = Field(
         default_factory=dict,
         description="Arguments for the action tool. idempotency_key is agent-generated.",
     )
-    verify_tool: str = Field(
-        min_length=1,
-        description="Read tool to call after the action to check the fix worked.",
+    verify_tool: ReadToolName = Field(
+        description="Read tool to call after the action. Enum-constrained.",
     )
     verify_arguments: dict[str, Any] = Field(
         default_factory=dict,

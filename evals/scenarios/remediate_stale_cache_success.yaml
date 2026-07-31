@@ -1,103 +1,89 @@
-# Cache-miss spike → invalidate the stale key → verify hit rate recovers.
-
 name: remediate_stale_cache_success
-description: >
-  Cache miss rate spike alert. Agent probes get_redis_health, sees the
-  hit rate has collapsed, emits RemediateAction. Remediation planner
-  picks invalidate_cache_key targeting a specific stale key; verify
-  probes get_redis_health again and expects the miss trend to reverse.
+description: 'Cache miss rate spike alert. Agent probes get_redis_health, sees the hit rate has collapsed, emits RemediateAction. Remediation planner picks invalidate_cache_key targeting a specific stale
+  key; verify probes get_redis_health again and expects the miss trend to reverse.
 
-tags: [phase-6, remediation, tier-1, cache, live-mcp, live-llm]
-
-# Live-mode setup: run `make chaos-saturate` first to induce cache
-# pressure. Without setup, the initial probe shows a healthy Redis and
-# the agent may reasonably escalate without invalidating anything.
+  '
+tags:
+- phase-6
+- remediation
+- tier-1
+- cache
+- live-mcp
+- live-llm
 use_live_mcp: true
 use_live_llm: true
-
 alert:
   source: platform.cache
   severity: high
   fingerprint: cache_miss_spike
   cache_key: cache:jobs:worker-dispatcher:hot_set
-
 canned_tool_responses:
-  # First probe: keyspace stats show a bad hit/miss ratio.
   get_redis_health:
     content:
-      - type: text
-        text: '{"ok":true,"ping_latency_ms":1.1,"connected_clients":3,"used_memory_bytes":1073741824,"used_memory_human":"1.00G","keyspace_hits":293,"keyspace_misses":449813,"error":null}'
+    - type: text
+      text: '{"ok":true,"ping_latency_ms":1.1,"connected_clients":3,"used_memory_bytes":1073741824,"used_memory_human":"1.00G","keyspace_hits":293,"keyspace_misses":449813,"error":null}'
     is_error: false
-  # Remediation: delete one hot key.
   invalidate_cache_key:
     content:
-      - type: text
-        text: '{"key":"cache:jobs:worker-dispatcher:hot_set","deleted":true}'
+    - type: text
+      text: '{"key":"cache:jobs:worker-dispatcher:hot_set","deleted":true}'
     is_error: false
-
 canned_llm_responses:
   investigation_planner:
-    - hypotheses:
-        - name: stale_cache_hot_key
-          confidence: 0.55
-          reasoning: >
-            Cache miss spike; probe redis health to check hit ratio and
-            memory pressure.
-      next_action:
-        kind: probe
-        tool_name: get_redis_health
-        arguments: {}
-    - hypotheses:
-        - name: stale_cache_hot_key
-          confidence: 0.85
-          reasoning: >
-            Hit/miss ratio collapsed (293 hits vs 449813 misses = 0.065%).
-            Alert names a specific hot key. Invalidating forces a refresh
-            from the source of truth and should restore cache behavior.
-      next_action:
-        kind: remediate
-        reason: stale hot key identified — invalidate_cache_key applies
-  remediation_planner:
-    - target_hypothesis: stale_cache_hot_key
-      action_tool: invalidate_cache_key
-      action_arguments:
-        key: cache:jobs:worker-dispatcher:hot_set
-      verify_tool: get_redis_health
-      verify_arguments: {}
-      verify_expectation: >
-        Miss rate should stabilize as workers repopulate the key from
-        the source of truth. deleted=true confirms the key existed and
-        was cleared.
-  verification_judge:
-    - verdict: verified
-      reasoning: >
-        invalidate_cache_key returned deleted=true, confirming the stale
-        key was cleared. Follow-up read shows Redis is healthy and the
-        hit rate will stabilize as workers repopulate.
-  briefing_writer:
-    - findings: >
-        Redis cache hit rate collapsed to 0.065%. Alert named a specific
-        hot key (cache:jobs:worker-dispatcher:hot_set) as the likely
-        culprit. Invalidating the key returned deleted=true; workers
-        will repopulate on next lookup.
-      recommendation: >
-        Monitor hit ratio for the next 5 minutes to confirm recovery.
-        If a similar spike recurs on the same key, investigate why it's
-        going stale — TTL misconfiguration or an upstream write pattern
-        not invalidating properly.
-  briefing_judge:
-    - groundedness: 0.9
-      actionability: 0.85
-      reasoning: >
-        Findings ground in the health probe stats and the invalidation
-        result; recommendation names a concrete monitoring window plus
-        an investigation direction if the problem recurs.
+  - hypotheses:
+    - category: stale_cache
+      name: stale_cache_hot_key
+      confidence: 0.55
+      reasoning: 'Cache miss spike; probe redis health to check hit ratio and memory pressure.
 
+        '
+    next_action:
+      kind: probe
+      tool_name: get_redis_health
+      arguments: {}
+  - hypotheses:
+    - category: stale_cache
+      name: stale_cache_hot_key
+      confidence: 0.85
+      reasoning: 'Hit/miss ratio collapsed (293 hits vs 449813 misses = 0.065%). Alert names a specific hot key. Invalidating forces a refresh from the source of truth and should restore cache behavior.
+
+        '
+    next_action:
+      kind: remediate
+      reason: "stale hot key identified \u2014 invalidate_cache_key applies"
+  remediation_planner:
+  - target_hypothesis: stale_cache_hot_key
+    action_tool: invalidate_cache_key
+    action_arguments:
+      key: cache:jobs:worker-dispatcher:hot_set
+    verify_tool: get_redis_health
+    verify_arguments: {}
+    verify_expectation: 'Miss rate should stabilize as workers repopulate the key from the source of truth. deleted=true confirms the key existed and was cleared.
+
+      '
+  verification_judge:
+  - verdict: verified
+    reasoning: 'invalidate_cache_key returned deleted=true, confirming the stale key was cleared. Follow-up read shows Redis is healthy and the hit rate will stabilize as workers repopulate.
+
+      '
+  briefing_writer:
+  - findings: 'Redis cache hit rate collapsed to 0.065%. Alert named a specific hot key (cache:jobs:worker-dispatcher:hot_set) as the likely culprit. Invalidating the key returned deleted=true; workers
+      will repopulate on next lookup.
+
+      '
+    recommendation: "Monitor hit ratio for the next 5 minutes to confirm recovery. If a similar spike recurs on the same key, investigate why it's going stale \u2014 TTL misconfiguration or an upstream\
+      \ write pattern not invalidating properly.\n"
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.85
+    reasoning: 'Findings ground in the health probe stats and the invalidation result; recommendation names a concrete monitoring window plus an investigation direction if the problem recurs.
+
+      '
 expectation:
   name: remediate_stale_cache_success
   expected_terminal_state: resolved
   expected_action_tool: invalidate_cache_key
   expected_evidence_contains:
-    - deleted
-    - verified
+  - deleted
+  - verified
   max_tool_calls: 5

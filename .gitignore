@@ -47,3 +47,6 @@ evals/traces/*
 evals/reports/latest.json
 evals/reports/human/*
 !evals/reports/human/.gitkeep
+
+# Claude Code runtime artifacts (per-machine)
+.claude/

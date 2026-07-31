@@ -1,77 +1,70 @@
-# Baseline eval scenario: consumer lag on the worker-dispatcher group.
-# First scenario running against the real platform.
-
 name: consumer_lag_high
-description: >
-  Kafka consumer lag alert on the worker-dispatcher group. Only group the
-  platform exposes today (Wave 1); more arrive with later waves.
-  For Phase 0 (read-only), the agent runs one probe and escalates.
+description: 'Kafka consumer lag alert on the worker-dispatcher group. Only group the platform exposes today (Wave 1); more arrive with later waves. For Phase 0 (read-only), the agent runs one probe and
+  escalates.
 
-tags: [read-only, phase-0, kafka, live-mcp, live-llm]
-
+  '
+tags:
+- read-only
+- phase-0
+- kafka
+- live-mcp
+- live-llm
 use_live_mcp: true
 use_live_llm: true
-
 alert:
   source: platform.kafka
   severity: high
   fingerprint: consumer_lag_high
   consumer_group: worker-dispatcher
-
-# Canned fallback for offline `make eval` — mirrors what the live platform
-# returns so the offline determinism check stays green even for live scenarios.
 canned_tool_responses:
   get_consumer_lag:
     content:
-      - type: text
-        text: '{"consumer_group":"worker-dispatcher","lag":1200,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":1200,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
     is_error: false
-
 canned_llm_responses:
   investigation_planner:
-    - hypotheses:
-        - name: consumer_saturation
-          confidence: 0.55
-          reasoning: >
-            Paging severity on worker-dispatcher suggests the consumer is
-            falling behind. Probe for the current lag.
-      next_action:
-        kind: probe
-        tool_name: get_consumer_lag
-        arguments:
-          consumer_group: worker-dispatcher
-    - hypotheses:
-        - name: consumer_saturation
-          confidence: 0.7
-          reasoning: >
-            Platform returned the live lag reading; whether it's a spike or
-            sustained is not knowable from one point without another tool.
-      next_action:
-        kind: stop
-        reason: >
-          Only one read tool available today; escalate the live reading to a
-          human for judgment.
-  briefing_writer:
-    - findings: >
-        Live lag reading for the worker-dispatcher Kafka group was fetched
-        from the platform via get_consumer_lag.
-      recommendation: >
-        Compare the lag reading against the paging threshold and check the
-        worker process's recent CPU / restart history before intervening.
-  briefing_judge:
-    - groundedness: 0.85
-      actionability: 0.8
-      reasoning: >
-        Findings ground in the live tool response; recommendation names two
-        concrete verification steps.
+  - hypotheses:
+    - category: consumer_saturation
+      name: consumer_saturation
+      confidence: 0.55
+      reasoning: 'Paging severity on worker-dispatcher suggests the consumer is falling behind. Probe for the current lag.
 
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: worker-dispatcher
+  - hypotheses:
+    - category: consumer_saturation
+      name: consumer_saturation
+      confidence: 0.7
+      reasoning: 'Platform returned the live lag reading; whether it''s a spike or sustained is not knowable from one point without another tool.
+
+        '
+    next_action:
+      kind: stop
+      reason: 'Only one read tool available today; escalate the live reading to a human for judgment.
+
+        '
+  briefing_writer:
+  - findings: 'Live lag reading for the worker-dispatcher Kafka group was fetched from the platform via get_consumer_lag.
+
+      '
+    recommendation: 'Compare the lag reading against the paging threshold and check the worker process''s recent CPU / restart history before intervening.
+
+      '
+  briefing_judge:
+  - groundedness: 0.85
+    actionability: 0.8
+    reasoning: 'Findings ground in the live tool response; recommendation names two concrete verification steps.
+
+      '
 expectation:
   name: consumer_lag_high
   expected_terminal_state: escalated
   expected_evidence_contains:
-    # `cache_key` only appears in the parsed GetConsumerLagOutput; matching
-    # on it rules out the false-green case where the planner errored and its
-    # error string happened to leak the alert's group name.
-    - cache_key
-    - worker-dispatcher
+  - cache_key
+  - worker-dispatcher
   max_tool_calls: 5

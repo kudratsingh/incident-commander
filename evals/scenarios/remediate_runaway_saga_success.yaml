@@ -1,111 +1,92 @@
-# Saga runaway → pause the DAG → verify children stop advancing → RESOLVED.
-
 name: remediate_runaway_saga_success
-description: >
-  Runaway saga alert. Agent probes get_dag_state, sees the saga is
-  spawning children faster than intended (or a child is retry-looping),
-  emits RemediateAction. Remediation planner picks pause_dag with the
-  known TTL so the pause self-cleans; verify re-probes and expects the
-  children to be in a WAITING/paused state.
+description: 'Runaway saga alert. Agent probes get_dag_state, sees the saga is spawning children faster than intended (or a child is retry-looping), emits RemediateAction. Remediation planner picks pause_dag
+  with the known TTL so the pause self-cleans; verify re-probes and expects the children to be in a WAITING/paused state.
 
-tags: [phase-6, remediation, tier-1, dag, saga, live-mcp, live-llm]
-
-# Live-mode setup: no dedicated chaos hook for saga runaway today.
-# Simplest live setup is to hand-invoke via the seeded DAG UUID and
-# check the response shape. The agent's pause_dag is TTL-scoped (max
-# 10 minutes) so live effect self-cleans without operator intervention.
+  '
+tags:
+- phase-6
+- remediation
+- tier-1
+- dag
+- saga
+- live-mcp
+- live-llm
 use_live_mcp: true
 use_live_llm: true
-
 alert:
   source: platform.dag
   severity: high
   fingerprint: saga_runaway
-  # Pinned seed UUID from the platform's eval fixture manifest.
-  # (scripts/seed_eval_fixtures.py::collect_pins → dag.seed_job_id)
   job_id: 25220882-1820-5cd3-b09b-f866ff5823c9
-
 canned_tool_responses:
   get_dag_state:
     content:
-      - type: text
-        text: '{"seed_id":"25220882-1820-5cd3-b09b-f866ff5823c9","nodes":[{"id":"n1","type":"reserve_inventory","status":"succeeded","retry_count":0,"created_at":"2026-07-30T10:00:00Z"},{"id":"n2","type":"charge_card","status":"running","retry_count":5,"created_at":"2026-07-30T10:01:00Z"},{"id":"n3","type":"ship_order","status":"waiting","retry_count":0,"created_at":"2026-07-30T10:01:00Z"}],"edges":[{"from_id":"n1","to_id":"n2"},{"from_id":"n2","to_id":"n3"}]}'
+    - type: text
+      text: '{"seed_id":"25220882-1820-5cd3-b09b-f866ff5823c9","nodes":[{"id":"n1","type":"reserve_inventory","status":"succeeded","retry_count":0,"created_at":"2026-07-30T10:00:00Z"},{"id":"n2","type":"charge_card","status":"running","retry_count":5,"created_at":"2026-07-30T10:01:00Z"},{"id":"n3","type":"ship_order","status":"waiting","retry_count":0,"created_at":"2026-07-30T10:01:00Z"}],"edges":[{"from_id":"n1","to_id":"n2"},{"from_id":"n2","to_id":"n3"}]}'
     is_error: false
   pause_dag:
     content:
-      - type: text
-        text: '{"root_job_id":"25220882-1820-5cd3-b09b-f866ff5823c9","pause_key":"chaos:dag_pause:25220882-1820-5cd3-b09b-f866ff5823c9","ttl_seconds":600,"accepted":true}'
+    - type: text
+      text: '{"root_job_id":"25220882-1820-5cd3-b09b-f866ff5823c9","pause_key":"chaos:dag_pause:25220882-1820-5cd3-b09b-f866ff5823c9","ttl_seconds":600,"accepted":true}'
     is_error: false
-
 canned_llm_responses:
   investigation_planner:
-    - hypotheses:
-        - name: runaway_saga_node
-          confidence: 0.55
-          reasoning: >
-            Saga runaway alert names a seed job; probe get_dag_state to
-            see which node is retry-looping.
-      next_action:
-        kind: probe
-        tool_name: get_dag_state
-        arguments:
-          job_id: 25220882-1820-5cd3-b09b-f866ff5823c9
-    - hypotheses:
-        - name: runaway_saga_node
-          confidence: 0.85
-          reasoning: >
-            charge_card is running with retry_count=5 while ship_order
-            waits. Pausing the DAG prevents further promotion while the
-            payment dependency is investigated.
-      next_action:
-        kind: remediate
-        reason: charge_card retry-looping; pause_dag stops further promotion
-  remediation_planner:
-    - target_hypothesis: runaway_saga_node
-      action_tool: pause_dag
-      action_arguments:
-        root_job_id: 25220882-1820-5cd3-b09b-f866ff5823c9
-        ttl_seconds: 600
-      verify_tool: get_dag_state
-      verify_arguments:
-        job_id: 25220882-1820-5cd3-b09b-f866ff5823c9
-      verify_expectation: >
-        Downstream nodes should stay in waiting/pending state — no new
-        children promoted while the pause key holds. The pause auto-
-        expires after 10 minutes so operators have time to investigate.
-  verification_judge:
-    - verdict: verified
-      reasoning: >
-        pause_dag returned accepted=true with a valid pause_key + TTL.
-        The get_dag_state probe still shows charge_card and ship_order
-        in non-terminal states, consistent with the pause holding.
-  briefing_writer:
-    - findings: >
-        Saga at seed_id 25220882... had charge_card retrying (count=5)
-        with ship_order waiting downstream. Paused the DAG with a
-        10-minute TTL to stop further child promotion. TTL self-cleans;
-        no operator action needed to unpause if the underlying issue
-        resolves itself.
-      recommendation: >
-        Investigate the payment gateway (charge_card's dependency) —
-        the retry pattern is external, not code. If the gateway
-        recovers within 10 minutes, the pause expires and the saga
-        resumes. If not, extend the pause and start compensation
-        (reserve_inventory rollback).
-  briefing_judge:
-    - groundedness: 0.9
-      actionability: 0.85
-      reasoning: >
-        Findings ground in the DAG state and the pause response;
-        recommendation names both the investigation direction and the
-        follow-up compensation flow if the automatic recovery doesn't
-        happen.
+  - hypotheses:
+    - category: runaway_saga
+      name: runaway_saga_node
+      confidence: 0.55
+      reasoning: 'Saga runaway alert names a seed job; probe get_dag_state to see which node is retry-looping.
 
+        '
+    next_action:
+      kind: probe
+      tool_name: get_dag_state
+      arguments:
+        job_id: 25220882-1820-5cd3-b09b-f866ff5823c9
+  - hypotheses:
+    - category: runaway_saga
+      name: runaway_saga_node
+      confidence: 0.85
+      reasoning: 'charge_card is running with retry_count=5 while ship_order waits. Pausing the DAG prevents further promotion while the payment dependency is investigated.
+
+        '
+    next_action:
+      kind: remediate
+      reason: charge_card retry-looping; pause_dag stops further promotion
+  remediation_planner:
+  - target_hypothesis: runaway_saga_node
+    action_tool: pause_dag
+    action_arguments:
+      root_job_id: 25220882-1820-5cd3-b09b-f866ff5823c9
+      ttl_seconds: 600
+    verify_tool: get_dag_state
+    verify_arguments:
+      job_id: 25220882-1820-5cd3-b09b-f866ff5823c9
+    verify_expectation: "Downstream nodes should stay in waiting/pending state \u2014 no new children promoted while the pause key holds. The pause auto- expires after 10 minutes so operators have time\
+      \ to investigate.\n"
+  verification_judge:
+  - verdict: verified
+    reasoning: 'pause_dag returned accepted=true with a valid pause_key + TTL. The get_dag_state probe still shows charge_card and ship_order in non-terminal states, consistent with the pause holding.
+
+      '
+  briefing_writer:
+  - findings: 'Saga at seed_id 25220882... had charge_card retrying (count=5) with ship_order waiting downstream. Paused the DAG with a 10-minute TTL to stop further child promotion. TTL self-cleans; no
+      operator action needed to unpause if the underlying issue resolves itself.
+
+      '
+    recommendation: "Investigate the payment gateway (charge_card's dependency) \u2014 the retry pattern is external, not code. If the gateway recovers within 10 minutes, the pause expires and the saga\
+      \ resumes. If not, extend the pause and start compensation (reserve_inventory rollback).\n"
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.85
+    reasoning: 'Findings ground in the DAG state and the pause response; recommendation names both the investigation direction and the follow-up compensation flow if the automatic recovery doesn''t happen.
+
+      '
 expectation:
   name: remediate_runaway_saga_success
   expected_terminal_state: resolved
   expected_action_tool: pause_dag
   expected_evidence_contains:
-    - pause_key
-    - verified
+  - pause_key
+  - verified
   max_tool_calls: 5

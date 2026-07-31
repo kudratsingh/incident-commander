@@ -1,81 +1,79 @@
-# Planner probes twice before stopping. Tests real loop iteration.
-
 name: multi_probe_billing
-description: >
-  Planner probes get_consumer_lag twice — first to check billing-consumer,
-  then to re-probe after a suspicious low reading — before stopping with
-  updated confidence. Verifies the investigation loop iterates cleanly and
-  budget accounting handles multiple probes.
-
-tags: [read-only, phase-2, multi-probe, iteration, live-mcp, live-llm]
-
+description: "Planner probes get_consumer_lag twice \u2014 first to check billing-consumer, then to re-probe after a suspicious low reading \u2014 before stopping with updated confidence. Verifies the investigation\
+  \ loop iterates cleanly and budget accounting handles multiple probes.\n"
+tags:
+- read-only
+- phase-2
+- multi-probe
+- iteration
+- live-mcp
+- live-llm
 use_live_mcp: true
 use_live_llm: true
-
 alert:
   source: platform.kafka
   severity: high
   fingerprint: consumer_lag_high
   group: billing-consumer
-
 canned_tool_responses:
   get_consumer_lag:
     content:
-      - type: text
-        text: '{"consumer_group":"billing-consumer","lag":15000,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+    - type: text
+      text: '{"consumer_group":"billing-consumer","lag":15000,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
     is_error: false
-
 canned_llm_responses:
   investigation_planner:
-    - hypotheses:
-        - name: consumer_saturation
-          confidence: 0.5
-          reasoning: >
-            Standard paging alert on billing-consumer; probe for lag.
-      next_action:
-        kind: probe
-        tool_name: get_consumer_lag
-        arguments:
-          consumer_group: billing-consumer
-    - hypotheses:
-        - name: consumer_saturation
-          confidence: 0.7
-          reasoning: >
-            Lag of 15000 is high but the reading is a single point. Probe
-            again to confirm the trend rather than a momentary spike.
-      next_action:
-        kind: probe
-        tool_name: get_consumer_lag
-        arguments:
-          consumer_group: billing-consumer
-    - hypotheses:
-        - name: consumer_saturation
-          confidence: 0.9
-          reasoning: >
-            Repeat probe confirms sustained lag of 15000. Consumer is
-            genuinely backlogged, not a momentary spike.
-      next_action:
-        kind: stop
-        reason: two consistent readings; confidence high enough for handoff
-  briefing_writer:
-    - findings: >
-        billing-consumer lag reads 15000 messages across two probes. The
-        reading is sustained rather than a momentary spike.
-      recommendation: >
-        Verify billing-consumer pod count and processing time; the sustained
-        lag suggests the consumer is under-scaled or slower per-message than
-        producer rate.
-  briefing_judge:
-    - groundedness: 0.9
-      actionability: 0.85
-      reasoning: >
-        Findings capture both probes and the sustained-lag conclusion;
-        recommendation names two concrete verification steps.
+  - hypotheses:
+    - category: consumer_saturation
+      name: consumer_saturation
+      confidence: 0.5
+      reasoning: 'Standard paging alert on billing-consumer; probe for lag.
 
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: billing-consumer
+  - hypotheses:
+    - category: consumer_saturation
+      name: consumer_saturation
+      confidence: 0.7
+      reasoning: 'Lag of 15000 is high but the reading is a single point. Probe again to confirm the trend rather than a momentary spike.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: billing-consumer
+  - hypotheses:
+    - category: consumer_saturation
+      name: consumer_saturation
+      confidence: 0.9
+      reasoning: 'Repeat probe confirms sustained lag of 15000. Consumer is genuinely backlogged, not a momentary spike.
+
+        '
+    next_action:
+      kind: stop
+      reason: two consistent readings; confidence high enough for handoff
+  briefing_writer:
+  - findings: 'billing-consumer lag reads 15000 messages across two probes. The reading is sustained rather than a momentary spike.
+
+      '
+    recommendation: 'Verify billing-consumer pod count and processing time; the sustained lag suggests the consumer is under-scaled or slower per-message than producer rate.
+
+      '
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.85
+    reasoning: 'Findings capture both probes and the sustained-lag conclusion; recommendation names two concrete verification steps.
+
+      '
 expectation:
   name: multi_probe_billing
   expected_terminal_state: escalated
   expected_evidence_contains:
-    - billing-consumer
-    - lag
+  - billing-consumer
+  - lag
   max_tool_calls: 5

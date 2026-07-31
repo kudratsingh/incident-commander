@@ -19,7 +19,8 @@ alert:
 canned_llm_responses:
   investigation_planner:
     - hypotheses:
-        - name: consumer_saturation
+        - category: consumer_saturation
+          name: consumer_saturation
           confidence: 0.5
           reasoning: >
             Paging alert on payments-consumer; check current lag reading.

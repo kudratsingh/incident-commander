@@ -36,6 +36,11 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Ruff 0.7+ can format Python code blocks inside Markdown files. ADRs +
+# docs sometimes use illustrative formatting (comment alignment, spaced
+# enums for readability) that doesn't need to match production style.
+# Excluding *.md keeps docs from failing lint on presentation nits.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

@@ -19,6 +19,7 @@ from typing import Any, Final
 from pydantic import BaseModel, ValidationError
 
 from incident_commander.agent.hypothesis import (
+    HypothesisCategory,
     InvestigationStep,
     ProbeAction,
     RemediateAction,
@@ -38,6 +39,28 @@ from incident_commander.tools.registry import TOOL_REGISTRY
 
 _TOOL_NAME: Final[str] = "get_consumer_lag"
 _DEFAULT_MAX_ITERATIONS: Final[int] = 5
+_REMEDIATE_CONFIDENCE_THRESHOLD: Final[float] = 0.7
+
+
+# Single source of truth for category → Tier-1 tool routing.
+#
+# Categories in this map auto-remediate when the top hypothesis crosses
+# the confidence threshold. Categories NOT in this map — even at 1.0
+# confidence — auto-escalate to a human with a briefing. Adding a new
+# category to HypothesisCategory without adding it here is deliberate;
+# use that shape for observation-only classifications (e.g. UNKNOWN,
+# DEPLOY_REGRESSION) where auto-remediation would be wrong.
+#
+# Remediation planner selects the *specific* tool (e.g. for POISON_MESSAGE
+# it may pick replay_dlq_by_ids, replay_dlq_by_category, or mark_dlq_permanent
+# depending on the DLQ's remediation_hint contents). This map only asserts
+# "a Tier-1 fix category exists" — not the exact tool.
+FIX_MAP: Final[dict[HypothesisCategory, str]] = {
+    HypothesisCategory.CONSUMER_SATURATION: "restart_consumer_group",
+    HypothesisCategory.POISON_MESSAGE: "replay_dlq_by_ids",
+    HypothesisCategory.STALE_CACHE: "invalidate_cache_key",
+    HypothesisCategory.RUNAWAY_SAGA: "pause_dag",
+}
 
 
 def make_investigate(
@@ -146,8 +169,44 @@ def make_llm_investigate(
             if isinstance(action, StopAction):
                 return _finalize(run_state, at, action.reason)
             if isinstance(action, RemediateAction):
+                # Structural guard: the LLM emitted `remediate`, but we
+                # verify the top hypothesis actually qualifies before
+                # handing off to PLANNING. Two conditions:
+                #   1. category is a key in FIX_MAP (auto-remediable)
+                #   2. confidence >= threshold
+                # Either condition failing → escalate with a clear reason.
+                # The Pydantic schema already prevented invalid *categories*;
+                # this catches the "correct category, insufficient confidence"
+                # or "prompt drift emitted remediate for an unmapped category"
+                # cases at the state-machine level.
+                top = step.hypotheses[0]
+                if top.category not in FIX_MAP:
+                    return _finalize(
+                        run_state,
+                        at,
+                        (
+                            f"planner emitted remediate for category "
+                            f"{top.category.value!r} which has no Tier-1 fix; "
+                            "escalating"
+                        ),
+                    )
+                if top.confidence < _REMEDIATE_CONFIDENCE_THRESHOLD:
+                    return _finalize(
+                        run_state,
+                        at,
+                        (
+                            f"planner emitted remediate but top confidence "
+                            f"{top.confidence:.2f} is below threshold "
+                            f"{_REMEDIATE_CONFIDENCE_THRESHOLD}; escalating"
+                        ),
+                    )
                 return _handoff_to_planning(run_state, at, action.reason)
 
+            # ProbeAction — tool_name is Literal-validated at schema time,
+            # so this branch only runs on tools that were in the read-tier
+            # slice of TOOL_REGISTRY when the module loaded. The extra
+            # runtime check catches the (rare) case where the registry
+            # drifts after startup.
             if action.tool_name not in TOOL_REGISTRY:
                 return _escalate_investigation(
                     run_state, at, f"planner proposed unknown tool: {action.tool_name}"

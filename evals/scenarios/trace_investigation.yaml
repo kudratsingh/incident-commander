@@ -1,68 +1,65 @@
-# Job-error alert with trace id — planner probes get_trace for the audit trail.
-
 name: trace_investigation
-description: >
-  A specific job failed and the alert carries its trace_id. The planner
-  fetches the trace and its audit events before escalating.
+description: 'A specific job failed and the alert carries its trace_id. The planner fetches the trace and its audit events before escalating.
 
-tags: [read-only, phase-3, trace, live-mcp, live-llm]
-
+  '
+tags:
+- read-only
+- phase-3
+- trace
+- live-mcp
+- live-llm
 use_live_mcp: true
 use_live_llm: true
-
 alert:
   source: platform.jobs
   severity: high
   fingerprint: job_failed
   trace_id: trace-abc-123
   job_type: process_payment
-
 canned_tool_responses:
   get_trace:
     content:
-      - type: text
-        text: '{"trace_id":"trace-abc-123","jobs":[{"id":"job-1","type":"process_payment","status":"failed","retry_count":3,"error_message":"stripe api timeout","created_at":"2026-07-28T10:00:00Z"}],"audit_events":[{"action":"job.retried","principal_type":"system","created_at":"2026-07-28T10:01:00Z"}]}'
+    - type: text
+      text: '{"trace_id":"trace-abc-123","jobs":[{"id":"job-1","type":"process_payment","status":"failed","retry_count":3,"error_message":"stripe api timeout","created_at":"2026-07-28T10:00:00Z"}],"audit_events":[{"action":"job.retried","principal_type":"system","created_at":"2026-07-28T10:01:00Z"}]}'
     is_error: false
-
 canned_llm_responses:
   investigation_planner:
-    - hypotheses:
-        - name: downstream_timeout
-          confidence: 0.55
-          reasoning: >
-            Job failure alert carries a trace_id; fetch the trace for the
-            full retry + audit picture.
-      next_action:
-        kind: probe
-        tool_name: get_trace
-        arguments:
-          trace_id: trace-abc-123
-    - hypotheses:
-        - name: downstream_timeout
-          confidence: 0.85
-          reasoning: >
-            Trace shows 3 retries against Stripe timing out — root cause is
-            the external dependency, not the job code.
-      next_action:
-        kind: stop
-        reason: root cause is external dependency; escalate for retry policy tuning
-  briefing_writer:
-    - findings: >
-        Job process_payment (trace trace-abc-123) failed after 3 retries with
-        "stripe api timeout" as the error on each attempt.
-      recommendation: >
-        Confirm Stripe is healthy from the platform's network; if so, consider
-        widening the timeout or adding a circuit breaker on this job type.
-  briefing_judge:
-    - groundedness: 0.9
-      actionability: 0.85
-      reasoning: >
-        Findings ground in the trace's retry history and error message;
-        recommendation names concrete mitigations.
+  - hypotheses:
+    - category: transient_dependency
+      name: downstream_timeout
+      confidence: 0.55
+      reasoning: 'Job failure alert carries a trace_id; fetch the trace for the full retry + audit picture.
 
+        '
+    next_action:
+      kind: probe
+      tool_name: get_trace
+      arguments:
+        trace_id: trace-abc-123
+  - hypotheses:
+    - category: transient_dependency
+      name: downstream_timeout
+      confidence: 0.85
+      reasoning: "Trace shows 3 retries against Stripe timing out \u2014 root cause is the external dependency, not the job code.\n"
+    next_action:
+      kind: stop
+      reason: root cause is external dependency; escalate for retry policy tuning
+  briefing_writer:
+  - findings: 'Job process_payment (trace trace-abc-123) failed after 3 retries with "stripe api timeout" as the error on each attempt.
+
+      '
+    recommendation: 'Confirm Stripe is healthy from the platform''s network; if so, consider widening the timeout or adding a circuit breaker on this job type.
+
+      '
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.85
+    reasoning: 'Findings ground in the trace''s retry history and error message; recommendation names concrete mitigations.
+
+      '
 expectation:
   name: trace_investigation
   expected_terminal_state: escalated
   expected_evidence_contains:
-    - trace
+  - trace
   max_tool_calls: 5

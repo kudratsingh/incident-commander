@@ -48,6 +48,7 @@ def _probe_then_stop_llm(group: str = "billing") -> CannedLLMClient:
             {
                 "hypotheses": [
                     {
+                        "category": "consumer_saturation",
                         "name": "consumer_saturation",
                         "confidence": 0.55,
                         "reasoning": "Alert severity suggests saturation.",
@@ -62,6 +63,7 @@ def _probe_then_stop_llm(group: str = "billing") -> CannedLLMClient:
             {
                 "hypotheses": [
                     {
+                        "category": "consumer_saturation",
                         "name": "consumer_saturation",
                         "confidence": 0.9,
                         "reasoning": "Lag reading confirms saturation.",
@@ -125,6 +127,7 @@ class TestImmediateStop:
                 {
                     "hypotheses": [
                         {
+                            "category": "unknown",
                             "name": "false_positive",
                             "confidence": 0.8,
                             "reasoning": "Alert without actionable signal.",
@@ -154,6 +157,7 @@ class TestRemediateHandoff:
                 {
                     "hypotheses": [
                         {
+                            "category": "consumer_saturation",
                             "name": "consumer_saturation",
                             "confidence": 0.9,
                             "reasoning": "top hypothesis clear",
@@ -182,7 +186,9 @@ class TestErrorPaths:
         llm = CannedLLMClient(
             [
                 {
-                    "hypotheses": [{"name": "x", "confidence": 0.5, "reasoning": "r"}],
+                    "hypotheses": [
+                        {"category": "unknown", "name": "x", "confidence": 0.5, "reasoning": "r"}
+                    ],
                     "next_action": {
                         "kind": "probe",
                         "tool_name": "made_up_tool",
@@ -195,7 +201,13 @@ class TestErrorPaths:
         result = transition(_investigating(run_state), now)
         assert result.state is IncidentState.ESCALATED
         escalations = [e for e in result.evidence if e.tool_name == "_planner_escalate"]
-        assert any("unknown tool" in e.result_summary for e in escalations)
+        # Post-hardening: ProbeAction.tool_name is a Literal, so Pydantic
+        # rejects "made_up_tool" at schema-validation time. The transition's
+        # ValidationError catch escalates with a "planner output invalid"
+        # reason that mentions the rejected value.
+        assert any(
+            "made_up_tool" in e.result_summary or "invalid" in e.result_summary for e in escalations
+        )
 
     def test_tool_error_escalates(self, run_state: RunState, now: datetime) -> None:
         def erroring(_n: str, _a: Mapping[str, Any]) -> ToolResult:
@@ -239,7 +251,9 @@ class TestErrorPaths:
         llm = CannedLLMClient(
             [
                 {
-                    "hypotheses": [{"name": "x", "confidence": 0.6, "reasoning": "r"}],
+                    "hypotheses": [
+                        {"category": "unknown", "name": "x", "confidence": 0.6, "reasoning": "r"}
+                    ],
                     "next_action": {
                         "kind": "probe",
                         "tool_name": "get_dag_state",
@@ -247,7 +261,9 @@ class TestErrorPaths:
                     },
                 },
                 {
-                    "hypotheses": [{"name": "x", "confidence": 0.9, "reasoning": "r"}],
+                    "hypotheses": [
+                        {"category": "unknown", "name": "x", "confidence": 0.9, "reasoning": "r"}
+                    ],
                     "next_action": {"kind": "stop", "reason": "done"},
                 },
             ]
@@ -302,7 +318,14 @@ class TestBudgetGuards:
         # Planner always probes, never stops.
         mcp = _FakeMCPClient(lambda _n, _a: _consumer_lag_response("billing", 42))
         endless_probe = {
-            "hypotheses": [{"name": "loop", "confidence": 0.3, "reasoning": "keep probing"}],
+            "hypotheses": [
+                {
+                    "category": "unknown",
+                    "name": "loop",
+                    "confidence": 0.3,
+                    "reasoning": "keep probing",
+                }
+            ],
             "next_action": {
                 "kind": "probe",
                 "tool_name": "get_consumer_lag",
@@ -334,7 +357,9 @@ class TestBudgetGuards:
             ) -> LLMResult[T]:
                 self.calls += 1
                 payload = {
-                    "hypotheses": [{"name": "x", "confidence": 0.9, "reasoning": "r"}],
+                    "hypotheses": [
+                        {"category": "unknown", "name": "x", "confidence": 0.9, "reasoning": "r"}
+                    ],
                     "next_action": {"kind": "stop", "reason": "done"},
                 }
                 return LLMResult(

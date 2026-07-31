@@ -1,99 +1,87 @@
-# Full loop but the verify judge returns not_verified → ESCALATED.
-#
-# Tests the sad path: agent applies a fix, checks, but the fix didn't
-# work. Must escalate cleanly with the verdict on evidence.
-
 name: remediate_verify_fails
-description: >
-  Consumer lag remediation attempt where the restart succeeded but the
-  verify probe shows lag is still high. Judge returns not_verified;
-  scenario ends ESCALATED, remediation_attempts=1, so PLANNING cannot
-  autonomously retry.
+description: 'Consumer lag remediation attempt where the restart succeeded but the verify probe shows lag is still high. Judge returns not_verified; scenario ends ESCALATED, remediation_attempts=1, so PLANNING
+  cannot autonomously retry.
 
-tags: [phase-6, remediation, tier-1, sad-path, live-mcp, live-llm]
-
+  '
+tags:
+- phase-6
+- remediation
+- tier-1
+- sad-path
+- live-mcp
+- live-llm
 use_live_mcp: true
 use_live_llm: true
-
 alert:
   source: platform.kafka
   severity: high
   fingerprint: consumer_lag_high
   consumer_group: worker-dispatcher
-
 canned_tool_responses:
   get_consumer_lag:
     content:
-      - type: text
-        text: '{"consumer_group":"worker-dispatcher","lag":15000,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":15000,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
     is_error: false
   restart_consumer_group:
     content:
-      - type: text
-        text: '{"consumer_group":"worker-dispatcher","kill_key_cleared":true,"kill_key":"chaos:kill:worker-dispatcher","accepted":true}'
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","kill_key_cleared":true,"kill_key":"chaos:kill:worker-dispatcher","accepted":true}'
     is_error: false
-
 canned_llm_responses:
   investigation_planner:
-    - hypotheses:
-        - name: consumer_saturation
-          confidence: 0.55
-          reasoning: Paging severity — probe current lag.
-      next_action:
-        kind: probe
-        tool_name: get_consumer_lag
-        arguments:
-          consumer_group: worker-dispatcher
-    - hypotheses:
-        - name: consumer_saturation
-          confidence: 0.85
-          reasoning: >
-            Sustained lag confirms saturation; restart should recover it.
-      next_action:
-        kind: remediate
-        reason: consumer_saturation confirmed
-  remediation_planner:
-    - target_hypothesis: consumer_saturation
-      action_tool: restart_consumer_group
-      action_arguments:
+  - hypotheses:
+    - category: consumer_saturation
+      name: consumer_saturation
+      confidence: 0.55
+      reasoning: "Paging severity \u2014 probe current lag."
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
         consumer_group: worker-dispatcher
-      verify_tool: get_consumer_lag
-      verify_arguments:
-        consumer_group: worker-dispatcher
-      verify_expectation: >
-        Lag should drop below 100 messages within 30 seconds.
-  verification_judge:
-    # Deliberately not_verified — this is the sad-path test. Lag reading
-    # would still be 15000 in canned mode; judge correctly says the fix
-    # didn't take.
-    - verdict: not_verified
-      reasoning: >
-        The verify probe still shows lag=15000 — the restart action
-        went through but the consumer isn't processing. Deeper issue:
-        the consumer may be crashing on startup or a downstream
-        dependency is blocking it.
-  briefing_writer:
-    - findings: >
-        Restarted worker-dispatcher after seeing lag=15000. Verify probe
-        still shows lag=15000 — the restart did not clear the backlog,
-        so the underlying cause isn't a simple consumer death.
-      recommendation: >
-        Check the consumer pod's startup logs and downstream dependency
-        health (Postgres, Redis, downstream API). A restart-that-didn't-
-        help suggests the consumer is looping on a persistent error.
-  briefing_judge:
-    - groundedness: 0.9
-      actionability: 0.9
-      reasoning: >
-        Findings correctly identify the failed remediation attempt;
-        recommendation names three specific things to check next.
+  - hypotheses:
+    - category: consumer_saturation
+      name: consumer_saturation
+      confidence: 0.85
+      reasoning: 'Sustained lag confirms saturation; restart should recover it.
 
+        '
+    next_action:
+      kind: remediate
+      reason: consumer_saturation confirmed
+  remediation_planner:
+  - target_hypothesis: consumer_saturation
+    action_tool: restart_consumer_group
+    action_arguments:
+      consumer_group: worker-dispatcher
+    verify_tool: get_consumer_lag
+    verify_arguments:
+      consumer_group: worker-dispatcher
+    verify_expectation: 'Lag should drop below 100 messages within 30 seconds.
+
+      '
+  verification_judge:
+  - verdict: not_verified
+    reasoning: "The verify probe still shows lag=15000 \u2014 the restart action went through but the consumer isn't processing. Deeper issue: the consumer may be crashing on startup or a downstream dependency\
+      \ is blocking it.\n"
+  briefing_writer:
+  - findings: "Restarted worker-dispatcher after seeing lag=15000. Verify probe still shows lag=15000 \u2014 the restart did not clear the backlog, so the underlying cause isn't a simple consumer death.\n"
+    recommendation: 'Check the consumer pod''s startup logs and downstream dependency health (Postgres, Redis, downstream API). A restart-that-didn''t- help suggests the consumer is looping on a persistent
+      error.
+
+      '
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.9
+    reasoning: 'Findings correctly identify the failed remediation attempt; recommendation names three specific things to check next.
+
+      '
 expectation:
   name: remediate_verify_fails
   expected_terminal_state: escalated
-  # The remediation action still fires (before verify) — assertion holds.
   expected_action_tool: restart_consumer_group
   expected_evidence_contains:
-    - kill_key_cleared
-    - not_verified
+  - kill_key_cleared
+  - not_verified
   max_tool_calls: 5

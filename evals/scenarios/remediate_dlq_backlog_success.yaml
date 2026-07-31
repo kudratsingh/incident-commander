@@ -1,86 +1,82 @@
-# DLQ backlog → replay → verify DLQ shorter → RESOLVED.
-
 name: remediate_dlq_backlog_success
-description: >
-  DLQ depth alert. Agent probes list_dlq_messages, sees retryable jobs,
-  emits RemediateAction. Remediation planner picks replay_dlq_messages;
-  verify probes list_dlq_messages again to confirm the backlog shrank.
+description: 'DLQ depth alert. Agent probes list_dlq_messages, sees retryable jobs, emits RemediateAction. Remediation planner picks replay_dlq_messages; verify probes list_dlq_messages again to confirm
+  the backlog shrank.
 
-tags: [phase-6, remediation, tier-1, dlq, live-mcp, live-llm]
-
+  '
+tags:
+- phase-6
+- remediation
+- tier-1
+- dlq
+- live-mcp
+- live-llm
 use_live_mcp: true
 use_live_llm: true
-
 alert:
   source: platform.dlq
   severity: high
   fingerprint: dlq_depth_warning
-
 canned_tool_responses:
   list_dlq_messages:
     content:
-      - type: text
-        text: '{"total":3,"items":[{"id":"job-1","type":"send_email","error_message":"transient upstream 503","retry_count":3,"created_at":"2026-07-30T10:00:00Z","triage":{"summary":"upstream flapped, safe to retry","is_retryable":true,"confidence":0.9}}]}'
+    - type: text
+      text: '{"total":3,"items":[{"id":"job-1","type":"send_email","error_message":"transient upstream 503","retry_count":3,"created_at":"2026-07-30T10:00:00Z","triage":{"summary":"upstream flapped, safe
+        to retry","is_retryable":true,"confidence":0.9}}]}'
     is_error: false
   replay_dlq_messages:
     content:
-      - type: text
-        text: '{"requested":3,"replayed":3,"failed":0,"jobs":[{"id":"job-1","type":"send_email"},{"id":"job-2","type":"send_email"},{"id":"job-3","type":"send_email"}]}'
+    - type: text
+      text: '{"requested":3,"replayed":3,"failed":0,"jobs":[{"id":"job-1","type":"send_email"},{"id":"job-2","type":"send_email"},{"id":"job-3","type":"send_email"}]}'
     is_error: false
-
 canned_llm_responses:
   investigation_planner:
-    - hypotheses:
-        - name: transient_dependency_failure
-          confidence: 0.5
-          reasoning: DLQ depth crossed threshold; probe to see what's stuck.
-      next_action:
-        kind: probe
-        tool_name: list_dlq_messages
-        arguments: {}
-    - hypotheses:
-        - name: transient_dependency_failure
-          confidence: 0.85
-          reasoning: >
-            Triage flags jobs as retryable (upstream transient failure).
-            Replay them.
-      next_action:
-        kind: remediate
-        reason: retryable DLQ backlog — replay_dlq_messages applies
-  remediation_planner:
-    - target_hypothesis: transient_dependency_failure
-      action_tool: replay_dlq_messages
-      action_arguments: {}
-      verify_tool: list_dlq_messages
-      verify_arguments: {}
-      verify_expectation: >
-        DLQ list should shrink — replayed jobs are re-submitted through
-        the normal job path so they leave the dead-letter queue.
-  verification_judge:
-    - verdict: verified
-      reasoning: >
-        Replay action reported 3 of 3 jobs successfully re-submitted;
-        the DLQ should drain shortly.
-  briefing_writer:
-    - findings: >
-        DLQ held 3 send_email jobs marked retryable. Agent replayed all
-        three; platform confirmed 3/3 accepted for re-submission.
-      recommendation: >
-        Watch DLQ depth for 10 minutes to confirm it stays low. If jobs
-        return to DLQ, the upstream dependency is still failing —
-        escalate to the mailer service owner.
-  briefing_judge:
-    - groundedness: 0.9
-      actionability: 0.9
-      reasoning: >
-        Findings ground in the DLQ list and the replay response;
-        recommendation gives a concrete monitoring window and next step.
+  - hypotheses:
+    - category: poison_message
+      name: transient_dependency_failure
+      confidence: 0.5
+      reasoning: DLQ depth crossed threshold; probe to see what's stuck.
+    next_action:
+      kind: probe
+      tool_name: list_dlq_messages
+      arguments: {}
+  - hypotheses:
+    - category: poison_message
+      name: transient_dependency_failure
+      confidence: 0.85
+      reasoning: 'Triage flags jobs as retryable (upstream transient failure). Replay them.
 
+        '
+    next_action:
+      kind: remediate
+      reason: "retryable DLQ backlog \u2014 replay_dlq_messages applies"
+  remediation_planner:
+  - target_hypothesis: transient_dependency_failure
+    action_tool: replay_dlq_messages
+    action_arguments: {}
+    verify_tool: list_dlq_messages
+    verify_arguments: {}
+    verify_expectation: "DLQ list should shrink \u2014 replayed jobs are re-submitted through the normal job path so they leave the dead-letter queue.\n"
+  verification_judge:
+  - verdict: verified
+    reasoning: 'Replay action reported 3 of 3 jobs successfully re-submitted; the DLQ should drain shortly.
+
+      '
+  briefing_writer:
+  - findings: 'DLQ held 3 send_email jobs marked retryable. Agent replayed all three; platform confirmed 3/3 accepted for re-submission.
+
+      '
+    recommendation: "Watch DLQ depth for 10 minutes to confirm it stays low. If jobs return to DLQ, the upstream dependency is still failing \u2014 escalate to the mailer service owner.\n"
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.9
+    reasoning: 'Findings ground in the DLQ list and the replay response; recommendation gives a concrete monitoring window and next step.
+
+      '
 expectation:
   name: remediate_dlq_backlog_success
   expected_terminal_state: resolved
   expected_action_tool: replay_dlq_messages
   expected_evidence_contains:
-    - replayed
-    - verified
+  - replayed
+  - verified
   max_tool_calls: 5

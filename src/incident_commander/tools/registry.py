@@ -352,10 +352,16 @@ class RestartConsumerGroupInput(BaseModel):
 
 
 class RestartConsumerGroupOutput(BaseModel):
+    # v0.4.5+: response also carries latency_key_cleared / latency_key so the
+    # tool is the single compensating action for both `kill_consumer` and
+    # `inject_latency`. Both are always present; false + empty when nothing
+    # was cleared. extra="ignore" keeps us compatible with a future field add.
     model_config = ConfigDict(extra="ignore", frozen=True)
     consumer_group: str
     kill_key_cleared: bool
     kill_key: str
+    latency_key_cleared: bool = False
+    latency_key: str = ""
     accepted: bool
 
 

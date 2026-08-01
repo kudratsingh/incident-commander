@@ -26,7 +26,7 @@ canned_tool_responses:
   restart_consumer_group:
     content:
     - type: text
-      text: '{"consumer_group":"worker-dispatcher","kill_key_cleared":true,"kill_key":"chaos:kill:worker-dispatcher","accepted":true}'
+      text: '{"consumer_group":"worker-dispatcher","kill_key_cleared":true,"kill_key":"chaos:kill:worker-dispatcher","latency_key_cleared":false,"latency_key":"","accepted":true}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

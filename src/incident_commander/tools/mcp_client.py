@@ -2,11 +2,14 @@
 
 Deliberately transport-only: no tool-schema validation (that lives with the typed
 registry), no budget accounting (that lives with the transition that calls tools).
-Retry policy retries transient failures — network errors and 5xx — never 4xx.
+Retry policy retries transient failures — network errors, 5xx, and 429 — never
+other 4xx. Every failure path raises ``MCPError`` so transitions escalate with
+a graded reason instead of crashing the scenario with a raw httpx exception.
 """
 
 from __future__ import annotations
 
+import contextlib
 import time
 from collections.abc import Callable, Mapping
 from itertools import count
@@ -121,16 +124,30 @@ class MCPClient:
         for attempt in range(self._max_attempts):
             try:
                 response = self._client.post(self._base_url, json=body, headers=self._headers)
-            except httpx.RequestError:
+            except httpx.RequestError as exc:
                 if attempt == self._max_attempts - 1:
-                    raise
+                    raise MCPError(
+                        -32000,
+                        f"transport error after {self._max_attempts} attempts: "
+                        f"{type(exc).__name__}: {exc}",
+                    ) from exc
                 self._sleep(self._retry_base_delay * (2**attempt))
                 continue
-            if response.status_code >= 500 and attempt < self._max_attempts - 1:
-                self._sleep(self._retry_base_delay * (2**attempt))
+            status = response.status_code
+            if (status >= 500 or status == 429) and attempt < self._max_attempts - 1:
+                delay = self._retry_base_delay * (2**attempt)
+                retry_after = response.headers.get("retry-after")
+                if retry_after is not None:
+                    with contextlib.suppress(ValueError):
+                        delay = max(delay, float(retry_after))
+                self._sleep(delay)
                 continue
-            response.raise_for_status()
-            payload = response.json()
+            if status >= 400:
+                raise MCPError(-32000, f"HTTP {status} from MCP endpoint: {response.text[:200]}")
+            try:
+                payload = response.json()
+            except ValueError as exc:
+                raise MCPError(-32700, f"non-JSON response body: {exc}") from exc
             if not isinstance(payload, dict):
                 raise MCPError(-32700, f"non-object JSON response: {type(payload).__name__}")
             if "error" in payload:

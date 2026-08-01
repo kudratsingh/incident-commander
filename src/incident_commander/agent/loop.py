@@ -62,7 +62,10 @@ def run_to_completion(
     while not run_state.state.is_terminal:
         if steps >= max_steps:
             raise MaxStepsExceededError(f"run did not terminate within {max_steps} steps")
-        if run_state.budget.is_exhausted:
+        if run_state.budget.is_exhausted and run_state.state is not IncidentState.VERIFYING:
+            # VERIFYING is exempt: once a Tier-1 action executed, the run
+            # must always verify it — an executed-but-unverified action is
+            # worse than one extra probe over budget.
             run_state = _escalate(run_state, "budget exhausted", clock())
         else:
             run_state = dispatch(run_state, clock(), transitions=transitions)

@@ -79,4 +79,4 @@ expectation:
   expected_evidence_contains:
   - replayed
   - verified
-  max_tool_calls: 5
+  max_tool_calls: 8

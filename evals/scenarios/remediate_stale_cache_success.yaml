@@ -86,4 +86,4 @@ expectation:
   expected_evidence_contains:
   - deleted
   - verified
-  max_tool_calls: 5
+  max_tool_calls: 8

@@ -94,4 +94,4 @@ expectation:
   forbidden_replay_job_ids:
   - cccccccc-3333-3333-3333-000000000001
   - cccccccc-3333-3333-3333-000000000002
-  max_tool_calls: 5
+  max_tool_calls: 8

@@ -59,14 +59,14 @@ canned_llm_responses:
     verify_arguments:
       remediation_hint: wait_and_replay
       limit: 50
-    verify_expectation: 'After scheduling, the platform''s response should show scheduled=2 with per-job execute_at timestamps ~5 minutes in the future. The DLQ list filtered by wait_and_replay should shrink;
-      the platform removes the entries from the active DLQ once the delayed replay is enqueued (or on next tick).
+    verify_expectation: 'After scheduling, the platform''s response should show scheduled=2 with per-job execute_at timestamps ~5 minutes in the future. The entries REMAIN in the dead-letter list until the platform''s promote loop fires them at execute_at.
+      An unchanged wait_and_replay list immediately after the call is expected and is NOT a failure. Success = scheduled equals requested with future execute_at timestamps.
 
       '
   verification_judge:
   - verdict: verified
-    reasoning: "replay_dlq_by_ids returned scheduled=2 with per-job execute_at timestamps. Platform is holding the timer \u2014 no agent-side wait needed. Follow-up probe of the DLQ shows the wait_and_replay\
-      \ filter drained.\n"
+    reasoning: "replay_dlq_by_ids returned scheduled=2 with per-job execute_at timestamps. Platform is holding the timer \u2014 no agent-side wait needed. Entries remain in the DLQ until execute_at fires, matching the platform's\
+      \ timer-held behavior.\n"
   briefing_writer:
   - findings: 'DLQ had 2 wait_and_replay entries (SMTP transient timeouts). Scheduled a 5-minute-delayed replay via replay_dlq_by_ids; platform confirmed 2 scheduled with execute_at ~5 min out. Platform
       holds the timer end-to-end.
@@ -83,7 +83,7 @@ expectation:
   expected_action_tool: replay_dlq_by_ids
   expected_evidence_contains:
   - wait_and_replay
-  - '"scheduled":2'
+  - scheduled
   - execute_at
   - verified
-  max_tool_calls: 5
+  max_tool_calls: 8

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Final, Literal
@@ -151,6 +152,16 @@ def make_llm_plan(
                 f"remediation attempt cap reached "
                 f"({run_state.remediation_attempts}/{_MAX_REMEDIATION_ATTEMPTS}); "
                 "human decision required",
+            )
+        remaining_calls = run_state.budget.max_tool_calls - run_state.budget.tool_calls_used
+        if remaining_calls < 2:
+            # An action we can't afford to verify is worse than no action.
+            # Escalate before spending planner tokens or executing anything.
+            return _escalate_remediation(
+                run_state,
+                at,
+                f"insufficient tool-call budget for action+verify "
+                f"(remaining={remaining_calls}); escalating without executing",
             )
 
         top = run_state.hypotheses[0]
@@ -370,12 +381,23 @@ def make_llm_verify(
     mcp_client: MCPClientProtocol,
     llm_client: LLMClientProtocol,
     model: str,
+    probe_attempts: int = 1,
+    probe_delay_seconds: float = 0.0,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> Callable[[RunState, datetime], RunState]:
     """Bind clients + model to the VERIFYING transition.
 
     Calls the plan's verify probe, feeds the result + expectation to a
-    judge LLM. Verdict ``verified`` → RESOLVED, ``not_verified`` →
-    ESCALATED. Any tool/LLM failure also escalates.
+    judge LLM. Verdict ``verified`` -> RESOLVED. ``not_verified`` ->
+    re-probe after ``probe_delay_seconds`` until ``probe_attempts`` is
+    spent, then ESCALATED. Any tool/LLM failure also escalates.
+
+    Polling exists because live probes are eventually consistent: the
+    platform's consumer-lag read is a 60s-cached metric, and DB-effect
+    commits land just after the action's response is sent. One instant
+    read taken ~1s after the action judges the cache, not the fix.
+    Defaults (attempts=1, delay=0) preserve the single-probe behavior
+    that canned runs and existing tests rely on.
     """
 
     def transition_verify(run_state: RunState, at: datetime) -> RunState:
@@ -398,68 +420,74 @@ def make_llm_verify(
                 run_state, at, f"verify args invalid for {plan.verify_tool}: {err}"
             )
 
-        try:
-            result = mcp_client.call_tool(plan.verify_tool, arguments)
-        except MCPError as err:
-            return _escalate_remediation(
-                run_state, at, f"verify tool error ({plan.verify_tool}): {err}"
-            )
-        if result.is_error:
-            return _escalate_remediation(
-                run_state, at, f"verify tool reported is_error=True ({plan.verify_tool})"
-            )
+        for attempt in range(probe_attempts):
+            if attempt > 0:
+                sleep(probe_delay_seconds)
 
-        try:
-            probe_summary = _summarize_output(spec.output_model, result.content)
-        except (ValueError, ValidationError) as err:
-            return _escalate_remediation(
-                run_state, at, f"verify output parse failed ({plan.verify_tool}): {err}"
-            )
+            try:
+                result = mcp_client.call_tool(plan.verify_tool, arguments)
+            except MCPError as err:
+                return _escalate_remediation(
+                    run_state, at, f"verify tool error ({plan.verify_tool}): {err}"
+                )
+            if result.is_error:
+                return _escalate_remediation(
+                    run_state, at, f"verify tool reported is_error=True ({plan.verify_tool})"
+                )
 
-        try:
-            judgment_result = llm_client.call(
-                system_prompt=load_prompt("verification_judge"),
-                user_message=_format_verify_context(plan, probe_summary),
-                output_model=VerificationJudgment,
-                model=model,
-            )
-        except (ValueError, ValidationError, LLMError) as err:
-            return _escalate_remediation(run_state, at, f"verify judge LLM invalid: {err}")
+            try:
+                probe_summary = _summarize_output(spec.output_model, result.content)
+            except (ValueError, ValidationError) as err:
+                return _escalate_remediation(
+                    run_state, at, f"verify output parse failed ({plan.verify_tool}): {err}"
+                )
 
-        judgment = judgment_result.output
-        probe_entry = EvidenceEntry(
-            tool_name=plan.verify_tool,
-            arguments=arguments,
-            result_summary=probe_summary,
-            timestamp=at,
-        )
-        judge_entry = EvidenceEntry(
-            tool_name="_verify_judge",
-            arguments={"expectation": plan.verify_expectation},
-            result_summary=f"{judgment.verdict}: {judgment.reasoning}",
-            timestamp=at,
-        )
-        new_budget = run_state.budget.model_copy(
-            update={
-                "tool_calls_used": run_state.budget.tool_calls_used + 1,
-                "tokens_used": (
-                    run_state.budget.tokens_used
-                    + judgment_result.input_tokens
-                    + judgment_result.output_tokens
-                ),
-            }
-        )
-        terminal_state = (
-            IncidentState.RESOLVED if judgment.verdict == "verified" else IncidentState.ESCALATED
-        )
-        return run_state.model_copy(
-            update={
-                "state": terminal_state,
-                "budget": new_budget,
-                "evidence": (*run_state.evidence, probe_entry, judge_entry),
-                "updated_at": at,
-            }
-        )
+            try:
+                judgment_result = llm_client.call(
+                    system_prompt=load_prompt("verification_judge"),
+                    user_message=_format_verify_context(plan, probe_summary),
+                    output_model=VerificationJudgment,
+                    model=model,
+                )
+            except (ValueError, ValidationError, LLMError) as err:
+                return _escalate_remediation(run_state, at, f"verify judge LLM invalid: {err}")
+
+            judgment = judgment_result.output
+            probe_entry = EvidenceEntry(
+                tool_name=plan.verify_tool,
+                arguments=arguments,
+                result_summary=probe_summary,
+                timestamp=at,
+            )
+            judge_entry = EvidenceEntry(
+                tool_name="_verify_judge",
+                arguments={"expectation": plan.verify_expectation},
+                result_summary=f"{judgment.verdict}: {judgment.reasoning}",
+                timestamp=at,
+            )
+            new_budget = run_state.budget.model_copy(
+                update={
+                    "tool_calls_used": run_state.budget.tool_calls_used + 1,
+                    "tokens_used": (
+                        run_state.budget.tokens_used
+                        + judgment_result.input_tokens
+                        + judgment_result.output_tokens
+                    ),
+                }
+            )
+            # Accumulate evidence + budget across polling attempts so an
+            # eventual escalation carries the full probe history.
+            run_state = run_state.model_copy(
+                update={
+                    "budget": new_budget,
+                    "evidence": (*run_state.evidence, probe_entry, judge_entry),
+                    "updated_at": at,
+                }
+            )
+            if judgment.verdict == "verified":
+                return run_state.with_state(IncidentState.RESOLVED, at)
+
+        return run_state.with_state(IncidentState.ESCALATED, at)
 
     return transition_verify
 

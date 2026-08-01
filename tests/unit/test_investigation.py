@@ -18,7 +18,13 @@ class _FakeMCPClient:
         self._handler = handler
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
-    def call_tool(self, name: str, arguments: Mapping[str, Any]) -> ToolResult:
+    def call_tool(
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ToolResult:
         self.calls.append((name, dict(arguments)))
         return self._handler(name, arguments)
 

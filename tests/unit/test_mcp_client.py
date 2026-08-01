@@ -91,6 +91,19 @@ class TestCallTool:
         assert exc.value.code == -32602
         assert "invalid params" in str(exc.value)
 
+    def test_per_call_timeout_overrides_client_default(self) -> None:
+        captured: list[httpx.Timeout | float | None] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.append(request.extensions.get("timeout"))
+            return _rpc_ok({"content": [{"type": "text", "text": "ok"}], "isError": False})
+
+        with _client(handler) as client:
+            client.call_tool("restart_consumer_group", {}, timeout_seconds=90.0)
+            client.call_tool("get_consumer_lag", {})
+        assert captured[0] == {"connect": 90.0, "read": 90.0, "write": 90.0, "pool": 90.0}
+        assert captured[1] == {"connect": 30.0, "read": 30.0, "write": 30.0, "pool": 30.0}
+
 
 class TestRetries:
     def test_retries_on_network_error_then_succeeds(self) -> None:

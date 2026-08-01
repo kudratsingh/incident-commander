@@ -277,12 +277,18 @@ def _format_plan_context(run_state: RunState, top_hypothesis_name: str) -> str:
 
 def make_remediate(
     mcp_client: MCPClientProtocol,
+    action_timeout_seconds: float | None = None,
 ) -> Callable[[RunState, datetime], RunState]:
     """Bind the MCP client to the REMEDIATING transition.
 
     Executes ``RunState.remediation_plan.action_tool`` with an agent-
     generated idempotency key. Success → VERIFYING. Any failure →
     ESCALATED with the reason recorded.
+
+    ``action_timeout_seconds`` overrides the client's read-default for
+    just this action call; None keeps the client default (fine for
+    canned runs). Wired from ``settings.action_tool_timeout_seconds``
+    in the eval runner and the FastAPI factory.
     """
 
     def transition_remediate(run_state: RunState, at: datetime) -> RunState:
@@ -331,7 +337,11 @@ def make_remediate(
             )
 
         try:
-            result = mcp_client.call_tool(plan.action_tool, arguments)
+            result = mcp_client.call_tool(
+                plan.action_tool,
+                arguments,
+                timeout_seconds=action_timeout_seconds,
+            )
         except MCPError as err:
             return _escalate_remediation(
                 run_state, at, f"remediation tool error ({plan.action_tool}): {err}"

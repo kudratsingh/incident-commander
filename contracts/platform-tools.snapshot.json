@@ -736,7 +736,7 @@
     },
     {
       "name": "restart_consumer_group",
-      "description": "Clear the chaos kill flag on a Kafka consumer group so its supervisor will restart it. Paired with `kill_consumer`; use this to end a chaos run cleanly. Idempotent — repeat calls with the same idempotency_key are safe.",
+      "description": "Clear the chaos kill flag AND any injected latency on a Kafka consumer group so its supervisor restarts it at full speed. Compensating counterpart to both `kill_consumer` and `inject_latency`; use this to end a chaos run cleanly. Idempotent — repeat calls with the same idempotency_key are safe.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

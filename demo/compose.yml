@@ -1,6 +1,6 @@
 # Live demo: minimal platform footprint sufficient for read-only MCP.
 #
-# Pinned to the incident-platform v0.4.4 release by digest so the agent's
+# Pinned to the incident-platform v0.4.5 release by digest so the agent's
 # contract expectations don't shift under us. Bump the digest whenever the
 # platform ships a new release and rerun `make eval-live` to catch drift.
 #
@@ -41,13 +41,13 @@ services:
       retries: 5
 
   platform:
-    # incident-platform v0.4.4. Do not switch to `:latest` — the whole point
+    # incident-platform v0.4.5. Do not switch to `:latest` — the whole point
     # of pinning by digest is that a platform-side prompt or schema change
     # can't shift agent behavior without an explicit bump here.
     # This is the index (multi-arch manifest) digest; the linux/amd64
-    # manifest is sha256:64b66626ef4e118204094111ffe1c98c4e40f95884961ad93b4e321a0f429640.
-    image: ghcr.io/kudratsingh/incident-platform@sha256:c3cd82c3bab2b1de147c7b6263de1b964e021758fd88f15ce9a30ac3453fefa8
-    # v0.4.4 only publishes linux/amd64. On Apple Silicon this runs under
+    # manifest is sha256:83169491ee7540c295592f42e98f17f5f8c174ae9943afadb09883bef04c9ae7.
+    image: ghcr.io/kudratsingh/incident-platform@sha256:a7f271308e4a9a039bf122d26474efb2f8f5d74f53b47820f28d6907d68543ba
+    # v0.4.5 only publishes linux/amd64. On Apple Silicon this runs under
     # Rosetta (slower cold start, correct output). Drop this line when the
     # platform ships arm64 (docker buildx --platform linux/amd64,linux/arm64).
     platform: linux/amd64
@@ -60,6 +60,11 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
       REDIS_URL: redis://redis:6379/0
       ENVIRONMENT: development
+      # Image WORKDIR is /app, but Python roots live under /app/backend
+      # (`import app.models.*`, `from app.config import ...`). The image's
+      # entrypoint.sh sets this; we override `command:` to run the standalone
+      # MCP process instead of the full REST app, so we must set it ourselves.
+      PYTHONPATH: /app/backend
       # v0.2.1+: auto-seed the eval fixture pack (consumer groups, DLQ jobs,
       # incidents, DAG jobs, traces, deploys) on every boot. Idempotent —
       # existing rows are left alone. See /app/eval-fixtures-pins.json in

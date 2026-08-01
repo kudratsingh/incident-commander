@@ -47,6 +47,7 @@ import argparse
 import json
 import os
 import sys
+import uuid
 from typing import Any
 
 import httpx
@@ -284,7 +285,11 @@ def main() -> int:
             # Not a chaos hook — call the agent's Tier-1 tool directly to
             # clear leftover flags. Operator-driven; skips the propose/execute
             # ceremony because the agent isn't in the loop.
-            key = "restore-consumer-cli-invocation-01"
+            # Fresh key per invocation. A fixed key made every repeat
+            # restore an idempotency-cache replay: the platform returned
+            # the first call's cached body (claiming kill_key_cleared)
+            # without deleting anything, and 409'd if --group differed.
+            key = f"restore-consumer-cli-{uuid.uuid4().hex}"
             result = client.call(
                 "restart_consumer_group",
                 {"consumer_group": args.group, "idempotency_key": key},

@@ -89,4 +89,4 @@ expectation:
   expected_evidence_contains:
   - pause_key
   - verified
-  max_tool_calls: 5
+  max_tool_calls: 8

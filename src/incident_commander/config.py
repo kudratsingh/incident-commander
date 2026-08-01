@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     budget_max_seconds: int = Field(default=1_800, ge=1)
     budget_max_usd: Decimal = Field(default=Decimal("5.00"), ge=Decimal("0"))
 
+    # Live-eval verification polling. attempts=1 keeps the legacy single-
+    # probe behavior (canned/offline runs). Live runs should set
+    # VERIFY_PROBE_ATTEMPTS>1 so eventually-consistent probes (e.g. the
+    # 60s-cached consumer lag) are re-read over a window instead of judged
+    # on one instant read taken ~1s after the action.
+    verify_probe_attempts: int = Field(default=1, ge=1, le=10)
+    verify_probe_delay_seconds: float = Field(default=15.0, ge=0.0)
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

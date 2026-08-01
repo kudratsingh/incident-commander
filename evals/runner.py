@@ -213,7 +213,13 @@ def run_scenario(
     )
     transitions[IncidentState.REMEDIATING] = make_remediate(mcp_client)
     transitions[IncidentState.VERIFYING] = make_llm_verify(
-        mcp_client, verification_judge_llm, model=settings.agent_model
+        mcp_client,
+        verification_judge_llm,
+        model=settings.agent_model,
+        # Poll the verify probe only against a real platform; canned
+        # responses are instant-consistent so one read is authoritative.
+        probe_attempts=settings.verify_probe_attempts if live_mcp_available else 1,
+        probe_delay_seconds=settings.verify_probe_delay_seconds,
     )
 
     try:

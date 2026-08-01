@@ -171,7 +171,7 @@ class TestRetries:
     def test_does_not_retry_on_4xx(self) -> None:
         sdk = MagicMock()
         sdk.messages.create.side_effect = self._status_error(400)
-        with pytest.raises(anthropic.APIStatusError):
+        with pytest.raises(LLMError, match="LLM API error 400"):
             _client(sdk).call(
                 system_prompt="s",
                 user_message="u",
@@ -180,10 +180,25 @@ class TestRetries:
             )
         assert sdk.messages.create.call_count == 1
 
+    def test_retries_on_429_then_succeeds(self) -> None:
+        sdk = MagicMock()
+        sdk.messages.create.side_effect = [
+            self._status_error(429),
+            _tool_use_message({"label": "ok", "confidence": 1.0}),
+        ]
+        result = _client(sdk).call(
+            system_prompt="s",
+            user_message="u",
+            output_model=_SampleOutput,
+            model="claude-sonnet-4-6",
+        )
+        assert result.output.label == "ok"
+        assert sdk.messages.create.call_count == 2
+
     def test_gives_up_after_max_attempts_on_persistent_5xx(self) -> None:
         sdk = MagicMock()
         sdk.messages.create.side_effect = self._status_error(500)
-        with pytest.raises(anthropic.APIStatusError):
+        with pytest.raises(LLMError, match="transport failure after 2 attempts"):
             _client(sdk, max_attempts=2).call(
                 system_prompt="s",
                 user_message="u",
@@ -235,7 +250,7 @@ class TestTracer:
             client=sdk,
             tracer=captured.append,
         )
-        with pytest.raises(anthropic.APIConnectionError):
+        with pytest.raises(LLMError):
             client.call(
                 system_prompt="s",
                 user_message="u",

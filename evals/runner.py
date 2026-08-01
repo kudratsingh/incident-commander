@@ -11,6 +11,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, SecretStr
 
+from evals.chaos_hooks import ChaosInvocationError, invoke_chaos_hook
 from evals.fakes import CannedMCPClient
 from evals.graders.deterministic import (
     DimensionResult,
@@ -151,6 +152,34 @@ def run_scenario(
     mcp_client: MCPClientProtocol
     live_mcp_client: MCPClient | None = None
     if live_mcp_available:
+        # Fire the scenario's declared chaos hook (if any) BEFORE building
+        # the agent's client so a seeding failure surfaces immediately with
+        # a clear reason, not as a downstream "read returned healthy" bug.
+        # Canned runs skip this — the canned tool responses already encode
+        # the broken state.
+        if scenario.chaos_setup is not None:
+            try:
+                seed_result = invoke_chaos_hook(
+                    str(settings.platform_mcp_url),
+                    settings.platform_token.get_secret_value(),
+                    scenario.chaos_setup.name,
+                    dict(scenario.chaos_setup.arguments),
+                )
+            except ChaosInvocationError as err:
+                raise RuntimeError(
+                    f"scenario {scenario.name!r} chaos_setup "
+                    f"{scenario.chaos_setup.name!r} failed: {err}"
+                ) from err
+            if tracer is not None:
+                tracer.write(
+                    {
+                        "kind": "chaos_setup",
+                        "scenario": scenario.name,
+                        "hook": scenario.chaos_setup.name,
+                        "arguments": dict(scenario.chaos_setup.arguments),
+                        "result": seed_result,
+                    }
+                )
         live_mcp_client = make_client(
             settings,
             tracer=tracer.mcp_hook() if tracer else None,

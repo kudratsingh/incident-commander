@@ -9,6 +9,17 @@ tags:
 - live-llm
 use_live_mcp: true
 use_live_llm: true
+# Live-only: seed the broken state the agent is expected to fix. Ignored
+# by canned/offline runs (the canned tool responses already encode a
+# high-lag reading). inject_latency is preferred over kill_consumer here
+# because it doesn't require the platform's consumer supervisor to be
+# fully wired — the consumer stays alive, just slow.
+chaos_setup:
+  name: inject_latency
+  arguments:
+    consumer_group: worker-dispatcher
+    latency_ms: 2000
+    ttl_seconds: 300
 alert:
   source: platform.kafka
   severity: high

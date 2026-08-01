@@ -107,16 +107,24 @@ class LLMClient:
             "tool_choice": {"type": "tool", "name": _STRUCTURED_TOOL_NAME},
         }
         last_exc: Exception | None = None
+        retry_after: float | None = None
         for attempt in range(self._max_attempts):
             started = time.monotonic()
             try:
                 response = self._client.messages.create(**request_body)
             except anthropic.APIConnectionError as err:
                 last_exc = err
+                retry_after = None
             except anthropic.APIStatusError as err:
-                if err.status_code < 500:
-                    raise
+                if err.status_code != 429 and err.status_code < 500:
+                    # Client-side error (bad request, auth). Retrying can't
+                    # help; wrap so the transition escalates-with-reason
+                    # instead of the scenario crashing on a raw SDK error.
+                    raise LLMError(f"LLM API error {err.status_code}: {err}") from err
+                # 429 + 5xx are transient: retry with backoff, honoring a
+                # numeric Retry-After when the platform sends one.
                 last_exc = err
+                retry_after = _retry_after_seconds(err)
             else:
                 result = self._parse(response, output_model)
                 if self._tracer is not None:
@@ -131,9 +139,15 @@ class LLMClient:
                     )
                 return result
             if attempt < self._max_attempts - 1:
-                self._sleep(self._retry_base_delay * (2**attempt))
+                delay = self._retry_base_delay * (2**attempt)
+                if retry_after is not None:
+                    delay = max(delay, retry_after)
+                self._sleep(delay)
         assert last_exc is not None
-        raise last_exc
+        raise LLMError(
+            f"LLM transport failure after {self._max_attempts} attempts: "
+            f"{type(last_exc).__name__}: {last_exc}"
+        ) from last_exc
 
     def _parse[T: BaseModel](self, response: Message, output_model: type[T]) -> LLMResult[T]:
         for block in response.content:
@@ -150,3 +164,12 @@ class LLMClient:
         raise LLMError(
             f"no {_STRUCTURED_TOOL_NAME} tool_use in response; stop_reason={response.stop_reason}"
         )
+
+
+def _retry_after_seconds(err: anthropic.APIStatusError) -> float | None:
+    """Numeric Retry-After off a 429/5xx response, when present and parseable."""
+    try:
+        value = err.response.headers.get("retry-after")
+        return float(value) if value is not None else None
+    except Exception:
+        return None

@@ -126,7 +126,7 @@ class TestRetries:
             attempts.append(len(attempts))
             return httpx.Response(401, text="unauthorized")
 
-        with _client(handler) as client, pytest.raises(httpx.HTTPStatusError):
+        with _client(handler) as client, pytest.raises(MCPError, match="HTTP 401"):
             client.list_tools()
         assert len(attempts) == 1
 
@@ -137,7 +137,20 @@ class TestRetries:
             attempts.append(len(attempts))
             return httpx.Response(500, text="server error")
 
-        with _client(handler, max_attempts=2) as client, pytest.raises(httpx.HTTPStatusError):
+        with _client(handler, max_attempts=2) as client, pytest.raises(MCPError, match="HTTP 500"):
+            client.list_tools()
+        assert len(attempts) == 2
+
+    def test_retries_on_429_then_succeeds(self) -> None:
+        attempts: list[int] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            attempts.append(len(attempts))
+            if len(attempts) == 1:
+                return httpx.Response(429, text="rate limited", headers={"retry-after": "0"})
+            return _rpc_ok({"tools": []})
+
+        with _client(handler) as client:
             client.list_tools()
         assert len(attempts) == 2
 
@@ -148,7 +161,10 @@ class TestRetries:
             attempts.append(len(attempts))
             raise httpx.ConnectError("boom", request=request)
 
-        with _client(handler, max_attempts=2) as client, pytest.raises(httpx.ConnectError):
+        with (
+            _client(handler, max_attempts=2) as client,
+            pytest.raises(MCPError, match="transport error"),
+        ):
             client.list_tools()
         assert len(attempts) == 2
 

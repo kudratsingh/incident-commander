@@ -78,6 +78,34 @@ Chaos effects TTL-expire on their own. If you want to accelerate cleanup:
 make chaos-restore     # clears leftover kill/latency flags on worker-dispatcher
 ```
 
+## Live eval protocol (post-hardening)
+
+Written after the Phase-6 seven-run live eval that produced the five-bucket noise-source taxonomy (see [`docs/lessons/live-eval-noise-sources.md`](lessons/live-eval-noise-sources.md)). Until `Scenario` setup/teardown hooks + `make eval-reset` land, run one scenario at a time with an explicit reset between them.
+
+```bash
+make demo && make bootstrap-token
+export VERIFY_PROBE_ATTEMPTS=4 VERIFY_PROBE_DELAY_SECONDS=20
+
+# First proof: doesn't need the platform supervisor (consumer stays alive)
+make chaos-inject-latency
+uv run python -m evals.runner --live --only remediate_consumer_lag_success
+
+# Reset. Until `make eval-reset` exists, this is:
+make chaos-restore     # clears kill + latency flags
+
+# Then one fault → one scenario → reset, for each remaining scenario.
+# Do NOT batch until the reset script is enforceable.
+```
+
+Environment variable knobs for the live path (see [ADR 0006](ADR/0006-verification-is-a-polling-window.md)):
+
+| Var | Default | Live-recommended | Meaning |
+|---|---|---|---|
+| `VERIFY_PROBE_ATTEMPTS` | 1 | 4 | Bounded polling window on VERIFYING. Default keeps canned runs single-probe. |
+| `VERIFY_PROBE_DELAY_SECONDS` | 15 | 20 | Delay between polling attempts. Size to the slowest verify probe's freshness. |
+
+The `remediate_stale_cache_success` scenario is currently **not winnable live** — it needs a chaos hook to seed `cache:jobs:worker-dispatcher:hot_set` before the agent runs, and no such hook exists. Skip it in the live pass until the platform ships the hook or the scenario is flagged offline-only.
+
 ## Debugging one scenario
 
 The per-scenario trace file is the fastest path:

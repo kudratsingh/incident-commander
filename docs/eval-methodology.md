@@ -142,6 +142,49 @@ Three coordinated changes (in flight as of 2026-07-30, pending platform v0.4.0):
 
 This is exactly what live-eval is for — surfacing the mismatch between design-time assumptions and runtime reality. Offline canned evals never would have caught it because the canned DLQ data was tuned to match the expected outcome.
 
+## Grader calibration rules
+
+Written after the Phase-6 seven-run live eval. Every rule is enforced by a checkpoint in the PR template or the scenario schema, not by memory. See [`docs/lessons/live-eval-noise-sources.md`](lessons/live-eval-noise-sources.md) for the taxonomy these rules come from.
+
+### 1. Caps carry ≥30% margin
+
+`max_tool_calls` is the *expected live path length* plus a headroom margin. Never set it to a tight number matching the happy path — one extra triage probe or one verify re-poll turns a resolved run into a `BUDGET` failure.
+
+- Expected live path = 4–5 tool calls for the current remediation scenarios.
+- Cap = 8 (roughly 60% margin) for all Phase-6 remediation scenarios.
+- If a scenario legitimately needs a tighter cap (e.g. testing budget enforcement), name that in a comment inside the YAML.
+
+### 2. Presence over counts
+
+`expected_evidence_contains` items assert that a *field name* or a *concept* appears somewhere in the evidence corpus. They never assert a specific serialized-JSON fragment.
+
+- Wrong: `"\"scheduled\":2"` — depends on JSON serializer, field order, and observed count matching.
+- Right: `scheduled` — asserts the field was present in some evidence entry.
+
+If a count truly matters (e.g. "at most one replay should have fired"), express it as a structured assertion in a dedicated grader dimension, not as a substring match on serialized JSON.
+
+### 3. Judge expectations come from platform code, not the mental model
+
+`verify_expectation` text describes what the platform *actually does*, not what the reviewer thinks it should do. Reviewers of every platform-version-sync PR must re-read the expectations in `evals/scenarios/*.yaml` for the tools touched by the version bump.
+
+- The `dlq_wait_and_replay_success` scenario shipped with an expectation that said "the DLQ list should shrink immediately." Platform's actual behavior: entries stay in the DLQ until the promote loop fires at `execute_at`. The scenario grade-failed correct behavior for two runs before we caught it.
+- PR template: version-sync PRs include a checkbox for "re-reviewed judge expectations for tools whose semantics or descriptions changed."
+
+### 4. One fault, one scenario (during live-eval hardening)
+
+Until `Scenario` setup/teardown hooks + `make eval-reset` ship, live-eval runs one scenario at a time with a manual reset between them. Batch mode is deferred until state-reset is enforceable in the harness rather than depending on operator memory.
+
+## Reading a live report — required first pass
+
+Every failed live-eval run gets bucketed *before* any code is opened:
+
+1. Read `evals/traces/<scenario>.jsonl` first — the last few records tell you which layer failed.
+2. Classify the failure into the five-bucket taxonomy in [`docs/lessons/live-eval-noise-sources.md`](lessons/live-eval-noise-sources.md).
+3. If two consecutive failures fall in different buckets, suspect environment drift before you suspect novel bugs.
+4. Only then open the affected source file.
+
+Skipping this step and jumping to code is how the seven-run cascade started.
+
 ## What eval doesn't cover (yet)
 
 - **Adversarial robustness** — Phase 7. Injection payloads in log lines, DLQ bodies, trace metadata.

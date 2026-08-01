@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     verify_probe_attempts: int = Field(default=1, ge=1, le=10)
     verify_probe_delay_seconds: float = Field(default=15.0, ge=0.0)
 
+    # Tier-1 action tool calls (restart_consumer_group, replay_dlq_by_ids,
+    # etc.) do real work on the platform side and can legitimately take
+    # longer than a read. The MCPClient's 30s default is right for reads;
+    # actions get their own knob so a slow-but-successful action doesn't
+    # escalate as a transport error.
+    action_tool_timeout_seconds: float = Field(default=60.0, ge=1.0)
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

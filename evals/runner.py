@@ -211,7 +211,14 @@ def run_scenario(
     transitions[IncidentState.PLANNING] = make_llm_plan(
         remediation_planner_llm, model=settings.agent_model
     )
-    transitions[IncidentState.REMEDIATING] = make_remediate(mcp_client)
+    transitions[IncidentState.REMEDIATING] = make_remediate(
+        mcp_client,
+        # Live actions can take longer than reads (kafka restart, DB write,
+        # etc.); canned responses are instant so the override is a no-op.
+        action_timeout_seconds=(
+            settings.action_tool_timeout_seconds if live_mcp_available else None
+        ),
+    )
     transitions[IncidentState.VERIFYING] = make_llm_verify(
         mcp_client,
         verification_judge_llm,

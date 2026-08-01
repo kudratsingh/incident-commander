@@ -49,7 +49,7 @@ class LLMClientProtocol(Protocol):
         user_message: str,
         output_model: type[T],
         model: str,
-        max_tokens: int = 2048,
+        max_tokens: int = 4096,
     ) -> LLMResult[T]: ...
 
 
@@ -84,7 +84,7 @@ class LLMClient:
         user_message: str,
         output_model: type[T],
         model: str,
-        max_tokens: int = 2048,
+        max_tokens: int = 4096,
     ) -> LLMResult[T]:
         request_body: dict[str, Any] = {
             "model": model,

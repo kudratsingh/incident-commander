@@ -15,7 +15,13 @@ class CannedMCPClient:
         self._responses = dict(responses)
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
-    def call_tool(self, name: str, arguments: Mapping[str, Any]) -> ToolResult:
+    def call_tool(
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ToolResult:
         self.calls.append((name, dict(arguments)))
         if name not in self._responses:
             raise MCPError(-32601, f"no canned response for tool: {name}")

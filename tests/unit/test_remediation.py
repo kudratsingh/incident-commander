@@ -41,7 +41,13 @@ class _FakeMCP:
         self._handler = handler
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
-    def call_tool(self, name: str, arguments: Mapping[str, Any]) -> ToolResult:
+    def call_tool(
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ToolResult:
         self.calls.append((name, dict(arguments)))
         return self._handler(name, arguments)
 
@@ -281,6 +287,39 @@ class TestRemediating:
         run = _run_state(state=IncidentState.REMEDIATING, remediation_plan=_plan_dict())
         result = transition(run, _now())
         assert result.state is IncidentState.ESCALATED
+
+    def test_action_timeout_forwarded_to_call_tool(self) -> None:
+        captured: list[float | None] = []
+
+        class _TimeoutCapturingMCP:
+            def call_tool(
+                self,
+                name: str,
+                arguments: Mapping[str, Any],
+                *,
+                timeout_seconds: float | None = None,
+            ) -> ToolResult:
+                captured.append(timeout_seconds)
+                return ToolResult(
+                    content=[
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                {
+                                    "consumer_group": arguments["consumer_group"],
+                                    "kill_key_cleared": True,
+                                    "kill_key": "k",
+                                    "accepted": True,
+                                }
+                            ),
+                        }
+                    ]
+                )
+
+        transition = make_remediate(_TimeoutCapturingMCP(), action_timeout_seconds=90.0)
+        run = _run_state(state=IncidentState.REMEDIATING, remediation_plan=_plan_dict())
+        transition(run, _now())
+        assert captured == [90.0]
 
     def test_idempotency_key_is_deterministic_across_invocations(self) -> None:
         keys: list[str] = []

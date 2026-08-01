@@ -32,7 +32,7 @@ class CannedLLMClient:
         user_message: str,
         output_model: type[T],
         model: str,
-        max_tokens: int = 2048,
+        max_tokens: int = 4096,
     ) -> LLMResult[T]:
         self.calls.append((system_prompt, user_message))
         if self._index >= len(self._outputs):

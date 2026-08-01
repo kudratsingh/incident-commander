@@ -86,11 +86,21 @@ class MCPClient:
         tools = result.get("tools", [])
         return list(tools) if isinstance(tools, list) else []
 
-    def call_tool(self, name: str, arguments: Mapping[str, Any]) -> ToolResult:
+    def call_tool(
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ToolResult:
         started = time.monotonic()
         args_dict = dict(arguments)
         try:
-            result = self._call("tools/call", {"name": name, "arguments": args_dict})
+            result = self._call(
+                "tools/call",
+                {"name": name, "arguments": args_dict},
+                timeout_seconds=timeout_seconds,
+            )
         except Exception as exc:
             if self._tracer is not None:
                 self._tracer(
@@ -114,16 +124,28 @@ class MCPClient:
             )
         return tool_result
 
-    def _call(self, method: str, params: Mapping[str, Any]) -> dict[str, Any]:
+    def _call(
+        self,
+        method: str,
+        params: Mapping[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
         body = {
             "jsonrpc": "2.0",
             "id": next(self._ids),
             "method": method,
             "params": dict(params),
         }
+        # Per-request timeout override — used for Tier-1 action tools which
+        # can legitimately take longer than the client's read-default. When
+        # None, httpx falls back to the client-level timeout.
+        post_kwargs: dict[str, Any] = {"json": body, "headers": self._headers}
+        if timeout_seconds is not None:
+            post_kwargs["timeout"] = timeout_seconds
         for attempt in range(self._max_attempts):
             try:
-                response = self._client.post(self._base_url, json=body, headers=self._headers)
+                response = self._client.post(self._base_url, **post_kwargs)
             except httpx.RequestError as exc:
                 if attempt == self._max_attempts - 1:
                     raise MCPError(
@@ -177,4 +199,10 @@ def make_client(
 class MCPClientProtocol(Protocol):
     """Structural type for anything a transition can call to invoke a tool."""
 
-    def call_tool(self, name: str, arguments: Mapping[str, Any]) -> ToolResult: ...
+    def call_tool(
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ToolResult: ...

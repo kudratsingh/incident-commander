@@ -145,14 +145,22 @@ def make_llm_plan(
                 run_state, at, "planning entered with no hypotheses on RunState"
             )
         if run_state.remediation_attempts >= _MAX_REMEDIATION_ATTEMPTS:
-            # A prior attempt didn't verify; don't retry autonomously.
-            # A human reviewing the escalation briefing decides next steps.
+            # Invariant guard (ADR 0008): under the current allowed-
+            # transition graph, PLANNING is only reachable from
+            # INVESTIGATING (attempts == 0). REMEDIATING → VERIFYING
+            # is a one-way flight — VERIFYING has no PLANNING successor.
+            # If we reach here with attempts >= 1, the state machine
+            # graph was mutated without updating ADR 0008, or someone
+            # constructed a RunState directly bypassing dispatch.
+            # Escalate with a distinct reason so the trajectory doesn't
+            # silently swallow the invariant violation.
             return _escalate_remediation(
                 run_state,
                 at,
-                f"remediation attempt cap reached "
-                f"({run_state.remediation_attempts}/{_MAX_REMEDIATION_ATTEMPTS}); "
-                "human decision required",
+                f"invariant violation (ADR 0008): PLANNING reached with "
+                f"remediation_attempts={run_state.remediation_attempts} "
+                f"(cap={_MAX_REMEDIATION_ATTEMPTS}); the allowed-transition "
+                "graph should make this state unreachable",
             )
         remaining_calls = run_state.budget.max_tool_calls - run_state.budget.tool_calls_used
         if remaining_calls < 2:
@@ -236,17 +244,6 @@ def _load_plan(run_state: RunState) -> RemediationPlan | None:
     return RemediationPlan.model_validate(raw)
 
 
-def _action_already_executed(run_state: RunState, action_tool: str) -> bool:
-    """True when the evidence log records a prior invocation of ``action_tool``.
-
-    Used by REMEDIATING as a crash-recovery signal: if the checkpoint after
-    the tool call was written but the state transition to VERIFYING wasn't,
-    we'd re-enter REMEDIATING with the action already executed. This lets
-    the transition short-circuit to VERIFYING without a duplicate call.
-    """
-    return any(entry.tool_name == action_tool for entry in run_state.evidence)
-
-
 def _format_plan_context(run_state: RunState, top_hypothesis_name: str) -> str:
     hypotheses_dump = json.dumps([h.model_dump() for h in run_state.hypotheses], indent=2)
     evidence_dump = "\n".join(
@@ -302,29 +299,15 @@ def make_remediate(
                 run_state, at, "REMEDIATING entered with no remediation_plan"
             )
 
-        # Crash-recovery reconciliation: if the last checkpoint was after
-        # we already executed this action (evidence log has an entry for
-        # plan.action_tool since PLANNING), skip re-execution. Platform
-        # idempotency makes re-execution safe, but skipping keeps the
-        # trajectory clean and avoids a duplicate audit entry.
-        if _action_already_executed(run_state, plan.action_tool):
-            entry = EvidenceEntry(
-                tool_name="_remediate_reconciled",
-                arguments={"action_tool": plan.action_tool},
-                result_summary=(
-                    f"reconciled: {plan.action_tool} was already invoked this incident; "
-                    "skipping re-execution and re-verifying"
-                ),
-                timestamp=at,
-            )
-            return run_state.model_copy(
-                update={
-                    "state": IncidentState.VERIFYING,
-                    "evidence": (*run_state.evidence, entry),
-                    "updated_at": at,
-                }
-            )
-
+        # Crash-recovery contract (ADR 0008): if a prior transition
+        # landed the action but crashed before the VERIFYING checkpoint,
+        # re-entering REMEDIATING re-invokes the tool with the SAME
+        # idempotency_key. build_idempotency_key is deterministic in
+        # (incident, tool, args), and the platform's idempotency store
+        # returns the cached response without re-executing the effect
+        # (see ADR 0010 on the platform side). No client-side
+        # reconciliation branch — the wire contract handles it, proven
+        # live by tests/integration/test_idempotency_contract.py.
         spec = TOOL_REGISTRY[plan.action_tool]
         idempotency_key = build_idempotency_key(
             str(run_state.incident_id), plan.action_tool, plan.action_arguments
@@ -409,6 +392,10 @@ def make_llm_verify(
     read taken ~1s after the action judges the cache, not the fix.
     Defaults (attempts=1, delay=0) preserve the single-probe behavior
     that canned runs and existing tests rely on.
+
+    On ``not_verified`` after all probe attempts the transition ends
+    the incident at ESCALATED — VERIFYING has no PLANNING successor
+    (ADR 0008). Retry-with-reinvestigation is deferred.
     """
 
     def transition_verify(run_state: RunState, at: datetime) -> RunState:

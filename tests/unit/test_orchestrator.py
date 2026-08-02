@@ -55,6 +55,18 @@ class TestAllowedTransitions:
                 f"{start.value} cannot reach any terminal state"
             )
 
+    def test_verifying_has_no_planning_successor(self) -> None:
+        # ADR 0008: single-attempt remediation. VERIFYING resolves,
+        # escalates, or fails — never re-plans. Practice 12: dead edges
+        # in ALLOWED_TRANSITIONS get deleted; the deleted edge becomes
+        # an explicit assertion so a future well-intentioned "let's
+        # retry" PR flags this test rather than silently restoring the
+        # loop.
+        assert IncidentState.PLANNING not in ALLOWED_TRANSITIONS[IncidentState.VERIFYING]
+        assert ALLOWED_TRANSITIONS[IncidentState.VERIFYING] == frozenset(
+            {IncidentState.RESOLVED, IncidentState.ESCALATED, IncidentState.FAILED}
+        )
+
 
 class TestTransitionsRegistry:
     def test_transition_registered_for_every_non_terminal_state(self) -> None:

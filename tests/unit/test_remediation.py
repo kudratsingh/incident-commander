@@ -426,91 +426,17 @@ class TestPlanRoundTrip:
             RemediationPlan.model_validate({**_plan_dict(), "extra_field": "boom"})
 
 
-class TestCrashRecoveryReconciliation:
-    """REMEDIATING must be safe against re-entry after a mid-flight crash.
+class TestSingleAttemptInvariant:
+    """One Tier-1 attempt per incident (ADR 0008).
 
-    Even though the platform's idempotency store makes re-execution safe,
-    we short-circuit when evidence already shows the action ran — that
-    keeps the trajectory clean and avoids a duplicate audit entry.
+    Under the current allowed-transition graph, PLANNING is only
+    reachable from INVESTIGATING (attempts == 0). VERIFYING has no
+    PLANNING successor. The check in ``make_llm_plan`` is therefore
+    an *invariant guard*, not a soft limit — it fires only if the
+    state machine graph is mutated or a RunState is constructed
+    directly bypassing dispatch. Practice 8 requires that guard to
+    have a matching test.
     """
-
-    def _mock_action_evidence(self, tool_name: str) -> EvidenceEntry:
-        return EvidenceEntry(
-            tool_name=tool_name,
-            arguments={
-                "consumer_group": "worker-dispatcher",
-                "idempotency_key": "pretend-this-was-real",
-            },
-            result_summary='{"consumer_group":"worker-dispatcher","accepted":true}',
-            timestamp=_now(),
-        )
-
-    def test_reconciles_when_action_already_in_evidence(self) -> None:
-        mcp = _FakeMCP(lambda _n, _a: ToolResult(content=[]))  # would blow up
-        transition = make_remediate(mcp)
-        run = _run_state(
-            state=IncidentState.REMEDIATING,
-            remediation_plan=_plan_dict(),
-            evidence=(self._mock_action_evidence("restart_consumer_group"),),
-        )
-        result = transition(run, _now())
-        # Skipped execution — MCP was never called.
-        assert mcp.calls == []
-        # But still advanced to VERIFYING with a reconciliation note.
-        assert result.state is IncidentState.VERIFYING
-        reconciles = [e for e in result.evidence if e.tool_name == "_remediate_reconciled"]
-        assert len(reconciles) == 1
-        assert "already invoked" in reconciles[0].result_summary
-
-    def test_does_not_reconcile_when_evidence_is_for_different_action(self) -> None:
-        # Evidence has an entry for a DIFFERENT Tier-1 tool → still execute.
-        captured: list[str] = []
-
-        def handler(name: str, args: Mapping[str, Any]) -> ToolResult:
-            captured.append(name)
-            return ToolResult(
-                content=[
-                    {
-                        "type": "text",
-                        "text": json.dumps(
-                            {
-                                "consumer_group": args["consumer_group"],
-                                "kill_key_cleared": True,
-                                "kill_key": "k",
-                                "accepted": True,
-                            }
-                        ),
-                    }
-                ]
-            )
-
-        transition = make_remediate(_FakeMCP(handler))
-        run = _run_state(
-            state=IncidentState.REMEDIATING,
-            remediation_plan=_plan_dict(),
-            evidence=(self._mock_action_evidence("invalidate_cache_key"),),
-        )
-        result = transition(run, _now())
-        assert captured == ["restart_consumer_group"]
-        assert result.state is IncidentState.VERIFYING
-
-    def test_re_entry_does_not_double_count_attempts(self) -> None:
-        # First REMEDIATING attempt already happened (evidence + attempts=1).
-        # Re-entering must NOT bump the counter — no new action was taken.
-        mcp = _FakeMCP(lambda _n, _a: ToolResult(content=[]))
-        transition = make_remediate(mcp)
-        run = _run_state(
-            state=IncidentState.REMEDIATING,
-            remediation_plan=_plan_dict(),
-            evidence=(self._mock_action_evidence("restart_consumer_group"),),
-            remediation_attempts=1,
-        )
-        result = transition(run, _now())
-        assert result.remediation_attempts == 1
-
-
-class TestAttemptCap:
-    """One Tier-1 attempt per incident. PLANNING refuses to propose a retry."""
 
     def test_first_attempt_transitions_normally(self) -> None:
         llm = CannedLLMClient([_plan_dict()])
@@ -530,9 +456,10 @@ class TestAttemptCap:
         result = transition(run, _now())
         assert result.state is IncidentState.REMEDIATING
 
-    def test_second_attempt_escalates_without_calling_llm(self) -> None:
-        # LLM queue is EMPTY — if PLANNING calls it, we'd get a fake error
-        # rather than a real plan. Test guards that no LLM call happens.
+    def test_impossible_state_fires_invariant_guard(self) -> None:
+        # Construct the state directly (bypassing dispatch, which would
+        # never allow this reachable). LLM queue empty — the guard must
+        # escalate before any planner tokens are spent.
         llm = CannedLLMClient([])
         transition = make_llm_plan(llm, model=_MODEL)
         run = _run_state(
@@ -549,7 +476,8 @@ class TestAttemptCap:
         )
         result = transition(run, _now())
         assert result.state is IncidentState.ESCALATED
-        assert any("attempt cap reached" in e.result_summary for e in result.evidence)
+        assert any("invariant violation (ADR 0008)" in e.result_summary for e in result.evidence)
+        assert llm.calls == []  # guard fires before spending planner tokens
 
     def test_successful_remediation_increments_attempts(self) -> None:
         def handler(_n: str, args: Mapping[str, Any]) -> ToolResult:

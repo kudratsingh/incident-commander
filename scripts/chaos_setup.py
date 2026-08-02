@@ -50,59 +50,7 @@ import sys
 import uuid
 from typing import Any
 
-import httpx
-
-_DEFAULT_TIMEOUT_SECONDS = 15.0
-
-
-class ChaosClient:
-    """Minimal JSON-RPC caller — deliberately not the agent's MCPClient.
-
-    Chaos setup is an operator concern outside the agent's trust
-    boundary. Using a raw httpx call keeps this script honest about
-    that separation.
-    """
-
-    def __init__(self, base_url: str, token: str) -> None:
-        self._url = base_url.rstrip("/")
-        self._client = httpx.Client(
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            timeout=_DEFAULT_TIMEOUT_SECONDS,
-        )
-
-    def call(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        body = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": tool_name, "arguments": arguments},
-        }
-        response = self._client.post(self._url, json=body)
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise RuntimeError(f"non-object JSON response: {type(payload).__name__}")
-        if "error" in payload:
-            err = payload["error"]
-            raise RuntimeError(
-                f"platform returned MCP error {err.get('code')}: {err.get('message')}"
-            )
-        result = payload.get("result", {})
-        if not isinstance(result, dict):
-            return {}
-        content = result.get("content", [])
-        for block in content:
-            if block.get("type") == "text" and isinstance(block.get("text"), str):
-                parsed = json.loads(block["text"])
-                if isinstance(parsed, dict):
-                    return parsed
-        return {}
-
-    def close(self) -> None:
-        self._client.close()
+from evals.chaos_hooks import ChaosClient
 
 
 def _print_result(action: str, result: dict[str, Any]) -> None:

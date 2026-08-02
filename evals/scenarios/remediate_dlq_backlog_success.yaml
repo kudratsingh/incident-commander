@@ -12,6 +12,14 @@ tags:
 - live-llm
 use_live_mcp: true
 use_live_llm: true
+# Live-only: seed a poison message so the DLQ has something to replay.
+# Ignored by canned/offline runs (canned list_dlq_messages already encodes
+# the backlog). Payload {} fails every topic schema.
+chaos_setup:
+  name: poison_message
+  arguments:
+    topic: job.submitted
+    payload: {}
 alert:
   source: platform.dlq
   severity: high

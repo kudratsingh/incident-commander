@@ -80,21 +80,25 @@ make chaos-restore     # clears leftover kill/latency flags on worker-dispatcher
 
 ## Live eval protocol (post-hardening)
 
-Written after the Phase-6 seven-run live eval that produced the five-bucket noise-source taxonomy (see [`docs/lessons/live-eval-noise-sources.md`](lessons/live-eval-noise-sources.md)). Until `Scenario` setup/teardown hooks + `make eval-reset` land, run one scenario at a time with an explicit reset between them.
+Written after the Phase-6 seven-run live eval that produced the five-bucket noise-source taxonomy (see [`docs/lessons/live-eval-noise-sources.md`](lessons/live-eval-noise-sources.md)). Run one scenario at a time with an explicit reset between them.
 
 ```bash
 make demo && make bootstrap-token
 export VERIFY_PROBE_ATTEMPTS=4 VERIFY_PROBE_DELAY_SECONDS=20
 
-# First proof: doesn't need the platform supervisor (consumer stays alive)
-make chaos-inject-latency
+# Scenarios that declare chaos_setup in the YAML seed themselves — no
+# separate `make chaos-*` call needed. remediate_consumer_lag_success
+# uses inject_latency; remediate_dlq_backlog_success uses poison_message.
 uv run python -m evals.runner --live --only remediate_consumer_lag_success
 
-# Reset. Until `make eval-reset` exists, this is:
-make chaos-restore     # clears kill + latency flags
+# Reset between scenarios. Today eval-reset only clears the consumer-
+# group kill+latency flags — a full seed reset (idempotency records,
+# DLQ pool, chaos:* keys) is blocked on platform-owned
+# scripts/reset_eval_state.py landing.
+make eval-reset
 
 # Then one fault → one scenario → reset, for each remaining scenario.
-# Do NOT batch until the reset script is enforceable.
+# Do NOT batch until the platform reset script is enforceable.
 ```
 
 Environment variable knobs for the live path (see [ADR 0006](ADR/0006-verification-is-a-polling-window.md)):

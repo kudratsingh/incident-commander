@@ -18,6 +18,22 @@ from incident_commander.api.schemas import AlertPayload
 from incident_commander.tools.mcp_client import ToolResult
 
 
+class ChaosHook(BaseModel):
+    """Declarative chaos-hook invocation the runner fires before a live run.
+
+    Moves the "which chaos hook seeds this scenario" mapping from operator
+    memory (or the sibling ``make chaos-*`` targets) into the scenario file
+    itself. Only invoked when the run is live (``use_live_mcp`` is true AND
+    ``PLATFORM_MCP_URL`` is a real endpoint); canned runs ignore it entirely
+    since the canned tool responses already encode the broken state.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(min_length=1, description="Platform hook name, e.g. `inject_latency`.")
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
 class Scenario(BaseModel):
     """One eval scenario. Loaded from YAML, validated at load time."""
 
@@ -41,3 +57,7 @@ class Scenario(BaseModel):
     # the API key is the offline placeholder. Non-deterministic — regression
     # gate does not apply.
     use_live_llm: bool = False
+    # Optional chaos hook to fire before the run in live mode. Puts scenario
+    # setup in the scenario file instead of in operator memory (see the
+    # live-eval noise-source lessons doc, "shared mutable environment").
+    chaos_setup: ChaosHook | None = None

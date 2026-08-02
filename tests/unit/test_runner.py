@@ -5,8 +5,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
 from pydantic import SecretStr
 
+from evals.chaos_hooks import ChaosInvocationError
 from evals.fakes import CannedMCPClient
 from evals.graders.deterministic import ScenarioExpectation
 from evals.runner import (
@@ -18,7 +20,7 @@ from evals.runner import (
     write_report,
     write_trajectories,
 )
-from evals.scenarios.schema import Scenario
+from evals.scenarios.schema import ChaosHook, Scenario
 from incident_commander.agent.briefing import EscalationBriefing
 from incident_commander.agent.state import IncidentState
 from incident_commander.api.schemas import AlertPayload
@@ -293,6 +295,80 @@ class TestLiveMcpDispatch:
         report, _, _ = run_all([_passing_scenario()], settings)
         assert report.total == 1
         assert report.passed == 1
+
+
+class TestChaosSetupHook:
+    """Scenarios declare their own chaos setup; runner fires it only in live mode."""
+
+    def _scenario_with_chaos(self) -> Scenario:
+        base = _passing_scenario()
+        return base.model_copy(
+            update={
+                "name": "chaos_probe",
+                "use_live_mcp": True,
+                "chaos_setup": ChaosHook(
+                    name="inject_latency",
+                    arguments={"consumer_group": "wd", "latency_ms": 2000},
+                ),
+            }
+        )
+
+    def test_chaos_setup_not_invoked_in_canned_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Offline placeholder URL → falls back to canned; hook must not fire.
+        calls: list[tuple[str, dict[str, Any]]] = []
+
+        def _fake_invoke(
+            url: str, token: str, name: str, arguments: dict[str, Any]
+        ) -> dict[str, Any]:
+            calls.append((name, arguments))
+            return {}
+
+        monkeypatch.setattr("evals.runner.invoke_chaos_hook", _fake_invoke)
+        result = run_scenario(self._scenario_with_chaos(), _test_settings())
+        assert result.outcome.final_state is IncidentState.ESCALATED
+        assert calls == []
+
+    def test_chaos_setup_invoked_before_run_in_live_mode(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[tuple[str, dict[str, Any]]] = []
+
+        def _fake_invoke(
+            url: str, token: str, name: str, arguments: dict[str, Any]
+        ) -> dict[str, Any]:
+            calls.append((name, arguments))
+            return {"seeded": True}
+
+        # We can't actually reach a live platform here, so we also monkeypatch
+        # the MCP client factory to return a fake with a no-op close() (the
+        # runner treats live_mcp_client as an MCPClient and calls .close() in
+        # its finally block).
+        class _ClosableCannedMCP(CannedMCPClient):
+            def close(self) -> None:  # pragma: no cover - no-op
+                return None
+
+        monkeypatch.setattr("evals.runner.invoke_chaos_hook", _fake_invoke)
+        monkeypatch.setattr(
+            "evals.runner.make_client",
+            lambda *_a, **_kw: _ClosableCannedMCP(
+                self._scenario_with_chaos().canned_tool_responses
+            ),
+        )
+        settings = _test_settings(platform_mcp_url="http://real.host:8001/mcp")
+        result = run_scenario(self._scenario_with_chaos(), settings)
+        assert result.outcome.final_state is IncidentState.ESCALATED
+        assert calls == [("inject_latency", {"consumer_group": "wd", "latency_ms": 2000})]
+
+    def test_chaos_setup_failure_surfaces_as_run_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _failing_invoke(*_a: Any, **_kw: Any) -> dict[str, Any]:
+            raise ChaosInvocationError("platform said no")
+
+        monkeypatch.setattr("evals.runner.invoke_chaos_hook", _failing_invoke)
+        settings = _test_settings(platform_mcp_url="http://real.host:8001/mcp")
+        with pytest.raises(RuntimeError, match="chaos_probe.*inject_latency.*platform said no"):
+            run_scenario(self._scenario_with_chaos(), settings)
 
 
 class TestWriteReport:

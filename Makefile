@@ -1,4 +1,4 @@
-.PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-live-remediation eval-reg trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
+.PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-live-remediation eval-reg eval-reset trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
 
 help:
 	@echo "Targets:"
@@ -15,6 +15,7 @@ help:
 	@echo "  trace-report     render evals/traces/*.jsonl → readable txt files"
 	@echo "  chaos-help       list chaos setup subcommands (kill-consumer, etc.)"
 	@echo "  eval-reg         regression eval subset"
+	@echo "  eval-reset       clear leftover chaos state between live scenarios"
 	@echo "  demo             compose up (platform pinned by digest) + live scenario"
 	@echo "  demo-down        stop demo compose services"
 	@echo "  bootstrap-token  mint a service-account token against a running platform"
@@ -93,6 +94,21 @@ chaos-bad-deploy:
 
 chaos-restore:
 	uv run python scripts/chaos_setup.py restore-consumer
+
+# Between live scenarios: clear leftover chaos state. Today this only
+# clears the consumer-group kill+latency flags (the state the current
+# scenarios mutate). When the platform ships scripts/reset_eval_state.py
+# — see the shared FIX_PLAN v2 backlog item #24 — replace this body
+# with a call to that script for a full seed reset (idempotency records,
+# DLQ fixture pool, chaos:* keys).
+eval-reset:
+	@echo "eval-reset: clearing consumer-group chaos state (kill+latency)..."
+	uv run python scripts/chaos_setup.py restore-consumer
+	@echo ""
+	@echo "NOTE: full reset (idempotency records, DLQ pool, chaos:* keys)"
+	@echo "requires platform-owned scripts/reset_eval_state.py, which"
+	@echo "does not exist yet. Until then, one-fault-one-scenario is the"
+	@echo "manual protocol — see docs/runbook.md."
 
 chaos-bad-data-job:
 	uv run python scripts/chaos_setup.py bad-data-job

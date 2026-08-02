@@ -82,46 +82,36 @@ make chaos-restore     # clears leftover kill/latency flags on worker-dispatcher
 
 Written after the Phase-6 seven-run live eval that produced the five-bucket noise-source taxonomy (see [`docs/lessons/live-eval-noise-sources.md`](lessons/live-eval-noise-sources.md)). Run one scenario at a time with an explicit reset between them.
 
-**Do NOT use `make demo` for bring-up.** Its last step runs a full untraced `--live` eval suite against a freshly-seeded (no chaos) platform — burns ~$4, produces uninspectable results, and most remediation scenarios read as escalations because the platform is healthy. Bring the stack up with `docker compose` directly and land the first LLM spend inside the deliberate read-only pass where the results mean something. [Follow-up filed](https://github.com/kudratsingh/incident-commander/issues/59) to strip the embedded eval from `make demo`.
-
 ```bash
-# Bring-up (compose only, no embedded eval).
-docker compose -f demo/compose.yml up -d --wait
+# Bring-up. `make demo` now stops after compose-up (no embedded eval).
+make demo
 make bootstrap-token
 
-# EVAL_TRACE_DIR is MANDATORY for direct runner invocations —
-# `make eval-live` sets it inline, but the one-scenario protocol
-# uses direct `evals.runner` calls where the tracer is off by
-# default. Without it: no JSONL trace, no human report, blind run.
+# Probe knobs for the live path. eval-live sets EVAL_TRACE_DIR inline,
+# but exporting it here means every direct `evals.runner` invocation
+# also gets traced.
 export EVAL_TRACE_DIR=evals/traces \
        VERIFY_PROBE_ATTEMPTS=4 \
        VERIFY_PROBE_DELAY_SECONDS=20
 
-# Smoke pass FIRST — read-only scenarios catch any wire-shape
-# surprise from the current pin before you spend on a Tier-1
-# remediation attempt. ~$1 of tokens.
-uv run python -m evals.runner --live --only '(consumer_lag|dlq_|traces|deploy|incident|postgres|redis|noise|planner_stops|multi_probe|saga_stuck|redis_saturation|postgres_slow|failed_traces|incidents_overview|trace_investigation|alert_storm|tool_)'
-make trace-report  # renders JSONL → evals/reports/human/*.md
+# 1) Smoke pass FIRST — read-only scenarios catch any wire-shape
+#    surprise from the current pin before you spend on a Tier-1
+#    remediation attempt. ~$1 of tokens.
+make eval-live ONLY='(consumer_lag|dlq_|traces|deploy|incident|postgres|redis|noise|planner_stops|multi_probe|saga_stuck|redis_saturation|postgres_slow|failed_traces|incidents_overview|trace_investigation|alert_storm|tool_)'
 
-# Then remediation scenarios, one at a time, with reset between.
-# Each scenario declares its own chaos_setup in the YAML (PR #54).
-uv run python -m evals.runner --live --only remediate_consumer_lag_success
-make trace-report
-make eval-reset
+# 2) Remediation scenarios, one at a time, with reset between.
+#    Each scenario declares its own chaos_setup in the YAML (PR #54).
+make eval-live ONLY=remediate_consumer_lag_success && make eval-reset
+make eval-live ONLY=remediate_dlq_backlog_success  && make eval-reset
+make eval-live ONLY=remediate_stale_cache_success  && make eval-reset
 
-uv run python -m evals.runner --live --only remediate_dlq_backlog_success
-make trace-report
-make eval-reset
-
-uv run python -m evals.runner --live --only remediate_stale_cache_success
-make trace-report
-make eval-reset
-
-# Do NOT batch until the make targets grow an ONLY= filter
-# (issue #59). Batch mode via the current --live entrypoint
-# would run every scenario back-to-back with no reset — the
-# exact anti-pattern the post-hardening protocol retired.
+# Do NOT drop the reset between scenarios. The one-fault-one-scenario
+# protocol exists because shared platform state between runs was the
+# single largest source of noise in the seven-run audit — see the
+# lessons doc's third bucket, "shared mutable environment".
 ```
+
+Every `make eval-live` invocation writes JSONL traces to `evals/traces/` and renders per-scenario human reports to `evals/reports/human/*.md` (via the `format_traces.py` step chained into the target).
 
 `make eval-reset` shells into the platform's `app` container via `docker compose -f $PLATFORM_COMPOSE exec` — defaults to `../incident-platform/docker-compose.yml`. Override with `PLATFORM_COMPOSE=/path/to/docker-compose.yml` if the platform repo isn't a sibling checkout. Pass `PURGE_IDEMPOTENCY=1` to also `DELETE` idempotency_records (24h TTL from platform ADR 0010 handles the common case; opt-in purge for guaranteed-fresh cache).
 

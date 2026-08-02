@@ -10,8 +10,9 @@ help:
 	@echo "  test-contract    diff platform tool schemas against snapshot"
 	@echo "  test-e2e         full compose end-to-end (spends tokens)"
 	@echo "  eval             full eval suite offline (writes report)"
-	@echo "  eval-live        run eval suite against live platform (needs .env)"
-	@echo "  eval-live-remediation  run only remediate_* scenarios live (~\$$0.35)"
+	@echo "  eval-live        run eval suite against live platform (needs .env);"
+	@echo "                   ONLY=<substr[,substr...]> to filter (e.g. ONLY=remediate_consumer_lag_success)"
+	@echo "  eval-live-remediation  DEPRECATED alias for 'eval-live ONLY=remediate_,dlq_'"
 	@echo "  trace-report     render evals/traces/*.jsonl → readable txt files"
 	@echo "  chaos-help       list chaos setup subcommands (kill-consumer, etc.)"
 	@echo "  eval-reg         regression eval subset"
@@ -52,19 +53,23 @@ test-e2e:
 eval:
 	uv run python -m evals.runner
 
+# ONLY=<pattern>[,<pattern>...] filters to scenarios whose name matches
+# any of the substrings. Runs the whole suite when unset. Traced by
+# construction — EVAL_TRACE_DIR is set inline so the human report is
+# always produced, matching the post-hardening one-scenario protocol
+# in docs/runbook.md.
 eval-live:
-	EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live
+	EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live $(if $(ONLY),--only $(ONLY))
 	uv run python scripts/format_traces.py
 	@echo "JSONL traces: evals/traces/*.jsonl"
-	@echo "Human-readable trajectories: evals/reports/human/*.txt"
+	@echo "Human-readable trajectories: evals/reports/human/*.md"
 
-# Filtered live run — same as eval-live but only runs scenarios whose
-# name contains the substring. Cost ~$0.35 for the 5 remediate_* scenarios
-# vs ~$1.60 for the full suite. Pair with `make chaos-*` first for a
-# real broken state to fix.
+# Kept as a deprecated alias for the batch remediation pattern the
+# post-hardening protocol retired. Prefer:
+#   make eval-live ONLY=remediate_consumer_lag_success
+# and `make eval-reset` between scenarios.
 eval-live-remediation:
-	EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live --only remediate_,dlq_
-	uv run python scripts/format_traces.py
+	$(MAKE) eval-live ONLY=remediate_,dlq_
 
 trace-report:
 	uv run python scripts/format_traces.py
@@ -129,10 +134,17 @@ chaos-bad-data-job:
 eval-reg: eval
 	uv run python -m evals.regression
 
+# Bring-up only. Deliberately does NOT run `evals.runner --live` — the
+# previous embedded batch was untraced (~$4), ran against a healthy
+# (no-chaos) platform, and produced escalations that were correct
+# behaviour but read as failures in the summary. Land the first live
+# LLM spend inside the deliberate read-only smoke pass instead — see
+# docs/runbook.md for the protocol.
 demo:
 	docker compose -f demo/compose.yml up -d --wait
-	uv run python -m evals.runner --live
-	@echo "Demo done. Stop with 'make demo-down'."
+	@echo "Platform up. Next: 'make bootstrap-token' + follow the protocol"
+	@echo "in docs/runbook.md#live-eval-protocol-post-hardening."
+	@echo "Stop with 'make demo-down'."
 
 demo-down:
 	docker compose -f demo/compose.yml down -v

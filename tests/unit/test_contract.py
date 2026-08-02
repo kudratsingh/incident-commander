@@ -64,11 +64,38 @@ class TestNormalize:
             ]
         }
         result = normalize(raw)
-        assert set(result["tools"][0].keys()) == {"name", "description", "inputSchema"}
+        assert set(result["tools"][0].keys()) == {
+            "name",
+            "description",
+            "inputSchema",
+            "outputSchema",
+        }
 
     def test_empty_tools_list(self) -> None:
         assert normalize({"tools": []}) == {"tools": []}
         assert normalize({}) == {"tools": []}
+
+    def test_output_schema_pulled_from_lookup(self) -> None:
+        raw = {"tools": [{"name": "a", "description": "d", "inputSchema": {}}]}
+        schemas = {"a": {"type": "object", "properties": {"ok": {"type": "boolean"}}}}
+        result = normalize(raw, schemas)
+        assert result["tools"][0]["outputSchema"] == {
+            "type": "object",
+            "properties": {"ok": {"type": "boolean"}},
+        }
+
+    def test_output_schema_defaults_to_empty_for_unknown_tool(self) -> None:
+        # Operator-only chaos hooks (poison_message, saturate_redis, etc.) have
+        # no local output model — snapshot records {} rather than raising.
+        raw = {"tools": [{"name": "chaos_only", "description": "d", "inputSchema": {}}]}
+        result = normalize(raw, {"other_tool": {"type": "object"}})
+        assert result["tools"][0]["outputSchema"] == {}
+
+    def test_no_output_schemas_lookup_treats_all_as_empty(self) -> None:
+        # Back-compat + convenience: caller can omit the lookup entirely.
+        raw = {"tools": [{"name": "a", "description": "d", "inputSchema": {}}]}
+        result = normalize(raw)
+        assert result["tools"][0]["outputSchema"] == {}
 
 
 class TestCompare:
@@ -103,6 +130,25 @@ class TestCompare:
         live = deepcopy(snapshot)
         live["tools"][0]["inputSchema"]["properties"]["consumer_group"]["default"] = "event-log"
         diff = compare(snapshot, live)
+        assert diff.changed == ("get_consumer_lag",)
+
+    def test_output_schema_change_flagged(self) -> None:
+        # v0.4.4's real drift was outputs — this is the assertion that would
+        # have caught it. Same platform tool description + inputSchema, but a
+        # response field changed → surfaces as a `changed` delta.
+        committed = normalize(
+            {"tools": [{"name": "get_consumer_lag", "description": "d", "inputSchema": {}}]},
+            {"get_consumer_lag": {"properties": {"lag": {"type": "integer"}}}},
+        )
+        live = normalize(
+            {"tools": [{"name": "get_consumer_lag", "description": "d", "inputSchema": {}}]},
+            {
+                "get_consumer_lag": {
+                    "properties": {"lag": {"type": "integer"}, "new_field": {"type": "string"}}
+                }
+            },
+        )
+        diff = compare(committed, live)
         assert diff.changed == ("get_consumer_lag",)
 
     def test_new_required_field_flagged(self, snapshot: dict[str, Any]) -> None:

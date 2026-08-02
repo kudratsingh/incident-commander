@@ -26,6 +26,7 @@ from pathlib import Path
 import httpx
 
 from incident_commander.tools.contract import normalize
+from incident_commander.tools.registry import TOOL_REGISTRY
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SNAPSHOT_PATH = _REPO_ROOT / "contracts" / "platform-tools.snapshot.json"
@@ -80,7 +81,10 @@ def main() -> int:
         return 2
 
     result = fetch_tools(args.mcp_url, args.token)
-    snapshot = normalize(result)
+    output_schemas = {
+        name: spec.output_model.model_json_schema() for name, spec in TOOL_REGISTRY.items()
+    }
+    snapshot = normalize(result, output_schemas)
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n")

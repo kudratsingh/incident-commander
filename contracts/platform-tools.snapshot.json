@@ -39,7 +39,8 @@
         },
         "title": "BadDeployInput",
         "type": "object"
-      }
+      },
+      "outputSchema": {}
     },
     {
       "name": "create_bad_data_job",
@@ -63,7 +64,8 @@
         },
         "title": "CreateBadDataJobInput",
         "type": "object"
-      }
+      },
+      "outputSchema": {}
     },
     {
       "name": "get_consumer_lag",
@@ -79,6 +81,36 @@
           }
         },
         "title": "GetConsumerLagInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "consumer_group": {
+            "title": "Consumer Group",
+            "type": "string"
+          },
+          "lag": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lag"
+          },
+          "cache_key": {
+            "title": "Cache Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "consumer_group",
+          "lag",
+          "cache_key"
+        ],
+        "title": "GetConsumerLagOutput",
         "type": "object"
       }
     },
@@ -99,6 +131,89 @@
           "job_id"
         ],
         "title": "GetDagStateInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {
+          "DagEdge": {
+            "properties": {
+              "from_id": {
+                "title": "From Id",
+                "type": "string"
+              },
+              "to_id": {
+                "title": "To Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "from_id",
+              "to_id"
+            ],
+            "title": "DagEdge",
+            "type": "object"
+          },
+          "DagNode": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "type": {
+                "title": "Type",
+                "type": "string"
+              },
+              "status": {
+                "title": "Status",
+                "type": "string"
+              },
+              "retry_count": {
+                "title": "Retry Count",
+                "type": "integer"
+              },
+              "created_at": {
+                "format": "date-time",
+                "title": "Created At",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "status",
+              "retry_count",
+              "created_at"
+            ],
+            "title": "DagNode",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "seed_id": {
+            "title": "Seed Id",
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/$defs/DagNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/$defs/DagEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          }
+        },
+        "required": [
+          "seed_id",
+          "nodes",
+          "edges"
+        ],
+        "title": "GetDagStateOutput",
         "type": "object"
       }
     },
@@ -132,6 +247,101 @@
         },
         "title": "GetDeployHistoryInput",
         "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {
+          "DeployEntry": {
+            "properties": {
+              "version": {
+                "title": "Version",
+                "type": "string"
+              },
+              "revision": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Revision"
+              },
+              "image_tag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Image Tag"
+              },
+              "deployed_at": {
+                "format": "date-time",
+                "title": "Deployed At",
+                "type": "string"
+              },
+              "environment": {
+                "title": "Environment",
+                "type": "string"
+              },
+              "notes": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Notes"
+              }
+            },
+            "required": [
+              "version",
+              "deployed_at",
+              "environment"
+            ],
+            "title": "DeployEntry",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/$defs/DeployEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source"
+          }
+        },
+        "required": [
+          "total",
+          "entries"
+        ],
+        "title": "GetDeployHistoryOutput",
+        "type": "object"
       }
     },
     {
@@ -151,6 +361,95 @@
         ],
         "title": "GetIncidentInput",
         "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "fired_at": {
+            "format": "date-time",
+            "title": "Fired At",
+            "type": "string"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resolved At"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "extra_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Extra Data"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Request Id"
+          }
+        },
+        "required": [
+          "id",
+          "severity",
+          "source",
+          "title",
+          "fired_at",
+          "is_active"
+        ],
+        "title": "GetIncidentOutput",
+        "type": "object"
       }
     },
     {
@@ -161,6 +460,60 @@
         "properties": {},
         "title": "_EmptyIn",
         "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "ping_latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ping Latency Ms"
+          },
+          "active_connections": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Active Connections"
+          },
+          "dialect": {
+            "title": "Dialect",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error"
+          }
+        },
+        "required": [
+          "ok",
+          "dialect"
+        ],
+        "title": "PostgresHealthOutput",
+        "type": "object"
       }
     },
     {
@@ -170,6 +523,103 @@
         "additionalProperties": false,
         "properties": {},
         "title": "_EmptyIn",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "ping_latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ping Latency Ms"
+          },
+          "connected_clients": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Connected Clients"
+          },
+          "used_memory_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Used Memory Bytes"
+          },
+          "used_memory_human": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Used Memory Human"
+          },
+          "keyspace_hits": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Keyspace Hits"
+          },
+          "keyspace_misses": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Keyspace Misses"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "RedisHealthOutput",
         "type": "object"
       }
     },
@@ -196,6 +646,169 @@
           "trace_id"
         ],
         "title": "GetTraceInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {
+          "TracedAuditRow": {
+            "properties": {
+              "action": {
+                "title": "Action",
+                "type": "string"
+              },
+              "resource_type": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Resource Type"
+              },
+              "resource_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Resource Id"
+              },
+              "principal_type": {
+                "title": "Principal Type",
+                "type": "string"
+              },
+              "created_at": {
+                "format": "date-time",
+                "title": "Created At",
+                "type": "string"
+              },
+              "extra_data": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Extra Data"
+              }
+            },
+            "required": [
+              "action",
+              "principal_type",
+              "created_at"
+            ],
+            "title": "TracedAuditRow",
+            "type": "object"
+          },
+          "TracedJob": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "type": {
+                "title": "Type",
+                "type": "string"
+              },
+              "status": {
+                "title": "Status",
+                "type": "string"
+              },
+              "user_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "User Id"
+              },
+              "retry_count": {
+                "title": "Retry Count",
+                "type": "integer"
+              },
+              "error_message": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Error Message"
+              },
+              "created_at": {
+                "format": "date-time",
+                "title": "Created At",
+                "type": "string"
+              },
+              "updated_at": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Updated At"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "status",
+              "retry_count",
+              "created_at"
+            ],
+            "title": "TracedJob",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "trace_id": {
+            "title": "Trace Id",
+            "type": "string"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/$defs/TracedJob"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "audit_events": {
+            "items": {
+              "$ref": "#/$defs/TracedAuditRow"
+            },
+            "title": "Audit Events",
+            "type": "array"
+          }
+        },
+        "required": [
+          "trace_id",
+          "jobs",
+          "audit_events"
+        ],
+        "title": "GetTraceOutput",
         "type": "object"
       }
     },
@@ -234,7 +847,8 @@
         ],
         "title": "InjectLatencyInput",
         "type": "object"
-      }
+      },
+      "outputSchema": {}
     },
     {
       "name": "invalidate_cache_key",
@@ -261,6 +875,24 @@
           "idempotency_key"
         ],
         "title": "InvalidateCacheKeyInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "deleted": {
+            "title": "Deleted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "deleted"
+        ],
+        "title": "InvalidateCacheKeyOutput",
         "type": "object"
       }
     },
@@ -291,7 +923,8 @@
         ],
         "title": "KillConsumerInput",
         "type": "object"
-      }
+      },
+      "outputSchema": {}
     },
     {
       "name": "list_active_alerts",
@@ -321,6 +954,88 @@
           }
         },
         "title": "ListActiveAlertsInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {
+          "AlertSummary": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "severity": {
+                "title": "Severity",
+                "type": "string"
+              },
+              "source": {
+                "title": "Source",
+                "type": "string"
+              },
+              "title": {
+                "title": "Title",
+                "type": "string"
+              },
+              "description": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Description"
+              },
+              "fired_at": {
+                "format": "date-time",
+                "title": "Fired At",
+                "type": "string"
+              },
+              "extra_data": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Extra Data"
+              }
+            },
+            "required": [
+              "id",
+              "severity",
+              "source",
+              "title",
+              "fired_at"
+            ],
+            "title": "AlertSummary",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "alerts": {
+            "items": {
+              "$ref": "#/$defs/AlertSummary"
+            },
+            "title": "Alerts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "total",
+          "alerts"
+        ],
+        "title": "ListActiveAlertsOutput",
         "type": "object"
       }
     },
@@ -379,6 +1094,119 @@
         },
         "title": "ListAuditEventsInput",
         "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {
+          "AuditEventEntry": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "action": {
+                "title": "Action",
+                "type": "string"
+              },
+              "principal_type": {
+                "title": "Principal Type",
+                "type": "string"
+              },
+              "principal_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Principal Id"
+              },
+              "resource_type": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Resource Type"
+              },
+              "resource_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Resource Id"
+              },
+              "request_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Request Id"
+              },
+              "created_at": {
+                "format": "date-time",
+                "title": "Created At",
+                "type": "string"
+              },
+              "extra_data": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Extra Data"
+              }
+            },
+            "required": [
+              "id",
+              "action",
+              "principal_type",
+              "created_at"
+            ],
+            "title": "AuditEventEntry",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/$defs/AuditEventEntry"
+            },
+            "title": "Events",
+            "type": "array"
+          }
+        },
+        "required": [
+          "total",
+          "events"
+        ],
+        "title": "ListAuditEventsOutput",
+        "type": "object"
       }
     },
     {
@@ -422,6 +1250,192 @@
           }
         },
         "title": "ListDlqMessagesInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {
+          "DlqEntry": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "type": {
+                "title": "Type",
+                "type": "string"
+              },
+              "error_message": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Error Message"
+              },
+              "retry_count": {
+                "title": "Retry Count",
+                "type": "integer"
+              },
+              "created_at": {
+                "format": "date-time",
+                "title": "Created At",
+                "type": "string"
+              },
+              "updated_at": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Updated At"
+              },
+              "trace_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Trace Id"
+              },
+              "triage": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/DlqTriageSummary"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "remediation_hint": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Remediation Hint"
+              },
+              "extra": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Extra"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "retry_count",
+              "created_at"
+            ],
+            "title": "DlqEntry",
+            "type": "object"
+          },
+          "DlqTriageSummary": {
+            "properties": {
+              "root_cause_category": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Root Cause Category"
+              },
+              "summary": {
+                "title": "Summary",
+                "type": "string"
+              },
+              "suggested_fix": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Suggested Fix"
+              },
+              "is_retryable": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Is Retryable"
+              },
+              "confidence": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Confidence"
+              }
+            },
+            "required": [
+              "summary"
+            ],
+            "title": "DlqTriageSummary",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/$defs/DlqEntry"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "ListDlqMessagesOutput",
         "type": "object"
       }
     },
@@ -473,6 +1487,93 @@
         },
         "title": "ListIncidentsInput",
         "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {
+          "IncidentSummary": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "severity": {
+                "title": "Severity",
+                "type": "string"
+              },
+              "source": {
+                "title": "Source",
+                "type": "string"
+              },
+              "title": {
+                "title": "Title",
+                "type": "string"
+              },
+              "description": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Description"
+              },
+              "fired_at": {
+                "format": "date-time",
+                "title": "Fired At",
+                "type": "string"
+              },
+              "resolved_at": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Resolved At"
+              },
+              "is_active": {
+                "title": "Is Active",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "severity",
+              "source",
+              "title",
+              "fired_at",
+              "is_active"
+            ],
+            "title": "IncidentSummary",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "incidents": {
+            "items": {
+              "$ref": "#/$defs/IncidentSummary"
+            },
+            "title": "Incidents",
+            "type": "array"
+          }
+        },
+        "required": [
+          "total",
+          "incidents"
+        ],
+        "title": "ListIncidentsOutput",
+        "type": "object"
       }
     },
     {
@@ -508,6 +1609,42 @@
         ],
         "title": "MarkDlqPermanentInput",
         "type": "object"
+      },
+      "outputSchema": {
+        "description": "Output shape from v0.4.4 platform.\n\n``previous_hint`` shows what the categorizer had classified this\nentry as before the mark. ``remediation_hint`` is always\n``'human_required'`` after the call (that's the whole point).\n``already_marked`` tells the operator whether this call was a\nno-op (repeat call with the same idempotency_key OR the entry was\nalready ``human_required``).",
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "previous_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Previous Hint"
+          },
+          "remediation_hint": {
+            "title": "Remediation Hint",
+            "type": "string"
+          },
+          "already_marked": {
+            "title": "Already Marked",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "job_id",
+          "remediation_hint",
+          "already_marked"
+        ],
+        "title": "MarkDlqPermanentOutput",
+        "type": "object"
       }
     },
     {
@@ -542,6 +1679,34 @@
           "idempotency_key"
         ],
         "title": "PauseDagInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "root_job_id": {
+            "title": "Root Job Id",
+            "type": "string"
+          },
+          "pause_key": {
+            "title": "Pause Key",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "title": "Ttl Seconds",
+            "type": "integer"
+          },
+          "accepted": {
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "root_job_id",
+          "pause_key",
+          "ttl_seconds",
+          "accepted"
+        ],
+        "title": "PauseDagOutput",
         "type": "object"
       }
     },
@@ -583,7 +1748,8 @@
         ],
         "title": "PoisonMessageInput",
         "type": "object"
-      }
+      },
+      "outputSchema": {}
     },
     {
       "name": "replay_dlq_by_category",
@@ -644,6 +1810,60 @@
         ],
         "title": "ReplayDlqByCategoryInput",
         "type": "object"
+      },
+      "outputSchema": {
+        "description": "Output shape from v0.4.4 platform.\n\n``matched`` (not requested) — how many DLQ rows the category filter\nhit. ``replayed`` + ``scheduled`` + ``failed`` sum to ``matched``.\n``job_ids[]`` lists the specific ids that were processed.\n``execute_at`` is set when the caller passed ``delay_seconds``\n(single epoch for the bulk operation; per-job in the by-ids tool).",
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "matched": {
+            "title": "Matched",
+            "type": "integer"
+          },
+          "replayed": {
+            "title": "Replayed",
+            "type": "integer"
+          },
+          "scheduled": {
+            "title": "Scheduled",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "job_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Job Ids",
+            "type": "array"
+          },
+          "execute_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Execute At"
+          }
+        },
+        "required": [
+          "category",
+          "matched",
+          "replayed",
+          "scheduled",
+          "failed",
+          "job_ids"
+        ],
+        "title": "ReplayDlqByCategoryOutput",
+        "type": "object"
       }
     },
     {
@@ -691,6 +1911,93 @@
         ],
         "title": "ReplayDlqByIdsInput",
         "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {
+          "ReplayedJobResult": {
+            "description": "Per-job outcome inside ``replay_dlq_by_ids.results[]`` (v0.4.4+).\n\n``ok`` distinguishes \"platform accepted the replay\" from \"platform\nrejected it\" (e.g. job wasn't in a replayable state). ``scheduled``\n+ ``execute_at`` are set when the caller passed ``delay_seconds``.",
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "ok": {
+                "title": "Ok",
+                "type": "boolean"
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Error"
+              },
+              "scheduled": {
+                "default": false,
+                "title": "Scheduled",
+                "type": "boolean"
+              },
+              "execute_at": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Execute At"
+              }
+            },
+            "required": [
+              "id",
+              "ok"
+            ],
+            "title": "ReplayedJobResult",
+            "type": "object"
+          }
+        },
+        "description": "Output shape from v0.4.4 platform.\n\n``requested`` == input job_ids count. ``replayed`` + ``scheduled`` +\n``failed`` sum to ``requested``. Per-job outcome lives in\n``results[]`` — that's where an operator finds which specific ids\nwere rejected and why.",
+        "properties": {
+          "requested": {
+            "title": "Requested",
+            "type": "integer"
+          },
+          "replayed": {
+            "title": "Replayed",
+            "type": "integer"
+          },
+          "scheduled": {
+            "title": "Scheduled",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/$defs/ReplayedJobResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "requested",
+          "replayed",
+          "scheduled",
+          "failed",
+          "results"
+        ],
+        "title": "ReplayDlqByIdsOutput",
+        "type": "object"
       }
     },
     {
@@ -732,6 +2039,59 @@
         ],
         "title": "ReplayDlqMessagesInput",
         "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {
+          "LegacyReplayedJob": {
+            "description": "Per-job entry inside the legacy ``replay_dlq_messages.jobs[]``.\n\nJust ``id`` + ``type``, no per-job outcome. Kept for back-compat\nwith the older tool; ``replay_dlq_by_ids`` (v0.4.0+) uses the\nricher ``ReplayedJobResult`` below.",
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "type": {
+                "title": "Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ],
+            "title": "LegacyReplayedJob",
+            "type": "object"
+          }
+        },
+        "description": "Output for the legacy ``replay_dlq_messages`` tool (pre-v0.4.0).",
+        "properties": {
+          "requested": {
+            "title": "Requested",
+            "type": "integer"
+          },
+          "replayed": {
+            "title": "Replayed",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/$defs/LegacyReplayedJob"
+            },
+            "title": "Jobs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "requested",
+          "replayed",
+          "failed",
+          "jobs"
+        ],
+        "title": "ReplayDlqMessagesOutput",
+        "type": "object"
       }
     },
     {
@@ -759,6 +2119,44 @@
           "idempotency_key"
         ],
         "title": "RestartConsumerGroupInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "consumer_group": {
+            "title": "Consumer Group",
+            "type": "string"
+          },
+          "kill_key_cleared": {
+            "title": "Kill Key Cleared",
+            "type": "boolean"
+          },
+          "kill_key": {
+            "title": "Kill Key",
+            "type": "string"
+          },
+          "latency_key_cleared": {
+            "default": false,
+            "title": "Latency Key Cleared",
+            "type": "boolean"
+          },
+          "latency_key": {
+            "default": "",
+            "title": "Latency Key",
+            "type": "string"
+          },
+          "accepted": {
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "consumer_group",
+          "kill_key_cleared",
+          "kill_key",
+          "accepted"
+        ],
+        "title": "RestartConsumerGroupOutput",
         "type": "object"
       }
     },
@@ -795,7 +2193,8 @@
         },
         "title": "SaturateRedisInput",
         "type": "object"
-      }
+      },
+      "outputSchema": {}
     },
     {
       "name": "search_traces",
@@ -851,6 +2250,58 @@
           }
         },
         "title": "SearchTracesInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {
+          "TraceMatch": {
+            "properties": {
+              "trace_id": {
+                "title": "Trace Id",
+                "type": "string"
+              },
+              "job_id": {
+                "title": "Job Id",
+                "type": "string"
+              },
+              "job_type": {
+                "title": "Job Type",
+                "type": "string"
+              },
+              "status": {
+                "title": "Status",
+                "type": "string"
+              },
+              "created_at": {
+                "format": "date-time",
+                "title": "Created At",
+                "type": "string"
+              }
+            },
+            "required": [
+              "trace_id",
+              "job_id",
+              "job_type",
+              "status",
+              "created_at"
+            ],
+            "title": "TraceMatch",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "matches": {
+            "items": {
+              "$ref": "#/$defs/TraceMatch"
+            },
+            "title": "Matches",
+            "type": "array"
+          }
+        },
+        "required": [
+          "matches"
+        ],
+        "title": "SearchTracesOutput",
         "type": "object"
       }
     }

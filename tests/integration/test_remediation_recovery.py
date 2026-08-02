@@ -2,9 +2,13 @@
 
 Simulates the failure mode CLAUDE.md invariant 6 requires the agent to
 handle: agent executes the Tier-1 action, writes a checkpoint, then
-crashes before verifying. On restart the checkpoint is loaded and the
-REMEDIATING transition must reconcile — recognize the action already
-ran and skip re-execution — rather than double-invoking the platform.
+crashes before advancing to VERIFYING. On restart the checkpoint is
+loaded and REMEDIATING re-fires. Under ADR 0008 the agent does NOT
+short-circuit here — it re-invokes with the SAME idempotency_key, and
+the platform's idempotency store (ADR 0010 on the platform side) is
+what makes the re-send safe. See
+``tests/integration/test_idempotency_contract.py`` for the live proof
+that the platform actually dedupes.
 
 Uses ``PostgresCheckpointer`` so the round-trip proves the schema
 handles v3 fields (``remediation_attempts``, ``remediation_plan``).
@@ -24,7 +28,6 @@ from sqlalchemy import Engine
 from incident_commander.agent.remediation import make_remediate
 from incident_commander.agent.state import (
     BudgetLedger,
-    EvidenceEntry,
     IncidentState,
     RunState,
 )
@@ -100,74 +103,60 @@ def _successful_action() -> ToolResult:
 
 
 class TestCrashRecoveryRoundTrip:
-    """Full cycle: execute → checkpoint → crash → resume → reconcile."""
+    """Full cycle: execute → checkpoint → crash → resume → re-send with same idem key.
 
-    def test_reload_after_execution_reconciles_without_re_invocation(
-        self, clean_engine: Engine
-    ) -> None:
+    Under ADR 0008 there is no client-side reconciliation branch. The
+    invariant is stronger, not weaker: on crash-resume the agent re-
+    invokes with a *deterministic* ``build_idempotency_key(incident,
+    tool, args)``, and the platform's idempotency store returns the
+    cached response. The agent doesn't need to know whether the first
+    invocation landed — the wire contract makes both cases equivalent.
+    """
+
+    def test_resume_reissues_same_idempotency_key(self, clean_engine: Engine) -> None:
         checkpointer = PostgresCheckpointer(clean_engine)
         mcp = _CountingMCP(_successful_action())
         remediate: Callable[[RunState, datetime], RunState] = make_remediate(mcp)
 
-        # 1) Pre-crash: execute REMEDIATING, checkpoint the result. This
-        #    is where the agent would successfully call the platform and
-        #    persist the outcome to Postgres.
+        # 1) Pre-crash: execute REMEDIATING, checkpoint the result.
         pre = _pre_remediation_state()
         checkpointer.write(pre)
         post = remediate(pre, _now())
         checkpointer.write(post)
 
-        # Sanity: state advanced to VERIFYING, attempts=1, MCP called once.
         assert post.state is IncidentState.VERIFYING
         assert post.remediation_attempts == 1
         assert len(mcp.calls) == 1
+        first_call_args = mcp.calls[0][1]
+        first_idem_key = first_call_args["idempotency_key"]
 
-        # 2) Simulate crash + restart: agent process dies, comes back
-        #    with only what's in Postgres. Load and inspect.
-        reloaded = checkpointer.load(pre.incident_id)
-        assert reloaded == post
-
-        # 3) Suppose the crash happened between the platform call and
-        #    the post-write (worst case) — the loaded state would be
-        #    ``pre`` with the evidence-bearing checkpoint missing.
-        #    Overwrite Postgres to represent that timeline: state is
-        #    still REMEDIATING but evidence records the tool call
-        #    (because we wrote the "action succeeded" checkpoint first
-        #    in a real system, before flipping state).
-        mid_crash = pre.model_copy(
-            update={
-                "state": IncidentState.REMEDIATING,
-                "evidence": (
-                    EvidenceEntry(
-                        tool_name="restart_consumer_group",
-                        arguments={
-                            "consumer_group": "worker-dispatcher",
-                            "idempotency_key": "abc123",
-                        },
-                        result_summary='{"consumer_group":"worker-dispatcher","accepted":true}',
-                        timestamp=_now(),
-                    ),
-                ),
-                "remediation_attempts": 1,
-            }
-        )
-        checkpointer.write(mid_crash)
-
-        # 4) Resume: REMEDIATING transition re-fires. Reconciliation
-        #    must recognize the action already ran and NOT call MCP
-        #    again — otherwise the platform sees a duplicate audit
-        #    entry (safe due to idempotency, but noise we can avoid).
+        # 2) Simulate the worst-case crash: the action landed on the
+        #    platform, but the post-transition checkpoint didn't. On
+        #    restart the state loaded from Postgres is still the
+        #    pre-execute snapshot.
+        checkpointer.write(pre)
         resumed = checkpointer.load(pre.incident_id)
         assert resumed is not None
-        after_recover = remediate(resumed, _now())
+        assert resumed.state is IncidentState.REMEDIATING
 
+        # 3) Re-fire REMEDIATING. The agent invokes MCP AGAIN — no
+        #    client-side reconciliation short-circuit exists. The
+        #    critical assertion is that the second call carries the
+        #    SAME idempotency_key as the first, which is what makes
+        #    the platform's dedup safe.
+        after_recover = remediate(resumed, _now())
         assert after_recover.state is IncidentState.VERIFYING
-        # Critical assertion: MCP was NOT called a second time.
-        assert len(mcp.calls) == 1
-        # Reconciliation note is on evidence for the trajectory.
-        assert any(e.tool_name == "_remediate_reconciled" for e in after_recover.evidence)
-        # attempts stays at 1 — no new attempt was made.
-        assert after_recover.remediation_attempts == 1
+        assert len(mcp.calls) == 2, (
+            "REMEDIATING must re-invoke on resume; safety is on the "
+            "platform side (ADR 0010) via the idempotency_key match, "
+            "not on the agent side via a reconciliation short-circuit."
+        )
+        assert mcp.calls[1][1]["idempotency_key"] == first_idem_key, (
+            "Second call must carry the same idempotency_key as the first — "
+            "otherwise the platform would treat it as a fresh execute and "
+            "the effect would double. build_idempotency_key is deterministic "
+            "in (incident, tool, args); if this fails, that determinism broke."
+        )
 
     def test_schema_v3_fields_round_trip_through_postgres(self, clean_engine: Engine) -> None:
         # Explicit round-trip check for the two v3 fields the earlier

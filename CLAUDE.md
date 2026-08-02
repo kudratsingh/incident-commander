@@ -216,7 +216,7 @@ Exit: cache hit rate and cost per incident improve against Phase 4 baseline and 
 Skills proven: skills, sub-agents, context engineering, cost engineering.
 
 **Phase 6 - Remediation and approvals.**
-Tier policy live, propose/approve/execute against platform approval objects, param-hash binding verified, execute/verify loop with revert, agent-generated idempotency keys, single-flight lease per incident, crash recovery that reconciles against the platform audit log before re-planning.
+Tier policy live, propose/approve/execute against platform approval objects, param-hash binding verified, execute/verify loop (single attempt per incident; retry-with-reinvestigation is a deferred design in [ADR 0008](docs/ADR/0008-single-attempt-remediation.md)), agent-generated idempotency keys as the crash-recovery contract (deterministic per (incident, tool, args) — platform dedupes on re-send; no client-side reconciliation), single-flight lease per incident.
 Exit: full tier 1 auto-remediation and tier 2 approval round trip in the demo. Kill the agent mid-remediation in a test and watch it recover correctly. Zero unauthorized actions across the suite, graded from audit.
 Skills proven: harness engineering, human-in-the-loop, durable execution, distributed-systems judgment applied to agents.
 

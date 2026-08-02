@@ -40,13 +40,13 @@ ALLOWED_TRANSITIONS: dict[IncidentState, frozenset[IncidentState]] = {
     IncidentState.REMEDIATING: frozenset(
         {IncidentState.VERIFYING, IncidentState.ESCALATED, IncidentState.FAILED}
     ),
+    # VERIFYING has no PLANNING successor: per ADR 0008, one Tier-1
+    # attempt per incident. A ``not_verified`` verdict escalates for
+    # human review rather than re-planning autonomously. Reintroducing
+    # this edge for retry-with-reinvestigation is a future phase — see
+    # ADR 0008's deferred-design section.
     IncidentState.VERIFYING: frozenset(
-        {
-            IncidentState.RESOLVED,
-            IncidentState.PLANNING,
-            IncidentState.ESCALATED,
-            IncidentState.FAILED,
-        }
+        {IncidentState.RESOLVED, IncidentState.ESCALATED, IncidentState.FAILED}
     ),
     IncidentState.RESOLVED: frozenset(),
     IncidentState.ESCALATED: frozenset(),

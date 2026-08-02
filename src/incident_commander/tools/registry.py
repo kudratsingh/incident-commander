@@ -100,8 +100,9 @@ class GetDeployHistoryOutput(BaseModel):
     total: int
     entries: list[DeployEntry]
     # v0.2.1+: platform advertises where the entries came from
-    # ("deploy_markers" table vs env-based fallback).
-    source: str | None = None
+    # ("deploy_markers" table vs env-based fallback). Required + non-
+    # nullable per v0.4.8 outputSchema.
+    source: str
 
 
 # --- get_incident + list_incidents --------------------------------------
@@ -352,16 +353,16 @@ class RestartConsumerGroupInput(BaseModel):
 
 
 class RestartConsumerGroupOutput(BaseModel):
-    # v0.4.5+: response also carries latency_key_cleared / latency_key so the
+    # v0.4.5+: response carries latency_key_cleared / latency_key so the
     # tool is the single compensating action for both `kill_consumer` and
-    # `inject_latency`. Both are always present; false + empty when nothing
-    # was cleared. extra="ignore" keeps us compatible with a future field add.
+    # `inject_latency`. Platform advertises both as required (no defaults);
+    # extra="ignore" keeps us compatible with future additive fields.
     model_config = ConfigDict(extra="ignore", frozen=True)
     consumer_group: str
     kill_key_cleared: bool
     kill_key: str
-    latency_key_cleared: bool = False
-    latency_key: str = ""
+    latency_key_cleared: bool
+    latency_key: str
     accepted: bool
 
 
@@ -387,12 +388,12 @@ class ReplayDlqMessagesInput(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=255)
 
 
-class LegacyReplayedJob(BaseModel):
+class ReplayedJob(BaseModel):
     """Per-job entry inside the legacy ``replay_dlq_messages.jobs[]``.
 
     Just ``id`` + ``type``, no per-job outcome. Kept for back-compat
     with the older tool; ``replay_dlq_by_ids`` (v0.4.0+) uses the
-    richer ``ReplayedJobResult`` below.
+    richer ``ReplayResult`` below.
     """
 
     model_config = ConfigDict(extra="ignore", frozen=True)
@@ -407,10 +408,10 @@ class ReplayDlqMessagesOutput(BaseModel):
     requested: int
     replayed: int
     failed: int
-    jobs: list[LegacyReplayedJob]
+    jobs: list[ReplayedJob]
 
 
-class ReplayedJobResult(BaseModel):
+class ReplayResult(BaseModel):
     """Per-job outcome inside ``replay_dlq_by_ids.results[]`` (v0.4.4+).
 
     ``ok`` distinguishes "platform accepted the replay" from "platform
@@ -475,9 +476,11 @@ class ReplayDlqByIdsOutput(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
     requested: int
     replayed: int
-    scheduled: int
+    # Platform advertises scheduled with default=0 (delay_seconds omitted →
+    # nothing scheduled, that's the modal case). replayed stays required.
+    scheduled: int = 0
     failed: int
-    results: list[ReplayedJobResult]
+    results: list[ReplayResult]
 
 
 class ReplayDlqByCategoryInput(BaseModel):
@@ -506,8 +509,8 @@ class ReplayDlqByCategoryOutput(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
     category: str
     matched: int
-    replayed: int
-    scheduled: int
+    replayed: int = 0
+    scheduled: int = 0
     failed: int
     job_ids: list[str]
     execute_at: float | None = None
@@ -538,7 +541,8 @@ class MarkDlqPermanentOutput(BaseModel):
 
     model_config = ConfigDict(extra="ignore", frozen=True)
     job_id: str
-    previous_hint: str | None = None
+    # Nullable but required (no default) per v0.4.8 outputSchema.
+    previous_hint: str | None
     remediation_hint: str
     already_marked: bool
 

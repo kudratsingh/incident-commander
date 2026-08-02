@@ -1,12 +1,13 @@
 """Contract snapshot comparison.
 
 The committed snapshot at ``contracts/platform-tools.snapshot.json`` captures
-BOTH sides of the tool contract as of the pinned image:
+the platform's ``tools/list`` response as of the pinned image:
 
-- ``inputSchema``  — from the platform's live ``tools/list`` response.
-- ``outputSchema`` — from the agent's local registry (each ``ToolSpec``'s
-  ``output_model.model_json_schema()``). MCP doesn't advertise output
-  shapes, so the agent's Pydantic models ARE the contract on this side.
+- ``inputSchema``  — advertised by the platform.
+- ``outputSchema`` — also advertised by the platform since v0.4.8 (PR #88).
+  The agent's local ``TOOL_REGISTRY`` output models must match; a separate
+  unit test (``tests/unit/test_registry_matches_snapshot.py``) enforces
+  that direction so registry drift can't diverge from platform truth.
 
 Compared against a fresh fetch, we surface three deltas:
 
@@ -15,17 +16,18 @@ Compared against a fresh fetch, we surface three deltas:
 - ``changed`` — tool present in both, but description / inputSchema /
                 outputSchema differs
 
-v0.4.4's silent output drift is the reason ``outputSchema`` was added.
-Regenerate the snapshot with ``make snapshot`` whenever either side moves.
+v0.4.4's silent output drift was the reason ``outputSchema`` was added
+to the snapshot. Regenerate with ``make snapshot`` whenever the pinned
+platform image bumps.
 
 The functions here are pure — the caller passes the platform response
-AND a name->output-schema lookup, so this module has no dependency on
-``tools/registry.py`` and stays unit-testable without a running platform.
+and we read every field off the wire, so this module has no dependency
+on ``tools/registry.py`` and stays unit-testable without a running
+platform.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -43,33 +45,24 @@ class ContractDiff:
         return not (self.added or self.removed or self.changed)
 
 
-def normalize(
-    snapshot: dict[str, Any],
-    output_schemas: Mapping[str, dict[str, Any]] | None = None,
-) -> dict[str, Any]:
+def normalize(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Return a stable, order-independent representation.
 
-    Tools are sorted alphabetically by name. Fields kept are ``name``
-    + ``description`` + ``inputSchema`` (from the snapshot's tool
-    descriptor) + ``outputSchema`` (from ``output_schemas``, keyed by
-    tool name; ``{}`` for tools we don't have a local model for, like
-    operator-only chaos hooks).
+    Tools are sorted alphabetically by name. Fields kept are ``name``,
+    ``description``, ``inputSchema``, and ``outputSchema``. Every one
+    is read directly off the platform's ``tools/list`` response.
     """
-    schemas = output_schemas or {}
     tools = snapshot.get("tools") or []
     normalized: list[dict[str, Any]] = []
     for tool in sorted(tools, key=lambda t: t["name"]):
-        normalized.append(_tool_view(tool, schemas.get(tool["name"], {})))
+        normalized.append(_tool_view(tool))
     return {"tools": normalized}
 
 
 def compare(committed: dict[str, Any], live: dict[str, Any]) -> ContractDiff:
     """Compute the delta from ``committed`` to ``live``.
 
-    Both inputs should already be ``normalize``d — ``compare`` does not
-    re-derive ``outputSchema``. That keeps the diff honest: if the
-    caller forgot to include current output schemas in ``live``, the
-    diff surfaces every tool as changed, which is the correct signal.
+    Both inputs should already be ``normalize``d.
     """
     committed_by_name = _index(committed)
     live_by_name = _index(live)
@@ -90,11 +83,11 @@ def _index(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {t["name"]: dict(t) for t in snapshot.get("tools") or []}
 
 
-def _tool_view(tool: dict[str, Any], output_schema: dict[str, Any]) -> dict[str, Any]:
+def _tool_view(tool: dict[str, Any]) -> dict[str, Any]:
     """Just the fields we snapshot — no volatile server-side metadata."""
     return {
         "name": tool["name"],
         "description": tool.get("description", ""),
         "inputSchema": tool.get("inputSchema") or {},
-        "outputSchema": output_schema,
+        "outputSchema": tool.get("outputSchema") or {},
     }

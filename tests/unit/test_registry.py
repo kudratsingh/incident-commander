@@ -54,6 +54,7 @@ class TestCoverage:
             "inject_latency",
             "bad_deploy",
             "create_bad_data_job",  # v0.4.0 addition
+            "create_stale_cache",  # v0.4.7 addition — seeds hot_set for the stale-cache scenario
         }
         expected = snapshot_names - chaos_tools
         assert set(TOOL_REGISTRY) == expected, (

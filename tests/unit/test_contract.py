@@ -75,24 +75,26 @@ class TestNormalize:
         assert normalize({"tools": []}) == {"tools": []}
         assert normalize({}) == {"tools": []}
 
-    def test_output_schema_pulled_from_lookup(self) -> None:
-        raw = {"tools": [{"name": "a", "description": "d", "inputSchema": {}}]}
-        schemas = {"a": {"type": "object", "properties": {"ok": {"type": "boolean"}}}}
-        result = normalize(raw, schemas)
+    def test_output_schema_read_from_wire(self) -> None:
+        # v0.4.8+ platform emits outputSchema in tools/list directly.
+        raw = {
+            "tools": [
+                {
+                    "name": "a",
+                    "description": "d",
+                    "inputSchema": {},
+                    "outputSchema": {"type": "object", "properties": {"ok": {"type": "boolean"}}},
+                }
+            ]
+        }
+        result = normalize(raw)
         assert result["tools"][0]["outputSchema"] == {
             "type": "object",
             "properties": {"ok": {"type": "boolean"}},
         }
 
-    def test_output_schema_defaults_to_empty_for_unknown_tool(self) -> None:
-        # Operator-only chaos hooks (poison_message, saturate_redis, etc.) have
-        # no local output model — snapshot records {} rather than raising.
-        raw = {"tools": [{"name": "chaos_only", "description": "d", "inputSchema": {}}]}
-        result = normalize(raw, {"other_tool": {"type": "object"}})
-        assert result["tools"][0]["outputSchema"] == {}
-
-    def test_no_output_schemas_lookup_treats_all_as_empty(self) -> None:
-        # Back-compat + convenience: caller can omit the lookup entirely.
+    def test_missing_output_schema_defaults_to_empty(self) -> None:
+        # Older platforms or chaos-only tools may omit outputSchema.
         raw = {"tools": [{"name": "a", "description": "d", "inputSchema": {}}]}
         result = normalize(raw)
         assert result["tools"][0]["outputSchema"] == {}
@@ -137,16 +139,33 @@ class TestCompare:
         # have caught it. Same platform tool description + inputSchema, but a
         # response field changed → surfaces as a `changed` delta.
         committed = normalize(
-            {"tools": [{"name": "get_consumer_lag", "description": "d", "inputSchema": {}}]},
-            {"get_consumer_lag": {"properties": {"lag": {"type": "integer"}}}},
+            {
+                "tools": [
+                    {
+                        "name": "get_consumer_lag",
+                        "description": "d",
+                        "inputSchema": {},
+                        "outputSchema": {"properties": {"lag": {"type": "integer"}}},
+                    }
+                ]
+            }
         )
         live = normalize(
-            {"tools": [{"name": "get_consumer_lag", "description": "d", "inputSchema": {}}]},
             {
-                "get_consumer_lag": {
-                    "properties": {"lag": {"type": "integer"}, "new_field": {"type": "string"}}
-                }
-            },
+                "tools": [
+                    {
+                        "name": "get_consumer_lag",
+                        "description": "d",
+                        "inputSchema": {},
+                        "outputSchema": {
+                            "properties": {
+                                "lag": {"type": "integer"},
+                                "new_field": {"type": "string"},
+                            }
+                        },
+                    }
+                ]
+            }
         )
         diff = compare(committed, live)
         assert diff.changed == ("get_consumer_lag",)

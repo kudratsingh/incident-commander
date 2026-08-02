@@ -26,7 +26,6 @@ from pathlib import Path
 import httpx
 
 from incident_commander.tools.contract import normalize
-from incident_commander.tools.registry import TOOL_REGISTRY
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SNAPSHOT_PATH = _REPO_ROOT / "contracts" / "platform-tools.snapshot.json"
@@ -81,10 +80,10 @@ def main() -> int:
         return 2
 
     result = fetch_tools(args.mcp_url, args.token)
-    output_schemas = {
-        name: spec.output_model.model_json_schema() for name, spec in TOOL_REGISTRY.items()
-    }
-    snapshot = normalize(result, output_schemas)
+    # v0.4.8+ platform emits outputSchema in tools/list per PR #88; normalize
+    # reads it directly off the wire. Registry consistency is enforced by a
+    # separate unit test — see tests/unit/test_registry_matches_snapshot.py.
+    snapshot = normalize(result)
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n")

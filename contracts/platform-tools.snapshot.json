@@ -40,7 +40,34 @@
         "title": "BadDeployInput",
         "type": "object"
       },
-      "outputSchema": {}
+      "outputSchema": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "flag_key": {
+            "title": "Flag Key",
+            "type": "string"
+          },
+          "alert_id": {
+            "title": "Alert Id",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "flag_key",
+          "alert_id",
+          "ttl_seconds"
+        ],
+        "title": "BadDeployOutput",
+        "type": "object"
+      }
     },
     {
       "name": "create_bad_data_job",
@@ -65,7 +92,92 @@
         "title": "CreateBadDataJobInput",
         "type": "object"
       },
-      "outputSchema": {}
+      "outputSchema": {
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "remediation_hint": {
+            "title": "Remediation Hint",
+            "type": "string"
+          },
+          "accepted": {
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "job_id",
+          "remediation_hint",
+          "accepted"
+        ],
+        "title": "CreateBadDataJobOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "create_stale_cache",
+      "description": "[chaos: environment_wide] Populate a Redis cache key with obviously-fake stale content so the `remediate_stale_cache_success` scenario has a condition to observe and invalidate. Compensator is `invalidate_cache_key` — the scenario's success action IS the cleanup. Value is a JSON array of fabricated IDs so an operator inspecting Redis doesn't confuse this with real cache. Bounded TTL (max 1h) so a forgotten cleanup self-clears.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "default": "cache:jobs:worker-dispatcher:hot_set",
+            "description": "Redis key to populate. Must start with one of ['cache:', 'jobs:cache:', 'read_model:'] so `invalidate_cache_key` can serve as the compensator (its allowlist would refuse arbitrary keys). Default is the hot_set key the `remediate_stale_cache_success` scenario reads.",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "stale_count": {
+            "default": 3,
+            "description": "Number of fake stale entries in the JSON array written to the key.",
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Stale Count",
+            "type": "integer"
+          },
+          "ttl_seconds": {
+            "default": 600,
+            "description": "TTL on the cache key — no permanent damage. Default 600s (10min), max 1h.",
+            "maximum": 3600,
+            "minimum": 1,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "title": "CreateStaleCacheInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "ttl_seconds": {
+            "title": "Ttl Seconds",
+            "type": "integer"
+          },
+          "accepted": {
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "size_bytes",
+          "ttl_seconds",
+          "accepted"
+        ],
+        "title": "CreateStaleCacheOutput",
+        "type": "object"
+      }
     },
     {
       "name": "get_consumer_lag",
@@ -98,9 +210,11 @@
                 "type": "null"
               }
             ],
+            "description": "Messages the group is behind, per the metrics loop's last emission (or the eval seed script). `null` when the cache is empty — typical for unknown groups or a Redis restart within the last ~60s.",
             "title": "Lag"
           },
           "cache_key": {
+            "description": "Diagnostic — the Redis key the value was read from.",
             "title": "Cache Key",
             "type": "string"
           }
@@ -136,6 +250,7 @@
       "outputSchema": {
         "$defs": {
           "DagEdge": {
+            "description": "`from_id` depends on `to_id` — the parent has to finish before\nthe child can start. Direction matches the schema\n(`job_dependencies.child_job_id → parent_job_id`).",
             "properties": {
               "from_id": {
                 "title": "From Id",
@@ -253,6 +368,7 @@
           "DeployEntry": {
             "properties": {
               "version": {
+                "description": "Version label — a git tag, image tag, or opaque identifier the release pipeline set.",
                 "title": "Version",
                 "type": "string"
               },
@@ -266,6 +382,7 @@
                   }
                 ],
                 "default": null,
+                "description": "Git SHA if known.",
                 "title": "Revision"
               },
               "image_tag": {
@@ -299,6 +416,7 @@
                   }
                 ],
                 "default": null,
+                "description": "Free-form annotation attached to the deploy — correlation hints, feature flags, etc.",
                 "title": "Notes"
               }
             },
@@ -324,21 +442,15 @@
             "type": "array"
           },
           "source": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Source"
+            "description": "Where the data came from: `deploy_markers` when the table is populated, `env` for the single-entry env fallback.",
+            "title": "Source",
+            "type": "string"
           }
         },
         "required": [
           "total",
-          "entries"
+          "entries",
+          "source"
         ],
         "title": "GetDeployHistoryOutput",
         "type": "object"
@@ -489,6 +601,7 @@
               }
             ],
             "default": null,
+            "description": "Rows in pg_stat_activity where state='active'. Null on SQLite (dev/test) — that path returns a bare `ok=true`.",
             "title": "Active Connections"
           },
           "dialect": {
@@ -541,6 +654,7 @@
               }
             ],
             "default": null,
+            "description": "Round-trip time for a single PING. `null` when the ping failed.",
             "title": "Ping Latency Ms"
           },
           "connected_clients": {
@@ -848,7 +962,39 @@
         "title": "InjectLatencyInput",
         "type": "object"
       },
-      "outputSchema": {}
+      "outputSchema": {
+        "properties": {
+          "consumer_group": {
+            "title": "Consumer Group",
+            "type": "string"
+          },
+          "latency_key": {
+            "title": "Latency Key",
+            "type": "string"
+          },
+          "latency_ms": {
+            "title": "Latency Ms",
+            "type": "integer"
+          },
+          "ttl_seconds": {
+            "title": "Ttl Seconds",
+            "type": "integer"
+          },
+          "accepted": {
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "consumer_group",
+          "latency_key",
+          "latency_ms",
+          "ttl_seconds",
+          "accepted"
+        ],
+        "title": "InjectLatencyOutput",
+        "type": "object"
+      }
     },
     {
       "name": "invalidate_cache_key",
@@ -884,6 +1030,7 @@
             "type": "string"
           },
           "deleted": {
+            "description": "True if a key existed and was deleted. False if the key wasn't in Redis at call time (harmless).",
             "title": "Deleted",
             "type": "boolean"
           }
@@ -924,7 +1071,35 @@
         "title": "KillConsumerInput",
         "type": "object"
       },
-      "outputSchema": {}
+      "outputSchema": {
+        "properties": {
+          "consumer_group": {
+            "title": "Consumer Group",
+            "type": "string"
+          },
+          "kill_key": {
+            "title": "Kill Key",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "title": "Ttl Seconds",
+            "type": "integer"
+          },
+          "accepted": {
+            "description": "True if the kill flag was set. This does not confirm the consumer actually stopped — that happens on its next poll iteration (typically within 500ms).",
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "consumer_group",
+          "kill_key",
+          "ttl_seconds",
+          "accepted"
+        ],
+        "title": "KillConsumerOutput",
+        "type": "object"
+      }
     },
     {
       "name": "list_active_alerts",
@@ -1280,6 +1455,19 @@
                 "title": "Retry Count",
                 "type": "integer"
               },
+              "remediation_hint": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Coarse category set by triage / seed / chaos. See `RemediationHint` for the fixed value set. `null` means the platform hasn't categorized this entry yet — agent should treat as unknown, not as replay-safe.",
+                "title": "Remediation Hint"
+              },
               "created_at": {
                 "format": "date-time",
                 "title": "Created At",
@@ -1320,18 +1508,6 @@
                   }
                 ],
                 "default": null
-              },
-              "remediation_hint": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "title": "Remediation Hint"
               },
               "extra": {
                 "anyOf": [
@@ -1611,7 +1787,6 @@
         "type": "object"
       },
       "outputSchema": {
-        "description": "Output shape from v0.4.4 platform.\n\n``previous_hint`` shows what the categorizer had classified this\nentry as before the mark. ``remediation_hint`` is always\n``'human_required'`` after the call (that's the whole point).\n``already_marked`` tells the operator whether this call was a\nno-op (repeat call with the same idempotency_key OR the entry was\nalready ``human_required``).",
         "properties": {
           "job_id": {
             "title": "Job Id",
@@ -1626,7 +1801,6 @@
                 "type": "null"
               }
             ],
-            "default": null,
             "title": "Previous Hint"
           },
           "remediation_hint": {
@@ -1640,6 +1814,7 @@
         },
         "required": [
           "job_id",
+          "previous_hint",
           "remediation_hint",
           "already_marked"
         ],
@@ -1749,7 +1924,55 @@
         "title": "PoisonMessageInput",
         "type": "object"
       },
-      "outputSchema": {}
+      "outputSchema": {
+        "properties": {
+          "topic": {
+            "title": "Topic",
+            "type": "string"
+          },
+          "payload_bytes": {
+            "title": "Payload Bytes",
+            "type": "integer"
+          },
+          "partition_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Partition Key"
+          },
+          "accepted": {
+            "description": "Kafka send succeeded from the platform's perspective. The paired synthetic DLQ entry is guaranteed.",
+            "title": "Accepted",
+            "type": "boolean"
+          },
+          "dlq_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "ID of the synthetic DLQ entry the hook wrote (remediation_hint=replay_safe). Observable via `list_dlq_messages`. `null` only when no user exists in the caller's tenant to attach the job to (defensive).",
+            "title": "Dlq Job Id"
+          }
+        },
+        "required": [
+          "topic",
+          "payload_bytes",
+          "accepted"
+        ],
+        "title": "PoisonMessageOutput",
+        "type": "object"
+      }
     },
     {
       "name": "replay_dlq_by_category",
@@ -1812,7 +2035,6 @@
         "type": "object"
       },
       "outputSchema": {
-        "description": "Output shape from v0.4.4 platform.\n\n``matched`` (not requested) — how many DLQ rows the category filter\nhit. ``replayed`` + ``scheduled`` + ``failed`` sum to ``matched``.\n``job_ids[]`` lists the specific ids that were processed.\n``execute_at`` is set when the caller passed ``delay_seconds``\n(single epoch for the bulk operation; per-job in the by-ids tool).",
         "properties": {
           "category": {
             "title": "Category",
@@ -1823,10 +2045,12 @@
             "type": "integer"
           },
           "replayed": {
+            "default": 0,
             "title": "Replayed",
             "type": "integer"
           },
           "scheduled": {
+            "default": 0,
             "title": "Scheduled",
             "type": "integer"
           },
@@ -1857,8 +2081,6 @@
         "required": [
           "category",
           "matched",
-          "replayed",
-          "scheduled",
           "failed",
           "job_ids"
         ],
@@ -1914,8 +2136,7 @@
       },
       "outputSchema": {
         "$defs": {
-          "ReplayedJobResult": {
-            "description": "Per-job outcome inside ``replay_dlq_by_ids.results[]`` (v0.4.4+).\n\n``ok`` distinguishes \"platform accepted the replay\" from \"platform\nrejected it\" (e.g. job wasn't in a replayable state). ``scheduled``\n+ ``execute_at`` are set when the caller passed ``delay_seconds``.",
+          "ReplayResult": {
             "properties": {
               "id": {
                 "title": "Id",
@@ -1959,11 +2180,10 @@
               "id",
               "ok"
             ],
-            "title": "ReplayedJobResult",
+            "title": "ReplayResult",
             "type": "object"
           }
         },
-        "description": "Output shape from v0.4.4 platform.\n\n``requested`` == input job_ids count. ``replayed`` + ``scheduled`` +\n``failed`` sum to ``requested``. Per-job outcome lives in\n``results[]`` — that's where an operator finds which specific ids\nwere rejected and why.",
         "properties": {
           "requested": {
             "title": "Requested",
@@ -1974,6 +2194,7 @@
             "type": "integer"
           },
           "scheduled": {
+            "default": 0,
             "title": "Scheduled",
             "type": "integer"
           },
@@ -1983,7 +2204,7 @@
           },
           "results": {
             "items": {
-              "$ref": "#/$defs/ReplayedJobResult"
+              "$ref": "#/$defs/ReplayResult"
             },
             "title": "Results",
             "type": "array"
@@ -1992,7 +2213,6 @@
         "required": [
           "requested",
           "replayed",
-          "scheduled",
           "failed",
           "results"
         ],
@@ -2042,8 +2262,7 @@
       },
       "outputSchema": {
         "$defs": {
-          "LegacyReplayedJob": {
-            "description": "Per-job entry inside the legacy ``replay_dlq_messages.jobs[]``.\n\nJust ``id`` + ``type``, no per-job outcome. Kept for back-compat\nwith the older tool; ``replay_dlq_by_ids`` (v0.4.0+) uses the\nricher ``ReplayedJobResult`` below.",
+          "ReplayedJob": {
             "properties": {
               "id": {
                 "title": "Id",
@@ -2058,11 +2277,10 @@
               "id",
               "type"
             ],
-            "title": "LegacyReplayedJob",
+            "title": "ReplayedJob",
             "type": "object"
           }
         },
-        "description": "Output for the legacy ``replay_dlq_messages`` tool (pre-v0.4.0).",
         "properties": {
           "requested": {
             "title": "Requested",
@@ -2078,7 +2296,7 @@
           },
           "jobs": {
             "items": {
-              "$ref": "#/$defs/LegacyReplayedJob"
+              "$ref": "#/$defs/ReplayedJob"
             },
             "title": "Jobs",
             "type": "array"
@@ -2136,12 +2354,10 @@
             "type": "string"
           },
           "latency_key_cleared": {
-            "default": false,
             "title": "Latency Key Cleared",
             "type": "boolean"
           },
           "latency_key": {
-            "default": "",
             "title": "Latency Key",
             "type": "string"
           },
@@ -2154,6 +2370,8 @@
           "consumer_group",
           "kill_key_cleared",
           "kill_key",
+          "latency_key_cleared",
+          "latency_key",
           "accepted"
         ],
         "title": "RestartConsumerGroupOutput",
@@ -2194,7 +2412,39 @@
         "title": "SaturateRedisInput",
         "type": "object"
       },
-      "outputSchema": {}
+      "outputSchema": {
+        "properties": {
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "key_prefix": {
+            "title": "Key Prefix",
+            "type": "string"
+          },
+          "keys_written": {
+            "title": "Keys Written",
+            "type": "integer"
+          },
+          "total_value_bytes": {
+            "title": "Total Value Bytes",
+            "type": "integer"
+          },
+          "ttl_seconds": {
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "key_prefix",
+          "keys_written",
+          "total_value_bytes",
+          "ttl_seconds"
+        ],
+        "title": "SaturateRedisOutput",
+        "type": "object"
+      }
     },
     {
       "name": "search_traces",

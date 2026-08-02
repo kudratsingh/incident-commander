@@ -39,6 +39,7 @@ from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError
 from incident_commander.tools.policies import Tier, tier_of
 from incident_commander.tools.registry import TOOL_REGISTRY
+from incident_commander.tools.wire import wire_arguments
 
 # Every Tier-1 tool the platform exposes today. Kept hand-listed for the
 # same reason as ``ReadToolName`` in hypothesis.py — Pydantic Literals need
@@ -330,7 +331,7 @@ def make_remediate(
         )
         raw_args = {**plan.action_arguments, "idempotency_key": idempotency_key}
         try:
-            arguments = spec.input_model.model_validate(raw_args).model_dump(mode="json")
+            arguments = wire_arguments(spec, raw_args)
         except ValidationError as err:
             return _escalate_remediation(
                 run_state, at, f"remediation args invalid for {plan.action_tool}: {err}"
@@ -422,9 +423,7 @@ def make_llm_verify(
 
         spec = TOOL_REGISTRY[plan.verify_tool]
         try:
-            arguments = spec.input_model.model_validate(plan.verify_arguments).model_dump(
-                mode="json"
-            )
+            arguments = wire_arguments(spec, plan.verify_arguments)
         except ValidationError as err:
             return _escalate_remediation(
                 run_state, at, f"verify args invalid for {plan.verify_tool}: {err}"

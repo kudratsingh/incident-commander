@@ -95,20 +95,33 @@ chaos-bad-deploy:
 chaos-restore:
 	uv run python scripts/chaos_setup.py restore-consumer
 
-# Between live scenarios: clear leftover chaos state. Today this only
-# clears the consumer-group kill+latency flags (the state the current
-# scenarios mutate). When the platform ships scripts/reset_eval_state.py
-# — see the shared FIX_PLAN v2 backlog item #24 — replace this body
-# with a call to that script for a full seed reset (idempotency records,
-# DLQ fixture pool, chaos:* keys).
+# Between live scenarios: full seed reset via the platform-owned
+# scripts/reset_eval_state.py (shipped in platform v0.4.6). Clears
+# chaos:* keys, re-seeds lag cache + DLQ fixture pool + hot_set, and
+# optionally purges idempotency records. Runs inside the platform
+# `app` container so it has DB/Redis credentials.
+#
+# PLATFORM_COMPOSE defaults to the sibling checkout — override if
+# the incident-platform repo lives elsewhere. Pass PURGE_IDEMPOTENCY=1
+# to also `DELETE` the idempotency_records rows (usually unnecessary
+# thanks to the 24h TTL from platform ADR 0010, but useful when a
+# scenario needs a guaranteed-fresh cache).
+PLATFORM_COMPOSE ?= ../incident-platform/docker-compose.yml
+# PYTHONPATH prepend below is a v0.4.8 workaround: reset_eval_state.py
+# does `from scripts import seed_eval_fixtures` which needs /app on the
+# path. The image ships PYTHONPATH=/app/backend for the app process
+# itself. Prepend /app so both roots resolve. Drop the -e override once
+# platform ships the script with explicit path setup or moves
+# seed_eval_fixtures under backend/.
 eval-reset:
-	@echo "eval-reset: clearing consumer-group chaos state (kill+latency)..."
-	uv run python scripts/chaos_setup.py restore-consumer
-	@echo ""
-	@echo "NOTE: full reset (idempotency records, DLQ pool, chaos:* keys)"
-	@echo "requires platform-owned scripts/reset_eval_state.py, which"
-	@echo "does not exist yet. Until then, one-fault-one-scenario is the"
-	@echo "manual protocol — see docs/runbook.md."
+	@echo "eval-reset: full seed reset via platform reset_eval_state.py..."
+	@if [ ! -f "$(PLATFORM_COMPOSE)" ]; then \
+		echo "ERROR: $(PLATFORM_COMPOSE) not found; set PLATFORM_COMPOSE=..." >&2; exit 2; \
+	fi
+	@docker compose -f "$(PLATFORM_COMPOSE)" exec -T \
+		-e PYTHONPATH=/app:/app/backend app \
+		python /app/scripts/reset_eval_state.py \
+		$(if $(PURGE_IDEMPOTENCY),--purge-idempotency,)
 
 chaos-bad-data-job:
 	uv run python scripts/chaos_setup.py bad-data-job

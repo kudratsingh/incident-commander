@@ -12,6 +12,15 @@ tags:
 - live-llm
 use_live_mcp: true
 use_live_llm: true
+# v0.4.7 chaos hook — seeds cache:jobs:worker-dispatcher:hot_set with
+# obvious-fake stale content so the agent has something to observe +
+# invalidate. Compensator is invalidate_cache_key on that same key.
+# Ignored in canned/offline runs (canned get_redis_health already
+# encodes the collapsed hit rate).
+chaos_setup:
+  name: create_stale_cache
+  arguments:
+    key: cache:jobs:worker-dispatcher:hot_set
 alert:
   source: platform.cache
   severity: high

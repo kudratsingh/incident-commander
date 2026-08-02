@@ -23,7 +23,6 @@ import httpx
 import pytest
 
 from incident_commander.tools.contract import compare, normalize
-from incident_commander.tools.registry import TOOL_REGISTRY
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SNAPSHOT_PATH = _REPO_ROOT / "contracts" / "platform-tools.snapshot.json"
@@ -54,14 +53,10 @@ def test_live_platform_matches_committed_snapshot() -> None:
     payload = r.json()
     assert "error" not in payload, f"tools/list failed: {payload.get('error')}"
     live_result = payload["result"]
-    # Output schemas come from the current registry — a diff on this side
-    # means someone changed a Pydantic output model without regenerating
-    # the snapshot (or the platform's response shape moved and the model
-    # hasn't been updated yet). Both are drift worth catching.
-    output_schemas = {
-        name: spec.output_model.model_json_schema() for name, spec in TOOL_REGISTRY.items()
-    }
-    live = normalize(live_result, output_schemas)
+    # v0.4.8+ platform emits outputSchema on the wire (PR #88); we read every
+    # field off tools/list. Registry-side drift is caught by a separate unit
+    # test — see tests/unit/test_registry_matches_snapshot.py.
+    live = normalize(live_result)
 
     committed = json.loads(_SNAPSHOT_PATH.read_text())
     diff = compare(committed, live)

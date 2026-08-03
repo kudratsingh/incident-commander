@@ -78,6 +78,23 @@ Chaos effects TTL-expire on their own. If you want to accelerate cleanup:
 make chaos-restore     # clears leftover kill/latency flags on worker-dispatcher
 ```
 
+**Verifying the consumer actually came back — ask Kafka, not the lag metric.**
+The lag number in Redis is written by a separate background loop that keeps
+refreshing while the consumer is dead, so "the lag key got a fresh write" is a
+fake-green check: a dead consumer passes it. The real test is whether the
+group has a live member:
+
+```bash
+# In the platform's Redpanda container:
+rpk group describe worker-dispatcher
+```
+
+Healthy = a live member in the group, holding all 6 partitions, with lag
+draining to 0. A corpse cannot pass this — Kafka won't report a member that
+isn't there. Caveat: wait 10–15 seconds after the restore before running it,
+or you'll catch the group mid-rejoin (`PreparingRebalance`) and think it
+failed when it didn't.
+
 ## Live eval protocol (post-hardening)
 
 Written after the Phase-6 seven-run live eval that produced the five-bucket noise-source taxonomy (see [`docs/lessons/live-eval-noise-sources.md`](lessons/live-eval-noise-sources.md)). Run one scenario at a time with an explicit reset between them.
@@ -96,14 +113,20 @@ export EVAL_TRACE_DIR=evals/traces \
 
 # 1) Smoke pass FIRST — read-only scenarios catch any wire-shape
 #    surprise from the current pin before you spend on a Tier-1
-#    remediation attempt. ~$1 of tokens.
-make eval-live ONLY='(consumer_lag|dlq_|traces|deploy|incident|postgres|redis|noise|planner_stops|multi_probe|saga_stuck|redis_saturation|postgres_slow|failed_traces|incidents_overview|trace_investigation|alert_storm|tool_)'
+#    remediation attempt. ~$1 of tokens. ONLY= takes comma-separated
+#    name substrings — NOT a regex; a '(a|b)' pattern matches nothing.
+#    Replay-firing dlq_* scenarios are deliberately absent here.
+make eval-live ONLY=alert_storm,deploy_correlation,dlq_human,failed_traces,incidents_overview,multi_probe,noise_,planner_stops,postgres_slow,redis_saturation,saga_stuck,tool_,trace_investigation,consumer_lag_healthy,consumer_lag_medium,consumer_lag_missing,consumer_lag_orders,consumer_lag_payments,consumer_lag_shipping,consumer_lag_analytics,consumer_lag_high
 
 # 2) Remediation scenarios, one at a time, with reset between.
 #    Each scenario declares its own chaos_setup in the YAML (PR #54).
 make eval-live ONLY=remediate_consumer_lag_success && make eval-reset
 make eval-live ONLY=remediate_dlq_backlog_success  && make eval-reset
 make eval-live ONLY=remediate_stale_cache_success  && make eval-reset
+
+# After any consumer restart — the agent's restart_consumer_group or a
+# manual restore — confirm liveness with `rpk group describe
+# worker-dispatcher` (see "Restore state" above), never the lag metric.
 
 # Do NOT drop the reset between scenarios. The one-fault-one-scenario
 # protocol exists because shared platform state between runs was the

@@ -1,5 +1,25 @@
 .PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-live-remediation eval-reg eval-reset trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
 
+# Make does not read .env on its own — only the Python side does, via
+# dotenv. Without this include, a make-level var like PLATFORM_COMPOSE
+# has to be re-exported on every single invocation, and forgetting it
+# fails `eval-reset` on its exit-2 guard. Optional (`-include`) so a
+# fresh checkout with no .env still runs every offline target.
+#
+# Must precede any `?=` default that .env is expected to win over.
+# A command-line `VAR=...` still overrides both.
+#
+# Deliberately no blanket `export`: the vars make actually consumes are
+# expanded by make inside the recipe, so exporting would only widen
+# ANTHROPIC_API_KEY and PLATFORM_TOKEN into every subprocess of every
+# target for no benefit.
+#
+# Caveat: make parses .env more naively than dotenv — it keeps surrounding
+# quotes and treats `#` as a comment. Keep make-consumed values unquoted.
+# The secrets above are read by Python and never expanded by make, so
+# their formatting is unaffected either way.
+-include .env
+
 help:
 	@echo "Targets:"
 	@echo "  setup            uv sync + install dev dependencies"
@@ -106,11 +126,13 @@ chaos-restore:
 # optionally purges idempotency records. Runs inside the platform
 # `app` container so it has DB/Redis credentials.
 #
-# PLATFORM_COMPOSE defaults to the sibling checkout — override if
-# the incident-platform repo lives elsewhere. Pass PURGE_IDEMPOTENCY=1
-# to also `DELETE` the idempotency_records rows (usually unnecessary
-# thanks to the 24h TTL from platform ADR 0010, but useful when a
-# scenario needs a guaranteed-fresh cache).
+# PLATFORM_COMPOSE defaults to the sibling checkout — override if the
+# incident-platform repo lives elsewhere, either per-invocation or once
+# in .env (see the `-include .env` note at the top of this file).
+#
+# Pass PURGE_IDEMPOTENCY=1 to also `DELETE` the idempotency_records rows
+# (usually unnecessary thanks to the 24h TTL from platform ADR 0010, but
+# useful when a scenario needs a guaranteed-fresh cache).
 PLATFORM_COMPOSE ?= ../incident-platform/docker-compose.yml
 # PYTHONPATH prepend below is a v0.4.8 workaround: reset_eval_state.py
 # does `from scripts import seed_eval_fixtures` which needs /app on the

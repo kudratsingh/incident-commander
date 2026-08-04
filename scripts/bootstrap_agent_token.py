@@ -39,6 +39,16 @@ SERVICE_ACCOUNT_SCOPES = [
     "actions:execute",
     "chaos:invoke",
 ]
+# Read-only twin for the smoke pass: with no actions:execute scope, a
+# Tier-1 attempt 403s at the platform, wraps as MCPError, and grades as
+# an escalation — "read-only smoke" becomes structurally true instead of
+# a property of the scenario list (2026-08-03 campaign: consumer_lag_high
+# fired a real replay during the read-only pass).
+SMOKE_SERVICE_ACCOUNT_NAME = "incident-commander-smoke"
+SMOKE_SERVICE_ACCOUNT_SCOPES = [
+    "telemetry:read",
+    "incidents:read",
+]
 
 _SAFE_EMAIL = re.compile(r"^[A-Za-z0-9._+@-]+$")
 
@@ -88,15 +98,21 @@ def _login(client: httpx.Client, email: str, password: str) -> str:
     return token
 
 
-def _create_or_get_sa(client: httpx.Client, jwt: str, name: str, scopes: list[str]) -> str:
+def _create_or_get_sa(
+    client: httpx.Client, jwt: str, name: str, scopes: list[str], *, exact: bool = False
+) -> str:
     """Create the service account, or reuse the existing one — widening
     its scopes to ``scopes`` if it exists with a narrower set.
 
-    Wider-scope widening uses the platform's
-    ``PATCH /admin/service-accounts/{id}`` endpoint (v0.3.0+). Older
-    platforms don't have PATCH — the script falls back to reusing the
-    existing scopes and prints a warning, so a stale platform doesn't
-    crash the whole flow.
+    With ``exact=True`` the scopes are corrected in BOTH directions: an
+    existing account with extra scopes is narrowed back down. The smoke
+    SA uses this — a read-only principal that silently kept
+    actions:execute would defeat its whole purpose.
+
+    Scope changes use the platform's ``PATCH /admin/service-accounts/{id}``
+    endpoint (v0.3.0+). Older platforms don't have PATCH — the script
+    falls back to reusing the existing scopes and prints a warning, so a
+    stale platform doesn't crash the whole flow.
     """
     headers = {"Authorization": f"Bearer {jwt}"}
     r = client.post(
@@ -115,16 +131,22 @@ def _create_or_get_sa(client: httpx.Client, jwt: str, name: str, scopes: list[st
             if sa["name"] == name:
                 existing_id: str = sa["id"]
                 existing_scopes: list[str] = sa.get("scopes", [])
-                if set(existing_scopes) >= set(scopes):
+                acceptable = (
+                    set(existing_scopes) == set(scopes)
+                    if exact
+                    else set(existing_scopes) >= set(scopes)
+                )
+                if acceptable:
                     print(
                         f"service account {name} exists (id={existing_id}) "
                         f"with scopes={sorted(existing_scopes)}, reusing"
                     )
                     return existing_id
-                missing = sorted(set(scopes) - set(existing_scopes))
+                verb = "correcting scopes to" if exact else "widening to include"
+                delta = sorted(set(scopes)) if exact else sorted(set(scopes) - set(existing_scopes))
                 print(
                     f"service account {name} exists (id={existing_id}) with "
-                    f"scopes={sorted(existing_scopes)}; widening to include {missing}"
+                    f"scopes={sorted(existing_scopes)}; {verb} {delta}"
                 )
                 patch = client.patch(
                     f"/admin/service-accounts/{existing_id}",
@@ -136,11 +158,19 @@ def _create_or_get_sa(client: httpx.Client, jwt: str, name: str, scopes: list[st
                 elif patch.status_code == 404:
                     # Old platform (pre-v0.3.0) — no PATCH route. Warn but
                     # keep the flow going with the existing narrower scopes.
-                    print(
-                        f"WARNING: platform lacks PATCH /admin/service-accounts/{{id}} "
-                        f"(pre-v0.3.0). Existing scopes {sorted(existing_scopes)} kept; "
-                        f"chaos / actions calls will 403 until platform is upgraded."
-                    )
+                    extra = sorted(set(existing_scopes) - set(scopes))
+                    if exact and extra:
+                        print(
+                            f"WARNING: platform lacks PATCH — {name} keeps EXTRA "
+                            f"scopes {extra}. Read-only is NOT structurally true "
+                            "until the platform is upgraded and this rerun."
+                        )
+                    else:
+                        print(
+                            f"WARNING: platform lacks PATCH /admin/service-accounts/{{id}} "
+                            f"(pre-v0.3.0). Existing scopes {sorted(existing_scopes)} kept; "
+                            f"chaos / actions calls will 403 until platform is upgraded."
+                        )
                 else:
                     patch.raise_for_status()
                 return existing_id
@@ -183,13 +213,22 @@ def main() -> int:
         jwt = _login(client, args.email, args.password)
         sa_id = _create_or_get_sa(client, jwt, SERVICE_ACCOUNT_NAME, SERVICE_ACCOUNT_SCOPES)
         token = _mint_token(client, jwt, sa_id)
+        smoke_sa_id = _create_or_get_sa(
+            client,
+            jwt,
+            SMOKE_SERVICE_ACCOUNT_NAME,
+            SMOKE_SERVICE_ACCOUNT_SCOPES,
+            exact=True,
+        )
+        smoke_token = _mint_token(client, jwt, smoke_sa_id)
 
     print()
     print("=" * 60)
-    print("Token minted. Copy into .env:")
+    print("Tokens minted. Copy into .env:")
     print()
     print(f"PLATFORM_MCP_URL={args.mcp_url}")
     print(f"PLATFORM_TOKEN={token}")
+    print(f"PLATFORM_SMOKE_TOKEN={smoke_token}")
     print("=" * 60)
     return 0
 

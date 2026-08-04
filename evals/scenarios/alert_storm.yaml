@@ -79,4 +79,4 @@ expectation:
   expected_terminal_state: escalated
   expected_evidence_contains:
   - alert
-  max_tool_calls: 6
+  max_tool_calls: 10

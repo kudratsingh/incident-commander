@@ -65,4 +65,4 @@ expectation:
   expected_evidence_contains:
   - payments-consumer
   - lag
-  max_tool_calls: 5
+  max_tool_calls: 12

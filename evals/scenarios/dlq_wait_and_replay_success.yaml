@@ -80,10 +80,13 @@ canned_llm_responses:
 expectation:
   name: dlq_wait_and_replay_success
   expected_terminal_state: resolved
-  expected_action_tool: replay_dlq_by_ids
+  # Effect: delayed replay scheduled for the wait_and_replay jobs. Both
+  # categorized siblings support delay_seconds; graded on scheduled +
+  # execute_at evidence below, never on DLQ shrink (the 5-minute timer
+  # fires outside any sane verify window by design).
+  expected_action_tools: [replay_dlq_by_ids, replay_dlq_by_category]
   expected_evidence_contains:
   - wait_and_replay
   - scheduled
   - execute_at
-  - verified
   max_tool_calls: 8

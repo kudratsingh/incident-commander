@@ -85,7 +85,7 @@ canned_llm_responses:
 expectation:
   name: remediate_runaway_saga_success
   expected_terminal_state: resolved
-  expected_action_tool: pause_dag
+  expected_action_tools: [pause_dag]
   expected_evidence_contains:
   - pause_key
   - verified

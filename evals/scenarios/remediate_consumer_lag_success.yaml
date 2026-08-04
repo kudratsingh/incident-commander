@@ -1,6 +1,5 @@
 name: remediate_consumer_lag_success
-description: "Consumer lag high alert. Agent probes \u2192 confirms saturation \u2192 emits RemediateAction \u2192 PLANNING picks restart_consumer_group \u2192 REMEDIATING executes with idempotency key\
-  \ \u2192 VERIFYING probes lag again \u2192 sees 0 \u2192 verdict verified \u2192 RESOLVED.\n"
+description: "Stalled-consumer alert (kill-based). Chaos kills worker-dispatcher; the group keeps its Kafka assignment and reports TRUE climbing lag. Agent probes \u2192 confirms saturation \u2192 RemediateAction \u2192 PLANNING picks restart_consumer_group \u2192 REMEDIATING clears the kill flag \u2192 supervisor re-spawns the consumer (~2.4s) \u2192 VERIFYING sees lag draining to 0 \u2192 RESOLVED.\n"
 tags:
 - phase-6
 - remediation
@@ -10,26 +9,45 @@ tags:
 use_live_mcp: true
 use_live_llm: true
 # Live-only: seed the broken state the agent is expected to fix. Ignored
-# by canned/offline runs (the canned tool responses already encode a
-# high-lag reading). inject_latency is preferred over kill_consumer here
-# because it doesn't require the platform's consumer supervisor to be
-# fully wired — the consumer stays alive, just slow.
+# by canned/offline runs (the canned tool responses already encode it).
+#
+# kill_consumer, not inject_latency — physics finding from the 2026-08-03
+# campaign: the platform's per-principal rate limit admits ~0.55 jobs/s
+# sustained while latency-degraded service still ran ~0.49 jobs/s
+# (injected latency doesn't linearize across partitions), so a single
+# principal could never build a visible backlog — the latency design was
+# unwinnable, not flaky. A killed consumer has service rate 0: modest
+# traffic (1 job / 2s) builds true lag with no soak engineering.
+# Kill-window report: the killed consumer KEEPS its group assignment and
+# reports true climbing lag (no eviction); the supervisor honors the kill
+# flag for the TTL and re-spawns ~2.4s after restart_consumer_group
+# clears it.
 chaos_setup:
-  name: inject_latency
+  name: kill_consumer
   arguments:
     consumer_group: worker-dispatcher
-    latency_ms: 2000
     ttl_seconds: 300
 alert:
   source: platform.kafka
   severity: high
-  fingerprint: consumer_lag_high
+  fingerprint: consumer_stalled
   consumer_group: worker-dispatcher
+  # A claim the kill-based fault can actually manufacture: the consumer
+  # stops processing but keeps its assignment, so lag genuinely climbs.
+  summary: worker-dispatcher stopped processing; lag climbing, group assignment retained
 canned_tool_responses:
+  # Sequenced: investigation reads the true climbing backlog; the
+  # post-restart verify probe reads the drained state. (Live, the verify
+  # side polls per ADR 0006 and the cached metric can trail recovery by
+  # ~30s — canned models the settled outcome.)
   get_consumer_lag:
-    content:
+  - content:
     - type: text
       text: '{"consumer_group":"worker-dispatcher","lag":15000,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":0,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
     is_error: false
   restart_consumer_group:
     content:
@@ -42,7 +60,7 @@ canned_llm_responses:
     - category: consumer_saturation
       name: consumer_saturation
       confidence: 0.55
-      reasoning: "Paging severity on worker-dispatcher \u2014 probe current lag.\n"
+      reasoning: "Alert claims worker-dispatcher stopped processing with climbing lag \u2014 probe current lag.\n"
     next_action:
       kind: probe
       tool_name: get_consumer_lag
@@ -52,7 +70,7 @@ canned_llm_responses:
     - category: consumer_saturation
       name: consumer_saturation
       confidence: 0.85
-      reasoning: 'Lag of 15000 messages confirms sustained saturation. Restart the consumer to clear the backlog.
+      reasoning: 'Lag of 15000 and climbing with the group assignment retained is the stalled-consumer signature. Restart clears the kill state and lets the supervisor re-spawn it.
 
         '
     next_action:
@@ -66,14 +84,14 @@ canned_llm_responses:
     verify_tool: get_consumer_lag
     verify_arguments:
       consumer_group: worker-dispatcher
-    verify_expectation: "Lag should drop toward zero within seconds of the restart \u2014 the supervisor picks the consumer back up and processes the backlog.\n"
+    verify_expectation: "After the restart clears the kill flag the supervisor re-spawns the consumer within seconds and the backlog drains: get_consumer_lag drops toward 0. The cached metric may trail the recovery by ~30s, so an early read can still show the old high value.\n"
   verification_judge:
   - verdict: verified
-    reasoning: 'The get_consumer_lag probe returned a healthy reading indicating the consumer has restarted and is processing again.
+    reasoning: 'The verify probe reads lag 0 after the restart: the kill flag was cleared (kill_key_cleared=true), the supervisor re-spawned the consumer, and the backlog has drained.
 
       '
   briefing_writer:
-  - findings: 'worker-dispatcher consumer lag was 15000 messages. The agent restarted the consumer group; the follow-up probe showed the supervisor picked it back up and lag is recovering.
+  - findings: 'worker-dispatcher had stopped processing while retaining its group assignment; lag climbed to 15000. The agent restarted the consumer group (kill flag cleared); the supervisor re-spawned it and the follow-up probe shows lag back at 0.
 
       '
     recommendation: "Monitor lag for the next 5 minutes to confirm sustained recovery. If the same alert re-fires within 30 minutes, escalate \u2014 a restart-loop suggests a deeper issue than saturation.\n"
@@ -89,5 +107,11 @@ expectation:
   expected_action_tools: [restart_consumer_group]
   expected_evidence_contains:
   - kill_key_cleared
-  - verified
-  max_tool_calls: 8
+  # Post-restart drained reading — replaces the `verified` assert, which
+  # substring-matches `not_verified` (fake-green; see PR #64).
+  - '"lag":0'
+  # Live worst case: up to 3 investigation probes + 1 freshness re-probe
+  # (ADR 0009; the FIRST lag read may be a stale cached 0) + action +
+  # up to 6 verify polls (ADR 0006 at VERIFY_PROBE_ATTEMPTS=6). Campaign
+  # observed 10 under the old design; 12 keeps the >=30% margin rule.
+  max_tool_calls: 12

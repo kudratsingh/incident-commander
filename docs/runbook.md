@@ -148,7 +148,26 @@ Environment variable knobs for the live path (see [ADR 0006](ADR/0006-verificati
 | `INVESTIGATE_REPROBE_ATTEMPTS` | 0 | 1 | Investigation-side freshness re-probe ([ADR 0009](ADR/0009-investigation-freshness-reprobe.md)): when a cached read kills a fixable hypothesis at ≥0.7, re-read it fresh before accepting. Default 0 keeps canned runs byte-identical. |
 | `INVESTIGATE_REPROBE_DELAY_SECONDS` | 20 | 20+ | Delay before the freshness re-read. Size to the cached tool's declared staleness window (lag cache: 60s). |
 
-All Tier-1 remediation scenarios now self-seed via `chaos_setup:` in their YAML — no separate `make chaos-*` step needed for the live pass. As of platform v0.4.7 the previously-blocked `remediate_stale_cache_success` uses the new `create_stale_cache` chaos hook and is winnable live.
+All Tier-1 remediation scenarios now self-seed via `chaos_setup:` in their YAML — no separate `make chaos-*` step needed for the live pass.
+
+### consumer_lag live notes (kill-window experiment, 2026-08-04)
+
+`remediate_consumer_lag_success` seeds `kill_consumer` (not latency — the
+per-principal rate limit ≈ latency-degraded service rate made the old
+design unwinnable; see the scenario's chaos_setup comment). Facts to
+operate by:
+
+- A killed consumer **keeps its group assignment and reports true
+  climbing lag** — no eviction, no null. Rising lag is the signal.
+- Cache staleness: ~60s for the metric to show the fault, ~30s to show
+  the recovery. The **first probe may read a stale 0** — exactly the
+  case the ADR 0009 freshness re-probe exists for; run live with
+  `INVESTIGATE_REPROBE_ATTEMPTS=1`.
+- Supervisor re-spawn after `restart_consumer_group` clears the kill
+  flag: **~2.4s**. Verify polling absorbs it easily.
+- Traffic: **modest suffices** — the standard 1-job/2s loop against a
+  dead consumer (service rate 0) builds real backlog. No soak
+  engineering, no heavy bursts (the rate limiter would eat them anyway). As of platform v0.4.7 the previously-blocked `remediate_stale_cache_success` uses the new `create_stale_cache` chaos hook and is winnable live.
 
 ## Debugging one scenario
 

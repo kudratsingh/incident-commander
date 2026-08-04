@@ -81,6 +81,10 @@ Before opening a PR that changes anything that could touch a live run:
 - [ ] Every new external client's public methods raise only that client's own domain exception; SDK types stay behind the boundary.
 - [ ] If the scenario mutates state, it declares its own reset / TTL story.
 
+## Campaign 2026-08-03 addenda
+
+The next live campaign added four patterns that refine these buckets rather than replacing them: **fixture age ≠ staleness** and **attractive-nuisance fixtures** (shared-environment refinements), **expectations live in two layers** — YAML grader vs planner-authored verify expectation (a grader-brittleness refinement with no YAML fix), and **rate-limiter physics** (an environment precondition: check the platform's throttles before designing chaos that must outrun them). Full exhibits and fix map: [`live-campaign-2026-08-03.md`](live-campaign-2026-08-03.md).
+
 ## Related documents
 
 - [ADR 0006 — Verification is a bounded polling window, not an instant read](../ADR/0006-verification-is-a-polling-window.md)

@@ -37,7 +37,7 @@ from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError, ToolResult
 from incident_commander.tools.policies import Tier, is_cached_read, tools_at_or_below
-from incident_commander.tools.registry import TOOL_REGISTRY
+from incident_commander.tools.registry import TOOL_REGISTRY, description_of
 
 _TOOL_NAME: Final[str] = "get_consumer_lag"
 _DEFAULT_MAX_ITERATIONS: Final[int] = 5
@@ -491,5 +491,20 @@ def _format_planner_context(run_state: RunState) -> str:
     for name in sorted(tools_at_or_below(Tier.READ)):
         spec = TOOL_REGISTRY[name]
         schema = spec.input_model.model_json_schema()
-        lines.append(f"  - {name}: input_schema={json.dumps(schema, sort_keys=True)}")
+        lines.append(f"  - {name}: {_indented_description(name)}")
+        lines.append(f"    input_schema={json.dumps(schema, sort_keys=True)}")
     return "\n".join(lines)
+
+
+def _indented_description(tool_name: str) -> str:
+    """Platform-authored tool description, indented for the context block.
+
+    Verbatim from the contract snapshot (see ``registry.description_of``).
+    These are load-bearing: freshness windows, delayed-replay semantics,
+    and observable effects live here, and the planner can only reason
+    about them if it reads them.
+    """
+    text = description_of(tool_name)
+    if not text:
+        return "(no description)"
+    return text.replace("\n", "\n    ")

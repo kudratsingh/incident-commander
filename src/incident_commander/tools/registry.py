@@ -13,8 +13,10 @@ invoke them — the investigation planner cannot propose Tier-1 actions.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Final
 from uuid import UUID
 
@@ -70,10 +72,18 @@ class DagEdge(BaseModel):
 
 
 class GetDagStateOutput(BaseModel):
+    # v0.4.9: the pause flag became observable here (platform fix after the
+    # 2026-08-03 campaign surfaced pause_dag as a shipped no-op — see
+    # docs/lessons/live-campaign-2026-08-03.md exhibit 2). Without these
+    # fields the output model would strip `paused` before the verify judge
+    # ever saw it.
     model_config = ConfigDict(extra="ignore", frozen=True)
     seed_id: str
     nodes: list[DagNode]
     edges: list[DagEdge]
+    paused: bool
+    paused_expires_in_seconds: int | None = None
+    paused_by: str | None = None
 
 
 # --- get_deploy_history --------------------------------------------------
@@ -353,16 +363,14 @@ class RestartConsumerGroupInput(BaseModel):
 
 
 class RestartConsumerGroupOutput(BaseModel):
-    # v0.4.5+: response carries latency_key_cleared / latency_key so the
-    # tool is the single compensating action for both `kill_consumer` and
-    # `inject_latency`. Platform advertises both as required (no defaults);
-    # extra="ignore" keeps us compatible with future additive fields.
+    # v0.4.5+: latency_key_cleared makes the tool the single compensating
+    # action for both `kill_consumer` and `inject_latency`. v0.4.9 dropped
+    # the raw kill_key/latency_key strings from the response (internal
+    # Redis key names, not operator signal); the booleans remain.
     model_config = ConfigDict(extra="ignore", frozen=True)
     consumer_group: str
     kill_key_cleared: bool
-    kill_key: str
     latency_key_cleared: bool
-    latency_key: str
     accepted: bool
 
 
@@ -557,6 +565,39 @@ class ToolSpec:
     name: str
     input_model: type[BaseModel]
     output_model: type[BaseModel]
+
+
+_SNAPSHOT_PATH: Final[Path] = (
+    Path(__file__).resolve().parents[3] / "contracts" / "platform-tools.snapshot.json"
+)
+
+
+def _load_snapshot_descriptions() -> dict[str, str]:
+    """Tool descriptions, mirrored verbatim from the committed contract snapshot.
+
+    The v0.4.9 descriptions are load-bearing eval infrastructure, not doc
+    fluff: the remediation planner authors its verify expectation from
+    them (delayed-replay semantics, lag freshness windows, the pause
+    flag's observable effect). Loading from the snapshot at import makes
+    the mirror true by construction — a `make snapshot` refresh IS the
+    description update, and there is no second copy to drift.
+    """
+    try:
+        raw = json.loads(_SNAPSHOT_PATH.read_text())
+    except (OSError, ValueError):
+        # Missing snapshot (e.g. exotic packaging) degrades to empty
+        # descriptions; tests/unit/test_registry_matches_snapshot.py
+        # fails loudly in any checkout where this happens.
+        return {}
+    return {t["name"]: t.get("description", "") for t in raw.get("tools", [])}
+
+
+_TOOL_DESCRIPTIONS: Final[dict[str, str]] = _load_snapshot_descriptions()
+
+
+def description_of(tool_name: str) -> str:
+    """Platform-authored description for one tool ("" when unknown)."""
+    return _TOOL_DESCRIPTIONS.get(tool_name, "")
 
 
 TOOL_REGISTRY: Final[dict[str, ToolSpec]] = {

@@ -44,7 +44,13 @@ class Scenario(BaseModel):
     tags: tuple[str, ...] = ()
     alert: AlertPayload
     expectation: ScenarioExpectation
-    canned_tool_responses: dict[str, ToolResult] = Field(default_factory=dict)
+    # One response per tool (served on every call), or a list consumed in
+    # order with the last repeating — for scenarios whose canned platform
+    # state changes mid-run (e.g. get_dag_state paused false→true across
+    # a pause_dag action; v0.4.9 enforced-pause semantics).
+    canned_tool_responses: dict[str, ToolResult | tuple[ToolResult, ...]] = Field(
+        default_factory=dict
+    )
     canned_llm_responses: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     # When True the runner ignores ``canned_tool_responses`` and builds a real
     # ``MCPClient`` against ``settings.platform_mcp_url``. Scenarios using this

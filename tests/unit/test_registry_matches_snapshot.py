@@ -66,3 +66,42 @@ class TestRegistryMatchesSnapshot:
             "`make snapshot` if the platform is the source of truth for the "
             "new shape."
         )
+
+
+class TestDescriptionMirror:
+    """Descriptions are load-bearing (the planner authors verify
+    expectations from them) and are loaded from the snapshot at import —
+    these tests guard the loader path, not a second copy."""
+
+    def test_every_registry_tool_has_a_nonempty_description(self) -> None:
+        from incident_commander.tools.registry import TOOL_REGISTRY, description_of
+
+        missing = [name for name in TOOL_REGISTRY if not description_of(name)]
+        assert not missing, (
+            f"tools with no snapshot description: {missing} — snapshot stale "
+            "or the registry loader path broke"
+        )
+
+    def test_descriptions_are_verbatim_from_snapshot(self) -> None:
+        import json
+        from pathlib import Path
+
+        from incident_commander.tools.registry import TOOL_REGISTRY, description_of
+
+        snapshot = json.loads(
+            (
+                Path(__file__).resolve().parents[2] / "contracts" / "platform-tools.snapshot.json"
+            ).read_text()
+        )
+        by_name = {t["name"]: t.get("description", "") for t in snapshot["tools"]}
+        for name in TOOL_REGISTRY:
+            assert description_of(name) == by_name.get(name, ""), name
+
+    def test_v049_semantics_reach_the_planner_context(self) -> None:
+        # The whole point of the mirror: freshness, delayed-replay, and
+        # enforced-pause semantics must be present in what the LLM reads.
+        from incident_commander.agent.remediation import _tool_context_block
+
+        assert "FRESHNESS" in _tool_context_block("get_consumer_lag")
+        assert "paused=true" in _tool_context_block("pause_dag")
+        assert "VERIFYING A DELAYED REPLAY" in _tool_context_block("replay_dlq_by_category")

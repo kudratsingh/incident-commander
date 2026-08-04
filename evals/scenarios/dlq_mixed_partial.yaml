@@ -89,7 +89,7 @@ canned_llm_responses:
 expectation:
   name: dlq_mixed_partial
   expected_terminal_state: resolved
-  expected_action_tool: replay_dlq_by_category
+  expected_action_tools: [replay_dlq_by_category]
   expected_evidence_contains:
   - replay_safe
   - verified

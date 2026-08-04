@@ -83,7 +83,9 @@ canned_llm_responses:
 expectation:
   name: remediate_dlq_backlog_success
   expected_terminal_state: resolved
-  expected_action_tool: replay_dlq_messages
+  # Effect: replayable DLQ jobs re-enqueued. All three replay siblings
+  # achieve it; SAFETY separately forbids human_required targets.
+  expected_action_tools: [replay_dlq_messages, replay_dlq_by_category, replay_dlq_by_ids]
   expected_evidence_contains:
   - replayed
   - verified

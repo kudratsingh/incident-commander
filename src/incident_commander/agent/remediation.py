@@ -37,7 +37,7 @@ from incident_commander.agent.state import (
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError
-from incident_commander.tools.policies import Tier, tier_of
+from incident_commander.tools.policies import RESOURCE_ARG_FIELDS, Tier, tier_of
 from incident_commander.tools.registry import TOOL_REGISTRY
 from incident_commander.tools.wire import wire_arguments
 
@@ -207,6 +207,19 @@ def make_llm_plan(
                 at,
                 f"verify tool must be read-only, got tier={tier_of(plan.verify_tool).value}",
             )
+        unsourced = _unsourced_resource_args(plan, _evidence_value_corpus(run_state))
+        if unsourced:
+            # Copy, don't re-type: a resource name the platform never uttered
+            # is a hallucination risk, not a plan. The live campaign watched
+            # the planner drop `cache:jobs:` off an alert-provided key; only
+            # the platform's prefix allowlist stopped the call.
+            return _escalate_remediation(
+                run_state,
+                at,
+                "plan rejected before execution: resource argument(s) not "
+                f"evidence-sourced: {', '.join(unsourced)}. Resource names must "
+                "be copied verbatim from the alert or tool results.",
+            )
 
         tokens = result.input_tokens + result.output_tokens
         new_budget = run_state.budget.model_copy(
@@ -236,6 +249,63 @@ def make_llm_plan(
     return transition_plan
 
 
+def _collect_strings(node: Any, out: set[str]) -> None:
+    """Recursively collect every string value in a JSON-shaped structure."""
+    if isinstance(node, str):
+        out.add(node)
+    elif isinstance(node, dict):
+        for value in node.values():
+            _collect_strings(value, out)
+    elif isinstance(node, (list, tuple)):
+        for value in node:
+            _collect_strings(value, out)
+
+
+def _evidence_value_corpus(run_state: RunState) -> set[str]:
+    """Every string value the platform itself produced during this run.
+
+    Sources: the alert payload, prior tool-call arguments, and tool result
+    summaries that parse as JSON. Bookkeeping entries (prose summaries)
+    are skipped deliberately — LLM prose is not a source of truth for
+    resource names.
+    """
+    corpus: set[str] = set()
+    _collect_strings(dict(run_state.alert), corpus)
+    for entry in run_state.evidence:
+        _collect_strings(entry.arguments, corpus)
+        try:
+            parsed = json.loads(entry.result_summary)
+        except (ValueError, TypeError):
+            continue
+        _collect_strings(parsed, corpus)
+    return corpus
+
+
+def _unsourced_resource_args(plan: RemediationPlan, corpus: set[str]) -> list[str]:
+    """Resource-naming plan arguments whose values the platform never produced.
+
+    Fields checked per tool come from ``policies.RESOURCE_ARG_FIELDS``
+    (single source of truth; coverage-tested against the registry).
+    String values and elements of list values are compared exactly —
+    substring matches don't count, because the campaign's failure value
+    (`worker-dispatcher:hot_set`) IS a substring of the true key.
+    """
+    problems: list[str] = []
+    for tool, args in (
+        (plan.action_tool, plan.action_arguments),
+        (plan.verify_tool, plan.verify_arguments),
+    ):
+        for field in sorted(RESOURCE_ARG_FIELDS.get(tool, frozenset())):
+            if field not in args:
+                continue
+            raw = args[field]
+            values = raw if isinstance(raw, (list, tuple)) else [raw]
+            for value in values:
+                if isinstance(value, str) and value not in corpus:
+                    problems.append(f"{tool}.{field}={value!r}")
+    return problems
+
+
 def _load_plan(run_state: RunState) -> RemediationPlan | None:
     """Round-trip the dict-stored plan back through the Pydantic validator."""
     raw = run_state.remediation_plan
@@ -259,8 +329,13 @@ def _format_plan_context(run_state: RunState, top_hypothesis_name: str) -> str:
         f"  - {name}: input_schema={json.dumps(TOOL_REGISTRY[name].input_model.model_json_schema())}"  # noqa: E501
         for name in read_tools
     )
+    # The alert is included verbatim: resource-naming arguments must be
+    # copied exactly from platform-produced values (alert + tool results),
+    # and the campaign showed the planner otherwise only sees resource
+    # names filtered through investigation prose.
     return (
         f"Incident: {run_state.incident_id}\n"
+        f"Alert: {json.dumps(dict(run_state.alert), sort_keys=True)}\n"
         f"Target hypothesis: {top_hypothesis_name}\n\n"
         f"All ranked hypotheses:\n{hypotheses_dump}\n\n"
         f"Evidence collected during investigation:\n{evidence_dump}\n\n"

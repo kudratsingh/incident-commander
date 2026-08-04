@@ -57,6 +57,42 @@ _TIER_1_TOOLS: Final[frozenset[str]] = frozenset(
 _TIER_2_TOOLS: Final[frozenset[str]] = frozenset()
 
 
+# Per-tool argument fields whose values NAME a specific platform resource
+# (a cache key, a job id, a consumer group, a trace id) — as opposed to
+# filters, enums, counts, and free text. A remediation plan may only fill
+# these fields with values copied verbatim from the alert or from tool
+# results (the evidence ledger): the 2026-08-03 live campaign watched the
+# remediation planner re-type an alert's cache key minus its `cache:jobs:`
+# prefix, and only the platform's key-prefix allowlist stopped the call
+# (ADR 0009's sibling fix; see `remediation._unsourced_resource_args`).
+# Copy, don't re-type — enforced structurally, not by prompt prose.
+#
+# Every tool in TOOL_REGISTRY has an entry, empty when it takes no
+# resource-naming args; `tests/unit/test_policies.py` fails if a new tool
+# lands without classifying its fields here.
+RESOURCE_ARG_FIELDS: Final[dict[str, frozenset[str]]] = {
+    "get_consumer_lag": frozenset({"consumer_group"}),
+    "get_dag_state": frozenset({"job_id"}),
+    "get_deploy_history": frozenset(),
+    "get_incident": frozenset({"id"}),
+    "get_postgres_health": frozenset(),
+    "get_redis_health": frozenset(),
+    "get_trace": frozenset({"trace_id"}),
+    "invalidate_cache_key": frozenset({"key"}),
+    "list_active_alerts": frozenset(),
+    "list_audit_events": frozenset(),
+    "list_dlq_messages": frozenset(),
+    "list_incidents": frozenset(),
+    "mark_dlq_permanent": frozenset({"job_id"}),
+    "pause_dag": frozenset({"root_job_id"}),
+    "replay_dlq_by_category": frozenset(),
+    "replay_dlq_by_ids": frozenset({"job_ids"}),
+    "replay_dlq_messages": frozenset(),
+    "restart_consumer_group": frozenset({"consumer_group"}),
+    "search_traces": frozenset(),
+}
+
+
 def tier_of(tool_name: str) -> Tier:
     """Classify one tool. Unknown tools raise — callers should validate
     against ``TOOL_REGISTRY`` first."""

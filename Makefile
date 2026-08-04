@@ -1,4 +1,4 @@
-.PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-live-remediation eval-reg eval-reset trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
+.PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-live-remediation eval-smoke eval-reg eval-reset trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
 
 # Make does not read .env on its own — only the Python side does, via
 # dotenv. Without this include, a make-level var like PLATFORM_COMPOSE
@@ -33,6 +33,7 @@ help:
 	@echo "  eval-live        run eval suite against live platform (needs .env);"
 	@echo "                   ONLY=<substr[,substr...]> to filter (e.g. ONLY=remediate_consumer_lag_success)"
 	@echo "  eval-live-remediation  DEPRECATED alias for 'eval-live ONLY=remediate_,dlq_'"
+	@echo "  eval-smoke       read-only smoke pass under the read-scoped smoke token"
 	@echo "  trace-report     render evals/traces/*.jsonl → readable txt files"
 	@echo "  chaos-help       list chaos setup subcommands (kill-consumer, etc.)"
 	@echo "  eval-reg         regression eval subset"
@@ -71,7 +72,7 @@ test-e2e:
 	@echo "TODO(phase-0+): compose up incident-platform + agent, inject scenario, assert audit"
 
 eval:
-	uv run python -m evals.runner
+	uv run python -m evals.runner $(if $(ONLY),--only $(ONLY))
 
 # ONLY=<pattern>[,<pattern>...] filters to scenarios whose name matches
 # any of the substrings. Runs the whole suite when unset. Traced by
@@ -90,6 +91,19 @@ eval-live:
 # and `make eval-reset` between scenarios.
 eval-live-remediation:
 	$(MAKE) eval-live ONLY=remediate_,dlq_
+
+# Read-only smoke pass, structurally: runs under PLATFORM_SMOKE_TOKEN
+# (telemetry:read + incidents:read only, minted by `make bootstrap-token`),
+# so a Tier-1 attempt 403s at the platform, wraps as MCPError, and grades
+# as an escalation instead of mutating state. The 2026-08-03 campaign's
+# "read-only" pass fired a real DLQ replay; this target closes that door.
+# Override the scenario list with SMOKE_ONLY=... if needed.
+SMOKE_ONLY ?= alert_storm,deploy_correlation,dlq_human,failed_traces,incidents_overview,multi_probe,noise_,planner_stops,postgres_slow,redis_saturation,saga_stuck,tool_,trace_investigation,consumer_lag_healthy,consumer_lag_medium,consumer_lag_missing,consumer_lag_orders,consumer_lag_payments,consumer_lag_shipping,consumer_lag_analytics,consumer_lag_high
+eval-smoke:
+	@if [ -z "$(PLATFORM_SMOKE_TOKEN)" ]; then \
+		echo "ERROR: PLATFORM_SMOKE_TOKEN not set. Run 'make bootstrap-token' and add it to .env" >&2; exit 2; \
+	fi
+	PLATFORM_TOKEN="$(PLATFORM_SMOKE_TOKEN)" $(MAKE) eval-live ONLY="$(SMOKE_ONLY)"
 
 trace-report:
 	uv run python scripts/format_traces.py
@@ -134,6 +148,9 @@ chaos-restore:
 # (usually unnecessary thanks to the 24h TTL from platform ADR 0010, but
 # useful when a scenario needs a guaranteed-fresh cache).
 PLATFORM_COMPOSE ?= ../incident-platform/docker-compose.yml
+# Compose service name running the platform app. The dev stack calls it
+# `app`; the pinned demo stack may name it differently.
+PLATFORM_SERVICE ?= app
 # PYTHONPATH prepend below is a v0.4.8 workaround: reset_eval_state.py
 # does `from scripts import seed_eval_fixtures` which needs /app on the
 # path. The image ships PYTHONPATH=/app/backend for the app process
@@ -146,7 +163,7 @@ eval-reset:
 		echo "ERROR: $(PLATFORM_COMPOSE) not found; set PLATFORM_COMPOSE=..." >&2; exit 2; \
 	fi
 	@docker compose -f "$(PLATFORM_COMPOSE)" exec -T \
-		-e PYTHONPATH=/app:/app/backend app \
+		-e PYTHONPATH=/app:/app/backend $(PLATFORM_SERVICE) \
 		python /app/scripts/reset_eval_state.py \
 		$(if $(PURGE_IDEMPOTENCY),--purge-idempotency,)
 

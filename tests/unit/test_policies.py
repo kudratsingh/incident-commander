@@ -75,3 +75,22 @@ class TestEnsureCovered:
         # If someone adds a tool to the registry without touching policies,
         # this fails — that's the whole point.
         ensure_covered()
+
+
+class TestResourceArgFieldsCoverage:
+    def test_every_registry_tool_is_classified(self) -> None:
+        # A new tool must classify its resource-naming fields (possibly
+        # empty) or the evidence-sourcing validator silently skips it.
+        from incident_commander.tools.policies import RESOURCE_ARG_FIELDS
+        from incident_commander.tools.registry import TOOL_REGISTRY
+
+        assert set(RESOURCE_ARG_FIELDS) == set(TOOL_REGISTRY)
+
+    def test_classified_fields_exist_on_input_models(self) -> None:
+        from incident_commander.tools.policies import RESOURCE_ARG_FIELDS
+        from incident_commander.tools.registry import TOOL_REGISTRY
+
+        for tool, fields in RESOURCE_ARG_FIELDS.items():
+            model_fields = set(TOOL_REGISTRY[tool].input_model.model_fields)
+            missing = fields - model_fields
+            assert not missing, f"{tool}: {missing} not on input model"

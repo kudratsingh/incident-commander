@@ -173,3 +173,21 @@ def _retry_after_seconds(err: anthropic.APIStatusError) -> float | None:
         return float(value) if value is not None else None
     except Exception:
         return None
+
+
+def preflight_auth(api_key: str) -> None:
+    """One cheap authenticated call; raises ``LLMError`` if the key is bad.
+
+    The 2026-08-03 campaign discovered an expired key as 24 identical
+    per-scenario crash rows across a whole smoke pass. models.list is
+    free, instant, and fails with the same 401 the first real call
+    would — so the runner can turn that failure mode into one labeled
+    line before anything runs.
+    """
+    client = anthropic.Anthropic(api_key=api_key)
+    try:
+        client.models.list(limit=1)
+    except anthropic.APIStatusError as err:
+        raise LLMError(f"auth preflight failed: HTTP {err.status_code}: {err}") from err
+    except anthropic.APIConnectionError as err:
+        raise LLMError(f"auth preflight failed: connection error: {err}") from err

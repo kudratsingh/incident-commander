@@ -108,15 +108,16 @@ make bootstrap-token
 # but exporting it here means every direct `evals.runner` invocation
 # also gets traced.
 export EVAL_TRACE_DIR=evals/traces \
-       VERIFY_PROBE_ATTEMPTS=4 \
+       VERIFY_PROBE_ATTEMPTS=6 \
        VERIFY_PROBE_DELAY_SECONDS=20
 
 # 1) Smoke pass FIRST — read-only scenarios catch any wire-shape
 #    surprise from the current pin before you spend on a Tier-1
-#    remediation attempt. ~$1 of tokens. ONLY= takes comma-separated
-#    name substrings — NOT a regex; a '(a|b)' pattern matches nothing.
-#    Replay-firing dlq_* scenarios are deliberately absent here.
-make eval-live ONLY=alert_storm,deploy_correlation,dlq_human,failed_traces,incidents_overview,multi_probe,noise_,planner_stops,postgres_slow,redis_saturation,saga_stuck,tool_,trace_investigation,consumer_lag_healthy,consumer_lag_medium,consumer_lag_missing,consumer_lag_orders,consumer_lag_payments,consumer_lag_shipping,consumer_lag_analytics,consumer_lag_high
+#    remediation attempt. ~$1 of tokens. Runs under the read-scoped
+#    PLATFORM_SMOKE_TOKEN, so "read-only" is enforced by the platform
+#    (a Tier-1 attempt 403s and grades as an escalation), not by the
+#    scenario list. Override the list with SMOKE_ONLY= if needed.
+make eval-smoke
 
 # 2) Remediation scenarios, one at a time, with reset between.
 #    Each scenario declares its own chaos_setup in the YAML (PR #54).
@@ -142,8 +143,10 @@ Environment variable knobs for the live path (see [ADR 0006](ADR/0006-verificati
 
 | Var | Default | Live-recommended | Meaning |
 |---|---|---|---|
-| `VERIFY_PROBE_ATTEMPTS` | 1 | 4 | Bounded polling window on VERIFYING. Default keeps canned runs single-probe. |
+| `VERIFY_PROBE_ATTEMPTS` | 1 | 6 | Bounded polling window on VERIFYING. Default keeps canned runs single-probe. 6 proved out in the 2026-08-03 campaign; size scenario caps for it. |
 | `VERIFY_PROBE_DELAY_SECONDS` | 15 | 20 | Delay between polling attempts. Size to the slowest verify probe's freshness. |
+| `INVESTIGATE_REPROBE_ATTEMPTS` | 0 | 1 | Investigation-side freshness re-probe ([ADR 0009](ADR/0009-investigation-freshness-reprobe.md)): when a cached read kills a fixable hypothesis at ≥0.7, re-read it fresh before accepting. Default 0 keeps canned runs byte-identical. |
+| `INVESTIGATE_REPROBE_DELAY_SECONDS` | 20 | 20+ | Delay before the freshness re-read. Size to the cached tool's declared staleness window (lag cache: 60s). |
 
 All Tier-1 remediation scenarios now self-seed via `chaos_setup:` in their YAML — no separate `make chaos-*` step needed for the live pass. As of platform v0.4.7 the previously-blocked `remediate_stale_cache_success` uses the new `create_stale_cache` chaos hook and is winnable live.
 

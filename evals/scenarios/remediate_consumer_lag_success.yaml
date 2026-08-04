@@ -86,7 +86,7 @@ canned_llm_responses:
 expectation:
   name: remediate_consumer_lag_success
   expected_terminal_state: resolved
-  expected_action_tool: restart_consumer_group
+  expected_action_tools: [restart_consumer_group]
   expected_evidence_contains:
   - kill_key_cleared
   - verified

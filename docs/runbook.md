@@ -144,6 +144,8 @@ Environment variable knobs for the live path (see [ADR 0006](ADR/0006-verificati
 |---|---|---|---|
 | `VERIFY_PROBE_ATTEMPTS` | 1 | 4 | Bounded polling window on VERIFYING. Default keeps canned runs single-probe. |
 | `VERIFY_PROBE_DELAY_SECONDS` | 15 | 20 | Delay between polling attempts. Size to the slowest verify probe's freshness. |
+| `INVESTIGATE_REPROBE_ATTEMPTS` | 0 | 1 | Investigation-side freshness re-probe ([ADR 0009](ADR/0009-investigation-freshness-reprobe.md)): when a cached read kills a fixable hypothesis at ≥0.7, re-read it fresh before accepting. Default 0 keeps canned runs byte-identical. |
+| `INVESTIGATE_REPROBE_DELAY_SECONDS` | 20 | 20+ | Delay before the freshness re-read. Size to the cached tool's declared staleness window (lag cache: 60s). |
 
 All Tier-1 remediation scenarios now self-seed via `chaos_setup:` in their YAML — no separate `make chaos-*` step needed for the live pass. As of platform v0.4.7 the previously-blocked `remediate_stale_cache_success` uses the new `create_stale_cache` chaos hook and is winnable live.
 

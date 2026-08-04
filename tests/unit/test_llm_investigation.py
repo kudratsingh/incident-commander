@@ -383,3 +383,218 @@ class TestBudgetGuards:
         result = transition(_investigating(run_state), now)
         assert result.budget.tokens_used == 1500
         assert llm.calls == 1
+
+
+def _hyp(category: str, confidence: float) -> dict[str, Any]:
+    return {
+        "category": category,
+        "name": f"{category}-hypothesis",
+        "confidence": confidence,
+        "reasoning": "r",
+    }
+
+
+def _lag_probe(group: str = "worker-dispatcher") -> dict[str, Any]:
+    return {
+        "kind": "probe",
+        "tool_name": "get_consumer_lag",
+        "arguments": {"consumer_group": group},
+    }
+
+
+class TestFreshnessReprobe:
+    """ADR 0009: a cached read that kills an actionable hypothesis gets one
+    fresh re-read before the loop accepts the contradiction."""
+
+    def _lag_sequence_mcp(self, readings: list[int]) -> _FakeMCPClient:
+        """get_consumer_lag returns readings in order; other tools return a stub."""
+        seen = {"lag_calls": 0}
+
+        def handler(name: str, _args: Mapping[str, Any]) -> ToolResult:
+            if name == "get_consumer_lag":
+                lag = readings[min(seen["lag_calls"], len(readings) - 1)]
+                seen["lag_calls"] += 1
+                return _consumer_lag_response("worker-dispatcher", lag)
+            return ToolResult(content=[{"type": "text", "text": '{"total":0,"items":[]}'}])
+
+        return _FakeMCPClient(handler)
+
+    def test_stale_kill_intercepts_even_a_stop_step(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # (i) actionable hypothesis at 0.75, probes the cached lag tool ->
+        # stale 0 kills it -> (ii) planner says stop. The interceptor must
+        # ignore the stop, re-probe fresh, and let (iii) decide on both
+        # readings. This is the exact 2026-08-03 campaign trace shape.
+        llm = CannedLLMClient(
+            [
+                {
+                    "hypotheses": [_hyp("consumer_saturation", 0.75)],
+                    "next_action": _lag_probe(),
+                },
+                {
+                    "hypotheses": [_hyp("poison_message", 0.4), _hyp("consumer_saturation", 0.2)],
+                    "next_action": {"kind": "stop", "reason": "lag is zero, nothing to fix"},
+                },
+                {
+                    "hypotheses": [_hyp("consumer_saturation", 0.9)],
+                    "next_action": {"kind": "stop", "reason": "fresh read confirms saturation"},
+                },
+            ]
+        )
+        mcp = self._lag_sequence_mcp([0, 15000])
+        slept: list[float] = []
+        transition = make_llm_investigate(
+            mcp,
+            llm,
+            model="m",
+            reprobe_attempts=1,
+            reprobe_delay_seconds=20.0,
+            sleep=slept.append,
+        )
+        result = transition(_investigating(run_state), now)
+
+        lag_calls = [c for c in mcp.calls if c[0] == "get_consumer_lag"]
+        assert len(lag_calls) == 2
+        assert slept == [20.0]
+        markers = [e for e in result.evidence if e.tool_name == "_freshness_reprobe"]
+        assert len(markers) == 1
+        assert "consumer_saturation" in markers[0].result_summary
+        # Step (iii) saw both readings and was acted on.
+        assert result.hypotheses[0].confidence == 0.9
+        assert result.budget.tool_calls_used == 2
+
+    def test_default_zero_attempts_accepts_contradiction(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # Canned posture: no re-probe, the stop in (ii) terminates the run.
+        llm = CannedLLMClient(
+            [
+                {
+                    "hypotheses": [_hyp("consumer_saturation", 0.75)],
+                    "next_action": _lag_probe(),
+                },
+                {
+                    "hypotheses": [_hyp("consumer_saturation", 0.2)],
+                    "next_action": {"kind": "stop", "reason": "lag is zero"},
+                },
+            ]
+        )
+        mcp = self._lag_sequence_mcp([0])
+        transition = make_llm_investigate(mcp, llm, model="m")
+        result = transition(_investigating(run_state), now)
+
+        assert len([c for c in mcp.calls if c[0] == "get_consumer_lag"]) == 1
+        assert not [e for e in result.evidence if e.tool_name == "_freshness_reprobe"]
+        assert result.state is IncidentState.ESCALATED
+
+    def test_non_cached_probe_never_triggers(self, run_state: RunState, now: datetime) -> None:
+        # list_dlq_messages is a live read; a contradiction after it is real.
+        llm = CannedLLMClient(
+            [
+                {
+                    "hypotheses": [_hyp("poison_message", 0.8)],
+                    "next_action": {
+                        "kind": "probe",
+                        "tool_name": "list_dlq_messages",
+                        "arguments": {},
+                    },
+                },
+                {
+                    "hypotheses": [_hyp("poison_message", 0.1)],
+                    "next_action": {"kind": "stop", "reason": "dlq is empty"},
+                },
+            ]
+        )
+        mcp = self._lag_sequence_mcp([0])
+        slept: list[float] = []
+        transition = make_llm_investigate(
+            mcp, llm, model="m", reprobe_attempts=1, sleep=slept.append
+        )
+        result = transition(_investigating(run_state), now)
+
+        assert slept == []
+        assert not [e for e in result.evidence if e.tool_name == "_freshness_reprobe"]
+        assert result.state is IncidentState.ESCALATED
+
+    def test_below_threshold_prior_never_triggers(self, run_state: RunState, now: datetime) -> None:
+        # 0.55 was never actionable, so its death changes no decision.
+        llm = CannedLLMClient(
+            [
+                {
+                    "hypotheses": [_hyp("consumer_saturation", 0.55)],
+                    "next_action": _lag_probe(),
+                },
+                {
+                    "hypotheses": [_hyp("consumer_saturation", 0.1)],
+                    "next_action": {"kind": "stop", "reason": "healthy"},
+                },
+            ]
+        )
+        mcp = self._lag_sequence_mcp([0])
+        slept: list[float] = []
+        transition = make_llm_investigate(
+            mcp, llm, model="m", reprobe_attempts=1, sleep=slept.append
+        )
+        transition(_investigating(run_state), now)
+        assert slept == []
+
+    def test_unmapped_category_never_triggers(self, run_state: RunState, now: datetime) -> None:
+        # deploy_regression has no Tier-1 fix: it escalates at any
+        # confidence, so a stale kill changes the briefing, not the action.
+        llm = CannedLLMClient(
+            [
+                {
+                    "hypotheses": [_hyp("deploy_regression", 0.9)],
+                    "next_action": _lag_probe(),
+                },
+                {
+                    "hypotheses": [_hyp("deploy_regression", 0.1)],
+                    "next_action": {"kind": "stop", "reason": "rolled back already"},
+                },
+            ]
+        )
+        mcp = self._lag_sequence_mcp([0])
+        slept: list[float] = []
+        transition = make_llm_investigate(
+            mcp, llm, model="m", reprobe_attempts=1, sleep=slept.append
+        )
+        transition(_investigating(run_state), now)
+        assert slept == []
+
+    def test_allowance_is_per_tool_and_capped(self, run_state: RunState, now: datetime) -> None:
+        # attempts=1: after the fresh read the planner STILL kills the
+        # hypothesis -> allowance for get_consumer_lag is spent -> the
+        # loop accepts the contradiction and acts on the step.
+        llm = CannedLLMClient(
+            [
+                {
+                    "hypotheses": [_hyp("consumer_saturation", 0.8)],
+                    "next_action": _lag_probe(),
+                },
+                {
+                    "hypotheses": [_hyp("consumer_saturation", 0.2)],
+                    "next_action": {"kind": "stop", "reason": "zero lag"},
+                },
+                {
+                    "hypotheses": [_hyp("consumer_saturation", 0.2)],
+                    "next_action": {"kind": "stop", "reason": "still zero, accepting"},
+                },
+            ]
+        )
+        mcp = self._lag_sequence_mcp([0, 0])
+        slept: list[float] = []
+        transition = make_llm_investigate(
+            mcp,
+            llm,
+            model="m",
+            reprobe_attempts=1,
+            reprobe_delay_seconds=5.0,
+            sleep=slept.append,
+        )
+        result = transition(_investigating(run_state), now)
+
+        assert len([c for c in mcp.calls if c[0] == "get_consumer_lag"]) == 2
+        assert slept == [5.0]
+        assert result.state is IncidentState.ESCALATED
+        assert len([e for e in result.evidence if e.tool_name == "_freshness_reprobe"]) == 1

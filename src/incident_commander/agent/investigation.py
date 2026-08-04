@@ -12,6 +12,7 @@ Two flavors:
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Final
@@ -19,6 +20,7 @@ from typing import Any, Final
 from pydantic import BaseModel, ValidationError
 
 from incident_commander.agent.hypothesis import (
+    Hypothesis,
     HypothesisCategory,
     InvestigationStep,
     ProbeAction,
@@ -34,7 +36,7 @@ from incident_commander.agent.state import (
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError, ToolResult
-from incident_commander.tools.policies import Tier, tools_at_or_below
+from incident_commander.tools.policies import Tier, is_cached_read, tools_at_or_below
 from incident_commander.tools.registry import TOOL_REGISTRY
 
 _TOOL_NAME: Final[str] = "get_consumer_lag"
@@ -147,23 +149,63 @@ def make_llm_investigate(
     llm_client: LLMClientProtocol,
     model: str,
     max_iterations: int = _DEFAULT_MAX_ITERATIONS,
+    reprobe_attempts: int = 0,
+    reprobe_delay_seconds: float = 0.0,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> Callable[[RunState, datetime], RunState]:
     """Bind clients + model to the Phase 2 INVESTIGATING transition.
 
     Each iteration: the LLM ranks hypotheses and either proposes a probe or
     says stop. Budget is checked before every LLM call and every tool call;
     exhaustion escalates immediately. ``max_iterations`` guards against loops.
+
+    ``reprobe_attempts`` is the investigation-side twin of ADR 0006's verify
+    polling (ADR 0009): when a probe of a declared-cached tool (see
+    ``policies.CACHED_READ_FRESHNESS_SECONDS``) kills a fixable hypothesis
+    that was at or above the remediate threshold, the loop re-reads that
+    same probe after ``reprobe_delay_seconds`` before accepting the
+    contradiction — at most ``reprobe_attempts`` times per tool per run.
+    Default 0 preserves canned behavior byte-identically; the runner wires
+    it live, where a cached reading can predate the fault entirely.
     """
 
     def transition_llm_investigate(run_state: RunState, at: datetime) -> RunState:
+        last_probe: ProbeAction | None = None
+        reprobes_spent: dict[str, int] = {}
         for _ in range(max_iterations):
             if run_state.budget.is_exhausted:
                 return _escalate_investigation(run_state, at, "budget exhausted mid-investigation")
 
+            prior_hypotheses = run_state.hypotheses
             try:
                 run_state, step = _plan_next_step(run_state, at, llm_client, model)
             except (ValueError, ValidationError, LLMError) as err:
                 return _escalate_investigation(run_state, at, f"planner output invalid: {err}")
+
+            killed = _cached_probe_contradiction(prior_hypotheses, step.hypotheses, last_probe)
+            if (
+                killed is not None
+                and last_probe is not None
+                and reprobes_spent.get(last_probe.tool_name, 0) < reprobe_attempts
+            ):
+                # Do not act on this step yet — the hypothesis died on the
+                # word of a possibly-stale sensor. Re-read it fresh first;
+                # the next planner iteration sees both readings and decides.
+                reprobes_spent[last_probe.tool_name] = (
+                    reprobes_spent.get(last_probe.tool_name, 0) + 1
+                )
+                run_state = _note_freshness_reprobe(
+                    run_state, at, last_probe, killed, reprobe_delay_seconds
+                )
+                sleep(reprobe_delay_seconds)
+                if run_state.budget.is_exhausted:
+                    return _escalate_investigation(
+                        run_state, at, "budget exhausted before freshness re-probe"
+                    )
+                run_state = _execute_probe(run_state, at, mcp_client, last_probe)
+                if run_state.state is IncidentState.ESCALATED:
+                    return run_state
+                continue
 
             action = step.next_action
             if isinstance(action, StopAction):
@@ -219,6 +261,7 @@ def make_llm_investigate(
             if run_state.state is IncidentState.ESCALATED:
                 # Probe failed; already escalated with the reason.
                 return run_state
+            last_probe = action
 
         return _escalate_investigation(run_state, at, f"max iterations ({max_iterations}) exceeded")
 
@@ -305,6 +348,70 @@ def _summarize_probe(output_model: type[BaseModel], result: ToolResult) -> str:
     """Parse the tool's typed output and return its compact JSON summary."""
     output = _parse_output(output_model, result.content)
     return output.model_dump_json()
+
+
+def _cached_probe_contradiction(
+    prior: tuple[Hypothesis, ...],
+    updated: tuple[Hypothesis, ...] | list[Hypothesis],
+    last_probe: ProbeAction | None,
+) -> Hypothesis | None:
+    """Return the fixable high-prior hypothesis a cached read just killed, if any.
+
+    Trigger requires all of:
+    - the last executed probe reads from a declared staleness window,
+    - the prior top hypothesis was actionable (category in ``FIX_MAP``)
+      and at/above the remediate threshold,
+    - the fresh planner output dropped that category below the threshold
+      (or dropped it entirely).
+
+    Scoped to FIX_MAP categories deliberately: the re-probe exists to
+    protect the remediate handoff decision. Unmapped categories escalate
+    to a human either way.
+    """
+    if last_probe is None or not is_cached_read(last_probe.tool_name):
+        return None
+    if not prior:
+        return None
+    prior_top = prior[0]
+    if prior_top.category not in FIX_MAP:
+        return None
+    if prior_top.confidence < _REMEDIATE_CONFIDENCE_THRESHOLD:
+        return None
+    surviving = max(
+        (h.confidence for h in updated if h.category == prior_top.category),
+        default=0.0,
+    )
+    if surviving >= _REMEDIATE_CONFIDENCE_THRESHOLD:
+        return None
+    return prior_top
+
+
+def _note_freshness_reprobe(
+    run_state: RunState,
+    at: datetime,
+    probe: ProbeAction,
+    killed: Hypothesis,
+    delay_seconds: float,
+) -> RunState:
+    """Record why the loop is re-reading a probe instead of acting (ADR 0009)."""
+    reason = (
+        f"cached read {probe.tool_name} contradicted actionable hypothesis "
+        f"{killed.category.value!r} ({killed.confidence:.2f} >= "
+        f"{_REMEDIATE_CONFIDENCE_THRESHOLD}); re-probing after {delay_seconds:g}s "
+        "before accepting the contradiction"
+    )
+    entry = EvidenceEntry(
+        tool_name="_freshness_reprobe",
+        arguments={"tool": probe.tool_name, "delay_seconds": delay_seconds},
+        result_summary=reason,
+        timestamp=at,
+    )
+    return run_state.model_copy(
+        update={
+            "evidence": (*run_state.evidence, entry),
+            "updated_at": at,
+        }
+    )
 
 
 def _finalize(run_state: RunState, at: datetime, reason: str) -> RunState:

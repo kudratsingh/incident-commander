@@ -49,6 +49,15 @@ class Settings(BaseSettings):
     verify_probe_attempts: int = Field(default=1, ge=1, le=10)
     verify_probe_delay_seconds: float = Field(default=15.0, ge=0.0)
 
+    # Investigation-side twin of the verify window (ADR 0009): when a probe
+    # of a declared-cached tool kills a fixable hypothesis at/above the
+    # remediate threshold, re-read it fresh before accepting the
+    # contradiction — at most this many times per tool per run. Default 0
+    # keeps canned runs byte-identical (a re-probe would consume an extra
+    # scripted planner response); the eval runner wires it for live runs.
+    investigate_reprobe_attempts: int = Field(default=0, ge=0, le=3)
+    investigate_reprobe_delay_seconds: float = Field(default=20.0, ge=0.0)
+
     # Tier-1 action tool calls (restart_consumer_group, replay_dlq_by_ids,
     # etc.) do real work on the platform side and can legitimately take
     # longer than a read. The MCPClient's 30s default is right for reads;

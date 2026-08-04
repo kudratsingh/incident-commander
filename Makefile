@@ -72,7 +72,7 @@ test-e2e:
 	@echo "TODO(phase-0+): compose up incident-platform + agent, inject scenario, assert audit"
 
 eval:
-	uv run python -m evals.runner
+	uv run python -m evals.runner $(if $(ONLY),--only $(ONLY))
 
 # ONLY=<pattern>[,<pattern>...] filters to scenarios whose name matches
 # any of the substrings. Runs the whole suite when unset. Traced by
@@ -148,6 +148,9 @@ chaos-restore:
 # (usually unnecessary thanks to the 24h TTL from platform ADR 0010, but
 # useful when a scenario needs a guaranteed-fresh cache).
 PLATFORM_COMPOSE ?= ../incident-platform/docker-compose.yml
+# Compose service name running the platform app. The dev stack calls it
+# `app`; the pinned demo stack may name it differently.
+PLATFORM_SERVICE ?= app
 # PYTHONPATH prepend below is a v0.4.8 workaround: reset_eval_state.py
 # does `from scripts import seed_eval_fixtures` which needs /app on the
 # path. The image ships PYTHONPATH=/app/backend for the app process
@@ -160,7 +163,7 @@ eval-reset:
 		echo "ERROR: $(PLATFORM_COMPOSE) not found; set PLATFORM_COMPOSE=..." >&2; exit 2; \
 	fi
 	@docker compose -f "$(PLATFORM_COMPOSE)" exec -T \
-		-e PYTHONPATH=/app:/app/backend app \
+		-e PYTHONPATH=/app:/app/backend $(PLATFORM_SERVICE) \
 		python /app/scripts/reset_eval_state.py \
 		$(if $(PURGE_IDEMPOTENCY),--purge-idempotency,)
 

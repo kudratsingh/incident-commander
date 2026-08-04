@@ -67,7 +67,11 @@ def _run_state(
     return RunState(
         incident_id=UUID("11111111-1111-1111-1111-111111111111"),
         state=state,
-        alert={"source": "platform.kafka", "severity": "high"},
+        alert={
+            "source": "platform.kafka",
+            "severity": "high",
+            "consumer_group": "worker-dispatcher",
+        },
         budget=BudgetLedger(
             max_tool_calls=25,
             max_tokens=200_000,
@@ -514,3 +518,154 @@ class TestSingleAttemptInvariant:
         result = transition(run, _now())
         assert result.state is IncidentState.VERIFYING
         assert result.remediation_attempts == 1
+
+
+class TestEvidenceSourcedArgs:
+    """Copy, don't re-type: plan resource args must be platform-produced.
+
+    Campaign exhibit: the planner rebuilt an alert-provided cache key as
+    `worker-dispatcher:hot_set` (dropping the `cache:jobs:` prefix); the
+    platform allowlist refused it. This validator rejects the plan before
+    any call is attempted — and because the bad value is a SUBSTRING of
+    the true key, matching must be exact-value, not containment.
+    """
+
+    _TRUE_KEY = "cache:jobs:worker-dispatcher:hot_set"
+
+    def _cache_run(self) -> RunState:
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.STALE_CACHE,
+                    name="stale-cache",
+                    confidence=0.85,
+                    reasoning="r",
+                ),
+            ),
+        )
+        return run.model_copy(
+            update={
+                "alert": {
+                    "source": "platform.cache",
+                    "severity": "high",
+                    "cache_key": self._TRUE_KEY,
+                }
+            }
+        )
+
+    def _cache_plan(self, key: str) -> dict[str, Any]:
+        return _plan_dict(
+            target_hypothesis="stale-cache",
+            action_tool="invalidate_cache_key",
+            action_arguments={"key": key},
+            verify_tool="get_redis_health",
+            verify_arguments={},
+        )
+
+    def test_verbatim_key_from_alert_passes(self) -> None:
+        llm = CannedLLMClient([self._cache_plan(self._TRUE_KEY)])
+        result = make_llm_plan(llm, model=_MODEL)(self._cache_run(), _now())
+        assert result.state is IncidentState.REMEDIATING
+
+    def test_retyped_key_rejected_even_as_substring_of_truth(self) -> None:
+        # "worker-dispatcher:hot_set" is inside the true key — containment
+        # matching would fake-green this exact campaign failure.
+        llm = CannedLLMClient([self._cache_plan("worker-dispatcher:hot_set")])
+        result = make_llm_plan(llm, model=_MODEL)(self._cache_run(), _now())
+        assert result.state is IncidentState.ESCALATED
+        reasons = " ".join(e.result_summary for e in result.evidence)
+        assert "not evidence-sourced" in reasons
+        assert "worker-dispatcher:hot_set" in reasons
+
+    def test_value_from_tool_result_json_passes(self) -> None:
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.RUNAWAY_SAGA,
+                    name="runaway-saga",
+                    confidence=0.9,
+                    reasoning="r",
+                ),
+            ),
+            evidence=(
+                EvidenceEntry(
+                    tool_name="get_dag_state",
+                    arguments={},
+                    result_summary='{"seed_id": "33333333-3333-3333-3333-333333333333"}',
+                    timestamp=_now(),
+                ),
+            ),
+        )
+        plan = _plan_dict(
+            target_hypothesis="runaway-saga",
+            action_tool="pause_dag",
+            action_arguments={
+                "root_job_id": "33333333-3333-3333-3333-333333333333",
+                "ttl_seconds": 600,
+            },
+            verify_tool="get_dag_state",
+            verify_arguments={"job_id": "33333333-3333-3333-3333-333333333333"},
+        )
+        result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(run, _now())
+        assert result.state is IncidentState.REMEDIATING
+
+    def test_invented_job_id_in_list_rejected_and_named(self) -> None:
+        known = "44444444-4444-4444-4444-444444444444"
+        invented = "99999999-9999-9999-9999-999999999999"
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.POISON_MESSAGE,
+                    name="poison",
+                    confidence=0.9,
+                    reasoning="r",
+                ),
+            ),
+            evidence=(
+                EvidenceEntry(
+                    tool_name="list_dlq_messages",
+                    arguments={},
+                    result_summary=f'{{"items": [{{"id": "{known}"}}]}}',
+                    timestamp=_now(),
+                ),
+            ),
+        )
+        plan = _plan_dict(
+            target_hypothesis="poison",
+            action_tool="replay_dlq_by_ids",
+            action_arguments={"job_ids": [known, invented]},
+            verify_tool="list_dlq_messages",
+            verify_arguments={},
+        )
+        result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(run, _now())
+        assert result.state is IncidentState.ESCALATED
+        reasons = " ".join(e.result_summary for e in result.evidence)
+        assert invented in reasons
+        assert known not in reasons.split("not evidence-sourced")[1].split(".")[0]
+
+    def test_non_resource_fields_are_unconstrained(self) -> None:
+        # category / max_replays / delay_seconds are parameters, not
+        # resource names — the planner may choose them freely.
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.POISON_MESSAGE,
+                    name="poison",
+                    confidence=0.9,
+                    reasoning="r",
+                ),
+            ),
+        )
+        plan = _plan_dict(
+            target_hypothesis="poison",
+            action_tool="replay_dlq_by_category",
+            action_arguments={"category": "replay_safe", "max_replays": 20},
+            verify_tool="list_dlq_messages",
+            verify_arguments={},
+        )
+        result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(run, _now())
+        assert result.state is IncidentState.REMEDIATING

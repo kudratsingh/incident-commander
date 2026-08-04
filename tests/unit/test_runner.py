@@ -2,18 +2,27 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import pytest
 from pydantic import SecretStr
 
 from evals.chaos_hooks import ChaosInvocationError
 from evals.fakes import CannedMCPClient
-from evals.graders.deterministic import ScenarioExpectation
+from evals.graders.deterministic import (
+    DimensionResult,
+    GradeDimension,
+    GradeReport,
+    ScenarioExpectation,
+)
 from evals.runner import (
     RunReport,
     Trajectory,
+    _classify_failure,
+    _crashed_result,
     run_all,
     run_scenario,
     write_briefings,
@@ -22,7 +31,7 @@ from evals.runner import (
 )
 from evals.scenarios.schema import ChaosHook, Scenario
 from incident_commander.agent.briefing import EscalationBriefing
-from incident_commander.agent.state import IncidentState
+from incident_commander.agent.state import BudgetLedger, EvidenceEntry, IncidentState, RunState
 from incident_commander.api.schemas import AlertPayload
 from incident_commander.config import Settings
 from incident_commander.tools.mcp_client import MCPError, ToolResult
@@ -447,3 +456,77 @@ class TestCannedMCPClient:
 
         with pytest.raises(MCPError, match="no canned response"):
             client.call_tool("unknown_tool", {})
+
+
+class TestFailureClassification:
+    """failure_class: the five-bucket taxonomy as a report column (issue #59)."""
+
+    _NOW = datetime(2026, 8, 3, 12, 0, tzinfo=UTC)
+
+    def _report(self, failing: set[GradeDimension]) -> GradeReport:
+        dims = tuple(
+            DimensionResult(dimension=d, passed=d not in failing, detail="x")
+            for d in GradeDimension
+        )
+        return GradeReport(scenario="s", passed=not failing, dimensions=dims)
+
+    def _final(self, *entries: tuple[str, str]) -> RunState:
+        evidence = tuple(
+            EvidenceEntry(tool_name=t, arguments={}, result_summary=s, timestamp=self._NOW)
+            for t, s in entries
+        )
+        return RunState(
+            incident_id=UUID("11111111-1111-1111-1111-111111111111"),
+            state=IncidentState.ESCALATED,
+            alert={"source": "platform.kafka", "severity": "high"},
+            budget=BudgetLedger(
+                max_tool_calls=25,
+                max_tokens=200_000,
+                max_wall_seconds=600,
+                max_usd=Decimal("1.00"),
+            ),
+            evidence=evidence,
+            created_at=self._NOW,
+            updated_at=self._NOW,
+        )
+
+    def test_passed(self) -> None:
+        assert _classify_failure(self._report(set()), self._final()) == "passed"
+
+    def test_budget_only_is_llm_variance(self) -> None:
+        got = _classify_failure(self._report({GradeDimension.BUDGET}), self._final())
+        assert got == "llm-variance"
+
+    def test_evidence_only_is_grader_brittleness(self) -> None:
+        got = _classify_failure(self._report({GradeDimension.EVIDENCE}), self._final())
+        assert got == "grader-brittleness"
+
+    def test_tool_is_error_is_shared_env(self) -> None:
+        final = self._final(("get_redis_health", "tool reported is_error=True (get_redis_health)"))
+        got = _classify_failure(self._report({GradeDimension.OUTCOME}), final)
+        assert got == "shared-env"
+
+    def test_not_verified_with_correct_action_is_eventual_consistency(self) -> None:
+        final = self._final(
+            ("pause_dag", '{"accepted": true}'),
+            ("_verify_judge", "not_verified: nodes still waiting"),
+        )
+        got = _classify_failure(self._report({GradeDimension.OUTCOME}), final)
+        assert got == "eventual-consistency"
+
+    def test_wrong_action_outcome_fail_is_unclassified(self) -> None:
+        # ACTION failed + OUTCOME failed with no environment/consistency
+        # signature: the conservative bucket is "look at the trace".
+        got = _classify_failure(
+            self._report({GradeDimension.OUTCOME, GradeDimension.ACTION}), self._final()
+        )
+        assert got == "unclassified"
+
+    def test_crashed_result_is_transport_or_shared_env(self) -> None:
+        scenario = _passing_scenario()
+        transport = _crashed_result(scenario, RuntimeError("boom"))
+        assert transport.outcome.failure_class == "transport"
+        env = _crashed_result(
+            scenario, RuntimeError("scenario 'x' chaos_setup 'create_stale_cache' failed")
+        )
+        assert env.outcome.failure_class == "shared-env"

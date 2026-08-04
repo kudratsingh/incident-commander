@@ -63,4 +63,4 @@ expectation:
   expected_evidence_contains:
   - shipping-consumer
   - cache_key
-  max_tool_calls: 5
+  max_tool_calls: 10

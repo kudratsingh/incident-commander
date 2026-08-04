@@ -56,6 +56,24 @@ _TIER_1_TOOLS: Final[frozenset[str]] = frozenset(
 
 _TIER_2_TOOLS: Final[frozenset[str]] = frozenset()
 
+# Read tools whose responses come from a cache rather than a live read,
+# with the platform-declared staleness window in seconds. A reading from
+# one of these taken inside its window may predate the fault entirely —
+# the 2026-08-03 live campaign watched a 60s-cached lag value of 0, read
+# 10s after chaos injection, kill a correct consumer_saturation hypothesis
+# at 0.75 confidence (ADR 0009). The investigation loop uses this map to
+# decide when a contradicting probe deserves one fresh re-read before the
+# hypothesis dies. Extend as the platform declares freshness on more tools;
+# instant DB-backed reads do not belong here.
+CACHED_READ_FRESHNESS_SECONDS: Final[dict[str, int]] = {
+    "get_consumer_lag": 60,
+}
+
+
+def is_cached_read(tool_name: str) -> bool:
+    """True when the tool's response is served from a declared staleness window."""
+    return tool_name in CACHED_READ_FRESHNESS_SECONDS
+
 
 # Per-tool argument fields whose values NAME a specific platform resource
 # (a cache key, a job id, a consumer group, a trace id) — as opposed to

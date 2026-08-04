@@ -87,7 +87,7 @@ canned_llm_responses:
 expectation:
   name: dlq_human_required_escalates
   expected_terminal_state: resolved
-  expected_action_tool: mark_dlq_permanent
+  expected_action_tools: [mark_dlq_permanent]
   expected_evidence_contains:
   - human_required
   - verified

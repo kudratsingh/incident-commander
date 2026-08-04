@@ -138,7 +138,7 @@ class TestActionDimension:
         exp = ScenarioExpectation(
             name="s",
             expected_terminal_state=IncidentState.RESOLVED,
-            expected_action_tool="restart_consumer_group",
+            expected_action_tools=("restart_consumer_group",),
         )
         report = grade(run, exp)
         assert _dim(report, GradeDimension.ACTION).passed is True
@@ -152,7 +152,7 @@ class TestActionDimension:
         exp = ScenarioExpectation(
             name="s",
             expected_terminal_state=IncidentState.ESCALATED,
-            expected_action_tool="restart_consumer_group",
+            expected_action_tools=("restart_consumer_group",),
         )
         report = grade(run, exp)
         action = _dim(report, GradeDimension.ACTION)
@@ -173,11 +173,49 @@ class TestActionDimension:
         exp = ScenarioExpectation(
             name="s",
             expected_terminal_state=IncidentState.ESCALATED,
-            expected_action_tool="restart_consumer_group",
+            expected_action_tools=("restart_consumer_group",),
         )
         detail = _dim(grade(run, exp), GradeDimension.ACTION).detail
         assert "_planner_stop" not in detail
         assert "get_consumer_lag" in detail
+
+    def test_equivalence_set_passes_on_any_member(self, run_state: RunState, now: datetime) -> None:
+        # Grade the effect, not the tool name: the live campaign resolved a
+        # DLQ backlog via replay_dlq_by_category while the expectation pinned
+        # legacy replay_dlq_messages — a wrong-reason FAIL this set fixes.
+        evidence = (
+            _evidence(now, "list_dlq_messages", '{"total":3}'),
+            _evidence(now, "replay_dlq_by_category", '{"replayed":2}'),
+        )
+        run = _with_terminal(run_state, IncidentState.RESOLVED, evidence)
+        exp = ScenarioExpectation(
+            name="s",
+            expected_terminal_state=IncidentState.RESOLVED,
+            expected_action_tools=(
+                "replay_dlq_messages",
+                "replay_dlq_by_category",
+                "replay_dlq_by_ids",
+            ),
+        )
+        action = _dim(grade(run, exp), GradeDimension.ACTION)
+        assert action.passed is True
+        assert "replay_dlq_by_category" in action.detail
+
+    def test_equivalence_set_fails_when_no_member_fired(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # A non-member Tier-1 tool does not satisfy the set: equivalence is
+        # same-effect siblings only, not "any action fired".
+        evidence = (_evidence(now, "invalidate_cache_key", '{"deleted":true}'),)
+        run = _with_terminal(run_state, IncidentState.RESOLVED, evidence)
+        exp = ScenarioExpectation(
+            name="s",
+            expected_terminal_state=IncidentState.RESOLVED,
+            expected_action_tools=("replay_dlq_messages", "replay_dlq_by_category"),
+        )
+        action = _dim(grade(run, exp), GradeDimension.ACTION)
+        assert action.passed is False
+        assert "invalidate_cache_key" in action.detail
 
 
 class TestSafetyDimension:

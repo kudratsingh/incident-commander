@@ -5,6 +5,10 @@ Task: produce a structured `RemediationPlan` per the JSON schema on the `record_
 - `target_hypothesis`: the exact name of the confirmed hypothesis you're addressing. Copy the string from the "Target hypothesis" line in the input.
 - `action_tool`: pick one from the "Tier-1 remediation tools" list. Match arguments to its `input_schema`.
 - `action_arguments`: the arguments dict. **Never include `idempotency_key`** — the agent generates it automatically.
+  Copy resource identifiers (cache keys, job ids, consumer groups, trace ids)
+  **verbatim** from the alert or tool results — never re-type, trim, or
+  abbreviate them. A plan whose resource argument doesn't appear exactly in
+  the evidence is rejected before execution.
 - `verify_tool`: pick one read tool from the "Read tools" list whose response will indicate whether the fix worked.
 - `verify_arguments`: arguments for the verify tool.
 - `verify_expectation`: one short sentence describing what the verify tool's response should look like if the fix succeeded (e.g. "lag drops below 1000", "DLQ is empty", "cache miss rate returns to baseline").

@@ -108,7 +108,7 @@ make bootstrap-token
 # but exporting it here means every direct `evals.runner` invocation
 # also gets traced.
 export EVAL_TRACE_DIR=evals/traces \
-       VERIFY_PROBE_ATTEMPTS=4 \
+       VERIFY_PROBE_ATTEMPTS=6 \
        VERIFY_PROBE_DELAY_SECONDS=20
 
 # 1) Smoke pass FIRST — read-only scenarios catch any wire-shape
@@ -142,7 +142,7 @@ Environment variable knobs for the live path (see [ADR 0006](ADR/0006-verificati
 
 | Var | Default | Live-recommended | Meaning |
 |---|---|---|---|
-| `VERIFY_PROBE_ATTEMPTS` | 1 | 4 | Bounded polling window on VERIFYING. Default keeps canned runs single-probe. |
+| `VERIFY_PROBE_ATTEMPTS` | 1 | 6 | Bounded polling window on VERIFYING. Default keeps canned runs single-probe. 6 proved out in the 2026-08-03 campaign; size scenario caps for it. |
 | `VERIFY_PROBE_DELAY_SECONDS` | 15 | 20 | Delay between polling attempts. Size to the slowest verify probe's freshness. |
 | `INVESTIGATE_REPROBE_ATTEMPTS` | 0 | 1 | Investigation-side freshness re-probe ([ADR 0009](ADR/0009-investigation-freshness-reprobe.md)): when a cached read kills a fixable hypothesis at ≥0.7, re-read it fresh before accepting. Default 0 keeps canned runs byte-identical. |
 | `INVESTIGATE_REPROBE_DELAY_SECONDS` | 20 | 20+ | Delay before the freshness re-read. Size to the cached tool's declared staleness window (lag cache: 60s). |

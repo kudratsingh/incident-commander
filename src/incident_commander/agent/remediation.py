@@ -524,15 +524,20 @@ def make_llm_verify(
                 return _escalate_remediation(run_state, at, f"verify judge LLM invalid: {err}")
 
             judgment = judgment_result.output
+            # Ordinal labels: under probe_attempts>1 a run produces several
+            # probe+judge pairs; {attempt, of} on the evidence arguments is
+            # what lets a reader (and the human trace render) tell poll #2/4
+            # from #4/4 without leaning on timestamps (issue #59).
+            ordinal = {"attempt": attempt + 1, "of": probe_attempts}
             probe_entry = EvidenceEntry(
                 tool_name=plan.verify_tool,
-                arguments=arguments,
+                arguments={**arguments, **ordinal},
                 result_summary=probe_summary,
                 timestamp=at,
             )
             judge_entry = EvidenceEntry(
                 tool_name="_verify_judge",
-                arguments={"expectation": plan.verify_expectation},
+                arguments={"expectation": plan.verify_expectation, **ordinal},
                 result_summary=f"{judgment.verdict}: {judgment.reasoning}",
                 timestamp=at,
             )

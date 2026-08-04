@@ -36,7 +36,7 @@ from incident_commander.agent.remediation import (
 )
 from incident_commander.agent.state import IncidentState, RunState
 from incident_commander.config import Settings
-from incident_commander.llm.client import LLMClient, LLMClientProtocol
+from incident_commander.llm.client import LLMClient, LLMClientProtocol, LLMError, preflight_auth
 from incident_commander.llm.fakes import CannedLLMClient
 from incident_commander.persistence.memory import InMemoryCheckpointer
 from incident_commander.tools.mcp_client import MCPClient, MCPClientProtocol, make_client
@@ -63,6 +63,14 @@ class ScenarioOutcome(BaseModel):
     tool_calls_used: int
     report: GradeReport
     judge_score: JudgeScore | None = None
+    # Five-bucket noise-source classification (docs/lessons/
+    # live-eval-noise-sources.md) + "passed" + "unclassified". Heuristic,
+    # derived from the grade report and the run's evidence — a starting
+    # point for bucket-before-you-debug, not a verdict.
+    failure_class: str = "unclassified"
+    # Set when the briefing judge call itself failed: the scenario result
+    # stands (graded deterministically); only the judge column is missing.
+    judge_error: str | None = None
 
 
 class RunReport(BaseModel):
@@ -279,10 +287,16 @@ def run_scenario(
         ):
             briefing = enrich_briefing(briefing, briefing_llm, model=settings.agent_model)
         judge_score: JudgeScore | None = None
+        judge_error: str | None = None
         if scenario.use_live_llm or (
             isinstance(judge_llm, CannedLLMClient) and judge_llm.has_remaining
         ):
-            judge_score = judge_briefing(briefing, judge_llm, model=settings.judge_model)
+            try:
+                judge_score = judge_briefing(briefing, judge_llm, model=settings.judge_model)
+            except LLMError as err:
+                # The judge is a soft-quality column on top of an already-
+                # graded run. Losing the judge must not void the run.
+                judge_error = f"judge call failed: {err}"
     except Exception as exc:
         if tracer is not None:
             tracer.write(
@@ -297,12 +311,15 @@ def run_scenario(
         if live_mcp_client is not None:
             live_mcp_client.close()
 
+    failure_class = _classify_failure(report, final)
     outcome = ScenarioOutcome(
         scenario=scenario.name,
         final_state=final.state,
         tool_calls_used=final.budget.tool_calls_used,
         report=report,
         judge_score=judge_score,
+        failure_class=failure_class,
+        judge_error=judge_error,
     )
     if tracer is not None:
         tracer.write(
@@ -312,9 +329,46 @@ def run_scenario(
                 "final_state": final.state.value,
                 "tool_calls_used": final.budget.tool_calls_used,
                 "passed": report.passed,
+                "failure_class": failure_class,
             }
         )
     return ScenarioResult(outcome=outcome, trajectory=trajectory, briefing=briefing)
+
+
+def _classify_failure(report: GradeReport, final: RunState | None) -> str:
+    """Bucket a graded run into the five-bucket noise taxonomy.
+
+    Heuristic and deliberately conservative: anything ambiguous lands in
+    "unclassified" rather than a wrong bucket. Priority order mirrors the
+    debugging discipline in docs/lessons/live-eval-noise-sources.md —
+    environment before consistency before variance before grader.
+    """
+    if report.passed:
+        return "passed"
+    dims = {d.dimension: d for d in report.dimensions}
+    failing = {d.dimension for d in report.dimensions if not d.passed}
+    evidence = final.evidence if final is not None else ()
+    summaries = [e.result_summary for e in evidence]
+    if any("MCPError" in s or "LLM" in s and "invalid" in s for s in summaries):
+        return "transport"
+    if any("is_error=True" in s for s in summaries):
+        return "shared-env"
+    action = dims.get(GradeDimension.ACTION)
+    if (
+        action is not None
+        and action.passed
+        and any(
+            e.tool_name == "_verify_judge" and e.result_summary.startswith("not_verified")
+            for e in evidence
+        )
+    ):
+        # Right action, judge said not-yet: the fix outran the probe.
+        return "eventual-consistency"
+    if failing == {GradeDimension.BUDGET}:
+        return "llm-variance"
+    if failing == {GradeDimension.EVIDENCE}:
+        return "grader-brittleness"
+    return "unclassified"
 
 
 def _crashed_result(scenario: Scenario, exc: BaseException) -> ScenarioResult:
@@ -338,12 +392,17 @@ def _crashed_result(scenario: Scenario, exc: BaseException) -> ScenarioResult:
             ),
         ),
     )
+    # Post-#48 the transitions absorb transport failures as graded
+    # escalations, so a crash that still reaches here is either the
+    # scenario's own seeding (environment) or an unwrapped transport path.
+    crash_class = "shared-env" if "chaos_setup" in error_detail else "transport"
     outcome = ScenarioOutcome(
         scenario=scenario.name,
         final_state=IncidentState.TRIAGE,
         tool_calls_used=0,
         report=report,
         judge_score=None,
+        failure_class=crash_class,
     )
     trajectory = Trajectory(
         scenario=scenario.name,
@@ -462,7 +521,12 @@ def _print_summary(report: RunReport, degraded_to_canned: int = 0) -> None:
         judge_hint = ""
         if outcome.judge_score is not None:
             judge_hint = f"  (judge: {outcome.judge_score.overall:.2f})"
-        print(f"  {mark} {outcome.scenario}{judge_hint}")
+        elif outcome.judge_error is not None:
+            judge_hint = f"  (judge unavailable: {outcome.judge_error})"
+        class_hint = ""
+        if not outcome.report.passed:
+            class_hint = f"  [{outcome.failure_class}]"
+        print(f"  {mark} {outcome.scenario}{class_hint}{judge_hint}")
         if not outcome.report.passed:
             for dim in outcome.report.dimensions:
                 if not dim.passed:
@@ -517,6 +581,16 @@ def main() -> int:
     degraded_to_canned = sum(
         1 for s in scenarios if (s.use_live_mcp and offline_mcp) or (s.use_live_llm and offline_llm)
     )
+    if live and not offline_llm and any(s.use_live_llm for s in scenarios):
+        # One free authenticated call before anything runs: an expired key
+        # otherwise surfaces as N identical per-scenario crash rows (the
+        # 2026-08-03 campaign burned a whole smoke pass discovering this).
+        try:
+            preflight_auth(settings.anthropic_api_key.get_secret_value())
+        except LLMError as err:
+            print(f"PREFLIGHT FAIL (LLM auth): {err}")
+            print("fix ANTHROPIC_API_KEY in .env — no scenarios ran, nothing was spent")
+            return 3
     report, trajectories, briefings = run_all(scenarios, settings)
     write_report(report)
     write_trajectories(trajectories)

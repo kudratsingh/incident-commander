@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Render eval trace JSONL files as human-readable Markdown per scenario.
+"""Render eval trace JSONL files as human-readable text per scenario.
 
 Each ``evals/traces/<scenario>.jsonl`` produces one
-``evals/reports/human/<scenario>.md`` where every LLM call, MCP tool call,
+``evals/reports/human/<scenario>.txt`` where every LLM call, MCP tool call,
 and scenario boundary is a numbered, labeled step. Written for eyeball
 inspection of a full incident trajectory — the JSONL stays canonical.
 

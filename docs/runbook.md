@@ -108,7 +108,7 @@ make bootstrap-token
 # but exporting it here means every direct `evals.runner` invocation
 # also gets traced.
 export EVAL_TRACE_DIR=evals/traces \
-       VERIFY_PROBE_ATTEMPTS=4 \
+       VERIFY_PROBE_ATTEMPTS=6 \
        VERIFY_PROBE_DELAY_SECONDS=20
 
 # 1) Smoke pass FIRST — read-only scenarios catch any wire-shape
@@ -142,7 +142,7 @@ Environment variable knobs for the live path (see [ADR 0006](ADR/0006-verificati
 
 | Var | Default | Live-recommended | Meaning |
 |---|---|---|---|
-| `VERIFY_PROBE_ATTEMPTS` | 1 | 4 | Bounded polling window on VERIFYING. Default keeps canned runs single-probe. |
+| `VERIFY_PROBE_ATTEMPTS` | 1 | 6 | Bounded polling window on VERIFYING. Default keeps canned runs single-probe. 6 proved out in the 2026-08-03 campaign; size scenario caps for it. |
 | `VERIFY_PROBE_DELAY_SECONDS` | 15 | 20 | Delay between polling attempts. Size to the slowest verify probe's freshness. |
 
 All Tier-1 remediation scenarios now self-seed via `chaos_setup:` in their YAML — no separate `make chaos-*` step needed for the live pass. As of platform v0.4.7 the previously-blocked `remediate_stale_cache_success` uses the new `create_stale_cache` chaos hook and is winnable live.

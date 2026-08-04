@@ -1,6 +1,10 @@
 # ADR 0010: Scenario-owned DLQ fixtures — the inter-scenario baseline is an empty DLQ
 
-* Status: proposed (cross-repo — platform review requested before any implementation)
+* Status: accepted (platform reviewed and shipped its half — `seed_dlq_messages`
+  landed in v0.4.9 with reset-swept fixture tagging; implementation of the
+  commander half and the baseline flip is deferred to post-rerun on both
+  sides by operator decision, so the clean-baseline rerun measures the
+  v0.4.9 bridge alone)
 * Date: 2026-08-03
 * Decider: Kudrat Singh
 

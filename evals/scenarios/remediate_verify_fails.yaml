@@ -10,8 +10,13 @@ tags:
 - sad-path
 - live-mcp
 - live-llm
-use_live_mcp: true
-use_live_llm: true
+# Canned-only by design: the premise requires a live fault that verify
+# polling then fails to see cleared — a healthy platform can't supply one,
+# so the live run degenerated into judging a no-op restart. Live sad-path
+# evidence lives in docs/lessons/live-campaign-2026-08-03.md. Retargeting
+# this at a seeded dead group is a tracked post-rerun follow-up.
+use_live_mcp: false
+use_live_llm: false
 alert:
   source: platform.kafka
   severity: high

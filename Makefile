@@ -38,7 +38,7 @@ help:
 	@echo "  chaos-help       list chaos setup subcommands (kill-consumer, etc.)"
 	@echo "  eval-reg         regression eval subset"
 	@echo "  eval-reset       clear leftover chaos state between live scenarios"
-	@echo "  demo             compose up (platform pinned by digest) + live scenario"
+	@echo "  demo             compose up only (platform pinned by digest); no eval runs"
 	@echo "  demo-down        stop demo compose services"
 	@echo "  bootstrap-token  mint a service-account token against a running platform"
 	@echo "  snapshot         regenerate contracts/platform-tools.snapshot.json from live"
@@ -98,7 +98,11 @@ eval-live-remediation:
 # as an escalation instead of mutating state. The 2026-08-03 campaign's
 # "read-only" pass fired a real DLQ replay; this target closes that door.
 # Override the scenario list with SMOKE_ONLY=... if needed.
-SMOKE_ONLY ?= alert_storm,deploy_correlation,dlq_human,failed_traces,incidents_overview,multi_probe,noise_,planner_stops,postgres_slow,redis_saturation,saga_stuck,tool_,trace_investigation,consumer_lag_healthy,consumer_lag_medium,consumer_lag_missing,consumer_lag_orders,consumer_lag_payments,consumer_lag_shipping,consumer_lag_analytics,consumer_lag_high
+# dlq_human_required_escalates is deliberately NOT in this list: it
+# expects RESOLVED via mark_dlq_permanent, which the read-scoped token
+# 403s by design — guaranteed red here. It runs in the remediation
+# stage under the full token instead.
+SMOKE_ONLY ?= alert_storm,deploy_correlation,failed_traces,incidents_overview,multi_probe,noise_,planner_stops,postgres_slow,redis_saturation,saga_stuck,tool_,trace_investigation,consumer_lag_healthy,consumer_lag_medium,consumer_lag_missing,consumer_lag_orders,consumer_lag_payments,consumer_lag_shipping,consumer_lag_analytics,consumer_lag_high
 eval-smoke:
 	@if [ -z "$(PLATFORM_SMOKE_TOKEN)" ]; then \
 		echo "ERROR: PLATFORM_SMOKE_TOKEN not set. Run 'make bootstrap-token' and add it to .env" >&2; exit 2; \

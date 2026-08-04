@@ -113,10 +113,11 @@ export EVAL_TRACE_DIR=evals/traces \
 
 # 1) Smoke pass FIRST — read-only scenarios catch any wire-shape
 #    surprise from the current pin before you spend on a Tier-1
-#    remediation attempt. ~$1 of tokens. ONLY= takes comma-separated
-#    name substrings — NOT a regex; a '(a|b)' pattern matches nothing.
-#    Replay-firing dlq_* scenarios are deliberately absent here.
-make eval-live ONLY=alert_storm,deploy_correlation,dlq_human,failed_traces,incidents_overview,multi_probe,noise_,planner_stops,postgres_slow,redis_saturation,saga_stuck,tool_,trace_investigation,consumer_lag_healthy,consumer_lag_medium,consumer_lag_missing,consumer_lag_orders,consumer_lag_payments,consumer_lag_shipping,consumer_lag_analytics,consumer_lag_high
+#    remediation attempt. ~$1 of tokens. Runs under the read-scoped
+#    PLATFORM_SMOKE_TOKEN, so "read-only" is enforced by the platform
+#    (a Tier-1 attempt 403s and grades as an escalation), not by the
+#    scenario list. Override the list with SMOKE_ONLY= if needed.
+make eval-smoke
 
 # 2) Remediation scenarios, one at a time, with reset between.
 #    Each scenario declares its own chaos_setup in the YAML (PR #54).

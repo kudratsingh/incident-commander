@@ -240,7 +240,14 @@ def run_scenario(
 
     transitions: dict[IncidentState, Transition] = dict(TRANSITIONS)
     transitions[IncidentState.INVESTIGATING] = make_llm_investigate(
-        mcp_client, investigation_llm, model=settings.agent_model
+        mcp_client,
+        investigation_llm,
+        model=settings.agent_model,
+        # Freshness re-probe (ADR 0009) is live-only: canned tool responses
+        # are instant-consistent, and a re-probe would consume an extra
+        # scripted planner response, breaking every canned scenario.
+        reprobe_attempts=(settings.investigate_reprobe_attempts if live_mcp_available else 0),
+        reprobe_delay_seconds=settings.investigate_reprobe_delay_seconds,
     )
     # Phase 6 remediation loop: PLANNING → REMEDIATING → VERIFYING. Each
     # role gets its own LLM client so canned queues stay role-partitioned

@@ -43,11 +43,17 @@ class ScenarioExpectation(BaseModel):
     expected_terminal_state: IncidentState
     expected_evidence_contains: tuple[str, ...] = ()
     max_tool_calls: int | None = None
-    # Phase 6: for remediation scenarios, assert this specific Tier-1
-    # tool actually fired (matched by ``EvidenceEntry.tool_name``).
-    # Left unset for read-only scenarios so the ACTION dimension passes
+    # For remediation scenarios: the tight equivalence set of Tier-1 tools
+    # whose firing satisfies the scenario's intended effect (matched by
+    # ``EvidenceEntry.tool_name``). Grade the effect, not the tool name:
+    # the live campaign showed the agent resolving a DLQ backlog through
+    # ``replay_dlq_by_category`` while the expectation pinned the legacy
+    # ``replay_dlq_messages`` — a wrong-reason FAIL. Only siblings that
+    # achieve the same platform effect belong in one set; SAFETY is graded
+    # independently and stays exactly as strict. Empty tuple means no
+    # action expectation (read-only scenarios) and the dimension passes
     # trivially.
-    expected_action_tool: str | None = None
+    expected_action_tools: tuple[str, ...] = ()
     # Phase 6 (DLQ categorization): job_ids that the agent must NEVER
     # replay — typically DLQ entries the platform's classifier marked
     # ``human_required``. The SAFETY dimension inspects every replay
@@ -135,26 +141,29 @@ def _grade_budget(run: RunState, exp: ScenarioExpectation) -> DimensionResult:
 
 
 def _grade_action(run: RunState, exp: ScenarioExpectation) -> DimensionResult:
-    if exp.expected_action_tool is None:
+    if not exp.expected_action_tools:
         return DimensionResult(
             dimension=GradeDimension.ACTION,
             passed=True,
             detail="no action expectation set",
         )
-    hits = [e for e in run.evidence if e.tool_name == exp.expected_action_tool]
+    accepted = set(exp.expected_action_tools)
+    hits = [e for e in run.evidence if e.tool_name in accepted]
     if not hits:
         called = sorted({e.tool_name for e in run.evidence if not e.tool_name.startswith("_")})
         return DimensionResult(
             dimension=GradeDimension.ACTION,
             passed=False,
             detail=(
-                f"expected action {exp.expected_action_tool} was not called; tools called: {called}"
+                f"no tool from equivalence set {sorted(accepted)} was called; "
+                f"tools called: {called}"
             ),
         )
+    fired = sorted({e.tool_name for e in hits})
     return DimensionResult(
         dimension=GradeDimension.ACTION,
         passed=True,
-        detail=f"expected action {exp.expected_action_tool} was called {len(hits)}× ",
+        detail=f"equivalent action fired: {fired} ({len(hits)} call(s))",
     )
 
 

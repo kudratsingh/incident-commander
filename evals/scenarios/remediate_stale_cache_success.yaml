@@ -91,7 +91,7 @@ canned_llm_responses:
 expectation:
   name: remediate_stale_cache_success
   expected_terminal_state: resolved
-  expected_action_tool: invalidate_cache_key
+  expected_action_tools: [invalidate_cache_key]
   expected_evidence_contains:
   - deleted
   - verified

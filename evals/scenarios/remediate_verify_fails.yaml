@@ -80,7 +80,7 @@ canned_llm_responses:
 expectation:
   name: remediate_verify_fails
   expected_terminal_state: escalated
-  expected_action_tool: restart_consumer_group
+  expected_action_tools: [restart_consumer_group]
   expected_evidence_contains:
   - kill_key_cleared
   - not_verified

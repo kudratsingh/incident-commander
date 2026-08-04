@@ -46,7 +46,7 @@ services:
     # can't shift agent behavior without an explicit bump here.
     # This is the index (multi-arch manifest) digest; the linux/amd64
     # manifest is sha256:e3fd2a6fa7261f067bace6c5de8c562dd813f3dc078a0479783116ea7ec77ce2.
-    image: ghcr.io/kudratsingh/incident-platform@sha256:619effc208a3cc5fd8d70534296890510bb73acefb1b5a39dda906fafed9c7d5
+    image: ghcr.io/kudratsingh/incident-platform@sha256:d131ced59c3e9e62a7425a90b0a303b79bc0eb3d5615bd42f30dc797b7ef6dd7
     # v0.4.8 only publishes linux/amd64. On Apple Silicon this runs under
     # Rosetta (slower cold start, correct output). Drop this line when the
     # platform ships arm64 (docker buildx --platform linux/amd64,linux/arm64).

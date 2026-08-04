@@ -181,7 +181,7 @@
     },
     {
       "name": "get_consumer_lag",
-      "description": "Read the last-emitted Kafka consumer lag for one of the platform's consumer groups. Values come from a Redis cache — no live Kafka query. Returns null when the cache is empty. Advertised groups include worker-dispatcher (real platform group) plus 7 eval-seed groups (billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer).",
+      "description": "Read the last-emitted Kafka consumer lag for one of the platform's consumer groups. Advertised groups include worker-dispatcher (real platform group) plus 7 eval-seed groups (billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer).\nFRESHNESS: cached in Redis, refreshed by a background loop every ~60s with a 90s TTL — never a live Kafka query. Measured behaviour: after a fault begins, the cached value catches up within ~60s; after a recovery it keeps reading the old high value for ~30s before dropping. Treat any single reading as up to a minute stale, in either direction.\nA STALLED CONSUMER STILL REPORTS LAG. A consumer that has stopped processing keeps its Kafka assignment, so this metric goes on reporting its real and climbing lag rather than going null — rising lag is the expected signal of a stall, not absence of data.\nNULL means the platform could not determine lag (consumer not started, no partition assignment, or the query errored). It is deliberately not reported as 0, because a fabricated 0 would read as healthy. Null is evidence of an unhealthy or restarting consumer, but it is not the usual symptom of a stall, and it carries no lag magnitude.\nNeither a number nor a null proves liveness. Consumer-group membership is the authoritative check — a group holds its assignment and keeps reporting accurate lag for minutes after its consumer stops, without being evicted.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -230,7 +230,7 @@
     },
     {
       "name": "get_dag_state",
-      "description": "Fetch the immediate dependency graph around one job — direct parents and direct children with statuses. Use to answer 'why is this job waiting?' or 'what will unblock if I replay?'",
+      "description": "Fetch the immediate dependency graph around one job — direct parents and direct children with statuses. Use to answer 'why is this job waiting?' or 'what will unblock if I replay?' Also reports pause state: `paused` is this job's own flag, `paused_by` names the ancestor holding it back, and `paused_expires_in_seconds` counts down to automatic resume. This is the verification surface for pause_dag — a successful pause reads as paused=true with children still in `waiting`. Live read: graph and statuses come from Postgres, pause flags from Redis; both reflect the moment of the call.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -321,12 +321,44 @@
             },
             "title": "Edges",
             "type": "array"
+          },
+          "paused": {
+            "description": "True when this job carries its own pause flag — the direct result of pause_dag(root_job_id=this job).",
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "paused_expires_in_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Seconds until this job's own pause flag expires, and held children resume automatically. Null when not paused (or when the flag carries no expiry).",
+            "title": "Paused Expires In Seconds"
+          },
+          "paused_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Job id whose pause flag is holding this job back — itself, or an ancestor when the pause was applied further up the chain. Null when nothing in the ancestry is paused.",
+            "title": "Paused By"
           }
         },
         "required": [
           "seed_id",
           "nodes",
-          "edges"
+          "edges",
+          "paused"
         ],
         "title": "GetDagStateOutput",
         "type": "object"
@@ -334,7 +366,7 @@
     },
     {
       "name": "get_deploy_history",
-      "description": "Return recent deploys, newest first. Prefers the `deploy_markers` table; falls back to a single-entry env snapshot when unseeded. Useful for correlating incidents with a recent deploy — the seed script annotates one row with a `notes` string for exactly this hypothesis-testing use case.",
+      "description": "Return recent deploys, newest first. Prefers the `deploy_markers` table; falls back to a single-entry env snapshot when unseeded. Useful for correlating incidents with a recent deploy — the seed script annotates one row with a `notes` string for exactly this hypothesis-testing use case.\nFRESHNESS: live read from Postgres, no cache. Deploy markers are written by the release pipeline, so a very recent deploy may not have a row yet — absence of a marker is weak evidence that no deploy happened.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -566,7 +598,7 @@
     },
     {
       "name": "get_postgres_health",
-      "description": "Ping the primary database and read a small set of activity stats. Falls back cleanly on non-Postgres backends (SQLite in tests) — the `dialect` field tells the agent what it looked at.",
+      "description": "Ping the primary database and read a small set of activity stats. Falls back cleanly on non-Postgres backends (SQLite in tests) — the `dialect` field tells the agent what it looked at.\nFRESHNESS: live probe, measured at call time.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {},
@@ -631,7 +663,7 @@
     },
     {
       "name": "get_redis_health",
-      "description": "Ping Redis and read a short list of stats from INFO. Never raises — an `ok=false` result *is* the interesting signal.",
+      "description": "Ping Redis and read a short list of stats from INFO. Never raises — an `ok=false` result *is* the interesting signal.\nFRESHNESS: live probe, measured at call time. Reports aggregate server stats only — it does not enumerate keys, so it cannot tell you which keys exist or who wrote them.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {},
@@ -739,7 +771,7 @@
     },
     {
       "name": "get_trace",
-      "description": "Fetch every artifact carrying a given trace_id — job rows plus audit-log rows if `include_audit=true`. Useful for building a cold-start context around one incident: the trace is the correlation key that stitches the browser → API → worker → DB path.",
+      "description": "Fetch every artifact carrying a given trace_id — job rows plus audit-log rows if `include_audit=true`. Useful for building a cold-start context around one incident: the trace is the correlation key that stitches the browser → API → worker → DB path.\nFRESHNESS: live read from Postgres (jobs + audit rows), no cache and no dependency on the tracing backend — results are unaffected by whether an OTel collector is running.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -1103,7 +1135,7 @@
     },
     {
       "name": "list_active_alerts",
-      "description": "List unresolved alerts scoped to the caller's tenant. Alerts come from platform sources (SLO breach, DLQ threshold, chaos runs, etc.). Prefer receiving the HMAC-signed webhook if you can — this endpoint is a poll fallback.",
+      "description": "List unresolved alerts scoped to the caller's tenant. Alerts come from platform sources (SLO breach, DLQ threshold, chaos runs, etc.). Prefer receiving the HMAC-signed webhook if you can — this endpoint is a poll fallback.\nFRESHNESS: live read from Postgres — reflects the moment of the call, no cache.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -1216,7 +1248,7 @@
     },
     {
       "name": "list_audit_events",
-      "description": "Read the immutable audit log for the caller's tenant. Every user + agent + chaos action lands here — use it to reconcile state after a restart or to check what an operator did before the current incident. Filter by `action`, `action_prefix` (e.g. `agent.`), or `principal_type` (`user` vs `service_account`).",
+      "description": "Read the immutable audit log for the caller's tenant. Every user + agent + chaos action lands here — use it to reconcile state after a restart or to check what an operator did before the current incident. Filter by `action`, `action_prefix` (e.g. `agent.`), or `principal_type` (`user` vs `service_account`).\nFRESHNESS: live read from Postgres. Rows written directly by an action appear immediately; rows produced by the Kafka audit consumer land within a second or two of the event, so allow a moment before concluding an event is missing.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -1386,7 +1418,7 @@
     },
     {
       "name": "list_dlq_messages",
-      "description": "List jobs currently in the dead-letter state, most recent first. Each entry carries `remediation_hint` (`replay_safe`, `wait_and_replay`, `human_required`, or null) so the agent can pick a strategy without re-reasoning about the error string. Filter by `remediation_hint=<value>` to isolate one category — e.g. pass `replay_safe` before calling `replay_dlq_by_category`. Also includes the LLM triage row when present.",
+      "description": "List jobs currently in the dead-letter state, most recent first. Each entry carries `remediation_hint` (`replay_safe`, `wait_and_replay`, `human_required`, or null) so the agent can pick a strategy without re-reasoning about the error string. Filter by `remediation_hint=<value>` to isolate one category — e.g. pass `replay_safe` before calling `replay_dlq_by_category`. Also includes the LLM triage row when present.\nFRESHNESS: live read from Postgres — reflects the moment of the call, no cache. Note that entries scheduled for a delayed replay still appear here until their `execute_at` passes, so an unchanged list right after a delayed replay is expected.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -1617,7 +1649,7 @@
     },
     {
       "name": "list_incidents",
-      "description": "List incidents (alerts) scoped to the caller's tenant. Defaults to unresolved; pass `include_resolved=true` to see history. Superset of `list_active_alerts` — that tool is the cheap poll path when you know you want unresolved only.",
+      "description": "List incidents (alerts) scoped to the caller's tenant. Defaults to unresolved; pass `include_resolved=true` to see history. Superset of `list_active_alerts` — that tool is the cheap poll path when you know you want unresolved only.\nFRESHNESS: live read from Postgres — reflects the moment of the call, no cache.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -1824,7 +1856,7 @@
     },
     {
       "name": "pause_dag",
-      "description": "Pause promotion of WAITING children in the DAG rooted at `root_job_id`. The DependencyResolver consumer checks the pause key before promoting; while set, no child promotes. Effect self-cleans on TTL (default 10 minutes). Idempotent.",
+      "description": "Pause promotion of WAITING children in the DAG rooted at `root_job_id`. Observable effect: `get_dag_state(root_job_id)` returns `paused=true` with `paused_expires_in_seconds`, children stay in status `waiting`, and no new promotions occur while the flag is set. Already-RUNNING jobs are not cancelled — pause stops promotion, it does not stop work in flight. Self-cleans on TTL (default 10 minutes), after which held children promote automatically. Idempotent.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -1976,7 +2008,7 @@
     },
     {
       "name": "replay_dlq_by_category",
-      "description": "Bulk-replay every DLQ entry in one remediation category (`replay_safe` or `wait_and_replay`). Refuses `human_required` — those must go through a human review path. Bounded by `max_replays` (default 20). Idempotent.",
+      "description": "Bulk-replay every DLQ entry in one remediation category (`replay_safe` or `wait_and_replay`). Refuses `human_required` — those must go through a human review path. Bounded by `max_replays` (default 20). Idempotent.\nVERIFYING A DELAYED REPLAY: when `delay_seconds` is set, nothing is enqueued yet. The matched entries stay in status `dead_letter` and remain visible in list_dlq_messages until `execute_at` passes — a DLQ that has not shrunk is the expected state, not a failed replay. Verify with the `scheduled` count in this response and the `job.replay_scheduled` audit events, not with DLQ size. Re-check DLQ size only after `execute_at`.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -2090,7 +2122,7 @@
     },
     {
       "name": "replay_dlq_by_ids",
-      "description": "Replay a specific set of DLQ jobs by ID. Safer than `replay_dlq_messages(job_type, limit)` when the agent has already picked entries from `list_dlq_messages`. Immediate replay hits the existing JobService path (reset retry_count, re-publish to job.submitted via the outbox). Pass `delay_seconds` (1..3600) to defer the enqueue for the `wait_and_replay` category — the platform schedules on a Redis ZSET and a worker loop fires the replay when the delay elapses. Returns per-id outcome so a partial replay is observable. Idempotent.",
+      "description": "Replay a specific set of DLQ jobs by ID. Safer than `replay_dlq_messages(job_type, limit)` when the agent has already picked entries from `list_dlq_messages`. Immediate replay hits the existing JobService path (reset retry_count, re-publish to job.submitted via the outbox). Pass `delay_seconds` (1..3600) to defer the enqueue for the `wait_and_replay` category — the platform schedules on a Redis ZSET and a worker loop fires the replay when the delay elapses. Returns per-id outcome so a partial replay is observable. Idempotent.\nVERIFYING A DELAYED REPLAY: a scheduled entry is not replayed yet. It stays in status `dead_letter` and keeps appearing in list_dlq_messages until `execute_at` passes — an unchanged DLQ is the expected state, not a failure. Verify with the `scheduled` outcomes in this response and the `job.replay_scheduled` audit events, not with DLQ shrink. Re-check DLQ size only after `execute_at`.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -2314,7 +2346,7 @@
     },
     {
       "name": "restart_consumer_group",
-      "description": "Clear the chaos kill flag AND any injected latency on a Kafka consumer group so its supervisor restarts it at full speed. Compensating counterpart to both `kill_consumer` and `inject_latency`; use this to end a chaos run cleanly. Idempotent — repeat calls with the same idempotency_key are safe.",
+      "description": "Restart a stalled Kafka consumer group and clear any throttling applied to it, so its supervisor brings it back at full speed. `kill_key_cleared` / `latency_key_cleared` report whether each condition was actually present. Idempotent — repeat calls with the same idempotency_key are safe.\nVERIFYING: a real restart brings the consumer back within a few seconds (measured ~2s). Confirm via group membership and draining lag — not via get_consumer_lag alone, whose cached value keeps reading the pre-restart high for ~30s after a genuine recovery. `kill_key_cleared: false` with an unchanged consumer is the signature of a reused idempotency_key replaying an old success rather than acting.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -2325,7 +2357,7 @@
             "type": "string"
           },
           "idempotency_key": {
-            "description": "Caller-supplied token. Repeat calls with the same value + same arguments return the same result without re-executing.",
+            "description": "Caller-supplied token. Repeat calls with the same value + same arguments return the cached result WITHOUT re-executing — including `accepted: true`. Reusing a key from an earlier incident therefore looks like a success and does nothing. Use a fresh key per distinct intent; only reuse one to retry the very same call after a transport failure.",
             "maxLength": 255,
             "minLength": 8,
             "title": "Idempotency Key",
@@ -2349,17 +2381,9 @@
             "title": "Kill Key Cleared",
             "type": "boolean"
           },
-          "kill_key": {
-            "title": "Kill Key",
-            "type": "string"
-          },
           "latency_key_cleared": {
             "title": "Latency Key Cleared",
             "type": "boolean"
-          },
-          "latency_key": {
-            "title": "Latency Key",
-            "type": "string"
           },
           "accepted": {
             "title": "Accepted",
@@ -2369,9 +2393,7 @@
         "required": [
           "consumer_group",
           "kill_key_cleared",
-          "kill_key",
           "latency_key_cleared",
-          "latency_key",
           "accepted"
         ],
         "title": "RestartConsumerGroupOutput",
@@ -2552,6 +2574,84 @@
           "matches"
         ],
         "title": "SearchTracesOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "seed_dlq_messages",
+      "description": "[chaos: environment_wide] Seed N dead-letter rows with a declared `remediation_hint`, `job_type`, and error string. Lets a scenario own the DLQ state it is graded against instead of inheriting a standing fixture pool. Rows are tagged as seeded fixtures and removed by the next eval reset. Written directly to `jobs`; doesn't touch Kafka.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "remediation_hint": {
+            "description": "Category stamped on every row: `replay_safe`, `wait_and_replay`, or `human_required`. Drives which branch of the agent's remediation logic the rows exercise.",
+            "title": "Remediation Hint",
+            "type": "string"
+          },
+          "count": {
+            "default": 1,
+            "description": "How many rows to create. Capped so a scenario can't accidentally flood the DLQ.",
+            "maximum": 50,
+            "minimum": 1,
+            "title": "Count",
+            "type": "integer"
+          },
+          "job_type": {
+            "default": "bulk_api_sync",
+            "description": "Type stamped on each row. Should match a real processor type so downstream reasoning stays plausible.",
+            "title": "Job Type",
+            "type": "string"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Error string for every row. Defaults to a realistic string matching the declared remediation_hint.",
+            "title": "Error Message"
+          }
+        },
+        "required": [
+          "remediation_hint"
+        ],
+        "title": "SeedDlqMessagesInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "job_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Job Ids",
+            "type": "array"
+          },
+          "remediation_hint": {
+            "title": "Remediation Hint",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "accepted": {
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "job_ids",
+          "remediation_hint",
+          "count",
+          "accepted"
+        ],
+        "title": "SeedDlqMessagesOutput",
         "type": "object"
       }
     }

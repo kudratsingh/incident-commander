@@ -93,9 +93,7 @@ def _successful_action() -> ToolResult:
                     {
                         "consumer_group": "worker-dispatcher",
                         "kill_key_cleared": True,
-                        "kill_key": "chaos:kill:worker-dispatcher",
                         "latency_key_cleared": False,
-                        "latency_key": "",
                         "accepted": True,
                     }
                 ),

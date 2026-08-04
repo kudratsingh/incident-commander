@@ -19,10 +19,18 @@ alert:
   fingerprint: saga_runaway
   job_id: 25220882-1820-5cd3-b09b-f866ff5823c9
 canned_tool_responses:
+  # Sequenced (v0.4.9 enforced-pause semantics): investigation reads the
+  # unpaused DAG; the post-pause_dag verify probe reads paused=true with a
+  # live expiry. Children stay `waiting` — pause halts promotion, it does
+  # not flip node statuses (docs/lessons/live-campaign-2026-08-03.md).
   get_dag_state:
-    content:
+  - content:
     - type: text
-      text: '{"seed_id":"25220882-1820-5cd3-b09b-f866ff5823c9","nodes":[{"id":"n1","type":"reserve_inventory","status":"succeeded","retry_count":0,"created_at":"2026-07-30T10:00:00Z"},{"id":"n2","type":"charge_card","status":"running","retry_count":5,"created_at":"2026-07-30T10:01:00Z"},{"id":"n3","type":"ship_order","status":"waiting","retry_count":0,"created_at":"2026-07-30T10:01:00Z"}],"edges":[{"from_id":"n1","to_id":"n2"},{"from_id":"n2","to_id":"n3"}]}'
+      text: '{"seed_id":"25220882-1820-5cd3-b09b-f866ff5823c9","nodes":[{"id":"n1","type":"reserve_inventory","status":"succeeded","retry_count":0,"created_at":"2026-07-30T10:00:00Z"},{"id":"n2","type":"charge_card","status":"running","retry_count":5,"created_at":"2026-07-30T10:01:00Z"},{"id":"n3","type":"ship_order","status":"waiting","retry_count":0,"created_at":"2026-07-30T10:01:00Z"}],"edges":[{"from_id":"n1","to_id":"n2"},{"from_id":"n2","to_id":"n3"}],"paused":false,"paused_expires_in_seconds":null,"paused_by":null}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"seed_id":"25220882-1820-5cd3-b09b-f866ff5823c9","nodes":[{"id":"n1","type":"reserve_inventory","status":"succeeded","retry_count":0,"created_at":"2026-07-30T10:00:00Z"},{"id":"n2","type":"charge_card","status":"running","retry_count":5,"created_at":"2026-07-30T10:01:00Z"},{"id":"n3","type":"ship_order","status":"waiting","retry_count":0,"created_at":"2026-07-30T10:01:00Z"}],"edges":[{"from_id":"n1","to_id":"n2"},{"from_id":"n2","to_id":"n3"}],"paused":true,"paused_expires_in_seconds":540,"paused_by":"incident-commander"}'
     is_error: false
   pause_dag:
     content:
@@ -62,11 +70,10 @@ canned_llm_responses:
     verify_tool: get_dag_state
     verify_arguments:
       job_id: 25220882-1820-5cd3-b09b-f866ff5823c9
-    verify_expectation: "Downstream nodes should stay in waiting/pending state \u2014 no new children promoted while the pause key holds. The pause auto- expires after 10 minutes so operators have time\
-      \ to investigate.\n"
+    verify_expectation: "get_dag_state returns paused=true with a positive paused_expires_in_seconds \u2014 the enforced pause is active. Children remain in status waiting (pause halts promotion; it does not change node statuses or cancel running work) and no new promotions occur. The pause self-expires so operators have time to investigate.\n"
   verification_judge:
   - verdict: verified
-    reasoning: 'pause_dag returned accepted=true with a valid pause_key + TTL. The get_dag_state probe still shows charge_card and ship_order in non-terminal states, consistent with the pause holding.
+    reasoning: 'The verify probe shows paused=true with paused_expires_in_seconds=540 — the enforced pause is active and observable. Children remain in waiting as expected (pause halts promotion without flipping node statuses), and no new promotions appear.
 
       '
   briefing_writer:
@@ -88,5 +95,7 @@ expectation:
   expected_action_tools: [pause_dag]
   expected_evidence_contains:
   - pause_key
-  - verified
+  # v0.4.9 observable effect — replaces the old `verified` assert, which
+  # was substring-fake-green (it also matches `not_verified`; see PR #64).
+  - '"paused":true'
   max_tool_calls: 8

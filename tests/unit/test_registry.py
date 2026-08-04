@@ -43,20 +43,18 @@ def snapshot() -> dict[str, Any]:
 
 class TestCoverage:
     def test_registry_covers_every_snapshot_tool(self, snapshot: dict[str, Any]) -> None:
-        snapshot_names = {t["name"] for t in snapshot["tools"]}
-        # Chaos tools live on the platform but the agent never invokes them
-        # via the typed registry — they're operator concerns wrapped by
-        # scripts/chaos_setup.py (raw httpx, outside the agent trust boundary).
-        chaos_tools = {
-            "kill_consumer",
-            "poison_message",
-            "saturate_redis",
-            "inject_latency",
-            "bad_deploy",
-            "create_bad_data_job",  # v0.4.0 addition
-            "create_stale_cache",  # v0.4.7 addition — seeds hot_set for the stale-cache scenario
+        # Chaos/seed tools live on the platform but the agent never invokes
+        # them via the typed registry — they're operator/eval concerns
+        # wrapped by scripts/chaos_setup.py and the runner's chaos hooks
+        # (raw httpx, outside the agent trust boundary). Since v0.4.9 the
+        # platform marks them with a "[chaos: ...]" description prefix, so
+        # the filter is structural instead of a hand-list that drifted on
+        # every new hook (seed_dlq_messages was the third time).
+        expected = {
+            t["name"]
+            for t in snapshot["tools"]
+            if not t.get("description", "").startswith("[chaos:")
         }
-        expected = snapshot_names - chaos_tools
         assert set(TOOL_REGISTRY) == expected, (
             f"Registry drift vs snapshot. "
             f"Missing: {expected - set(TOOL_REGISTRY)}. "

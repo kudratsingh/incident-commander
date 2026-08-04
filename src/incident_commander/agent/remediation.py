@@ -38,7 +38,7 @@ from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError
 from incident_commander.tools.policies import RESOURCE_ARG_FIELDS, Tier, tier_of
-from incident_commander.tools.registry import TOOL_REGISTRY
+from incident_commander.tools.registry import TOOL_REGISTRY, description_of
 from incident_commander.tools.wire import wire_arguments
 
 # Every Tier-1 tool the platform exposes today. Kept hand-listed for the
@@ -319,16 +319,14 @@ def _format_plan_context(run_state: RunState, top_hypothesis_name: str) -> str:
     evidence_dump = "\n".join(
         f"  - [{e.tool_name}] {e.result_summary[:200]}" for e in run_state.evidence
     )
+    # Descriptions are mirrored verbatim from the platform contract and are
+    # load-bearing here: the planner authors action choices AND the verify
+    # expectation from them (delayed-replay semantics, freshness windows,
+    # pause_dag's observable effect).
     tier_1_tools = sorted(name for name in TOOL_REGISTRY if tier_of(name) is Tier.TIER_1)
-    tier_1_dump = "\n".join(
-        f"  - {name}: input_schema={json.dumps(TOOL_REGISTRY[name].input_model.model_json_schema())}"  # noqa: E501
-        for name in tier_1_tools
-    )
+    tier_1_dump = "\n".join(_tool_context_block(name) for name in tier_1_tools)
     read_tools = sorted(name for name in TOOL_REGISTRY if tier_of(name) is Tier.READ)
-    read_dump = "\n".join(
-        f"  - {name}: input_schema={json.dumps(TOOL_REGISTRY[name].input_model.model_json_schema())}"  # noqa: E501
-        for name in read_tools
-    )
+    read_dump = "\n".join(_tool_context_block(name) for name in read_tools)
     # The alert is included verbatim: resource-naming arguments must be
     # copied exactly from platform-produced values (alert + tool results),
     # and the campaign showed the planner otherwise only sees resource
@@ -566,6 +564,13 @@ def make_llm_verify(
         return run_state.with_state(IncidentState.ESCALATED, at)
 
     return transition_verify
+
+
+def _tool_context_block(name: str) -> str:
+    description = description_of(name) or "(no description)"
+    schema = json.dumps(TOOL_REGISTRY[name].input_model.model_json_schema())
+    indented = description.replace("\n", "\n    ")
+    return f"  - {name}: {indented}\n    input_schema={schema}"
 
 
 def _format_verify_context(plan: RemediationPlan, probe_summary: str) -> str:

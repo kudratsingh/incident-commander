@@ -248,9 +248,7 @@ class TestRemediating:
                             {
                                 "consumer_group": args["consumer_group"],
                                 "kill_key_cleared": True,
-                                "kill_key": f"chaos:kill:{args['consumer_group']}",
                                 "latency_key_cleared": False,
-                                "latency_key": "",
                                 "accepted": True,
                             }
                         ),
@@ -314,9 +312,7 @@ class TestRemediating:
                                 {
                                     "consumer_group": arguments["consumer_group"],
                                     "kill_key_cleared": True,
-                                    "kill_key": "k",
                                     "latency_key_cleared": False,
-                                    "latency_key": "",
                                     "accepted": True,
                                 }
                             ),
@@ -344,7 +340,6 @@ class TestRemediating:
                                 "kill_key_cleared": True,
                                 "kill_key": "k",
                                 "latency_key_cleared": False,
-                                "latency_key": "",
                                 "accepted": True,
                             }
                         ),
@@ -501,7 +496,6 @@ class TestSingleAttemptInvariant:
                                 "kill_key_cleared": True,
                                 "kill_key": "k",
                                 "latency_key_cleared": False,
-                                "latency_key": "",
                                 "accepted": True,
                             }
                         ),

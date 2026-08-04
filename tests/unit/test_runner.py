@@ -530,3 +530,22 @@ class TestFailureClassification:
             scenario, RuntimeError("scenario 'x' chaos_setup 'create_stale_cache' failed")
         )
         assert env.outcome.failure_class == "shared-env"
+
+
+class TestCannedSequencing:
+    def test_sequence_consumed_in_order_and_last_repeats(self) -> None:
+        a = ToolResult(content=[{"type": "text", "text": '{"paused": false}'}])
+        b = ToolResult(content=[{"type": "text", "text": '{"paused": true}'}])
+        client = CannedMCPClient({"get_dag_state": (a, b)})
+        first = client.call_tool("get_dag_state", {})
+        second = client.call_tool("get_dag_state", {})
+        third = client.call_tool("get_dag_state", {})
+        assert first is a
+        assert second is b
+        assert third is b  # last repeats: verify polling must not crash
+
+    def test_single_response_served_forever(self) -> None:
+        a = ToolResult(content=[{"type": "text", "text": "{}"}])
+        client = CannedMCPClient({"get_consumer_lag": a})
+        assert client.call_tool("get_consumer_lag", {}) is a
+        assert client.call_tool("get_consumer_lag", {}) is a

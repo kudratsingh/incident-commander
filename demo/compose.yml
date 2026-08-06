@@ -1,6 +1,6 @@
 # Live demo: minimal platform footprint sufficient for read-only MCP.
 #
-# Pinned to the incident-platform v0.4.8 release by digest so the agent's
+# Pinned to the incident-platform v0.4.9 release by digest so the agent's
 # contract expectations don't shift under us. Bump the digest whenever the
 # platform ships a new release and rerun `make eval-live` to catch drift.
 #
@@ -41,14 +41,14 @@ services:
       retries: 5
 
   platform:
-    # incident-platform v0.4.8. Do not switch to `:latest` — the whole point
-    # of pinning by digest is that a platform-side prompt or schema change
-    # can't shift agent behavior without an explicit bump here.
-    # This is the index (multi-arch manifest) digest; the linux/amd64
-    # manifest is sha256:e3fd2a6fa7261f067bace6c5de8c562dd813f3dc078a0479783116ea7ec77ce2.
-    image: ghcr.io/kudratsingh/incident-platform@sha256:d131ced59c3e9e62a7425a90b0a303b79bc0eb3d5615bd42f30dc797b7ef6dd7
-    # v0.4.8 only publishes linux/amd64. On Apple Silicon this runs under
-    # Rosetta (slower cold start, correct output). Drop this line when the
+    # incident-platform v0.4.9 (digest published by the platform release).
+    # Do not switch to `:latest` — the whole point of pinning by digest is
+    # that a platform-side prompt or schema change can't shift agent
+    # behavior without an explicit bump here.
+    image: ghcr.io/kudratsingh/incident-platform@sha256:a73f16ac8d926baa9609dadc082b52099b466a8000be07fb3bef4a7d8d5d6aea
+    # v0.4.9 publishes linux/amd64 only. On Apple Silicon this runs under
+    # Rosetta (slower cold start, correct output) — REQUIRED there; without
+    # it `make demo` fails to resolve a runnable manifest. Drop when the
     # platform ships arm64 (docker buildx --platform linux/amd64,linux/arm64).
     platform: linux/amd64
     # Host port is env-configurable so a native platform (or anything else)

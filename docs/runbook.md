@@ -188,6 +188,16 @@ open evals/reports/human/redis_saturation.txt
 
 For deeper introspection, `evals/trajectories/<scenario>.json` has every `RunState` checkpoint (state, evidence, hypotheses over time).
 
+## Contract-test target (constraint in force)
+
+**Run contract tests ONLY against the pinned demo stack until further
+notice.** Platform master currently serves one more tool than the v0.4.9
+tag (a dormant, flag-off addition), and no new tag lands until the
+clean-baseline rerun completes. A contract check against the dev stack
+will therefore fail **by design** — that is master drift, not drift in
+the pinned artifact, and it must not trigger a snapshot rebless from the
+dev stack. Bless snapshots from the pinned stack only.
+
 ## Bumping the pinned platform image
 
 Platform ships a new digest → three steps on the agent side:

@@ -155,12 +155,13 @@ PLATFORM_COMPOSE ?= ../incident-platform/docker-compose.yml
 # Compose service name running the platform app. The dev stack calls it
 # `app`; the pinned demo stack may name it differently.
 PLATFORM_SERVICE ?= app
-# PYTHONPATH prepend below is a v0.4.8 workaround: reset_eval_state.py
-# does `from scripts import seed_eval_fixtures` which needs /app on the
-# path. The image ships PYTHONPATH=/app/backend for the app process
-# itself. Prepend /app so both roots resolve. Drop the -e override once
-# platform ships the script with explicit path setup or moves
-# seed_eval_fixtures under backend/.
+# PYTHONPATH prepend below: reset_eval_state.py does
+# `from scripts import seed_eval_fixtures`, which needs /app on the path
+# while the image ships PYTHONPATH=/app/backend for the app process.
+# REQUIRED until a post-v0.4.9 image ships the sys.path fix (parked in
+# platform #92) — do not remove. The v0.4.9 image fails eval-reset
+# without this override; the fix exists on platform master but is
+# deliberately untagged until after the rerun.
 eval-reset:
 	@echo "eval-reset: full seed reset via platform reset_eval_state.py..."
 	@if [ ! -f "$(PLATFORM_COMPOSE)" ]; then \

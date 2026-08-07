@@ -79,13 +79,16 @@ services:
     depends_on:
       redpanda:
         condition: service_healthy
+    # Idempotent, unlike the dev compose's verbatim init: `rpk topic
+    # create` exits 1 on an existing topic, and `make demo` re-runs on a
+    # live stack fail at --wait if this one-shot hard-fails. TOPIC_ALREADY
+    # _EXISTS is success for our purposes; real broker failures still
+    # surface when the consumers boot.
     entrypoint: >
       /bin/bash -c "
-        rpk topic create job.submitted --brokers=redpanda:9092 --partitions=6 --replicas=1 &&
-        rpk topic create job.progress  --brokers=redpanda:9092 --partitions=6 --replicas=1 &&
-        rpk topic create job.completed --brokers=redpanda:9092 --partitions=6 --replicas=1 &&
-        rpk topic create job.failed    --brokers=redpanda:9092 --partitions=6 --replicas=1 &&
-        rpk topic create job.dlq       --brokers=redpanda:9092 --partitions=6 --replicas=1
+        for t in job.submitted job.progress job.completed job.failed job.dlq; do
+          rpk topic create $$t --brokers=redpanda:9092 --partitions=6 --replicas=1 || true;
+        done
       "
 
   migrate:

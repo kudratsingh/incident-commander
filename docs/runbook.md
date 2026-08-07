@@ -101,6 +101,10 @@ Written after the Phase-6 seven-run live eval that produced the five-bucket nois
 
 ```bash
 # Bring-up. `make demo` now stops after compose-up (no embedded eval).
+# Expect FIVE long-running healthy containers (postgres, redis, redpanda,
+# platform=MCP on 8001, api=REST+consumers on 8000) plus two exited
+# one-shots (migrate, redpanda-init). Three healthy containers means the
+# pre-completion compose — no consumers, no consumer_lag scenarios.
 make demo
 make bootstrap-token
 

@@ -1,17 +1,30 @@
-# Live demo: minimal platform footprint sufficient for read-only MCP.
+# Live demo: full platform footprint sufficient for remediation eval.
 #
 # Pinned to the incident-platform v0.4.9 release by digest so the agent's
-# contract expectations don't shift under us. Bump the digest whenever the
-# platform ships a new release and rerun `make eval-live` to catch drift.
+# contract expectations don't shift under us. Every platform-code service
+# below uses the SAME pinned digest. Bump the digest whenever the platform
+# ships a new release and rerun `make eval-live` to catch drift.
 #
-# Services:
-#   postgres  — platform's system of record (agent uses its own DB, not this)
-#   redis     — platform's cache / pub-sub
-#   platform  — MCP process only (the REST/frontend surfaces aren't needed
-#               for read-only eval)
+# Services (5 long-running + 2 one-shots):
+#   postgres      — platform's system of record (agent uses its own DB)
+#   redis         — platform's cache / pub-sub
+#   redpanda      — Kafka API (consumer-lag scenarios need real consumers);
+#                   redpanda-init (one-shot) creates the 6-partition topics
+#   migrate       — one-shot alembic upgrade; app services wait on it so
+#                   two services never race the schema
+#   platform      — standalone MCP process (port 8001)
+#   api           — REST app on 8000. ALSO hosts the consumer groups: the
+#                   dev stack runs no separate worker service — the single
+#                   worker process (8 consumer groups incl. worker-dispatcher)
+#                   lives inside this process. The traffic loop and future
+#                   bootstrap_agent_token REST mints need this too.
 #
 # The agent process is not part of this compose. It runs on the host so
 # `make eval-live` can reach the MCP endpoint at http://localhost:8001/mcp.
+#
+# Deliberately absent vs the dev stack: minio (report_gen artifact storage)
+# and jaeger (OTLP). If stage-2 job processing turns out to need storage,
+# add minio here rather than pointing at a host service.
 
 name: incident-commander-demo
 
@@ -40,6 +53,56 @@ services:
       timeout: 5s
       retries: 5
 
+  redpanda:
+    # Copied from the dev compose (config parity — env drift between
+    # stacks is platform bug #69's class). No host port publish: the
+    # agent's rpk checks run via `docker compose exec redpanda rpk`.
+    image: redpandadata/redpanda:latest
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=512M
+      - --overprovisioned
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info", "--brokers=localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redpanda-init:
+    # One-shot: creates the 6-partition topics the dispatcher consumes.
+    # Copied verbatim from the dev compose.
+    image: redpandadata/redpanda:latest
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: >
+      /bin/bash -c "
+        rpk topic create job.submitted --brokers=redpanda:9092 --partitions=6 --replicas=1 &&
+        rpk topic create job.progress  --brokers=redpanda:9092 --partitions=6 --replicas=1 &&
+        rpk topic create job.completed --brokers=redpanda:9092 --partitions=6 --replicas=1 &&
+        rpk topic create job.failed    --brokers=redpanda:9092 --partitions=6 --replicas=1 &&
+        rpk topic create job.dlq       --brokers=redpanda:9092 --partitions=6 --replicas=1
+      "
+
+  migrate:
+    # One-shot schema migration, mirroring the dev compose's migrate
+    # service: with two app-code services (mcp + api) neither should
+    # race `alembic upgrade head` at boot.
+    image: ghcr.io/kudratsingh/incident-platform@sha256:a73f16ac8d926baa9609dadc082b52099b466a8000be07fb3bef4a7d8d5d6aea
+    platform: linux/amd64
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
+      PYTHONPATH: /app/backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
   platform:
     # incident-platform v0.4.9 (digest published by the platform release).
     # Do not switch to `:latest` — the whole point of pinning by digest is
@@ -60,6 +123,13 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
       REDIS_URL: redis://redis:6379/0
       ENVIRONMENT: development
+      # poison_message is the only MCP tool that opens a direct Kafka
+      # connection. The config default is localhost:9092, which inside a
+      # container resolves to the container itself — missing this env var
+      # on the mcp service was the cause of poison_message -32603 in
+      # v0.4.0→v0.4.2 (dev compose documents the same). Stage-2 chaos
+      # hooks fire on THIS service, so parity here is load-bearing.
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
       # Image WORKDIR is /app, but Python roots live under /app/backend
       # (`import app.models.*`, `from app.config import ...`). The image's
       # entrypoint.sh sets this; we override `command:` to run the standalone
@@ -81,12 +151,70 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command:
-      - /bin/sh
-      - -c
-      - "alembic upgrade head && uvicorn app.mcp.standalone:app --host 0.0.0.0 --port 8001"
+      - uvicorn
+      - app.mcp.standalone:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  api:
+    # REST app on 8000 — dev-compose `app` parity, same pinned digest.
+    # This process ALSO hosts the consumer groups (worker-dispatcher et
+    # al.): the dev stack has no separate worker service; the single
+    # worker process lives here. Without this service the pinned stack
+    # has no consumers, no lag, and no job intake — consumer_lag
+    # scenarios were unhostable on the 3-service demo.
+    # Env copied deliberately from the dev compose's `app` service
+    # (drift between services is platform bug #69's class); minio/jaeger
+    # endpoints omitted with the services (see header note).
+    image: ghcr.io/kudratsingh/incident-platform@sha256:a73f16ac8d926baa9609dadc082b52099b466a8000be07fb3bef4a7d8d5d6aea
+    platform: linux/amd64
+    ports:
+      - "${DEMO_API_HOST_PORT:-8000}:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: development
+      DEBUG: "true"
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      PYTHONPATH: /app/backend
+      # Seeding stays on the `platform` (MCP) service ONLY — exactly one
+      # seeder, no double-seed.
+      SEED_EVAL_FIXTURES: "false"
+      # Must match the platform service's setting (chaos gate asserts at
+      # startup; the kill flag is honored by the consumers in THIS
+      # process).
+      CHAOS_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
       interval: 10s
       timeout: 5s
       retries: 5

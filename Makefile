@@ -184,8 +184,14 @@ eval-reg: eval
 # behaviour but read as failures in the summary. Land the first live
 # LLM spend inside the deliberate read-only smoke pass instead — see
 # docs/runbook.md for the protocol.
+# --wait is scoped to the five long-running services: compose fails the
+# wait when a one-shot (migrate, redpanda-init) exits during the watch
+# window, which happens on every re-up. depends_on still runs both
+# one-shots first; their failures surface through the services that
+# gate on service_completed_successfully.
 demo:
-	docker compose -f demo/compose.yml up -d --wait
+	docker compose -f demo/compose.yml up -d --wait \
+		postgres redis redpanda platform api
 	@echo "Platform up. Next: 'make bootstrap-token' + follow the protocol"
 	@echo "in docs/runbook.md#live-eval-protocol-post-hardening."
 	@echo "Stop with 'make demo-down'."

@@ -187,11 +187,18 @@ class MCPClient:
 def make_client(
     settings: Settings,
     tracer: Callable[[dict[str, Any]], None] | None = None,
+    token: str | None = None,
 ) -> MCPClient:
-    """Build a client from Settings — the app-code entry point."""
+    """Build a client from Settings — the app-code entry point.
+
+    ``token`` overrides ``settings.platform_token`` for callers that must
+    run under a different principal (the eval runner's read-scoped smoke
+    mode). Explicit beats ambient: the previous approach threaded the
+    smoke token through make's environment and lost it to `-include .env`.
+    """
     return MCPClient(
         base_url=str(settings.platform_mcp_url),
-        token=settings.platform_token.get_secret_value(),
+        token=token or settings.platform_token.get_secret_value(),
         tracer=tracer,
     )
 

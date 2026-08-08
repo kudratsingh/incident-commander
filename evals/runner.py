@@ -20,6 +20,11 @@ from evals.graders.deterministic import (
     grade,
 )
 from evals.graders.llm_judge import JudgeScore, judge_briefing
+from evals.guards import (
+    PrincipalGuardError,
+    assert_no_tier1_successes,
+    assert_read_only_principal,
+)
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
 from evals.tracing import JsonlTracer, tracer_for
@@ -39,7 +44,12 @@ from incident_commander.config import Settings
 from incident_commander.llm.client import LLMClient, LLMClientProtocol, LLMError, preflight_auth
 from incident_commander.llm.fakes import CannedLLMClient
 from incident_commander.persistence.memory import InMemoryCheckpointer
-from incident_commander.tools.mcp_client import MCPClient, MCPClientProtocol, make_client
+from incident_commander.tools.mcp_client import (
+    MCPClient,
+    MCPClientProtocol,
+    MCPError,
+    make_client,
+)
 
 _EVAL_PLACEHOLDER_HOST = "eval.local"
 _EVAL_PLACEHOLDER_API_KEY = "eval"
@@ -119,6 +129,7 @@ def run_scenario(
     scenario: Scenario,
     settings: Settings,
     clock: Callable[[], datetime] | None = None,
+    mcp_token: str | None = None,
 ) -> ScenarioResult:
     """Drive one scenario end-to-end and grade the result.
 
@@ -191,6 +202,7 @@ def run_scenario(
         live_mcp_client = make_client(
             settings,
             tracer=tracer.mcp_hook() if tracer else None,
+            token=mcp_token,
         )
         mcp_client = live_mcp_client
     else:
@@ -428,6 +440,7 @@ def run_all(
     scenarios: Iterable[Scenario],
     settings: Settings,
     clock: Callable[[], datetime] | None = None,
+    mcp_token: str | None = None,
 ) -> tuple[RunReport, tuple[Trajectory, ...], tuple[EscalationBriefing, ...]]:
     # run_scenario falls back to canned when env is placeholder; nothing
     # is skipped here. Per-scenario crashes are captured as failed outcomes
@@ -435,7 +448,7 @@ def run_all(
     results: list[ScenarioResult] = []
     for scenario in scenarios:
         try:
-            results.append(run_scenario(scenario, settings, clock))
+            results.append(run_scenario(scenario, settings, clock, mcp_token=mcp_token))
         except Exception as exc:  # noqa: BLE001 — deliberate: don't abort suite
             print(f"  CRASH {scenario.name}: {type(exc).__name__}: {exc}")
             results.append(_crashed_result(scenario, exc))
@@ -573,8 +586,21 @@ def _parse_only(argv: list[str]) -> list[str]:
 
 def main() -> int:
     live = "--live" in sys.argv[1:]
+    # Smoke mode selects the read-scoped principal from Settings directly.
+    # It is NOT plumbed through the shell: exporting PLATFORM_TOKEN from a
+    # make recipe was silently overridden by `-include .env` (PR #62 vs
+    # #69), so every "read-scoped" smoke run before 2026-08-07 actually
+    # held write scope. Config in, guard at point of use.
+    smoke = "--smoke" in sys.argv[1:]
     only_patterns = _parse_only(sys.argv[1:])
     settings = _settings_for_mode(live)
+    mcp_token: str | None = None
+    if smoke:
+        if settings.platform_smoke_token is None:
+            print("SMOKE FAIL: PLATFORM_SMOKE_TOKEN is not set in .env")
+            print("run `make bootstrap-token` and add the read-scoped token")
+            return 3
+        mcp_token = settings.platform_smoke_token.get_secret_value()
     scenarios = load_scenarios(_SCENARIOS_DIR)
     if only_patterns:
         # OR-match: scenario keeps if any pattern is a substring of its name.
@@ -598,12 +624,51 @@ def main() -> int:
             print(f"PREFLIGHT FAIL (LLM auth): {err}")
             print("fix ANTHROPIC_API_KEY in .env — no scenarios ran, nothing was spent")
             return 3
-    report, trajectories, briefings = run_all(scenarios, settings)
+    # Guard the principal at point of use, against the live platform,
+    # before a single scenario (or dollar) is spent. v0.4.9 exposes no
+    # whoami/introspection tool, so this is a negative probe: a Tier-1
+    # call with invalid arguments must be refused on SCOPE. The handler
+    # checks scope before parsing arguments, so it cannot execute under
+    # either token — the two outcomes are distinguishable and safe.
+    stage_started_at = datetime.now(UTC)
+    if smoke and live:
+        try:
+            guard_client = make_client(settings, token=mcp_token)
+            try:
+                assert_read_only_principal(guard_client)
+            finally:
+                guard_client.close()
+        except PrincipalGuardError as err:
+            print(f"PRINCIPAL GUARD FAIL: {err}")
+            print("no scenarios ran, nothing was spent")
+            return 4
+        print("principal guard: token is read-scoped (negative probe refused on scope)")
+
+    report, trajectories, briefings = run_all(scenarios, settings, mcp_token=mcp_token)
     write_report(report)
     write_trajectories(trajectories)
     ran_names = [o.scenario for o in report.outcomes]
     write_briefings(briefings, ran_names)
     _print_summary(report, degraded_to_canned=degraded_to_canned)
+
+    # Post-stage assertion, graded from the platform audit log rather than
+    # the agent's own trajectory (CLAUDE.md invariant 6). This is the exact
+    # evidence that exposed the token bug — now automatic.
+    if smoke and live:
+        try:
+            audit_client = make_client(settings, token=mcp_token)
+            try:
+                assert_no_tier1_successes(audit_client, stage_started_at)
+            finally:
+                audit_client.close()
+        except PrincipalGuardError as err:
+            print(f"POST-STAGE AUDIT FAIL: {err}")
+            return 5
+        except MCPError as err:
+            print(f"POST-STAGE AUDIT INCONCLUSIVE (audit read failed): {err}")
+            return 5
+        print("post-stage audit: zero successful Tier-1 actions during the smoke stage")
+
     return 0 if report.failed == 0 else 1
 
 

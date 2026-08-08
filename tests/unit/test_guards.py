@@ -98,3 +98,52 @@ class TestPostStageAudit:
             _result([_audit("mark_dlq_permanent", "success", since - timedelta(hours=2))])
         )
         assert assert_no_tier1_successes(client, since) == []
+
+
+class TestFailsClosed:
+    """An unverified control is an unmet precondition, never a warning."""
+
+    def test_transport_error_fails_closed(self) -> None:
+        client = _Client(MCPError(-32000, "transport error after 3 attempts"))
+        with pytest.raises(PrincipalGuardError):
+            assert_read_only_principal(client)
+
+    def test_unexpected_exception_type_fails_closed(self) -> None:
+        client = _Client(RuntimeError("something nobody predicted"))
+        with pytest.raises(PrincipalGuardError, match="Failing closed"):
+            assert_read_only_principal(client)
+
+    def test_unreadable_audit_fails_closed(self) -> None:
+        client = _Client(MCPError(-32000, "audit read blew up"))
+        with pytest.raises(PrincipalGuardError, match="not a clean stage"):
+            assert_no_tier1_successes(client, datetime(2026, 8, 7, tzinfo=UTC))
+
+    def test_unparseable_audit_response_fails_closed(self) -> None:
+        client = _Client(ToolResult(content=[{"type": "text", "text": "not json"}]))
+        with pytest.raises(PrincipalGuardError):
+            assert_no_tier1_successes(client, datetime(2026, 8, 7, tzinfo=UTC))
+
+
+class TestNoOptOut:
+    """The guard must have no bypass — that's the whole point of F-001."""
+
+    def test_guard_is_derived_from_platform_reachability_not_a_flag(self) -> None:
+        from pathlib import Path
+
+        runner = (Path(__file__).resolve().parents[2] / "evals" / "runner.py").read_text()
+        assert "guard_required = smoke and not _is_offline_placeholder" in runner, (
+            "the guard condition must derive from whether a real platform is "
+            "reachable, not from the --live flag (a second mechanism deciding "
+            "whether the first needs checking)"
+        )
+        assert "if smoke and live:" not in runner
+
+    def test_no_bypass_switch_exists(self) -> None:
+        from pathlib import Path
+
+        repo = Path(__file__).resolve().parents[2]
+        sources = (repo / "evals" / "runner.py").read_text() + (
+            repo / "evals" / "guards.py"
+        ).read_text()
+        for bypass in ("SKIP_GUARD", "skip_guard", "no_guard", "disable_guard", "--no-guard"):
+            assert bypass not in sources, f"bypass switch {bypass!r} must not exist"

@@ -126,16 +126,29 @@ class LLMClient:
                 last_exc = err
                 retry_after = _retry_after_seconds(err)
             else:
-                result = self._parse(response, output_model)
+                # Trace BEFORE parsing: the API call is already billed at
+                # this point, and a response we fail to parse (no
+                # record_output block, max_tokens truncation) is exactly
+                # the call a cost or debugging audit most wants to see.
+                # Tracing after the parse meant those spent money and left
+                # no record (study/findings.md F-002).
+                trace: dict[str, Any] | None = None
                 if self._tracer is not None:
-                    self._tracer(
-                        {
-                            "request": request_body,
-                            "response": response.model_dump(mode="json"),
-                            "output": result.output.model_dump(mode="json"),
-                            "output_model": output_model.__name__,
-                            "duration_seconds": time.monotonic() - started,
-                        }
+                    trace = {
+                        "request": request_body,
+                        "response": response.model_dump(mode="json"),
+                        "output_model": output_model.__name__,
+                        "duration_seconds": time.monotonic() - started,
+                    }
+                try:
+                    result = self._parse(response, output_model)
+                except LLMError:
+                    if trace is not None:
+                        self._tracer(dict(trace, parse_failed=True))  # type: ignore[misc]
+                    raise
+                if trace is not None:
+                    self._tracer(  # type: ignore[misc]
+                        dict(trace, output=result.output.model_dump(mode="json"))
                     )
                 return result
             if attempt < self._max_attempts - 1:

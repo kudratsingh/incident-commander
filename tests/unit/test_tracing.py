@@ -37,13 +37,17 @@ class TestJsonlTracer:
         JsonlTracer(path=target)
         assert target.parent.exists()
 
-    def test_truncates_on_construction(self, tmp_path: Path) -> None:
-        # Simulates a re-run of the same scenario — the file should not
-        # accumulate stale lines from the prior run.
+    def test_does_not_truncate_on_construction(self, tmp_path: Path) -> None:
+        # INVERTED 2026-08-07. This test previously asserted the file was
+        # cleared on construction "so re-runs don't accumulate stale
+        # lines" — the assertion was the bug, not the guard: it pinned
+        # behavior that deleted the previous attempt's records. Run 001's
+        # killed attempt was erased by its own re-run. Attempts are now
+        # separated by invocation_id, not by deletion.
         target = tmp_path / "run.jsonl"
-        target.write_text('{"kind": "stale"}\n')
+        target.write_text('{"kind": "prior_attempt"}\n')
         JsonlTracer(path=target)
-        assert target.read_text() == ""
+        assert target.read_text() == '{"kind": "prior_attempt"}\n'
 
 
 class TestLlmHook:
@@ -80,4 +84,49 @@ class TestTracerFor:
     def test_names_file_after_scenario(self, tmp_path: Path) -> None:
         tracer = tracer_for("consumer_lag_high", tmp_path)
         assert tracer.path == tmp_path / "consumer_lag_high.jsonl"
+        # The file is created by the first write, not by construction —
+        # construction no longer touches an existing file's contents.
+        assert tracer.path.parent.exists()
+        tracer.write({"kind": "llm"})
         assert tracer.path.exists()
+
+
+class TestNoTruncationAcrossInvocations:
+    """Regression: the tracer must never delete a prior attempt's records.
+
+    Until 2026-08-07 ``JsonlTracer.__post_init__`` truncated the file "so
+    re-runs don't concatenate". Run 001's killed first attempt was erased
+    in full by its own re-run; the loss surfaced only as a ~1.9x gap
+    between trace-derived and billed cost (study/findings.md F-002).
+    """
+
+    def _records(self, path: Path) -> list[dict[str, object]]:
+        return [json.loads(line) for line in path.read_text().splitlines()]
+
+    def test_second_invocation_preserves_the_first(self, tmp_path: Path) -> None:
+        first = tracer_for("scenario_x", tmp_path)
+        first.write({"kind": "llm", "attempt": 1})
+        second = tracer_for("scenario_x", tmp_path)
+        second.write({"kind": "llm", "attempt": 2})
+
+        records = self._records(tmp_path / "scenario_x.jsonl")
+        assert [r["attempt"] for r in records] == [1, 2], (
+            "re-running a scenario deleted the earlier attempt's records"
+        )
+
+    def test_invocations_are_separable(self, tmp_path: Path) -> None:
+        first = tracer_for("scenario_x", tmp_path)
+        first.write({"kind": "llm"})
+        first.write({"kind": "mcp"})
+        second = tracer_for("scenario_x", tmp_path)
+        second.write({"kind": "llm"})
+
+        records = self._records(tmp_path / "scenario_x.jsonl")
+        ids = [r["invocation_id"] for r in records]
+        assert ids[0] == ids[1] != ids[2], "records must group by invocation"
+        assert all(r["invocation_started_at"] for r in records)
+
+    def test_invocation_id_does_not_overwrite_caller_supplied_value(self, tmp_path: Path) -> None:
+        tracer = tracer_for("scenario_x", tmp_path)
+        tracer.write({"kind": "llm", "invocation_id": "explicit"})
+        assert self._records(tmp_path / "scenario_x.jsonl")[0]["invocation_id"] == "explicit"

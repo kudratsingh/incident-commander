@@ -107,7 +107,15 @@ eval-smoke:
 	@if [ -z "$(PLATFORM_SMOKE_TOKEN)" ]; then \
 		echo "ERROR: PLATFORM_SMOKE_TOKEN not set. Run 'make bootstrap-token' and add it to .env" >&2; exit 2; \
 	fi
-	PLATFORM_TOKEN="$(PLATFORM_SMOKE_TOKEN)" $(MAKE) eval-live ONLY="$(SMOKE_ONLY)"
+	# The runner reads PLATFORM_SMOKE_TOKEN from Settings under --smoke and
+	# asserts the principal against the live platform before any scenario.
+	# Do NOT reintroduce `PLATFORM_TOKEN=... $(MAKE) ...` here: `-include .env`
+	# above overrides recipe-exported values, which is exactly how every
+	# "read-scoped" smoke run before 2026-08-07 silently held write scope.
+	# The @ on the runner line also keeps tokens out of the log.
+	@EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live --smoke \
+		--only "$(SMOKE_ONLY)"
+	uv run python scripts/format_traces.py
 
 trace-report:
 	uv run python scripts/format_traces.py

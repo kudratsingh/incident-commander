@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     platform_mcp_url: AnyHttpUrl
     platform_rest_url: AnyHttpUrl
     platform_token: SecretStr
+    # Read-scoped twin used by `make eval-smoke` (telemetry:read +
+    # incidents:read only). Selected by the runner's --smoke flag rather
+    # than shell plumbing: passing it through make was silently defeated
+    # by `-include .env` (PR #62 vs #69), so every "read-scoped" smoke run
+    # up to 2026-08-07 actually held write scope. Config beats inheritance.
+    platform_smoke_token: SecretStr | None = None
     platform_webhook_secret: SecretStr
 
     # Agent-owned Postgres.

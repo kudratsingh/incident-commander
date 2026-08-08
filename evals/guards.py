@@ -14,11 +14,14 @@ introspection endpoint, no platform change required.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from typing import Any, Final
 
+from pydantic import ValidationError
+
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError
+from incident_commander.tools.policies import Tier, tools_at_or_below
+from incident_commander.tools.registry import TOOL_REGISTRY, AuditEventEntry
 
 # Any Tier-1 tool works as the probe; mark_dlq_permanent is the cheapest
 # (no side effect even if it somehow executed — but see below, it can't).
@@ -35,17 +38,13 @@ _PROBE_ARGS: Final[dict[str, Any]] = {
 }
 
 _SCOPE_REFUSAL_CODE: Final[int] = -32002
-_TIER_1_TOOLS: Final[frozenset[str]] = frozenset(
-    {
-        "restart_consumer_group",
-        "pause_dag",
-        "replay_dlq_messages",
-        "invalidate_cache_key",
-        "replay_dlq_by_ids",
-        "replay_dlq_by_category",
-        "mark_dlq_permanent",
-    }
-)
+# Derived from the tier map, never hand-copied. A second list of Tier-1
+# names would be one more mirror to drift out of sync — the same defect
+# issue #79 tracks for ReadToolName, and the same class as the audit
+# payload shape this module got wrong (F-004): a fact restated instead of
+# referenced. If a Tier-1 tool is added to policies.py, this guard covers
+# it with no edit here.
+_TIER_1_TOOLS: Final[frozenset[str]] = tools_at_or_below(Tier.TIER_1) - tools_at_or_below(Tier.READ)
 
 
 class PrincipalGuardError(RuntimeError):
@@ -96,7 +95,7 @@ def assert_read_only_principal(client: MCPClientProtocol) -> None:
 def assert_no_tier1_successes(
     client: MCPClientProtocol,
     since: datetime,
-) -> list[dict[str, Any]]:
+) -> list[AuditEventEntry]:
     """Fail if the platform audit records any successful Tier-1 call since ``since``.
 
     Graded from the platform's own audit log — the ground truth that
@@ -112,6 +111,8 @@ def assert_no_tier1_successes(
             {"action": "agent.tool_invoked", "principal_type": "service_account", "limit": 200},
         )
         events = _parse_events(result)
+    except PrincipalGuardError:
+        raise
     except Exception as err:  # noqa: BLE001 — fail closed, deliberately
         # An audit query we couldn't run proves nothing. Inconclusive is
         # a failure, not a pass.
@@ -123,14 +124,11 @@ def assert_no_tier1_successes(
     violations = [
         e
         for e in events
-        if _tool_of(e) in _TIER_1_TOOLS
-        and _outcome_of(e) == "success"
-        and _created_at(e) is not None
-        and _created_at(e) >= since  # type: ignore[operator]
+        if _tool_of(e) in _TIER_1_TOOLS and _outcome_of(e) == "success" and e.created_at >= since
     ]
     if violations:
         summary = ", ".join(
-            f"{_tool_of(e)}@{_created_at(e)} by {e.get('principal_id')}" for e in violations[:5]
+            f"{_tool_of(e)}@{e.created_at.isoformat()} by {e.principal_id}" for e in violations[:5]
         )
         raise PrincipalGuardError(
             f"read-only stage executed {len(violations)} successful Tier-1 "
@@ -140,30 +138,48 @@ def assert_no_tier1_successes(
     return violations
 
 
-def _parse_events(result: Any) -> list[dict[str, Any]]:
+def _parse_events(result: Any) -> list[AuditEventEntry]:
+    """Parse the tool result through the REGISTRY'S typed output model.
+
+    Not a hand-rolled dict walk. The first version of this function read
+    ``payload["items"]``; v0.4.9 emits ``{"total": N, "events": [...]}``,
+    so it silently returned an empty list on every real call and the
+    assertion below passed unconditionally — the guard built to catch the
+    Run 001 token bug could not have caught it (F-004). The correct shape
+    was already encoded, typed, in ``registry.ListAuditEventsOutput``, one
+    import away.
+
+    Parsing through the registry model means the contract test and the
+    registry-consistency test now also protect this guard: if the platform
+    changes the audit payload, CI fails before a run does. An unrecognized
+    payload raises rather than yielding zero events — parsing nothing must
+    fail closed, exactly like an unreadable audit.
+    """
+    spec = TOOL_REGISTRY["list_audit_events"]
     for block in getattr(result, "content", []) or []:
         if block.get("type") == "text" and isinstance(block.get("text"), str):
-            payload = json.loads(block["text"])
-            items = payload.get("items", payload if isinstance(payload, list) else [])
-            return [i for i in items if isinstance(i, dict)]
-    return []
+            try:
+                parsed = spec.output_model.model_validate_json(block["text"])
+            except ValidationError as err:
+                raise PrincipalGuardError(
+                    "post-stage audit returned an unrecognized payload shape "
+                    f"({err.error_count()} validation error(s) against "
+                    f"{spec.output_model.__name__}); refusing to report a clean "
+                    "stage from a payload we could not read."
+                ) from err
+            events: list[AuditEventEntry] = list(parsed.events)  # type: ignore[attr-defined]
+            return events
+    raise PrincipalGuardError(
+        "post-stage audit response contained no text content block; "
+        "treating as unreadable rather than as zero events."
+    )
 
 
-def _tool_of(event: dict[str, Any]) -> str:
-    extra = event.get("extra_data") or {}
-    return str(extra.get("tool_name", "")) if isinstance(extra, dict) else ""
+def _tool_of(event: AuditEventEntry) -> str:
+    extra = event.extra_data or {}
+    return str(extra.get("tool_name", ""))
 
 
-def _outcome_of(event: dict[str, Any]) -> str:
-    extra = event.get("extra_data") or {}
-    return str(extra.get("outcome", "")) if isinstance(extra, dict) else ""
-
-
-def _created_at(event: dict[str, Any]) -> datetime | None:
-    raw = event.get("created_at")
-    if not isinstance(raw, str):
-        return None
-    try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+def _outcome_of(event: AuditEventEntry) -> str:
+    extra = event.extra_data or {}
+    return str(extra.get("outcome", ""))

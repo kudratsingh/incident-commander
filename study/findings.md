@@ -69,3 +69,72 @@ told them apart.
 **Related.** `evals/guards.py`, `tests/unit/test_make_token_precedence.py`,
 CLAUDE.md invariant 6 (audit log is ground truth), ADR 0003 (platform-side
 enforcement is the boundary — it held; the agent-side plumbing did not).
+
+
+## F-002 — A derived metric that silently lost its own data
+
+**Date:** 2026-08-07 (Run 001, stage 1)
+
+**What happened.** Throughout Run 001 I reported spend as "~$1.9 of the
+$4 ceiling." The console's actual for that UTC day was **$4.53** — 2.4x
+the number I was steering by, and **above the $4 ceiling the run was
+authorized under**. Nobody knew until the operator read the console.
+
+**Two separate errors, and the second is the interesting one.**
+
+*The reported figure was never computed.* I applied the runbook's
+per-scenario rule of thumb (~$0.05 read-only) written during the July
+campaign, against a suite whose prompts, tool descriptions, and
+verify-polling depth had all since grown. Summing the surviving traces
+with real per-model rates — Sonnet $3/$15 per MTok, Haiku $1/$5, cache
+writes at 1.25x input, cache reads at 0.1x — gives **$2.43**.
+
+*The traces themselves were incomplete, by construction.*
+`JsonlTracer.__post_init__` called `self.path.write_text("")`, commented
+"truncate on scenario start so re-runs don't concatenate." Run 001's
+first attempt was killed after 13 scenarios; the re-run covered the same
+27 and **erased all 13 of those records in full**. The exact-timestamp
+reconstruction is unambiguous: the trace directory holds one contiguous
+window (10:49:55–11:25:13 UTC) and nothing at all from the killed
+attempt's 10:19–10:31.
+
+**How the mechanism was identified — and how I got it wrong first.**
+Traced Sonnet was 1.86x under console and traced Haiku 1.89x under: two
+models, different rates, different cache mixes, skewed identically. That
+eliminates a pricing-formula error (which would skew per-model) and
+implicates missing calls. I then guessed *which* missing calls, and
+picked wrong — I claimed cache-write usage was under-reported, citing
+188k cache-reads against 2.4k cache-writes as impossible. It is not
+impossible; it is exactly what prompt caching looks like when one early
+call writes a prefix that twenty-six later scenarios read. The operator
+found the real cause by reading `tracing.py`. **The elimination argument
+was sound and the mechanism was a guess dressed as a conclusion.**
+
+**The lesson — same family as F-001.** F-001 was an unverified
+*capability* claim; this is an unverified *measurement*. Both were
+plausible, internally consistent, and never checked against the system
+that actually knew. Worse here: the writer destroyed the evidence needed
+to check it, so the shortfall could only ever surface from outside.
+A budget ceiling enforced against a self-reported estimate is not a
+ceiling.
+
+**Fix.**
+- `evals/tracing.py` no longer truncates. Every record carries
+  `invocation_id` + `invocation_started_at`, so re-runs stay separable
+  without deletion — concatenation was never the problem,
+  *indistinguishable* concatenation was. The old test asserting
+  truncation is inverted, with the reason inline, plus regression tests
+  that a second invocation preserves the first.
+- `LLMClient.call` traces **before** parsing. A response that bills and
+  then fails to parse (no `record_output` block, `max_tokens`
+  truncation) previously left no record at all; it is now written with
+  `parse_failed: true`.
+- `scripts/estimate_cost.py` replaces the heuristic with token
+  arithmetic at correct per-model and cache rates, groups by
+  `invocation_id`, and labels itself a lower bound every time it runs.
+- `study/runs.jsonl` records trace-derived **and** console actual per
+  window, with the ratio. Console is authoritative for property 6.
+
+**Unrecoverable:** Run 001's killed first attempt. Its ~13 scenarios are
+gone from the trace record permanently; its cost exists only inside the
+console day total.

@@ -76,6 +76,16 @@ def assert_read_only_principal(client: MCPClientProtocol) -> None:
             "carry actions:execute — refusing to run smoke scenarios under "
             "a write-capable principal."
         ) from err
+    except Exception as err:  # noqa: BLE001 — fail closed, deliberately
+        # Transport blip, unknown response shape, anything at all: an
+        # unverified guard is an unmet precondition, not a warning. A
+        # safety check that shrugs on an unexpected error is the bypass
+        # F-001 is about.
+        raise PrincipalGuardError(
+            "read-only guard: could not verify the principal "
+            f"({type(err).__name__}: {err}). Failing closed — the run does "
+            "not proceed on an unverified control."
+        ) from err
     raise PrincipalGuardError(
         "read-only guard: the negative probe was NOT refused on scope "
         f"(result: {str(result)[:200]}). The token carries write scope — "
@@ -96,11 +106,20 @@ def assert_no_tier1_successes(
     Returns the offending rows (empty on success) so callers can report
     them; raises ``PrincipalGuardError`` when any are found.
     """
-    result = client.call_tool(
-        "list_audit_events",
-        {"action": "agent.tool_invoked", "principal_type": "service_account", "limit": 200},
-    )
-    events = _parse_events(result)
+    try:
+        result = client.call_tool(
+            "list_audit_events",
+            {"action": "agent.tool_invoked", "principal_type": "service_account", "limit": 200},
+        )
+        events = _parse_events(result)
+    except Exception as err:  # noqa: BLE001 — fail closed, deliberately
+        # An audit query we couldn't run proves nothing. Inconclusive is
+        # a failure, not a pass.
+        raise PrincipalGuardError(
+            "post-stage audit could not be read "
+            f"({type(err).__name__}: {err}); treating as a failure — an "
+            "unverifiable stage is not a clean stage."
+        ) from err
     violations = [
         e
         for e in events

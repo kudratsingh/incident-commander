@@ -631,7 +631,15 @@ def main() -> int:
     # checks scope before parsing arguments, so it cannot execute under
     # either token — the two outcomes are distinguishable and safe.
     stage_started_at = datetime.now(UTC)
-    if smoke and live:
+    # Unconditional in smoke mode whenever a real platform is reachable.
+    # Derived from the platform URL, NOT from the --live flag: the guard
+    # must not depend on a second mechanism (flag parsing) to decide
+    # whether the first mechanism (scope) needs checking. There is no
+    # opt-out — no env var, no flag, no config key disables this.
+    guard_required = smoke and not _is_offline_placeholder(str(settings.platform_mcp_url))
+    if smoke and not guard_required:
+        print("smoke mode against a placeholder platform: canned run, no live principal to guard")
+    if guard_required:
         try:
             guard_client = make_client(settings, token=mcp_token)
             try:
@@ -654,7 +662,7 @@ def main() -> int:
     # Post-stage assertion, graded from the platform audit log rather than
     # the agent's own trajectory (CLAUDE.md invariant 6). This is the exact
     # evidence that exposed the token bug — now automatic.
-    if smoke and live:
+    if guard_required:
         try:
             audit_client = make_client(settings, token=mcp_token)
             try:

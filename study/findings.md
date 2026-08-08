@@ -138,3 +138,66 @@ ceiling.
 **Unrecoverable:** Run 001's killed first attempt. Its ~13 scenarios are
 gone from the trace record permanently; its cost exists only inside the
 console day total.
+
+
+## P-001 — When an artifact's consumer changes, re-audit its producer
+
+**Named practice, promoted from three failures in one campaign.**
+
+Each of these was a different bug with the same shape:
+
+| Failure | Producer written for | Consumer it acquired | What broke |
+|---|---|---|---|
+| Trace truncation (F-002) | debug output — "don't concatenate re-runs" is *correct* for eyeballing one scenario | cost ledger and study evidence | Deleting the prior attempt went from tidy to destructive the moment someone summed the file |
+| Estimate vs console ceiling (F-002) | a July per-scenario rule of thumb, fine as a rough sizing hint | the enforcement input for a hard $4 spend ceiling | A hint became a control without ever being re-derived |
+| Read-only smoke token (F-001) | a token selection mechanism, correct when written | the *guarantee* that a stage cannot write | Nothing re-checked it at the point the guarantee was relied on |
+
+None was a coding error. In every case the producer kept doing exactly
+what it was built to do, and the *demand placed on its output* changed
+underneath it. Truncation is reasonable for a debug log and unacceptable
+for a ledger; a heuristic is reasonable for sizing and unacceptable for
+enforcement; a config value is reasonable for wiring and unacceptable as
+a safety guarantee. The bug is never visible in the producer's own diff —
+it appears only when you ask what the output is now being trusted to do.
+
+**The practice.** When you begin using an existing artifact for a new
+purpose — especially a purpose that involves *counting it, enforcing
+against it, or citing it as evidence* — go read the code that produces
+it, before you trust it. Ask three questions:
+
+1. **Is it complete?** Can it drop, truncate, or overwrite records? Under
+   what conditions — a re-run, a crash, an unset env var?
+2. **Is it precise enough for the new use?** A number good enough to
+   eyeball is not automatically good enough to enforce a ceiling.
+3. **Is it verified where it is used,** or only where it was configured?
+   (This is F-001's rule; P-001 is the reason you'd think to ask.)
+
+**Review-checklist line** (add to the PR checklist in
+`docs/architecture-principles.md`):
+
+> - [ ] If this PR starts using an existing artifact for a new purpose —
+>   counting it, enforcing against it, grading from it, or citing it as
+>   evidence — I read the producer and confirmed it is complete and
+>   precise enough for that use. (P-001)
+
+**Why a checklist line and not a memory.** The three failures above span
+five weeks and were each committed by someone who knew the individual
+facts. Nobody forgot that traces were debug output; nobody re-asked what
+that implied once the traces became the cost record. Enforced at review,
+the question gets asked by the process rather than remembered by a
+person.
+
+### Run 001 residuals — permanent
+
+- **Attempt 1 (13 scenarios, 2026-08-07 10:19–10:31 UTC) is unrecoverable
+  from traces.** Its cost is known only as part of the console day total.
+  Best estimate ~$1.2, derived from the re-run's $0.09/scenario — an
+  inference, not a measurement.
+- **~$0.9 of the day's $4.53 is permanently unattributable.** The records
+  that would have resolved it were deleted by the producer being audited.
+  This number does not get to shrink later; it is what the failure cost
+  in evidence, and it is recorded so no future analysis quietly rounds it
+  away.
+- **Run 001 exceeded its authorized $4 ceiling** and the overage was
+  detected by the operator reading the console, not by any control in the
+  system.

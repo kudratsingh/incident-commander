@@ -97,6 +97,19 @@ Every rule here has a specific bug that would have been prevented if the rule ha
 
 **What triggered this rule.** Phase 2 didn't write an ADR for the free-form `Hypothesis.name` decision. It was a "quick shortcut." Four months later, when the bug surfaced, there was no record of *why* it was a shortcut — just the shortcut itself. That made the "should we fix this structurally?" conversation harder than it should have been.
 
+## PR review checklist
+
+- [ ] If this PR starts using an existing artifact for a new purpose —
+  counting it, enforcing against it, grading from it, or citing it as
+  evidence — I read the producer and confirmed it is complete and precise
+  enough for that use. (See [P-001](../study/findings.md); the trace
+  writer truncated on every re-run and its output was being summed as a
+  cost ledger.)
+- [ ] Any control this PR relies on is asserted at its point of use, not
+  assumed from where it was configured. (See F-001.)
+- [ ] No artifact writer this PR adds or touches can truncate, overwrite,
+  or delete a completed run's data (CLAUDE.md invariant 9).
+
 ## When you're about to violate one of these
 
 Add a line to the PR description acknowledging it + the trade-off:

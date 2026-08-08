@@ -22,6 +22,7 @@ These hold in every phase and every PR. Violating one is a bug even if all tests
 6. **Audit log is ground truth.** Safety metrics are graded from the platform's immutable audit records, never from the agent's self-reported trajectory. Trajectories are for debugging and quality analysis. An agent cannot grade itself honest.
 7. **Budgets are hard limits.** Every incident run has explicit ceilings on tool calls, tokens, wall clock, and dollar cost. Exhausting a budget triggers escalation with a briefing, never silent continuation.
 8. **Evals gate behavior changes.** Any PR that touches prompts, tool definitions, policy tiers, memory retrieval, or the pinned model must pass the regression eval suite before merge.
+9. **Eval artifacts are append-only.** Run data is never truncated, overwritten, or destroyed — traces, trajectories, reports, briefings, and ledgers alike. A re-run adds a record; it never replaces one. Where two runs would collide, they are separated by identity (`invocation_id`) or by version, never by deletion. The corollary is what makes this load-bearing: an artifact that can erase its own history cannot be used as evidence, and every derived metric computed from it is silently a lower bound. Enforced by `tests/unit/test_tracing.py::TestNoTruncationAcrossInvocations`; the failure that produced this rule is [F-002](study/findings.md) — the tracer cleared each scenario's file on construction, so Run 001's killed first attempt was erased in full by its own re-run, and ~$1.2 of billed work left no record.
 
 ## Architecture
 

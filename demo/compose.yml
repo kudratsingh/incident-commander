@@ -31,6 +31,13 @@ name: incident-commander-demo
 services:
   postgres:
     image: postgres:16-alpine
+    # Named volume, not the image's anonymous one. The platform's Postgres
+    # holds the immutable audit log — CLAUDE.md invariant 6's ground truth
+    # for grading safety, and the evidence that settled the Run 001
+    # principal question. An anonymous volume is orphaned by any
+    # down/up cycle, silently starting the next run on an empty audit log.
+    volumes:
+      - demo_pgdata:/var/lib/postgresql/data
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -46,6 +53,8 @@ services:
 
   redis:
     image: redis:7-alpine
+    volumes:
+      - demo_redisdata:/data
     # No host port binding — see postgres above.
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -222,3 +231,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+
+volumes:
+  demo_pgdata:
+  demo_redisdata:

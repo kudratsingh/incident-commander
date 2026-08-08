@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -60,6 +61,12 @@ _REPORTS_DIR = _REPO_ROOT / "evals" / "reports"
 _TRAJECTORIES_DIR = _REPO_ROOT / "evals" / "trajectories"
 _BRIEFINGS_DIR = _REPO_ROOT / "evals" / "briefings"
 _LATEST_REPORT = _REPORTS_DIR / "latest.json"
+# Immutable per-invocation archive. The flat files above are POINTERS to
+# the most recent run and are refreshed in place; this directory is the
+# append-only record (CLAUDE.md invariant 9). Writing the archive with
+# exclusive-create means a path collision fails loudly instead of
+# deleting a prior run.
+_RUNS_DIR = _REPO_ROOT / "evals" / "runs"
 _TRACE_DIR_ENV = "EVAL_TRACE_DIR"
 
 
@@ -95,6 +102,7 @@ class RunReport(BaseModel):
     judged_count: int = 0
     judge_useful_count: int = 0
     judge_mean_overall: float | None = None
+    invocation_id: str = ""
     outcomes: tuple[ScenarioOutcome, ...]
 
 
@@ -106,6 +114,11 @@ class Trajectory(BaseModel):
     scenario: str
     incident_id: str
     checkpoints: tuple[RunState, ...]
+    # Which runner invocation produced this. Mixed-vintage directories
+    # self-describe even if filenames are lost — the trajectory writer
+    # overwrote by scenario name until 2026-08-08 and Run 001's live
+    # trajectories were erased by a later offline `make eval`.
+    invocation_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -130,6 +143,7 @@ def run_scenario(
     settings: Settings,
     clock: Callable[[], datetime] | None = None,
     mcp_token: str | None = None,
+    invocation_id: str = "",
 ) -> ScenarioResult:
     """Drive one scenario end-to-end and grade the result.
 
@@ -157,6 +171,10 @@ def run_scenario(
     trace_dir_env = os.environ.get(_TRACE_DIR_ENV)
     if trace_dir_env:
         tracer = tracer_for(scenario.name, Path(trace_dir_env))
+        if invocation_id:
+            # Share one id across the whole invocation so a scenario's
+            # trace and its trajectory can be joined after the fact.
+            tracer.invocation_id = invocation_id
         tracer.write(
             {
                 "kind": "scenario_start",
@@ -296,6 +314,7 @@ def run_scenario(
         )
         report = grade(final, scenario.expectation)
         trajectory = Trajectory(
+            invocation_id=invocation_id,
             scenario=scenario.name,
             incident_id=str(final.incident_id),
             checkpoints=tuple(checkpointer.history(final.incident_id)),
@@ -390,7 +409,9 @@ def _classify_failure(report: GradeReport, final: RunState | None) -> str:
     return "unclassified"
 
 
-def _crashed_result(scenario: Scenario, exc: BaseException) -> ScenarioResult:
+def _crashed_result(
+    scenario: Scenario, exc: BaseException, invocation_id: str = ""
+) -> ScenarioResult:
     """Synthesize a failed ScenarioResult when run_scenario raises.
 
     One crashing scenario should not take out the whole suite — live-eval
@@ -424,6 +445,7 @@ def _crashed_result(scenario: Scenario, exc: BaseException) -> ScenarioResult:
         failure_class=crash_class,
     )
     trajectory = Trajectory(
+        invocation_id=invocation_id,
         scenario=scenario.name,
         incident_id="00000000-0000-0000-0000-000000000000",
         checkpoints=(),
@@ -441,6 +463,7 @@ def run_all(
     settings: Settings,
     clock: Callable[[], datetime] | None = None,
     mcp_token: str | None = None,
+    invocation_id: str = "",
 ) -> tuple[RunReport, tuple[Trajectory, ...], tuple[EscalationBriefing, ...]]:
     # run_scenario falls back to canned when env is placeholder; nothing
     # is skipped here. Per-scenario crashes are captured as failed outcomes
@@ -448,10 +471,14 @@ def run_all(
     results: list[ScenarioResult] = []
     for scenario in scenarios:
         try:
-            results.append(run_scenario(scenario, settings, clock, mcp_token=mcp_token))
+            results.append(
+                run_scenario(
+                    scenario, settings, clock, mcp_token=mcp_token, invocation_id=invocation_id
+                )
+            )
         except Exception as exc:  # noqa: BLE001 — deliberate: don't abort suite
             print(f"  CRASH {scenario.name}: {type(exc).__name__}: {exc}")
-            results.append(_crashed_result(scenario, exc))
+            results.append(_crashed_result(scenario, exc, invocation_id))
     outcomes = tuple(r.outcome for r in results)
     trajectories = tuple(r.trajectory for r in results)
     briefings = tuple(r.briefing for r in results)
@@ -471,6 +498,7 @@ def run_all(
         )
     report = RunReport(
         generated_at=datetime.now(UTC),
+        invocation_id=invocation_id,
         total=len(outcomes),
         passed=passed,
         failed=failed,
@@ -507,6 +535,41 @@ def write_briefings(
     directory.mkdir(parents=True, exist_ok=True)
     for briefing, name in zip(briefings, scenario_names, strict=True):
         (directory / f"{name}.json").write_text(briefing.model_dump_json(indent=2))
+
+
+def archive_run(
+    invocation_id: str,
+    report: RunReport,
+    trajectories: Iterable[Trajectory],
+    briefings: Iterable[EscalationBriefing],
+    scenario_names: Iterable[str],
+    runs_dir: Path = _RUNS_DIR,
+) -> Path:
+    """Write this invocation's artifacts to an immutable per-run directory.
+
+    The flat ``evals/{reports,trajectories,briefings}`` paths are pointers
+    to the latest run and are refreshed in place — convenient, and the
+    thing every existing consumer reads. This archive is the durable
+    record required by CLAUDE.md invariant 9.
+
+    Every file is opened with exclusive-create (``"x"``). That is the
+    load-bearing half: if a future refactor ever routes two invocations at
+    one directory, the run fails loudly instead of silently deleting the
+    earlier one — which is exactly how Run 001's live trajectories were
+    lost (study/findings.md F-002).
+    """
+    target = runs_dir / invocation_id
+    (target / "trajectories").mkdir(parents=True, exist_ok=True)
+    (target / "briefings").mkdir(parents=True, exist_ok=True)
+    with (target / "report.json").open("x") as handle:
+        handle.write(report.model_dump_json(indent=2))
+    for trajectory in trajectories:
+        with (target / "trajectories" / f"{trajectory.scenario}.json").open("x") as handle:
+            handle.write(trajectory.model_dump_json(indent=2))
+    for briefing, name in zip(briefings, scenario_names, strict=True):
+        with (target / "briefings" / f"{name}.json").open("x") as handle:
+            handle.write(briefing.model_dump_json(indent=2))
+    return target
 
 
 def _eval_defaults() -> Settings:
@@ -592,6 +655,11 @@ def main() -> int:
     # #69), so every "read-scoped" smoke run before 2026-08-07 actually
     # held write scope. Config in, guard at point of use.
     smoke = "--smoke" in sys.argv[1:]
+    # One identity per invocation, shared by the tracer, the trajectories,
+    # the report, and the archive directory — so every artifact this run
+    # produces can be joined, and none of them can collide with another
+    # run's (CLAUDE.md invariant 9).
+    invocation_id = uuid.uuid4().hex[:12]
     only_patterns = _parse_only(sys.argv[1:])
     settings = _settings_for_mode(live)
     mcp_token: str | None = None
@@ -652,12 +720,21 @@ def main() -> int:
             return 4
         print("principal guard: token is read-scoped (negative probe refused on scope)")
 
-    report, trajectories, briefings = run_all(scenarios, settings, mcp_token=mcp_token)
+    report, trajectories, briefings = run_all(
+        scenarios, settings, mcp_token=mcp_token, invocation_id=invocation_id
+    )
+    ran_names = [o.scenario for o in report.outcomes]
+    # Archive FIRST, into an immutable per-invocation directory, then
+    # refresh the flat pointers. Order matters: if the pointer writes ever
+    # fail, the durable record is already on disk. Until 2026-08-08 only
+    # the pointers existed, so a routine offline `make eval` erased Run
+    # 001's paid live trajectories (study/findings.md F-003).
+    archived = archive_run(invocation_id, report, trajectories, briefings, ran_names)
     write_report(report)
     write_trajectories(trajectories)
-    ran_names = [o.scenario for o in report.outcomes]
     write_briefings(briefings, ran_names)
     _print_summary(report, degraded_to_canned=degraded_to_canned)
+    print(f"run archived: {archived.relative_to(_REPO_ROOT)} (immutable; flat paths are pointers)")
 
     # Post-stage assertion, graded from the platform audit log rather than
     # the agent's own trajectory (CLAUDE.md invariant 6). This is the exact

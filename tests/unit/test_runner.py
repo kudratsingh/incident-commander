@@ -20,9 +20,11 @@ from evals.graders.deterministic import (
 )
 from evals.runner import (
     RunReport,
+    ScenarioOutcome,
     Trajectory,
     _classify_failure,
     _crashed_result,
+    archive_run,
     run_all,
     run_scenario,
     write_briefings,
@@ -35,6 +37,8 @@ from incident_commander.agent.state import BudgetLedger, EvidenceEntry, Incident
 from incident_commander.api.schemas import AlertPayload
 from incident_commander.config import Settings
 from incident_commander.tools.mcp_client import MCPError, ToolResult
+
+_NOW = datetime(2026, 8, 8, tzinfo=UTC)
 
 
 def _test_settings(**overrides: Any) -> Settings:
@@ -549,3 +553,70 @@ class TestCannedSequencing:
         client = CannedMCPClient({"get_consumer_lag": a})
         assert client.call_tool("get_consumer_lag", {}) is a
         assert client.call_tool("get_consumer_lag", {}) is a
+
+
+class TestRunArchiveIsAppendOnly:
+    """CLAUDE.md invariant 9 for the runner's own artifacts.
+
+    ``write_trajectories`` keyed files on scenario name alone and used
+    ``write_text``, so any later run — including a free offline
+    ``make eval`` — overwrote the previous one. Run 001's paid live
+    trajectories were destroyed exactly this way while the trace-truncation
+    fix was being developed (study/findings.md F-003).
+    """
+
+    def _report(self, scenario: str) -> RunReport:
+        return RunReport(
+            generated_at=_NOW,
+            total=1,
+            passed=1,
+            failed=0,
+            outcomes=(
+                ScenarioOutcome(
+                    scenario=scenario,
+                    final_state=IncidentState.ESCALATED,
+                    tool_calls_used=1,
+                    report=GradeReport(scenario=scenario, passed=True, dimensions=()),
+                ),
+            ),
+        )
+
+    def _bits(self, scenario: str) -> tuple[Trajectory, EscalationBriefing]:
+        return (
+            Trajectory(scenario=scenario, incident_id="i", checkpoints=()),
+            EscalationBriefing(
+                incident_id="i", final_state=IncidentState.ESCALATED, alert_summary="a"
+            ),
+        )
+
+    def test_two_invocations_both_survive(self, tmp_path: Path) -> None:
+        traj, brief = self._bits("s")
+        first = archive_run("inv_one", self._report("s"), [traj], [brief], ["s"], tmp_path)
+        second = archive_run("inv_two", self._report("s"), [traj], [brief], ["s"], tmp_path)
+
+        assert first != second
+        for target in (first, second):
+            assert (target / "report.json").exists()
+            assert (target / "trajectories" / "s.json").exists()
+            assert (target / "briefings" / "s.json").exists()
+
+    def test_reusing_an_invocation_id_fails_loudly(self, tmp_path: Path) -> None:
+        # Exclusive-create is the load-bearing half: a future refactor that
+        # routes two runs at one directory must crash, not silently delete.
+        traj, brief = self._bits("s")
+        archive_run("dupe", self._report("s"), [traj], [brief], ["s"], tmp_path)
+        with pytest.raises(FileExistsError):
+            archive_run("dupe", self._report("s"), [traj], [brief], ["s"], tmp_path)
+
+    def test_archive_survives_a_later_flat_write(self, tmp_path: Path) -> None:
+        # The exact Run 001 loss: a second run refreshes the flat pointer
+        # while the first run's evidence stays intact in the archive.
+        runs, flat = tmp_path / "runs", tmp_path / "trajectories"
+        first_traj = Trajectory(scenario="s", incident_id="first", checkpoints=())
+        archive_run("inv_one", self._report("s"), [first_traj], [], [], runs)
+        write_trajectories([first_traj], flat)
+        write_trajectories([Trajectory(scenario="s", incident_id="second", checkpoints=())], flat)
+
+        assert json.loads((flat / "s.json").read_text())["incident_id"] == "second"
+        archived = json.loads((runs / "inv_one" / "trajectories" / "s.json").read_text())
+        assert archived["incident_id"] == "first", "archive must not follow the pointer"

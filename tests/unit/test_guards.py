@@ -55,15 +55,32 @@ class TestReadOnlyGuard:
 
 
 def _audit(tool: str, outcome: str, when: datetime) -> dict[str, Any]:
+    """One audit row in the PLATFORM's real shape.
+
+    Taken from v0.4.9's AuditEventEntry, not from what the guard happened
+    to expect. The first version of these tests built {"items": [...]},
+    a container key the platform never emits, so all four audit tests
+    passed against a payload that could not occur and the guard was a
+    no-op in production (F-004).
+    """
     return {
+        "id": "aud_" + tool[:6] + when.strftime("%H%M%S"),
+        "action": "agent.tool_invoked",
+        "principal_type": "service_account",
+        "principal_id": "c12fd570-3ff4-42ce-a935-61086396df3c",
+        "resource_type": None,
+        "resource_id": None,
+        "request_id": None,
         "created_at": when.isoformat(),
-        "principal_id": "abc",
         "extra_data": {"tool_name": tool, "outcome": outcome},
     }
 
 
 def _result(items: list[dict[str, Any]]) -> ToolResult:
-    return ToolResult(content=[{"type": "text", "text": json.dumps({"items": items})}])
+    """The platform's envelope: {"total": N, "events": [...]}."""
+    return ToolResult(
+        content=[{"type": "text", "text": json.dumps({"total": len(items), "events": items})}]
+    )
 
 
 class TestPostStageAudit:
@@ -147,3 +164,53 @@ class TestNoOptOut:
         ).read_text()
         for bypass in ("SKIP_GUARD", "skip_guard", "no_guard", "disable_guard", "--no-guard"):
             assert bypass not in sources, f"bypass switch {bypass!r} must not exist"
+
+
+class TestAuditPayloadShape:
+    """The guard must read the platform's shape, and fail closed on any other.
+
+    F-004: `_parse_events` read `payload["items"]` while v0.4.9 emits
+    `{"total": N, "events": [...]}`, so it returned zero events on every
+    real call — no violations, no exception, "zero successful Tier-1
+    actions", exit 0. The check built to catch the Run 001 token bug could
+    not have caught it. Parsing nothing must fail like an unreadable audit,
+    never like a clean one.
+    """
+
+    _SINCE = datetime(2026, 8, 8, 12, 0, tzinfo=UTC)
+
+    def _envelope(self, payload: dict[str, Any] | list[Any]) -> _Client:
+        return _Client(ToolResult(content=[{"type": "text", "text": json.dumps(payload)}]))
+
+    def test_reads_the_platform_events_key(self) -> None:
+        row = _audit("restart_consumer_group", "success", self._SINCE + timedelta(minutes=1))
+        client = self._envelope({"total": 1, "events": [row]})
+        with pytest.raises(PrincipalGuardError, match="restart_consumer_group"):
+            assert_no_tier1_successes(client, self._SINCE)
+
+    def test_legacy_items_key_is_not_silently_accepted_as_empty(self) -> None:
+        # The exact regression: a payload keyed "items" must NOT parse as
+        # zero events and report a clean stage.
+        row = _audit("mark_dlq_permanent", "success", self._SINCE + timedelta(minutes=1))
+        with pytest.raises(PrincipalGuardError):
+            assert_no_tier1_successes(self._envelope({"items": [row]}), self._SINCE)
+
+    def test_unrecognized_shape_raises_rather_than_returning_empty(self) -> None:
+        with pytest.raises(PrincipalGuardError, match="unrecognized payload shape"):
+            assert_no_tier1_successes(self._envelope({"rows": []}), self._SINCE)
+
+    def test_bare_list_payload_raises(self) -> None:
+        with pytest.raises(PrincipalGuardError, match="unrecognized payload shape"):
+            assert_no_tier1_successes(self._envelope([]), self._SINCE)
+
+    def test_no_text_block_raises(self) -> None:
+        client = _Client(ToolResult(content=[]))
+        with pytest.raises(PrincipalGuardError, match="no text content block"):
+            assert_no_tier1_successes(client, self._SINCE)
+
+    def test_well_formed_empty_audit_is_a_genuine_pass(self) -> None:
+        # total=0/events=[] is the platform saying "nothing happened" —
+        # distinguishable from "we could not read the payload".
+        assert (
+            assert_no_tier1_successes(self._envelope({"total": 0, "events": []}), self._SINCE) == []
+        )

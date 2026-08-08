@@ -201,3 +201,72 @@ person.
 - **Run 001 exceeded its authorized $4 ceiling** and the overage was
   detected by the operator reading the console, not by any control in the
   system.
+
+
+## F-003 — The audit for a data-destruction defect destroyed data while it ran
+
+**Date:** 2026-08-08
+
+**What happened.** While fixing F-002's trace truncation, the routine
+offline commands used to verify the fix — `make eval`, `make eval-reg`,
+run repeatedly and free of charge — silently erased **Run 001's live
+trajectories**. `write_trajectories` keyed files on scenario name alone
+and wrote with `Path.write_text`, so each offline run overwrote the paid
+live run's record. Every file now in `evals/trajectories/` is stamped
+2026-08-08T05:20–05:21Z. The 2026-08-07 live trajectories are gone.
+
+The traces from that same run survived only because the tracer had been
+made append-only the day before. **The two artifact stores had identical
+defects; one had been fixed, and the fix was not carried across.**
+
+**The shape of it.** The verification step for a data-loss fix was itself
+a data-loss event, executed in the same working tree that held the only
+copy. The command that did it was free, routine, and reflexively safe —
+"just re-run the offline suite" — which is precisely why it was run
+several times without a second thought. Nothing about `make eval`
+announces that it overwrites evidence.
+
+**Fix.** `evals/runner.py` gains `archive_run`: every invocation mints one
+`invocation_id` (shared with the tracer, so a trajectory and its trace can
+be joined) and writes `report.json`, `trajectories/`, and `briefings/`
+into an immutable `evals/runs/<invocation_id>/`, **before** refreshing the
+flat paths. Every archive file is opened with exclusive-create — a path
+collision fails loudly instead of deleting. The flat
+`evals/{reports,trajectories,briefings}` paths remain as pointers to the
+latest run, so every existing consumer is unchanged.
+
+Two further confirmed writers fixed in the same pass:
+
+- **`make demo-down` was `docker compose down -v`**, and `demo/compose.yml`
+  declared no named volumes. Stopping the demo stack deleted the
+  platform's Postgres volume — including the **immutable audit log that
+  CLAUDE.md invariant 6 makes the ground truth for grading safety**, the
+  service accounts, and the fixture state. Now: named volumes
+  (`demo_pgdata`, `demo_redisdata`), `demo-down` preserves data, and a
+  separate `demo-destroy` requires `CONFIRM=1`. Stopping a stack is not a
+  destructive act.
+- `write_report` / `write_briefings` shared the overwrite pattern. Both
+  are largely derived (rebuildable from traces), which is why the audit's
+  verifiers split on severity — but both are now archived per invocation
+  regardless, because "derived today" is exactly the assumption P-001 says
+  will stop holding.
+
+**Standing practice (new).** *Irreplaceable run artifacts are archived
+outside the working tree before any fix cycle touches their writers.*
+Debugging a writer means running it; running it is the hazard. Before this
+fix cycle continued, `evals/{traces,trajectories,reports,briefings}` and
+`study/` were copied to `~/eval-archive/<date>-pre-writer-fix/` — 157
+files, outside the repo, unaffected by anything the fix does. Do that
+first, every time, and confirm the copy exists before editing.
+
+**Relationship to the other findings.** F-001: a control asserted nowhere.
+F-002: a measurement checked against nothing. F-003: a fix whose
+verification loop consumed the evidence it was meant to protect. P-001
+names the common root — but F-003 adds a sharper corollary: **when the
+defect is in a writer, the act of testing the fix is itself the failure
+mode.** Back up first.
+
+**Unrecoverable.** Run 001's live trajectories, like its attempt-1 traces,
+are gone permanently. They will not be regenerated: a re-run costs money
+and produces a different run, which would be a fabrication, not a
+recovery.

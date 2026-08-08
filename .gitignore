@@ -50,3 +50,9 @@ evals/reports/human/*
 
 # Claude Code runtime artifacts (per-machine)
 .claude/
+
+# Per-invocation immutable run archive (CLAUDE.md invariant 9).
+# Local evidence; large and machine-specific, so not committed — back it
+# up outside the tree before any work that touches its writers (F-003).
+evals/runs/*
+!evals/runs/.gitkeep

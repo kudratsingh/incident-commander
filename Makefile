@@ -1,4 +1,4 @@
-.PHONY: help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-live-remediation eval-smoke eval-reg eval-reset trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
+.PHONY: demo-destroy help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-live-remediation eval-smoke eval-reg eval-reset trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
 
 # Make does not read .env on its own — only the Python side does, via
 # dotenv. Without this include, a make-level var like PLATFORM_COMPOSE
@@ -204,7 +204,19 @@ demo:
 	@echo "in docs/runbook.md#live-eval-protocol-post-hardening."
 	@echo "Stop with 'make demo-down'."
 
+# Stops the stack and KEEPS the data. `-v` was here until 2026-08-08 and
+# deleted the volumes outright — including the platform's audit log, which
+# CLAUDE.md invariant 6 makes the ground truth for grading safety, plus the
+# service accounts and eval fixtures. Stopping a stack must not be a
+# destructive act; use `make demo-destroy` when you actually mean it.
 demo-down:
+	docker compose -f demo/compose.yml down
+
+# Explicit, irreversible: removes containers AND the named data volumes.
+demo-destroy:
+	@echo "This DELETES the demo platform's Postgres + Redis data, including"
+	@echo "the audit log used to grade safety. Re-run with CONFIRM=1 to proceed."
+	@test "$(CONFIRM)" = "1" || exit 2
 	docker compose -f demo/compose.yml down -v
 
 bootstrap-token:

@@ -165,6 +165,14 @@ services:
         condition: service_healthy
       redpanda:
         condition: service_healthy
+      redpanda-init:
+        # Topics must exist before the consumers boot. Nothing depended on
+        # this one-shot until 2026-08-08, so `make demo`'s scoped --wait
+        # service list (added in #77) never started it — invisible only
+        # because the topics already existed on the old volume. On a fresh
+        # stack the consumer groups would have had nothing to subscribe to.
+        # Mirrors the `migrate` pattern directly above.
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
     command:
@@ -216,6 +224,14 @@ services:
         condition: service_healthy
       redpanda:
         condition: service_healthy
+      redpanda-init:
+        # Topics must exist before the consumers boot. Nothing depended on
+        # this one-shot until 2026-08-08, so `make demo`'s scoped --wait
+        # service list (added in #77) never started it — invisible only
+        # because the topics already existed on the old volume. On a fresh
+        # stack the consumer groups would have had nothing to subscribe to.
+        # Mirrors the `migrate` pattern directly above.
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
     command:

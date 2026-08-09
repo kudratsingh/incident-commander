@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -10,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from incident_commander.agent.state import RunState
+from incident_commander.agent.state import IncidentState, RunState
 from incident_commander.api import app as app_module
 from incident_commander.api.app import create_app
 from incident_commander.api.hmac_verify import sign
@@ -263,3 +264,79 @@ class TestIngestAlert:
         run = spawned_runs[0]
         assert run.alert["trace_id"] == "abc123"
         assert run.alert["labels"] == {"team": "payments"}
+
+
+class TestKillSwitch:
+    """AGENT_ENABLED=false gates the state machine, never the webhook
+    (docs/safety-model.md#kill-switch, docs/runbook.md#kill-switch).
+
+    The assertion that would have caught finding B-03: the documented env
+    var must actually stop investigation runs from being spawned.
+    """
+
+    def _post_alert(self, client: TestClient, alert: dict[str, Any]) -> Any:
+        body = json.dumps(alert).encode()
+        return client.post(
+            "/alerts",
+            content=body,
+            headers={
+                "X-Alert-Signature": sign(body, "hmac-secret"),
+                "X-Alert-Timestamp": str(int(time.time() * 1000)),
+                "Content-Type": "application/json",
+            },
+        )
+
+    def test_disabled_records_triage_run_without_spawning(
+        self, spawned_runs: list[RunState], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        ckpt = InMemoryCheckpointer()
+
+        def capture(run: RunState, _s: Settings, _c: object) -> None:
+            spawned_runs.append(run)
+
+        app = create_app(
+            settings=_test_settings(agent_enabled=False),
+            checkpointer=ckpt,
+            run_task=capture,
+        )
+        with caplog.at_level(logging.WARNING, logger="incident_commander.api.app"):
+            response = self._post_alert(
+                TestClient(app),
+                {"source": "billing", "severity": "high", "group": "billing-consumer"},
+            )
+        assert response.status_code == 202
+        incident_id = UUID(response.json()["incident_id"])
+        assert spawned_runs == []
+        recorded = ckpt.load(incident_id)
+        assert recorded is not None
+        assert recorded.state is IncidentState.TRIAGE
+        assert recorded.alert["group"] == "billing-consumer"
+        assert any("AGENT_ENABLED=false" in r.getMessage() for r in caplog.records)
+
+    def test_disabled_checkpoint_failure_still_acknowledges(
+        self, spawned_runs: list[RunState], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Fail-open posture: a disabled agent must never turn webhook
+        ingestion into delivery failures, even with the run store down."""
+
+        class _ExplodingCheckpointer(InMemoryCheckpointer):
+            def write(self, run_state: RunState) -> None:
+                raise RuntimeError("run store unavailable")
+
+        def capture(run: RunState, _s: Settings, _c: object) -> None:
+            spawned_runs.append(run)
+
+        app = create_app(
+            settings=_test_settings(agent_enabled=False),
+            checkpointer=_ExplodingCheckpointer(),
+            run_task=capture,
+        )
+        with caplog.at_level(logging.ERROR, logger="incident_commander.api.app"):
+            response = self._post_alert(TestClient(app), {"source": "billing"})
+        assert response.status_code == 202
+        UUID(response.json()["incident_id"])
+        assert spawned_runs == []
+        assert any(
+            "AGENT_ENABLED=false" in r.getMessage() and r.levelno == logging.ERROR
+            for r in caplog.records
+        )

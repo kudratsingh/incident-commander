@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     budget_max_seconds: int = Field(default=1_800, ge=1)
     budget_max_usd: Decimal = Field(default=Decimal("5.00"), ge=Decimal("0"))
 
+    # Operational kill switch, env var AGENT_ENABLED (docs/safety-model.md
+    # #kill-switch and docs/runbook.md#kill-switch): false keeps the webhook
+    # ingress accepting and recording alerts but spawns no investigation
+    # runs — the state machine never advances. Read once at process start
+    # (Settings is frozen, get_settings() is cached); changing it requires
+    # an agent-process restart.
+    agent_enabled: bool = True
+
     # Live-eval verification polling. attempts=1 keeps the legacy single-
     # probe behavior (canned/offline runs). Live runs should set
     # VERIFY_PROBE_ATTEMPTS>1 so eventually-consistent probes (e.g. the

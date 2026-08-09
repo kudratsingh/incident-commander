@@ -466,6 +466,7 @@ def make_llm_verify(
     probe_attempts: int = 1,
     probe_delay_seconds: float = 0.0,
     sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], datetime] | None = None,
 ) -> Callable[[RunState, datetime], RunState]:
     """Bind clients + model to the VERIFYING transition.
 
@@ -480,6 +481,21 @@ def make_llm_verify(
     read taken ~1s after the action judges the cache, not the fix.
     Defaults (attempts=1, delay=0) preserve the single-probe behavior
     that canned runs and existing tests rely on.
+
+    The window is budget-gated between attempts: attempt 1 always runs
+    (ADR 0006's atomicity guarantee — an executed Tier-1 action is always
+    verified at least once, which is why loop.py exempts VERIFYING from
+    the loop-level short-circuit), but every later attempt is refused
+    once the ledger is exhausted. That bounds the overspend at the "one
+    extra probe over budget" ADR 0006 actually blesses instead of the
+    ``verify_probe_attempts`` (up to 10) probes plus judge calls an
+    ungated loop would allow.
+
+    ``clock`` stamps each poll attempt with a real read, so a window that
+    spans minutes of live polling produces honest per-attempt
+    timestamps. ``None`` (the default) preserves the legacy behavior of
+    stamping every entry in the window with the transition's single
+    ``at`` — what direct-constructed tests and canned runs expect.
 
     On ``not_verified`` after all probe attempts the transition ends
     the incident at ESCALATED — VERIFYING has no PLANNING successor
@@ -504,26 +520,51 @@ def make_llm_verify(
                 run_state, at, f"verify args invalid for {plan.verify_tool}: {err}"
             )
 
+        # Stamp for the attempt in flight. Seeded with the transition's
+        # single `at` so the clock=None path is byte-identical to the
+        # pre-#59 behavior and so the value is defined before attempt 1.
+        at_attempt = at
         for attempt in range(probe_attempts):
             if attempt > 0:
+                if run_state.budget.is_exhausted:
+                    # ADR 0006 exempts VERIFYING from the loop-level budget
+                    # short-circuit and blesses "one extra probe over
+                    # budget" — not `verify_probe_attempts` of them. Attempt
+                    # 1 above is that blessed probe; from here on the hard
+                    # limit wins. Gate BEFORE the sleep: a run that is
+                    # already escalating must not burn probe_delay_seconds
+                    # first.
+                    return _escalate_remediation(
+                        run_state,
+                        at_attempt,
+                        f"budget exhausted after verify attempt "
+                        f"{attempt}/{probe_attempts}; Tier-1 action already "
+                        f"executed, verification incomplete — escalating with "
+                        f"full probe history (ADR 0006 guarantees at least "
+                        f"one verify attempt)",
+                    )
                 sleep(probe_delay_seconds)
+
+            at_attempt = clock() if clock is not None else at
 
             try:
                 result = mcp_client.call_tool(plan.verify_tool, arguments)
             except MCPError as err:
                 return _escalate_remediation(
-                    run_state, at, f"verify tool error ({plan.verify_tool}): {err}"
+                    run_state, at_attempt, f"verify tool error ({plan.verify_tool}): {err}"
                 )
             if result.is_error:
                 return _escalate_remediation(
-                    run_state, at, f"verify tool reported is_error=True ({plan.verify_tool})"
+                    run_state,
+                    at_attempt,
+                    f"verify tool reported is_error=True ({plan.verify_tool})",
                 )
 
             try:
                 probe_summary = _summarize_output(spec.output_model, result.content)
             except (ValueError, ValidationError) as err:
                 return _escalate_remediation(
-                    run_state, at, f"verify output parse failed ({plan.verify_tool}): {err}"
+                    run_state, at_attempt, f"verify output parse failed ({plan.verify_tool}): {err}"
                 )
 
             try:
@@ -534,25 +575,29 @@ def make_llm_verify(
                     model=model,
                 )
             except (ValueError, ValidationError, LLMError) as err:
-                return _escalate_remediation(run_state, at, f"verify judge LLM invalid: {err}")
+                return _escalate_remediation(
+                    run_state, at_attempt, f"verify judge LLM invalid: {err}"
+                )
 
             judgment = judgment_result.output
             # Ordinal labels: under probe_attempts>1 a run produces several
             # probe+judge pairs; {attempt, of} on the evidence arguments is
             # what lets a reader (and the human trace render) tell poll #2/4
-            # from #4/4 without leaning on timestamps (issue #59).
+            # from #4/4 (issue #59). Timestamps are now real per attempt when
+            # a clock is wired, but the ordinals stay authoritative for canned
+            # runs, where the clock may be coarse or frozen.
             ordinal = {"attempt": attempt + 1, "of": probe_attempts}
             probe_entry = EvidenceEntry(
                 tool_name=plan.verify_tool,
                 arguments={**arguments, **ordinal},
                 result_summary=probe_summary,
-                timestamp=at,
+                timestamp=at_attempt,
             )
             judge_entry = EvidenceEntry(
                 tool_name="_verify_judge",
                 arguments={"expectation": plan.verify_expectation, **ordinal},
                 result_summary=f"{judgment.verdict}: {judgment.reasoning}",
-                timestamp=at,
+                timestamp=at_attempt,
             )
             new_budget = run_state.budget.model_copy(
                 update={
@@ -570,13 +615,13 @@ def make_llm_verify(
                 update={
                     "budget": new_budget,
                     "evidence": (*run_state.evidence, probe_entry, judge_entry),
-                    "updated_at": at,
+                    "updated_at": at_attempt,
                 }
             )
             if judgment.verdict == "verified":
-                return run_state.with_state(IncidentState.RESOLVED, at)
+                return run_state.with_state(IncidentState.RESOLVED, at_attempt)
 
-        return run_state.with_state(IncidentState.ESCALATED, at)
+        return run_state.with_state(IncidentState.ESCALATED, at_attempt)
 
     return transition_verify
 

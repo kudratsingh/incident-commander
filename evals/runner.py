@@ -327,6 +327,10 @@ def run_scenario(
         # responses are instant-consistent so one read is authoritative.
         probe_attempts=settings.verify_probe_attempts if live_mcp_available else 1,
         probe_delay_seconds=settings.verify_probe_delay_seconds,
+        # Same clock the loop runs on, so a multi-minute polling window
+        # stamps each attempt with the time it actually happened rather
+        # than reusing the transition's single entry read.
+        clock=tick,
     )
 
     try:

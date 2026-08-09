@@ -38,7 +38,12 @@ class _EmptyInput(BaseModel):
 
 class GetConsumerLagInput(BaseModel):
     model_config = _EMPTY_CONFIG
-    consumer_group: str = Field(default="worker-dispatcher", min_length=1)
+    # No min_length: the platform accepts ANY group string and returns
+    # lag:null for unknown ones (platform consumer_lag.py — "Any group
+    # name is accepted"). The snapshot inputSchema has no minLength, and
+    # the input-side contract test holds this model to exact schema
+    # equality with it.
+    consumer_group: str = Field(default="worker-dispatcher")
 
 
 class GetConsumerLagOutput(BaseModel):
@@ -572,7 +577,7 @@ _SNAPSHOT_PATH: Final[Path] = (
 )
 
 
-def _load_snapshot_descriptions() -> dict[str, str]:
+def _load_snapshot_descriptions(path: Path = _SNAPSHOT_PATH) -> dict[str, str]:
     """Tool descriptions, mirrored verbatim from the committed contract snapshot.
 
     The v0.4.9 descriptions are load-bearing eval infrastructure, not doc
@@ -581,14 +586,25 @@ def _load_snapshot_descriptions() -> dict[str, str]:
     flag's observable effect). Loading from the snapshot at import makes
     the mirror true by construction — a `make snapshot` refresh IS the
     description update, and there is no second copy to drift.
+
+    A missing or unreadable snapshot is a hard error, raised at import.
+    The previous behavior — silently degrading to ``{}`` — meant any
+    non-checkout install (e.g. a wheel, where ``parents[3]`` of this file
+    is not the repo root) shipped '(no description)' to the planner for
+    every tool: a silent quality collapse of the verify context that no
+    deployed environment would ever test for. If a packaged deployment
+    lands later, the snapshot must ship as package data (an ADR-level
+    layout change) — not by reintroducing the silent fallback.
     """
     try:
-        raw = json.loads(_SNAPSHOT_PATH.read_text())
-    except (OSError, ValueError):
-        # Missing snapshot (e.g. exotic packaging) degrades to empty
-        # descriptions; tests/unit/test_registry_matches_snapshot.py
-        # fails loudly in any checkout where this happens.
-        return {}
+        raw = json.loads(path.read_text())
+    except (OSError, ValueError) as err:
+        raise RuntimeError(
+            f"platform-tools snapshot missing or unreadable at {path}; the "
+            "registry's tool descriptions are load-bearing (verify "
+            "expectations are authored from them) — refusing to run with "
+            "empty descriptions"
+        ) from err
     return {t["name"]: t.get("description", "") for t in raw.get("tools", [])}
 
 

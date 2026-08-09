@@ -202,10 +202,24 @@ def make_client(
     run under a different principal (the eval runner's read-scoped smoke
     mode). Explicit beats ambient: the previous approach threaded the
     smoke token through make's environment and lost it to `-include .env`.
+
+    "Not provided" and "provided as empty" are different requests and get
+    different answers. Omitting ``token`` (or passing ``None``) selects the
+    documented ambient default, ``settings.platform_token``. Passing an
+    empty or blank string is a configuration error and raises: the old
+    ``token or ...`` treated it as ambient, so a caller who *meant* to run
+    restricted silently got the FULL write-scoped principal instead of a
+    failure (S-04). A broken credential never resolves upward.
     """
+    if token is not None and not token.strip():
+        raise ValueError(
+            "make_client: explicit token is empty — refusing to fall back to the "
+            "full platform principal. Pass None to select settings.platform_token "
+            "deliberately, or fix the empty credential."
+        )
     return MCPClient(
         base_url=str(settings.platform_mcp_url),
-        token=token or settings.platform_token.get_secret_value(),
+        token=token if token is not None else settings.platform_token.get_secret_value(),
         tracer=tracer,
     )
 

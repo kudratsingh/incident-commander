@@ -924,7 +924,13 @@ def main() -> int:
         print(msg)
     mcp_token: str | None = None
     if smoke:
-        if settings.platform_smoke_token is None:
+        # An empty secret is an UNSET one, not a token. `is None` alone let
+        # SecretStr("") through, mcp_token became "", and make_client's old
+        # `token or ...` then selected the FULL principal for every client
+        # in the stage — guard client included (S-04).
+        if settings.platform_smoke_token is None or not (
+            settings.platform_smoke_token.get_secret_value().strip()
+        ):
             print("SMOKE FAIL: PLATFORM_SMOKE_TOKEN is not set in .env")
             print("run `make bootstrap-token` and add the read-scoped token")
             return 3
@@ -937,6 +943,25 @@ def main() -> int:
             print(f"no scenarios matched --only={only_patterns}")
             return 2
         print(f"filter --only={only_patterns} → {len(scenarios)} scenario(s)")
+    if smoke:
+        # A read-only stage does not seed chaos. run_scenario fires
+        # chaos_setup under settings.platform_token — the full write+chaos
+        # principal — which is exactly the claim --smoke exists to disprove.
+        # The #80 principal guard only inspects the AGENT client's token and
+        # the exit-5 post-stage audit sees the write after it lands, so the
+        # only prevention is refusing the selection outright, here: after
+        # --only (the reachable channel, since SMOKE_ONLY is .env-overridable)
+        # and before preflight, guard, and any spend. There is no opt-out
+        # flag: a scenario that seeds chaos is not a smoke scenario (S-03).
+        chaos_scenarios = [s.name for s in scenarios if s.chaos_setup is not None]
+        if chaos_scenarios:
+            print(
+                f"SMOKE FAIL: scenario(s) {', '.join(chaos_scenarios)} declare "
+                "chaos_setup — a read-only stage does not seed chaos (chaos runs "
+                "under the full write+chaos principal)"
+            )
+            print("no scenarios ran, nothing was spent")
+            return 6
     offline_mcp = _is_offline_placeholder(str(settings.platform_mcp_url))
     offline_llm = _is_offline_api_key(settings.anthropic_api_key.get_secret_value())
     degraded_to_canned = sum(

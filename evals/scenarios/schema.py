@@ -9,13 +9,63 @@ one-probe shape; more elaborate matching lands with multi-probe scenarios.
 
 from __future__ import annotations
 
-from typing import Any
+import json
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Final
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from evals.graders.deterministic import ScenarioExpectation
 from incident_commander.api.schemas import AlertPayload
 from incident_commander.tools.mcp_client import ToolResult
+
+_SNAPSHOT_PATH: Final = (
+    Path(__file__).resolve().parents[2] / "contracts" / "platform-tools.snapshot.json"
+)
+# Since v0.4.9 the platform stamps every chaos tool's description with its
+# blast radius (platform app/mcp/chaos.py:79). Selecting on that prefix is
+# the same structural filter tests/unit/test_registry.py uses to exclude
+# chaos tools from TOOL_REGISTRY — hand-lists of chaos tools have drifted
+# three times in this repo's history, so nothing here is hand-listed.
+_CHAOS_PREFIX: Final = "[chaos:"
+# Chaos tools the platform registers but the commander deliberately does not
+# use. ``seed_dlq_messages`` is deferred, flag-off platform work that stays
+# out of this repo entirely — not in TOOL_REGISTRY, not in a ``chaos_setup``,
+# not in a scenario. It is absent from the pinned 26-tool snapshot today and
+# the post-campaign rebless will add it; excluding it here by construction
+# means that rebless cannot silently widen the closed set.
+_DEFERRED_CHAOS_TOOLS: Final = frozenset({"seed_dlq_messages"})
+
+
+def _chaos_names_from_snapshot(payload: object) -> frozenset[str]:
+    """Chaos tool names in a parsed ``tools/list`` snapshot, minus deferrals."""
+    if not isinstance(payload, dict):
+        return frozenset()
+    tools = payload.get("tools", [])
+    if not isinstance(tools, list):
+        return frozenset()
+    names = {
+        str(tool["name"])
+        for tool in tools
+        if isinstance(tool, dict)
+        and isinstance(tool.get("name"), str)
+        and str(tool.get("description", "")).startswith(_CHAOS_PREFIX)
+    }
+    return frozenset(names - _DEFERRED_CHAOS_TOOLS)
+
+
+@lru_cache(maxsize=1)
+def chaos_tool_names() -> frozenset[str]:
+    """The closed set of chaos hooks a scenario may declare.
+
+    Derived from the committed contract snapshot, read lazily and cached:
+    ``evals`` is imported at unit-test collection time and this must not
+    cost a file read per scenario. The snapshot is always present in a
+    checkout; a missing one is a broken checkout, and the resulting
+    ``FileNotFoundError`` says so more usefully than a silent empty set.
+    """
+    return _chaos_names_from_snapshot(json.loads(_SNAPSHOT_PATH.read_text()))
 
 
 class ChaosHook(BaseModel):
@@ -26,12 +76,33 @@ class ChaosHook(BaseModel):
     itself. Only invoked when the run is live (``use_live_mcp`` is true AND
     ``PLATFORM_MCP_URL`` is a real endpoint); canned runs ignore it entirely
     since the canned tool responses already encode the broken state.
+
+    ``name`` is a CLOSED SET, not a free string. Chaos seeding runs under
+    ``settings.platform_token`` — the full write+chaos principal — and
+    ``ChaosClient.call`` forwards the name verbatim as a ``tools/call``, so
+    an unconstrained name lets a scenario YAML execute any platform tool,
+    Tier-1 writes included, under that principal (S-03).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str = Field(min_length=1, description="Platform hook name, e.g. `inject_latency`.")
     arguments: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("name")
+    @classmethod
+    def _name_is_a_registered_chaos_tool(cls, value: str) -> str:
+        allowed = chaos_tool_names()
+        if value not in allowed:
+            raise ValueError(
+                f"{value!r} is not a chaos tool. chaos_setup runs under the full "
+                f"write+chaos principal, so its name is a closed set: "
+                f"{', '.join(sorted(allowed))}. To add a hook, land it on the platform, "
+                f"bump the pinned digest in demo/compose.yml, and re-bless the snapshot "
+                f"with `make snapshot` (docs/runbook.md) — this list is derived from "
+                f"contracts/platform-tools.snapshot.json, never hand-edited."
+            )
+        return value
 
 
 class Scenario(BaseModel):

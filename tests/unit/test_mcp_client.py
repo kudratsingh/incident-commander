@@ -6,8 +6,10 @@ from typing import Any
 
 import httpx
 import pytest
+from pydantic import AnyHttpUrl, PostgresDsn, SecretStr
 
-from incident_commander.tools.mcp_client import MCPClient, MCPError, ToolResult
+from incident_commander.config import Settings
+from incident_commander.tools.mcp_client import MCPClient, MCPError, ToolResult, make_client
 
 _BASE_URL = "https://mcp.local"
 
@@ -277,3 +279,61 @@ class TestTracer:
             client.call_tool("get_consumer_lag", {})
         assert len(captured) == 1
         assert captured[0]["error"].startswith("MCPError")
+
+
+def _settings() -> Settings:
+    return Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        anthropic_api_key=SecretStr("sk-ant-test-not-a-real-key"),
+        judge_model="claude-sonnet-4-5",
+        platform_mcp_url=AnyHttpUrl(_BASE_URL),
+        platform_rest_url=AnyHttpUrl(_BASE_URL),
+        platform_token=SecretStr("sa_full_scope"),
+        platform_webhook_secret=SecretStr("whsec_test"),
+        database_url=PostgresDsn("postgresql://eval:eval@localhost:5432/eval"),
+    )
+
+
+def _bearer(client: MCPClient) -> str:
+    return client._headers["Authorization"]
+
+
+class TestMakeClientPrincipalSelection:
+    """S-04: an explicit empty token is a config error, not a request for root.
+
+    ``token or settings.platform_token`` conflated "no token given" with
+    "an empty token was given" and answered both with the FULL write-scoped
+    principal. "Not provided" is a documented default; "provided as empty"
+    is a broken config, and a broken config must not resolve upward.
+    """
+
+    def test_explicit_empty_token_raises(self) -> None:
+        with pytest.raises(ValueError, match="refusing to fall back"):
+            make_client(_settings(), token="")
+
+    def test_explicit_empty_token_does_not_build_a_privileged_client(self) -> None:
+        # The assertion that catches fallback-to-privileged: at HEAD this
+        # returned a client whose Authorization header carried the full
+        # platform token.
+        try:
+            client = make_client(_settings(), token="")
+        except ValueError:
+            return
+        try:
+            raise AssertionError(f"make_client returned a client bearing {_bearer(client)!r}")
+        finally:
+            client.close()
+
+    def test_absent_token_still_selects_the_ambient_platform_token(self) -> None:
+        with make_client(_settings()) as client:
+            assert _bearer(client) == "Bearer sa_full_scope"
+        with make_client(_settings(), token=None) as client:
+            assert _bearer(client) == "Bearer sa_full_scope"
+
+    def test_explicit_token_beats_the_ambient_one(self) -> None:
+        with make_client(_settings(), token="sa_x") as client:
+            assert _bearer(client) == "Bearer sa_x"
+
+    def test_whitespace_only_token_is_not_a_token(self) -> None:
+        with pytest.raises(ValueError, match="refusing to fall back"):
+            make_client(_settings(), token="   ")

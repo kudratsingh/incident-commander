@@ -900,10 +900,33 @@ def main() -> int:
     # the agent's own trajectory (CLAUDE.md invariant 6). This is the exact
     # evidence that exposed the token bug — now automatic.
     if guard_required:
+        # Attribute violations to the principals this stage owns, so a
+        # shared platform's other service accounts cannot fail (or mask)
+        # this stage (A-13). Both ids or nothing: the failure mode this
+        # guard exists for — the "read-scoped" stage silently holding the
+        # full token — writes its audit rows under the AGENT principal, so
+        # a half-configured env naming only the smoke id would blind the
+        # guard to its own reason for existing. Unfiltered is over-broad,
+        # which is the safe side to fall back to.
+        agent_principal = settings.platform_agent_principal_id
+        smoke_principal = settings.platform_smoke_principal_id
+        principal_ids = (
+            frozenset({agent_principal, smoke_principal})
+            if agent_principal and smoke_principal
+            else None
+        )
+        if principal_ids is None and (agent_principal or smoke_principal):
+            print(
+                "post-stage audit: only one of PLATFORM_AGENT_PRINCIPAL_ID / "
+                "PLATFORM_SMOKE_PRINCIPAL_ID is set — ignoring both and failing "
+                "on ANY service account's Tier-1 success (see docs/runbook.md)"
+            )
         try:
             audit_client = make_client(settings, token=mcp_token)
             try:
-                assert_no_tier1_successes(audit_client, stage_started_at)
+                assert_no_tier1_successes(
+                    audit_client, stage_started_at, principal_ids=principal_ids
+                )
             finally:
                 audit_client.close()
         except PrincipalGuardError as err:

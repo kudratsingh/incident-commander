@@ -14,6 +14,7 @@ introspection endpoint, no platform change required.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import datetime
 from typing import Any, Final
 
@@ -45,6 +46,13 @@ _SCOPE_REFUSAL_CODE: Final[int] = -32002
 # referenced. If a Tier-1 tool is added to policies.py, this guard covers
 # it with no edit here.
 _TIER_1_TOOLS: Final[frozenset[str]] = tools_at_or_below(Tier.TIER_1) - tools_at_or_below(Tier.READ)
+
+# The page size the post-stage audit asks for, and the same number the
+# saturation check below compares against — one constant, because a
+# request for N rows checked against a hardcoded 200 would be a silent
+# lie the moment either moved. 200 is the platform's ceiling
+# (ListAuditEventsInput.limit is le=200), not a tuning choice.
+_AUDIT_PAGE_LIMIT: Final[int] = 200
 
 
 class PrincipalGuardError(RuntimeError):
@@ -95,6 +103,8 @@ def assert_read_only_principal(client: MCPClientProtocol) -> None:
 def assert_no_tier1_successes(
     client: MCPClientProtocol,
     since: datetime,
+    *,
+    principal_ids: Collection[str] | None = None,
 ) -> list[AuditEventEntry]:
     """Fail if the platform audit records any successful Tier-1 call since ``since``.
 
@@ -102,15 +112,30 @@ def assert_no_tier1_successes(
     caught the token bug — rather than from the agent's trajectory. An
     agent cannot grade itself honest (CLAUDE.md invariant 6).
 
+    ``principal_ids`` is the set of principals THIS stage owns (the agent
+    SA and the smoke SA, both minted by ``bootstrap_agent_token.py``).
+    When given, only their rows can fail the stage, so a neighbouring
+    tenant's legitimate Tier-1 success on a shared platform is not our
+    exit 5. When omitted or empty the guard stays deliberately over-broad
+    — any service account's success fails — because without the ids we
+    cannot tell ours from theirs, and over-broad is the safe side. Note
+    it must be BOTH ids: the F-001 failure mode is the stage silently
+    holding the FULL token, and those rows carry the AGENT principal.
+
     Returns the offending rows (empty on success) so callers can report
-    them; raises ``PrincipalGuardError`` when any are found.
+    them; raises ``PrincipalGuardError`` when any are found, or when the
+    page cannot prove it covered the whole window (``_window_fully_scanned``).
     """
     try:
         result = client.call_tool(
             "list_audit_events",
-            {"action": "agent.tool_invoked", "principal_type": "service_account", "limit": 200},
+            {
+                "action": "agent.tool_invoked",
+                "principal_type": "service_account",
+                "limit": _AUDIT_PAGE_LIMIT,
+            },
         )
-        events = _parse_events(result)
+        total, events = _parse_events(result)
     except PrincipalGuardError:
         raise
     except Exception as err:  # noqa: BLE001 — fail closed, deliberately
@@ -121,24 +146,81 @@ def assert_no_tier1_successes(
             f"({type(err).__name__}: {err}); treating as a failure — an "
             "unverifiable stage is not a clean stage."
         ) from err
+    owned = frozenset(str(p) for p in principal_ids) if principal_ids else None
     violations = [
         e
         for e in events
-        if _tool_of(e) in _TIER_1_TOOLS and _outcome_of(e) == "success" and e.created_at >= since
+        if _tool_of(e) in _TIER_1_TOOLS
+        and _outcome_of(e) == "success"
+        and e.created_at >= since
+        and (owned is None or str(e.principal_id) in owned)
     ]
-    if violations:
-        summary = ", ".join(
-            f"{_tool_of(e)}@{e.created_at.isoformat()} by {e.principal_id}" for e in violations[:5]
+    if not _window_fully_scanned(total, events, since):
+        # A-13: the page came back truncated, so the rows we could not
+        # fetch may hold the very successes this assertion exists to
+        # catch. Inconclusive is a failure, exactly like an unreadable
+        # audit — but anything already visible is the more actionable
+        # signal and is named here rather than swallowed.
+        raise PrincipalGuardError(
+            f"post-stage audit inconclusive: the audit page is saturated "
+            f"({len(events)} of {total} matching row(s) returned, cap "
+            f"{_AUDIT_PAGE_LIMIT}) and its oldest row is still inside the "
+            "stage window, so rows the tool cannot return may hold Tier-1 "
+            "successes. list_audit_events exposes no offset and no "
+            "created_after, so the window cannot be paged — treating as a "
+            f"failure.{_visible_suffix(violations)}"
         )
+    if violations:
         raise PrincipalGuardError(
             f"read-only stage executed {len(violations)} successful Tier-1 "
-            f"action(s) per the platform audit log: {summary}. "
+            f"action(s) per the platform audit log: {_summarize(violations)}. "
             "Read-only means read-only."
         )
     return violations
 
 
-def _parse_events(result: Any) -> list[AuditEventEntry]:
+def _window_fully_scanned(
+    total: int,
+    events: list[AuditEventEntry],
+    since: datetime,
+) -> bool:
+    """Can this one page prove it saw every row in ``[since, now]``?
+
+    ``list_audit_events`` hardcodes ``offset=0`` and caps ``limit`` at 200
+    (platform ``mcp/tools/list_audit_events.py:95-96``), so there is no
+    second page to ask for — a "loop until older than since" would re-read
+    the same rows forever. What the guard CAN do is refuse to call a
+    truncated read clean.
+
+    Rows were withheld when the server's own ``total`` (a COUNT over the
+    same filter with no limit — ``repositories/audit.py:86``) exceeds what
+    it returned, or when the page sits at the cap. Rows come back
+    ``created_at DESC`` (``repositories/audit.py:100``), so once rows are
+    withheld the only proof the window is fully on the page is that the
+    page reaches back PAST ``since``.
+    """
+    withheld = total > len(events) or len(events) >= _AUDIT_PAGE_LIMIT
+    if not withheld:
+        return True
+    return bool(events) and min(e.created_at for e in events) < since
+
+
+def _summarize(violations: list[AuditEventEntry]) -> str:
+    return ", ".join(
+        f"{_tool_of(e)}@{e.created_at.isoformat()} by {e.principal_id}" for e in violations[:5]
+    )
+
+
+def _visible_suffix(violations: list[AuditEventEntry]) -> str:
+    if not violations:
+        return ""
+    return (
+        f" {len(violations)} in-window Tier-1 success(es) are already "
+        f"visible on the truncated page: {_summarize(violations)}."
+    )
+
+
+def _parse_events(result: Any) -> tuple[int, list[AuditEventEntry]]:
     """Parse the tool result through the REGISTRY'S typed output model.
 
     Not a hand-rolled dict walk. The first version of this function read
@@ -154,6 +236,10 @@ def _parse_events(result: Any) -> list[AuditEventEntry]:
     changes the audit payload, CI fails before a run does. An unrecognized
     payload raises rather than yielding zero events — parsing nothing must
     fail closed, exactly like an unreadable audit.
+
+    Returns ``(total, events)``. ``total`` is the platform's unlimited
+    COUNT over the same filter, which is how the caller learns the page
+    was truncated; ``events`` is what actually came back.
     """
     spec = TOOL_REGISTRY["list_audit_events"]
     for block in getattr(result, "content", []) or []:
@@ -168,7 +254,8 @@ def _parse_events(result: Any) -> list[AuditEventEntry]:
                     "stage from a payload we could not read."
                 ) from err
             events: list[AuditEventEntry] = list(parsed.events)  # type: ignore[attr-defined]
-            return events
+            total: int = int(parsed.total)  # type: ignore[attr-defined]
+            return total, events
     raise PrincipalGuardError(
         "post-stage audit response contained no text content block; "
         "treating as unreadable rather than as zero events."

@@ -244,6 +244,11 @@ def main() -> int:
     print(f"PLATFORM_MCP_URL={args.mcp_url}")
     print(f"PLATFORM_TOKEN={token}")
     print(f"PLATFORM_SMOKE_TOKEN={smoke_token}")
+    # Ids, not credentials — they scope the post-stage audit guard to the
+    # two service accounts this script just minted, so a shared platform's
+    # other principals cannot fail (or mask) a smoke stage (A-13).
+    print(f"PLATFORM_AGENT_PRINCIPAL_ID={sa_id}")
+    print(f"PLATFORM_SMOKE_PRINCIPAL_ID={smoke_sa_id}")
     print("=" * 60)
     return 0
 

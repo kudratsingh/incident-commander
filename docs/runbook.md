@@ -202,7 +202,44 @@ the degradation is now recorded in the report (`degraded_count` in
 | 2 | no scenario matched `--only` (regression gate: missing report, or a filtered `--only` `latest.json` — refused as gate input) |
 | 3 | preflight/env failure: `--smoke` without `--live`, degraded `--live` env, invalid or missing settings, missing smoke token, LLM auth preflight failure |
 | 4 | principal guard: the smoke token holds more than read scope |
-| 5 | post-stage audit failed or was unreadable |
+| 5 | post-stage audit failed, was unreadable, or was inconclusive |
+
+### Post-stage audit: saturation and self-owned principals (A-13)
+
+After the smoke stage, the runner re-reads the platform's audit log and
+fails (exit 5) if any successful Tier-1 action landed during the stage
+window. That read is **one page of at most 200 rows**:
+`list_audit_events` exposes no `offset` and no `created_after`, and the
+platform handler hardcodes `offset=0`, so the window cannot be paged from
+this repo. Two consequences operators need to know:
+
+* **A saturated page is inconclusive, not clean.** Rows come back newest
+  first, so the only proof the whole window was scanned is that the
+  oldest row on the page predates the stage start. If the page is at the
+  200 cap (or the platform's `total` says rows were withheld) and it
+  still does not reach back past the stage start, the guard raises and
+  the runner exits 5 — the unreachable rows could hold the very Tier-1
+  successes it is looking for. **This is by design** (inconclusive ≠
+  clean, invariant 6): it is not an agent bug. Re-run the smoke stage in
+  a quieter window, or reduce concurrent `agent.tool_invoked` traffic on
+  the tenant. Any violation already visible on the truncated page is
+  named in the same message.
+* **Violations can be scoped to the principals you own.** Set both
+  `PLATFORM_AGENT_PRINCIPAL_ID` and `PLATFORM_SMOKE_PRINCIPAL_ID` (both
+  printed by `make bootstrap-token` alongside the tokens) and only those
+  two service accounts' Tier-1 successes fail the stage, so a shared
+  platform's other principals cannot false-fail it. Both are required —
+  the wrong-token failure mode this guard exists for (the "read-scoped"
+  stage silently holding `PLATFORM_TOKEN`) writes its rows under the
+  **agent** principal, so the smoke id alone would blind the guard to its
+  own reason for existing. Leave them unset and the guard stays
+  deliberately over-broad: any service account's in-window Tier-1
+  success fails the stage.
+
+Real pagination is a **cross-repo follow-up**: it needs a platform PR
+adding `created_after` / `offset` / `principal_id` to `list_audit_events`,
+a platform release, a pin bump, and a snapshot regen from the pinned
+stack — never a hand edit of `contracts/platform-tools.snapshot.json`.
 
 ### consumer_lag live notes (kill-window experiment, 2026-08-04)
 

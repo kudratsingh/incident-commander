@@ -67,48 +67,87 @@ The agent never touches the bottom layer directly. The trust boundary is the MCP
 
 ## Repository layout
 
+This describes the tree as it is. Roadmap entries that do not exist yet carry an explicit
+`(planned — Phase N)` marker; everything without one is a real path.
+`tests/unit/test_docs_env_vars.py` asserts both halves of that claim, because the drift this
+block used to carry — a pre-package `src/agent`-style tree that never shipped — is the
+vocabulary `evals.yml`'s path filter was written against, so the regression gate never fired
+on a prompt change.
+
 ```text
 incident-commander/
-├── CLAUDE.md                  # this file
-├── README.md                  # positioning, demo instructions, architecture summary
-├── Makefile                   # single entrypoint for all dev commands
-├── Dockerfile
-├── pyproject.toml             # uv-managed, pinned dependencies
+├── CLAUDE.md                       # this file
+├── README.md                       # positioning, getting started, architecture summary
+├── Makefile                        # single entrypoint for all dev commands
+├── pyproject.toml                  # uv-managed dependencies, pinned via committed uv.lock
+├── alembic.ini                     # agent-DB migrations; versions under alembic/versions/
+├── Dockerfile                      # (planned — Phase 8) agent image for the cold-start demo
 ├── src/
-│   ├── agent/
-│   │   ├── orchestrator.py    # explicit state machine, owns transitions
-│   │   ├── state.py           # incident run state, Pydantic models, checkpoint schema
-│   │   ├── triage.py          # dedupe, correlate, severity, noise filter
-│   │   ├── investigation.py   # hypothesis loop: rank, probe, update, exit conditions
-│   │   ├── remediation.py     # plan, tier classification, execute/verify loop, revert
-│   │   ├── escalation.py      # briefing package generation
-│   │   └── prompts/           # versioned prompt files, snapshot-tested
-│   ├── tools/
-│   │   ├── mcp_client.py      # MCP transport, auth, retries, timeouts
-│   │   ├── registry.py        # typed tool definitions generated from contract snapshot
-│   │   └── policies.py        # tier map, allowlists, budget config
-│   ├── approvals/             # propose/execute client + graph resume on approval
-│   ├── memory/                # episodic store, retrieval, write policy
-│   ├── skills/                # runbook skill files + loader (progressive disclosure)
-│   ├── observability/         # OTel setup, cost meter, structured logging
-│   └── api/                   # FastAPI app: webhook ingress, health, run inspection
+│   └── incident_commander/
+│       ├── config.py               # Settings: model pins, budgets, platform URLs, secrets
+│       ├── agent/
+│       │   ├── orchestrator.py     # explicit state machine, owns transitions (ADR 0002)
+│       │   ├── loop.py             # drives one run from initial to terminal state
+│       │   ├── state.py            # RunState, Pydantic models, checkpoint schema
+│       │   ├── factory.py          # builds a fresh RunState from an inbound alert
+│       │   ├── triage.py           # severity, noise filter, actionable or not
+│       │   ├── investigation.py    # hypothesis loop: rank, probe, update, exit conditions
+│       │   ├── hypothesis.py       # hypothesis and evidence models, ranking inputs
+│       │   ├── remediation.py      # plan, tier gate, execute/verify loop, idempotency keys
+│       │   ├── briefing.py         # deterministic escalation briefing (the old escalation.py)
+│       │   └── briefing_enrichment.py  # LLM findings + recommendation over that template
+│       ├── llm/
+│       │   ├── client.py           # Anthropic SDK, typed structured outputs, retries
+│       │   ├── fakes.py            # offline LLMClientProtocol fakes for tests and evals
+│       │   └── prompts/            # versioned prompt .md files + loader.py, snapshot-tested
+│       ├── tools/
+│       │   ├── mcp_client.py       # MCP JSON-RPC transport, auth, retries, timeouts
+│       │   ├── registry.py         # typed tool definitions mirroring the contract snapshot
+│       │   ├── policies.py         # tier map, allowlists, per-state tool gates
+│       │   ├── contract.py         # snapshot-vs-live schema diff
+│       │   └── wire.py             # the exact request bytes the platform hashes
+│       ├── persistence/
+│       │   ├── postgres.py         # Postgres checkpointer, append-only snapshot log
+│       │   └── memory.py           # in-memory checkpointer for tests and the demo
+│       ├── api/
+│       │   ├── app.py              # FastAPI app: webhook ingress, health, run inspection
+│       │   ├── schemas.py          # HTTP request/response models (untrusted input)
+│       │   └── hmac_verify.py      # constant-time webhook signature verification
+│       ├── approvals/              # (planned — Phase 6) propose/execute client, resume on approval
+│       ├── memory/                 # (planned — Phase 4) episodic store, retrieval, write policy
+│       ├── skills/                 # (planned — Phase 5) runbook skill files + loader
+│       └── observability/          # (planned — Phase 8) OTel setup, cost meter, structured logging
 ├── evals/
-│   ├── scenarios/             # YAML scenario definitions incl. adversarial/
-│   ├── graders/               # deterministic graders + pinned LLM judge
-│   ├── runner.py              # replay engine against chaos-injected platform
-│   ├── trajectories/          # captured runs for debugging and analysis
-│   └── reports/               # baseline and regression reports, committed
+│   ├── scenarios/                  # YAML scenario definitions + loader.py, schema.py
+│   │   └── adversarial/            # (planned — Phase 7) injection payloads in tool output
+│   ├── graders/                    # deterministic graders + pinned LLM judge
+│   ├── runner.py                   # offline replay engine over scenario fixtures
+│   ├── regression.py               # baseline diff and the regression gate
+│   ├── guards.py                   # eval-time safety assertions
+│   ├── tracing.py                  # per-invocation trace writer (append-only, invariant 9)
+│   ├── chaos_hooks.py              # chaos-injection helpers for live runs
+│   ├── traces/                     # raw trace JSONL per run
+│   ├── runs/                       # per-run scored outcomes
+│   ├── trajectories/               # captured runs for debugging and analysis
+│   ├── briefings/                  # escalation briefings emitted during runs
+│   └── reports/                    # baseline.json + committed regression reports
 ├── contracts/
 │   └── platform-tools.snapshot.json   # generated from platform, diffed in CI
 ├── demo/
-│   ├── compose.yml            # pinned platform image by digest + agent + one command
-│   └── inject_and_run.py
-├── docs/                      # see Documentation section
+│   ├── compose.yml                 # platform image pinned by digest + its dependencies
+│   └── README.md                   # one-command demo walkthrough
+├── scripts/                        # token bootstrap, snapshot regen, chaos setup, cost estimate
+├── docs/                           # see Documentation section
+├── study/                          # campaign findings, predictions, run ledger (append-only)
 ├── tests/
 │   ├── unit/
 │   ├── integration/
-│   └── e2e/
-└── .github/workflows/         # ci.yml, evals.yml, nightly.yml
+│   └── e2e/                        # (planned — Phase 8) both services on compose, real budget
+└── .github/
+    └── workflows/
+        ├── ci.yml                  # check, test, contract — the three required jobs
+        ├── evals.yml               # regression subset, path-filtered (see Evals)
+        └── nightly.yml             # (planned — Phase 8) full suite + trend report
 ```
 
 ## Tech stack and standing decisions
@@ -150,13 +189,13 @@ Before opening a PR touching schemas, prompts, or the state machine, read [`docs
 
 Every PR that adds or changes code includes tests at the appropriate levels. Untested code does not merge. "It works in the demo" is not evidence.
 
-**Unit tests** (`tests/unit/`): pure logic, no network, no database, no LLM calls. State machine transitions, tier classification, budget accounting, hypothesis ranking math, parameter hashing, briefing assembly. Fast enough to run on every save. Target is high coverage of `src/agent/` and `src/tools/policies.py`, roughly 90 percent on those modules.
+**Unit tests** (`tests/unit/`): pure logic, no network, no database, no LLM calls. State machine transitions, tier classification, budget accounting, hypothesis ranking math, parameter hashing, briefing assembly. Fast enough to run on every save. Target is high coverage of `src/incident_commander/agent/` and `src/incident_commander/tools/policies.py`, roughly 90 percent on those modules.
 
 **Integration tests** (`tests/integration/`): real Postgres via testcontainers, mocked platform responses from recorded fixtures, LLM calls replayed from recorded fixtures rather than live. Checkpoint and resume behavior, lease acquisition, memory read and write paths, MCP client retry and timeout behavior, approval propose and execute round trips against a stubbed platform.
 
-**Contract tests** (`tests/integration/contract/`): pull the pinned platform image by digest, start it, fetch the live tool schemas, and diff against `contracts/platform-tools.snapshot.json`. CI fails loudly when a required tool disappears, a parameter becomes required, an enum changes, or a response field changes type. The snapshot is generated, never hand-edited.
+**Contract tests** (`tests/integration/test_contract_snapshot.py`): pull the pinned platform image by digest, start it, fetch the live tool schemas, and diff against `contracts/platform-tools.snapshot.json`. CI fails loudly when a required tool disappears, a parameter becomes required, an enum changes, or a response field changes type. The snapshot is generated, never hand-edited.
 
-**End-to-end tests** (`tests/e2e/`): compose both services, inject one chaos scenario, run the full agent loop with a real model call budget, and assert outcomes from the platform audit log: incident resolved or escalated correctly, zero unauthorized actions, approval records well formed. E2E runs on merge to main and nightly, not on every PR, because it spends real tokens.
+**End-to-end tests** (`tests/e2e/`, planned — Phase 8): compose both services, inject one chaos scenario, run the full agent loop with a real model call budget, and assert outcomes from the platform audit log: incident resolved or escalated correctly, zero unauthorized actions, approval records well formed. E2E runs on merge to main and nightly, not on every PR, because it spends real tokens.
 
 **Evals are a separate suite, not pytest.** The eval harness under `evals/` measures agent quality and safety across the scenario library. The regression subset gates PRs that touch behavior (prompts, tools, policies, model pins). The full suite runs nightly and produces a committed report. Treat eval metrics like production SLOs: a regression is a blocker, not a curiosity.
 
@@ -167,7 +206,7 @@ Test data discipline: fixtures are recorded from real runs and versioned. When a
 The harness is the product's proof. Built before the agent, maintained forever.
 
 - **Scenarios** are YAML files defining a chaos injection, the ground-truth root cause, the correct remediation, expected tier, and grading config. Taxonomy covers consumer crashes, poison messages, resource saturation, bad deploys, dependency failures, cascades, flapping alerts, and pure noise. Target 30 to 50 scenarios by end of Phase 1, grown continuously.
-- **Adversarial scenarios** (`evals/scenarios/adversarial/`) embed injection payloads in log lines, DLQ message bodies, and error strings. Graders assert the agent treated the content as data: no privilege escalation attempts, no actions sourced from payload text, injection flagged in the briefing where relevant.
+- **Adversarial scenarios** (`evals/scenarios/adversarial/`, planned — Phase 7) embed injection payloads in log lines, DLQ message bodies, and error strings. Graders assert the agent treated the content as data: no privilege escalation attempts, no actions sourced from payload text, injection flagged in the briefing where relevant.
 - **Graders** are deterministic first: RCA label match, action safety from the platform audit log, budget adherence, escalation correctness, evidence citation presence. An LLM judge (pinned `JUDGE_MODEL`, versioned rubric) grades soft qualities only: postmortem quality, briefing usefulness, hypothesis reasoning coherence.
 - **Metrics**: triage accuracy, RCA accuracy, time and cost per incident, action safety violations (must be zero), escalation precision and recall, false-action rate, memory lift (score delta on repeat-pattern scenarios with memory on vs off), token and cache-hit economics.
 - **Regression gating**: `evals.yml` runs the regression subset when a PR touches `src/incident_commander/agent/**`, `src/incident_commander/tools/**`, `src/incident_commander/llm/**` (prompts live in `llm/prompts/`), `src/incident_commander/config.py` (model pins), `contracts/platform-tools.snapshot.json`, or the eval harness (`evals/graders/`, `evals/runner.py`, `evals/scenarios/`, `evals/reports/baseline.json`). Baseline lives in `evals/reports/baseline.json`. A metric drop beyond threshold fails the check and the PR explains or fixes it.
@@ -233,21 +272,23 @@ Skills proven: LLM observability, production operations of an AI system.
 
 ## Skill coverage map
 
-Keep `docs/interview-map.md` synchronized with this table. Every row must point at merged, tested code.
+Keep `docs/interview-map.md` synchronized with this table. Every row must point at merged, tested
+code, or say which phase will build it — a row pointing at a path that does not exist is the drift
+that produced the `evals.yml` gate gap.
 
 | JD skill | Where it is proven |
 |---|---|
-| Agent architectures, loop engineering | `src/agent/orchestrator.py`, `investigation.py`, ADR 0002 |
-| Tool calling, typed tool use | `src/tools/registry.py`, structured outputs everywhere |
+| Agent architectures, loop engineering | `src/incident_commander/agent/orchestrator.py`, `investigation.py`, ADR 0002 |
+| Tool calling, typed tool use | `src/incident_commander/tools/registry.py`, structured outputs everywhere |
 | MCP | platform MCP server (platform repo), `mcp_client.py`, Claude Code as second client |
 | Evaluation frameworks, LLM-as-judge | `evals/`, ADR 0004, regression gating in CI |
 | Harness engineering, guardrails | tier policy, platform approvals, budgets, ADR 0003 |
-| Agent memory | `src/memory/`, measured lift, ADR 0005 |
-| Skills, sub-agents, context engineering | `src/skills/`, log-diver sub-agent, compaction |
+| Agent memory | `src/incident_commander/memory/` (planned — Phase 4), measured lift, ADR 0005 |
+| Skills, sub-agents, context engineering | `src/incident_commander/skills/` (planned — Phase 5), log-diver sub-agent, compaction |
 | Prompt and context caching economics | ADR 0006, cost metrics in eval reports |
-| Adversarial robustness, injection defense | `evals/scenarios/adversarial/`, `docs/threat-model.md` |
+| Adversarial robustness, injection defense | `evals/scenarios/adversarial/`, `docs/threat-model.md` (both planned — Phase 7) |
 | Human-in-the-loop design | approvals flow, briefings, escalation rail |
-| LLM observability and cost | `src/observability/`, OTel spans, per-incident dashboards |
+| LLM observability and cost | `src/incident_commander/observability/` (planned — Phase 8), OTel spans, per-incident dashboards |
 | Production SWE discipline | this file, CI, contract tests, ADRs, PR history itself |
 
 ## Development commands
@@ -298,7 +339,7 @@ BUDGET_MAX_USD           # per incident hard cost ceiling
 
 - Read `docs/ADR/` before proposing structural changes. Do not contradict an accepted ADR silently.
 - Never edit `contracts/platform-tools.snapshot.json` by hand. It is generated. Tool changes start with a platform PR.
-- Prompts live in `src/agent/prompts/` as versioned files with snapshot tests. Never inline prompts in code.
+- Prompts live in `src/incident_commander/llm/prompts/` as versioned files with snapshot tests. Never inline prompts in code. That path is also the one `evals.yml` filters on — if prompts ever move, the workflow and this line move with them in the same PR.
 - Prefer changing one capability per PR with its full vertical slice. Ask before splitting or merging planned PR scopes.
 - When tests and implementation disagree, assume the test encodes intent unless the test itself is the bug, and say which case applies.
 - Run `make eval-reg` before declaring any prompt or policy change complete.

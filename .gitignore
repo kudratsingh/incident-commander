@@ -50,8 +50,8 @@ evals/reports/human/*
 # Claude Code runtime artifacts (per-machine)
 .claude/
 
-# Per-invocation immutable run archive (CLAUDE.md invariant 9).
-# Local evidence; large and machine-specific, so not committed — back it
-# up outside the tree before any work that touches its writers (F-003).
-evals/runs/*
-!evals/runs/.gitkeep
+# evals/runs/ — the per-invocation immutable run archive — is the
+# CLAUDE.md invariant-9 durable record and is deliberately NOT ignored:
+# live-campaign archives must be committed (see docs/runbook.md,
+# "Live eval protocol"). The flat-pointer ignores above (trajectories,
+# briefings, traces, latest.json, reports/human) are refreshable by design.

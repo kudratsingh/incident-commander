@@ -154,6 +154,28 @@ Environment variable knobs for the live path (see [ADR 0006](ADR/0006-verificati
 
 All Tier-1 remediation scenarios now self-seed via `chaos_setup:` in their YAML — no separate `make chaos-*` step needed for the live pass.
 
+### Commit the run archive (invariant 9)
+
+After every live campaign, commit its archive:
+
+```bash
+git checkout -b eval/<slug>
+git add evals/runs/<invocation_id>
+git commit -m "eval: archive live run <invocation_id>"
+```
+
+`evals/runs/` is no longer gitignored, but un-gitignoring alone is NOT
+durability: `git clean -fd` deletes untracked files regardless of ignore
+status (only `-x` concerns ignored ones), so an uncommitted archive is
+still one `git clean -fd` away from erasure. The commit is the durability.
+
+Offline `make eval` / `make eval-reg` / `make baseline` invocations also
+leave untracked `evals/runs/<id>/` directories behind. Leaving them
+untracked is acceptable; deleting them is not (invariant 9).
+
+This step first becomes exercisable at the post-v0.5.0 eval — under the
+ADR 0011 freeze nothing runs, so no archive is committed until then.
+
 ### consumer_lag live notes (kill-window experiment, 2026-08-04)
 
 `remediate_consumer_lag_success` seeds `kill_consumer` (not latency — the

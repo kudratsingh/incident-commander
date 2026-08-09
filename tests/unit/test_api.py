@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from incident_commander.agent.factory import start_run
-from incident_commander.agent.state import IncidentState, RunState
+from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 from incident_commander.api import app as app_module
 from incident_commander.api.app import create_app
 from incident_commander.api.hmac_verify import sign
@@ -49,14 +49,18 @@ def spawned_runs() -> list[RunState]:
 
 
 @pytest.fixture
-def client(spawned_runs: list[RunState]) -> TestClient:
+def checkpointer() -> InMemoryCheckpointer:
+    return InMemoryCheckpointer()
+
+
+@pytest.fixture
+def client(spawned_runs: list[RunState], checkpointer: InMemoryCheckpointer) -> TestClient:
     settings = _test_settings()
-    ckpt = InMemoryCheckpointer()
 
     def capture(run: RunState, _s: Settings, _c: object) -> None:
         spawned_runs.append(run)
 
-    app = create_app(settings=settings, checkpointer=ckpt, run_task=capture)
+    app = create_app(settings=settings, checkpointer=checkpointer, run_task=capture)
     return TestClient(app)
 
 
@@ -268,6 +272,144 @@ class TestIngestAlert:
         assert run.alert["labels"] == {"team": "payments"}
 
 
+class TestDurableIncidentIdentity:
+    """ADR 0016: the incident id is derived from the triage dedup key, so an
+    at-least-once redelivery lands on the SAME incident — durably, unlike the
+    process-local replay cache (ADR 0014) that only suppresses byte-identical
+    redeliveries within the skew window.
+
+    Every test here defeats that cache deliberately (a cleared cache or a body
+    that differs outside the identity pair), so a green result can only come
+    from derivation. ``len(spawned_runs) == 2`` is the proof: the replay branch
+    returns before spawning, so two spawns mean both deliveries ran the full
+    ingress path.
+    """
+
+    def _post(self, client: TestClient, alert: dict[str, Any]) -> Any:
+        body = json.dumps(alert).encode()
+        return client.post(
+            "/alerts",
+            content=body,
+            headers={
+                "X-Alert-Signature": sign(body, "hmac-secret"),
+                "X-Alert-Timestamp": str(int(time.time() * 1000)),
+                "Content-Type": "application/json",
+            },
+        )
+
+    def test_redelivery_after_replay_cache_loss_keeps_the_incident_id(
+        self, client: TestClient, spawned_runs: list[RunState]
+    ) -> None:
+        alert = {"source": "billing", "severity": "high", "fingerprint": "kafka-lag-spike"}
+        first = self._post(client, alert)
+        # The cache is process-local and lost on restart; durable dedupe is
+        # exactly the guarantee it could not make.
+        app_module._replay_cache.clear()
+        second = self._post(client, alert)
+
+        assert (first.status_code, second.status_code) == (202, 202)
+        assert first.json()["incident_id"] == second.json()["incident_id"]
+        assert len(spawned_runs) == 2, "both deliveries must reach the spawn path"
+        assert spawned_runs[0].incident_id == spawned_runs[1].incident_id
+
+    def test_dedupe_holds_when_the_body_changes_outside_the_identity_pair(
+        self, client: TestClient, spawned_runs: list[RunState]
+    ) -> None:
+        # Different bodies → different signatures → the replay cache cannot be
+        # what makes this pass. Identity keys on (source, fingerprint) only.
+        first = self._post(
+            client, {"source": "billing", "severity": "high", "fingerprint": "kafka-lag-spike"}
+        )
+        second = self._post(
+            client,
+            {
+                "source": "billing",
+                "severity": "critical",
+                "fingerprint": "kafka-lag-spike",
+                "annotations": {"redelivery": 2},
+            },
+        )
+        assert first.json()["incident_id"] == second.json()["incident_id"]
+        assert len(spawned_runs) == 2
+
+    def test_redelivery_writes_a_single_ingress_checkpoint(
+        self, client: TestClient, checkpointer: InMemoryCheckpointer
+    ) -> None:
+        alert = {"source": "billing", "severity": "high", "fingerprint": "kafka-lag-spike"}
+        incident_id = UUID(self._post(client, alert).json()["incident_id"])
+        app_module._replay_cache.clear()
+        redelivery = self._post(client, alert)
+        assert UUID(redelivery.json()["incident_id"]) == incident_id
+        assert len(checkpointer.history(incident_id)) == 1
+
+    def test_redelivery_does_not_append_triage_over_an_inflight_run(
+        self, client: TestClient, checkpointer: InMemoryCheckpointer
+    ) -> None:
+        """The corruption case the conditional ingress write exists for.
+
+        ``run_snapshots`` is append-only and ``load`` returns the highest
+        version, so an unconditional TRIAGE append on top of an in-flight
+        INVESTIGATING run would hand the resume path an evidence-stripped
+        state.
+        """
+        alert = {"source": "billing", "severity": "high", "fingerprint": "kafka-lag-spike"}
+        incident_id = UUID(self._post(client, alert).json()["incident_id"])
+        inflight = checkpointer.load(incident_id)
+        assert inflight is not None
+        checkpointer.write(inflight.with_state(IncidentState.INVESTIGATING, datetime.now(UTC)))
+
+        app_module._replay_cache.clear()
+        redelivery = self._post(client, alert)
+
+        assert UUID(redelivery.json()["incident_id"]) == incident_id
+        latest = checkpointer.load(incident_id)
+        assert latest is not None
+        assert latest.state is IncidentState.INVESTIGATING
+        assert [snap.state for snap in checkpointer.history(incident_id)] == [
+            IncidentState.TRIAGE,
+            IncidentState.INVESTIGATING,
+        ]
+
+    def test_different_fingerprints_open_different_incidents(
+        self, client: TestClient, spawned_runs: list[RunState]
+    ) -> None:
+        first = self._post(client, {"source": "billing", "fingerprint": "kafka-lag-spike"})
+        second = self._post(client, {"source": "billing", "fingerprint": "dlq-growth"})
+        assert first.json()["incident_id"] != second.json()["incident_id"]
+        assert len(spawned_runs) == 2
+
+    def test_fingerprintless_alerts_do_not_collapse_per_source(
+        self, client: TestClient, spawned_runs: list[RunState]
+    ) -> None:
+        # The load-bearing fallback: without it an entire fingerprint-less
+        # alert stream from one source would merge into one immortal incident.
+        first = self._post(client, {"source": "billing", "severity": "high"})
+        second = self._post(client, {"source": "billing", "severity": "critical"})
+        assert first.json()["incident_id"] != second.json()["incident_id"]
+        assert len(spawned_runs) == 2
+
+    def test_recurrence_after_a_terminal_run_opens_a_new_incident(
+        self, client: TestClient, checkpointer: InMemoryCheckpointer
+    ) -> None:
+        alert = {"source": "billing", "severity": "high", "fingerprint": "kafka-lag-spike"}
+        first = UUID(self._post(client, alert).json()["incident_id"])
+        resolved = checkpointer.load(first)
+        assert resolved is not None
+        checkpointer.write(resolved.with_state(IncidentState.RESOLVED, datetime.now(UTC)))
+
+        app_module._replay_cache.clear()
+        second = UUID(self._post(client, alert).json()["incident_id"])
+        assert second != first
+        assert checkpointer.load(second) is not None
+
+        # The recurrence is a deterministic generation, not a fresh uuid4:
+        # its own redeliveries must keep landing on it, or dedupe would be
+        # lost exactly for the alerts most likely to be retried.
+        app_module._replay_cache.clear()
+        third = UUID(self._post(client, alert).json()["incident_id"])
+        assert third == second
+
+
 class TestKillSwitch:
     """AGENT_ENABLED=false gates the state machine, never the webhook
     (docs/safety-model.md#kill-switch, docs/runbook.md#kill-switch).
@@ -423,14 +565,21 @@ class TestFailureRail:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A crash after the outcome was decided must not overwrite it with
-        FAILED — the terminal record already tells the true story."""
+        FAILED — the terminal record already tells the true story.
+
+        Two layers hold this now. ADR 0016's resume gate refuses to re-run a
+        terminal incident at all, so the crashing body is never reached; and
+        ``_record_run_failure``'s own terminal check, exercised directly below,
+        still guards a crash that happens after the loop wrote a terminal
+        snapshot internally.
+        """
         ckpt = InMemoryCheckpointer()
         run = self._run()
         ckpt.write(run.with_state(IncidentState.ESCALATED, datetime.now(UTC)))
         monkeypatch.setattr(app_module, "run_to_completion", _boom)
 
-        with pytest.raises(RuntimeError, match="boom"):
-            app_module._run_investigation(run, _test_settings(), ckpt)
+        app_module._run_investigation(run, _test_settings(), ckpt)
+        app_module._record_run_failure(run, ckpt, RuntimeError("boom"))
 
         history = ckpt.history(run.incident_id)
         assert len(history) == 1
@@ -476,3 +625,104 @@ class TestFailureRail:
         briefing_json: str = record.__dict__["briefing"]
         assert str(run.incident_id) in briefing_json
         assert IncidentState.ESCALATED.value in briefing_json
+
+
+class TestResumeGate:
+    """ADR 0016: inside the lease, the background task loads the latest
+    checkpoint and continues from it instead of always re-running from TRIAGE.
+
+    No engine is wired here, so these exercise the resume branch alone; the
+    lease itself needs real Postgres (``tests/integration/test_single_flight``).
+    """
+
+    def _run(self) -> RunState:
+        return start_run(
+            {"source": "billing", "severity": "high", "fingerprint": "kafka-lag-spike"},
+            _test_settings(),
+            datetime.now(UTC),
+        )
+
+    def _recorder(
+        self, seen: list[RunState]
+    ) -> Callable[..., RunState]:  # pragma: no cover - trivial
+        def record(state: RunState, **_kwargs: Any) -> RunState:
+            seen.append(state)
+            return state.with_state(IncidentState.ESCALATED, datetime.now(UTC))
+
+        return record
+
+    def test_no_checkpoint_runs_the_state_it_was_handed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[RunState] = []
+        run = self._run()
+        monkeypatch.setattr(app_module, "run_to_completion", self._recorder(seen))
+
+        app_module._run_investigation(run, _test_settings(), InMemoryCheckpointer())
+
+        assert [state.incident_id for state in seen] == [run.incident_id]
+        assert seen[0].state is IncidentState.TRIAGE
+
+    def test_non_terminal_checkpoint_is_resumed_with_its_evidence(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The crash-resume contract: a run that died mid-investigation
+        continues from its checkpoint rather than re-spending the budget to
+        rebuild evidence it already has."""
+        ckpt = InMemoryCheckpointer()
+        run = self._run()
+        ckpt.write(run)
+        crashed = run.with_state(IncidentState.INVESTIGATING, datetime.now(UTC)).model_copy(
+            update={
+                "evidence": (
+                    EvidenceEntry(
+                        tool_name="get_consumer_lag",
+                        arguments={"consumer_group": "worker-dispatcher"},
+                        result_summary="lag=12000",
+                        timestamp=datetime.now(UTC),
+                    ),
+                )
+            }
+        )
+        ckpt.write(crashed)
+        seen: list[RunState] = []
+        monkeypatch.setattr(app_module, "run_to_completion", self._recorder(seen))
+
+        app_module._run_investigation(run, _test_settings(), ckpt)
+
+        assert seen[0].state is IncidentState.INVESTIGATING
+        assert [entry.tool_name for entry in seen[0].evidence] == ["get_consumer_lag"]
+
+    def test_terminal_checkpoint_is_not_resumed(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        ckpt = InMemoryCheckpointer()
+        run = self._run()
+        ckpt.write(run.with_state(IncidentState.RESOLVED, datetime.now(UTC)))
+        monkeypatch.setattr(app_module, "run_to_completion", _boom)
+
+        with caplog.at_level(logging.INFO, logger="incident_commander.api.app"):
+            app_module._run_investigation(run, _test_settings(), ckpt)
+
+        assert len(ckpt.history(run.incident_id)) == 1
+        assert any("terminal" in r.getMessage() for r in caplog.records)
+
+    def test_awaiting_approval_is_not_resumed(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Tier-2 resume is scoped out (ADR 0016): AWAITING_APPROVAL's
+        transition is still a stub, so resuming into it would raise
+        NotImplementedError and the failure rail would turn a merely-waiting
+        incident into a FAILED one."""
+        ckpt = InMemoryCheckpointer()
+        run = self._run()
+        ckpt.write(run.with_state(IncidentState.AWAITING_APPROVAL, datetime.now(UTC)))
+        monkeypatch.setattr(app_module, "run_to_completion", _boom)
+
+        with caplog.at_level(logging.INFO, logger="incident_commander.api.app"):
+            app_module._run_investigation(run, _test_settings(), ckpt)
+
+        latest = ckpt.load(run.incident_id)
+        assert latest is not None
+        assert latest.state is IncidentState.AWAITING_APPROVAL
+        assert any("awaiting_approval" in r.getMessage() for r in caplog.records)

@@ -56,6 +56,13 @@ class PostgresCheckpointer:
                 return
             except IntegrityError:
                 # Concurrent writer took our version. Retry with a fresh one.
+                #
+                # The single-flight lease (ADR 0016) does NOT demote this to
+                # belt-and-suspenders: it fences the run loop, but the two
+                # ingress writes of a simultaneous double-delivery both happen
+                # OUTSIDE the lease — both derive the same incident id, both
+                # find no snapshot, both write TRIAGE. This retry is what
+                # absorbs that collision, and it stays a live requirement.
                 if attempt == 2:
                     raise
 

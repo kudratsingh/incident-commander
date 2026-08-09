@@ -10,16 +10,17 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Final
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, status
-from sqlalchemy import create_engine
+from sqlalchemy import Engine, create_engine
 
 from incident_commander.agent.briefing import render_briefing
-from incident_commander.agent.factory import start_run
+from incident_commander.agent.factory import derive_incident_id, start_run
 from incident_commander.agent.investigation import make_investigate
 from incident_commander.agent.loop import run_to_completion
 from incident_commander.agent.orchestrator import TRANSITIONS, Checkpointer, Transition
@@ -27,6 +28,7 @@ from incident_commander.agent.state import EvidenceEntry, IncidentState, RunStat
 from incident_commander.api.hmac_verify import verify
 from incident_commander.api.schemas import AlertPayload, HealthResponse, IngestResponse
 from incident_commander.config import Settings, get_settings
+from incident_commander.persistence.lease import incident_lease
 from incident_commander.persistence.postgres import PostgresCheckpointer
 from incident_commander.tools.mcp_client import make_client
 
@@ -67,14 +69,25 @@ def create_app(
 ) -> FastAPI:
     """Build the FastAPI app. Tests inject ``checkpointer`` and ``run_task``."""
     resolved_settings = settings or get_settings()
-    resolved_checkpointer = checkpointer or PostgresCheckpointer(
-        create_engine(str(resolved_settings.database_url))
-    )
-    task: RunTask = run_task or _run_investigation
+    # The engine is kept, not discarded: the single-flight lease (ADR 0016)
+    # needs a real connection to take its advisory lock on. An injected
+    # checkpointer means there is no engine — see ``_single_flight``.
+    engine: Engine | None = None
+    if checkpointer is None:
+        engine = create_engine(str(resolved_settings.database_url))
+        resolved_checkpointer: Checkpointer = PostgresCheckpointer(engine)
+    else:
+        resolved_checkpointer = checkpointer
+
+    def investigate(run: RunState, run_settings: Settings, run_checkpointer: Checkpointer) -> None:
+        _run_investigation(run, run_settings, run_checkpointer, engine=engine)
+
+    task: RunTask = run_task or investigate
 
     app = FastAPI(title="Incident Commander", version="0.1.0")
     app.state.settings = resolved_settings
     app.state.checkpointer = resolved_checkpointer
+    app.state.engine = engine
 
     @app.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
@@ -139,24 +152,48 @@ def create_app(
                 status.HTTP_422_UNPROCESSABLE_CONTENT, f"malformed alert payload: {err}"
             ) from err
 
-        run = start_run(payload.model_dump(), resolved_settings, datetime.now(UTC))
+        alert = payload.model_dump()
+        # Durable identity (ADR 0016): an at-least-once redelivery of the same
+        # (source, fingerprint) resolves to the same incident id, so it joins
+        # the live run instead of starting a second investigation against one
+        # fault. Fail-open like the write below — a store that is down
+        # degrades to today's fresh id rather than failing the delivery.
+        try:
+            incident_id = derive_incident_id(alert, resolved_checkpointer)
+        except Exception:
+            _log.exception(
+                "incident identity derivation failed; falling back to a fresh id "
+                "(redeliveries of this alert will not dedupe)"
+            )
+            incident_id = uuid4()
+
+        run = start_run(alert, resolved_settings, datetime.now(UTC), incident_id=incident_id)
 
         # Durability before acknowledgement (finding B-04): the TRIAGE row
         # exists before the 202, so a process death between here and the
         # background task still leaves a record of the alert. Enabled or
         # killed, the write is the same — the kill switch below only skips
-        # spawning the run. ``run_to_completion`` writes its own TRIAGE
-        # snapshot on entry, so the append-only log normally carries two
-        # identical TRIAGE rows (version+1); that is benign and cheaper than
-        # plumbing a skip flag through the loop.
+        # spawning the run.
         #
-        # Fail-open: a checkpoint failure is logged, never surfaced as a 5xx.
-        # The run store being down must not turn webhook ingestion into
-        # delivery failures during exactly the kind of incident that took it
-        # down, and paging runs through the platform's oncall route
-        # regardless of this endpoint.
+        # Conditional on there being no snapshot yet, and that is correctness,
+        # not thrift (ADR 0016): ``run_snapshots`` is append-only and ``load``
+        # returns the highest version, so appending a fresh TRIAGE row on top
+        # of an in-flight INVESTIGATING run would make ``load`` return TRIAGE
+        # and hand the resume path a state stripped of its evidence. The first
+        # delivery still always writes, so the guarantee above is intact. On
+        # the fresh path ``run_to_completion`` writes its own TRIAGE snapshot
+        # on entry, so the log still carries two identical TRIAGE rows; that
+        # stays benign and cheaper than plumbing a skip flag through the loop.
+        #
+        # Fail-open: a checkpoint failure is logged, never surfaced as a 5xx —
+        # and a failed LOOKUP is treated exactly like a failed write. The run
+        # store being down must not turn webhook ingestion into delivery
+        # failures during exactly the kind of incident that took it down, and
+        # paging runs through the platform's oncall route regardless of this
+        # endpoint.
         try:
-            resolved_checkpointer.write(run)
+            if resolved_checkpointer.load(run.incident_id) is None:
+                resolved_checkpointer.write(run)
         except Exception:
             _log.exception(
                 "checkpoint write failed for incident %s (AGENT_ENABLED=%s); "
@@ -176,18 +213,50 @@ def create_app(
             )
             return IngestResponse(incident_id=run.incident_id)
 
+        # Every accepted delivery still spawns a task. The lease, not the
+        # ingress, decides who actually runs: a duplicate arriving mid-run
+        # loses it and exits immediately, while one arriving after the owning
+        # process died finds the lock released and resumes. Deciding "is
+        # anything live?" here would need exactly the liveness knowledge only
+        # the lock has.
         background_tasks.add_task(task, run, resolved_settings, resolved_checkpointer)
         return IngestResponse(incident_id=run.incident_id)
 
     return app
 
 
+@contextmanager
+def _single_flight(engine: Engine | None, incident_id: UUID) -> Iterator[bool]:
+    """``incident_lease``, or an always-granted lease when no engine is wired.
+
+    ``create_app`` only builds an engine when it also builds the checkpointer,
+    so the injected-checkpointer wiring — tests today — has nothing to lock
+    against. That wiring is single-process and non-durable by construction, so
+    running unleased is sound there and nowhere else. The served app always
+    has an engine.
+    """
+    if engine is None:
+        yield True
+        return
+    with incident_lease(engine, incident_id) as acquired:
+        yield acquired
+
+
 def _run_investigation(
     run: RunState,
     settings: Settings,
     checkpointer: Checkpointer,
+    *,
+    engine: Engine | None = None,
 ) -> None:
-    """Background task: wire a per-run MCP client, run the state machine.
+    """Background task: take the single-flight lease, resume or start, run.
+
+    Single-flight + resume (ADR 0016, implementing ADR 0002's promise): the
+    lease is held across the whole run, so one incident has at most one live
+    writer no matter how many times the alert is delivered. Inside it, the
+    latest checkpoint decides what to run — a crashed run continues from where
+    it died instead of re-spending its budget to rebuild evidence it already
+    recorded.
 
     Failure rail (finding B-04): without the ``except`` below, any exception
     here — a checkpointer failure with Postgres down is the realistic vector —
@@ -196,15 +265,62 @@ def _run_investigation(
     path now leaves a terminal snapshot behind.
     """
     try:
-        with make_client(settings) as client:
-            transitions: dict[IncidentState, Transition] = dict(TRANSITIONS)
-            transitions[IncidentState.INVESTIGATING] = make_investigate(client)
-            final = run_to_completion(
-                run,
-                clock=lambda: datetime.now(UTC),
-                checkpointer=checkpointer,
-                transitions=transitions,
-            )
+        with _single_flight(engine, run.incident_id) as acquired:
+            if not acquired:
+                _log.info(
+                    "another worker holds the single-flight lease for incident %s; "
+                    "not starting a second run",
+                    run.incident_id,
+                )
+                return
+
+            latest = checkpointer.load(run.incident_id)
+            if latest is None:
+                resuming = run
+            elif latest.state.is_terminal:
+                # RESOLVED/ESCALATED/FAILED are done. FAILED especially: it is
+                # the crash rail's record that a run died unhandled, and
+                # resuming it would arm a redelivery-driven retry loop with no
+                # operator signal. A recurrence opens a new incident instead.
+                _log.info(
+                    "incident %s already reached terminal state %s; not resuming",
+                    run.incident_id,
+                    latest.state.value,
+                )
+                return
+            elif latest.state is IncidentState.AWAITING_APPROVAL:
+                # Tier-2 resume is deliberately out of scope (ADR 0016): the
+                # transition is still a stub, so resuming would raise
+                # NotImplementedError and the rail below would turn a merely-
+                # waiting incident into a FAILED one. First thing the Tier-2
+                # phase deletes.
+                _log.info(
+                    "incident %s is awaiting_approval; approval-bound resume is not "
+                    "implemented, leaving it untouched",
+                    run.incident_id,
+                )
+                return
+            else:
+                resuming = latest
+                if latest.state is not IncidentState.TRIAGE:
+                    # A TRIAGE checkpoint is just the ingress row this task was
+                    # spawned for — nothing to announce. Anything further along
+                    # means a real crash-resume, which an operator wants to see.
+                    _log.info(
+                        "resuming incident %s from its %s checkpoint",
+                        run.incident_id,
+                        latest.state.value,
+                    )
+
+            with make_client(settings) as client:
+                transitions: dict[IncidentState, Transition] = dict(TRANSITIONS)
+                transitions[IncidentState.INVESTIGATING] = make_investigate(client)
+                final = run_to_completion(
+                    resuming,
+                    clock=lambda: datetime.now(UTC),
+                    checkpointer=checkpointer,
+                    transitions=transitions,
+                )
     except Exception as exc:
         _record_run_failure(run, checkpointer, exc)
         # Re-raise the ORIGINAL exception: starlette runs background tasks
@@ -227,9 +343,10 @@ def _record_run_failure(run: RunState, checkpointer: Checkpointer, exc: Exceptio
     checkpoints progress internally and returns nothing on raise — so recover
     it via ``load`` and fall back to ``run``. The realistic crash vector IS the
     checkpointer, so the whole rail is best-effort: if it cannot write, it logs
-    and lets the original exception carry the story. Recovery/resume of a
-    stranded run is separate, structural work (ADR 0002 lease); this only
-    guarantees a terminal record exists.
+    and lets the original exception carry the story. The FAILED record it
+    leaves is terminal on purpose: the resume gate in ``_run_investigation``
+    refuses to re-run it (ADR 0016), so a deterministically-crashing run cannot
+    be pushed into a redelivery-driven retry loop.
     """
     try:
         latest = checkpointer.load(run.incident_id) or run

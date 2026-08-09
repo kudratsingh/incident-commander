@@ -181,6 +181,44 @@ untracked is acceptable; deleting them is not (invariant 9).
 This step first becomes exercisable at the post-v0.5.0 eval — under the
 ADR 0011 freeze nothing runs, so no archive is committed until then.
 
+### Partial archives: no `report.json` means the run was killed ([ADR 0017](ADR/0017-eval-run-archive-lifecycle.md))
+
+The archive is written **incrementally**. `evals/runs/<invocation_id>/` is
+created before the first scenario, each scenario's trajectory, briefing and
+trace slice land as that scenario finishes, and `report.json` is the **last**
+file written. So:
+
+| On disk | Means |
+|---|---|
+| `runs/<id>/report.json` present | the suite finished; the aggregate report is authoritative |
+| `runs/<id>/report.json` absent | the run was killed, crashed, or is still in flight |
+
+A directory without `report.json` is **not** garbage: the per-scenario files
+under it are first-class evidence of the scenarios that did complete, they cost
+real money, and invariant 9 covers them exactly as it covers a finished run.
+Commit them the same way — the commit message is the place to say the run was
+interrupted. A Ctrl-C mid-suite now loses at most the in-flight scenario.
+
+List the incomplete archives:
+
+```bash
+for d in evals/runs/*/; do [ -f "$d/report.json" ] || echo "PARTIAL $d"; done
+```
+
+`runs/<id>/traces/<scenario>.jsonl` holds this invocation's slice of the flat
+`evals/traces/<scenario>.jsonl` — the flat file accumulates every invocation
+forever and is gitignored, so the archived slice is what makes a committed run
+re-readable. The runner only ever **reads** the flat file; it stays the
+canonical incremental record and is the only trace of a scenario killed
+part-way through, before its archive write fires. Trace slices carry full
+prompts and responses, so committed archives are correspondingly large — that
+is deliberate (ADR 0017).
+
+Re-using an invocation id fails loudly: the run directory is created with
+`exist_ok=False` and every file inside is opened exclusive-create, so a
+collision raises before a single tool call is spent instead of overwriting the
+earlier run.
+
 ### Runner exit codes and --live refusal (ADR 0013)
 
 `--live` now **refuses to run against an env that would degrade any selected

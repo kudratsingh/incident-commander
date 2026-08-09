@@ -27,11 +27,16 @@ Every registered tool is classified as `READ`, `TIER_1`, or `TIER_2`. See [ADR 0
 | `TIER_1` | Bounded, reversible, idempotent | Remediation planner (only) | Agent, with server-side idempotency | — |
 | `TIER_2` | Wide or hard-to-reverse | Remediation planner (only) | Agent, only after platform-issued approval id | Human via platform inbox |
 
-The 4 Tier-1 actions today:
+The 7 Tier-1 actions today (tier map in `src/incident_commander/tools/policies.py`):
 - `restart_consumer_group` — clears a chaos kill flag on one Kafka consumer group
 - `pause_dag` — halts child promotion under one DAG root, TTL-scoped (max 60 minutes)
-- `replay_dlq_messages` — re-submits dead-lettered jobs (bounded by `limit`, default 25)
+- `replay_dlq_messages` — legacy bulk re-submit of dead-lettered jobs (bounded by `limit`, default 25)
 - `invalidate_cache_key` — deletes one Redis key from an allowlisted prefix set
+- `replay_dlq_by_ids` — re-submits explicitly listed dead-lettered jobs (max 50 ids per call)
+- `replay_dlq_by_category` — bulk re-submit of one platform-classified category (`replay_safe`/`wait_and_replay` only — the platform refuses `human_required`; capped by `max_replays`, default 20)
+- `mark_dlq_permanent` — flags one dead-lettered job as not-replayable, with a `reason` written to the audit log
+
+All seven are idempotent (caller-supplied `idempotency_key`, see below) with a bounded, platform-enforced blast radius; every call additionally passes the platform's `actions:execute` scope check.
 
 No `TIER_2` tools ship today. When they land, they use the platform's propose/approve/execute flow (Wave 3 PR F on the platform side).
 
@@ -44,34 +49,30 @@ No `TIER_2` tools ship today. When they land, they use the platform's propose/ap
           │ (only when top hypothesis > 0.7 AND a Tier-1 fix maps)
           ▼
       PLANNING  ── invalid plan (wrong tier / unknown tool) ────► ESCALATED
-          │                                                          ▲
-          │ RemediationPlan (target_hypothesis, action_tool,          │
-          │  action_arguments, verify_tool, verify_arguments,         │
-          │  verify_expectation)                                      │
-          ▼                                                           │
-      REMEDIATING ─ prior evidence for action_tool ──► VERIFYING (reconciled)
-          │                                                           │
-          │ execute action_tool with sha256 idempotency key           │
+          │
+          │ RemediationPlan (target_hypothesis, action_tool,
+          │  action_arguments, verify_tool, verify_arguments,
+          │  verify_expectation)
+          ▼
+      REMEDIATING
+          │ execute action_tool with sha256 idempotency key
           │ tool_error / is_error=True ─────────────────────► ESCALATED
-          │                                                           │
-          ▼                                                           │
-       VERIFYING                                                      │
-          │ probe verify_tool + judge LLM                             │
+          ▼
+       VERIFYING
+          │ probe verify_tool + judge LLM
           │ verdict "not_verified" ─────────────────────────► ESCALATED
-          │ verdict "verified"                                        │
-          ▼                                                           │
-        RESOLVED                                                      │
-                                                                      │
-     If PLANNING re-enters and remediation_attempts >= 1:             │
-     force ESCALATED ─────────────────────────────────────────────────┘
-     ("attempt cap reached; human decision required")
+          │ verdict "verified"
+          ▼
+        RESOLVED
 ```
+
+One attempt, one way ([ADR 0008](ADR/0008-single-attempt-remediation.md)): `ALLOWED_TRANSITIONS` in `src/incident_commander/agent/orchestrator.py` gives VERIFYING no PLANNING successor — a `not_verified` verdict escalates for human review rather than re-planning autonomously — and REMEDIATING always proceeds through a real tool call, with no client-side skip-ahead branch (see crash recovery below).
 
 Every escalation carries the failure reason on evidence. `EscalationBriefing` (rendered by the briefing writer + judged by the judge) is the artifact a human reads.
 
 ## Evidence-driven caution is a feature
 
-The remediation prompt lists 4 hypothesis-to-fix mappings: `consumer_saturation → restart_consumer_group`, `poison_message → replay_dlq_messages`, `stale_cache → invalidate_cache_key`, `runaway_saga → pause_dag`. It also says: _"Prefer `remediate` over `stop` when the top hypothesis has confidence > 0.7 and matches a Tier-1 fix category. If none match, `stop` and let a human handle it."_
+The category-to-fix map (`src/incident_commander/agent/investigation.py`) lists 4 hypothesis-to-fix mappings: `consumer_saturation → restart_consumer_group`, `poison_message → replay_dlq_by_ids`, `stale_cache → invalidate_cache_key`, `runaway_saga → pause_dag`. For the DLQ case the map only asserts that a Tier-1 fix category exists — the remediation planner selects the specific tool (`replay_dlq_by_ids`, `replay_dlq_by_category`, or `mark_dlq_permanent`) from the platform's `remediation_hint` on each dead-lettered entry; the legacy `replay_dlq_messages` is no longer the routed fix. The investigation prompt gates the handoff: _"Emit `remediate` when the top hypothesis has confidence > 0.7 AND its category has a Tier-1 fix."_ If none match, the planner stops and lets a human handle it.
 
 The important word is **matches**. If the LLM's top hypothesis is above the confidence threshold but its *name* doesn't map to one of the 4 categories (e.g., `smtp-relay-down-post-deploy`, `database-cpu-saturation`, `hot-key-eviction`), the agent correctly refuses to force-fit a wrong fix and escalates. The first live-eval remediation run surfaced this exact case — the agent read real DLQ contents, identified them as downstream-outage failures rather than poison messages, and escalated with a well-graded briefing instead of blindly replaying jobs that would just re-fail.
 
@@ -84,9 +85,9 @@ This is intentional. Aggressive auto-remediation with an unmapped hypothesis is 
 | Dimension | Env var | Default | Enforced by |
 |---|---|---|---|
 | Tool calls | `BUDGET_MAX_TOOL_CALLS` | 25 | `budget.is_exhausted` checked before every probe + planner call |
-| Tokens | `BUDGET_MAX_TOKENS` | 200000 | Same |
+| Tokens | `BUDGET_MAX_TOKENS` | 500000 | Same |
 | Wall clock | `BUDGET_MAX_SECONDS` | 1800 | Same |
-| Dollars | `BUDGET_MAX_USD` | 1.00 | Same |
+| Dollars | `BUDGET_MAX_USD` | 5.00 | Same |
 
 Exhausting any dimension forces escalation with `"budget exhausted"` on evidence. No dimension has a "just a little bit more" override.
 
@@ -104,19 +105,19 @@ sha256(f"{incident_id}|{action_tool}|{sorted_json_args}")[:32]
 
 ## Crash recovery
 
-Two mechanisms in [PR #35](https://github.com/kudratsingh/incident-commander/pull/35):
+Two mechanisms (introduced in [PR #35](https://github.com/kudratsingh/incident-commander/pull/35), reshaped by [ADR 0008](ADR/0008-single-attempt-remediation.md)):
 
-1. **Evidence-based reconciliation.** REMEDIATING checks whether the action tool is already in the evidence log. If yes, skip re-execution and go straight to VERIFYING. Platform idempotency makes re-execution safe; skipping keeps trajectories clean and avoids duplicate audit entries.
+1. **Idempotency-key wire contract.** If the process crashes after the Tier-1 action landed but before the VERIFYING checkpoint, crash-resume re-enters REMEDIATING and re-sends the action with the SAME deterministic idempotency key (`sha256(incident|tool|args)[:32]`, see Idempotency above — stable across restarts). The platform's idempotency store recognizes the key and returns the cached response without re-executing the effect. There is no client-side evidence-log reconciliation branch — ADR 0008 deleted it; the wire contract carries the whole guarantee, proven against a live platform by `tests/integration/test_idempotency_contract.py`.
 
-2. **Attempt cap.** `RunState.remediation_attempts` starts at 0, increments once per successful REMEDIATING execution (not per reconciled re-entry). PLANNING refuses to propose a new plan when `attempts >= 1`. Prevents autonomous retry loops when the LLM keeps proposing fixes that keep not verifying.
+2. **Attempt cap as an invariant guard.** `RunState.remediation_attempts` starts at 0 and increments once per executed action. Under `ALLOWED_TRANSITIONS`, PLANNING is only reachable from INVESTIGATING — where attempts is still 0 — and VERIFYING has no PLANNING successor, so no live run can re-enter PLANNING with `attempts >= 1`. The cap check in the PLANNING transition therefore guards an invariant-violating, should-be-unreachable state: hitting it means the transition graph was mutated without updating ADR 0008 (or a RunState was constructed bypassing dispatch), and the run escalates with a distinct reason instead of proposing another fix.
 
-Integration test: `tests/integration/test_remediation_recovery.py` simulates a mid-execution crash via `PostgresCheckpointer` and asserts the reload doesn't double-invoke.
+Integration test: `tests/integration/test_remediation_recovery.py` simulates a mid-execution crash via `PostgresCheckpointer` and asserts the resumed run re-invokes the action with the same idempotency key rather than skipping or double-spending it.
 
 ## Fail-open on paging
 
 The agent augments the incident response path; it never gates it. If the LLM API is down or the agent crashes, alerts still page humans through the platform's normal webhook → oncall route. The agent degrades to attaching whatever raw signals were collected before failure. **No human page ever waits on the agent.**
 
-Implementation: alert ingress (`src/incident_commander/api/`) writes the run row before invoking the agent loop. The oncall notification path (planned) reads directly from the incident record, not from a completed agent trajectory.
+Implementation: alert ingress (`src/incident_commander/api/`) acknowledges every verified delivery with 202 before any agent work happens. With the agent enabled, the first checkpoint is written when the background investigation task starts; with the kill switch thrown, the handler records the TRIAGE run synchronously and spawns nothing (see below). The oncall notification path (planned) reads directly from the incident record, not from a completed agent trajectory.
 
 ## Prompt injection surface
 
@@ -133,7 +134,7 @@ Adversarial hardening (specific injection payloads in the eval suite) is Phase 7
 
 ## Kill switch
 
-Set `AGENT_ENABLED=false` in the environment. The webhook ingress still accepts alerts, records them, and returns 200 — but the state machine never advances. Alerts fall through to the platform's normal oncall path (see fail-open above). Restart with `AGENT_ENABLED=true`.
+Set `AGENT_ENABLED=false` in the environment and restart the agent process — the switch is read once at startup (`agent_enabled` in `src/incident_commander/config.py`; `Settings` is frozen and cached), not per request. The webhook ingress still accepts alerts, records each one as a TRIAGE-state run, and returns 202 — but no investigation run is spawned, so the state machine never advances. Recording is best-effort in this mode: a failed checkpoint write is logged and the delivery is still acknowledged, because a disabled agent must never turn alert ingestion into delivery failures. Alerts fall through to the platform's normal oncall path (see fail-open above). Re-enable with `AGENT_ENABLED=true` and restart.
 
 ## What this file does NOT cover
 

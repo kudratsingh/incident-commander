@@ -2,8 +2,13 @@
 
 Runs ``tools/list`` against the platform reachable via ``PLATFORM_MCP_URL``,
 normalizes the response, and diffs against ``contracts/platform-tools.snapshot.json``.
-Skipped cleanly when the env isn't set — CI wires the platform up and provides
-the env; local dev runs it via ``make test-contract`` after ``make bootstrap-token``.
+Skipped cleanly when the env isn't set. In CI the ``contract`` job in
+``.github/workflows/ci.yml`` boots ``demo/compose.yml`` at the pinned v0.4.9
+digest, mints a service-account token with ``scripts/bootstrap_agent_token.py``
+(``--postgres-container incident-commander-demo-postgres-1``), exports
+``PLATFORM_MCP_URL``/``PLATFORM_TOKEN``, and runs this test via
+``make test-contract`` on every pull request. Local dev runs it the same way
+via ``make test-contract`` after ``make demo`` and ``make bootstrap-token``.
 
 When this fails, the fix is one of:
 

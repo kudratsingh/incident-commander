@@ -254,6 +254,16 @@ dev stack. Bless snapshots from the pinned stack only.
 
 ## Bumping the pinned platform image
 
+**The contract diff now runs in CI on every pull request** (the `contract`
+job in `.github/workflows/ci.yml` boots `demo/compose.yml` and runs
+`make test-contract`), always against whatever digest is pinned on the
+branch. So the three steps below **must land as ONE pull request**: a PR
+that bumps the digest without the reblessed snapshot — or blesses a new
+snapshot without the digest bump — puts the `contract` job red on itself
+and on `main` until the other half lands. Bless the new snapshot locally
+from the new pinned stack, then commit the compose bump, the snapshot, and
+any registry realignment together.
+
 Platform ships a new digest → three steps on the agent side:
 
 1. Update `demo/compose.yml`:

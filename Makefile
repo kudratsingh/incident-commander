@@ -102,6 +102,14 @@ eval-live-remediation:
 # expects RESOLVED via mark_dlq_permanent, which the read-scoped token
 # 403s by design — guaranteed red here. It runs in the remediation
 # stage under the full token instead.
+# dlq_backlog is also absent, but for the opposite reason: it IS
+# scope-compatible with the smoke token — read-only, no chaos_setup, and
+# its one probe (list_dlq_messages) needs incidents:read only. What is
+# unproven is its behavior against the smoke stage's unseeded DLQ, and
+# that cannot be settled without a live smoke run. Add it here during
+# the next live campaign, once a run confirms it green — not before.
+# Rationale for both exclusions: docs/eval-methodology.md, "The
+# read-only smoke pass".
 SMOKE_ONLY ?= alert_storm,deploy_correlation,failed_traces,incidents_overview,multi_probe,noise_,planner_stops,postgres_slow,redis_saturation,saga_stuck,tool_,trace_investigation,consumer_lag_healthy,consumer_lag_medium,consumer_lag_missing,consumer_lag_orders,consumer_lag_payments,consumer_lag_shipping,consumer_lag_analytics,consumer_lag_high
 eval-smoke:
 	@if [ -z "$(PLATFORM_SMOKE_TOKEN)" ]; then \

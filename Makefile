@@ -83,7 +83,7 @@ eval-live:
 	EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live $(if $(ONLY),--only $(ONLY))
 	uv run python scripts/format_traces.py
 	@echo "JSONL traces: evals/traces/*.jsonl"
-	@echo "Human-readable trajectories: evals/reports/human/*.md"
+	@echo "Human-readable trajectories: evals/reports/human/*.txt"
 
 # Kept as a deprecated alias for the batch remediation pattern the
 # post-hardening protocol retired. Prefer:

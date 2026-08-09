@@ -21,7 +21,7 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("9b62d3a8e3d883af8150fc2162428953c7606c9770a90fd42e35ef39530e54e0"),
     "investigation_planner": ("519cecc6dca82dc1db60179e83e60d8290aa639bd38cc29ba39e697ad4208bae"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
-    "remediation_planner": ("7dc796041cdae2217fcdbd0d80be86b63f5c4b37a7a5f6b97080fe9bb499cfdc"),
+    "remediation_planner": ("b7e19749612dc27a40d4e735b859635954b01afd6d4d583515b937332e8c076d"),
     "verification_judge": ("3a645c8414e0216870b40e226d0440933d832e7080f18109112c616cda21508e"),
 }
 
@@ -106,6 +106,21 @@ class TestRemediationPlannerInvariants:
         assert "replay_safe" in content
         assert "wait_and_replay" in content
         assert "human_required" in content
+
+    def test_mark_permanent_verify_matches_platform_contract(self) -> None:
+        # The platform's mark_dlq_permanent does NOT remove the entry: its tool
+        # description (mirrored verbatim into planner context via the snapshot)
+        # reads "Doesn't change job.status — the entry stays in DLQ, just won't
+        # be auto-replayed", and the handler only flips remediation_hint to
+        # human_required, so list_dlq_messages(remediation_hint="human_required")
+        # precisely SELECTS the marked job. The prompt once taught the inverse
+        # ("the specific job_id should be gone from the active DLQ list"), which
+        # made the live human_required scenario unverifiable. Nothing cross-
+        # checked the prompt's verify prose against the tool semantics; this is
+        # that check, so the inversion cannot be silently reintroduced.
+        content = load_prompt("remediation_planner")
+        assert "gone from the active DLQ list" not in content
+        assert "stays in the DLQ" in content
 
     def test_forbids_agent_supplied_idempotency_key(self) -> None:
         content = load_prompt("remediation_planner")

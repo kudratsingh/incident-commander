@@ -150,7 +150,7 @@ Three coordinated changes (in flight as of 2026-07-30, pending platform v0.4.0):
 
 **Platform side:**
 1. **Categorize DLQ seed data + triage output.** Add `remediation_hint` field per entry: `replay_safe` / `wait_and_replay` / `human_required`. Chaos hook `poison_message` should produce `replay_safe`; a new `chaos-seed-bad-data` should produce `human_required`.
-2. **More granular Tier-1 tools.** `replay_dlq_by_ids([id, ...])` for targeted replay, `replay_dlq_by_category("replay_safe")` for bulk-but-filtered, `mark_dlq_permanent(id, reason)` to remove unfixable entries from the active DLQ.
+2. **More granular Tier-1 tools.** `replay_dlq_by_ids([id, ...])` for targeted replay, `replay_dlq_by_category("replay_safe")` for bulk-but-filtered, `mark_dlq_permanent(id, reason)` to exclude unfixable entries from auto-replay (the entry stays in the DLQ with `remediation_hint=human_required`).
 
 **Agent side:**
 3. **Split the scenario** into category-specific tests: `remediate_dlq_replay_safe_success` (all replay-safe → replay), `remediate_dlq_mixed_partial` (mixed → replay safe ones, escalate rest), `remediate_dlq_all_persistent_escalates` (all real bugs → escalate cleanly). Update the remediation planner prompt to consume `remediation_hint`.

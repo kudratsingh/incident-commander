@@ -56,19 +56,19 @@ canned_llm_responses:
     action_tool: mark_dlq_permanent
     action_arguments:
       job_id: cccccccc-3333-3333-3333-000000000001
-      reason: 'CSV parse error at row 15382 is a source-data bug that will re-fail on replay. Removing from active DLQ for human review.
+      reason: 'CSV parse error at row 15382 is a source-data bug that will re-fail on replay. Excluding it from auto-replay for human review.
 
         '
     verify_tool: list_dlq_messages
     verify_arguments:
       remediation_hint: human_required
       limit: 50
-    verify_expectation: 'The marked job_id should no longer appear in the DLQ list filtered by human_required.
+    verify_expectation: 'The marked job_id still appears in the DLQ list filtered by remediation_hint=human_required — the entry stays in the DLQ (status dead_letter) and is only excluded from auto-replay.
 
       '
   verification_judge:
   - verdict: verified
-    reasoning: 'mark_dlq_permanent returned marked=true with the reason recorded. The entry is out of the active DLQ; humans will pick it up via the review path.
+    reasoning: 'mark_dlq_permanent returned remediation_hint=human_required with the reason recorded. The verify probe shows the job still present in the human_required-filtered DLQ, which is the expected post-mark state — excluded from auto-replay, awaiting human review.
 
       '
   briefing_writer:

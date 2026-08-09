@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import uuid
@@ -74,6 +75,14 @@ _LATEST_REPORT = _REPORTS_DIR / "latest.json"
 # append-only record (CLAUDE.md invariant 9). Writing the archive with
 # exclusive-create means a path collision fails loudly instead of
 # deleting a prior run.
+#
+# The archive is written INCREMENTALLY: main() creates
+# runs/<invocation_id>/ before the suite starts, and each scenario's
+# trajectory, briefing and trace slice land as that scenario finishes
+# (archive_scenario). ``report.json`` is written LAST (finalize_archive)
+# and is the completion marker — a run directory without it is a killed
+# or crashed run whose per-scenario files are still first-class evidence
+# (ADR 0017).
 _RUNS_DIR = _REPO_ROOT / "evals" / "runs"
 _TRACE_DIR_ENV = "EVAL_TRACE_DIR"
 
@@ -524,21 +533,30 @@ def run_all(
     mcp_token: str | None = None,
     invocation_id: str = "",
     only_patterns: tuple[str, ...] = (),
+    on_result: Callable[[ScenarioResult], None] | None = None,
 ) -> tuple[RunReport, tuple[Trajectory, ...], tuple[EscalationBriefing, ...]]:
     # run_scenario falls back to canned when env is placeholder; nothing
     # is skipped here. Per-scenario crashes are captured as failed outcomes
     # so the batch keeps running — see _crashed_result.
+    #
+    # ``on_result`` fires once per scenario, on both paths, before the next
+    # scenario starts: main() passes archive_scenario there so the evidence
+    # for scenario N is durable while scenario N+1 runs. It is called
+    # OUTSIDE the try, so an archive failure (e.g. exclusive-create hitting
+    # an existing file) aborts the suite loudly instead of being recorded as
+    # a scenario crash.
     results: list[ScenarioResult] = []
     for scenario in scenarios:
         try:
-            results.append(
-                run_scenario(
-                    scenario, settings, clock, mcp_token=mcp_token, invocation_id=invocation_id
-                )
+            result = run_scenario(
+                scenario, settings, clock, mcp_token=mcp_token, invocation_id=invocation_id
             )
         except Exception as exc:  # noqa: BLE001 — deliberate: don't abort suite
             print(f"  CRASH {scenario.name}: {type(exc).__name__}: {exc}")
-            results.append(_crashed_result(scenario, exc, invocation_id))
+            result = _crashed_result(scenario, exc, invocation_id)
+        results.append(result)
+        if on_result is not None:
+            on_result(result)
     outcomes = tuple(r.outcome for r in results)
     trajectories = tuple(r.trajectory for r in results)
     briefings = tuple(r.briefing for r in results)
@@ -603,6 +621,106 @@ def write_briefings(
         (directory / f"{name}.json").write_text(briefing.model_dump_json(indent=2))
 
 
+def _archive_trajectory(target: Path, trajectory: Trajectory) -> None:
+    """Exclusive-create ``<target>/trajectories/<scenario>.json``."""
+    directory = target / "trajectories"
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / f"{trajectory.scenario}.json").open("x") as handle:
+        handle.write(trajectory.model_dump_json(indent=2))
+
+
+def _archive_briefing(target: Path, scenario: str, briefing: EscalationBriefing) -> None:
+    """Exclusive-create ``<target>/briefings/<scenario>.json``."""
+    directory = target / "briefings"
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / f"{scenario}.json").open("x") as handle:
+        handle.write(briefing.model_dump_json(indent=2))
+
+
+def _archive_trace_slice(
+    target: Path, scenario: str, *, invocation_id: str, trace_dir: Path
+) -> None:
+    """Copy this invocation's trace records into ``<target>/traces/<scenario>.jsonl``.
+
+    The flat ``<EVAL_TRACE_DIR>/<scenario>.jsonl`` accumulates every
+    invocation's records forever (never truncated — study/findings.md
+    F-002) and is gitignored, so an archived run whose traces stayed only
+    there could not be joined back to the prompts and responses that
+    produced it (S-07). The archive therefore carries its own slice.
+
+    Filter convention, shared with ``scripts/estimate_cost.py``: records
+    whose ``invocation_id`` does not match are another run's, and records
+    with no ``invocation_id`` at all are pre-invocation-id vintage — both
+    are excluded. Unparseable lines are skipped rather than fatal; a
+    truncated final line from a killed run must not block the archive.
+
+    The flat file is opened READ-ONLY on every path. It is the canonical
+    incremental record — the only evidence of a scenario killed mid-flight,
+    before this function ever fires for it.
+    """
+    source = trace_dir / f"{scenario}.jsonl"
+    if not source.exists():
+        return
+    kept: list[str] = []
+    for line in source.read_text().splitlines():
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict) and record.get("invocation_id") == invocation_id:
+            kept.append(line)
+    directory = target / "traces"
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / f"{scenario}.jsonl").open("x") as handle:
+        for line in kept:
+            handle.write(line + "\n")
+
+
+def archive_scenario(
+    target: Path,
+    result: ScenarioResult,
+    *,
+    invocation_id: str,
+    trace_dir: Path | None = None,
+) -> None:
+    """Stream one finished scenario's evidence into the run archive.
+
+    Wired into ``run_all(on_result=...)``, so scenario N's trajectory,
+    briefing and trace slice are on disk before scenario N+1 starts.
+    Before this existed, every artifact but the JSONL traces lived in
+    memory until the whole suite finished, and a Ctrl-C at scenario 30 of
+    37 threw away 30 scenarios of paid live evidence (S-05/A-14) — the
+    F-002/F-003 shape CLAUDE.md invariant 9 exists to prevent. A hard kill
+    now costs at most the in-flight scenario.
+
+    Every file is exclusive-create (``"x"``), as in ``archive_run``: a
+    second write at a path that already holds evidence crashes instead of
+    deleting it. ``report.json`` is NOT written here — see
+    ``finalize_archive``.
+    """
+    scenario = result.outcome.scenario
+    _archive_trajectory(target, result.trajectory)
+    _archive_briefing(target, scenario, result.briefing)
+    if trace_dir is not None:
+        _archive_trace_slice(target, scenario, invocation_id=invocation_id, trace_dir=trace_dir)
+
+
+def finalize_archive(target: Path, report: RunReport) -> Path:
+    """Write ``<target>/report.json`` — the completion marker, always last.
+
+    Presence of ``report.json`` is what makes an archive complete. Its
+    absence marks the directory as a partial run (killed, crashed, or still
+    in flight) whose per-scenario files remain first-class evidence — which
+    is why the aggregate report moved from the FIRST archive write to the
+    last (S-08): written first, a half-finished archive was
+    indistinguishable from a complete one.
+    """
+    target.mkdir(parents=True, exist_ok=True)
+    with (target / "report.json").open("x") as handle:
+        handle.write(report.model_dump_json(indent=2))
+    return target
+
+
 def archive_run(
     invocation_id: str,
     report: RunReport,
@@ -611,7 +729,12 @@ def archive_run(
     scenario_names: Iterable[str],
     runs_dir: Path = _RUNS_DIR,
 ) -> Path:
-    """Write this invocation's artifacts to an immutable per-run directory.
+    """Write a whole run's artifacts to an immutable per-run directory at once.
+
+    The one-shot equivalent of the streaming path (``archive_scenario`` per
+    scenario, then ``finalize_archive``) that ``main`` uses, kept for
+    callers that already hold a complete run in memory. Same files, same
+    ordering guarantee: report.json last.
 
     The flat ``evals/{reports,trajectories,briefings}`` paths are pointers
     to the latest run and are refreshed in place — convenient, and the
@@ -627,15 +750,11 @@ def archive_run(
     target = runs_dir / invocation_id
     (target / "trajectories").mkdir(parents=True, exist_ok=True)
     (target / "briefings").mkdir(parents=True, exist_ok=True)
-    with (target / "report.json").open("x") as handle:
-        handle.write(report.model_dump_json(indent=2))
     for trajectory in trajectories:
-        with (target / "trajectories" / f"{trajectory.scenario}.json").open("x") as handle:
-            handle.write(trajectory.model_dump_json(indent=2))
+        _archive_trajectory(target, trajectory)
     for briefing, name in zip(briefings, scenario_names, strict=True):
-        with (target / "briefings" / f"{name}.json").open("x") as handle:
-            handle.write(briefing.model_dump_json(indent=2))
-    return target
+        _archive_briefing(target, name, briefing)
+    return finalize_archive(target, report)
 
 
 def _eval_defaults() -> Settings:
@@ -719,6 +838,18 @@ def _canned_equivalent_knob_warning(settings: Settings) -> str | None:
             '"Environment variable knobs"'
         )
     return None
+
+
+def _repo_relative(path: Path) -> str:
+    """Display form for a path: repo-relative when it is inside the repo.
+
+    Unit tests point ``_RUNS_DIR`` at ``tmp_path``, which has no repo-root
+    prefix, and a console nicety must never be the thing that raises.
+    """
+    try:
+        return str(path.relative_to(_REPO_ROOT))
+    except ValueError:
+        return str(path)
 
 
 def _settings_for_mode(live: bool) -> Settings:
@@ -876,25 +1007,45 @@ def main() -> int:
             return 4
         print("principal guard: token is read-scoped (negative probe refused on scope)")
 
+    # Create the archive directory BEFORE the suite runs: from here on every
+    # scenario streams its own evidence into it as it finishes, so a Ctrl-C
+    # or a crash costs at most the in-flight scenario (ADR 0017).
+    # exist_ok=False on all three: an invocation-id collision must fail
+    # loudly, before any scenario is paid for, rather than land two runs in
+    # one directory.
+    trace_dir_setting = os.environ.get(_TRACE_DIR_ENV)
+    trace_dir = Path(trace_dir_setting) if trace_dir_setting else None
+    target = _RUNS_DIR / invocation_id
+    target.mkdir(parents=True, exist_ok=False)
+    (target / "trajectories").mkdir(exist_ok=False)
+    (target / "briefings").mkdir(exist_ok=False)
+    if trace_dir is not None:
+        (target / "traces").mkdir(exist_ok=False)
+
     report, trajectories, briefings = run_all(
         scenarios,
         settings,
         mcp_token=mcp_token,
         invocation_id=invocation_id,
         only_patterns=tuple(only_patterns),
+        on_result=lambda result: archive_scenario(
+            target, result, invocation_id=invocation_id, trace_dir=trace_dir
+        ),
     )
     ran_names = [o.scenario for o in report.outcomes]
-    # Archive FIRST, into an immutable per-invocation directory, then
-    # refresh the flat pointers. Order matters: if the pointer writes ever
-    # fail, the durable record is already on disk. Until 2026-08-08 only
-    # the pointers existed, so a routine offline `make eval` erased Run
-    # 001's paid live trajectories (study/findings.md F-003).
-    archived = archive_run(invocation_id, report, trajectories, briefings, ran_names)
+    # The per-scenario archive writes already happened, inside run_all.
+    # report.json goes down next — the completion marker, and the last write
+    # into the archive — and only then are the flat pointers refreshed.
+    # Order matters: if the pointer writes ever fail, the durable record is
+    # already complete on disk. Until 2026-08-08 only the pointers existed,
+    # so a routine offline `make eval` erased Run 001's paid live
+    # trajectories (study/findings.md F-003).
+    archived = finalize_archive(target, report)
     write_report(report)
     write_trajectories(trajectories)
     write_briefings(briefings, ran_names)
     _print_summary(report)
-    print(f"run archived: {archived.relative_to(_REPO_ROOT)} (immutable; flat paths are pointers)")
+    print(f"run archived: {_repo_relative(archived)} (immutable; flat paths are pointers)")
 
     # Post-stage assertion, graded from the platform audit log rather than
     # the agent's own trajectory (CLAUDE.md invariant 6). This is the exact

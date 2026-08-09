@@ -23,6 +23,7 @@ from evals.graders.deterministic import (
 from evals.runner import (
     RunReport,
     ScenarioOutcome,
+    ScenarioResult,
     Trajectory,
     _canned_equivalent_knob_warning,
     _classify_failure,
@@ -699,6 +700,217 @@ class TestRunArchiveIsAppendOnly:
         assert archived["incident_id"] == "first", "archive must not follow the pointer"
 
 
+def _finished_result(scenario: str) -> ScenarioResult:
+    """A plausible ScenarioResult, as run_scenario would return it."""
+    return ScenarioResult(
+        outcome=ScenarioOutcome(
+            scenario=scenario,
+            final_state=IncidentState.ESCALATED,
+            tool_calls_used=1,
+            report=GradeReport(scenario=scenario, passed=True, dimensions=()),
+        ),
+        trajectory=Trajectory(scenario=scenario, incident_id="i", checkpoints=()),
+        briefing=EscalationBriefing(
+            incident_id="i", final_state=IncidentState.ESCALATED, alert_summary="a"
+        ),
+    )
+
+
+def _stub_report(scenario: str) -> RunReport:
+    return RunReport(
+        generated_at=_NOW,
+        total=1,
+        passed=1,
+        failed=0,
+        outcomes=(_finished_result(scenario).outcome,),
+    )
+
+
+class TestIncrementalArchive:
+    """The archive is written per scenario, and report.json marks completion.
+
+    Until 2026-08-09 every artifact except the JSONL traces lived only in
+    memory until the whole suite finished: a Ctrl-C at scenario 30 of 37 threw
+    away 30 scenarios of paid live evidence, because the single bulk
+    ``archive_run`` call came after the loop (S-05/A-14). The archive also
+    omitted the invocation's traces (S-07) and wrote report.json FIRST, so a
+    half-written archive was indistinguishable from a complete one (S-08).
+    """
+
+    def test_killed_suite_keeps_completed_scenarios(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The assertion that would have caught S-05/A-14: scenario 1 finishes,
+        # scenario 2 takes a Ctrl-C. run_all catches Exception only, so the
+        # KeyboardInterrupt escapes the suite by design — and scenario 1's
+        # evidence must already be on disk when it does.
+        target = tmp_path / "runs" / "inv"
+        (target / "trajectories").mkdir(parents=True)
+        (target / "briefings").mkdir(parents=True)
+
+        def _stub_run_scenario(scenario: Scenario, *_args: Any, **_kwargs: Any) -> ScenarioResult:
+            if scenario.name == "noise_alert":
+                raise KeyboardInterrupt
+            return _finished_result(scenario.name)
+
+        monkeypatch.setattr(runner_module, "run_scenario", _stub_run_scenario)
+        with pytest.raises(KeyboardInterrupt):
+            runner_module.run_all(
+                [_passing_scenario(), _noise_scenario()],
+                _test_settings(),
+                invocation_id="inv",
+                on_result=lambda result: runner_module.archive_scenario(
+                    target, result, invocation_id="inv", trace_dir=None
+                ),
+            )
+
+        assert (target / "trajectories" / "consumer_lag_pass.json").exists()
+        assert (target / "briefings" / "consumer_lag_pass.json").exists()
+        # No completion marker: the directory self-describes as a killed run.
+        assert not (target / "report.json").exists()
+
+    def test_crashed_scenarios_are_archived_too(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The _crashed_result path streams as well — a scenario the suite
+        # survived is still evidence of what the run paid for.
+        target = tmp_path / "runs" / "inv"
+        (target / "trajectories").mkdir(parents=True)
+        (target / "briefings").mkdir(parents=True)
+
+        def _boom(_scenario: Scenario, *_args: Any, **_kwargs: Any) -> ScenarioResult:
+            raise RuntimeError("simulated platform outage")
+
+        monkeypatch.setattr(runner_module, "run_scenario", _boom)
+        runner_module.run_all(
+            [_passing_scenario()],
+            _test_settings(),
+            invocation_id="inv",
+            on_result=lambda result: runner_module.archive_scenario(
+                target, result, invocation_id="inv", trace_dir=None
+            ),
+        )
+
+        archived = json.loads((target / "briefings" / "consumer_lag_pass.json").read_text())
+        assert "simulated platform outage" in archived["alert_summary"]
+
+    def test_trace_slice_contains_only_this_invocation(self, tmp_path: Path) -> None:
+        # Catches S-07: the archive omitted traces entirely, so the join from
+        # an archived run to its prompts/responses ran through the flat
+        # (gitignored, multi-vintage) trace file and did not survive it.
+        trace_dir = tmp_path / "traces"
+        trace_dir.mkdir()
+        flat = trace_dir / "consumer_lag_pass.jsonl"
+        original = (
+            json.dumps({"kind": "llm", "invocation_id": "old", "seq": 0})
+            + "\n"
+            + json.dumps({"kind": "llm", "invocation_id": "new", "seq": 1})
+            + "\n"
+            + "{ not json at all\n"
+            # No invocation_id: pre-invocation-id vintage, excluded by the same
+            # convention scripts/estimate_cost.py uses.
+            + json.dumps({"kind": "mcp", "seq": 2})
+            + "\n"
+            + json.dumps({"kind": "mcp", "invocation_id": "new", "seq": 3})
+            + "\n"
+        )
+        flat.write_text(original)
+        target = tmp_path / "runs" / "inv"
+        (target / "trajectories").mkdir(parents=True)
+        (target / "briefings").mkdir(parents=True)
+
+        runner_module.archive_scenario(
+            target,
+            _finished_result("consumer_lag_pass"),
+            invocation_id="new",
+            trace_dir=trace_dir,
+        )
+
+        sliced = (target / "traces" / "consumer_lag_pass.jsonl").read_text().splitlines()
+        records = [json.loads(line) for line in sliced]
+        assert [r["seq"] for r in records] == [1, 3]
+        assert all(r["invocation_id"] == "new" for r in records)
+        # The flat file is read-only input — it is the only record of a
+        # scenario killed mid-flight, before its archive_scenario call fires.
+        assert flat.read_text() == original
+
+    def test_trace_slice_is_skipped_when_the_scenario_was_not_traced(self, tmp_path: Path) -> None:
+        trace_dir = tmp_path / "traces"
+        trace_dir.mkdir()
+        target = tmp_path / "runs" / "inv"
+        (target / "trajectories").mkdir(parents=True)
+        (target / "briefings").mkdir(parents=True)
+
+        runner_module.archive_scenario(
+            target, _finished_result("consumer_lag_pass"), invocation_id="new", trace_dir=trace_dir
+        )
+
+        assert not (target / "traces" / "consumer_lag_pass.jsonl").exists()
+
+    def test_archiving_one_scenario_twice_fails_loudly(self, tmp_path: Path) -> None:
+        # Exclusive-create per scenario, same discipline as archive_run: a
+        # second write at a path that already holds evidence must crash.
+        target = tmp_path / "runs" / "inv"
+        (target / "trajectories").mkdir(parents=True)
+        (target / "briefings").mkdir(parents=True)
+        result = _finished_result("consumer_lag_pass")
+        runner_module.archive_scenario(target, result, invocation_id="inv", trace_dir=None)
+        with pytest.raises(FileExistsError):
+            runner_module.archive_scenario(target, result, invocation_id="inv", trace_dir=None)
+
+    def test_report_json_is_written_last_and_marks_completion(self, tmp_path: Path) -> None:
+        # Catches S-08: report.json used to be the FIRST archive write, so a
+        # crash mid-archive left a directory that looked complete. It is now
+        # the last, and its absence is the "this run was killed" signal.
+        target = tmp_path / "runs" / "inv"
+        (target / "trajectories").mkdir(parents=True)
+        (target / "briefings").mkdir(parents=True)
+        runner_module.archive_scenario(
+            target, _finished_result("consumer_lag_pass"), invocation_id="inv", trace_dir=None
+        )
+        assert (target / "trajectories" / "consumer_lag_pass.json").exists()
+        assert not (target / "report.json").exists(), "no marker until the suite finishes"
+
+        runner_module.finalize_archive(target, _stub_report("consumer_lag_pass"))
+        assert (target / "report.json").exists()
+        # The marker is exclusive-create too: it can be written once, ever.
+        with pytest.raises(FileExistsError):
+            runner_module.finalize_archive(target, _stub_report("consumer_lag_pass"))
+
+    def test_main_streams_each_scenario_then_writes_the_marker(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # End-to-end wiring, in process: main() must create the run directory
+        # BEFORE run_all and hand it a streaming callback, so evidence lands
+        # while the suite is still running. run_all and the flat-pointer
+        # writers are stubbed — nothing touches the real evals/ tree.
+        _isolate_settings_env(monkeypatch, tmp_path)
+        runs = tmp_path / "runs"
+        monkeypatch.setattr(runner_module, "_RUNS_DIR", runs)
+        targets: list[Path] = []
+
+        def _stub_run_all(
+            _scenarios: Any, _settings: Any, **kwargs: Any
+        ) -> tuple[RunReport, tuple[Trajectory, ...], tuple[EscalationBriefing, ...]]:
+            target = runs / str(kwargs["invocation_id"])
+            targets.append(target)
+            kwargs["on_result"](_finished_result("consumer_lag_pass"))
+            # Mid-suite state: the finished scenario is durable, the run is
+            # still marked incomplete.
+            assert (target / "trajectories" / "consumer_lag_pass.json").exists()
+            assert not (target / "report.json").exists()
+            return _stub_report("consumer_lag_pass"), (), ()
+
+        monkeypatch.setattr(runner_module, "run_all", _stub_run_all)
+        monkeypatch.setattr(runner_module, "write_report", lambda *_a, **_kw: None)
+        monkeypatch.setattr(runner_module, "write_trajectories", lambda *_a, **_kw: None)
+        monkeypatch.setattr(runner_module, "write_briefings", lambda *_a, **_kw: None)
+        monkeypatch.setattr(sys, "argv", ["evals.runner"])
+
+        assert runner_module.main() == 0
+        assert (targets[0] / "report.json").exists()
+
+
 class TestRunsDirIsTracked:
     """CLAUDE.md invariant 9: evals/runs/ must be commit-able (S-06).
 
@@ -816,19 +1028,19 @@ def _green_stub_report() -> RunReport:
     )
 
 
-def _stub_run_pipeline(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    """Stub run_all and every artifact writer so main() can cross the run
-    boundary without touching evals/{runs,reports,trajectories,briefings}."""
+def _stub_run_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[dict[str, Any]]:
+    """Stub run_all and the flat writers so main() can cross the run boundary
+    without touching evals/{reports,trajectories,briefings}, and redirect the
+    run archive at tmp_path — main() now creates runs/<invocation_id>/ itself
+    and writes its completion marker there."""
     run_all_calls: list[dict[str, Any]] = []
 
     def _stub_run_all(*args: Any, **kwargs: Any) -> Any:
         run_all_calls.append({"args": args, "kwargs": kwargs})
         return _green_stub_report(), (), ()
 
+    monkeypatch.setattr(runner_module, "_RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(runner_module, "run_all", _stub_run_all)
-    monkeypatch.setattr(
-        runner_module, "archive_run", lambda *_a, **_kw: runner_module._RUNS_DIR / "stub"
-    )
     monkeypatch.setattr(runner_module, "write_report", lambda *_a, **_kw: None)
     monkeypatch.setattr(runner_module, "write_trajectories", lambda *_a, **_kw: None)
     monkeypatch.setattr(runner_module, "write_briefings", lambda *_a, **_kw: None)
@@ -988,7 +1200,7 @@ class TestMainExitCodes:
         # Plain offline `make eval` (no --live) must keep exiting 0 — CI's
         # canned evals.yml job depends on it; degradation gates live runs only.
         _isolate_settings_env(monkeypatch, tmp_path)
-        run_all_calls = _stub_run_pipeline(monkeypatch)
+        run_all_calls = _stub_run_pipeline(monkeypatch, tmp_path)
         monkeypatch.setattr(sys, "argv", ["evals.runner"])
         assert runner_module.main() == 0
         assert len(run_all_calls) == 1
@@ -1001,7 +1213,7 @@ class TestMainExitCodes:
         # replacement for observing make eval-smoke under the eval freeze
         # (ADR 0011). Every live collaborator is stubbed — no network.
         _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
-        run_all_calls = _stub_run_pipeline(monkeypatch)
+        run_all_calls = _stub_run_pipeline(monkeypatch, tmp_path)
         preflight_calls: list[str] = []
         guard_calls: list[str] = []
         monkeypatch.setattr(
@@ -1045,7 +1257,7 @@ class TestMainExitCodes:
         env["PLATFORM_AGENT_PRINCIPAL_ID"] = "agent-sa-uuid"
         env["PLATFORM_SMOKE_PRINCIPAL_ID"] = "smoke-sa-uuid"
         _isolate_settings_env(monkeypatch, tmp_path, env)
-        _stub_run_pipeline(monkeypatch)
+        _stub_run_pipeline(monkeypatch, tmp_path)
         audit_kwargs: list[dict[str, Any]] = []
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
         monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: _StubGuardClient())
@@ -1069,7 +1281,7 @@ class TestMainExitCodes:
         env = dict(_REAL_LOOKING_LIVE_ENV)
         env["PLATFORM_SMOKE_PRINCIPAL_ID"] = "smoke-sa-uuid"
         _isolate_settings_env(monkeypatch, tmp_path, env)
-        _stub_run_pipeline(monkeypatch)
+        _stub_run_pipeline(monkeypatch, tmp_path)
         audit_kwargs: list[dict[str, Any]] = []
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
         monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: _StubGuardClient())
@@ -1140,7 +1352,7 @@ class TestCannedEquivalentKnobWarning:
         # The knobs are live-only; a canned run forces single-probe and
         # no-reprobe by construction, so warning offline would be noise.
         _isolate_settings_env(monkeypatch, tmp_path)
-        run_all_calls = _stub_run_pipeline(monkeypatch)
+        run_all_calls = _stub_run_pipeline(monkeypatch, tmp_path)
         monkeypatch.setattr(sys, "argv", ["evals.runner"])
         assert runner_module.main() == 0
         assert len(run_all_calls) == 1

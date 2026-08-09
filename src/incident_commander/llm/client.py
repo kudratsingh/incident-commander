@@ -18,10 +18,28 @@ from dataclasses import dataclass
 from typing import Any, Final, Protocol
 
 import anthropic
+import httpx
 from anthropic.types import Message
 from pydantic import BaseModel
 
 _STRUCTURED_TOOL_NAME: Final[str] = "record_output"
+
+# Explicit SDK bounds (C-07): the outer loop below owns retry policy, so the
+# SDK's own retries are off — SDK defaults (max_retries=2, 600s read timeout)
+# would otherwise layer under the 3-attempt loop for up to 9 HTTP requests
+# x 600s per logical call. The 120s read bound leaves room for a slow
+# structured generation at max_tokens=4096 (60s is too tight for that);
+# worst case per logical call is 3 attempts x ~120s ~= 6 min, well inside
+# budget_max_seconds=1800. The bound matters because wall_seconds_used is
+# never accrued today (B-01), so nothing else can interrupt a stalled call.
+_SDK_MAX_RETRIES: Final[int] = 0
+_SDK_TIMEOUT: Final[httpx.Timeout] = httpx.Timeout(120.0, connect=5.0)
+# Preflight is one models.list call — it should fail on a dead network in
+# seconds, not minutes.
+_PREFLIGHT_TIMEOUT: Final[httpx.Timeout] = httpx.Timeout(30.0, connect=5.0)
+# Cap the honored Retry-After: an hour-long server-suggested pause would
+# silently stall the sync state machine.
+_MAX_RETRY_AFTER_SECONDS: Final[float] = 60.0
 
 
 class LLMError(RuntimeError):
@@ -72,7 +90,11 @@ class LLMClient:
         client: anthropic.Anthropic | None = None,
         tracer: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
-        self._client = client or anthropic.Anthropic(api_key=api_key)
+        self._client = client or anthropic.Anthropic(
+            api_key=api_key,
+            timeout=_SDK_TIMEOUT,
+            max_retries=_SDK_MAX_RETRIES,
+        )
         self._max_attempts = max_attempts
         self._retry_base_delay = retry_base_delay
         self._sleep = sleep
@@ -154,7 +176,7 @@ class LLMClient:
             if attempt < self._max_attempts - 1:
                 delay = self._retry_base_delay * (2**attempt)
                 if retry_after is not None:
-                    delay = max(delay, retry_after)
+                    delay = max(delay, min(retry_after, _MAX_RETRY_AFTER_SECONDS))
                 self._sleep(delay)
         assert last_exc is not None
         raise LLMError(
@@ -197,7 +219,11 @@ def preflight_auth(api_key: str) -> None:
     would — so the runner can turn that failure mode into one labeled
     line before anything runs.
     """
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(
+        api_key=api_key,
+        timeout=_PREFLIGHT_TIMEOUT,
+        max_retries=_SDK_MAX_RETRIES,
+    )
     try:
         client.models.list(limit=1)
     except anthropic.APIStatusError as err:

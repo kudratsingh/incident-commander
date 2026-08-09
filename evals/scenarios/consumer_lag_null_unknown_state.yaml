@@ -1,0 +1,77 @@
+name: consumer_lag_null_unknown_state
+description: 'Paging alert names a consumer group the platform cannot resolve (renamed/decommissioned), so get_consumer_lag answers lag: null. Null is unknown-not-healthy: it is deliberately not reported
+  as 0, it carries no magnitude, and it neither confirms nor excludes saturation. The agent must attach the finding and escalate — never conclude healthy and never invent a remediation off a null reading.
+
+  '
+tags:
+- read-only
+- phase-0
+- kafka
+- defensive
+- null-lag
+- live-mcp
+- live-llm
+use_live_mcp: true
+use_live_llm: true
+alert:
+  source: platform.kafka
+  severity: high
+  fingerprint: consumer_lag_high
+  group: ledger-consumer
+canned_tool_responses:
+  get_consumer_lag:
+    content:
+    - type: text
+      text: '{"consumer_group":"ledger-consumer","lag":null,"cache_key":"kafka:consumer_lag:ledger-consumer"}'
+    is_error: false
+canned_llm_responses:
+  investigation_planner:
+  - hypotheses:
+    - category: consumer_saturation
+      name: consumer_saturation
+      confidence: 0.6
+      reasoning: 'Paging alert names ledger-consumer; probe its lag before hypothesising further.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: ledger-consumer
+  - hypotheses:
+    - category: unknown
+      name: undetermined_lag
+      confidence: 0.55
+      reasoning: 'Lag came back null, not a number: the platform could not determine lag for ledger-consumer (no cached value — consumer not started, no partition assignment, or a renamed group). Null
+        is not zero and is not healthy; it carries no magnitude, so saturation can be neither confirmed nor excluded from this reading. No remediation is justified on a null.
+
+        '
+    next_action:
+      kind: stop
+      reason: lag undetermined for the paged group; human decision required
+  briefing_writer:
+  - findings: 'The alert pages on ledger-consumer, but get_consumer_lag returned lag: null for that group — the platform has no cached reading for it. Null is an unknown state, not a healthy one: it is
+      deliberately not reported as 0 and carries no lag magnitude, so this probe neither confirms nor excludes consumer saturation.
+
+      '
+    recommendation: 'Confirm whether ledger-consumer still exists under that name; if it was renamed or decommissioned, retarget the paging rule at the live group, otherwise check that the consumer is
+      started and holds a partition assignment before treating the alert as noise.
+
+      '
+  briefing_judge:
+  - groundedness: 0.85
+    actionability: 0.8
+    reasoning: 'Findings read the null reading as undetermined rather than healthy and say why it carries no magnitude; recommendation names two concrete follow-ups (verify the group name, verify the
+      consumer is started and assigned).
+
+      '
+expectation:
+  name: consumer_lag_null_unknown_state
+  expected_terminal_state: escalated
+  # The literal wire value has to survive parse -> evidence: a regression that
+  # coerced null to 0 (or dropped the field) would flip this to `"lag":0` and
+  # fail here rather than grading a fabricated healthy reading.
+  expected_evidence_contains:
+  - '"lag":null'
+  - cache_key
+  max_tool_calls: 5

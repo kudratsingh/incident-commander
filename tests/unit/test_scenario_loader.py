@@ -1,14 +1,18 @@
+import json
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from evals.scenarios.loader import ScenarioLoadError, load_scenario, load_scenarios
 from evals.scenarios.schema import Scenario
 from incident_commander.agent.state import IncidentState
+from incident_commander.tools.mcp_client import ToolResult
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_EXAMPLE = _REPO_ROOT / "evals" / "scenarios" / "consumer_lag_high.yaml"
+_SCENARIO_DIR = _REPO_ROOT / "evals" / "scenarios"
+_EXAMPLE = _SCENARIO_DIR / "consumer_lag_high.yaml"
 
 
 _VALID_YAML = """\
@@ -82,7 +86,7 @@ class TestLoadScenarios:
             load_scenarios(tmp_path)
 
     def test_shipped_scenarios_directory_loads(self) -> None:
-        scenarios = load_scenarios(_REPO_ROOT / "evals" / "scenarios")
+        scenarios = load_scenarios(_SCENARIO_DIR)
         assert len(scenarios) >= 1
         assert any(s.name == "consumer_lag_high" for s in scenarios)
 
@@ -100,7 +104,7 @@ _REMEDIATION_MIN_CAP = 13
 @lru_cache(maxsize=1)
 def _shipped_scenarios() -> tuple[Scenario, ...]:
     """Parse the shipped scenario directory once per session, not per assertion."""
-    return tuple(load_scenarios(_REPO_ROOT / "evals" / "scenarios"))
+    return tuple(load_scenarios(_SCENARIO_DIR))
 
 
 # Scenarios that declare no `expected_action_tools` never enter the
@@ -114,6 +118,7 @@ _NON_REMEDIATION_CAPS: dict[str, int | None] = {
     "consumer_lag_high": 5,
     "consumer_lag_medium": 11,
     "consumer_lag_missing_group": 5,
+    "consumer_lag_null_unknown_state": 5,
     "consumer_lag_orders_high": 5,
     "consumer_lag_payments_critical": 12,
     "consumer_lag_shipping_extreme": 10,
@@ -178,3 +183,119 @@ class TestShippedScenarioBudgetCaps:
         # healthy-lag, no-action scenario — it must stay out of the class.
         by_name = {s.name: s for s in self._shipped()}
         assert by_name["consumer_lag_healthy_zero"].expectation.expected_action_tools == ()
+
+
+# The eight consumer groups the platform can resolve: `worker-dispatcher`
+# (written by the platform's own metrics loop) plus the seven the eval seed
+# script populates. Mirrors the `get_consumer_lag` input description in
+# contracts/platform-tools.snapshot.json, which is itself generated from
+# platform `SEEDED_CONSUMER_GROUPS` (consumer_lag.py:34-43). Any other name
+# is accepted by the platform and answered with `lag: null`.
+_PLATFORM_RESOLVABLE_GROUPS: frozenset[str] = frozenset(
+    {
+        "worker-dispatcher",
+        "billing-consumer",
+        "orders-consumer",
+        "notifications-consumer",
+        "analytics-consumer",
+        "payments-consumer",
+        "shipping-consumer",
+        "healthy-consumer",
+    }
+)
+
+_LAG_TOOL = "get_consumer_lag"
+_CACHE_KEY_PREFIX = "kafka:consumer_lag:"
+
+
+def _canned_lag_payloads() -> list[tuple[str, dict[str, Any]]]:
+    """Every canned ``get_consumer_lag`` text block, as (scenario name, parsed JSON)."""
+    payloads: list[tuple[str, dict[str, Any]]] = []
+    for scenario in _shipped_scenarios():
+        canned = scenario.canned_tool_responses.get(_LAG_TOOL)
+        if canned is None:
+            continue
+        results: tuple[ToolResult, ...] = (
+            (canned,) if isinstance(canned, ToolResult) else tuple(canned)
+        )
+        for result in results:
+            # Error results carry prose, not a payload — nothing to lint.
+            if result.is_error:
+                continue
+            for block in result.content:
+                if block.get("type") != "text":
+                    continue
+                parsed = json.loads(block["text"])
+                assert isinstance(parsed, dict), f"{scenario.name}: canned block is not an object"
+                payloads.append((scenario.name, parsed))
+    return payloads
+
+
+class TestCannedConsumerLagContract:
+    """Lint the canned ``get_consumer_lag`` fixtures against the platform contract.
+
+    Canned responses are supposed to be recordings of real platform responses
+    (docs/eval-methodology.md). Nothing enforced that, and the unknown-group
+    fixture drifted into fabricating ``lag: 42`` with a cache_key belonging to
+    a different group — an offline world the platform contractually never
+    produces (A-11). These assertions pin the two invariants that fixture
+    violated so the class cannot be reintroduced silently.
+    """
+
+    def test_at_least_one_lag_fixture_is_linted(self) -> None:
+        # Guards against the lint silently covering nothing if the canned
+        # shape ever changes.
+        assert len(_canned_lag_payloads()) >= 10
+
+    def test_unresolvable_group_lag_is_null(self) -> None:
+        # Platform contract: a group the platform has no cached value for
+        # returns `lag: null`, never a number — "deliberately not reported as
+        # 0, because a fabricated 0 would read as healthy"
+        # (incident-platform backend/app/mcp/tools/consumer_lag.py:9, :54, :93).
+        offenders = [
+            f"{name}: consumer_group={payload.get('consumer_group')!r} lag={payload.get('lag')!r}"
+            for name, payload in _canned_lag_payloads()
+            if payload.get("consumer_group") not in _PLATFORM_RESOLVABLE_GROUPS
+            and payload.get("lag") is not None
+        ]
+        assert not offenders, (
+            "canned get_consumer_lag fixtures fabricate a numeric lag for a group "
+            f"the platform would answer with null: {offenders}"
+        )
+
+    def test_cache_key_is_derived_from_the_requested_group(self) -> None:
+        # Platform contract: cache_key echoes the key actually read, which is
+        # derived from the REQUESTED group — `_redis_key(inp.consumer_group)`
+        # (consumer_lag.py:26-27, :111, :121-125). It can never name a
+        # different group than the response's own consumer_group.
+        offenders = [
+            f"{name}: consumer_group={payload['consumer_group']!r} "
+            f"cache_key={payload['cache_key']!r}"
+            for name, payload in _canned_lag_payloads()
+            if "cache_key" in payload
+            and payload["cache_key"] != f"{_CACHE_KEY_PREFIX}{payload['consumer_group']}"
+        ]
+        assert not offenders, (
+            f"canned get_consumer_lag cache_key does not echo the requested group: {offenders}"
+        )
+
+    def test_null_lag_is_exercised_end_to_end_by_a_scenario(self) -> None:
+        # S-21: the None-for-unknown contract was protected only by
+        # model-level unit tests. At least one scenario must drive a null
+        # reading through the whole loop, and it must NOT grade as healthy —
+        # a run that resolves on a null lag is the regression this catches.
+        null_lag_scenarios = {
+            name for name, payload in _canned_lag_payloads() if payload.get("lag") is None
+        }
+        assert null_lag_scenarios, "no scenario cans a `lag: null` get_consumer_lag response"
+        by_name: dict[str, Scenario] = {s.name: s for s in _shipped_scenarios()}
+        for name in sorted(null_lag_scenarios):
+            expectation = by_name[name].expectation
+            assert expectation.expected_terminal_state is not IncidentState.RESOLVED, (
+                f"{name}: a null lag reading is unknown-not-healthy; the scenario "
+                "must not expect a resolved run"
+            )
+            assert expectation.expected_terminal_state is IncidentState.ESCALATED, (
+                f"{name}: expected the null-lag scenario to escalate, got "
+                f"{expectation.expected_terminal_state}"
+            )

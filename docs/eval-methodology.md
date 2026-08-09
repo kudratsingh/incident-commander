@@ -209,6 +209,19 @@ If a count truly matters (e.g. "at most one replay should have fired"), express 
 
 Until `Scenario` setup/teardown hooks + `make eval-reset` ship, live-eval runs one scenario at a time with a manual reset between them. Batch mode is deferred until state-reset is enforceable in the harness rather than depending on operator memory.
 
+### 5. Canned responses are recordings, and the loader lints the ones we can check
+
+`canned_tool_responses` are supposed to be captured from real platform responses. Nothing enforced that, and the `get_consumer_lag` fixtures drifted into a world the platform never produces: `consumer_lag_missing_group` canned `lag: 42` for group `unknown`, and every consumer-lag fixture echoed `kafka:consumer_lag:worker-dispatcher` as its `cache_key` regardless of which group was probed (A-11).
+
+`tests/unit/test_scenario_loader.py::TestCannedConsumerLagContract` now pins the two invariants that fixture violated, across every scenario:
+
+- a group the platform cannot resolve (anything outside the eight it seeds) must can `lag: null`, never a number — the platform reports null *precisely so* an unknown reading is not mistaken for a healthy one, and a fabricated `0` or `42` erases that distinction;
+- `cache_key` must echo the requested group (`kafka:consumer_lag:{consumer_group}`), because the platform derives it from the request.
+
+The null contract is also exercised end-to-end by `consumer_lag_null_unknown_state`: the alert names a group the platform cannot resolve, the probe returns `lag: null`, and the expectation asserts the run **escalates** and that the literal `"lag":null` reaches the evidence ledger (S-21). A planner or judge regression that read null as healthy used to stay green offline — that scenario is the tripwire, and the loader lint keeps a future fixture from fabricating the number back.
+
+Fixtures written from the platform's source contract rather than recorded from a live probe are a stopgap; re-record them verbatim at the next sanctioned live campaign.
+
 ## Reading a live report — required first pass
 
 Every failed live-eval run gets bucketed *before* any code is opened:

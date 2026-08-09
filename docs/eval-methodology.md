@@ -60,6 +60,15 @@ No scenario ever "skips" — every one runs in both modes. This is why `make eva
 
 Four scenarios are deliberately canned-only (`use_live_mcp: false` + `use_live_llm: false`): they test agent-side error handling that a real platform doesn't produce (`tool_missing_response`, `tool_output_schema_mismatch`, `tool_result_marked_error`, `planner_stops_immediately`).
 
+**Provenance is part of the result** ([ADR 0013](ADR/0013-run-provenance-is-part-of-the-eval-result.md)). Which mode each leg actually ran in is persisted, not just printed:
+
+- `ScenarioOutcome.live_mcp` / `live_llm` — the leg ran live
+- `ScenarioOutcome.degraded` — a declared-live leg fell back to canned
+- `RunReport.degraded_count` — degraded outcomes in the run; `None` means a pre-schema report ("unknown"), deliberately distinct from `0` ("verified fully live")
+- `RunReport.only_patterns` — the `--only` filters that produced the report (empty = full suite)
+
+All fields are defaulted, so pre-schema artifacts (the committed `baseline.json`, archived runs) keep parsing unchanged — append-only evidence is never rewritten; the next deliberate `make baseline` bless picks the fields up. Under `--live` the runner refuses (exit 3, before any scenario runs) any env that would degrade a selected scenario — degraded "live" artifacts can no longer exist.
+
 ## Trace outputs
 
 Every live run writes three coordinated views per scenario:

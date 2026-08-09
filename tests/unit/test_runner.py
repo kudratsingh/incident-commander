@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -10,6 +11,7 @@ from uuid import UUID
 import pytest
 from pydantic import SecretStr
 
+from evals import runner as runner_module
 from evals.chaos_hooks import ChaosInvocationError
 from evals.fakes import CannedMCPClient
 from evals.graders.deterministic import (
@@ -24,6 +26,9 @@ from evals.runner import (
     Trajectory,
     _classify_failure,
     _crashed_result,
+    _eval_defaults,
+    _is_offline_placeholder,
+    _print_summary,
     archive_run,
     run_all,
     run_scenario,
@@ -660,3 +665,303 @@ class TestRunsDirIsTracked:
         assert not any(line.strip().startswith("evals/runs") for line in text.splitlines()), (
             "evals/runs is the invariant-9 durable record; it must not be gitignored"
         )
+
+
+# --- Run provenance + exit-code contract (ADR 0013; findings A-01/S-09/A-04/A-15) ---
+
+# Every env var Settings can read (config.py), upper-cased per pydantic-settings.
+# Exit-code tests must clear ALL of them and chdir away from any real .env, or a
+# developer's environment leaks into the test — the exact A-04 mechanism.
+_SETTINGS_ENV_VARS = (
+    "ANTHROPIC_API_KEY",
+    "AGENT_MODEL",
+    "JUDGE_MODEL",
+    "PLATFORM_MCP_URL",
+    "PLATFORM_REST_URL",
+    "PLATFORM_TOKEN",
+    "PLATFORM_SMOKE_TOKEN",
+    "PLATFORM_WEBHOOK_SECRET",
+    "DATABASE_URL",
+    "BUDGET_MAX_TOOL_CALLS",
+    "BUDGET_MAX_TOKENS",
+    "BUDGET_MAX_SECONDS",
+    "BUDGET_MAX_USD",
+    "VERIFY_PROBE_ATTEMPTS",
+    "VERIFY_PROBE_DELAY_SECONDS",
+    "INVESTIGATE_REPROBE_ATTEMPTS",
+    "INVESTIGATE_REPROBE_DELAY_SECONDS",
+    "ACTION_TOOL_TIMEOUT_SECONDS",
+)
+
+# What a verbatim `.env.example` copy gives a --live run: every field present
+# and valid, ANTHROPIC_API_KEY empty, platform URL the offline placeholder.
+_PLACEHOLDER_LIVE_ENV = {
+    "ANTHROPIC_API_KEY": "",
+    "JUDGE_MODEL": "eval-judge",
+    "PLATFORM_MCP_URL": "https://eval.local",
+    "PLATFORM_REST_URL": "https://eval.local",
+    "PLATFORM_TOKEN": "eval",
+    "PLATFORM_WEBHOOK_SECRET": "eval",
+    "DATABASE_URL": "postgresql://eval:eval@localhost:5432/eval",
+}
+
+# The `make eval-smoke` shape: a fully real-looking env (nothing offline).
+# No network is ever touched — every live-side collaborator is monkeypatched.
+_REAL_LOOKING_LIVE_ENV = {
+    "ANTHROPIC_API_KEY": "sk-ant-test-not-a-real-key",
+    "JUDGE_MODEL": "eval-judge",
+    "PLATFORM_MCP_URL": "http://real.host:8001/mcp",
+    "PLATFORM_REST_URL": "http://real.host:8000",
+    "PLATFORM_TOKEN": "sa_full_scope",
+    "PLATFORM_SMOKE_TOKEN": "sa_smoke_read_only",
+    "PLATFORM_WEBHOOK_SECRET": "whsec_test",
+    "DATABASE_URL": "postgresql://eval:eval@localhost:5432/eval",
+}
+
+
+def _isolate_settings_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    env: dict[str, str] | None = None,
+) -> None:
+    """chdir to tmp_path (no .env) and reset every Settings env var."""
+    monkeypatch.chdir(tmp_path)
+    for var in _SETTINGS_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+    for var, value in (env or {}).items():
+        monkeypatch.setenv(var, value)
+
+
+def _forbid_run_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exit-code tests exercise main()'s pre-run paths only: reaching run_all
+    would write into the append-only evidence dirs at module-constant paths."""
+
+    def _boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("run_all must not be reached")
+
+    monkeypatch.setattr(runner_module, "run_all", _boom)
+
+
+def _green_stub_report() -> RunReport:
+    return RunReport(
+        generated_at=_NOW,
+        total=1,
+        passed=1,
+        failed=0,
+        outcomes=(
+            ScenarioOutcome(
+                scenario="stub",
+                final_state=IncidentState.ESCALATED,
+                tool_calls_used=0,
+                report=GradeReport(scenario="stub", passed=True, dimensions=()),
+            ),
+        ),
+    )
+
+
+def _stub_run_pipeline(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Stub run_all and every artifact writer so main() can cross the run
+    boundary without touching evals/{runs,reports,trajectories,briefings}."""
+    run_all_calls: list[dict[str, Any]] = []
+
+    def _stub_run_all(*args: Any, **kwargs: Any) -> Any:
+        run_all_calls.append({"args": args, "kwargs": kwargs})
+        return _green_stub_report(), (), ()
+
+    monkeypatch.setattr(runner_module, "run_all", _stub_run_all)
+    monkeypatch.setattr(
+        runner_module, "archive_run", lambda *_a, **_kw: runner_module._RUNS_DIR / "stub"
+    )
+    monkeypatch.setattr(runner_module, "write_report", lambda *_a, **_kw: None)
+    monkeypatch.setattr(runner_module, "write_trajectories", lambda *_a, **_kw: None)
+    monkeypatch.setattr(runner_module, "write_briefings", lambda *_a, **_kw: None)
+    return run_all_calls
+
+
+class _StubGuardClient:
+    def close(self) -> None:
+        return None
+
+
+class TestRunProvenance:
+    """A-01/S-09: degradation must live in the artifact, not just stdout."""
+
+    def _live_llm_scenario(self) -> Scenario:
+        return _passing_scenario().model_copy(
+            update={"name": "live_llm_probe", "use_live_llm": True}
+        )
+
+    def test_declared_live_llm_scenario_records_degraded_when_placeholder(self) -> None:
+        # Placeholder API key => the declared-live LLM leg runs canned, and
+        # the outcome must say so (at HEAD ScenarioOutcome has no such field).
+        result = run_scenario(self._live_llm_scenario(), _test_settings())
+        assert result.outcome.live_llm is False
+        assert result.outcome.live_mcp is False
+        assert result.outcome.degraded is True
+
+    def test_fully_canned_scenario_is_not_degraded(self) -> None:
+        # A scenario that declares no live leg cannot "degrade" — canned is
+        # its intended mode.
+        result = run_scenario(_passing_scenario(), _test_settings())
+        assert result.outcome.live_llm is False
+        assert result.outcome.live_mcp is False
+        assert result.outcome.degraded is False
+
+    def test_run_all_persists_degraded_count_and_only_patterns(self) -> None:
+        report, _, _ = run_all(
+            [self._live_llm_scenario(), _passing_scenario()],
+            _test_settings(),
+            only_patterns=("lag",),
+        )
+        assert report.degraded_count == 1
+        assert report.only_patterns == ("lag",)
+
+    def test_run_all_only_patterns_defaults_to_empty(self) -> None:
+        report, _, _ = run_all([_passing_scenario()], _test_settings())
+        assert report.degraded_count == 0
+        assert report.only_patterns == ()
+
+    def test_print_summary_reads_the_persisted_degraded_count(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # The printed number and the persisted number must be the same value
+        # by construction — their divergence was the A-01 finding.
+        report, _, _ = run_all([self._live_llm_scenario()], _test_settings())
+        _print_summary(report)
+        out = capsys.readouterr().out
+        assert "degraded: 1 scenarios fell back to canned" in out
+
+
+class TestOfflinePlaceholderExactHost:
+    """S-09 sub-finding: substring matching silently degraded real URLs."""
+
+    def test_placeholder_host_matches(self) -> None:
+        assert _is_offline_placeholder("https://eval.local") is True
+
+    def test_placeholder_host_with_port_and_path_matches(self) -> None:
+        assert _is_offline_placeholder("http://eval.local:8001/mcp") is True
+
+    def test_placeholder_prefix_of_real_domain_counts_as_live(self) -> None:
+        assert _is_offline_placeholder("https://eval.local.evil.example/mcp") is False
+
+
+class TestEvalDefaultsPinned:
+    """A-04: offline placeholder Settings must not absorb .env values."""
+
+    def test_platform_smoke_token_ignores_dotenv(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        _isolate_settings_env(monkeypatch, tmp_path)
+        (tmp_path / ".env").write_text("PLATFORM_SMOKE_TOKEN=sa_smoke_from_dotenv\n")
+        assert _eval_defaults().platform_smoke_token is None
+
+
+class TestBaselineBackwardCompat:
+    """The committed pre-schema baseline must keep parsing — append-only evidence
+    is never rewritten; defaults carry the compatibility."""
+
+    def test_committed_baseline_parses_with_unknown_provenance(self) -> None:
+        baseline_path = Path(__file__).resolve().parents[2] / "evals" / "reports" / "baseline.json"
+        report = RunReport.model_validate_json(baseline_path.read_text())
+        assert report.total == 37
+        # None = unknown (pre-schema), NOT 0: the committed baseline was a
+        # 32/37-degraded canned run — claiming 0 would assert a falsehood.
+        assert report.degraded_count is None
+        assert report.only_patterns == ()
+        assert all(o.degraded is False for o in report.outcomes)
+
+
+class TestMainExitCodes:
+    """The new preflight refusals all exit 3 BEFORE run_all — pre-spend."""
+
+    def test_live_with_placeholder_env_refuses_exit_3(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The executed S-09 repro: a verbatim .env.example copy under --live.
+        # At HEAD this runs the whole suite canned and returns 0.
+        _isolate_settings_env(monkeypatch, tmp_path, _PLACEHOLDER_LIVE_ENV)
+        _forbid_run_all(monkeypatch)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        assert runner_module.main() == 3
+
+    def test_smoke_without_live_refuses_exit_3_before_settings(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # A-04: at HEAD this path runs the full suite canned (with .env-leaked
+        # smoke token) and returns 0. Must refuse before Settings is built.
+        _isolate_settings_env(monkeypatch, tmp_path)
+
+        def _no_settings(*_args: Any, **_kwargs: Any) -> Any:
+            raise AssertionError("_settings_for_mode must not be reached")
+
+        monkeypatch.setattr(runner_module, "_settings_for_mode", _no_settings)
+        _forbid_run_all(monkeypatch)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--smoke"])
+        assert runner_module.main() == 3
+
+    def test_live_with_broken_env_exits_3_not_traceback(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # A-15: at HEAD the pydantic ValidationError escapes main() and the
+        # interpreter exits 1 — the code reserved for "scenario failed".
+        _isolate_settings_env(monkeypatch, tmp_path)
+        _forbid_run_all(monkeypatch)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        assert runner_module.main() == 3
+
+    def test_live_smoke_placeholder_platform_with_canned_only_selection_exits_3(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # A-04 defense-in-depth: the selection contains no use_live scenario
+        # (so the degraded fail-fast is silent), the smoke token is present,
+        # but the platform is a placeholder — there is no principal to guard.
+        env = dict(_PLACEHOLDER_LIVE_ENV)
+        env["PLATFORM_SMOKE_TOKEN"] = "sa_smoke_read_only"
+        _isolate_settings_env(monkeypatch, tmp_path, env)
+        _forbid_run_all(monkeypatch)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke", "--only", "tool_"])
+        assert runner_module.main() == 3
+
+    def test_offline_run_still_exits_0(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Plain offline `make eval` (no --live) must keep exiting 0 — CI's
+        # canned evals.yml job depends on it; degradation gates live runs only.
+        _isolate_settings_env(monkeypatch, tmp_path)
+        run_all_calls = _stub_run_pipeline(monkeypatch)
+        monkeypatch.setattr(sys, "argv", ["evals.runner"])
+        assert runner_module.main() == 0
+        assert len(run_all_calls) == 1
+
+    def test_live_smoke_with_real_env_passes_preflight(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The `make eval-smoke` shape (--live --smoke, nothing offline) must
+        # NOT trip the degraded fail-fast: degraded_to_canned == 0. Unit-level
+        # replacement for observing make eval-smoke under the eval freeze
+        # (ADR 0011). Every live collaborator is stubbed — no network.
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        run_all_calls = _stub_run_pipeline(monkeypatch)
+        preflight_calls: list[str] = []
+        guard_calls: list[str] = []
+        monkeypatch.setattr(
+            runner_module, "preflight_auth", lambda key: preflight_calls.append(key)
+        )
+        monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: _StubGuardClient())
+        monkeypatch.setattr(
+            runner_module,
+            "assert_read_only_principal",
+            lambda _client: guard_calls.append("principal"),
+        )
+        monkeypatch.setattr(
+            runner_module,
+            "assert_no_tier1_successes",
+            lambda _client, _since: guard_calls.append("audit"),
+        )
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
+        assert runner_module.main() == 0
+        assert preflight_calls == ["sk-ant-test-not-a-real-key"]
+        assert guard_calls == ["principal", "audit"]
+        assert len(run_all_calls) == 1
+        # The read-scoped smoke token — not the write token — reached run_all.
+        assert run_all_calls[0]["kwargs"]["mcp_token"] == "sa_smoke_read_only"

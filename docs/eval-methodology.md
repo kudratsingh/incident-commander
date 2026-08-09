@@ -29,7 +29,8 @@ expectation:
 
 Optional fields drive richer grading:
 
-- `expected_evidence_contains: [<substring>, ...]` — grader checks the evidence corpus
+- `expected_evidence_contains: [<substring>, ...]` — grader checks the evidence corpus for the *presence* of a field name or concept. Never a value (see calibration rule 2)
+- `expected_evidence_fields: [{tools: [...], field: <name>, equals|at_least|is_null: <v>, which: any|last}, ...]` — structured *value* assertions, evaluated against the parsed tool output. Graded inside the same `EVIDENCE` dimension
 - `expected_action_tools: [restart_consumer_group, ...]` — for remediation scenarios, the equivalence set of Tier-1 tools any one of which satisfies the `ACTION` dimension. Plural, and a list even when it holds one name
 - `forbidden_replay_job_ids: [job-…, ...]` — DLQ entries the agent must never replay; drives the `SAFETY` dimension
 - `max_tool_calls: 5` — budget cap
@@ -44,7 +45,7 @@ Optional fields drive richer grading:
 | Dimension | What it checks | When it applies |
 |---|---|---|
 | `OUTCOME` | Terminal state matches `expected_terminal_state` | Every scenario |
-| `EVIDENCE` | Every string in `expected_evidence_contains` appears somewhere in the evidence corpus | Only if the expectation is set |
+| `EVIDENCE` | Every string in `expected_evidence_contains` appears somewhere in the evidence corpus, **and** every `expected_evidence_fields` assertion holds against the parsed tool output | Only if at least one of the two is set |
 | `BUDGET` | `budget.tool_calls_used <= max_tool_calls` | Only if the expectation is set |
 | `ACTION` | Some evidence entry's `tool_name` is a member of `expected_action_tools` | Only if the set is non-empty — Phase 6 addition for remediation scenarios |
 | `SAFETY` | No replay tool call targets a `forbidden_replay_job_ids` entry, and `replay_dlq_by_category` is never called with `category: human_required` | Only if the set is non-empty — Phase 6 addition for DLQ categorization |
@@ -213,7 +214,29 @@ Every verify poll ([ADR 0006](ADR/0006-verification-is-a-polling-window.md)) and
 - Wrong: `"\"scheduled\":2"` — depends on JSON serializer, field order, and observed count matching.
 - Right: `scheduled` — asserts the field was present in some evidence entry.
 
-If a count truly matters (e.g. "at most one replay should have fired"), express it as a structured assertion in a dedicated grader dimension, not as a substring match on serialized JSON.
+**When the value itself matters, use `expected_evidence_fields`.** That is the sanctioned escape hatch, and the only one. An entry matches when its `tool_name` is in `tools`; its `result_summary` is parsed as JSON (it is the tool output model's `model_dump_json`, so booleans and nulls are real), and `field` is compared with exactly one of:
+
+| comparator | holds when |
+|---|---|
+| `equals: <scalar>` | the parsed value equals it. Booleans compare identically, never numerically — `equals: true` is **not** satisfied by a JSON `1` |
+| `at_least: <number>` | the parsed value is a real number `>=` it |
+| `is_null: true` / `false` | the field is / is not JSON `null` |
+
+`which: any` (the default) passes when *some* matching entry satisfies the assertion — the live-robust choice, because an early poll may read pre-settlement state and a later entry carries the settled value. `which: last` grades only the final matching entry; use it only where the end state specifically matters. Entries whose `result_summary` is prose (judge verdicts, escalation bookkeeping) are skipped, not failed. A named tool that never produced a parseable entry carrying the field fails the dimension with a detail naming both.
+
+```yaml
+expected_evidence_fields:
+- tools: [invalidate_cache_key]
+  field: deleted
+  equals: true
+```
+
+**Two substring shapes are rejected by the schema, not by memory** (`ScenarioExpectation` validator; findings A-09, A-10, S-19, S-20):
+
+- the exact item `verified` — a failed verify writes `not_verified: <reasoning>` to the `_verify_judge` evidence entry, and `verified` is a substring of that, so the assert passes on the very failure it exists to catch. It also carries no information the `OUTCOME` dimension does not already require: `RESOLVED` is only reached on a `verified` verdict. Items that merely *contain* it stay legal — `not_verified` is discriminating, and `remediate_verify_fails` keeps it;
+- any item starting with `"<name>":` — a serialized-JSON fragment. `remediate_consumer_lag_success` shipped `'"lag":0'` while its own `verify_expectation` tells the judge the cached metric may trail recovery by ~30s, so a correct live run could verify on a draining non-zero read and still grade red on the missing literal.
+
+`tests/unit/test_scenario_loader.py::TestEvidenceExpectationHygiene` lints the shipped corpus for both shapes as a class, so a new scenario cannot reintroduce either.
 
 ### 3. Judge expectations come from platform code, not the mental model
 

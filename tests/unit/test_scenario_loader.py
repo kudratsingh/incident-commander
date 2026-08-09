@@ -1,4 +1,5 @@
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -183,6 +184,86 @@ class TestShippedScenarioBudgetCaps:
         # healthy-lag, no-action scenario — it must stay out of the class.
         by_name = {s.name: s for s in self._shipped()}
         assert by_name["consumer_lag_healthy_zero"].expectation.expected_action_tools == ()
+
+
+# Evidence substrings the scenario schema now refuses, mirroring the two
+# rejection rules in `evals/graders/deterministic.py`. Re-derived here from
+# the loaded YAMLs rather than imported, so this lint keeps failing loudly if
+# a future edit relaxes the schema-side validator.
+_TOXIC_EXACT_SUBSTRING = "verified"
+_SERIALIZED_FRAGMENT = re.compile(r'^"[^"]+":')
+
+# Scenarios whose value assertions moved from `expected_evidence_contains`
+# substrings to `expected_evidence_fields` (A-09/A-10/S-19/S-20). Kept as an
+# explicit list so a migration that silently drops an assertion — leaving the
+# scenario with no value coverage at all — fails here.
+_STRUCTURED_EVIDENCE_SCENARIOS: frozenset[str] = frozenset(
+    {
+        "consumer_lag_null_unknown_state",
+        "dlq_human_required_escalates",
+        "dlq_mixed_partial",
+        "dlq_replay_safe_success",
+        "remediate_consumer_lag_success",
+        "remediate_dlq_backlog_success",
+        "remediate_runaway_saga_success",
+        "remediate_stale_cache_success",
+    }
+)
+
+
+class TestEvidenceExpectationHygiene:
+    """No shipped scenario may assert a grader-toxic evidence substring.
+
+    Two shapes are fake-green or brittle by construction (A-09, A-10):
+
+    * the exact item ``verified`` substring-matches the ``not_verified: ...``
+      verdict a failed verify writes to the judge evidence entry, so it passes
+      on the very failure it exists to catch;
+    * a serialized-JSON fragment (``"lag":0``) pins the serializer, field
+      order and one observed value, so it re-fails correct live runs.
+
+    Enforced in the schema, not by memory (docs/eval-methodology.md rule 2);
+    this lint is the class-level second opinion over the shipped corpus.
+    """
+
+    def test_no_shipped_scenario_asserts_a_toxic_evidence_substring(self) -> None:
+        offenders = [
+            f"{s.name}: {item!r}"
+            for s in _shipped_scenarios()
+            for item in s.expectation.expected_evidence_contains
+            if item == _TOXIC_EXACT_SUBSTRING or _SERIALIZED_FRAGMENT.match(item)
+        ]
+        assert not offenders, (
+            "scenarios assert grader-toxic evidence substrings; move value "
+            f"assertions to expected_evidence_fields: {offenders}"
+        )
+
+    def test_migrated_scenarios_carry_structured_field_assertions(self) -> None:
+        by_name = {s.name: s for s in _shipped_scenarios()}
+        without = sorted(
+            name
+            for name in _STRUCTURED_EVIDENCE_SCENARIOS
+            if not by_name[name].expectation.expected_evidence_fields
+        )
+        assert without == [], (
+            "these scenarios traded a substring value assertion for a "
+            f"structured one and must still carry it: {without}"
+        )
+
+    def test_structured_assertions_name_a_tool_the_scenario_can_call(self) -> None:
+        # A field expectation pointed at a tool the scenario never exercises
+        # is dead coverage that only fails live. Every named tool must be one
+        # the scenario cans a response for.
+        offenders: list[str] = []
+        for name in sorted(_STRUCTURED_EVIDENCE_SCENARIOS):
+            scenario = {s.name: s for s in _shipped_scenarios()}[name]
+            canned = set(scenario.canned_tool_responses)
+            for expectation in scenario.expectation.expected_evidence_fields:
+                if not canned.intersection(expectation.tools):
+                    offenders.append(f"{name}: {expectation.field} on {list(expectation.tools)}")
+        assert offenders == [], (
+            f"evidence field expectations name tools the scenario never cans: {offenders}"
+        )
 
 
 # The eight consumer groups the platform can resolve: `worker-dispatcher`

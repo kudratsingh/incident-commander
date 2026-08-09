@@ -81,7 +81,13 @@ expectation:
   expected_action_tools: [replay_dlq_by_category]
   expected_evidence_contains:
   - replay_safe
-  - verified
+  # Structured effect assert (A-09): replaces the bare `verified` substring,
+  # which also matched a `not_verified: ...` verdict. Not pinned to an exact
+  # count — live DLQ seeding varies.
+  expected_evidence_fields:
+  - tools: [replay_dlq_by_category]
+    field: replayed
+    at_least: 1
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
   # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
   # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. Cap 13 is the

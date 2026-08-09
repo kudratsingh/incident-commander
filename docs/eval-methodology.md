@@ -169,9 +169,25 @@ Written after the Phase-6 seven-run live eval. Every rule is enforced by a check
 
 `max_tool_calls` is the *expected live path length* plus a headroom margin. Never set it to a tight number matching the happy path — one extra triage probe or one verify re-poll turns a resolved run into a `BUDGET` failure.
 
-- Expected live path = 4–5 tool calls for the current remediation scenarios.
-- Cap = 8 (roughly 60% margin) for all Phase-6 remediation scenarios.
+Sizing is done against the **live** knobs (`docs/runbook.md`, "Environment variable knobs"), not against the canned defaults. Canned runs force `probe_attempts=1` and `reprobe_attempts=0`, so they never approach any cap — offline green says nothing about whether a cap is calibrated.
+
+Every verify poll ([ADR 0006](ADR/0006-verification-is-a-polling-window.md)) and every freshness re-probe ([ADR 0009](ADR/0009-investigation-freshness-reprobe.md)) increments `tool_calls_used`, so both are charged to the cap. The arithmetic for a **correct** remediation run at the live knobs (`VERIFY_PROBE_ATTEMPTS=6`, `INVESTIGATE_REPROBE_ATTEMPTS=1`):
+
+| leg | calls |
+|---|---|
+| investigation probes | 2 |
+| ADR-0009 freshness re-probe | 1 |
+| Tier-1 action | 1 |
+| ADR-0006 verify polls (worst case) | 6 |
+| **expected live path** | **10** |
+
+- Cap = **13** for every remediation-class scenario — one that declares `expected_action_tools` and therefore enters the VERIFYING poll loop. That is the 10-call live path plus the ≥30% margin. The value is a maintainer decision; a post-campaign live run confirms it (see [`eval-debt.md`](eval-debt.md)).
+- Read-only scenarios never enter the poll loop, so this arithmetic does not apply to them and their caps are sized from their own probe counts.
+- The cap in a scenario's `expectation` is a **grading** cap, read by `evals/graders/deterministic.py:_grade_budget`. It is not the runtime `BudgetLedger` ceiling of CLAUDE.md invariant 7 (`settings.budget_max_tool_calls`, default 25), which is enforced independently at every loop step. Raising a grading cap never relaxes the runtime one.
 - If a scenario legitimately needs a tighter cap (e.g. testing budget enforcement), name that in a comment inside the YAML.
+- `tests/unit/test_scenario_loader.py` enforces the remediation-class rule so a new scenario cannot reintroduce a cap that a correct live run cannot meet.
+
+> The rule previously read "expected live path 4–5 calls, cap 8". That predated ADR-0006 polling and was never re-applied afterwards, which is how eight remediation scenarios kept a cap a correct live run could not meet (finding A-02).
 
 ### 2. Presence over counts
 

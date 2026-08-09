@@ -110,8 +110,9 @@ expectation:
   # Post-restart drained reading — replaces the `verified` assert, which
   # substring-matches `not_verified` (fake-green; see PR #64).
   - '"lag":0'
-  # Live worst case: up to 3 investigation probes + 1 freshness re-probe
-  # (ADR 0009; the FIRST lag read may be a stale cached 0) + action +
-  # up to 6 verify polls (ADR 0006 at VERIFY_PROBE_ATTEMPTS=6). Campaign
-  # observed 10 under the old design; 12 keeps the >=30% margin rule.
-  max_tool_calls: 12
+  # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
+  # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
+  # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. Cap 13 is the
+  # maintainer's decision (A-02), keeping the >=30% margin rule. Grading cap
+  # only — the runtime BudgetLedger ceiling (invariant 7) is untouched.
+  max_tool_calls: 13

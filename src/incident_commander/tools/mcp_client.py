@@ -16,7 +16,7 @@ from itertools import count
 from typing import Any, Final, Protocol
 
 import httpx
-from pydantic import BaseModel, ConfigDict
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from incident_commander.config import Settings
 
@@ -40,7 +40,14 @@ class ToolResult(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
 
     content: list[dict[str, Any]] = []
-    is_error: bool = False
+    # The MCP spec (and the platform: protocol.py:139) spells the error flag
+    # camelCase ``isError`` on the wire; canned fixtures and trajectories use
+    # snake ``is_error``. Both must land on the field — without the alias a
+    # spec-conformant {"isError": true} fell into __pydantic_extra__ and every
+    # escalate-on-error guard stayed dead against the wire (C-02). No
+    # serialization_alias on purpose: dumps keep emitting ``is_error`` so
+    # tracer JSONL and canned-fixture round-trips stay byte-stable.
+    is_error: bool = Field(default=False, validation_alias=AliasChoices("isError", "is_error"))
 
 
 class MCPClient:

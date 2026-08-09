@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 import pytest
 
-from incident_commander.tools.mcp_client import MCPClient, MCPError
+from incident_commander.tools.mcp_client import MCPClient, MCPError, ToolResult
 
 _BASE_URL = "https://mcp.local"
 
@@ -180,6 +180,44 @@ class TestRetries:
         ):
             client.list_tools()
         assert len(attempts) == 2
+
+
+class TestToolResultWireShape:
+    """The platform wire emits camelCase ``isError`` (MCP spec — platform
+    protocol.py:139); canned fixtures use snake ``is_error``. Both spellings
+    must land on the field, never in ``__pydantic_extra__``, or every
+    escalate-on-``is_error`` guard is dead against the wire (C-02)."""
+
+    def test_wire_iserror_true_maps_onto_is_error(self) -> None:
+        result = ToolResult.model_validate(
+            {"content": [{"type": "text", "text": "boom"}], "isError": True}
+        )
+        assert result.is_error is True
+        assert "isError" not in (result.__pydantic_extra__ or {})
+
+    def test_snake_case_fixture_spelling_still_maps(self) -> None:
+        result = ToolResult.model_validate({"content": [], "is_error": True})
+        assert result.is_error is True
+
+    def test_direct_construction_still_works(self) -> None:
+        assert ToolResult(is_error=True).is_error is True
+        assert ToolResult().is_error is False
+
+    def test_model_dump_still_emits_snake_case_field_name(self) -> None:
+        # Trajectories, tracer JSONL, and canned fixtures all spell the
+        # field ``is_error`` — dumps must keep that spelling and must not
+        # leak a stray ``isError`` extra alongside it.
+        dumped = ToolResult.model_validate({"content": [], "isError": True}).model_dump(mode="json")
+        assert dumped["is_error"] is True
+        assert "isError" not in dumped
+
+    def test_call_tool_maps_wire_iserror_true_end_to_end(self) -> None:
+        def handler(_r: httpx.Request) -> httpx.Response:
+            return _rpc_ok({"content": [{"type": "text", "text": "boom"}], "isError": True})
+
+        with _client(handler) as client:
+            result = client.call_tool("restart_consumer_group", {})
+        assert result.is_error is True
 
 
 class TestJsonRpcIds:

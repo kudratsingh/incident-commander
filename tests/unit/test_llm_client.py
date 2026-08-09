@@ -4,10 +4,11 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import anthropic
+import httpx
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from incident_commander.llm.client import LLMClient, LLMError
+from incident_commander.llm.client import LLMClient, LLMError, preflight_auth
 
 
 class _SampleOutput(BaseModel):
@@ -206,6 +207,88 @@ class TestRetries:
                 model="claude-sonnet-4-6",
             )
         assert sdk.messages.create.call_count == 2
+
+    def _rate_limited_then_ok(self, retry_after: str) -> MagicMock:
+        # A real httpx.Response so the retry-after header round-trips through
+        # the same parsing path a live 429 would take.
+        response = httpx.Response(
+            429,
+            headers={"retry-after": retry_after},
+            request=httpx.Request("POST", "https://api.anthropic.test/v1/messages"),
+        )
+        err = anthropic.APIStatusError(message="rate limited", response=response, body=None)
+        sdk = MagicMock()
+        sdk.messages.create.side_effect = [
+            err,
+            _tool_use_message({"label": "ok", "confidence": 1.0}),
+        ]
+        return sdk
+
+    def _call_recording_delays(self, sdk: MagicMock) -> list[float]:
+        delays: list[float] = []
+        client = LLMClient(
+            api_key="test",
+            max_attempts=3,
+            retry_base_delay=0.0,
+            sleep=delays.append,
+            client=sdk,
+        )
+        result = client.call(
+            system_prompt="s",
+            user_message="u",
+            output_model=_SampleOutput,
+            model="claude-sonnet-4-6",
+        )
+        assert result.output.label == "ok"
+        return delays
+
+    def test_honored_retry_after_is_capped(self) -> None:
+        # An hour-long server-suggested pause must not stall the sync state
+        # machine: the honored Retry-After is capped at 60s (C-07).
+        sdk = self._rate_limited_then_ok(retry_after="3600")
+        assert self._call_recording_delays(sdk) == [60.0]
+
+    def test_retry_after_below_cap_still_honored(self) -> None:
+        sdk = self._rate_limited_then_ok(retry_after="7")
+        assert self._call_recording_delays(sdk) == [7.0]
+
+
+class TestClientBounds:
+    """C-07: the default SDK client must not layer its own retries and 600s
+    read timeout underneath the outer 3-attempt loop."""
+
+    def test_default_client_disables_sdk_retries_and_bounds_timeout(self) -> None:
+        # Constructing anthropic.Anthropic performs no network I/O.
+        client = LLMClient(api_key="sk-test")
+        assert client._client.max_retries == 0
+        timeout = client._client.timeout
+        assert isinstance(timeout, httpx.Timeout)
+        assert timeout.read == 120.0
+        assert timeout.connect == 5.0
+
+    def test_injected_client_is_used_unchanged(self) -> None:
+        sdk = MagicMock()
+        assert _client(sdk)._client is sdk
+
+    def test_preflight_client_disables_sdk_retries_and_bounds_timeout(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, Any] = {}
+        fake_client = MagicMock()
+
+        def ctor(**kwargs: Any) -> MagicMock:
+            captured.update(kwargs)
+            return fake_client
+
+        monkeypatch.setattr(anthropic, "Anthropic", ctor)
+        preflight_auth("sk-test")
+        assert captured["api_key"] == "sk-test"
+        assert captured["max_retries"] == 0
+        timeout = captured["timeout"]
+        assert isinstance(timeout, httpx.Timeout)
+        assert timeout.read == 30.0
+        assert timeout.connect == 5.0
+        fake_client.models.list.assert_called_once_with(limit=1)
 
 
 class TestTracer:

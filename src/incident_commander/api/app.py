@@ -8,8 +8,12 @@ a fresh HTTP client and the module-level TRANSITIONS registry stays untouched.
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Final
+from uuid import uuid4
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, status
 from sqlalchemy import create_engine
@@ -26,6 +30,33 @@ from incident_commander.persistence.postgres import PostgresCheckpointer
 from incident_commander.tools.mcp_client import make_client
 
 RunTask = Callable[[RunState, Settings, Checkpointer], None]
+
+_log = logging.getLogger(__name__)
+
+# Replay suppression (ADR 0014): remember the signature of each accepted
+# delivery so an identical redelivery within the skew window returns 202
+# without spawning a second investigation run. Process-local by design and
+# lost on restart — durable single-flight/dedupe is the ADR-0002 lease work
+# (finding B-05), not this cache.
+_REPLAY_CACHE_MAX_ENTRIES: Final[int] = 1024
+_replay_cache: dict[str, float] = {}
+
+
+def _is_replay(signature_hex: str, now: float, window_seconds: float) -> bool:
+    """True iff ``signature_hex`` was already accepted within the window.
+
+    First sight records the signature and returns False. Expired entries are
+    pruned on every call, and the cache stays capacity-bounded by evicting
+    the oldest entry.
+    """
+    for key in [k for k, seen in _replay_cache.items() if now - seen > window_seconds]:
+        del _replay_cache[key]
+    if signature_hex in _replay_cache:
+        return True
+    if len(_replay_cache) >= _REPLAY_CACHE_MAX_ENTRIES:
+        del _replay_cache[min(_replay_cache, key=_replay_cache.__getitem__)]
+    _replay_cache[signature_hex] = now
+    return False
 
 
 def create_app(
@@ -58,13 +89,48 @@ def create_app(
         background_tasks: BackgroundTasks,
     ) -> IngestResponse:
         body = await request.body()
-        signature = request.headers.get("X-Signature-256", "")
+        # The platform emitter signs into X-Alert-Signature (alerts.py); the
+        # legacy X-Signature-256 name is kept as a fallback for pre-fix tools.
+        signature = request.headers.get("X-Alert-Signature") or request.headers.get(
+            "X-Signature-256", ""
+        )
         if not verify(
             body,
             signature,
             resolved_settings.platform_webhook_secret.get_secret_value(),
         ):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or missing signature")
+
+        # X-Alert-Timestamp is epoch MILLISECONDS platform-side. It is not
+        # part of the v1 signed material, so this skew check only bounds the
+        # replay window — it does not close it (ADR 0014).
+        timestamp_header = request.headers.get("X-Alert-Timestamp")
+        now = time.time()
+        if timestamp_header is not None:
+            try:
+                timestamp_ms = int(timestamp_header)
+            except ValueError as err:
+                raise HTTPException(
+                    status.HTTP_401_UNAUTHORIZED, "non-numeric X-Alert-Timestamp"
+                ) from err
+            if abs(now - timestamp_ms / 1000) > resolved_settings.webhook_max_skew_seconds:
+                raise HTTPException(
+                    status.HTTP_401_UNAUTHORIZED,
+                    "X-Alert-Timestamp outside the accepted skew window",
+                )
+
+        signature_hex = signature.removeprefix("sha256=")
+        if _is_replay(signature_hex, now, float(resolved_settings.webhook_max_skew_seconds)):
+            # 202, not 4xx: the platform emitter treats any >=400 as delivery
+            # failure and would log/retry, so legitimate at-least-once
+            # redelivery must look accepted. No run is spawned; the id is
+            # synthetic (the emitter only reads the status code).
+            _log.warning(
+                "suppressed replayed webhook delivery (signature %s...); no run spawned",
+                signature_hex[:12],
+            )
+            return IngestResponse(incident_id=uuid4())
+
         try:
             payload = AlertPayload.model_validate_json(body)
         except ValueError as err:

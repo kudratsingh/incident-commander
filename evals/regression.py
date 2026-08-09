@@ -1,8 +1,19 @@
 """Regression gate: compare a fresh RunReport against the committed baseline.
 
 Regression = a scenario that passed in the baseline and fails in ``latest``.
-Improvements and new scenarios are noted for transparency but never fail the
-gate — only regressions do.
+Improvements and new scenarios are noted for transparency and never fail the
+gate. Regressions fail it (exit 1) — and so do DROPPED scenarios (baseline
+scenarios missing from ``latest``): coverage loss is a gate failure, not a
+pass, and genuinely removing a scenario requires a deliberate re-bless via
+``make baseline`` (A-03). A ``latest.json`` produced under ``--only`` is
+refused outright (exit 2) — a filtered report is not a comparable gate
+input. A baseline/latest provenance mismatch (``degraded_count``, ADR 0013)
+warns and never gates (S-14).
+
+Exit codes — the gate's slice of the ADR 0013 contract: 0 = comparable
+full-suite input with no regressions and no coverage loss; 1 = gate failed
+(regression or dropped scenario); 2 = not a comparable input (missing file,
+filtered report).
 """
 
 from __future__ import annotations
@@ -88,6 +99,29 @@ def _print_comparison(result: ComparisonResult) -> None:
         print("no changes vs baseline")
 
 
+def _print_provenance(baseline: RunReport, latest: RunReport) -> None:
+    """Warn-only provenance check (S-14; ADR 0013).
+
+    Deliberately never gates: the committed baseline predates provenance
+    stamping (``degraded_count`` is ``None``), so a hard mismatch gate would
+    fail every comparison until the next bless — an honest warning beats
+    forcing a baseline rewrite. Gating is deferred per ADR 0013.
+    """
+    if baseline.degraded_count is None or latest.degraded_count is None:
+        unknown = "|".join(
+            name
+            for name, report in (("baseline", baseline), ("latest", latest))
+            if report.degraded_count is None
+        )
+        print(f"PROVENANCE: {unknown} predates provenance stamping (degraded_count unknown)")
+    elif baseline.degraded_count != latest.degraded_count:
+        print(
+            f"PROVENANCE WARNING: baseline ran {baseline.degraded_count} degraded, "
+            f"latest {latest.degraded_count} — pass/fail deltas may reflect "
+            "canned/live divergence, not agent change"
+        )
+
+
 def main() -> int:
     if not _BASELINE.exists():
         print(f"baseline not found at {_BASELINE}", file=sys.stderr)
@@ -97,9 +131,27 @@ def main() -> int:
         return 2
     baseline = _load_report(_BASELINE)
     latest = _load_report(_LATEST)
+    if latest.only_patterns:
+        # Refused, not diffed: comparing a filtered run against the full
+        # baseline would read the missing scenarios as "dropped" at best
+        # and as green coverage at worst (A-03). Exit 2 = not a comparable
+        # input, same class as a missing file.
+        print(
+            f"latest.json is a filtered run (--only={list(latest.only_patterns)}); "
+            "the gate requires a full-suite report — re-run 'make eval' without ONLY",
+            file=sys.stderr,
+        )
+        return 2
+    _print_provenance(baseline, latest)
     result = compare(baseline, latest)
     _print_comparison(result)
-    return 1 if result.has_regressions else 0
+    if result.dropped_scenarios:
+        print(
+            f"GATE FAIL: {len(result.dropped_scenarios)} baseline scenario(s) missing "
+            "from latest — coverage shrank; if intentional, re-bless via 'make baseline'",
+            file=sys.stderr,
+        )
+    return 1 if result.has_regressions or result.dropped_scenarios else 0
 
 
 if __name__ == "__main__":

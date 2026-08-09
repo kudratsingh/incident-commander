@@ -36,13 +36,13 @@ help:
 	@echo "  eval-smoke       read-only smoke pass under the read-scoped smoke token"
 	@echo "  trace-report     render evals/traces/*.jsonl → readable txt files"
 	@echo "  chaos-help       list chaos setup subcommands (kill-consumer, etc.)"
-	@echo "  eval-reg         regression eval subset"
+	@echo "  eval-reg         full offline eval + regression gate vs baseline (refuses ONLY=)"
 	@echo "  eval-reset       clear leftover chaos state between live scenarios"
 	@echo "  demo             compose up only (platform pinned by digest); no eval runs"
 	@echo "  demo-down        stop demo compose services"
 	@echo "  bootstrap-token  mint a service-account token against a running platform"
 	@echo "  snapshot         regenerate contracts/platform-tools.snapshot.json from live"
-	@echo "  baseline         recompute and commit eval baseline"
+	@echo "  baseline         recompute and commit eval baseline (refuses ONLY=)"
 	@echo "  clean            remove build artifacts and caches"
 
 setup:
@@ -183,8 +183,24 @@ eval-reset:
 chaos-bad-data-job:
 	uv run python scripts/chaos_setup.py bad-data-job
 
+# ONLY= must never reach the regression gate: `eval-reg: eval` forwards
+# ONLY into the runner, so a filtered run would overwrite latest.json and
+# the gate would compare a shrunken suite (A-03; study/runs.jsonl line 4
+# records this class as real artifact loss). The guard is a parse-time
+# conditional swapping in a prerequisite-free $(error) rule — it fires
+# before the `eval` prerequisite could run, whereas a recipe-line check
+# would fire only AFTER the filtered eval already overwrote latest.json.
+# `-include .env` above means an ONLY= line in .env trips this too —
+# deliberate: a filtered gate is wrong no matter where the filter came
+# from. regression.py's exit-2 refusal of only_patterns reports is the
+# backstop.
+ifdef ONLY
+eval-reg:
+	$(error 'make eval-reg ONLY=...' would gate on a filtered report; run 'make eval-reg' without ONLY)
+else
 eval-reg: eval
 	uv run python -m evals.regression
+endif
 
 # Bring-up only. Deliberately does NOT run `evals.runner --live` — the
 # previous embedded batch was untraced (~$4), ran against a healthy
@@ -225,9 +241,19 @@ bootstrap-token:
 snapshot:
 	uv run python scripts/snapshot_platform_tools.py
 
+# Same parse-time ONLY guard as eval-reg: `make baseline ONLY=x` would
+# bless a filtered subset over the committed 37-scenario baseline (the
+# study/runs.jsonl artifact-loss pattern). Must refuse before the `eval`
+# prerequisite can overwrite latest.json; an ONLY= line in .env trips it
+# too, deliberately.
+ifdef ONLY
+baseline:
+	$(error 'make baseline ONLY=...' would bless a filtered baseline over the committed full suite; run 'make baseline' without ONLY)
+else
 baseline: eval
 	cp evals/reports/latest.json evals/reports/baseline.json
 	@echo "Baseline updated. git add + commit evals/reports/baseline.json to bless."
+endif
 
 clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache build dist *.egg-info

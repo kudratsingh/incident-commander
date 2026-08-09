@@ -141,6 +141,8 @@ make eval-live ONLY=remediate_stale_cache_success  && make eval-reset
 
 Every `make eval-live` invocation writes JSONL traces to `evals/traces/` and renders per-scenario human reports to `evals/reports/human/*.md` (via the `format_traces.py` step chained into the target).
 
+A filtered run (`ONLY=...`) still overwrites `evals/reports/latest.json`, but the report now self-describes via `only_patterns` (ADR 0013) and **can no longer feed the gate or the baseline**: `make eval-reg` exits 2 on a filtered `latest.json`, and `make eval-reg ONLY=x` / `make baseline ONLY=x` refuse at Makefile parse time before anything runs (A-03 — `study/runs.jsonl` records a full-suite `latest.json` lost to a later filtered run). The archive under `evals/runs/<invocation_id>/` remains the durable record for filtered runs; the flat `latest.json` is only a pointer to the most recent one.
+
 `make eval-reset` shells into the platform's `app` container via `docker compose -f $PLATFORM_COMPOSE exec` — defaults to `../incident-platform/docker-compose.yml`. If the platform repo isn't a sibling checkout, set `PLATFORM_COMPOSE` either per-invocation or once in `.env` (the Makefile `-include .env`s it, so a non-sibling layout is a one-time setup rather than a flag you have to remember on every call). Getting this wrong fails loudly on an exit-2 guard before anything runs — it can't half-reset. Pass `PURGE_IDEMPOTENCY=1` to also `DELETE` idempotency_records (24h TTL from platform ADR 0010 handles the common case; opt-in purge for guaranteed-fresh cache).
 
 Environment variable knobs for the live path (see [ADR 0006](ADR/0006-verification-is-a-polling-window.md)):
@@ -193,8 +195,8 @@ the degradation is now recorded in the report (`degraded_count` in
 | Exit | Meaning |
 |---|---|
 | 0 | all selected scenarios passed |
-| 1 | ≥1 scenario failed (regression gate: regression detected) |
-| 2 | no scenario matched `--only` (regression gate: missing/incomparable report) |
+| 1 | ≥1 scenario failed (regression gate: regression detected, or a baseline scenario dropped from latest) |
+| 2 | no scenario matched `--only` (regression gate: missing report, or a filtered `--only` `latest.json` — refused as gate input) |
 | 3 | preflight/env failure: `--smoke` without `--live`, degraded `--live` env, invalid or missing settings, missing smoke token, LLM auth preflight failure |
 | 4 | principal guard: the smoke token holds more than read scope |
 | 5 | post-stage audit failed or was unreadable |

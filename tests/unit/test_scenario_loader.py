@@ -1,3 +1,4 @@
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -95,6 +96,13 @@ class TestLoadScenarios:
 # BudgetLedger ceiling of CLAUDE.md invariant 7.
 _REMEDIATION_MIN_CAP = 13
 
+
+@lru_cache(maxsize=1)
+def _shipped_scenarios() -> tuple[Scenario, ...]:
+    """Parse the shipped scenario directory once per session, not per assertion."""
+    return tuple(load_scenarios(_REPO_ROOT / "evals" / "scenarios"))
+
+
 # Scenarios that declare no `expected_action_tools` never enter the
 # VERIFYING poll loop, so the polling profile does not apply to them.
 # Pinned so the remediation recalibration cannot silently drift into the
@@ -139,8 +147,8 @@ class TestShippedScenarioBudgetCaps:
     """
 
     @staticmethod
-    def _shipped() -> list[Scenario]:
-        return load_scenarios(_REPO_ROOT / "evals" / "scenarios")
+    def _shipped() -> tuple[Scenario, ...]:
+        return _shipped_scenarios()
 
     def test_remediation_class_carries_the_live_polling_cap(self) -> None:
         remediation = [s for s in self._shipped() if s.expectation.expected_action_tools]

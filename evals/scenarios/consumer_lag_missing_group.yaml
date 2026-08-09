@@ -1,5 +1,5 @@
 name: consumer_lag_missing_group
-description: 'Actionable alert whose payload doesn''t name a group. The planner still probes something reasonable using the alert-source context; here we canned an "unknown" fallback response.
+description: 'Actionable alert whose payload doesn''t name a group. The planner still probes something reasonable using the alert-source context; the fallback group "unknown" is one the platform cannot resolve, so it answers lag: null with the requested group''s own cache_key.
 
   '
 tags:
@@ -18,7 +18,7 @@ canned_tool_responses:
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"unknown","lag":42,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+      text: '{"consumer_group":"unknown","lag":null,"cache_key":"kafka:consumer_lag:unknown"}'
     is_error: false
 canned_llm_responses:
   investigation_planner:
@@ -38,14 +38,14 @@ canned_llm_responses:
     - category: unknown
       name: undiscriminated_alert
       confidence: 0.6
-      reasoning: 'Fallback probe returned a small lag but the alert payload is missing enough context to confirm which consumer is at fault.
+      reasoning: 'Fallback probe returned lag: null — the platform could not determine lag for this group; null is unknown-not-healthy and carries no magnitude. The alert payload is still missing enough context to confirm which consumer is at fault.
 
         '
     next_action:
       kind: stop
       reason: alert payload incomplete; human decision required
   briefing_writer:
-  - findings: 'The paging alert did not name a consumer group. A fallback probe against "unknown" returned lag=42, but the alert payload is too thin to attribute the signal.
+  - findings: 'The paging alert did not name a consumer group. A fallback probe against "unknown" returned lag: null — the platform has no cached reading for that group, so the probe neither confirms nor excludes saturation and carries no magnitude. The alert payload is too thin to attribute the signal.
 
       '
     recommendation: 'Ask the alert-source owner to include the consumer group in future payloads; in the meantime, spot-check the top three lag-prone groups.
@@ -54,7 +54,7 @@ canned_llm_responses:
   briefing_judge:
   - groundedness: 0.85
     actionability: 0.8
-    reasoning: 'Findings correctly note the missing group and the fallback lag=42 reading; recommendation names two concrete steps (alert-source owner request + top-three spot check).
+    reasoning: 'Findings correctly note the missing group and read the null fallback reading as unknown rather than healthy; recommendation names two concrete steps (alert-source owner request + top-three spot check).
 
       '
 expectation:

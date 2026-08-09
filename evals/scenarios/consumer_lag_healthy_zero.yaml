@@ -16,12 +16,12 @@ alert:
   source: platform.kafka
   severity: high
   fingerprint: consumer_lag_high
-  group: reports-consumer
+  group: healthy-consumer
 canned_tool_responses:
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"reports-consumer","lag":0,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+      text: '{"consumer_group":"healthy-consumer","lag":0,"cache_key":"kafka:consumer_lag:healthy-consumer"}'
     is_error: false
 canned_llm_responses:
   investigation_planner:
@@ -29,14 +29,14 @@ canned_llm_responses:
     - category: consumer_saturation
       name: consumer_saturation
       confidence: 0.6
-      reasoning: 'Paging alert on reports-consumer; need lag reading to confirm.
+      reasoning: 'Paging alert on healthy-consumer; need lag reading to confirm.
 
         '
     next_action:
       kind: probe
       tool_name: get_consumer_lag
       arguments:
-        consumer_group: reports-consumer
+        consumer_group: healthy-consumer
   - hypotheses:
     - category: unknown
       name: alerting_false_positive
@@ -50,10 +50,10 @@ canned_llm_responses:
 
         '
   briefing_writer:
-  - findings: 'Alert reports consumer_lag_high on reports-consumer, but the probed lag reading is 0 messages. Likely a false positive or a spike that recovered before probing.
+  - findings: 'Alert reports consumer_lag_high on healthy-consumer, but the probed lag reading is 0 messages. Likely a false positive or a spike that recovered before probing.
 
       '
-    recommendation: 'Reconcile the paging rule for reports-consumer against the current lag metric and consider tightening the recovery window before re-arming.
+    recommendation: 'Reconcile the paging rule for healthy-consumer against the current lag metric and consider tightening the recovery window before re-arming.
 
       '
   briefing_judge:

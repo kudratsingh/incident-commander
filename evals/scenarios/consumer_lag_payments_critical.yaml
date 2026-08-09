@@ -20,7 +20,7 @@ canned_tool_responses:
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"payments-consumer","lag":25000,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+      text: '{"consumer_group":"payments-consumer","lag":25000,"cache_key":"kafka:consumer_lag:payments-consumer"}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

@@ -620,3 +620,23 @@ class TestRunArchiveIsAppendOnly:
         assert json.loads((flat / "s.json").read_text())["incident_id"] == "second"
         archived = json.loads((runs / "inv_one" / "trajectories" / "s.json").read_text())
         assert archived["incident_id"] == "first", "archive must not follow the pointer"
+
+
+class TestRunsDirIsTracked:
+    """CLAUDE.md invariant 9: evals/runs/ must be commit-able (S-06).
+
+    The append-only archive is the durable record, yet .gitignore carried an
+    ``evals/runs/*`` entry, so no archive was ever tracked and routine git
+    hygiene (a clean or a fresh clone) erased every one. This is the assertion
+    that would have caught it: the durable record's directory pattern must
+    never sit in .gitignore. The flat-pointer ignores (trajectories,
+    briefings, traces, latest.json, reports/human) are refreshable by design
+    and stay ignored.
+    """
+
+    def test_gitignore_does_not_ignore_the_durable_record(self) -> None:
+        gitignore = Path(__file__).resolve().parents[2] / ".gitignore"
+        text = gitignore.read_text(encoding="utf-8")
+        assert not any(line.strip().startswith("evals/runs") for line in text.splitlines()), (
+            "evals/runs is the invariant-9 durable record; it must not be gitignored"
+        )

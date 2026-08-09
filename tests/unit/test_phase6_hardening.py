@@ -1,6 +1,6 @@
 """Regression tests for the live-eval hardening fixes.
 
-Covers three behavior changes:
+Covers four behavior changes:
 
 1. ``run_to_completion`` exempts VERIFYING from the budget short-circuit —
    an executed Tier-1 action must always be verified, even over budget.
@@ -9,14 +9,19 @@ Covers three behavior changes:
 3. ``make_llm_verify`` can poll the verify probe: ``not_verified`` on an
    eventually-consistent read retries after a delay instead of
    escalating on the first instant read.
+4. That polling window re-checks the budget ledger between attempts
+   (B-12) — the first attempt is always allowed, every later one is
+   gated — and stamps each attempt with its own clock read when one is
+   wired in.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
-from datetime import UTC, datetime
+from collections.abc import Callable, Mapping
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from itertools import pairwise
 from typing import Any
 from uuid import uuid4
 
@@ -27,7 +32,12 @@ from incident_commander.agent.remediation import (
     make_llm_plan,
     make_llm_verify,
 )
-from incident_commander.agent.state import BudgetLedger, IncidentState, RunState
+from incident_commander.agent.state import (
+    BudgetLedger,
+    EvidenceEntry,
+    IncidentState,
+    RunState,
+)
 from incident_commander.llm.fakes import CannedLLMClient
 from incident_commander.tools.mcp_client import ToolResult
 
@@ -211,3 +221,155 @@ class TestVerifyPolling:
         result = transition(run, _clock())
         assert result.state is IncidentState.ESCALATED
         assert len(mcp.calls) == 1
+
+
+def _escalation_reasons(run: RunState) -> list[str]:
+    return [e.result_summary for e in run.evidence if e.tool_name == "_remediation_escalate"]
+
+
+def _verify_window(run: RunState) -> list[EvidenceEntry]:
+    """Probe + judge entries of the VERIFYING window, in emission order."""
+    return [e for e in run.evidence if e.tool_name in ("get_consumer_lag", "_verify_judge")]
+
+
+class TestVerifyBudgetGate:
+    """B-12: the polling window re-checks the ledger between attempts.
+
+    ADR 0006 exempts VERIFYING from the loop-level short-circuit and blesses
+    *one* extra probe over budget; without an in-loop gate a run entering
+    VERIFYING already exhausted could spend ``verify_probe_attempts`` (up to
+    10) probes plus as many judge calls past a hard limit.
+    """
+
+    def test_entering_verifying_exhausted_allows_exactly_one_attempt(self) -> None:
+        mcp = _SequencedMCP([_lag_result(15_000) for _ in range(10)])
+        judge = CannedLLMClient([{"verdict": "not_verified", "reasoning": "still high"}] * 10)
+        slept: list[float] = []
+        transition = make_llm_verify(
+            mcp,
+            judge,
+            model="test-model",
+            probe_attempts=10,
+            probe_delay_seconds=15.0,
+            sleep=slept.append,
+        )
+        run = _run_state(
+            IncidentState.VERIFYING,
+            _budget(max_tool_calls=4, used=4),  # already exhausted on entry
+            remediation_plan=_PLAN.model_dump(mode="json"),
+        )
+        result = transition(run, _clock())
+
+        assert len(mcp.calls) == 1  # the ADR-0006 guaranteed probe, and no more
+        assert len(judge.calls) == 1
+        assert slept == []  # never sleep into an escalation
+        assert result.state is IncidentState.ESCALATED
+        reasons = _escalation_reasons(result)
+        assert len(reasons) == 1
+        assert "budget exhausted after verify attempt 1/10" in reasons[0]
+        # The executed-but-unverified fact must be explicit for the briefing.
+        assert "verification incomplete" in reasons[0]
+        # Full probe history still rides along on the escalated state.
+        assert len([e for e in result.evidence if e.tool_name == "_verify_judge"]) == 1
+
+    def test_budget_exhausted_mid_window_escalates_without_sleeping(self) -> None:
+        mcp = _SequencedMCP([_lag_result(15_000 - 1_000 * i) for i in range(6)])
+        judge = CannedLLMClient([{"verdict": "not_verified", "reasoning": "still high"}] * 6)
+        slept: list[float] = []
+        transition = make_llm_verify(
+            mcp,
+            judge,
+            model="test-model",
+            probe_attempts=6,
+            probe_delay_seconds=15.0,
+            sleep=slept.append,
+        )
+        run = _run_state(
+            IncidentState.VERIFYING,
+            # Two calls of headroom: attempt 2's charge exhausts the ledger.
+            _budget(max_tool_calls=2, used=0),
+            remediation_plan=_PLAN.model_dump(mode="json"),
+        )
+        result = transition(run, _clock())
+
+        assert len(mcp.calls) == 2
+        assert len(judge.calls) == 2
+        assert len([e for e in result.evidence if e.tool_name == "_verify_judge"]) == 2
+        assert result.budget.tool_calls_used == 2
+        # One wait between attempts 1 and 2 — and none between attempt 2 and
+        # the escalation (the gate runs before the sleep).
+        assert slept == [15.0]
+        assert result.state is IncidentState.ESCALATED
+        assert "budget exhausted after verify attempt 2/6" in _escalation_reasons(result)[0]
+
+
+class TestVerifyAttemptTimestamps:
+    """B-12 secondary: each poll attempt gets its own clock read when wired."""
+
+    @staticmethod
+    def _polling_transition(
+        mcp: _SequencedMCP,
+        judge: CannedLLMClient,
+        clock: Callable[[], datetime] | None,
+    ) -> Callable[[RunState, datetime], RunState]:
+        return make_llm_verify(
+            mcp,
+            judge,
+            model="test-model",
+            probe_attempts=3,
+            probe_delay_seconds=0.0,
+            sleep=lambda _s: None,
+            clock=clock,
+        )
+
+    @staticmethod
+    def _run() -> RunState:
+        return _run_state(
+            IncidentState.VERIFYING,
+            _budget(max_tool_calls=10, used=2),
+            remediation_plan=_PLAN.model_dump(mode="json"),
+        )
+
+    def test_injected_clock_stamps_each_attempt_distinctly(self) -> None:
+        base = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        ticks = iter([base + timedelta(seconds=i) for i in range(1, 32)])
+        mcp = _SequencedMCP([_lag_result(15_000 - 1_000 * i) for i in range(3)])
+        judge = CannedLLMClient([{"verdict": "not_verified", "reasoning": "still high"}] * 3)
+        transition = self._polling_transition(mcp, judge, lambda: next(ticks))
+
+        result = transition(self._run(), base)
+
+        probes = [e.timestamp for e in result.evidence if e.tool_name == "get_consumer_lag"]
+        judges = [e.timestamp for e in result.evidence if e.tool_name == "_verify_judge"]
+        assert len(probes) == 3
+        assert all(later > earlier for earlier, later in pairwise(probes))
+        assert all(stamp > base for stamp in probes)
+        # Judge shares its own attempt's stamp — the pair stays coherent.
+        assert judges == probes
+        assert result.updated_at == probes[-1]
+
+    def test_clock_none_preserves_the_single_transition_timestamp(self) -> None:
+        at = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        mcp = _SequencedMCP([_lag_result(15_000 - 1_000 * i) for i in range(3)])
+        judge = CannedLLMClient([{"verdict": "not_verified", "reasoning": "still high"}] * 3)
+        transition = self._polling_transition(mcp, judge, None)
+
+        result = transition(self._run(), at)
+
+        window = _verify_window(result)
+        assert len(window) == 6
+        assert [e.timestamp for e in window] == [at] * 6
+        assert result.updated_at == at
+
+    def test_ordinals_survive_on_both_probe_and_judge_entries(self) -> None:
+        base = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        ticks = iter([base + timedelta(seconds=i) for i in range(1, 32)])
+        mcp = _SequencedMCP([_lag_result(15_000 - 1_000 * i) for i in range(3)])
+        judge = CannedLLMClient([{"verdict": "not_verified", "reasoning": "still high"}] * 3)
+        transition = self._polling_transition(mcp, judge, lambda: next(ticks))
+
+        result = transition(self._run(), base)
+
+        window = _verify_window(result)
+        ordinals = [(e.arguments["attempt"], e.arguments["of"]) for e in window]
+        assert ordinals == [(1, 3), (1, 3), (2, 3), (2, 3), (3, 3), (3, 3)]

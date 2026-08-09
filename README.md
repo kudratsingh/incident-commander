@@ -4,7 +4,7 @@ Autonomous AI SRE agent that investigates, remediates, and learns from productio
 
 The agent is an external client. It reaches the platform only through the platform's MCP server and versioned REST endpoints, authenticated with a scoped service-account token. Authorization, tenant isolation, rate limits, idempotency, approvals, and audit are enforced on the platform side. See [ADR 0001](docs/ADR/0001-external-client-architecture.md).
 
-Status: Phase 0 — repo bootstrap. See [CLAUDE.md](CLAUDE.md) for the project constitution and phase plan.
+Status: Phase 6 — remediation loop shipped. Tier-1 auto-remediation runs plan → execute → verify with agent-generated idempotency keys and Postgres-checkpointed crash recovery, behind a tier policy and an offline eval suite. Tier-2 propose/approve/execute and the single-flight lease are the remaining Phase 6 exit criteria. See [CLAUDE.md](CLAUDE.md) for the project constitution and phase plan.
 
 ## Getting started
 

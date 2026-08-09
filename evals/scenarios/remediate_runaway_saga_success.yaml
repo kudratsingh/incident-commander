@@ -95,9 +95,17 @@ expectation:
   expected_action_tools: [pause_dag]
   expected_evidence_contains:
   - pause_key
-  # v0.4.9 observable effect — replaces the old `verified` assert, which
-  # was substring-fake-green (it also matches `not_verified`; see PR #64).
-  - '"paused":true'
+  # v0.4.9 observable effect, now structural (A-10). PR #64 replaced the
+  # fake-green `verified` assert with the `"paused":true` fragment, which is
+  # the serializer-dependent shape grader-calibration rule 2 forbids. The
+  # parsed field says the same thing without pinning the serialization.
+  # `which: any` (the default): the pre-action get_dag_state reads
+  # paused=false and the verify probe reads paused=true.
+  expected_evidence_fields:
+  - tools: [get_dag_state]
+    field: paused
+    equals: true
+    which: any
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
   # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
   # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. Cap 13 is the

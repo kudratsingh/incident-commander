@@ -92,9 +92,13 @@ expectation:
   name: remediate_stale_cache_success
   expected_terminal_state: resolved
   expected_action_tools: [invalidate_cache_key]
-  expected_evidence_contains:
-  - deleted
-  - verified
+  # Structured effect assert (S-20): the bare `deleted` substring was
+  # satisfied by `"deleted":false` — a no-op invalidation graded green — and
+  # the bare `verified` one by a `not_verified: ...` verdict.
+  expected_evidence_fields:
+  - tools: [invalidate_cache_key]
+    field: deleted
+    equals: true
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
   # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
   # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. Cap 13 is the

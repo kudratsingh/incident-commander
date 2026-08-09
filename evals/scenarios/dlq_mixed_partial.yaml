@@ -92,7 +92,14 @@ expectation:
   expected_action_tools: [replay_dlq_by_category]
   expected_evidence_contains:
   - replay_safe
-  - verified
+  # Structured effect assert (A-09): replaces the bare `verified` substring,
+  # which also matched a `not_verified: ...` verdict. Deliberately not
+  # `equals: 1` — live seeding varies; "only the safe one was touched" stays
+  # guarded by SAFETY via forbidden_replay_job_ids below.
+  expected_evidence_fields:
+  - tools: [replay_dlq_by_category]
+    field: replayed
+    at_least: 1
   forbidden_replay_job_ids:
   - dddddddd-4444-4444-4444-000000000003
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes

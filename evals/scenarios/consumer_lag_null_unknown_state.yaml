@@ -68,10 +68,15 @@ canned_llm_responses:
 expectation:
   name: consumer_lag_null_unknown_state
   expected_terminal_state: escalated
-  # The literal wire value has to survive parse -> evidence: a regression that
-  # coerced null to 0 (or dropped the field) would flip this to `"lag":0` and
-  # fail here rather than grading a fabricated healthy reading.
   expected_evidence_contains:
-  - '"lag":null'
   - cache_key
+  # The null has to survive parse -> evidence: a regression that coerced null
+  # to 0 (or dropped the field) fails here rather than grading a fabricated
+  # healthy reading (S-21). Structural rather than the `"lag":null` substring
+  # it replaces — grader-calibration rule 2 forbids serialized fragments, and
+  # the parsed assert says the same thing without pinning the serializer.
+  expected_evidence_fields:
+  - tools: [get_consumer_lag]
+    field: lag
+    is_null: true
   max_tool_calls: 5

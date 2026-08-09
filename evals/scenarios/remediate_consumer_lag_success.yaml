@@ -105,11 +105,18 @@ expectation:
   name: remediate_consumer_lag_success
   expected_terminal_state: resolved
   expected_action_tools: [restart_consumer_group]
-  expected_evidence_contains:
-  - kill_key_cleared
-  # Post-restart drained reading — replaces the `verified` assert, which
-  # substring-matches `not_verified` (fake-green; see PR #64).
-  - '"lag":0'
+  # Structured effect assert (A-10). The bare `kill_key_cleared` substring
+  # also matched `"kill_key_cleared":false`, and the `"lag":0` fragment PR #64
+  # introduced is the shape grader-calibration rule 2 forbids: this scenario's
+  # own verify_expectation says the cached metric may trail recovery by ~30s,
+  # so a correct live run can verify on a draining non-zero read and still
+  # fail EVIDENCE for want of the literal. No lag assertion belongs here —
+  # "backlog drained" is OUTCOME's job (RESOLVED requires a verified verdict).
+  # What is honestly assertable is the action's own effect field.
+  expected_evidence_fields:
+  - tools: [restart_consumer_group]
+    field: kill_key_cleared
+    equals: true
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
   # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
   # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. Cap 13 is the

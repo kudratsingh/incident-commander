@@ -1,7 +1,11 @@
 from datetime import datetime
 
+import pytest
+from pydantic import ValidationError
+
 from evals.graders.deterministic import (
     DimensionResult,
+    EvidenceFieldExpectation,
     GradeDimension,
     GradeReport,
     ScenarioExpectation,
@@ -75,6 +79,351 @@ class TestEvidenceDimension:
         assert result.passed is False
         assert "billing" in result.detail
         assert "payments" in result.detail
+
+
+# The evidence a wrong-reason pass produced at HEAD (A-09 / S-19): the replay
+# tool reported it moved nothing, and the verify judge returned `not_verified`.
+# Both substrings `remediate_dlq_backlog_success` asserted — `replayed` and
+# `verified` — occur in this blob anyway, so EVIDENCE passed on the exact
+# failure it existed to catch.
+_FAKE_GREEN_REPLAY = '{"requested":3,"replayed":0,"scheduled":0,"failed":3,"results":[]}'
+_GENUINE_REPLAY = '{"requested":3,"replayed":3,"scheduled":0,"failed":0,"results":[]}'
+_NOT_VERIFIED_JUDGE = "not_verified: the DLQ still holds all three jobs; nothing was replayed"
+_REPLAY_TOOLS = ("replay_dlq_messages", "replay_dlq_by_category", "replay_dlq_by_ids")
+
+
+class TestSubstringEvidenceIsFakeGreen:
+    """The defect the structured mechanism replaces, pinned rather than assumed.
+
+    The same fake run is graded twice: once with the substring assert the
+    scenarios shipped (green — zero discriminating power) and once with the
+    structured field assert that replaced it (red). That pair is the whole
+    argument for the migration.
+    """
+
+    def _fake_run(self, run_state: RunState, now: datetime) -> RunState:
+        evidence = (
+            _evidence(now, "replay_dlq_by_ids", _FAKE_GREEN_REPLAY),
+            _evidence(now, "_verify_judge", _NOT_VERIFIED_JUDGE),
+        )
+        return _with_terminal(run_state, IncidentState.ESCALATED, evidence)
+
+    def test_verified_is_a_substring_of_the_not_verified_verdict(self) -> None:
+        # The one-line root cause: `_grade_evidence` does a plain `in` over the
+        # joined corpus, and a failed verify writes `not_verified: <reasoning>`
+        # (agent/remediation.py). The schema now refuses the item outright.
+        assert "verified" in _NOT_VERIFIED_JUDGE
+
+    def test_substring_assert_passes_on_the_failure_it_exists_to_catch(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        exp = ScenarioExpectation(
+            name="fake_green",
+            expected_terminal_state=IncidentState.ESCALATED,
+            # `replayed` is still a legal item (it names a field, not a value),
+            # and on this evidence it is satisfied by the literal `"replayed":0`
+            # — the tool reporting that it moved nothing.
+            expected_evidence_contains=("replayed",),
+        )
+        result = _dim(grade(self._fake_run(run_state, now), exp), GradeDimension.EVIDENCE)
+        assert result.passed is True
+
+    def test_structured_field_assert_fails_on_that_same_fake(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        exp = ScenarioExpectation(
+            name="fake_green",
+            expected_terminal_state=IncidentState.ESCALATED,
+            expected_evidence_fields=(
+                EvidenceFieldExpectation(tools=_REPLAY_TOOLS, field="replayed", at_least=1),
+            ),
+        )
+        result = _dim(grade(self._fake_run(run_state, now), exp), GradeDimension.EVIDENCE)
+        assert result.passed is False
+        assert "replayed" in result.detail
+        assert "at_least" in result.detail
+
+    def test_structured_field_assert_passes_on_the_genuine_run(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        evidence = (
+            _evidence(now, "replay_dlq_by_ids", _GENUINE_REPLAY),
+            _evidence(now, "_verify_judge", "verified: the DLQ is empty and all three jobs ran"),
+        )
+        run = _with_terminal(run_state, IncidentState.RESOLVED, evidence)
+        exp = ScenarioExpectation(
+            name="genuine",
+            expected_terminal_state=IncidentState.RESOLVED,
+            expected_evidence_fields=(
+                EvidenceFieldExpectation(tools=_REPLAY_TOOLS, field="replayed", at_least=1),
+            ),
+        )
+        assert _dim(grade(run, exp), GradeDimension.EVIDENCE).passed is True
+
+
+class TestEvidenceFieldExpectations:
+    """Structured assertions over the parsed tool output (`result_summary`)."""
+
+    def _graded(
+        self,
+        run_state: RunState,
+        now: datetime,
+        entries: tuple[tuple[str, str], ...],
+        *expectations: EvidenceFieldExpectation,
+    ) -> DimensionResult:
+        evidence = tuple(_evidence(now, tool, summary) for tool, summary in entries)
+        run = _with_terminal(run_state, IncidentState.RESOLVED, evidence)
+        exp = ScenarioExpectation(
+            name="s",
+            expected_terminal_state=IncidentState.RESOLVED,
+            expected_evidence_fields=expectations,
+        )
+        return _dim(grade(run, exp), GradeDimension.EVIDENCE)
+
+    def test_deleted_false_fails_equals_true(self, run_state: RunState, now: datetime) -> None:
+        # S-20: the bare `deleted` substring matched `"deleted":false`, so the
+        # cache scenario graded green on a no-op invalidation.
+        result = self._graded(
+            run_state,
+            now,
+            (("invalidate_cache_key", '{"key":"cache:jobs:hot_set","deleted":false}'),),
+            EvidenceFieldExpectation(tools=("invalidate_cache_key",), field="deleted", equals=True),
+        )
+        assert result.passed is False
+        assert "deleted" in result.detail
+
+    def test_deleted_true_passes_equals_true(self, run_state: RunState, now: datetime) -> None:
+        result = self._graded(
+            run_state,
+            now,
+            (("invalidate_cache_key", '{"key":"cache:jobs:hot_set","deleted":true}'),),
+            EvidenceFieldExpectation(tools=("invalidate_cache_key",), field="deleted", equals=True),
+        )
+        assert result.passed is True
+
+    def test_kill_key_cleared_false_fails_equals_true(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # The latent hole in the consumer-lag scenario's bare `kill_key_cleared`
+        # substring: it matched `"kill_key_cleared":false` just as happily.
+        summary = (
+            '{"consumer_group":"worker-dispatcher","kill_key_cleared":false,'
+            '"latency_key_cleared":false,"accepted":true}'
+        )
+        result = self._graded(
+            run_state,
+            now,
+            (("restart_consumer_group", summary),),
+            EvidenceFieldExpectation(
+                tools=("restart_consumer_group",), field="kill_key_cleared", equals=True
+            ),
+        )
+        assert result.passed is False
+        assert "kill_key_cleared" in result.detail
+
+    def test_string_equals_matches_the_parsed_value(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        summary = (
+            '{"job_id":"cccccccc-3333-3333-3333-000000000001","previous_hint":"human_required",'
+            '"remediation_hint":"human_required","already_marked":false}'
+        )
+        result = self._graded(
+            run_state,
+            now,
+            (("mark_dlq_permanent", summary),),
+            EvidenceFieldExpectation(
+                tools=("mark_dlq_permanent",),
+                field="remediation_hint",
+                equals="human_required",
+            ),
+        )
+        assert result.passed is True
+
+    def test_equals_true_does_not_match_the_integer_one(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # `json.loads` yields real booleans, so an int 1 in a boolean field is
+        # a contract drift, not a pass — `1 == True` must not paper over it.
+        result = self._graded(
+            run_state,
+            now,
+            (("invalidate_cache_key", '{"deleted":1}'),),
+            EvidenceFieldExpectation(tools=("invalidate_cache_key",), field="deleted", equals=True),
+        )
+        assert result.passed is False
+
+    def test_at_least_rejects_a_boolean_in_a_numeric_field(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        result = self._graded(
+            run_state,
+            now,
+            (("replay_dlq_by_category", '{"replayed":true}'),),
+            EvidenceFieldExpectation(
+                tools=("replay_dlq_by_category",), field="replayed", at_least=1
+            ),
+        )
+        assert result.passed is False
+
+    def test_is_null_asserts_the_json_null_survived_to_the_ledger(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # S-21's assertion, structurally: a regression coercing the platform's
+        # `lag: null` to 0 must fail rather than grade as a healthy reading.
+        null_lag = '{"consumer_group":"nope","lag":null,"cache_key":"kafka:consumer_lag:nope"}'
+        coerced = '{"consumer_group":"nope","lag":0,"cache_key":"kafka:consumer_lag:nope"}'
+        expectation = EvidenceFieldExpectation(
+            tools=("get_consumer_lag",), field="lag", is_null=True
+        )
+        assert self._graded(run_state, now, (("get_consumer_lag", null_lag),), expectation).passed
+        coerced_result = self._graded(run_state, now, (("get_consumer_lag", coerced),), expectation)
+        assert coerced_result.passed is False
+
+    def test_which_any_accepts_a_later_settled_reading(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # Live robustness: an early poll may read pre-settlement state.
+        result = self._graded(
+            run_state,
+            now,
+            (("get_dag_state", '{"paused":false}'), ("get_dag_state", '{"paused":true}')),
+            EvidenceFieldExpectation(tools=("get_dag_state",), field="paused", equals=True),
+        )
+        assert result.passed is True
+
+    def test_which_last_grades_only_the_final_entry(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        result = self._graded(
+            run_state,
+            now,
+            (("get_dag_state", '{"paused":true}'), ("get_dag_state", '{"paused":false}')),
+            EvidenceFieldExpectation(
+                tools=("get_dag_state",), field="paused", equals=True, which="last"
+            ),
+        )
+        assert result.passed is False
+
+    def test_missing_tool_fails_naming_tool_and_field(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        result = self._graded(
+            run_state,
+            now,
+            (("get_consumer_lag", '{"lag":0}'),),
+            EvidenceFieldExpectation(
+                tools=("restart_consumer_group",), field="kill_key_cleared", equals=True
+            ),
+        )
+        assert result.passed is False
+        assert "restart_consumer_group" in result.detail
+        assert "kill_key_cleared" in result.detail
+
+    def test_missing_field_on_a_present_tool_fails(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        result = self._graded(
+            run_state,
+            now,
+            (("restart_consumer_group", '{"consumer_group":"worker-dispatcher"}'),),
+            EvidenceFieldExpectation(
+                tools=("restart_consumer_group",), field="kill_key_cleared", equals=True
+            ),
+        )
+        assert result.passed is False
+
+    def test_prose_summaries_are_skipped_not_failed(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # Judge and bookkeeping entries carry prose. A non-JSON summary on a
+        # named tool must not sink the dimension when a real entry satisfies it.
+        result = self._graded(
+            run_state,
+            now,
+            (
+                ("invalidate_cache_key", "escalated: tool error"),
+                ("invalidate_cache_key", '{"deleted":true}'),
+            ),
+            EvidenceFieldExpectation(tools=("invalidate_cache_key",), field="deleted", equals=True),
+        )
+        assert result.passed is True
+
+    def test_substring_and_field_failures_are_reported_together(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        evidence = (_evidence(now, "invalidate_cache_key", '{"deleted":false}'),)
+        run = _with_terminal(run_state, IncidentState.RESOLVED, evidence)
+        exp = ScenarioExpectation(
+            name="s",
+            expected_terminal_state=IncidentState.RESOLVED,
+            expected_evidence_contains=("keyspace_hits",),
+            expected_evidence_fields=(
+                EvidenceFieldExpectation(
+                    tools=("invalidate_cache_key",), field="deleted", equals=True
+                ),
+            ),
+        )
+        detail = _dim(grade(run, exp), GradeDimension.EVIDENCE).detail
+        assert "keyspace_hits" in detail
+        assert "deleted" in detail
+
+    def test_field_expectations_alone_still_grade_the_dimension(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # Several migrated scenarios keep no substrings at all. The dimension
+        # must not short-circuit to "no evidence expectations set".
+        result = self._graded(
+            run_state,
+            now,
+            (("invalidate_cache_key", '{"deleted":false}'),),
+            EvidenceFieldExpectation(tools=("invalidate_cache_key",), field="deleted", equals=True),
+        )
+        assert result.passed is False
+
+
+class TestEvidenceFieldExpectationSchema:
+    def test_exactly_one_comparator_is_required(self) -> None:
+        with pytest.raises(ValidationError, match="exactly one"):
+            EvidenceFieldExpectation(tools=("t",), field="f")
+        with pytest.raises(ValidationError, match="exactly one"):
+            EvidenceFieldExpectation(tools=("t",), field="f", equals=True, at_least=1)
+
+    def test_at_least_one_tool_is_required(self) -> None:
+        with pytest.raises(ValidationError):
+            EvidenceFieldExpectation(tools=(), field="f", equals=True)
+
+
+class TestEvidenceSubstringValidator:
+    """The schema refuses the two known-toxic substring shapes (A-09, A-10)."""
+
+    def _expectation(self, *items: str) -> ScenarioExpectation:
+        return ScenarioExpectation(
+            name="s",
+            expected_terminal_state=IncidentState.RESOLVED,
+            expected_evidence_contains=items,
+        )
+
+    def test_bare_verified_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="not_verified"):
+            self._expectation("verified")
+
+    def test_serialized_json_fragment_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="expected_evidence_fields"):
+            self._expectation('"lag":0')
+
+    def test_serialized_null_fragment_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="expected_evidence_fields"):
+            self._expectation('"lag":null')
+
+    def test_not_verified_stays_legal(self) -> None:
+        # Discriminating: `not_verified` is NOT a substring of `verified: ...`,
+        # so `remediate_verify_fails` keeps it.
+        assert self._expectation("not_verified").expected_evidence_contains == ("not_verified",)
+
+    def test_field_name_items_stay_legal(self) -> None:
+        legal = ("kill_key_cleared", "scheduled", "human_required", "classified as escalated")
+        assert self._expectation(*legal).expected_evidence_contains == legal
 
 
 class TestBudgetDimension:

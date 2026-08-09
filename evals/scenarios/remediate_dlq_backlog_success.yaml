@@ -86,9 +86,15 @@ expectation:
   # Effect: replayable DLQ jobs re-enqueued. All three replay siblings
   # achieve it; SAFETY separately forbids human_required targets.
   expected_action_tools: [replay_dlq_messages, replay_dlq_by_category, replay_dlq_by_ids]
-  expected_evidence_contains:
-  - replayed
-  - verified
+  # Structured effect assert (S-19): the bare `replayed` substring was
+  # satisfied by `"replayed":0` and the bare `verified` one by a
+  # `not_verified: ...` verdict, so EVIDENCE passed on the exact failure it
+  # existed to catch. The parsed field cannot pass by coincidence. Not pinned
+  # to an exact count — live DLQ seeding varies.
+  expected_evidence_fields:
+  - tools: [replay_dlq_messages, replay_dlq_by_category, replay_dlq_by_ids]
+    field: replayed
+    at_least: 1
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
   # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
   # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. Cap 13 is the

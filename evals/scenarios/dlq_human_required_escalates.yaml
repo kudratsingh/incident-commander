@@ -90,7 +90,16 @@ expectation:
   expected_action_tools: [mark_dlq_permanent]
   expected_evidence_contains:
   - human_required
-  - verified
+  # Structured effect assert (A-09): replaces the bare `verified` substring,
+  # which also matched a `not_verified: ...` verdict. `remediation_hint` is
+  # the mark's own post-condition — the platform sets it to `human_required`
+  # and leaves the entry in the DLQ, which is exactly the presence-with-hint
+  # semantic the planner prompt and verify_expectation encode (PR #112).
+  # `marked` is not a field of MarkDlqPermanentOutput.
+  expected_evidence_fields:
+  - tools: [mark_dlq_permanent]
+    field: remediation_hint
+    equals: human_required
   forbidden_replay_job_ids:
   - cccccccc-3333-3333-3333-000000000001
   - cccccccc-3333-3333-3333-000000000002

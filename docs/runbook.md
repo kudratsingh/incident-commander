@@ -176,6 +176,29 @@ untracked is acceptable; deleting them is not (invariant 9).
 This step first becomes exercisable at the post-v0.5.0 eval — under the
 ADR 0011 freeze nothing runs, so no archive is committed until then.
 
+### Runner exit codes and --live refusal (ADR 0013)
+
+`--live` now **refuses to run against an env that would degrade any selected
+scenario to canned**: a placeholder `PLATFORM_MCP_URL` (`eval.local`) or an
+empty/placeholder `ANTHROPIC_API_KEY` (what a verbatim `.env.example` copy
+gives you) exits 3 before a single scenario runs — no tool calls, no spend.
+Likewise `--smoke` without `--live` exits 3 (smoke-without-live would run the
+whole suite canned under placeholder settings), and a broken/missing `.env`
+under `--live` exits 3 with a labeled `PREFLIGHT FAIL (env)` line instead of a
+pydantic traceback. There is no opt-out flag. Plain offline runs (no `--live`)
+are unaffected: canned fallback is their intended mode, they still exit 0, and
+the degradation is now recorded in the report (`degraded_count` in
+`latest.json`) rather than only printed.
+
+| Exit | Meaning |
+|---|---|
+| 0 | all selected scenarios passed |
+| 1 | ≥1 scenario failed (regression gate: regression detected) |
+| 2 | no scenario matched `--only` (regression gate: missing/incomparable report) |
+| 3 | preflight/env failure: `--smoke` without `--live`, degraded `--live` env, invalid or missing settings, missing smoke token, LLM auth preflight failure |
+| 4 | principal guard: the smoke token holds more than read scope |
+| 5 | post-stage audit failed or was unreadable |
+
 ### consumer_lag live notes (kill-window experiment, 2026-08-04)
 
 `remediate_consumer_lag_success` seeds `kill_consumer` (not latency — the

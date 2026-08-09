@@ -9,8 +9,16 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    PostgresDsn,
+    SecretStr,
+    ValidationError,
+)
 
 from evals.chaos_hooks import ChaosInvocationError, invoke_chaos_hook
 from evals.fakes import CannedMCPClient
@@ -88,6 +96,13 @@ class ScenarioOutcome(BaseModel):
     # Set when the briefing judge call itself failed: the scenario result
     # stands (graded deterministically); only the judge column is missing.
     judge_error: str | None = None
+    # Run provenance (ADR 0013): which legs actually ran live, and whether a
+    # declared-live leg silently fell back to canned. Defaults are load-
+    # bearing — archived reports and the committed baseline predate these
+    # fields and must keep parsing (same precedent as failure_class above).
+    live_mcp: bool = False
+    live_llm: bool = False
+    degraded: bool = False
 
 
 class RunReport(BaseModel):
@@ -103,6 +118,14 @@ class RunReport(BaseModel):
     judge_useful_count: int = 0
     judge_mean_overall: float | None = None
     invocation_id: str = ""
+    # None = pre-schema report ("unknown"), deliberately distinct from 0
+    # ("verified fully live"): the committed baseline was a 32/37-degraded
+    # canned run, and defaulting to 0 would make that artifact assert a
+    # falsehood — the exact honesty failure these fields exist to fix.
+    degraded_count: int | None = None
+    # Which --only filters produced this report, so filtered runs
+    # self-describe in latest.json and in the archive. Empty = full suite.
+    only_patterns: tuple[str, ...] = ()
     outcomes: tuple[ScenarioOutcome, ...]
 
 
@@ -131,7 +154,10 @@ class ScenarioResult:
 
 
 def _is_offline_placeholder(url: str) -> bool:
-    return _EVAL_PLACEHOLDER_HOST in url
+    # Exact-host match, not substring: "https://eval.local.evil.example"
+    # must count as live (S-09) — only the placeholder host itself, with
+    # any port/path, stays offline.
+    return urlparse(url).hostname == _EVAL_PLACEHOLDER_HOST
 
 
 def _is_offline_api_key(key: str) -> bool:
@@ -358,6 +384,11 @@ def run_scenario(
         judge_score=judge_score,
         failure_class=failure_class,
         judge_error=judge_error,
+        # Provenance mirrors the tracer's scenario_start keys above.
+        live_mcp=live_mcp_available,
+        live_llm=live_llm_available,
+        degraded=(scenario.use_live_mcp and not live_mcp_available)
+        or (scenario.use_live_llm and not live_llm_available),
     )
     if tracer is not None:
         tracer.write(
@@ -467,6 +498,7 @@ def run_all(
     clock: Callable[[], datetime] | None = None,
     mcp_token: str | None = None,
     invocation_id: str = "",
+    only_patterns: tuple[str, ...] = (),
 ) -> tuple[RunReport, tuple[Trajectory, ...], tuple[EscalationBriefing, ...]]:
     # run_scenario falls back to canned when env is placeholder; nothing
     # is skipped here. Per-scenario crashes are captured as failed outcomes
@@ -508,6 +540,12 @@ def run_all(
         judged_count=judged_count,
         judge_useful_count=judge_useful_count,
         judge_mean_overall=judge_mean_overall,
+        # _crashed_result outcomes keep degraded=False defaults: a crash is
+        # already a failure, so this post-run count may undercount the
+        # pre-run estimate when a live scenario crashes — acceptable, the
+        # --live gate in main() is pre-run.
+        degraded_count=sum(1 for o in outcomes if o.degraded),
+        only_patterns=only_patterns,
         outcomes=outcomes,
     )
     return report, trajectories, briefings
@@ -576,25 +614,38 @@ def archive_run(
 
 
 def _eval_defaults() -> Settings:
-    """Placeholder Settings for offline eval runs (budget is what actually matters)."""
-    return Settings.model_validate(
-        {
-            "anthropic_api_key": SecretStr("eval"),
-            "judge_model": "eval-judge",
-            "platform_mcp_url": "https://eval.local",
-            "platform_rest_url": "https://eval.local",
-            "platform_token": SecretStr("eval"),
-            "platform_webhook_secret": SecretStr("eval"),
-            "database_url": "postgresql://eval:eval@localhost:5432/eval",
-        }
+    """Placeholder Settings for offline eval runs (budget is what actually matters).
+
+    Constructor with ``_env_file=None``, NOT ``model_validate``: the latter
+    treats ``_env_file`` as data (``extra="ignore"`` drops it silently) and
+    consults the cwd ``.env`` for any field absent from the dict — which is
+    how a real ``PLATFORM_SMOKE_TOKEN`` leaked into "offline" runs (A-04).
+    ``platform_smoke_token=None`` is pinned explicitly so an exported shell
+    var cannot supply it either. Fields left unpinned here (``agent_model``,
+    budget knobs) can still absorb exported shell env vars — the dotenv leak
+    is the one closed here.
+    """
+    return Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        anthropic_api_key=SecretStr("eval"),
+        judge_model="eval-judge",
+        platform_mcp_url=AnyHttpUrl("https://eval.local"),
+        platform_rest_url=AnyHttpUrl("https://eval.local"),
+        platform_token=SecretStr("eval"),
+        platform_webhook_secret=SecretStr("eval"),
+        database_url=PostgresDsn("postgresql://eval:eval@localhost:5432/eval"),
+        platform_smoke_token=None,
     )
 
 
-def _print_summary(report: RunReport, degraded_to_canned: int = 0) -> None:
+def _print_summary(report: RunReport) -> None:
     print(f"scenarios: {report.total}, passed: {report.passed}, failed: {report.failed}")
-    if degraded_to_canned > 0:
+    # Print from the persisted field so the console number and the artifact
+    # number are the same value by construction — their divergence (stdout
+    # said "degraded", latest.json said nothing) was finding A-01.
+    if (report.degraded_count or 0) > 0:
         print(
-            f"degraded: {degraded_to_canned} scenarios fell back to canned "
+            f"degraded: {report.degraded_count} scenarios fell back to canned "
             "(PLATFORM_MCP_URL or ANTHROPIC_API_KEY is offline placeholder)"
         )
     if report.judged_count > 0 and report.judge_mean_overall is not None:
@@ -658,13 +709,32 @@ def main() -> int:
     # #69), so every "read-scoped" smoke run before 2026-08-07 actually
     # held write scope. Config in, guard at point of use.
     smoke = "--smoke" in sys.argv[1:]
+    if smoke and not live:
+        # Before settings load, so this needs no env at all. Erroring beats
+        # silently implying --live: that would flip the settings source from
+        # placeholder to real .env behind the operator's back (A-04).
+        print(
+            "SMOKE FAIL: --smoke requires --live (smoke without live would "
+            "run the whole suite canned under placeholder settings)"
+        )
+        return 3
     # One identity per invocation, shared by the tracer, the trajectories,
     # the report, and the archive directory — so every artifact this run
     # produces can be joined, and none of them can collide with another
     # run's (CLAUDE.md invariant 9).
     invocation_id = uuid.uuid4().hex[:12]
     only_patterns = _parse_only(sys.argv[1:])
-    settings = _settings_for_mode(live)
+    try:
+        settings = _settings_for_mode(live)
+    except ValidationError as err:
+        # Exit 3 is the preflight/env code (see the smoke-token and LLM-auth
+        # exits below); a raw traceback would exit 1, the code reserved for
+        # "a scenario failed" (A-15).
+        fields = ", ".join(
+            ".".join(str(part) for part in detail["loc"]) or "(settings)" for detail in err.errors()
+        )
+        print(f"PREFLIGHT FAIL (env): invalid or missing settings — {fields}")
+        return 3
     mcp_token: str | None = None
     if smoke:
         if settings.platform_smoke_token is None:
@@ -685,6 +755,25 @@ def main() -> int:
     degraded_to_canned = sum(
         1 for s in scenarios if (s.use_live_mcp and offline_mcp) or (s.use_live_llm and offline_llm)
     )
+    if live and degraded_to_canned > 0:
+        # Fail BEFORE run_all: a misconfigured --live run costs zero tool
+        # calls and zero dollars, and can never produce a latest.json that
+        # is indistinguishable from a live-green run (A-01/S-09) — nor the
+        # worse chimera of real MCP+chaos driven by a canned LLM.
+        legs = []
+        if offline_mcp:
+            legs.append("PLATFORM_MCP_URL is the offline placeholder")
+        if offline_llm:
+            legs.append(
+                "ANTHROPIC_API_KEY is empty or a placeholder "
+                "(.env.example ships ANTHROPIC_API_KEY= empty — the exact trigger)"
+            )
+        print(
+            f"PREFLIGHT FAIL (env): --live but {degraded_to_canned}/{len(scenarios)} "
+            f"scenario(s) would degrade to canned — {'; '.join(legs)}"
+        )
+        print("no scenarios ran, nothing was spent")
+        return 3
     if live and not offline_llm and any(s.use_live_llm for s in scenarios):
         # One free authenticated call before anything runs: an expired key
         # otherwise surfaces as N identical per-scenario crash rows (the
@@ -709,7 +798,15 @@ def main() -> int:
     # opt-out — no env var, no flag, no config key disables this.
     guard_required = smoke and not _is_offline_placeholder(str(settings.platform_mcp_url))
     if smoke and not guard_required:
-        print("smoke mode against a placeholder platform: canned run, no live principal to guard")
+        # Defense-in-depth behind the degraded fail-fast above (reachable
+        # when the --only selection contains no use_live scenario): a smoke
+        # pass exists to verify the live read-scoped principal, and a
+        # placeholder platform has no principal to verify (A-04).
+        print(
+            "SMOKE FAIL: smoke mode against a placeholder platform — "
+            "there is no live principal to guard"
+        )
+        return 3
     if guard_required:
         try:
             guard_client = make_client(settings, token=mcp_token)
@@ -724,7 +821,11 @@ def main() -> int:
         print("principal guard: token is read-scoped (negative probe refused on scope)")
 
     report, trajectories, briefings = run_all(
-        scenarios, settings, mcp_token=mcp_token, invocation_id=invocation_id
+        scenarios,
+        settings,
+        mcp_token=mcp_token,
+        invocation_id=invocation_id,
+        only_patterns=tuple(only_patterns),
     )
     ran_names = [o.scenario for o in report.outcomes]
     # Archive FIRST, into an immutable per-invocation directory, then
@@ -736,7 +837,7 @@ def main() -> int:
     write_report(report)
     write_trajectories(trajectories)
     write_briefings(briefings, ran_names)
-    _print_summary(report, degraded_to_canned=degraded_to_canned)
+    _print_summary(report)
     print(f"run archived: {archived.relative_to(_REPO_ROOT)} (immutable; flat paths are pointers)")
 
     # Post-stage assertion, graded from the platform audit log rather than

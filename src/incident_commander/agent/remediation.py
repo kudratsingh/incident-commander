@@ -43,8 +43,10 @@ from incident_commander.tools.wire import wire_arguments
 
 # Every Tier-1 tool the platform exposes today. Kept hand-listed for the
 # same reason as ``ReadToolName`` in hypothesis.py — Pydantic Literals need
-# literal string args at import time. Drift caught by a unit test that
-# compares to ``tools_at_or_below(Tier.TIER_1) - tools_at_or_below(Tier.READ)``.
+# literal string args at import time. Drift against
+# ``tools_at_or_below(Tier.TIER_1) - tools_at_or_below(Tier.READ)`` is caught
+# by ``tests/unit/test_policies.py::TestLiteralRegistryDrift::
+# test_tier1_tool_name_literal_matches_tier1_slice``.
 Tier1ToolName = Literal[
     "invalidate_cache_key",
     "mark_dlq_permanent",
@@ -264,20 +266,33 @@ def _collect_strings(node: Any, out: set[str]) -> None:
 def _evidence_value_corpus(run_state: RunState) -> set[str]:
     """Every string value the platform itself produced during this run.
 
-    Sources: the alert payload, prior tool-call arguments, and tool result
-    summaries that parse as JSON. Bookkeeping entries (prose summaries)
-    are skipped deliberately — LLM prose is not a source of truth for
-    resource names.
+    Sources: the alert payload, plus tool result summaries that parse as
+    JSON — EXCLUDING values the same call's own arguments supplied. An
+    echo (``get_consumer_lag`` repeating ``consumer_group`` back) is the
+    caller's words returned, not platform production: the platform
+    accepts any group name and answers ``lag: null`` for unknown ones, so
+    without the exclusion a hallucinated probe argument would launder
+    itself into the corpus and whitelist the same wrong name for the
+    Tier-1 action (B-08). LLM-authored call arguments and bookkeeping
+    entries' prose are deliberately not sources of truth for resource
+    names.
+
+    Echo exclusion is per-entry: a value genuinely discovered in one
+    call's result stays in the corpus even when a later call echoes it
+    back as an argument.
     """
     corpus: set[str] = set()
     _collect_strings(dict(run_state.alert), corpus)
     for entry in run_state.evidence:
-        _collect_strings(entry.arguments, corpus)
         try:
             parsed = json.loads(entry.result_summary)
         except (ValueError, TypeError):
             continue
-        _collect_strings(parsed, corpus)
+        result_strings: set[str] = set()
+        _collect_strings(parsed, result_strings)
+        argument_strings: set[str] = set()
+        _collect_strings(entry.arguments, argument_strings)
+        corpus |= result_strings - argument_strings
     return corpus
 
 

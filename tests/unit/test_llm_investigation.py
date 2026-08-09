@@ -5,10 +5,14 @@ from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any
 
+import pytest
+
+from incident_commander.agent.hypothesis import HypothesisCategory
 from incident_commander.agent.investigation import make_llm_investigate
 from incident_commander.agent.state import IncidentState, RunState
 from incident_commander.llm.client import LLMResult
 from incident_commander.llm.fakes import CannedLLMClient
+from incident_commander.tools import policies
 from incident_commander.tools.mcp_client import MCPError, ToolResult
 
 
@@ -598,3 +602,89 @@ class TestFreshnessReprobe:
         assert slept == [5.0]
         assert result.state is IncidentState.ESCALATED
         assert len([e for e in result.evidence if e.tool_name == "_freshness_reprobe"]) == 1
+
+
+class TestRuntimeTierGuard:
+    """B-06: the ReadToolName Literal keeps the *schema* read-only; only a
+    runtime ``tier_of`` check can catch a READ→TIER_1 reclassification made
+    in ``policies.py`` after the Literal was hand-listed. The live agent
+    token carries ``actions:execute``, so without the guard the platform
+    would permit the call."""
+
+    def test_reclassified_probe_tool_escalates_instead_of_executing(
+        self, run_state: RunState, now: datetime, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Simulate the drift: get_trace is reclassified as Tier-1 in the
+        # policy map, but it is still schema-legal in the ReadToolName
+        # Literal. Patch the module state tier_of reads at call time.
+        monkeypatch.setattr(policies, "_TIER_1_TOOLS", policies._TIER_1_TOOLS | {"get_trace"})
+        llm = CannedLLMClient(
+            [
+                {
+                    "hypotheses": [_hyp("unknown", 0.5)],
+                    "next_action": {
+                        "kind": "probe",
+                        "tool_name": "get_trace",
+                        "arguments": {"trace_id": "trace-0001"},
+                    },
+                },
+                {
+                    "hypotheses": [_hyp("unknown", 0.5)],
+                    "next_action": {"kind": "stop", "reason": "done"},
+                },
+            ]
+        )
+        mcp = _FakeMCPClient(
+            lambda _n, _a: ToolResult(
+                content=[
+                    {
+                        "type": "text",
+                        "text": '{"trace_id":"trace-0001","jobs":[],"audit_events":[]}',
+                    }
+                ]
+            )
+        )
+        transition = make_llm_investigate(mcp, llm, model="m")
+        result = transition(_investigating(run_state), now)
+
+        assert result.state is IncidentState.ESCALATED
+        assert any("non-read tool as probe" in e.result_summary for e in result.evidence)
+        # The reclassified tool was never executed.
+        assert mcp.calls == []
+
+
+class TestUnorderedRankingGate:
+    """B-07 gate-level regression: the remediate gate reads hypotheses[0];
+    the schema-boundary sort must make that read correct when the model
+    emits an unordered ranking."""
+
+    def test_unordered_ranking_escalates_on_true_top_without_fix(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # The model's true top pick (deploy_regression 0.9) is an
+        # escalate-only category, but it is listed second; the FIX_MAP
+        # hypothesis (consumer_saturation 0.75, above threshold) is listed
+        # first. Without normalization the gate hands off to PLANNING on
+        # the wrong diagnosis.
+        llm = CannedLLMClient(
+            [
+                {
+                    "hypotheses": [
+                        _hyp("consumer_saturation", 0.75),
+                        _hyp("deploy_regression", 0.9),
+                    ],
+                    "next_action": {
+                        "kind": "remediate",
+                        "reason": "lag pattern matches saturation",
+                    },
+                }
+            ]
+        )
+        mcp = _FakeMCPClient(lambda _n, _a: _consumer_lag_response("billing", 42))
+        transition = make_llm_investigate(mcp, llm, model="m")
+        result = transition(_investigating(run_state), now)
+
+        assert result.state is IncidentState.ESCALATED
+        assert any("no Tier-1 fix" in e.result_summary for e in result.evidence)
+        # The normalized ranking is what got persisted for the briefing.
+        assert result.hypotheses[0].category is HypothesisCategory.DEPLOY_REGRESSION

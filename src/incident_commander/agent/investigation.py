@@ -36,7 +36,7 @@ from incident_commander.agent.state import (
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError, ToolResult
-from incident_commander.tools.policies import Tier, is_cached_read, tools_at_or_below
+from incident_commander.tools.policies import Tier, is_cached_read, tier_of, tools_at_or_below
 from incident_commander.tools.registry import TOOL_REGISTRY, description_of
 
 _TOOL_NAME: Final[str] = "get_consumer_lag"
@@ -300,6 +300,20 @@ def _execute_probe(
 ) -> RunState:
     """Call the tool the planner picked. On any failure, escalate with the reason."""
     spec = TOOL_REGISTRY[action.tool_name]
+    # Runtime tier guard (B-06): the ReadToolName Literal keeps the schema
+    # read-only, but only tier_of() catches a READ→TIER_1 reclassification
+    # made in policies.py after the Literal was hand-listed — the live agent
+    # token carries actions:execute, so the platform would permit the call.
+    # Placed here so BOTH call sites are covered: the main probe branch and
+    # the freshness re-probe (ADR 0009). Mirrors make_llm_plan's
+    # defense-in-depth tier checks.
+    if tier_of(action.tool_name) is not Tier.READ:
+        return _escalate_investigation(
+            run_state,
+            at,
+            f"planner proposed non-read tool as probe: {action.tool_name} "
+            f"(tier={tier_of(action.tool_name).value})",
+        )
     try:
         # mode="json" so UUID/datetime fields serialize to str/isoformat —
         # httpx.json can't encode raw UUID objects.

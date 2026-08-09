@@ -270,3 +270,73 @@ mode.** Back up first.
 are gone permanently. They will not be regenerated: a re-run costs money
 and produces a different run, which would be a fabrication, not a
 recovery.
+
+
+## F-004 — The guard against unverified controls was itself unverified
+
+**Date:** 2026-08-08
+
+**What happened.** F-001's fix added a post-stage assertion: query the
+platform audit log and fail the stage if any Tier-1 tool shows
+`outcome=success`. It was the automation of the exact evidence that had
+caught the Run 001 token bug.
+
+It could not have caught the Run 001 token bug. `_parse_events` read
+`payload["items"]`. Platform v0.4.9 emits `{"total": N, "events": [...]}`.
+The `.get("items", ...)` fallback returned `[]` on every real call, so the
+assertion found no violations, raised nothing, printed *"post-stage audit:
+zero successful Tier-1 actions during the smoke stage"*, and exited 0 —
+**unconditionally, whatever the platform actually recorded.**
+
+**Why the tests didn't catch it.** All four audit tests built their
+fixture as `{"items": [...]}` — a container key the platform never emits.
+They validated the guard against the shape the guard assumed. Both sides
+of the test agreed with each other and neither agreed with reality.
+
+**Why the live verification didn't catch it either.** I ran the guard
+against the real platform and it printed a clean pass. It was a clean
+window: nothing had written a Tier-1 row. *"Parsed nothing"* and *"found
+nothing"* produce identical output, and I never constructed the case that
+distinguishes them. **A guard verified only on windows where it should
+pass is not verified.**
+
+**The sharpest detail.** The correct shape was already in the repository,
+typed, one import away: `registry.ListAuditEventsOutput` declares
+`total: int` and `events: list[AuditEventEntry]`, generated from the
+contract snapshot and protected by both the contract test and the
+registry-consistency test. I hand-rolled a dict walk *past* the model that
+encodes the truth. Not an unavailable fact — a bypassed one.
+
+**Fix.**
+- `_parse_events` parses through `TOOL_REGISTRY["list_audit_events"].output_model`.
+  The shape can no longer be wrong without CI failing first: the contract
+  test and registry-consistency test now protect this guard too.
+- An unrecognized payload, or a response with no text block, **raises**.
+  Parsing nothing fails closed, exactly like an unreadable audit; a
+  well-formed `{"total": 0, "events": []}` remains a genuine pass, and the
+  two are now distinguishable.
+- Test fixtures rebuilt from the platform's real envelope including
+  `total`, with explicit cases that a legacy `items` payload and any
+  unrecognized shape both raise rather than reporting a clean stage.
+- `_TIER_1_TOOLS` was a second hand-copied list of the seven Tier-1 names;
+  it is now derived from the tier map. Same defect class — a fact restated
+  instead of referenced.
+
+**Empirically verified, the only way that proves anything:** a real Tier-1
+action was executed under the full token, and the assertion was run over a
+window bracketing it. It failed, naming the tool, timestamp, and
+principal. A window starting one second later passed. Before the fix, the
+same window returned zero violations.
+
+**Fourth instance of one root.** F-001: a control asserted nowhere.
+F-002: a measurement reconciled against nothing. F-003: a fix whose
+verification consumed its own evidence. F-004: a verifier whose tests
+encoded the assumption rather than the contract. P-001 named the producer/
+consumer version of this; F-004 adds the test-shaped one:
+
+> **A test that constructs its own fixture cannot validate a contract.**
+> If the shape comes from outside the process, the fixture must come from
+> the contract — the snapshot, the typed model, or a captured real
+> response — never from what the code under test expects to see. And a
+> guard must be exercised on the case where it should FAIL before it is
+> trusted on the case where it should pass.

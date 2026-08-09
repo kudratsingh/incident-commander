@@ -89,4 +89,9 @@ expectation:
   expected_evidence_contains:
   - kill_key_cleared
   - not_verified
-  max_tool_calls: 8
+  # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
+  # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
+  # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. Cap 13 is the
+  # maintainer's decision (A-02), keeping the >=30% margin rule. Grading cap
+  # only — the runtime BudgetLedger ceiling (invariant 7) is untouched.
+  max_tool_calls: 13

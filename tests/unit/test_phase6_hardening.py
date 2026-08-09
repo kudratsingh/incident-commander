@@ -13,6 +13,10 @@ Covers four behavior changes:
    (B-12) — the first attempt is always allowed, every later one is
    gated — and stamps each attempt with its own clock read when one is
    wired in.
+
+Plus one calibration assertion that is not a behavior change: at the
+documented live knobs a CORRECT remediation run spends 10 tool calls, and
+every shipped remediation scenario's *grading* cap must admit that (A-02).
 """
 
 from __future__ import annotations
@@ -22,9 +26,12 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from itertools import pairwise
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from evals.graders.deterministic import GradeDimension, grade
+from evals.scenarios.loader import load_scenarios
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
 from incident_commander.agent.loop import run_to_completion
 from incident_commander.agent.remediation import (
@@ -40,6 +47,8 @@ from incident_commander.agent.state import (
 )
 from incident_commander.llm.fakes import CannedLLMClient
 from incident_commander.tools.mcp_client import ToolResult
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _clock() -> datetime:
@@ -373,3 +382,72 @@ class TestVerifyAttemptTimestamps:
         window = _verify_window(result)
         ordinals = [(e.arguments["attempt"], e.arguments["of"]) for e in window]
         assert ordinals == [(1, 3), (1, 3), (2, 3), (2, 3), (3, 3), (3, 3)]
+
+
+# Live knobs from docs/runbook.md:152-154 — the values the live campaign runs
+# with, and the ones the graded scenario caps must be sized for.
+_LIVE_VERIFY_PROBE_ATTEMPTS = 6
+_LIVE_INVESTIGATE_REPROBE_ATTEMPTS = 1
+# Tool calls already spent when a correct run enters VERIFYING: two
+# investigation probes, one ADR-0009 freshness re-probe, one Tier-1 action.
+_CALLS_BEFORE_VERIFYING = 2 + _LIVE_INVESTIGATE_REPROBE_ATTEMPTS + 1
+
+
+class TestLivePollingBudgetArithmetic:
+    """A-02: verify polls and freshness re-probes are charged to the GRADED cap.
+
+    Every poll increments ``tool_calls_used`` (ADR 0006 accounting), as does
+    the ADR-0009 re-probe. At the documented live knobs a CORRECT remediation
+    run therefore spends ~10 tool calls — which the shipped remediation
+    scenario caps must admit. Eight of them sat at 8, so a correct run failed
+    the BUDGET dimension. This is the arithmetic assertion that would have
+    caught it; it is about the grading cap in the scenario YAML, not the
+    runtime ``BudgetLedger`` ceiling of CLAUDE.md invariant 7.
+    """
+
+    @staticmethod
+    def _worst_case_correct_run() -> RunState:
+        """Drive VERIFYING at live knobs: 5 stale reads then a drained one."""
+        attempts = _LIVE_VERIFY_PROBE_ATTEMPTS
+        mcp = _SequencedMCP([_lag_result(15_000)] * (attempts - 1) + [_lag_result(0)])
+        judge = CannedLLMClient(
+            [{"verdict": "not_verified", "reasoning": "cached read"}] * (attempts - 1)
+            + [{"verdict": "verified", "reasoning": "lag drained to 0"}]
+        )
+        transition = make_llm_verify(
+            mcp,
+            judge,
+            model="test-model",
+            probe_attempts=attempts,
+            probe_delay_seconds=0.0,
+            sleep=lambda _s: None,
+        )
+        run = _run_state(
+            IncidentState.VERIFYING,
+            # Runtime ceiling stays the production default (invariant 7) —
+            # only the graded cap is under test here.
+            _budget(max_tool_calls=25, used=_CALLS_BEFORE_VERIFYING),
+            remediation_plan=_PLAN.model_dump(mode="json"),
+        )
+        return transition(run, _clock())
+
+    def test_correct_run_at_live_knobs_spends_ten_tool_calls(self) -> None:
+        result = self._worst_case_correct_run()
+        assert result.state is IncidentState.RESOLVED
+        assert result.budget.tool_calls_used == (
+            _CALLS_BEFORE_VERIFYING + _LIVE_VERIFY_PROBE_ATTEMPTS
+        )
+        assert result.budget.tool_calls_used == 10
+
+    def test_every_remediation_scenario_cap_admits_that_run(self) -> None:
+        result = self._worst_case_correct_run()
+        scenarios = load_scenarios(_REPO_ROOT / "evals" / "scenarios")
+        remediation = [s for s in scenarios if s.expectation.expected_action_tools]
+        assert len(remediation) >= 9, "expected the shipped remediation scenario class"
+        failures: dict[str, str] = {}
+        for scenario in remediation:
+            report = grade(result, scenario.expectation)
+            budget = next(d for d in report.dimensions if d.dimension is GradeDimension.BUDGET)
+            if not budget.passed:
+                failures[scenario.name] = budget.detail
+        assert failures == {}, f"correct live run fails the BUDGET dimension: {failures}"

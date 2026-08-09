@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel
@@ -9,16 +10,35 @@ from pydantic import BaseModel
 from incident_commander.llm.client import LLMError, LLMResult
 
 
+@dataclass(frozen=True, slots=True)
+class CannedUsage:
+    """Per-call token counts a ``CannedLLMClient`` reports.
+
+    Defaults are all-zero so every existing canned scenario stays
+    byte-identical. Tests that exercise budget accrual — cache-token
+    volume, the USD meter — pass a non-zero instance; a real response's
+    input volume lands mostly on the cache counters (``client.py`` caches
+    the system prompt), so zero-usage fakes cannot reach that path.
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+
+
 class CannedLLMClient:
     """Plays back a fixed sequence of output payloads.
 
     Each ``call`` pops the next payload, validates it against the caller's
-    ``output_model``, and wraps it in an ``LLMResult`` with zero token counts.
+    ``output_model``, and wraps it in an ``LLMResult`` reporting ``usage``
+    (zero token counts by default).
     Runs out → ``LLMError``. Records each call for post-run introspection.
     """
 
-    def __init__(self, outputs: list[dict[str, Any]]) -> None:
+    def __init__(self, outputs: list[dict[str, Any]], usage: CannedUsage | None = None) -> None:
         self._outputs = list(outputs)
+        self._usage = usage or CannedUsage()
         self._index = 0
         self.calls: list[tuple[str, str]] = []
 
@@ -41,9 +61,9 @@ class CannedLLMClient:
         self._index += 1
         return LLMResult(
             output=output_model.model_validate(payload),
-            input_tokens=0,
-            output_tokens=0,
-            cache_creation_tokens=0,
-            cache_read_tokens=0,
+            input_tokens=self._usage.input_tokens,
+            output_tokens=self._usage.output_tokens,
+            cache_creation_tokens=self._usage.cache_creation_tokens,
+            cache_read_tokens=self._usage.cache_read_tokens,
             stop_reason="canned",
         )

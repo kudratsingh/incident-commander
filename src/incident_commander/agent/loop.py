@@ -37,6 +37,26 @@ def _escalate(run_state: RunState, reason: str, at: datetime) -> RunState:
     )
 
 
+def _accrue_wall_time(run_state: RunState, now: datetime) -> RunState:
+    """Advance the wall meter to the elapsed time since ``created_at``.
+
+    Anchored on ``run_state.created_at``, not a loop-local start stamp:
+    a run resumed from a checkpoint after a crash must keep every second
+    the first process burned, and a local anchor silently resets the
+    meter to zero on resume (ADR 0015).
+
+    The monotone guard keeps ``model_copy`` churn down on a clock that
+    has not moved, and makes a clock that jumps backwards a no-op rather
+    than a meter rewind.
+    """
+    elapsed = (now - run_state.created_at).total_seconds()
+    if elapsed <= run_state.budget.wall_seconds_used:
+        return run_state
+    return run_state.model_copy(
+        update={"budget": run_state.budget.model_copy(update={"wall_seconds_used": elapsed})}
+    )
+
+
 def run_to_completion(
     run_state: RunState,
     clock: Callable[[], datetime],
@@ -62,13 +82,18 @@ def run_to_completion(
     while not run_state.state.is_terminal:
         if steps >= max_steps:
             raise MaxStepsExceededError(f"run did not terminate within {max_steps} steps")
+        # One clock read per iteration, shared by the wall meter and the
+        # transition stamp — the meter costs no extra reads.
+        now = clock()
+        run_state = _accrue_wall_time(run_state, now)
         if run_state.budget.is_exhausted and run_state.state is not IncidentState.VERIFYING:
             # VERIFYING is exempt: once a Tier-1 action executed, the run
             # must always verify it — an executed-but-unverified action is
-            # worse than one extra probe over budget.
-            run_state = _escalate(run_state, "budget exhausted", clock())
+            # worse than one extra probe over budget. The exemption now
+            # covers wall/USD exhaustion too, consistent with ADR 0006.
+            run_state = _escalate(run_state, "budget exhausted", now)
         else:
-            run_state = dispatch(run_state, clock(), transitions=transitions)
+            run_state = dispatch(run_state, now, transitions=transitions)
         if checkpointer is not None:
             checkpointer.write(run_state)
         steps += 1

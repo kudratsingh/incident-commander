@@ -82,14 +82,22 @@ This is intentional. Aggressive auto-remediation with an unmapped hypothesis is 
 
 `BudgetLedger` on `RunState` caps every incident:
 
-| Dimension | Env var | Default | Enforced by |
-|---|---|---|---|
-| Tool calls | `BUDGET_MAX_TOOL_CALLS` | 25 | `budget.is_exhausted` checked before every probe + planner call |
-| Tokens | `BUDGET_MAX_TOKENS` | 500000 | Same |
-| Wall clock | `BUDGET_MAX_SECONDS` | 1800 | Same |
-| Dollars | `BUDGET_MAX_USD` | 5.00 | Same |
+| Dimension | Env var | Default | Charged by | Checked by |
+|---|---|---|---|---|
+| Tool calls | `BUDGET_MAX_TOOL_CALLS` | 25 | +1 per probe, action, and verify poll | `budget.is_exhausted`, pre-spend and once per loop step |
+| Tokens | `BUDGET_MAX_TOKENS` | 500000 | Total volume — input + output + cache-creation + cache-read — at every planner and judge call | Same |
+| Wall clock | `BUDGET_MAX_SECONDS` | 1800 | Elapsed since `RunState.created_at`, recomputed each loop step | Same |
+| Dollars | `BUDGET_MAX_USD` | 5.00 | Per-model rates from the pinned price map, at every LLM call | Same |
 
 Exhausting any dimension forces escalation with `"budget exhausted"` on evidence. No dimension has a "just a little bit more" override.
+
+All four columns are live writers, not aspirations. Until [ADR 0015](ADR/0015-wall-clock-and-usd-budget-meters.md), `wall_seconds_used` and `usd_used` had no writer anywhere in `src/`: both ceilings were unreachable and every briefing reported `$0`. The token meter summed only the un-cached input, so it under-counted exactly when prompt caching worked well. Anchoring wall time on `created_at` rather than a process-local start also makes the meter survive crash-resume — a run rebuilt from a checkpoint does not get a fresh wall budget.
+
+Prices are configuration ([`src/incident_commander/llm/pricing.py`](../src/incident_commander/llm/pricing.py)), never fetched at runtime: offline evals must not need network, and a run's reported cost has to be reproducible from the checkout. An unpinned model id bills at the most expensive known row and warns — it never raises mid-incident.
+
+One deliberate exclusion: the briefing writer and briefing judge run *after* the terminal state, so no ceiling can gate them and they stay outside the per-incident ledger. Their cost is visible in traces.
+
+The one exemption is `VERIFYING` (see [ADR 0006](ADR/0006-verification-is-a-polling-window.md)): once a Tier-1 action has executed, the run always verifies it, because an executed-but-unverified action is worse than one poll over budget. That exemption now covers the wall and dollar dimensions too.
 
 ## Idempotency
 

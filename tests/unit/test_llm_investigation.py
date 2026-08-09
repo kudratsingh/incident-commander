@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -11,7 +12,7 @@ from incident_commander.agent.hypothesis import HypothesisCategory
 from incident_commander.agent.investigation import make_llm_investigate
 from incident_commander.agent.state import IncidentState, RunState
 from incident_commander.llm.client import LLMResult
-from incident_commander.llm.fakes import CannedLLMClient
+from incident_commander.llm.fakes import CannedLLMClient, CannedUsage
 from incident_commander.tools import policies
 from incident_commander.tools.mcp_client import MCPError, ToolResult
 
@@ -52,7 +53,9 @@ def _consumer_lag_response(group: str, lag: int) -> ToolResult:
     )
 
 
-def _probe_then_stop_llm(group: str = "billing") -> CannedLLMClient:
+def _probe_then_stop_llm(
+    group: str = "billing", usage: CannedUsage | None = None
+) -> CannedLLMClient:
     return CannedLLMClient(
         [
             {
@@ -84,7 +87,8 @@ def _probe_then_stop_llm(group: str = "billing") -> CannedLLMClient:
                     "reason": "confidence sufficient for handoff",
                 },
             },
-        ]
+        ],
+        usage=usage,
     )
 
 
@@ -349,6 +353,48 @@ class TestBudgetGuards:
         # Three iterations = three probes.
         assert result.budget.tool_calls_used == 3
         assert any("max iterations" in e.result_summary for e in result.evidence)
+
+    def test_usd_ceiling_trips_and_escalates_before_the_probe(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """C-05/B-01: the dollar dimension is reachable from a real run.
+
+        At HEAD ``usd_used`` had no writer, so ``BUDGET_MAX_USD`` could
+        never trip: this run spent the probe and stopped normally instead.
+        """
+        mcp = _FakeMCPClient(lambda _n, _a: _consumer_lag_response("billing", 42))
+        # One planner call at 1000 in / 1000 out on sonnet costs $0.018.
+        llm = _probe_then_stop_llm(usage=CannedUsage(input_tokens=1000, output_tokens=1000))
+        run = _investigating(run_state).model_copy(
+            update={"budget": run_state.budget.model_copy(update={"max_usd": Decimal("0.001")})}
+        )
+        transition = make_llm_investigate(mcp, llm, model="claude-sonnet-4-6")
+        result = transition(run, now)
+
+        assert result.state is IncidentState.ESCALATED
+        assert result.budget.usd_used == Decimal("0.018000")
+        assert result.budget.is_exhausted
+        assert any("budget exhausted" in e.result_summary for e in result.evidence)
+        # The probe never ran: the ceiling stopped the spend.
+        assert result.budget.tool_calls_used == 0
+        assert mcp.calls == []
+
+    def test_planner_call_charges_cache_tokens(self, run_state: RunState, now: datetime) -> None:
+        """C-06 at the investigation accrual site."""
+        mcp = _FakeMCPClient(lambda _n, _a: _consumer_lag_response("billing", 42))
+        llm = _probe_then_stop_llm(
+            usage=CannedUsage(
+                input_tokens=100,
+                output_tokens=50,
+                cache_creation_tokens=2_000,
+                cache_read_tokens=8_000,
+            )
+        )
+        transition = make_llm_investigate(mcp, llm, model="claude-sonnet-4-6")
+        result = transition(_investigating(run_state), now)
+        # Two planner calls x (100 + 50 + 2000 + 8000) tokens, $0.010950 each.
+        assert result.budget.tokens_used == 20_300
+        assert result.budget.usd_used == Decimal("0.021900")
 
     def test_llm_tokens_billed_to_budget(self, run_state: RunState, now: datetime) -> None:
         from pydantic import BaseModel

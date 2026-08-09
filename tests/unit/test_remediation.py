@@ -30,7 +30,7 @@ from incident_commander.agent.state import (
     IncidentState,
     RunState,
 )
-from incident_commander.llm.fakes import CannedLLMClient
+from incident_commander.llm.fakes import CannedLLMClient, CannedUsage
 from incident_commander.tools.mcp_client import MCPError, ToolResult
 
 _MODEL = "test-model"
@@ -355,26 +355,30 @@ class TestRemediating:
         assert keys[0] == keys[1]
 
 
+def _lag_mcp(lag: int) -> _FakeMCP:
+    def handler(name: str, args: Mapping[str, Any]) -> ToolResult:
+        assert name == "get_consumer_lag"
+        return ToolResult(
+            content=[
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {
+                            "consumer_group": args.get("consumer_group", "worker-dispatcher"),
+                            "lag": lag,
+                            "cache_key": "kafka:consumer_lag:worker-dispatcher",
+                        }
+                    ),
+                }
+            ]
+        )
+
+    return _FakeMCP(handler)
+
+
 class TestVerifying:
     def _mcp(self, lag: int) -> _FakeMCP:
-        def handler(name: str, args: Mapping[str, Any]) -> ToolResult:
-            assert name == "get_consumer_lag"
-            return ToolResult(
-                content=[
-                    {
-                        "type": "text",
-                        "text": json.dumps(
-                            {
-                                "consumer_group": args.get("consumer_group", "worker-dispatcher"),
-                                "lag": lag,
-                                "cache_key": "kafka:consumer_lag:worker-dispatcher",
-                            }
-                        ),
-                    }
-                ]
-            )
-
-        return _FakeMCP(handler)
+        return _lag_mcp(lag)
 
     def test_verified_transitions_to_resolved(self) -> None:
         llm = CannedLLMClient([{"verdict": "verified", "reasoning": "lag=0 after restart"}])
@@ -771,3 +775,80 @@ class TestEvidenceSourcedArgs:
         )
         result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(run, _now())
         assert result.state is IncidentState.REMEDIATING
+
+
+class TestLLMUsageAccrual:
+    """C-06 + ADR 0015: every LLM call charges total token volume and dollars.
+
+    ``client.py`` puts the system prompt behind ``cache_control``, so on a
+    live call most input volume arrives on ``cache_creation_tokens`` /
+    ``cache_read_tokens``. Summing only input+output metered the un-cached
+    remainder and under-enforced ``BUDGET_MAX_TOKENS`` exactly when caching
+    worked well.
+    """
+
+    _USAGE = CannedUsage(
+        input_tokens=100,
+        output_tokens=50,
+        cache_creation_tokens=2_000,
+        cache_read_tokens=8_000,
+    )
+
+    def _hypotheses(self) -> tuple[Hypothesis, ...]:
+        return (
+            Hypothesis(
+                category=HypothesisCategory.CONSUMER_SATURATION,
+                name="consumer_saturation",
+                confidence=0.85,
+                reasoning="r",
+            ),
+        )
+
+    def test_planning_charges_cache_tokens_and_dollars(self) -> None:
+        llm = CannedLLMClient([_plan_dict()], usage=self._USAGE)
+        transition = make_llm_plan(llm, model="claude-sonnet-4-6")
+        run = _run_state(state=IncidentState.PLANNING, hypotheses=self._hypotheses())
+        result = transition(run, _now())
+
+        assert result.state is IncidentState.REMEDIATING
+        # 100 + 50 + 2000 + 8000 — not 150.
+        assert result.budget.tokens_used == 10_150
+        # (100*3.00 + 50*15.00 + 2000*3.75 + 8000*0.30) / 1e6
+        assert result.budget.usd_used == Decimal("0.010950")
+
+    def test_verify_charges_cache_tokens_and_dollars_per_poll_attempt(self) -> None:
+        mcp = _lag_mcp(50_000)
+        llm = CannedLLMClient(
+            [{"verdict": "not_verified", "reasoning": "still lagging"}] * 2,
+            usage=self._USAGE,
+        )
+        transition = make_llm_verify(
+            mcp, llm, model="claude-sonnet-4-6", probe_attempts=2, sleep=lambda _s: None
+        )
+        run = _run_state(state=IncidentState.VERIFYING, remediation_plan=_plan_dict())
+        result = transition(run, _now())
+
+        assert result.state is IncidentState.ESCALATED
+        # Two judge calls, each charging full volume; two verify probes.
+        assert result.budget.tokens_used == 20_300
+        assert result.budget.tool_calls_used == 2
+        assert result.budget.usd_used == Decimal("0.021900")
+
+    def test_zero_usage_canned_client_leaves_the_ledger_untouched(self) -> None:
+        """Canned scenarios stay byte-identical: no usage, no charge."""
+        llm = CannedLLMClient([_plan_dict()])
+        transition = make_llm_plan(llm, model="claude-sonnet-4-6")
+        run = _run_state(state=IncidentState.PLANNING, hypotheses=self._hypotheses())
+        result = transition(run, _now())
+        assert result.budget.tokens_used == 0
+        assert result.budget.usd_used == Decimal("0")
+
+    def test_usd_ceiling_trips_from_a_single_expensive_plan(self) -> None:
+        """The USD dimension is reachable: one call can exhaust the ledger."""
+        llm = CannedLLMClient([_plan_dict()], usage=CannedUsage(output_tokens=200_000))
+        transition = make_llm_plan(llm, model="claude-sonnet-4-6")
+        run = _run_state(state=IncidentState.PLANNING, hypotheses=self._hypotheses())
+        result = transition(run, _now())
+        # 200_000 * 15.00 / 1e6 = 3.00 against the fixture's 1.00 cap.
+        assert result.budget.usd_used == Decimal("3.000000")
+        assert result.budget.is_exhausted

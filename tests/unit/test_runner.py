@@ -988,6 +988,15 @@ _REAL_LOOKING_LIVE_ENV = {
 }
 
 
+# A smoke pass selects chaos-free scenarios, exactly as `make eval-smoke`
+# does (`--only "$(SMOKE_ONLY)"`, Makefile:105-117 — the three remediate_*
+# scenarios are deliberately absent from that list). An unfiltered
+# `--live --smoke` selects all 37 and is refused with exit 6: it would seed
+# chaos under the full write+chaos principal during the read-only stage
+# (S-03). One representative pattern stands in for the full SMOKE_ONLY list.
+_SMOKE_ONLY_ARGS = ["--only", "consumer_lag_healthy,tool_"]
+
+
 def _isolate_settings_env(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1232,7 +1241,7 @@ class TestMainExitCodes:
             audit_kwargs.append(kwargs)
 
         monkeypatch.setattr(runner_module, "assert_no_tier1_successes", _audit_guard)
-        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke", *_SMOKE_ONLY_ARGS])
         assert runner_module.main() == 0
         assert preflight_calls == ["sk-ant-test-not-a-real-key"]
         assert guard_calls == ["principal", "audit"]
@@ -1267,7 +1276,7 @@ class TestMainExitCodes:
             "assert_no_tier1_successes",
             lambda _client, _since, **kwargs: audit_kwargs.append(kwargs),
         )
-        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke", *_SMOKE_ONLY_ARGS])
         assert runner_module.main() == 0
         assert audit_kwargs == [{"principal_ids": frozenset({"agent-sa-uuid", "smoke-sa-uuid"})}]
 
@@ -1291,10 +1300,122 @@ class TestMainExitCodes:
             "assert_no_tier1_successes",
             lambda _client, _since, **kwargs: audit_kwargs.append(kwargs),
         )
-        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke", *_SMOKE_ONLY_ARGS])
         assert runner_module.main() == 0
         assert audit_kwargs == [{"principal_ids": None}]
         assert "only one of PLATFORM_AGENT_PRINCIPAL_ID" in capsys.readouterr().out
+
+
+class TestSmokeRefusesChaosSeeding:
+    """S-03: a read-only stage does not seed chaos.
+
+    ``run_scenario`` fires ``chaos_setup`` under ``settings.platform_token``
+    — the full write+chaos principal — regardless of ``--smoke``. The #80
+    principal guard only asserts the AGENT client's token, and the exit-5
+    post-stage audit sees the write after it lands. The only prevention is
+    refusing the run before anything is spent.
+    """
+
+    def _chaos_scenario(self) -> Scenario:
+        return _passing_scenario().model_copy(
+            update={
+                "name": "remediate_consumer_lag_success",
+                "use_live_mcp": True,
+                "chaos_setup": ChaosHook(
+                    name="kill_consumer",
+                    arguments={"consumer_group": "worker-dispatcher"},
+                ),
+            }
+        )
+
+    def test_smoke_with_a_chaos_scenario_exits_6_and_fires_no_hook(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # At HEAD this run proceeds: the hook fires inside run_scenario under
+        # the FULL principal during the stage whose purpose is proving the
+        # smoke token is read-only.
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        _forbid_run_all(monkeypatch)
+        hook_calls: list[str] = []
+        monkeypatch.setattr(
+            runner_module,
+            "invoke_chaos_hook",
+            lambda _url, _token, name, _args: hook_calls.append(name),
+        )
+        monkeypatch.setattr(runner_module, "load_scenarios", lambda _dir: [self._chaos_scenario()])
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
+        assert runner_module.main() == 6
+        assert hook_calls == []
+        out = capsys.readouterr().out
+        assert "SMOKE FAIL" in out
+        assert "remediate_consumer_lag_success" in out
+
+    def test_the_refusal_precedes_the_principal_guard(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Refuse before preflight/guard/spend: a stage that must not run is
+        # cheaper to refuse than to guard, and the guard cannot see chaos.
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        _forbid_run_all(monkeypatch)
+
+        def _boom(*_a: Any, **_kw: Any) -> Any:
+            raise AssertionError("the principal guard must not be reached")
+
+        monkeypatch.setattr(runner_module, "assert_read_only_principal", _boom)
+        monkeypatch.setattr(runner_module, "preflight_auth", _boom)
+        monkeypatch.setattr(runner_module, "invoke_chaos_hook", _boom)
+        monkeypatch.setattr(runner_module, "load_scenarios", lambda _dir: [self._chaos_scenario()])
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
+        assert runner_module.main() == 6
+
+    def test_only_filter_cannot_smuggle_a_chaos_scenario_past_the_gate(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The SMOKE_ONLY / --only path is the reachable channel S-03 names:
+        # the gate runs on the SELECTED scenarios, after filtering.
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        _forbid_run_all(monkeypatch)
+        monkeypatch.setattr(
+            runner_module,
+            "load_scenarios",
+            lambda _dir: [_passing_scenario(), self._chaos_scenario()],
+        )
+        monkeypatch.setattr(
+            sys, "argv", ["evals.runner", "--live", "--smoke", "--only", "remediate_"]
+        )
+        assert runner_module.main() == 6
+
+    def test_chaos_free_smoke_selection_still_runs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The gate is scoped to chaos: a normal smoke pass is unaffected.
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        run_all_calls = _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
+        monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: _StubGuardClient())
+        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(runner_module, "assert_no_tier1_successes", lambda *_a, **_kw: None)
+        monkeypatch.setattr(
+            runner_module,
+            "load_scenarios",
+            lambda _dir: [_passing_scenario().model_copy(update={"use_live_mcp": True})],
+        )
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
+        assert runner_module.main() == 0
+        assert len(run_all_calls) == 1
+
+    def test_non_smoke_live_run_keeps_chaos_seeding(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The three remediate_* scenarios legitimately seed chaos on a live
+        # non-smoke run; the fix is stage-gating, not removing chaos.
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        run_all_calls = _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
+        monkeypatch.setattr(runner_module, "load_scenarios", lambda _dir: [self._chaos_scenario()])
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        assert runner_module.main() == 0
+        assert len(run_all_calls) == 1
 
 
 class TestCannedEquivalentKnobWarning:

@@ -11,9 +11,15 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
+from pydantic import AnyHttpUrl, PostgresDsn, SecretStr
+
+from evals import runner as runner_module
+from incident_commander.config import Settings
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -56,6 +62,53 @@ def test_runner_smoke_flag_selects_the_smoke_principal() -> None:
     assert "platform_smoke_token" in runner
     assert "assert_read_only_principal" in runner
     assert "assert_no_tier1_successes" in runner
+
+
+def _smoke_settings(smoke_token: SecretStr | None) -> Settings:
+    return Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        anthropic_api_key=SecretStr("sk-ant-test-not-a-real-key"),
+        judge_model="claude-sonnet-4-5",
+        platform_mcp_url=AnyHttpUrl("http://real.host:8001/mcp"),
+        platform_rest_url=AnyHttpUrl("http://real.host:8000"),
+        platform_token=SecretStr("sa_full_scope"),
+        platform_webhook_secret=SecretStr("whsec_test"),
+        database_url=PostgresDsn("postgresql://eval:eval@localhost:5432/eval"),
+        platform_smoke_token=smoke_token,
+    )
+
+
+def test_empty_smoke_secret_is_unset_and_refuses_the_stage(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """S-04: ``SecretStr("")`` is not a principal — it is a missing one.
+
+    ``if settings.platform_smoke_token is None`` passes for an empty secret,
+    so ``mcp_token`` became ``""`` and ``make_client``'s ``token or ...``
+    then selected the FULL write principal for every client in the stage,
+    the guard client included. The empty string must take the same exit as
+    an absent token, not the privileged default.
+    """
+
+    def _boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("the smoke stage must not proceed on an empty token")
+
+    # Every collaborator past the token check is a tripwire: reaching any of
+    # them means the empty secret was accepted as a principal. preflight_auth
+    # in particular would otherwise be a real network call.
+    monkeypatch.setattr(runner_module, "run_all", _boom)
+    monkeypatch.setattr(runner_module, "make_client", _boom)
+    monkeypatch.setattr(runner_module, "preflight_auth", _boom)
+    monkeypatch.setattr(runner_module, "load_scenarios", _boom)
+    monkeypatch.setattr(runner_module, "_settings_for_mode", lambda _live: _smoke_settings(None))
+    monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
+    assert runner_module.main() == 3, "sanity: an absent token already exits 3"
+
+    monkeypatch.setattr(
+        runner_module, "_settings_for_mode", lambda _live: _smoke_settings(SecretStr(""))
+    )
+    assert runner_module.main() == 3
+    assert "PLATFORM_SMOKE_TOKEN is not set" in capsys.readouterr().out
 
 
 def test_only_guard_refuses_gate_and_bless_at_parse_time() -> None:

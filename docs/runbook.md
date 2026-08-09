@@ -121,7 +121,10 @@ export EVAL_TRACE_DIR=evals/traces
 #    remediation attempt. ~$1 of tokens. Runs under the read-scoped
 #    PLATFORM_SMOKE_TOKEN, so "read-only" is enforced by the platform
 #    (a Tier-1 attempt 403s and grades as an escalation), not by the
-#    scenario list. Override the list with SMOKE_ONLY= if needed.
+#    scenario list. Override the list with SMOKE_ONLY= if needed —
+#    but a smoke selection may not contain a chaos-declaring scenario
+#    (exit 6, see "Runner exit codes" below), so keep the remediate_*
+#    scenarios out of it.
 make eval-smoke
 
 # 2) Remediation scenarios, one at a time, with reset between.
@@ -241,6 +244,38 @@ the degradation is now recorded in the report (`degraded_count` in
 | 3 | preflight/env failure: `--smoke` without `--live`, degraded `--live` env, invalid or missing settings, missing smoke token, LLM auth preflight failure |
 | 4 | principal guard: the smoke token holds more than read scope |
 | 5 | post-stage audit failed, was unreadable, or was inconclusive |
+| 6 | `--smoke` selected a scenario that declares `chaos_setup` — a read-only stage does not seed chaos |
+
+### A smoke selection may not seed chaos (S-03)
+
+`chaos_setup` is fired by the runner under `PLATFORM_TOKEN` — the full
+write+chaos principal — because chaos needs `chaos:invoke`, which the
+read-scoped smoke token does not carry. That is fine on a `--live`
+remediation run and wrong during `--smoke`, whose entire purpose is to
+prove the stage is read-only. So `--smoke` now refuses, with **exit 6**,
+before preflight or any spend, if any *selected* scenario declares
+`chaos_setup`. The check runs after `--only` filtering, so an
+`SMOKE_ONLY=` override cannot smuggle a chaos scenario in. There is no
+opt-out flag: a scenario that seeds chaos is not a smoke scenario. The
+default `SMOKE_ONLY` list already excludes the three `remediate_*`
+scenarios, so `make eval-smoke` is unaffected; an unfiltered
+`python -m evals.runner --live --smoke` selects all 37 and is refused.
+
+Relatedly, a chaos hook name is a **closed set**, validated at scenario
+load time against the chaos tools in
+`contracts/platform-tools.snapshot.json` (selected by the platform's
+`[chaos: ...]` description prefix). A scenario YAML naming any other tool
+— a Tier-1 write, say — is rejected at load instead of being forwarded
+verbatim as a `tools/call` under the full principal. New hooks become
+legal via a platform release + digest bump + `make snapshot`, never by
+hand-editing a list. Re-tokening chaos onto a dedicated lower-privilege
+principal is deliberately out of scope: it is a platform-side scope
+design change, not a commander one.
+
+An **empty** `PLATFORM_SMOKE_TOKEN` counts as unset and exits 3 rather
+than falling through to the write-scoped `PLATFORM_TOKEN`; likewise
+`make_client` raises on an explicitly-empty token instead of selecting
+the privileged default (S-04).
 
 ### Post-stage audit: saturation and self-owned principals (A-13)
 

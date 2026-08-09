@@ -18,11 +18,12 @@ from uuid import uuid4
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, status
 from sqlalchemy import create_engine
 
+from incident_commander.agent.briefing import render_briefing
 from incident_commander.agent.factory import start_run
 from incident_commander.agent.investigation import make_investigate
 from incident_commander.agent.loop import run_to_completion
 from incident_commander.agent.orchestrator import TRANSITIONS, Checkpointer, Transition
-from incident_commander.agent.state import IncidentState, RunState
+from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 from incident_commander.api.hmac_verify import verify
 from incident_commander.api.schemas import AlertPayload, HealthResponse, IngestResponse
 from incident_commander.config import Settings, get_settings
@@ -139,28 +140,40 @@ def create_app(
             ) from err
 
         run = start_run(payload.model_dump(), resolved_settings, datetime.now(UTC))
+
+        # Durability before acknowledgement (finding B-04): the TRIAGE row
+        # exists before the 202, so a process death between here and the
+        # background task still leaves a record of the alert. Enabled or
+        # killed, the write is the same — the kill switch below only skips
+        # spawning the run. ``run_to_completion`` writes its own TRIAGE
+        # snapshot on entry, so the append-only log normally carries two
+        # identical TRIAGE rows (version+1); that is benign and cheaper than
+        # plumbing a skip flag through the loop.
+        #
+        # Fail-open: a checkpoint failure is logged, never surfaced as a 5xx.
+        # The run store being down must not turn webhook ingestion into
+        # delivery failures during exactly the kind of incident that took it
+        # down, and paging runs through the platform's oncall route
+        # regardless of this endpoint.
+        try:
+            resolved_checkpointer.write(run)
+        except Exception:
+            _log.exception(
+                "checkpoint write failed for incident %s (AGENT_ENABLED=%s); "
+                "acknowledging delivery without a durable record",
+                run.incident_id,
+                str(resolved_settings.agent_enabled).lower(),
+            )
+
         if not resolved_settings.agent_enabled:
-            # Kill switch (docs/safety-model.md#kill-switch): record the
-            # alert as a TRIAGE-state run so nothing is lost, but spawn no
-            # investigation — the state machine never advances. Fail-open:
-            # a checkpoint failure is logged, never surfaced as a 5xx — a
-            # disabled agent must not turn webhook ingestion into delivery
-            # failures during exactly the kind of incident that got it
-            # disabled, and paging runs through the platform's oncall
-            # route regardless of this endpoint.
-            try:
-                resolved_checkpointer.write(run)
-                _log.warning(
-                    "kill switch active (AGENT_ENABLED=false): recorded incident %s "
-                    "in TRIAGE; no investigation run spawned",
-                    run.incident_id,
-                )
-            except Exception:
-                _log.exception(
-                    "kill switch active (AGENT_ENABLED=false): checkpoint write failed "
-                    "for incident %s; acknowledging delivery without a durable record",
-                    run.incident_id,
-                )
+            # Kill switch (docs/safety-model.md#kill-switch): the alert is
+            # recorded above as a TRIAGE-state run so nothing is lost, but no
+            # investigation is spawned — the state machine never advances.
+            _log.warning(
+                "kill switch active (AGENT_ENABLED=false): recorded incident %s "
+                "in TRIAGE; no investigation run spawned",
+                run.incident_id,
+            )
             return IngestResponse(incident_id=run.incident_id)
 
         background_tasks.add_task(task, run, resolved_settings, resolved_checkpointer)
@@ -174,13 +187,101 @@ def _run_investigation(
     settings: Settings,
     checkpointer: Checkpointer,
 ) -> None:
-    """Background task: wire a per-run MCP client, run the state machine."""
-    with make_client(settings) as client:
-        transitions: dict[IncidentState, Transition] = dict(TRANSITIONS)
-        transitions[IncidentState.INVESTIGATING] = make_investigate(client)
-        run_to_completion(
-            run,
-            clock=lambda: datetime.now(UTC),
-            checkpointer=checkpointer,
-            transitions=transitions,
+    """Background task: wire a per-run MCP client, run the state machine.
+
+    Failure rail (finding B-04): without the ``except`` below, any exception
+    here — a checkpointer failure with Postgres down is the realistic vector —
+    kills the task silently, leaving the incident stranded at whatever
+    non-terminal checkpoint it reached with nothing recording why. Every exit
+    path now leaves a terminal snapshot behind.
+    """
+    try:
+        with make_client(settings) as client:
+            transitions: dict[IncidentState, Transition] = dict(TRANSITIONS)
+            transitions[IncidentState.INVESTIGATING] = make_investigate(client)
+            final = run_to_completion(
+                run,
+                clock=lambda: datetime.now(UTC),
+                checkpointer=checkpointer,
+                transitions=transitions,
+            )
+    except Exception as exc:
+        _record_run_failure(run, checkpointer, exc)
+        # Re-raise the ORIGINAL exception: starlette runs background tasks
+        # after the response, so this surfaces in the server log with its
+        # stack intact. Swallowing it would hide the crash class this rail
+        # exists to record.
+        raise
+    else:
+        _log_briefing(final)
+
+
+def _record_run_failure(run: RunState, checkpointer: Checkpointer, exc: Exception) -> None:
+    """Best-effort terminal FAILED checkpoint for a crashed run.
+
+    Written directly via ``checkpointer.write``, not ``dispatch``: this is a
+    crash rail, not a state-machine transition (``ALLOWED_TRANSITIONS`` already
+    lists FAILED as a successor of every non-terminal state).
+
+    The crashed run's latest state is not the local ``run`` — the loop
+    checkpoints progress internally and returns nothing on raise — so recover
+    it via ``load`` and fall back to ``run``. The realistic crash vector IS the
+    checkpointer, so the whole rail is best-effort: if it cannot write, it logs
+    and lets the original exception carry the story. Recovery/resume of a
+    stranded run is separate, structural work (ADR 0002 lease); this only
+    guarantees a terminal record exists.
+    """
+    try:
+        latest = checkpointer.load(run.incident_id) or run
+        if latest.state.is_terminal:
+            # The run already reached its outcome; a crash afterwards must not
+            # overwrite a real RESOLVED/ESCALATED record with FAILED.
+            return
+        at = datetime.now(UTC)
+        checkpointer.write(
+            latest.model_copy(
+                update={
+                    "state": IncidentState.FAILED,
+                    "updated_at": at,
+                    "evidence": (
+                        *latest.evidence,
+                        EvidenceEntry(
+                            tool_name="_run_failure",
+                            arguments={"error_type": type(exc).__name__},
+                            result_summary=str(exc)[:500],
+                            timestamp=at,
+                        ),
+                    ),
+                }
+            )
+        )
+    except Exception:
+        _log.exception(
+            "failure rail could not record a terminal FAILED checkpoint for incident %s",
+            run.incident_id,
+        )
+
+
+def _log_briefing(final: RunState) -> None:
+    """Emit the invariant-7 handoff artifact on the service path.
+
+    ``render_briefing`` had exactly one caller (``evals/runner.py``), so a real
+    incident never produced the artifact a human is supposed to be handed.
+    Logging it is the minimal producer; durable briefing storage (a table, an
+    API surface) is future design. Rendering must never break the rail — the
+    run already reached its terminal state, so a briefing failure is logged,
+    not propagated.
+    """
+    try:
+        _log.info(
+            "incident terminal",
+            extra={
+                "incident_id": str(final.incident_id),
+                "final_state": final.state.value,
+                "briefing": render_briefing(final).model_dump_json(),
+            },
+        )
+    except Exception:
+        _log.exception(
+            "could not render the escalation briefing for incident %s", final.incident_id
         )

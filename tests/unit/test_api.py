@@ -4,6 +4,7 @@ import json
 import logging
 import time
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -11,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
+from incident_commander.agent.factory import start_run
 from incident_commander.agent.state import IncidentState, RunState
 from incident_commander.api import app as app_module
 from incident_commander.api.app import create_app
@@ -340,3 +342,137 @@ class TestKillSwitch:
             "AGENT_ENABLED=false" in r.getMessage() and r.levelno == logging.ERROR
             for r in caplog.records
         )
+
+
+def _boom(*_args: Any, **_kwargs: Any) -> RunState:
+    raise RuntimeError("boom")
+
+
+class TestFailureRail:
+    """B-04: a crashing background run must still leave a terminal record.
+
+    ``test_api.py`` injects ``run_task=capture`` everywhere else, so the real
+    ``_run_investigation`` body was never exercised — which is exactly why the
+    missing failure rail survived. Monkeypatching ``run_to_completion`` is the
+    honest seam: the Phase-0 transitions wired by ``create_app`` always
+    terminate at ESCALATED, so no realistic flow reaches a raising transition.
+    """
+
+    def _run(self) -> RunState:
+        return start_run(
+            {"source": "billing", "severity": "high", "group": "billing-consumer"},
+            _test_settings(),
+            datetime.now(UTC),
+        )
+
+    def _post_alert(self, client: TestClient, alert: dict[str, Any]) -> Any:
+        body = json.dumps(alert).encode()
+        return client.post(
+            "/alerts",
+            content=body,
+            headers={
+                "X-Alert-Signature": sign(body, "hmac-secret"),
+                "X-Alert-Timestamp": str(int(time.time() * 1000)),
+                "Content-Type": "application/json",
+            },
+        )
+
+    def test_crash_writes_terminal_failed_checkpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The assertion that would have caught B-04: a raising run still
+        yields a terminal checkpoint carrying the error as evidence."""
+        ckpt = InMemoryCheckpointer()
+        run = self._run()
+        monkeypatch.setattr(app_module, "run_to_completion", _boom)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            app_module._run_investigation(run, _test_settings(), ckpt)
+
+        recorded = ckpt.load(run.incident_id)
+        assert recorded is not None
+        assert recorded.state is IncidentState.FAILED
+        failures = [e for e in recorded.evidence if e.tool_name == "_run_failure"]
+        assert len(failures) == 1
+        assert "boom" in failures[0].result_summary
+        assert failures[0].arguments["error_type"] == "RuntimeError"
+
+    def test_ingress_writes_triage_checkpoint_before_202(
+        self, spawned_runs: list[RunState]
+    ) -> None:
+        """Initial-checkpoint-at-ingress contract: the run row is durable
+        before the 202, independent of the background task ever running."""
+        ckpt = InMemoryCheckpointer()
+
+        def capture(run: RunState, _s: Settings, _c: object) -> None:
+            spawned_runs.append(run)
+
+        app = create_app(settings=_test_settings(), checkpointer=ckpt, run_task=capture)
+        response = self._post_alert(
+            TestClient(app),
+            {"source": "billing", "severity": "high", "group": "billing-consumer"},
+        )
+
+        assert response.status_code == 202
+        incident_id = UUID(response.json()["incident_id"])
+        assert len(spawned_runs) == 1
+        recorded = ckpt.load(incident_id)
+        assert recorded is not None
+        assert recorded.state is IncidentState.TRIAGE
+        assert recorded.alert["group"] == "billing-consumer"
+
+    def test_crash_after_terminal_state_appends_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A crash after the outcome was decided must not overwrite it with
+        FAILED — the terminal record already tells the true story."""
+        ckpt = InMemoryCheckpointer()
+        run = self._run()
+        ckpt.write(run.with_state(IncidentState.ESCALATED, datetime.now(UTC)))
+        monkeypatch.setattr(app_module, "run_to_completion", _boom)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            app_module._run_investigation(run, _test_settings(), ckpt)
+
+        history = ckpt.history(run.incident_id)
+        assert len(history) == 1
+        assert history[-1].state is IncidentState.ESCALATED
+
+    def test_failure_write_error_still_reraises_the_original(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The realistic crash vector IS the run store, so the rail is
+        best-effort: it logs and lets the ORIGINAL exception carry the stack."""
+
+        class _ExplodingCheckpointer(InMemoryCheckpointer):
+            def write(self, run_state: RunState) -> None:
+                raise OSError("run store unavailable")
+
+        run = self._run()
+        monkeypatch.setattr(app_module, "run_to_completion", _boom)
+
+        with (
+            caplog.at_level(logging.ERROR, logger="incident_commander.api.app"),
+            pytest.raises(RuntimeError, match="boom"),
+        ):
+            app_module._run_investigation(run, _test_settings(), _ExplodingCheckpointer())
+
+        assert any(
+            "FAILED" in r.getMessage() and r.levelno == logging.ERROR for r in caplog.records
+        )
+
+    def test_terminal_run_logs_a_briefing(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Invariant 7 needs a producer on the service path: render_briefing's
+        only caller used to be evals/runner.py."""
+        ckpt = InMemoryCheckpointer()
+        run = self._run()
+        final = run.with_state(IncidentState.ESCALATED, datetime.now(UTC))
+        monkeypatch.setattr(app_module, "run_to_completion", lambda *_a, **_k: final)
+
+        with caplog.at_level(logging.INFO, logger="incident_commander.api.app"):
+            app_module._run_investigation(run, _test_settings(), ckpt)
+
+        record = next(r for r in caplog.records if "incident terminal" in r.getMessage())
+        briefing_json: str = record.__dict__["briefing"]
+        assert str(run.incident_id) in briefing_json
+        assert IncidentState.ESCALATED.value in briefing_json

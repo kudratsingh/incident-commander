@@ -117,7 +117,7 @@ Integration test: `tests/integration/test_remediation_recovery.py` simulates a m
 
 The agent augments the incident response path; it never gates it. If the LLM API is down or the agent crashes, alerts still page humans through the platform's normal webhook → oncall route. The agent degrades to attaching whatever raw signals were collected before failure. **No human page ever waits on the agent.**
 
-Implementation: alert ingress (`src/incident_commander/api/`) acknowledges every verified delivery with 202 before any agent work happens. With the agent enabled, the first checkpoint is written when the background investigation task starts; with the kill switch thrown, the handler records the TRIAGE run synchronously and spawns nothing (see below). The oncall notification path (planned) reads directly from the incident record, not from a completed agent trajectory.
+Implementation: alert ingress (`src/incident_commander/api/`) acknowledges every verified delivery with 202 before any agent work happens. The handler records the TRIAGE run synchronously before that 202 whether or not the agent is enabled — the kill switch only skips spawning the investigation (see below) — so the run row exists before the agent loop is invoked; a failed write is logged and the delivery is still acknowledged. The oncall notification path (planned) reads directly from the incident record, not from a completed agent trajectory.
 
 ## Prompt injection surface
 
@@ -134,7 +134,7 @@ Adversarial hardening (specific injection payloads in the eval suite) is Phase 7
 
 ## Kill switch
 
-Set `AGENT_ENABLED=false` in the environment and restart the agent process — the switch is read once at startup (`agent_enabled` in `src/incident_commander/config.py`; `Settings` is frozen and cached), not per request. The webhook ingress still accepts alerts, records each one as a TRIAGE-state run, and returns 202 — but no investigation run is spawned, so the state machine never advances. Recording is best-effort in this mode: a failed checkpoint write is logged and the delivery is still acknowledged, because a disabled agent must never turn alert ingestion into delivery failures. Alerts fall through to the platform's normal oncall path (see fail-open above). Re-enable with `AGENT_ENABLED=true` and restart.
+Set `AGENT_ENABLED=false` in the environment and restart the agent process — the switch is read once at startup (`agent_enabled` in `src/incident_commander/config.py`; `Settings` is frozen and cached), not per request. The webhook ingress still accepts alerts, records each one as a TRIAGE-state run, and returns 202 — but no investigation run is spawned, so the state machine never advances. Recording is best-effort here as on the enabled path: a failed checkpoint write is logged and the delivery is still acknowledged, because a disabled agent must never turn alert ingestion into delivery failures. Alerts fall through to the platform's normal oncall path (see fail-open above). Re-enable with `AGENT_ENABLED=true` and restart.
 
 ## What this file does NOT cover
 

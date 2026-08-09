@@ -20,7 +20,7 @@ from typing import Any, Final, Protocol
 import anthropic
 import httpx
 from anthropic.types import Message
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 _STRUCTURED_TOOL_NAME: Final[str] = "record_output"
 
@@ -188,8 +188,21 @@ class LLMClient:
         for block in response.content:
             if block.type == "tool_use" and block.name == _STRUCTURED_TOOL_NAME:
                 usage = response.usage
+                try:
+                    output = output_model.model_validate(block.input)
+                except ValidationError as err:
+                    # ADR 0007: only the domain exception crosses this
+                    # boundary. Constrained decoding enforces the JSON
+                    # schema's shape but not Pydantic's own constraints
+                    # (ge/le bounds, min_length), so a well-formed payload
+                    # can still fail validation — and a raw ValidationError
+                    # here also skipped the parse_failed trace below,
+                    # leaving billed calls with no record (F-002).
+                    raise LLMError(
+                        f"output failed schema validation for {output_model.__name__}: {err}"
+                    ) from err
                 return LLMResult(
-                    output=output_model.model_validate(block.input),
+                    output=output,
                     input_tokens=usage.input_tokens,
                     output_tokens=usage.output_tokens,
                     cache_creation_tokens=usage.cache_creation_input_tokens or 0,

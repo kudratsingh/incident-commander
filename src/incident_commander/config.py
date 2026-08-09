@@ -46,6 +46,18 @@ class Settings(BaseSettings):
     # by `-include .env` (PR #62 vs #69), so every "read-scoped" smoke run
     # up to 2026-08-07 actually held write scope. Config beats inheritance.
     platform_smoke_token: SecretStr | None = None
+    # Principal ids of the two service accounts above, printed by
+    # `make bootstrap-token`. They scope the post-stage audit guard to
+    # self-owned principals so a neighbouring tenant's legitimate Tier-1
+    # success on a shared platform is not our exit 5 (A-13). Not secrets —
+    # plain ids, no scope, nothing to authenticate with. BOTH must be set
+    # to take effect: the failure mode the guard exists for (F-001, the
+    # "read-scoped" stage silently holding the full token) writes its
+    # audit rows under the AGENT principal, so filtering to the smoke id
+    # alone would make the guard blind to its own reason for existing.
+    # Unset means unfiltered — any service account's success fails.
+    platform_agent_principal_id: str | None = None
+    platform_smoke_principal_id: str | None = None
     platform_webhook_secret: SecretStr
     # Webhook ingress replay guard (ADR 0014): reject deliveries whose
     # X-Alert-Timestamp (epoch ms, platform alerts.py) deviates from local

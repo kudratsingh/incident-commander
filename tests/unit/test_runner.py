@@ -743,6 +743,8 @@ _SETTINGS_ENV_VARS = (
     "INVESTIGATE_REPROBE_ATTEMPTS",
     "INVESTIGATE_REPROBE_DELAY_SECONDS",
     "ACTION_TOOL_TIMEOUT_SECONDS",
+    "PLATFORM_AGENT_PRINCIPAL_ID",
+    "PLATFORM_SMOKE_PRINCIPAL_ID",
 )
 
 # A present-but-offline env for a --live run: every field set and parseable,
@@ -1011,11 +1013,13 @@ class TestMainExitCodes:
             "assert_read_only_principal",
             lambda _client: guard_calls.append("principal"),
         )
-        monkeypatch.setattr(
-            runner_module,
-            "assert_no_tier1_successes",
-            lambda _client, _since: guard_calls.append("audit"),
-        )
+        audit_kwargs: list[dict[str, Any]] = []
+
+        def _audit_guard(_client: Any, _since: Any, **kwargs: Any) -> None:
+            guard_calls.append("audit")
+            audit_kwargs.append(kwargs)
+
+        monkeypatch.setattr(runner_module, "assert_no_tier1_successes", _audit_guard)
         monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
         assert runner_module.main() == 0
         assert preflight_calls == ["sk-ant-test-not-a-real-key"]
@@ -1023,6 +1027,62 @@ class TestMainExitCodes:
         assert len(run_all_calls) == 1
         # The read-scoped smoke token — not the write token — reached run_all.
         assert run_all_calls[0]["kwargs"]["mcp_token"] == "sa_smoke_read_only"
+        # Neither principal id is configured in this env: the post-stage
+        # audit stays deliberately over-broad (any service account's
+        # in-window Tier-1 success fails the stage).
+        assert audit_kwargs == [{"principal_ids": None}]
+
+    def test_configured_principal_ids_reach_the_post_stage_audit(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # A-13: on a shared platform the guard must attribute violations to
+        # the principals this stage owns. BOTH ids are required — the F-001
+        # failure mode (the stage silently holding the full token) writes
+        # under the AGENT principal, not the smoke one — so filtering to the
+        # smoke id alone would blind the guard to its own reason for
+        # existing. The ids come from Settings, printed by bootstrap-token.
+        env = dict(_REAL_LOOKING_LIVE_ENV)
+        env["PLATFORM_AGENT_PRINCIPAL_ID"] = "agent-sa-uuid"
+        env["PLATFORM_SMOKE_PRINCIPAL_ID"] = "smoke-sa-uuid"
+        _isolate_settings_env(monkeypatch, tmp_path, env)
+        _stub_run_pipeline(monkeypatch)
+        audit_kwargs: list[dict[str, Any]] = []
+        monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
+        monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: _StubGuardClient())
+        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module,
+            "assert_no_tier1_successes",
+            lambda _client, _since, **kwargs: audit_kwargs.append(kwargs),
+        )
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
+        assert runner_module.main() == 0
+        assert audit_kwargs == [{"principal_ids": frozenset({"agent-sa-uuid", "smoke-sa-uuid"})}]
+
+    def test_half_configured_principal_ids_fall_back_to_unfiltered(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # Naming ONLY the smoke principal would filter out the agent rows
+        # the F-001 failure mode writes — the guard would stop catching the
+        # thing it was built for. A half-configured env therefore falls back
+        # to the over-broad default (safe side) and says so.
+        env = dict(_REAL_LOOKING_LIVE_ENV)
+        env["PLATFORM_SMOKE_PRINCIPAL_ID"] = "smoke-sa-uuid"
+        _isolate_settings_env(monkeypatch, tmp_path, env)
+        _stub_run_pipeline(monkeypatch)
+        audit_kwargs: list[dict[str, Any]] = []
+        monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
+        monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: _StubGuardClient())
+        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module,
+            "assert_no_tier1_successes",
+            lambda _client, _since, **kwargs: audit_kwargs.append(kwargs),
+        )
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
+        assert runner_module.main() == 0
+        assert audit_kwargs == [{"principal_ids": None}]
+        assert "only one of PLATFORM_AGENT_PRINCIPAL_ID" in capsys.readouterr().out
 
 
 class TestCannedEquivalentKnobWarning:

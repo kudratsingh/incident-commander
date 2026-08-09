@@ -54,7 +54,17 @@ class TestReadOnlyGuard:
             assert_read_only_principal(client)
 
 
-def _audit(tool: str, outcome: str, when: datetime) -> dict[str, Any]:
+_OUR_AGENT_SA = "c12fd570-3ff4-42ce-a935-61086396df3c"
+_OUR_SMOKE_SA = "9b21a4de-71c0-4d0e-b0a1-0f0f5a2c8e11"
+_SOMEONE_ELSES_SA = "00000000-dead-beef-0000-1111deadbeef"
+
+
+def _audit(
+    tool: str,
+    outcome: str,
+    when: datetime,
+    principal_id: str = _OUR_AGENT_SA,
+) -> dict[str, Any]:
     """One audit row in the PLATFORM's real shape.
 
     Taken from v0.4.9's AuditEventEntry, not from what the guard happened
@@ -64,10 +74,10 @@ def _audit(tool: str, outcome: str, when: datetime) -> dict[str, Any]:
     no-op in production (F-004).
     """
     return {
-        "id": "aud_" + tool[:6] + when.strftime("%H%M%S"),
+        "id": "aud_" + tool[:6] + when.strftime("%H%M%S%f"),
         "action": "agent.tool_invoked",
         "principal_type": "service_account",
-        "principal_id": "c12fd570-3ff4-42ce-a935-61086396df3c",
+        "principal_id": principal_id,
         "resource_type": None,
         "resource_id": None,
         "request_id": None,
@@ -76,10 +86,23 @@ def _audit(tool: str, outcome: str, when: datetime) -> dict[str, Any]:
     }
 
 
-def _result(items: list[dict[str, Any]]) -> ToolResult:
-    """The platform's envelope: {"total": N, "events": [...]}."""
+def _result(items: list[dict[str, Any]], total: int | None = None) -> ToolResult:
+    """The platform's envelope: {"total": N, "events": [...]}.
+
+    ``total`` is the platform's COUNT over the SAME filter with no limit
+    applied (repositories/audit.py:86), while ``events`` is capped at
+    ``limit`` — so a caller-supplied ``total`` larger than ``len(items)``
+    is the server itself saying it withheld rows.
+    """
     return ToolResult(
-        content=[{"type": "text", "text": json.dumps({"total": len(items), "events": items})}]
+        content=[
+            {
+                "type": "text",
+                "text": json.dumps(
+                    {"total": len(items) if total is None else total, "events": items}
+                ),
+            }
+        ]
     )
 
 
@@ -214,3 +237,170 @@ class TestAuditPayloadShape:
         assert (
             assert_no_tier1_successes(self._envelope({"total": 0, "events": []}), self._SINCE) == []
         )
+
+    def test_row_with_unparseable_created_at_fails_closed(self) -> None:
+        # Covered by the typed parse since F-004: AuditEventEntry declares
+        # created_at as a required datetime, so a row the guard cannot place
+        # in time can never reach the window comparison and be silently
+        # dropped from it. Pinned here so a future loosening of the model
+        # (created_at: str | None) cannot quietly restore that hole.
+        row = _audit("mark_dlq_permanent", "success", self._SINCE + timedelta(minutes=1))
+        row["created_at"] = "not-a-timestamp"
+        with pytest.raises(PrincipalGuardError, match="unrecognized payload shape"):
+            assert_no_tier1_successes(self._envelope({"total": 1, "events": [row]}), self._SINCE)
+
+
+class TestSaturatedAuditPage:
+    """A-13: one page of at most 200 rows is not a scan of the window.
+
+    ``list_audit_events`` exposes no offset and no created_after (the
+    handler hardcodes offset=0, limit is capped at 200), so the guard
+    cannot page. Rows come back created_at DESC, which means the ONLY
+    proof the whole [since, now] window was seen is that the oldest row on
+    the page predates ``since``. Without that proof the guard must fail
+    closed: a busy stage otherwise pushes its Tier-1 successes past row
+    200 and the assertion that replaced the manual F-001 query reports a
+    clean stage.
+    """
+
+    _SINCE = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
+
+    def _page(self, count: int, *, oldest_before_since: bool = False) -> list[dict[str, Any]]:
+        rows = [
+            _audit("get_consumer_lag", "success", self._SINCE + timedelta(seconds=i + 1))
+            for i in range(count)
+        ]
+        if oldest_before_since:
+            rows[-1] = _audit("get_consumer_lag", "success", self._SINCE - timedelta(minutes=5))
+        return rows
+
+    def test_full_page_still_inside_the_window_fails_closed(self) -> None:
+        # Exactly the A-13 blindness: 200 in-window rows, none of them a
+        # Tier-1 success, so the violations list is empty — but rows 201+
+        # are unreachable and may hold the successes the guard exists for.
+        client = _Client(_result(self._page(200), total=417))
+        with pytest.raises(PrincipalGuardError, match="saturated"):
+            assert_no_tier1_successes(client, self._SINCE)
+
+    def test_full_page_whose_oldest_row_predates_since_is_a_genuine_pass(self) -> None:
+        # The window WAS fully scanned: the page reaches back past `since`,
+        # so nothing in-window can be hiding behind it. Saturation must not
+        # false-fail a covered window.
+        client = _Client(_result(self._page(200, oldest_before_since=True), total=417))
+        assert assert_no_tier1_successes(client, self._SINCE) == []
+
+    def test_server_reported_total_above_the_page_fails_closed(self) -> None:
+        # The platform's `total` is a COUNT over the same filter with no
+        # limit (repositories/audit.py:86), so total > len(events) is the
+        # server itself saying it withheld rows — honest even if the page
+        # cap ever moves off 200.
+        client = _Client(_result(self._page(3), total=64))
+        with pytest.raises(PrincipalGuardError, match="inconclusive"):
+            assert_no_tier1_successes(client, self._SINCE)
+
+    def test_short_page_is_conclusive(self) -> None:
+        # total == len(events) and the page is not at the cap: every row
+        # matching the filter came back, so the window is fully covered
+        # even though no row predates `since`.
+        client = _Client(_result(self._page(3)))
+        assert assert_no_tier1_successes(client, self._SINCE) == []
+
+    def test_saturated_page_still_names_the_violations_it_can_see(self) -> None:
+        # Inconclusive outranks clean, but a violation already visible on
+        # the page is the more actionable signal and must not be swallowed
+        # by the saturation message.
+        rows = self._page(199)
+        rows.append(_audit("mark_dlq_permanent", "success", self._SINCE + timedelta(minutes=1)))
+        client = _Client(_result(rows, total=900))
+        with pytest.raises(PrincipalGuardError, match="mark_dlq_permanent"):
+            assert_no_tier1_successes(client, self._SINCE)
+
+    def test_the_guard_asks_for_the_page_size_it_checks_against(self) -> None:
+        # The saturation check compares against a constant; if the request
+        # asked for a different limit the comparison would be meaningless.
+        client = _Client(_result([]))
+        assert assert_no_tier1_successes(client, self._SINCE) == []
+        assert client.calls[0][1]["limit"] == 200
+
+
+class TestSelfOwnedPrincipals:
+    """A-13's other half: a shared platform's other tenants are not us.
+
+    Any service account's in-window Tier-1 success currently fails the
+    stage, so a neighbouring principal's legitimate remediation is a false
+    exit 5. The filter set is {agent SA, smoke SA} — NOT the smoke SA
+    alone: the F-001 failure mode this guard was built for is the stage
+    silently running under the FULL agent token, and those rows carry the
+    AGENT principal_id.
+    """
+
+    _SINCE = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
+    _OURS = frozenset({_OUR_AGENT_SA, _OUR_SMOKE_SA})
+
+    def _tier1_by(self, principal_id: str) -> _Client:
+        return _Client(
+            _result(
+                [
+                    _audit(
+                        "mark_dlq_permanent",
+                        "success",
+                        self._SINCE + timedelta(minutes=2),
+                        principal_id=principal_id,
+                    )
+                ]
+            )
+        )
+
+    def test_foreign_principal_does_not_fail_our_stage(self) -> None:
+        client = self._tier1_by(_SOMEONE_ELSES_SA)
+        assert assert_no_tier1_successes(client, self._SINCE, principal_ids=self._OURS) == []
+
+    def test_our_agent_principal_still_fails_the_stage(self) -> None:
+        # The F-001 shape: the "read-scoped" stage wrote under the full
+        # agent token. Filtering to the smoke SA alone would make the guard
+        # blind to its own reason for existing.
+        client = self._tier1_by(_OUR_AGENT_SA)
+        with pytest.raises(PrincipalGuardError, match="mark_dlq_permanent"):
+            assert_no_tier1_successes(client, self._SINCE, principal_ids=self._OURS)
+
+    def test_our_smoke_principal_still_fails_the_stage(self) -> None:
+        client = self._tier1_by(_OUR_SMOKE_SA)
+        with pytest.raises(PrincipalGuardError, match="mark_dlq_permanent"):
+            assert_no_tier1_successes(client, self._SINCE, principal_ids=self._OURS)
+
+    def test_unconfigured_fails_on_any_service_account(self) -> None:
+        # Deliberately over-broad default: without the .env ids we cannot
+        # tell ours from theirs, and over-broad is the safe side.
+        client = self._tier1_by(_SOMEONE_ELSES_SA)
+        with pytest.raises(PrincipalGuardError, match="mark_dlq_permanent"):
+            assert_no_tier1_successes(client, self._SINCE, principal_ids=None)
+
+    def test_empty_configuration_is_treated_as_unconfigured(self) -> None:
+        client = self._tier1_by(_SOMEONE_ELSES_SA)
+        with pytest.raises(PrincipalGuardError, match="mark_dlq_permanent"):
+            assert_no_tier1_successes(client, self._SINCE, principal_ids=frozenset())
+
+    def test_foreign_principal_cannot_mask_our_own_violation(self) -> None:
+        # Filtering narrows who fails the stage; it must not drop OUR row
+        # just because a foreign row sorts ahead of it.
+        client = _Client(
+            _result(
+                [
+                    _audit(
+                        "restart_consumer_group",
+                        "success",
+                        self._SINCE + timedelta(minutes=3),
+                        principal_id=_SOMEONE_ELSES_SA,
+                    ),
+                    _audit(
+                        "pause_dag",
+                        "success",
+                        self._SINCE + timedelta(minutes=1),
+                        principal_id=_OUR_AGENT_SA,
+                    ),
+                ]
+            )
+        )
+        with pytest.raises(PrincipalGuardError, match="pause_dag") as excinfo:
+            assert_no_tier1_successes(client, self._SINCE, principal_ids=self._OURS)
+        assert "restart_consumer_group" not in str(excinfo.value)

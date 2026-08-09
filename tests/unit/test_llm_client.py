@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import anthropic
 import httpx
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from incident_commander.llm.client import LLMClient, LLMError, preflight_auth
 
@@ -120,10 +120,13 @@ class TestCall:
                 model="claude-sonnet-4-6",
             )
 
-    def test_schema_violation_bubbles_as_validation_error(self) -> None:
+    def test_schema_violation_wrapped_as_llm_error(self) -> None:
+        # ADR 0007: only the domain exception crosses the boundary. A
+        # schema-violating tool_use payload is a parse failure like any
+        # other, not a raw pydantic error for every caller to re-handle.
         sdk = MagicMock()
         sdk.messages.create.return_value = _tool_use_message({"label": "ok"})
-        with pytest.raises(ValidationError):
+        with pytest.raises(LLMError, match="output failed schema validation for _SampleOutput"):
             _client(sdk).call(
                 system_prompt="s",
                 user_message="u",
@@ -320,6 +323,35 @@ class TestTracer:
         assert record["output"] == {"label": "ok", "confidence": 0.9}
         assert record["output_model"] == "_SampleOutput"
         assert record["duration_seconds"] >= 0
+
+    def test_tracer_records_parse_failed_on_schema_violation(self) -> None:
+        # The call is already billed when the payload fails validation, so
+        # the trace must survive it (F-002). Before the LLMError wrap the
+        # raw ValidationError escaped `except LLMError` and the billed call
+        # left no trace record at all.
+        sdk = MagicMock()
+        response = _tool_use_message({"label": "ok"})
+        response.model_dump.return_value = {"content": [{"type": "tool_use"}]}
+        sdk.messages.create.return_value = response
+        captured: list[dict[str, Any]] = []
+        client = LLMClient(
+            api_key="test",
+            max_attempts=1,
+            retry_base_delay=0.0,
+            sleep=lambda _s: None,
+            client=sdk,
+            tracer=captured.append,
+        )
+        with pytest.raises(LLMError):
+            client.call(
+                system_prompt="s",
+                user_message="u",
+                output_model=_SampleOutput,
+                model="claude-sonnet-4-6",
+            )
+        assert len(captured) == 1
+        assert captured[0]["parse_failed"] is True
+        assert captured[0]["output_model"] == "_SampleOutput"
 
     def test_tracer_not_called_on_error(self) -> None:
         sdk = MagicMock()

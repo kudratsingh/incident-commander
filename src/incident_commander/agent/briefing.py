@@ -16,8 +16,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from incident_commander.agent.state import IncidentState, RunState
 
-_BOOKKEEPING_TOOLS = frozenset({"_triage", "_escalate", "_planner_stop", "_planner_escalate"})
-
 
 class ProbeSummary(BaseModel):
     """One entry in the investigation trail."""
@@ -50,8 +48,12 @@ def render_briefing(run_state: RunState) -> EscalationBriefing:
         alert_summary=_render_alert_summary(run_state),
         investigation_trail=tuple(
             ProbeSummary(tool=entry.tool_name, summary=entry.result_summary)
+            # Bookkeeping markers are underscore-prefixed by convention; no
+            # registry tool name is. Filtering structurally (the grader does
+            # the same, evals/graders/deterministic.py) means a new evidence
+            # writer cannot drift out of a hand-maintained exclusion list.
             for entry in run_state.evidence
-            if entry.tool_name not in _BOOKKEEPING_TOOLS
+            if not entry.tool_name.startswith("_")
         ),
         findings="",
         recommendation="",
@@ -69,7 +71,10 @@ def _render_alert_summary(run_state: RunState) -> str:
     source = str(alert.get("source", "unknown"))
     severity = str(alert.get("severity", "unknown"))
     fingerprint = alert.get("fingerprint")
-    group = alert.get("group")
+    # Accept legacy `group` field for backward-compat with older alert
+    # producers; platform's tool arg is `consumer_group`. Mirrors
+    # investigation.py's fallback.
+    group = alert.get("consumer_group") or alert.get("group")
     parts = [f"source={source}", f"severity={severity}"]
     if fingerprint is not None:
         parts.append(f"fingerprint={fingerprint}")

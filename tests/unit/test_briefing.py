@@ -6,6 +6,7 @@ from incident_commander.agent.briefing import (
     render_briefing,
 )
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
+from incident_commander.tools.registry import TOOL_REGISTRY
 
 
 def _evidence(now: datetime, tool: str, summary: str) -> EvidenceEntry:
@@ -36,6 +37,35 @@ class TestRenderBriefing:
         assert "fingerprint=consumer_lag_high" in briefing.alert_summary
         assert "group=billing-consumer" in briefing.alert_summary
 
+    def test_alert_summary_prefers_consumer_group_spelling(self, run_state: RunState) -> None:
+        # B-10: the platform's tool arg (and every consumer_group-keyed
+        # scenario alert) spells it `consumer_group`; the summary read only
+        # the legacy `group`, so the group silently vanished from briefings.
+        run = run_state.model_copy(
+            update={
+                "state": IncidentState.ESCALATED,
+                "alert": {
+                    "source": "platform.kafka",
+                    "severity": "high",
+                    "consumer_group": "billing-consumer",
+                },
+            }
+        )
+        assert "group=billing-consumer" in render_briefing(run).alert_summary
+
+    def test_alert_summary_still_accepts_legacy_group_spelling(self, run_state: RunState) -> None:
+        run = run_state.model_copy(
+            update={
+                "state": IncidentState.ESCALATED,
+                "alert": {
+                    "source": "platform.kafka",
+                    "severity": "high",
+                    "group": "legacy-consumer",
+                },
+            }
+        )
+        assert "group=legacy-consumer" in render_briefing(run).alert_summary
+
     def test_alert_summary_falls_back_to_unknown(self, run_state: RunState) -> None:
         run = run_state.model_copy(update={"state": IncidentState.ESCALATED, "alert": {}})
         briefing = render_briefing(run)
@@ -63,6 +93,32 @@ class TestRenderBriefing:
                 summary='{"group":"billing","lag":42}',
             ),
         )
+
+    def test_investigation_trail_excludes_every_underscore_pseudo_tool(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # B-11: the filter is structural (startswith "_"), matching the
+        # grader — a hand-list drifted once the Phase-6 evidence writers
+        # landed and these five leaked into the trail as "probes".
+        evidence = (
+            _evidence(now, "_triage", "severity=high classified as investigating"),
+            _evidence(now, "_planner_remediate", "planner chose remediation"),
+            _evidence(now, "_planner_plan", "restart the consumer"),
+            _evidence(now, "get_consumer_lag", '{"group":"billing","lag":42}'),
+            _evidence(now, "_remediation_escalate", "verification failed twice"),
+            _evidence(now, "_verify_judge", "resolved=false"),
+            _evidence(now, "_freshness_reprobe", "lag unchanged after re-probe"),
+        )
+        run = run_state.model_copy(update={"state": IncidentState.ESCALATED, "evidence": evidence})
+        briefing = render_briefing(run)
+        assert briefing.investigation_trail == (
+            ProbeSummary(tool="get_consumer_lag", summary='{"group":"billing","lag":42}'),
+        )
+
+    def test_no_registry_tool_is_hidden_by_the_underscore_filter(self) -> None:
+        # Registry names mirror platform tool names, so the structural filter
+        # can never swallow a real probe.
+        assert [name for name in TOOL_REGISTRY if name.startswith("_")] == []
 
     def test_investigation_trail_empty_when_only_triage(
         self, run_state: RunState, now: datetime

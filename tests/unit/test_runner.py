@@ -222,6 +222,57 @@ class TestRunScenario:
         assert states == [IncidentState.TRIAGE, IncidentState.ESCALATED]
 
 
+class TestPostGradeDecorationsAreContained:
+    """The briefing writer and the judge run AFTER grade(); neither may void the run.
+
+    ADR 0007: a crashed scenario is an eval-infrastructure bug by definition,
+    so a soft-quality decoration failing on an already-graded run must be
+    recorded as a missing column, not a transport crash.
+    """
+
+    def _with_llm_queue(self, role: str, queue: list[dict[str, Any]]) -> Scenario:
+        scenario = _passing_scenario()
+        responses = dict(scenario.canned_llm_responses)
+        responses[role] = queue
+        return scenario.model_copy(update={"canned_llm_responses": responses})
+
+    def test_briefing_enrichment_failure_preserves_the_graded_pass(self) -> None:
+        # BriefingContent.findings has min_length=1, so an empty string is a
+        # proven ValidationError raiser (test_briefing_enrichment.py).
+        scenario = self._with_llm_queue(
+            "briefing_writer", [{"findings": "", "recommendation": "x"}]
+        )
+        result = run_scenario(scenario, _test_settings())
+        assert result.outcome.report.passed is True
+        assert result.outcome.briefing_error is not None
+        assert "briefing enrichment failed" in result.outcome.briefing_error
+        # The deterministic briefing stands, unenriched.
+        assert result.briefing.findings == ""
+        assert result.briefing.recommendation == ""
+
+    def test_briefing_enrichment_transport_failure_is_contained(self) -> None:
+        # Empty queue → CannedLLMClient raises LLMError on exhaustion, the
+        # canned stand-in for a live transport failure after retries.
+        scenario = self._with_llm_queue("briefing_writer", [])
+        scenario = scenario.model_copy(update={"use_live_llm": True})
+        result = run_scenario(scenario, _test_settings())
+        assert result.outcome.report.passed is True
+        assert result.outcome.briefing_error is not None
+
+    def test_judge_schema_violation_is_contained(self) -> None:
+        # groundedness has le=1.0; constrained decoding does not enforce
+        # numeric bounds, so a live judge can emit 1.5.
+        scenario = self._with_llm_queue(
+            "briefing_judge",
+            [{"groundedness": 1.5, "actionability": 0.5, "reasoning": "r"}],
+        )
+        result = run_scenario(scenario, _test_settings())
+        assert result.outcome.report.passed is True
+        assert result.outcome.judge_score is None
+        assert result.outcome.judge_error is not None
+        assert "judge call failed" in result.outcome.judge_error
+
+
 class TestRunAll:
     def test_counts_passed_and_failed(self) -> None:
         scenarios = [_passing_scenario(), _bad_expectation_scenario()]

@@ -96,6 +96,10 @@ class ScenarioOutcome(BaseModel):
     # Set when the briefing judge call itself failed: the scenario result
     # stands (graded deterministically); only the judge column is missing.
     judge_error: str | None = None
+    # Set when post-grade briefing enrichment failed: the deterministic
+    # briefing stands and the run keeps its grade; only the LLM-written
+    # findings/recommendation are missing.
+    briefing_error: str | None = None
     # Run provenance (ADR 0013): which legs actually ran live, and whether a
     # declared-live leg silently fell back to canned. Defaults are load-
     # bearing — archived reports and the committed baseline predate these
@@ -350,10 +354,23 @@ def run_scenario(
             checkpoints=tuple(checkpointer.history(final.incident_id)),
         )
         briefing = render_briefing(final)
+        briefing_error: str | None = None
         if scenario.use_live_llm or (
             isinstance(briefing_llm, CannedLLMClient) and briefing_llm.has_remaining
         ):
-            briefing = enrich_briefing(briefing, briefing_llm, model=settings.agent_model)
+            try:
+                briefing = enrich_briefing(briefing, briefing_llm, model=settings.agent_model)
+            except (LLMError, ValidationError) as err:
+                # Enrichment is a decoration on an already-graded run, same
+                # as the judge below. Losing the briefing writer must not
+                # void the run (ADR 0007: a crashed scenario is an
+                # eval-infrastructure bug by definition) — the deterministic
+                # briefing stands. ValidationError is caught alongside
+                # LLMError deliberately even though LLMClient._parse now
+                # wraps schema violations: CannedLLMClient validates its
+                # payloads directly (llm/fakes.py) and never goes through
+                # _parse, so the raw pydantic error is still reachable.
+                briefing_error = f"briefing enrichment failed: {err}"
         judge_score: JudgeScore | None = None
         judge_error: str | None = None
         if scenario.use_live_llm or (
@@ -361,9 +378,12 @@ def run_scenario(
         ):
             try:
                 judge_score = judge_briefing(briefing, judge_llm, model=settings.judge_model)
-            except LLMError as err:
+            except (LLMError, ValidationError) as err:
                 # The judge is a soft-quality column on top of an already-
                 # graded run. Losing the judge must not void the run.
+                # ValidationError for the same canned-client reason as above;
+                # JudgeScore's ge/le bounds are not guaranteed by constrained
+                # decoding either.
                 judge_error = f"judge call failed: {err}"
     except Exception as exc:
         if tracer is not None:
@@ -388,6 +408,7 @@ def run_scenario(
         judge_score=judge_score,
         failure_class=failure_class,
         judge_error=judge_error,
+        briefing_error=briefing_error,
         # Provenance mirrors the tracer's scenario_start keys above.
         live_mcp=live_mcp_available,
         live_llm=live_llm_available,
@@ -664,10 +685,13 @@ def _print_summary(report: RunReport) -> None:
             judge_hint = f"  (judge: {outcome.judge_score.overall:.2f})"
         elif outcome.judge_error is not None:
             judge_hint = f"  (judge unavailable: {outcome.judge_error})"
+        briefing_hint = ""
+        if outcome.briefing_error is not None:
+            briefing_hint = f"  (briefing unenriched: {outcome.briefing_error})"
         class_hint = ""
         if not outcome.report.passed:
             class_hint = f"  [{outcome.failure_class}]"
-        print(f"  {mark} {outcome.scenario}{class_hint}{judge_hint}")
+        print(f"  {mark} {outcome.scenario}{class_hint}{judge_hint}{briefing_hint}")
         if not outcome.report.passed:
             for dim in outcome.report.dimensions:
                 if not dim.passed:

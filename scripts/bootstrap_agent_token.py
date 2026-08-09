@@ -71,22 +71,37 @@ def _register(client: httpx.Client, email: str, password: str) -> None:
 
 
 def _promote(container: str, email: str) -> None:
-    """Direct SQL: elevate to platform admin so the API grants service-account rights."""
+    """Direct SQL: elevate to platform admin so the API grants service-account rights.
+
+    The email reaches the statement only through psql variable binding: the
+    constant SQL is piped on stdin (``-f -``, where ``:'email'`` interpolation
+    happens — ``-c`` never interpolates variables) and the value rides
+    ``-v email=...``. Binding is the primary injection control; the
+    ``_SAFE_EMAIL`` allowlist below stays as a defense-in-depth backstop.
+    """
     if not _SAFE_EMAIL.match(email):
         raise ValueError(f"refusing to inject unsafe email into SQL: {email!r}")
     cmd = [
         "docker",
         "exec",
+        "-i",  # keep stdin open so psql can read the piped statement
         container,
         "psql",
         "-U",
         "postgres",
         "-d",
         "incident_platform",
-        "-c",
-        f"UPDATE users SET is_platform_admin=true, role='admin' WHERE email='{email}'",
+        "-v",
+        f"email={email}",
+        "-f",
+        "-",
     ]
-    subprocess.run(cmd, check=True, capture_output=True)
+    subprocess.run(
+        cmd,
+        check=True,
+        capture_output=True,
+        input=b"UPDATE users SET is_platform_admin=true, role='admin' WHERE email=:'email';",
+    )
     print(f"promoted {email} to platform admin")
 
 

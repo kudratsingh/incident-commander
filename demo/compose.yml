@@ -66,7 +66,31 @@ services:
     # Copied from the dev compose (config parity — env drift between
     # stacks is platform bug #69's class). No host port publish: the
     # agent's rpk checks run via `docker compose exec redpanda rpk`.
-    image: redpandadata/redpanda:latest
+    #
+    # Pinned by MANIFEST-LIST digest — never `:latest`, same standing
+    # decision as the platform image below. `:latest` let the broker and
+    # the redpanda-init rpk client resolve different builds on different
+    # days (rpk/broker skew), and an upstream major can move rpk flags or
+    # broker timing under the consumer-lag scenarios. The digest below is
+    # the multi-arch list (linux/amd64 + linux/arm64), NOT a per-platform
+    # digest: the demo runs native on Apple Silicon and on amd64 CI, and a
+    # single-platform digest breaks one of them at pull time.
+    #
+    # Bump procedure: pick the new release tag, resolve its manifest list
+    # with `docker buildx imagetools inspect redpandadata/redpanda:<tag>`
+    # (the top-level `Digest:` — confirm it lists both platforms), update
+    # BOTH this ref and redpanda-init's to the identical string, re-check
+    # the rpk invocations here and in redpanda-init against that version's
+    # rpk, then bring the stack up once deliberately.
+    image: redpandadata/redpanda:v26.2.1@sha256:9a47c1f8d6736f98fa2616f6f0b715c051cb0bdac1a1176e38321bf45a5b572d
+    # Named volume, mirroring the postgres rationale above. The image
+    # declares `VOLUME /var/lib/redpanda/data`, so without this the Kafka
+    # event log and every consumer-group offset lived on an anonymous
+    # volume that `docker compose down` orphans — platform CLAUDE.md puts
+    # half the truth in Kafka, and a routine stop deleted it. Wiping is
+    # `make demo-destroy` (down -v), which is gated on CONFIRM=1.
+    volumes:
+      - demo_redpandadata:/var/lib/redpanda/data
     command:
       - redpanda
       - start
@@ -84,7 +108,11 @@ services:
   redpanda-init:
     # One-shot: creates the 6-partition topics the dispatcher consumes.
     # Copied verbatim from the dev compose.
-    image: redpandadata/redpanda:latest
+    #
+    # Byte-identical to the broker's ref above, deliberately: this service
+    # is only here for its rpk client, and rpk/broker skew is exactly what
+    # the pin closes. Bump both or neither.
+    image: redpandadata/redpanda:v26.2.1@sha256:9a47c1f8d6736f98fa2616f6f0b715c051cb0bdac1a1176e38321bf45a5b572d
     depends_on:
       redpanda:
         condition: service_healthy
@@ -251,3 +279,4 @@ services:
 volumes:
   demo_pgdata:
   demo_redisdata:
+  demo_redpandadata:

@@ -139,6 +139,30 @@ def create_app(
             ) from err
 
         run = start_run(payload.model_dump(), resolved_settings, datetime.now(UTC))
+        if not resolved_settings.agent_enabled:
+            # Kill switch (docs/safety-model.md#kill-switch): record the
+            # alert as a TRIAGE-state run so nothing is lost, but spawn no
+            # investigation — the state machine never advances. Fail-open:
+            # a checkpoint failure is logged, never surfaced as a 5xx — a
+            # disabled agent must not turn webhook ingestion into delivery
+            # failures during exactly the kind of incident that got it
+            # disabled, and paging runs through the platform's oncall
+            # route regardless of this endpoint.
+            try:
+                resolved_checkpointer.write(run)
+                _log.warning(
+                    "kill switch active (AGENT_ENABLED=false): recorded incident %s "
+                    "in TRIAGE; no investigation run spawned",
+                    run.incident_id,
+                )
+            except Exception:
+                _log.exception(
+                    "kill switch active (AGENT_ENABLED=false): checkpoint write failed "
+                    "for incident %s; acknowledging delivery without a durable record",
+                    run.incident_id,
+                )
+            return IngestResponse(incident_id=run.incident_id)
+
         background_tasks.add_task(task, run, resolved_settings, resolved_checkpointer)
         return IngestResponse(incident_id=run.incident_id)
 

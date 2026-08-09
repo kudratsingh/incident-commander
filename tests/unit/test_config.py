@@ -10,6 +10,7 @@ from incident_commander.config import Settings, get_settings
 
 _ENV_VARS = (
     "ANTHROPIC_API_KEY",
+    "AGENT_ENABLED",
     "AGENT_MODEL",
     "JUDGE_MODEL",
     "PLATFORM_MCP_URL",
@@ -103,6 +104,21 @@ class TestSettings:
         valid_kwargs["budget_max_tool_calls"] = 0
         with pytest.raises(ValidationError):
             _settings(**valid_kwargs)
+
+    def test_agent_enabled_defaults_true(self, valid_kwargs: dict[str, Any]) -> None:
+        # The kill switch (docs/safety-model.md#kill-switch) must be ON by
+        # default — finding B-03: the documented env var had no field at all.
+        settings = _settings(**valid_kwargs)
+        assert settings.agent_enabled is True
+
+    def test_agent_enabled_env_false_parses(
+        self,
+        valid_kwargs: dict[str, Any],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("AGENT_ENABLED", "false")
+        settings = _settings(**valid_kwargs)
+        assert settings.agent_enabled is False
 
     def test_frozen_direct_mutation_rejected(self, valid_kwargs: dict[str, Any]) -> None:
         settings = _settings(**valid_kwargs)

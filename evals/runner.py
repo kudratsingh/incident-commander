@@ -670,6 +670,29 @@ def _print_summary(report: RunReport) -> None:
                     print(f"    - {dim.dimension.value}: {dim.detail}")
 
 
+def _canned_equivalent_knob_warning(settings: Settings) -> str | None:
+    """Preflight nudge for --live runs still on canned-equivalent probe knobs.
+
+    The config.py defaults (verify_probe_attempts=1,
+    investigate_reprobe_attempts=0) deliberately keep canned runs
+    byte-identical (ADR 0006/0009), but a live run at those values
+    reproduces both documented live failure modes the mitigations exist
+    for (S-10). A warning, not exit 3: through Settings an explicit
+    VERIFY_PROBE_ATTEMPTS=1 is indistinguishable from unset, so a hard
+    fail would ban deliberate single-probe live experiments with no
+    escape hatch.
+    """
+    if settings.verify_probe_attempts <= 1 or settings.investigate_reprobe_attempts == 0:
+        return (
+            "WARNING: live run with canned-equivalent probe knobs "
+            f"(VERIFY_PROBE_ATTEMPTS={settings.verify_probe_attempts}, "
+            f"INVESTIGATE_REPROBE_ATTEMPTS={settings.investigate_reprobe_attempts}); "
+            "the ADR 0006/0009 live mitigations are OFF — see docs/runbook.md "
+            '"Environment variable knobs"'
+        )
+    return None
+
+
 def _settings_for_mode(live: bool) -> Settings:
     """Live mode reads real env; offline uses the eval placeholder."""
     if live:
@@ -735,6 +758,11 @@ def main() -> int:
         )
         print(f"PREFLIGHT FAIL (env): invalid or missing settings — {fields}")
         return 3
+    # Live-only, immediately after the settings load and before any spend:
+    # surface canned-equivalent probe knobs even on runs that go on to be
+    # refused. Never affects exit codes.
+    if live and (msg := _canned_equivalent_knob_warning(settings)) is not None:
+        print(msg)
     mcp_token: str | None = None
     if smoke:
         if settings.platform_smoke_token is None:

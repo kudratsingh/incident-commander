@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -8,6 +9,11 @@ from pydantic import SecretStr, ValidationError
 
 from incident_commander.config import Settings, get_settings
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Every env var Settings can read (config.py), upper-cased per
+# pydantic-settings. Env vars outrank dotenv, so any of these leaking from
+# the developer's shell would silently override the file under test.
 _ENV_VARS = (
     "ANTHROPIC_API_KEY",
     "AGENT_ENABLED",
@@ -16,12 +22,19 @@ _ENV_VARS = (
     "PLATFORM_MCP_URL",
     "PLATFORM_REST_URL",
     "PLATFORM_TOKEN",
+    "PLATFORM_SMOKE_TOKEN",
     "PLATFORM_WEBHOOK_SECRET",
+    "WEBHOOK_MAX_SKEW_SECONDS",
     "DATABASE_URL",
     "BUDGET_MAX_TOOL_CALLS",
     "BUDGET_MAX_TOKENS",
     "BUDGET_MAX_SECONDS",
     "BUDGET_MAX_USD",
+    "VERIFY_PROBE_ATTEMPTS",
+    "VERIFY_PROBE_DELAY_SECONDS",
+    "INVESTIGATE_REPROBE_ATTEMPTS",
+    "INVESTIGATE_REPROBE_DELAY_SECONDS",
+    "ACTION_TOOL_TIMEOUT_SECONDS",
 )
 
 
@@ -120,6 +133,14 @@ class TestSettings:
         settings = _settings(**valid_kwargs)
         assert settings.agent_enabled is False
 
+    def test_blank_judge_model_rejected(self, valid_kwargs: dict[str, Any]) -> None:
+        # C-09: judge_model="" used to be silently accepted and only failed
+        # as an API 400 at the first judge call mid-run. min_length=1 guards
+        # the direct-construction path that env_ignore_empty cannot reach.
+        valid_kwargs["judge_model"] = ""
+        with pytest.raises(ValidationError):
+            _settings(**valid_kwargs)
+
     def test_frozen_direct_mutation_rejected(self, valid_kwargs: dict[str, Any]) -> None:
         settings = _settings(**valid_kwargs)
         with pytest.raises(ValidationError):
@@ -136,6 +157,42 @@ class TestSettings:
         settings = _settings()
         assert settings.budget_max_tool_calls == 42
         assert settings.judge_model == "claude-haiku-4-5"
+
+
+class TestEnvExampleTemplate:
+    """`cp .env.example .env` + fill secrets is the documented onboarding
+    path — the template must be copy-safe (C-09) and must ship the
+    live-only mitigation knobs (S-10)."""
+
+    def test_env_example_with_secrets_filled_parses(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The C-09 repro inverted into a regression test. Env vars outrank
+        # dotenv, so setenv stands in for "fill in the secrets"; everything
+        # else comes from the template verbatim.
+        for name, value in {
+            "ANTHROPIC_API_KEY": "sk-ant-test",
+            "JUDGE_MODEL": "claude-haiku-4-5",
+            "PLATFORM_TOKEN": "sa_test",
+            "PLATFORM_WEBHOOK_SECRET": "hmac-secret",
+            "DATABASE_URL": "postgresql://commander:commander@localhost:5432/commander",
+        }.items():
+            monkeypatch.setenv(name, value)
+        settings = Settings(_env_file=str(_REPO_ROOT / ".env.example"))  # type: ignore[call-arg]
+        # Optional entries left out (or blank) fall back to config.py
+        # defaults instead of failing int/Decimal parsing on "".
+        assert settings.budget_max_tokens == 500_000
+        assert settings.budget_max_seconds == 1_800
+        assert settings.budget_max_usd == Decimal("5.00")
+        # The shipped live-recommended probe-knob values flow through (S-10).
+        assert settings.verify_probe_attempts == 6
+        assert settings.investigate_reprobe_attempts == 1
+
+    def test_every_settings_field_documented_in_env_example(self) -> None:
+        # Every Settings field must at least appear in the template
+        # (commented-out counts) so the next live-only knob cannot be
+        # forgotten the way VERIFY_PROBE_ATTEMPTS was (S-10).
+        text = (_REPO_ROOT / ".env.example").read_text(encoding="utf-8")
+        for name in Settings.model_fields:
+            assert name.upper() in text, f"{name.upper()} missing from .env.example"
 
 
 class TestGetSettings:

@@ -24,6 +24,7 @@ from evals.runner import (
     RunReport,
     ScenarioOutcome,
     Trajectory,
+    _canned_equivalent_knob_warning,
     _classify_failure,
     _crashed_result,
     _eval_defaults,
@@ -693,10 +694,13 @@ _SETTINGS_ENV_VARS = (
     "ACTION_TOOL_TIMEOUT_SECONDS",
 )
 
-# What a verbatim `.env.example` copy gives a --live run: every field present
-# and valid, ANTHROPIC_API_KEY empty, platform URL the offline placeholder.
+# A present-but-offline env for a --live run: every field set and parseable,
+# ANTHROPIC_API_KEY an offline placeholder, platform URL the offline
+# placeholder. (A verbatim `.env.example` copy no longer parses this way:
+# env_ignore_empty treats its blank required entries as unset, so that copy
+# now dies as 'Field required' at construction — the broken-env exit-3 path.)
 _PLACEHOLDER_LIVE_ENV = {
-    "ANTHROPIC_API_KEY": "",
+    "ANTHROPIC_API_KEY": "eval",
     "JUDGE_MODEL": "eval-judge",
     "PLATFORM_MCP_URL": "https://eval.local",
     "PLATFORM_REST_URL": "https://eval.local",
@@ -877,8 +881,11 @@ class TestMainExitCodes:
     def test_live_with_placeholder_env_refuses_exit_3(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        # The executed S-09 repro: a verbatim .env.example copy under --live.
-        # At HEAD this runs the whole suite canned and returns 0.
+        # The executed S-09 repro: present-but-placeholder values under
+        # --live. At HEAD this ran the whole suite canned and returned 0.
+        # (The verbatim-.env.example-copy variant of the repro now exits 3
+        # even earlier — 'Field required' at construction, same path as
+        # test_live_with_broken_env_exits_3_not_traceback.)
         _isolate_settings_env(monkeypatch, tmp_path, _PLACEHOLDER_LIVE_ENV)
         _forbid_run_all(monkeypatch)
         monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
@@ -965,3 +972,65 @@ class TestMainExitCodes:
         assert len(run_all_calls) == 1
         # The read-scoped smoke token — not the write token — reached run_all.
         assert run_all_calls[0]["kwargs"]["mcp_token"] == "sa_smoke_read_only"
+
+
+class TestCannedEquivalentKnobWarning:
+    """S-10: a --live run whose probe knobs sit at the canned-equivalent
+    defaults reproduces both documented live failure modes (ADR 0006 verify
+    polling, ADR 0009 freshness re-probe). The runner warns — never exits —
+    because through Settings an explicit VERIFY_PROBE_ATTEMPTS=1 is
+    indistinguishable from unset, and a hard fail would ban deliberate
+    single-probe live experiments with no escape hatch."""
+
+    def test_warns_on_default_settings(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # No knob overrides: the config.py defaults are deliberately
+        # canned-equivalent (ADR 0006/0009 chose canned-default-off), so
+        # default-constructed settings must warn. delenv guards against a
+        # developer shell exporting the knobs into unset fields.
+        monkeypatch.delenv("VERIFY_PROBE_ATTEMPTS", raising=False)
+        monkeypatch.delenv("INVESTIGATE_REPROBE_ATTEMPTS", raising=False)
+        msg = _canned_equivalent_knob_warning(_test_settings())
+        assert msg is not None
+        assert "VERIFY_PROBE_ATTEMPTS" in msg
+        assert "INVESTIGATE_REPROBE_ATTEMPTS" in msg
+        assert "docs/runbook.md" in msg
+
+    def test_silent_at_live_recommended_values(self) -> None:
+        settings = _test_settings(verify_probe_attempts=6, investigate_reprobe_attempts=1)
+        assert _canned_equivalent_knob_warning(settings) is None
+
+    def test_warns_when_only_reprobe_is_canned_equivalent(self) -> None:
+        # `or`, not `and`: either knob at its canned-equivalent value leaves
+        # one of the two documented live failure modes open.
+        settings = _test_settings(verify_probe_attempts=6, investigate_reprobe_attempts=0)
+        assert _canned_equivalent_knob_warning(settings) is not None
+
+    def test_live_main_prints_warning_even_when_preflight_refuses(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # Wiring: the warning fires immediately after the settings load —
+        # before the degraded fail-fast — so even a refused --live run
+        # surfaces it. Pre-spend: run_all stays forbidden.
+        _isolate_settings_env(monkeypatch, tmp_path, _PLACEHOLDER_LIVE_ENV)
+        _forbid_run_all(monkeypatch)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        assert runner_module.main() == 3
+        assert "canned-equivalent probe knobs" in capsys.readouterr().out
+
+    def test_offline_main_never_warns(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # The knobs are live-only; a canned run forces single-probe and
+        # no-reprobe by construction, so warning offline would be noise.
+        _isolate_settings_env(monkeypatch, tmp_path)
+        run_all_calls = _stub_run_pipeline(monkeypatch)
+        monkeypatch.setattr(sys, "argv", ["evals.runner"])
+        assert runner_module.main() == 0
+        assert len(run_all_calls) == 1
+        assert "canned-equivalent probe knobs" not in capsys.readouterr().out

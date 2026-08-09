@@ -50,3 +50,100 @@ jobs:
 
       - name: make test
         run: make test
+
+  # The live contract diff. tests/integration/test_contract_snapshot.py skips
+  # itself unless PLATFORM_MCP_URL/PLATFORM_TOKEN are set, so until this job
+  # existed the "CI runs the contract diff" claim in CLAUDE.md and in that
+  # test's docstring was aspirational and platform drift was caught only by
+  # hand (S-15). Unconditional (no paths filter): CLAUDE.md lists `contract`
+  # among the CI checks, and drift originates on the platform side, so a
+  # filter on this repo's files would miss exactly the case that matters.
+  contract:
+    name: contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3.2.4
+        with:
+          version: "0.11.28"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+
+      # No docker/login-action and no registry secret: ghcr.io/kudratsingh/
+      # incident-platform is a public package, so an anonymous ghcr.io pull
+      # token resolves the pinned digest. demo/compose.yml is used AS-IS —
+      # the v0.4.9 digest and nothing else. Never `:latest` and never a
+      # locally built master image: master serves 27 tools and would red-flag
+      # seed_dlq_messages against the committed 26-tool snapshot by design,
+      # until the post-campaign v0.5.0 pin-bump PR moves the pin.
+      - name: Boot the pinned demo stack
+        run: |
+          docker compose -f demo/compose.yml up -d --wait \
+            postgres redis redpanda platform api
+
+      - name: Mint a platform service-account token
+        run: |
+          # `up --wait` clears the compose healthchecks (start_period 30s), but
+          # the platform service seeds the eval fixture pack at boot
+          # (SEED_EVAL_FIXTURES=true), which adds startup latency on top. Give
+          # the REST app on :8000 — which bootstrap registers and logs in
+          # against — three more chances before giving up.
+          for attempt in 1 2 3; do
+            if curl -fsS http://localhost:8000/healthz >/dev/null; then
+              break
+            fi
+            echo "REST API not ready yet (attempt ${attempt}/3); sleeping 10s"
+            sleep 10
+          done
+          curl -fsS http://localhost:8000/healthz >/dev/null
+
+          # demo/compose.yml declares `name: incident-commander-demo`, so the
+          # postgres container is incident-commander-demo-postgres-1. The
+          # script's default names the platform's OWN dev stack, which does
+          # not exist here.
+          out="$(uv run python scripts/bootstrap_agent_token.py \
+            --postgres-container incident-commander-demo-postgres-1)"
+
+          # The script prints BOTH tokens in plaintext. Register the masks
+          # BEFORE anything echoes its output: the stack dies with the job but
+          # run logs are forever.
+          token="$(printf '%s\n' "$out" | sed -n 's/^PLATFORM_TOKEN=//p')"
+          smoke="$(printf '%s\n' "$out" | sed -n 's/^PLATFORM_SMOKE_TOKEN=//p')"
+          if [ -z "$token" ]; then
+            echo "bootstrap_agent_token.py printed no PLATFORM_TOKEN line"
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          if [ -n "$smoke" ]; then
+            echo "::add-mask::$smoke"
+          fi
+          printf '%s\n' "$out"
+
+          # Masked above, so it is redacted anywhere it could resurface.
+          echo "PLATFORM_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: make test-contract
+        # PLATFORM_TOKEN arrives from the masked GITHUB_ENV write above.
+        env:
+          PLATFORM_MCP_URL: http://localhost:8001/mcp
+        run: make test-contract
+
+      - name: Dump stack state on failure
+        if: failure()
+        run: |
+          docker compose -f demo/compose.yml ps
+          docker compose -f demo/compose.yml logs --tail=200 platform api
+
+      # Tearing the stack down on an ephemeral GitHub runner is NOT the
+      # `make demo-down` discipline the runbook guards: there is no operator
+      # stack here and no long-lived volume to orphan, just a VM about to be
+      # destroyed. Leaving containers up would only slow the runner's cleanup.
+      - name: Tear down the demo stack
+        if: always()
+        run: docker compose -f demo/compose.yml down

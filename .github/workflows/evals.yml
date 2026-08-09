@@ -6,6 +6,9 @@ on:
     paths:
       - "src/incident_commander/agent/**"
       - "src/incident_commander/tools/**"
+      - "src/incident_commander/llm/**"
+      - "src/incident_commander/config.py"
+      - "contracts/platform-tools.snapshot.json"
       - "evals/graders/**"
       - "evals/runner.py"
       - "evals/scenarios/**"

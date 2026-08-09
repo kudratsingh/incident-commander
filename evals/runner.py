@@ -387,7 +387,10 @@ def _classify_failure(report: GradeReport, final: RunState | None) -> str:
     failing = {d.dimension for d in report.dimensions if not d.passed}
     evidence = final.evidence if final is not None else ()
     summaries = [e.result_summary for e in evidence]
-    if any("MCPError" in s or "LLM" in s and "invalid" in s for s in summaries):
+    if any(
+        ("MCP error" in s) or ("MCPError" in s) or ("LLM" in s and "invalid" in s)
+        for s in summaries
+    ):
         return "transport"
     if any("is_error=True" in s for s in summaries):
         return "shared-env"

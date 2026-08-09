@@ -510,6 +510,26 @@ class TestFailureClassification:
         got = _classify_failure(self._report({GradeDimension.OUTCOME}), final)
         assert got == "shared-env"
 
+    def test_real_mcp_transport_summary_is_transport(self) -> None:
+        # Summary built exactly as investigation.py's tool-error escalation
+        # builds it — from str() of a real MCPError, which renders
+        # "MCP error <code>: <message>" and never the class name (A-07).
+        err = MCPError(-32000, "connection reset by peer")
+        final = self._final(("get_consumer_lag", f"tool error (get_consumer_lag): {err}"))
+        got = _classify_failure(self._report({GradeDimension.OUTCOME}), final)
+        assert got == "transport"
+
+    def test_transport_beats_shared_env(self) -> None:
+        # Priority order is deliberate: transport before shared-env, per the
+        # debugging discipline in docs/lessons/live-eval-noise-sources.md.
+        err = MCPError(-32000, "connection reset by peer")
+        final = self._final(
+            ("get_consumer_lag", f"tool error (get_consumer_lag): {err}"),
+            ("get_redis_health", "tool reported is_error=True (get_redis_health)"),
+        )
+        got = _classify_failure(self._report({GradeDimension.OUTCOME}), final)
+        assert got == "transport"
+
     def test_not_verified_with_correct_action_is_eventual_consistency(self) -> None:
         final = self._final(
             ("pause_dag", '{"accepted": true}'),

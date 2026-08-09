@@ -108,12 +108,13 @@ Written after the Phase-6 seven-run live eval that produced the five-bucket nois
 make demo
 make bootstrap-token
 
-# Probe knobs for the live path. eval-live sets EVAL_TRACE_DIR inline,
-# but exporting it here means every direct `evals.runner` invocation
-# also gets traced.
-export EVAL_TRACE_DIR=evals/traces \
-       VERIFY_PROBE_ATTEMPTS=6 \
-       VERIFY_PROBE_DELAY_SECONDS=20
+# Tracing. eval-live sets EVAL_TRACE_DIR inline, but exporting it here
+# means every direct `evals.runner` invocation also gets traced. The live
+# probe knobs (VERIFY_PROBE_ATTEMPTS=6 etc.) no longer need exporting: a
+# .env copied from .env.example ships them, and a --live run still at the
+# canned-equivalent values prints a preflight warning (see the knobs table
+# below).
+export EVAL_TRACE_DIR=evals/traces
 
 # 1) Smoke pass FIRST — read-only scenarios catch any wire-shape
 #    surprise from the current pin before you spend on a Tier-1
@@ -153,6 +154,8 @@ Environment variable knobs for the live path (see [ADR 0006](ADR/0006-verificati
 | `VERIFY_PROBE_DELAY_SECONDS` | 15 | 20 | Delay between polling attempts. Size to the slowest verify probe's freshness. |
 | `INVESTIGATE_REPROBE_ATTEMPTS` | 0 | 1 | Investigation-side freshness re-probe ([ADR 0009](ADR/0009-investigation-freshness-reprobe.md)): when a cached read kills a fixable hypothesis at ≥0.7, re-read it fresh before accepting. Default 0 keeps canned runs byte-identical. |
 | `INVESTIGATE_REPROBE_DELAY_SECONDS` | 20 | 20+ | Delay before the freshness re-read. Size to the cached tool's declared staleness window (lag cache: 60s). |
+
+`.env.example` now ships the live-recommended values for these knobs uncommented (canned/offline runs are unaffected — the runner forces single-probe and no-reprobe whenever the platform is a placeholder), and a `--live` run that still has them at canned-equivalent values prints a preflight warning. This table stays the source of record.
 
 All Tier-1 remediation scenarios now self-seed via `chaos_setup:` in their YAML — no separate `make chaos-*` step needed for the live pass.
 

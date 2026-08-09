@@ -17,6 +17,12 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         frozen=True,
+        # A blank env/dotenv entry (VAR=) means "unset", not "empty string":
+        # optional fields fall back to their defaults instead of failing
+        # int/Decimal parsing on "", and required fields raise a clear
+        # "Field required" at construction instead of silently accepting ""
+        # (C-09 — `cp .env.example .env` + fill secrets must just work).
+        env_ignore_empty=True,
     )
 
     # Anthropic
@@ -24,7 +30,11 @@ class Settings(BaseSettings):
 
     # Models. Verify strings against docs.claude.com before changing defaults.
     agent_model: str = "claude-sonnet-4-6"
-    judge_model: str
+    # Required with no default (pinned separately for eval stability, per
+    # CLAUDE.md). min_length guards direct construction — Settings(
+    # judge_model="") — which env_ignore_empty cannot reach; an empty judge
+    # id otherwise only failed as an API 400 at the first judge call mid-run.
+    judge_model: str = Field(min_length=1)
 
     # Platform. MCP and REST are separate URLs per platform ADR-0006.
     platform_mcp_url: AnyHttpUrl

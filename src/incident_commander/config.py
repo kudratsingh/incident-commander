@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     # up to 2026-08-07 actually held write scope. Config beats inheritance.
     platform_smoke_token: SecretStr | None = None
     platform_webhook_secret: SecretStr
+    # Webhook ingress replay guard (ADR 0014): reject deliveries whose
+    # X-Alert-Timestamp (epoch ms, platform alerts.py) deviates from local
+    # time by more than this many seconds. Also bounds the window in which
+    # an identical redelivery is suppressed instead of spawning a run.
+    webhook_max_skew_seconds: int = Field(default=300, ge=1)
 
     # Agent-owned Postgres.
     database_url: PostgresDsn

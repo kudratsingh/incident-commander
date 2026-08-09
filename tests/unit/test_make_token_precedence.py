@@ -56,3 +56,31 @@ def test_runner_smoke_flag_selects_the_smoke_principal() -> None:
     assert "platform_smoke_token" in runner
     assert "assert_read_only_principal" in runner
     assert "assert_no_tier1_successes" in runner
+
+
+def test_only_guard_refuses_gate_and_bless_at_parse_time() -> None:
+    """A-03: `make eval-reg ONLY=x` / `make baseline ONLY=x` must refuse
+    BEFORE the `eval` prerequisite could overwrite latest.json with a
+    filtered report. That forces a parse-time conditional that swaps in a
+    prerequisite-free $(error) rule — a recipe-line check would fire only
+    after the filtered eval already ran (the study/runs.jsonl artifact-loss
+    pattern, dressed up as a fix).
+
+    Pinned on the Makefile TEXT so a red implementation can never launch an
+    eval run from inside pytest (ADR 0011 freeze). The manual freeze-safe
+    probe is `make -n <target> ONLY=x`: guard present → dies at parse time,
+    exit 2, no recipe output; guard absent → exit 0 (-n executes nothing
+    either way).
+    """
+    makefile = (_REPO / "Makefile").read_text()
+    for target in ("eval-reg", "baseline"):
+        assert f"ifdef ONLY\n{target}:\n\t$(error " in makefile, (
+            f"the {target} target must be wrapped in a parse-time `ifdef ONLY` "
+            "guard whose ONLY-branch rule has NO prerequisites and a $(error) "
+            "recipe — a recipe-line echo/exit would run after the eval "
+            "prerequisite already overwrote latest.json with a filtered report"
+        )
+        assert f"else\n{target}: eval" in makefile, (
+            f"the unfiltered {target} rule must keep depending on eval in the "
+            "else-branch of the ONLY guard"
+        )

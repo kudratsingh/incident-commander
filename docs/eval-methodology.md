@@ -86,7 +86,17 @@ The `evals/reports/human/*.txt` files are the fastest path to understand one run
 
 ## Regression gating
 
-`make eval-reg` runs the suite offline and compares against `evals/reports/baseline.json`. Behavior-changing PRs that touch prompts, tools, policy tiers, or the pinned model must pass. When a scenario's expectation legitimately shifts (new tool, new prompt, new grader dim), `make baseline` regenerates the baseline — commit the diff so the reviewer sees the metric movement.
+`make eval-reg` runs the full suite offline and compares against `evals/reports/baseline.json`. Behavior-changing PRs that touch prompts, tools, policy tiers, or the pinned model must pass. When a scenario's expectation legitimately shifts (new tool, new prompt, new grader dim), `make baseline` regenerates the baseline — commit the diff so the reviewer sees the metric movement.
+
+The gate accepts **full-suite reports only** (A-03):
+
+- **Regressions** (baseline pass → latest fail) fail the gate: exit 1.
+- **Dropped scenarios** (in baseline, missing from latest) also fail it: exit 1. Coverage loss is not a pass — genuinely removing a scenario means re-blessing via `make baseline`, deliberately.
+- **A filtered report is refused, not diffed**: a `latest.json` whose `only_patterns` is non-empty (produced under `--only`) exits 2 — it is not a comparable input, and the missing scenarios must not read as green. `make eval-reg ONLY=x` and `make baseline ONLY=x` additionally refuse at Makefile parse time, before the `eval` prerequisite could overwrite `latest.json` with a filtered report.
+- **Improvements and new scenarios** never fail the gate (noted for transparency).
+- **Provenance mismatch warns, never gates** (S-14): when `degraded_count` differs between baseline and latest — or is unknown (`None`) on either side, as with the pre-schema committed baseline — the gate prints a `PROVENANCE` line and continues. A pass/fail delta across a canned/live divergence may not be agent change; hard-gating on it is deferred until after the next baseline bless ([ADR 0013](ADR/0013-run-provenance-is-part-of-the-eval-result.md)).
+
+Gate exit codes are the regression-gate slice of the ADR 0013 contract: 0 = clean full-suite comparison; 1 = gate failed (regression or dropped scenario); 2 = not a comparable input (missing report, filtered report).
 
 ## When live and offline disagree
 

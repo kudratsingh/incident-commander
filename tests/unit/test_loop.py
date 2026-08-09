@@ -97,6 +97,86 @@ class TestRunToCompletion:
         with pytest.raises(MaxStepsExceededError):
             run_to_completion(run, clock=_make_clock(now), max_steps=1)
 
+    def test_wall_meter_accrues_without_tripping(self, run_state: RunState, now: datetime) -> None:
+        """B-01: the wall meter has a writer at all (it read 0.0 forever)."""
+        run = _with_alert(run_state, {"source": "billing", "severity": "info"})
+        clock = _make_clock(now + timedelta(seconds=5), step_seconds=5.0)
+        result = run_to_completion(run, clock=clock)
+        assert result.state is IncidentState.ESCALATED
+        assert result.budget.wall_seconds_used == 5.0
+
+    def test_slow_clock_trips_the_wall_budget_and_escalates(
+        self, budget: BudgetLedger, now: datetime
+    ) -> None:
+        """The B-01 repro shape: 61s/step against a 60s cap must escalate.
+
+        At HEAD the meter stayed 0.0, the wall dimension never tripped, and
+        the run walked on into the next transition instead.
+        """
+        run = RunState(
+            incident_id=uuid4(),
+            state=IncidentState.TRIAGE,
+            alert={"source": "billing", "severity": "high"},
+            budget=budget.model_copy(update={"max_wall_seconds": 60}),
+            created_at=now,
+            updated_at=now,
+        )
+        result = run_to_completion(run, clock=_make_clock(now, step_seconds=61.0))
+        assert result.state is IncidentState.ESCALATED
+        assert result.budget.wall_seconds_used >= 60
+        reasons = [entry.arguments.get("reason") for entry in result.evidence]
+        assert "budget exhausted" in reasons
+        assert any(e.result_summary == "escalated: budget exhausted" for e in result.evidence)
+
+    def test_wall_meter_survives_crash_resume(self, budget: BudgetLedger, now: datetime) -> None:
+        """A ledger rebuilt from a checkpoint reports the full elapsed wall.
+
+        The anchor is ``created_at``, not a loop-local start stamp: a
+        resumed run must not hand itself a fresh wall budget (ADR 0015).
+        """
+        started = now - timedelta(hours=1)
+        crashed = RunState(
+            incident_id=uuid4(),
+            state=IncidentState.TRIAGE,
+            alert={"source": "billing", "severity": "high"},
+            budget=budget,
+            created_at=started,
+            updated_at=started,
+        )
+        ckpt = InMemoryCheckpointer()
+        ckpt.write(crashed)
+        resumed = ckpt.load(crashed.incident_id)
+        assert resumed is not None
+        assert resumed.budget.wall_seconds_used == 0.0
+
+        def clock() -> datetime:
+            return now
+
+        result = run_to_completion(resumed, clock=clock)
+        assert result.budget.wall_seconds_used == 3600.0
+        assert result.state is IncidentState.ESCALATED
+        reasons = [entry.arguments.get("reason") for entry in result.evidence]
+        assert "budget exhausted" in reasons
+
+    def test_wall_meter_is_monotone_under_a_backwards_clock(
+        self, budget: BudgetLedger, now: datetime
+    ) -> None:
+        """A clock that jumps backwards must not refund wall time."""
+        run = RunState(
+            incident_id=uuid4(),
+            state=IncidentState.TRIAGE,
+            alert={"source": "billing", "severity": "info"},
+            budget=budget.model_copy(update={"wall_seconds_used": 42.0}),
+            created_at=now,
+            updated_at=now,
+        )
+
+        def backwards() -> datetime:
+            return now - timedelta(seconds=100)
+
+        result = run_to_completion(run, clock=backwards)
+        assert result.budget.wall_seconds_used == 42.0
+
     def test_transition_stamps_use_clock(self, run_state: RunState, now: datetime) -> None:
         later = now + timedelta(hours=1)
 
@@ -104,6 +184,13 @@ class TestRunToCompletion:
             return later
 
         run = _with_alert(run_state, {"source": "billing", "severity": "info"})
+        # The clock jumps an hour, which the wall meter now sees as elapsed
+        # time against ``created_at``. Widen the wall cap so this test keeps
+        # exercising the triage transition's stamping rather than the budget
+        # escalation path.
+        run = run.model_copy(
+            update={"budget": run.budget.model_copy(update={"max_wall_seconds": 7_200})}
+        )
         ckpt = InMemoryCheckpointer()
         result = run_to_completion(run, clock=fixed_clock, checkpointer=ckpt)
         history = ckpt.history(result.incident_id)

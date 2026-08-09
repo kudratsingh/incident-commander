@@ -30,8 +30,10 @@ _STRUCTURED_TOOL_NAME: Final[str] = "record_output"
 # x 600s per logical call. The 120s read bound leaves room for a slow
 # structured generation at max_tokens=4096 (60s is too tight for that);
 # worst case per logical call is 3 attempts x ~120s ~= 6 min, well inside
-# budget_max_seconds=1800. The bound matters because wall_seconds_used is
-# never accrued today (B-01), so nothing else can interrupt a stalled call.
+# budget_max_seconds=1800. The bound still matters even though
+# wall_seconds_used now accrues (ADR 0015): the wall meter is read
+# between transitions, so a call stalled inside one is only noticed at
+# the next loop step — this timeout is what makes that step arrive.
 _SDK_MAX_RETRIES: Final[int] = 0
 _SDK_TIMEOUT: Final[httpx.Timeout] = httpx.Timeout(120.0, connect=5.0)
 # Preflight is one models.list call — it should fail on a dead network in

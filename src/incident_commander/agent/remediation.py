@@ -28,6 +28,7 @@ from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from incident_commander.agent.accounting import accrue_llm_usage
 from incident_commander.agent.hypothesis import ReadToolName
 from incident_commander.agent.state import (
     EvidenceEntry,
@@ -223,10 +224,7 @@ def make_llm_plan(
                 "be copied verbatim from the alert or tool results.",
             )
 
-        tokens = result.input_tokens + result.output_tokens
-        new_budget = run_state.budget.model_copy(
-            update={"tokens_used": run_state.budget.tokens_used + tokens}
-        )
+        new_budget = accrue_llm_usage(run_state.budget, result, model)
         entry = EvidenceEntry(
             tool_name="_planner_plan",
             arguments={"target_hypothesis": plan.target_hypothesis},
@@ -599,15 +597,11 @@ def make_llm_verify(
                 result_summary=f"{judgment.verdict}: {judgment.reasoning}",
                 timestamp=at_attempt,
             )
-            new_budget = run_state.budget.model_copy(
-                update={
-                    "tool_calls_used": run_state.budget.tool_calls_used + 1,
-                    "tokens_used": (
-                        run_state.budget.tokens_used
-                        + judgment_result.input_tokens
-                        + judgment_result.output_tokens
-                    ),
-                }
+            # Tokens + USD from the judge call, then the verify probe's own
+            # tool call. Cache counters and dollars accrue per poll attempt,
+            # not once per VERIFYING entry (ADR 0015).
+            new_budget = accrue_llm_usage(run_state.budget, judgment_result, model).model_copy(
+                update={"tool_calls_used": run_state.budget.tool_calls_used + 1}
             )
             # Accumulate evidence + budget across polling attempts so an
             # eventual escalation carries the full probe history.

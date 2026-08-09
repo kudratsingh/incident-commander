@@ -19,6 +19,7 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ValidationError
 
+from incident_commander.agent.accounting import accrue_llm_usage
 from incident_commander.agent.hypothesis import (
     Hypothesis,
     HypothesisCategory,
@@ -28,7 +29,6 @@ from incident_commander.agent.hypothesis import (
     StopAction,
 )
 from incident_commander.agent.state import (
-    BudgetLedger,
     EvidenceEntry,
     IncidentState,
     RunState,
@@ -281,7 +281,7 @@ def _plan_next_step(
         output_model=InvestigationStep,
         model=model,
     )
-    new_budget = _add_tokens(run_state.budget, result.input_tokens + result.output_tokens)
+    new_budget = accrue_llm_usage(run_state.budget, result, model)
     updated = run_state.model_copy(
         update={
             "budget": new_budget,
@@ -477,10 +477,6 @@ def _handoff_to_planning(run_state: RunState, at: datetime, reason: str) -> RunS
             "evidence": (*run_state.evidence, entry),
         }
     )
-
-
-def _add_tokens(budget: BudgetLedger, tokens: int) -> BudgetLedger:
-    return budget.model_copy(update={"tokens_used": budget.tokens_used + tokens})
 
 
 def _format_planner_context(run_state: RunState) -> str:

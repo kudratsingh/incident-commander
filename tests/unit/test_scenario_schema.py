@@ -85,6 +85,39 @@ class TestScenario:
         assert scenario.chaos_setup.arguments["latency_ms"] == 2000
 
 
+class TestScenarioExpectation:
+    def test_singular_expected_action_tool_is_rejected(self) -> None:
+        """A-16: the stale documented name is not an alias — it fails the load.
+
+        ``ScenarioExpectation`` is ``extra="forbid"``, so a scenario author who
+        copies the singular ``expected_action_tool`` out of a doc gets a load
+        failure rather than a silently ungraded ACTION dimension. The correct
+        field is ``expected_action_tools``, a list of equivalent Tier-1 tools.
+        """
+        with pytest.raises(ValidationError, match="expected_action_tool"):
+            ScenarioExpectation.model_validate(
+                {
+                    "name": "s",
+                    "expected_terminal_state": "resolved",
+                    "expected_action_tool": "restart_consumer_group",
+                }
+            )
+
+    def test_plural_expected_action_tools_is_the_supported_name(self) -> None:
+        """The counterpart to the rejection: the plural loads as a tuple."""
+        expectation = ScenarioExpectation.model_validate(
+            {
+                "name": "s",
+                "expected_terminal_state": "resolved",
+                "expected_action_tools": ["replay_dlq_by_ids", "replay_dlq_by_category"],
+            }
+        )
+        assert expectation.expected_action_tools == (
+            "replay_dlq_by_ids",
+            "replay_dlq_by_category",
+        )
+
+
 class TestChaosHook:
     def test_empty_name_rejected(self) -> None:
         with pytest.raises(ValidationError):

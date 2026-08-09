@@ -19,3 +19,4 @@ validating?"
 
 | date | PR | WO id(s) | surface touched | what changed | post-campaign observable |
 |---|---|---|---|---|---|
+| 2026-08-09 | #94 | WO-C5-04, WO-C5-05 | LLM boundary: InvestigationStep schema, probe execution path, evidence-value corpus | hypothesis ranking normalized at the schema boundary (confidence-descending, stable); probes tier-checked at runtime (non-read tool → escalate); corpus drops LLM-authored arguments and same-call result echoes | post-campaign live run shows no remediate/escalate gate mis-ordering and no evidence-sourcing false accept/reject; offline canned suite stays 37/37 (canned rankings are pre-sorted, so offline outcomes are unchanged — `test_shipped_scenarios_pass`) |

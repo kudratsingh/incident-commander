@@ -9,8 +9,12 @@ is a schema hook, not a live path.
 
 from __future__ import annotations
 
+import typing
+
 import pytest
 
+from incident_commander.agent.hypothesis import ReadToolName
+from incident_commander.agent.remediation import Tier1ToolName
 from incident_commander.tools.policies import (
     Tier,
     ensure_covered,
@@ -75,6 +79,26 @@ class TestEnsureCovered:
         # If someone adds a tool to the registry without touching policies,
         # this fails — that's the whole point.
         ensure_covered()
+
+
+class TestLiteralRegistryDrift:
+    """The hand-listed Literals must track the tier map (B-06).
+
+    ``ReadToolName`` (hypothesis.py) and ``Tier1ToolName`` (remediation.py)
+    are the schema half of the LLM-boundary guard: Pydantic needs literal
+    strings at import time, so they cannot be generated from the registry.
+    These are the drift tripwires both files' comments promise — they fail
+    the day a tool is added, removed, or reclassified in ``policies.py``
+    without regenerating the Literal.
+    """
+
+    def test_read_tool_name_literal_matches_read_tier(self) -> None:
+        assert set(typing.get_args(ReadToolName)) == tools_at_or_below(Tier.READ)
+
+    def test_tier1_tool_name_literal_matches_tier1_slice(self) -> None:
+        assert set(typing.get_args(Tier1ToolName)) == tools_at_or_below(
+            Tier.TIER_1
+        ) - tools_at_or_below(Tier.READ)
 
 
 class TestResourceArgFieldsCoverage:

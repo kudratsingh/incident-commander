@@ -115,11 +115,15 @@ ReadToolName = Literal[
 ]
 """Union of every registry tool with ``Tier.READ`` classification.
 
-Kept hand-listed (and asserted to match the registry via a unit test)
-because Pydantic's Literal type checker needs literal string args at
-import time — a dynamic expression would satisfy Python but not the
-JSON schema generator. Adding a new read tool = one line here + one
-line in the registry + the test drift check catches any miss."""
+Kept hand-listed (and asserted to match the registry by
+``tests/unit/test_policies.py::TestLiteralRegistryDrift::
+test_read_tool_name_literal_matches_read_tier``) because Pydantic's
+Literal type checker needs literal string args at import time — a
+dynamic expression would satisfy Python but not the JSON schema
+generator. Adding a new read tool = one line here + one line in the
+registry + the drift test catches any miss. The Literal is the schema
+half of the guard only; ``_execute_probe`` re-checks ``tier_of`` at
+runtime for the reclassification case the Literal cannot see."""
 
 
 class ProbeAction(BaseModel):
@@ -165,8 +169,32 @@ class InvestigationStep(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    hypotheses: tuple[Hypothesis, ...] = Field(min_length=1)
+    hypotheses: tuple[Hypothesis, ...] = Field(
+        min_length=1,
+        description=(
+            "Candidate root causes. List them most likely first; ordering "
+            "is normalized after validation — entries are re-sorted by "
+            "confidence descending (stable: equal-confidence entries keep "
+            "their listed order), so index 0 is always the top hypothesis."
+        ),
+    )
     next_action: NextAction
+
+    @field_validator("hypotheses", mode="after")
+    @classmethod
+    def _rank_by_confidence(cls, value: tuple[Hypothesis, ...]) -> tuple[Hypothesis, ...]:
+        """Normalize ranking at the schema boundary (B-07).
+
+        The 'ordered most likely first' contract used to live only in
+        prompt prose, yet three gates read index 0 as the top pick: the
+        remediate gate (investigation.py), the ADR-0009 reprobe prior,
+        and the remediation planner's target. Sorting here — once, where
+        LLM output enters the system — makes those readers correct for
+        any order the model emits. ``sorted`` is stable, so ties preserve
+        the model's stated order (asserted by
+        tests/unit/test_hypothesis.py::TestInvestigationStepOrdering).
+        """
+        return tuple(sorted(value, key=lambda h: h.confidence, reverse=True))
 
     @field_validator("next_action", mode="before")
     @classmethod

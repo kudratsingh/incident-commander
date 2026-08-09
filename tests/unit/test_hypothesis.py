@@ -233,3 +233,50 @@ class TestInvestigationStep:
         )
         assert isinstance(step.next_action, StopAction)
         assert step.next_action.reason == "done"
+
+
+class TestInvestigationStepOrdering:
+    """B-07: ranking is normalized at the schema boundary.
+
+    Three gates read ``hypotheses[0]`` as the top pick (remediate gate,
+    ADR-0009 reprobe prior, remediation-planner target). The validator
+    guarantees index 0 is the highest-confidence hypothesis regardless
+    of the order the model listed them in.
+    """
+
+    def _hyp(self, category: str, name: str, confidence: float) -> dict[str, object]:
+        return {
+            "category": category,
+            "name": name,
+            "confidence": confidence,
+            "reasoning": "r",
+        }
+
+    def test_unordered_input_sorted_confidence_descending(self) -> None:
+        step = InvestigationStep.model_validate(
+            {
+                "hypotheses": [
+                    self._hyp("consumer_saturation", "saturation", 0.5),
+                    self._hyp("deploy_regression", "regression", 0.9),
+                ],
+                "next_action": {"kind": "stop", "reason": "x"},
+            }
+        )
+        assert step.hypotheses[0].confidence == 0.9
+        assert step.hypotheses[0].category is HypothesisCategory.DEPLOY_REGRESSION
+        assert [h.confidence for h in step.hypotheses] == [0.9, 0.5]
+
+    def test_equal_confidence_preserves_model_order(self) -> None:
+        # Stability contract: ties keep the model's stated order. A future
+        # "cleanup" to a non-stable sorting scheme must fail here.
+        step = InvestigationStep.model_validate(
+            {
+                "hypotheses": [
+                    self._hyp("stale_cache", "first-tie", 0.7),
+                    self._hyp("poison_message", "top", 0.9),
+                    self._hyp("unknown", "second-tie", 0.7),
+                ],
+                "next_action": {"kind": "stop", "reason": "x"},
+            }
+        )
+        assert [h.name for h in step.hypotheses] == ["top", "first-tie", "second-tie"]

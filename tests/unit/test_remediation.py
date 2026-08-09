@@ -663,3 +663,111 @@ class TestEvidenceSourcedArgs:
         )
         result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(run, _now())
         assert result.state is IncidentState.REMEDIATING
+
+    # -- B-08: probe-argument laundering ---------------------------------
+    # get_consumer_lag accepts ANY group name and returns lag:null for
+    # unknown ones (platform: backend/app/mcp/tools/consumer_lag.py), and
+    # its output echoes consumer_group back (cache_key embeds it). A
+    # hallucinated name used once as a probe argument must not whitelist
+    # itself for the Tier-1 action — neither via argument ingestion nor
+    # via the platform's echo of it in the result.
+
+    _HALLUCINATED_GROUP = "worker-dispatchr"  # note the missing 'e'
+
+    def _laundering_run(self, alert: dict[str, Any]) -> RunState:
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.CONSUMER_SATURATION,
+                    name="consumer-saturation",
+                    confidence=0.85,
+                    reasoning="r",
+                ),
+            ),
+            evidence=(
+                EvidenceEntry(
+                    tool_name="get_consumer_lag",
+                    arguments={"consumer_group": self._HALLUCINATED_GROUP},
+                    result_summary=(
+                        '{"consumer_group":"worker-dispatchr","lag":null,'
+                        '"cache_key":"kafka:consumer_lag:worker-dispatchr"}'
+                    ),
+                    timestamp=_now(),
+                ),
+            ),
+        )
+        return run.model_copy(update={"alert": alert})
+
+    def _laundering_plan(self) -> dict[str, Any]:
+        return _plan_dict(
+            action_arguments={"consumer_group": self._HALLUCINATED_GROUP},
+            verify_arguments={"consumer_group": self._HALLUCINATED_GROUP},
+        )
+
+    def test_probe_argument_laundering_rejected(self) -> None:
+        # Alert does NOT name the group; its only occurrences in evidence
+        # are the LLM-authored probe argument and the same call's echo.
+        run = self._laundering_run({"source": "platform.kafka", "severity": "high"})
+        result = make_llm_plan(CannedLLMClient([self._laundering_plan()]), model=_MODEL)(
+            run, _now()
+        )
+        assert result.state is IncidentState.ESCALATED
+        reasons = " ".join(e.result_summary for e in result.evidence)
+        assert "not evidence-sourced" in reasons
+        assert self._HALLUCINATED_GROUP in reasons
+
+    def test_probed_group_named_by_alert_passes(self) -> None:
+        # Positive control: identical probe flow, but the alert names the
+        # group — the alert payload remains a corpus source.
+        run = self._laundering_run(
+            {
+                "source": "platform.kafka",
+                "severity": "high",
+                "consumer_group": self._HALLUCINATED_GROUP,
+            }
+        )
+        result = make_llm_plan(CannedLLMClient([self._laundering_plan()]), model=_MODEL)(
+            run, _now()
+        )
+        assert result.state is IncidentState.REMEDIATING
+
+    def test_result_discovered_id_survives_later_argument_echo(self) -> None:
+        # Echo exclusion is per-entry, not global: a job id the platform
+        # produced in one result stays corpus-eligible even after a later
+        # probe echoes it back as an argument.
+        discovered = "44444444-4444-4444-4444-444444444444"
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.POISON_MESSAGE,
+                    name="poison",
+                    confidence=0.9,
+                    reasoning="r",
+                ),
+            ),
+            evidence=(
+                EvidenceEntry(
+                    tool_name="list_dlq_messages",
+                    arguments={},
+                    result_summary=f'{{"items": [{{"id": "{discovered}"}}]}}',
+                    timestamp=_now(),
+                ),
+                EvidenceEntry(
+                    tool_name="get_dag_state",
+                    arguments={"job_id": discovered},
+                    result_summary=f'{{"seed_id": "{discovered}"}}',
+                    timestamp=_now(),
+                ),
+            ),
+        )
+        plan = _plan_dict(
+            target_hypothesis="poison",
+            action_tool="replay_dlq_by_ids",
+            action_arguments={"job_ids": [discovered]},
+            verify_tool="list_dlq_messages",
+            verify_arguments={},
+        )
+        result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(run, _now())
+        assert result.state is IncidentState.REMEDIATING

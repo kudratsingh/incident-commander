@@ -83,7 +83,10 @@ class GetDagStateOutput(BaseModel):
     # fields the output model would strip `paused` before the verify judge
     # ever saw it.
     model_config = ConfigDict(extra="ignore", frozen=True)
-    seed_id: str
+    # v0.5.0 renamed the platform-side field, so its derived JSON-Schema title
+    # became "Root Job Id". The wire name `seed_id` is unchanged; only the
+    # title moved, and the output-leg snapshot test compares titles strictly.
+    seed_id: str = Field(title="Root Job Id")
     nodes: list[DagNode]
     edges: list[DagEdge]
     paused: bool

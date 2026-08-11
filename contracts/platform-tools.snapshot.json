@@ -181,13 +181,13 @@
     },
     {
       "name": "get_consumer_lag",
-      "description": "Read the last-emitted Kafka consumer lag for one of the platform's consumer groups. Advertised groups include worker-dispatcher (real platform group) plus 7 eval-seed groups (billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer).\nFRESHNESS: cached in Redis, refreshed by a background loop every ~60s with a 90s TTL — never a live Kafka query. Measured behaviour: after a fault begins, the cached value catches up within ~60s; after a recovery it keeps reading the old high value for ~30s before dropping. Treat any single reading as up to a minute stale, in either direction.\nA STALLED CONSUMER STILL REPORTS LAG. A consumer that has stopped processing keeps its Kafka assignment, so this metric goes on reporting its real and climbing lag rather than going null — rising lag is the expected signal of a stall, not absence of data.\nNULL means the platform could not determine lag (consumer not started, no partition assignment, or the query errored). It is deliberately not reported as 0, because a fabricated 0 would read as healthy. Null is evidence of an unhealthy or restarting consumer, but it is not the usual symptom of a stall, and it carries no lag magnitude.\nNeither a number nor a null proves liveness. Consumer-group membership is the authoritative check — a group holds its assignment and keeps reporting accurate lag for minutes after its consumer stops, without being evicted.",
+      "description": "Read the last-emitted Kafka consumer lag for one of the platform's consumer groups. Known consumer groups: worker-dispatcher, billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer.\nFRESHNESS: cached in Redis, refreshed by a background loop every ~60s with a 90s TTL — never a live Kafka query. Measured behaviour: after a fault begins, the cached value catches up within ~60s; after a recovery it keeps reading the old high value for ~30s before dropping. Treat any single reading as up to a minute stale, in either direction.\nA STALLED CONSUMER STILL REPORTS LAG. A consumer that has stopped processing keeps its Kafka assignment, so this metric goes on reporting its real and climbing lag rather than going null — rising lag is the expected signal of a stall, not absence of data.\nNULL means the platform could not determine lag (consumer not started, no partition assignment, or the query errored). It is deliberately not reported as 0, because a fabricated 0 would read as healthy. Null is evidence of an unhealthy or restarting consumer, but it is not the usual symptom of a stall, and it carries no lag magnitude.\nNeither a number nor a null proves liveness. Consumer-group membership is the authoritative check — a group holds its assignment and keeps reporting accurate lag for minutes after its consumer stops, without being evicted.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "consumer_group": {
             "default": "worker-dispatcher",
-            "description": "Kafka consumer group to inspect. Seeded groups: worker-dispatcher, billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer. Any other name is accepted and returns lag: null when the platform has no cached value for it.",
+            "description": "Kafka consumer group to inspect. Known groups: worker-dispatcher, billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer. Any other name is accepted and returns lag: null when the platform has no cached value for it.",
             "title": "Consumer Group",
             "type": "string"
           }
@@ -210,7 +210,7 @@
                 "type": "null"
               }
             ],
-            "description": "Messages the group is behind, per the metrics loop's last emission (or the eval seed script). `null` when the cache is empty — typical for unknown groups or a Redis restart within the last ~60s.",
+            "description": "Messages the group is behind, per the metrics loop's last emission. `null` when the cache is empty — typical for unknown groups or a Redis restart within the last ~60s.",
             "title": "Lag"
           },
           "cache_key": {
@@ -235,7 +235,7 @@
         "additionalProperties": false,
         "properties": {
           "job_id": {
-            "description": "Seed job. Its parents (dependencies) and children (dependents) are traversed one hop each direction.",
+            "description": "Root job. Its parents (dependencies) and children (dependents) are traversed one hop each direction.",
             "format": "uuid",
             "title": "Job Id",
             "type": "string"
@@ -305,7 +305,7 @@
         },
         "properties": {
           "seed_id": {
-            "title": "Seed Id",
+            "title": "Root Job Id",
             "type": "string"
           },
           "nodes": {
@@ -366,7 +366,7 @@
     },
     {
       "name": "get_deploy_history",
-      "description": "Return recent deploys, newest first. Prefers the `deploy_markers` table; falls back to a single-entry env snapshot when unseeded. Useful for correlating incidents with a recent deploy — the seed script annotates one row with a `notes` string for exactly this hypothesis-testing use case.\nFRESHNESS: live read from Postgres, no cache. Deploy markers are written by the release pipeline, so a very recent deploy may not have a row yet — absence of a marker is weak evidence that no deploy happened.",
+      "description": "Return recent deploys, newest first. Prefers the `deploy_markers` table; falls back to a single-entry env snapshot when the table is empty. Useful for correlating incidents with a recent deploy — some deploys carry a `notes` annotation useful for that correlation.\nFRESHNESS: live read from Postgres, no cache. Deploy markers are written by the release pipeline, so a very recent deploy may not have a row yet — absence of a marker is weak evidence that no deploy happened.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -1135,7 +1135,7 @@
     },
     {
       "name": "list_active_alerts",
-      "description": "List unresolved alerts scoped to the caller's tenant. Alerts come from platform sources (SLO breach, DLQ threshold, chaos runs, etc.). Prefer receiving the HMAC-signed webhook if you can — this endpoint is a poll fallback.\nFRESHNESS: live read from Postgres — reflects the moment of the call, no cache.",
+      "description": "List unresolved alerts scoped to the caller's tenant. Alerts come from platform sources (SLO breach, DLQ threshold, etc.). Prefer receiving the HMAC-signed webhook if you can — this endpoint is a poll fallback.\nFRESHNESS: live read from Postgres — reflects the moment of the call, no cache.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -1248,7 +1248,7 @@
     },
     {
       "name": "list_audit_events",
-      "description": "Read the immutable audit log for the caller's tenant. Every user + agent + chaos action lands here — use it to reconcile state after a restart or to check what an operator did before the current incident. Filter by `action`, `action_prefix` (e.g. `agent.`), or `principal_type` (`user` vs `service_account`).\nFRESHNESS: live read from Postgres. Rows written directly by an action appear immediately; rows produced by the Kafka audit consumer land within a second or two of the event, so allow a moment before concluding an event is missing.",
+      "description": "Read the immutable audit log for the caller's tenant. Every user + agent action lands here — use it to reconcile state after a restart or to check what an operator did before the current incident. Filter by `action`, `action_prefix` (e.g. `agent.`), or `principal_type` (`user` vs `service_account`).\nFRESHNESS: live read from Postgres. Rows written directly by an action appear immediately; rows produced by the Kafka audit consumer land within a second or two of the event, so allow a moment before concluding an event is missing.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -1275,7 +1275,7 @@
               }
             ],
             "default": null,
-            "description": "Prefix match against the action string. Useful for whole streams — `agent.` covers all agent activity, `chaos.` covers chaos, `service_account.` covers principal lifecycle. Ignored when `action` is set.",
+            "description": "Prefix match against the action string. Useful for whole streams — `agent.` covers all agent activity, `service_account.` covers principal lifecycle. Ignored when `action` is set.",
             "title": "Action Prefix"
           },
           "principal_type": {
@@ -1497,7 +1497,7 @@
                   }
                 ],
                 "default": null,
-                "description": "Coarse category set by triage / seed / chaos. See `RemediationHint` for the fixed value set. `null` means the platform hasn't categorized this entry yet — agent should treat as unknown, not as replay-safe.",
+                "description": "Coarse category set by the platform's triage pipeline. See `RemediationHint` for the fixed value set. `null` means the platform hasn't categorized this entry yet — agent should treat as unknown, not as replay-safe.",
                 "title": "Remediation Hint"
               },
               "created_at": {
@@ -2574,6 +2574,84 @@
           "matches"
         ],
         "title": "SearchTracesOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "seed_dlq_messages",
+      "description": "[chaos: environment_wide] Seed N dead-letter rows with a declared `remediation_hint`, `job_type`, and error string. Lets a scenario own the DLQ state it is graded against instead of inheriting a standing fixture pool. Rows are tagged as seeded fixtures and removed by the next eval reset. Written directly to `jobs`; doesn't touch Kafka.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "remediation_hint": {
+            "description": "Category stamped on every row: `replay_safe`, `wait_and_replay`, or `human_required`. Drives which branch of the agent's remediation logic the rows exercise.",
+            "title": "Remediation Hint",
+            "type": "string"
+          },
+          "count": {
+            "default": 1,
+            "description": "How many rows to create. Capped so a scenario can't accidentally flood the DLQ.",
+            "maximum": 50,
+            "minimum": 1,
+            "title": "Count",
+            "type": "integer"
+          },
+          "job_type": {
+            "default": "bulk_api_sync",
+            "description": "Type stamped on each row. Should match a real processor type so downstream reasoning stays plausible.",
+            "title": "Job Type",
+            "type": "string"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Error string for every row. Defaults to a realistic string matching the declared remediation_hint.",
+            "title": "Error Message"
+          }
+        },
+        "required": [
+          "remediation_hint"
+        ],
+        "title": "SeedDlqMessagesInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "job_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Job Ids",
+            "type": "array"
+          },
+          "remediation_hint": {
+            "title": "Remediation Hint",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "accepted": {
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "job_ids",
+          "remediation_hint",
+          "count",
+          "accepted"
+        ],
+        "title": "SeedDlqMessagesOutput",
         "type": "object"
       }
     }

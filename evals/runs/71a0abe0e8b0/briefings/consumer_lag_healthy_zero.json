@@ -1,0 +1,27 @@
+{
+  "incident_id": "715a63c7-5a2c-43a2-9aff-49216d81eba7",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=high fingerprint=consumer_lag_high group=healthy-consumer",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}"
+    },
+    {
+      "tool": "list_active_alerts",
+      "summary": "{\"total\":0,\"alerts\":[]}"
+    }
+  ],
+  "findings": "Both probes of the `healthy-consumer` group returned a lag of 0, and a scan of active alerts returned none — the monitored metrics show no current anomaly despite the high-severity `consumer_lag_high` alert firing. This suggests the alert may have resolved on its own or is being driven by a stale/cached value (cache key `kafka:consumer_lag:healthy-consumer`).",
+  "recommendation": "Verify whether the alert fired against a cached lag snapshot rather than a live broker read, and confirm the alert's evaluation window and threshold directly in the platform alerting config to determine if this is a false positive or a recently self-resolved condition.",
+  "budget_used": {
+    "tool_calls": 3,
+    "tokens": 24492,
+    "wall_seconds": 0.037525,
+    "usd": "0.065188"
+  }
+}

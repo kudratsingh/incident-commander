@@ -1,0 +1,23 @@
+{
+  "incident_id": "240732af-0582-4177-a724-a7f9d35234ac",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=high fingerprint=consumer_lag_high group=healthy-consumer",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}"
+    }
+  ],
+  "findings": "Both lag probes for consumer group \"healthy-consumer\" returned a lag of 0, directly contradicting the high-severity alert that triggered this incident; the cache key \"kafka:consumer_lag:healthy-consumer\" was hit both times, suggesting the reads may reflect a stale or incorrect cached value rather than live broker state.",
+  "recommendation": "Check whether the cached lag value (cache key: kafka:consumer_lag:healthy-consumer) is stale or miscalculated by comparing it against the live consumer group offset reported directly by the Kafka broker, and verify the alert's lag threshold and data source are aligned with current broker metrics.",
+  "budget_used": {
+    "tool_calls": 2,
+    "tokens": 18174,
+    "wall_seconds": 0.024982,
+    "usd": "0.046788"
+  }
+}

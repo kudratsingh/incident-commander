@@ -1,0 +1,27 @@
+{
+  "incident_id": "1c9f6917-fc5b-4b27-9b21-389234ca24aa",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=medium fingerprint=consumer_lag_warning group=notifications-consumer",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"cache_key\":\"kafka:consumer_lag:notifications-consumer\"}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"cache_key\":\"kafka:consumer_lag:notifications-consumer\"}"
+    },
+    {
+      "tool": "list_dlq_messages",
+      "summary": "{\"total\":0,\"items\":[]}"
+    }
+  ],
+  "findings": "The notifications-consumer group is sitting at a sustained lag of 500 messages, confirmed by two consecutive probes returning the same value, and the dead-letter queue is empty so no messages are being rejected or poisoned.",
+  "recommendation": "Check the consumer group's active partition assignments and throughput metrics to determine whether consumers have stalled, are under-scaled, or if there has been a recent spike in producer output that has outpaced consumption.",
+  "budget_used": {
+    "tool_calls": 3,
+    "tokens": 32573,
+    "wall_seconds": 57.119255,
+    "usd": "0.085784"
+  }
+}

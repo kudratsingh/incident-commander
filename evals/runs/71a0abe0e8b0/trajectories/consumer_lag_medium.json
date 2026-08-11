@@ -1,0 +1,482 @@
+{
+  "scenario": "consumer_lag_medium",
+  "incident_id": "1c9f6917-fc5b-4b27-9b21-389234ca24aa",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "1c9f6917-fc5b-4b27-9b21-389234ca24aa",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "medium",
+        "fingerprint": "consumer_lag_warning",
+        "group": "notifications-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:00:36.561719Z",
+      "updated_at": "2026-08-11T11:00:36.561719Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "1c9f6917-fc5b-4b27-9b21-389234ca24aa",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "medium",
+        "fingerprint": "consumer_lag_warning",
+        "group": "notifications-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.021403,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "02161753-8dcc-41a8-8ea0-d8dad68b2dbc",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "medium",
+            "dedup_key": "7dc69b32e58daea711c56b3f7edaab1f"
+          },
+          "result_summary": "severity=medium classified as investigating",
+          "timestamp": "2026-08-11T11:00:36.583122Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:00:36.561719Z",
+      "updated_at": "2026-08-11T11:00:36.583122Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "1c9f6917-fc5b-4b27-9b21-389234ca24aa",
+      "state": "planning",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "medium",
+        "fingerprint": "consumer_lag_warning",
+        "group": "notifications-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 24434,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.021455,
+        "max_usd": "1.00",
+        "usd_used": "0.064306"
+      },
+      "evidence": [
+        {
+          "evidence_id": "02161753-8dcc-41a8-8ea0-d8dad68b2dbc",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "medium",
+            "dedup_key": "7dc69b32e58daea711c56b3f7edaab1f"
+          },
+          "result_summary": "severity=medium classified as investigating",
+          "timestamp": "2026-08-11T11:00:36.583122Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "88f3129a-1824-4c9a-bc7b-4cc769723098",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "notifications-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"cache_key\":\"kafka:consumer_lag:notifications-consumer\"}",
+          "timestamp": "2026-08-11T11:00:36.583174Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dc6f32b7-d84b-450c-85de-5e239fb7b5df",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 20.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'consumer_saturation' (0.70 >= 0.7); re-probing after 20s before accepting the contradiction",
+          "timestamp": "2026-08-11T11:00:36.583174Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "de0e164c-787e-406e-b594-0a793e9eef4f",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "notifications-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"cache_key\":\"kafka:consumer_lag:notifications-consumer\"}",
+          "timestamp": "2026-08-11T11:00:36.583174Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "11872fa8-2d29-440d-ad93-e9b87f091daf",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": "notifications",
+            "remediation_hint": null,
+            "limit": 20
+          },
+          "result_summary": "{\"total\":0,\"items\":[]}",
+          "timestamp": "2026-08-11T11:00:36.583174Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d28da482-f595-4dd2-a2bb-8b6cb0325572",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The notifications-consumer lag is consistently 500 across two independent readings 20s apart with zero DLQ entries, confirming consumer saturation without poison messages. Confidence is 0.72 and consumer_saturation has a Tier-1 fix."
+          },
+          "result_summary": "planner handoff to PLANNING: The notifications-consumer lag is consistently 500 across two independent readings 20s apart with zero DLQ entries, confirming consumer saturation without poison messages. Confidence is 0.72 and consumer_saturation has a Tier-1 fix.",
+          "timestamp": "2026-08-11T11:00:36.583174Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "notifications-consumer-lag-500-sustained",
+          "confidence": 0.72,
+          "reasoning": "Lag of 500 has been consistent across two readings (60s apart) with no DLQ entries, indicating the consumer is falling behind without poison messages causing stalls."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-causing-consumer-slowdown",
+          "confidence": 0.15,
+          "reasoning": "A recent deploy could have introduced a performance regression in the notifications consumer; not yet checked."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "external-notification-provider-latency",
+          "confidence": 0.08,
+          "reasoning": "If an external SMTP or push-notification provider is slow, consumers could back up processing messages without failing them to DLQ."
+        },
+        {
+          "category": "unknown",
+          "name": "undetermined-cause",
+          "confidence": 0.05,
+          "reasoning": "No discriminating evidence yet to rule out other causes entirely."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:00:36.561719Z",
+      "updated_at": "2026-08-11T11:00:36.583174Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "1c9f6917-fc5b-4b27-9b21-389234ca24aa",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "medium",
+        "fingerprint": "consumer_lag_warning",
+        "group": "notifications-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 32573,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 50.998754,
+        "max_usd": "1.00",
+        "usd_used": "0.085784"
+      },
+      "evidence": [
+        {
+          "evidence_id": "02161753-8dcc-41a8-8ea0-d8dad68b2dbc",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "medium",
+            "dedup_key": "7dc69b32e58daea711c56b3f7edaab1f"
+          },
+          "result_summary": "severity=medium classified as investigating",
+          "timestamp": "2026-08-11T11:00:36.583122Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "88f3129a-1824-4c9a-bc7b-4cc769723098",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "notifications-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"cache_key\":\"kafka:consumer_lag:notifications-consumer\"}",
+          "timestamp": "2026-08-11T11:00:36.583174Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dc6f32b7-d84b-450c-85de-5e239fb7b5df",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 20.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'consumer_saturation' (0.70 >= 0.7); re-probing after 20s before accepting the contradiction",
+          "timestamp": "2026-08-11T11:00:36.583174Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "de0e164c-787e-406e-b594-0a793e9eef4f",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "notifications-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"cache_key\":\"kafka:consumer_lag:notifications-consumer\"}",
+          "timestamp": "2026-08-11T11:00:36.583174Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "11872fa8-2d29-440d-ad93-e9b87f091daf",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": "notifications",
+            "remediation_hint": null,
+            "limit": 20
+          },
+          "result_summary": "{\"total\":0,\"items\":[]}",
+          "timestamp": "2026-08-11T11:00:36.583174Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d28da482-f595-4dd2-a2bb-8b6cb0325572",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The notifications-consumer lag is consistently 500 across two independent readings 20s apart with zero DLQ entries, confirming consumer saturation without poison messages. Confidence is 0.72 and consumer_saturation has a Tier-1 fix."
+          },
+          "result_summary": "planner handoff to PLANNING: The notifications-consumer lag is consistently 500 across two independent readings 20s apart with zero DLQ entries, confirming consumer saturation without poison messages. Confidence is 0.72 and consumer_saturation has a Tier-1 fix.",
+          "timestamp": "2026-08-11T11:00:36.583174Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "350a7fcb-966b-4dcc-a927-a1b5797f94a1",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "notifications-consumer-lag-500-sustained"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"notifications-consumer\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-08-11T11:01:27.560473Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "notifications-consumer-lag-500-sustained",
+          "confidence": 0.72,
+          "reasoning": "Lag of 500 has been consistent across two readings (60s apart) with no DLQ entries, indicating the consumer is falling behind without poison messages causing stalls."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-causing-consumer-slowdown",
+          "confidence": 0.15,
+          "reasoning": "A recent deploy could have introduced a performance regression in the notifications consumer; not yet checked."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "external-notification-provider-latency",
+          "confidence": 0.08,
+          "reasoning": "If an external SMTP or push-notification provider is slow, consumers could back up processing messages without failing them to DLQ."
+        },
+        {
+          "category": "unknown",
+          "name": "undetermined-cause",
+          "confidence": 0.05,
+          "reasoning": "No discriminating evidence yet to rule out other causes entirely."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "notifications-consumer-lag-500-sustained",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "notifications-consumer"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "notifications-consumer"
+        },
+        "verify_expectation": "After the restart (allowing ~30s for the cached value to refresh), the reported lag for notifications-consumer drops well below 500 and continues trending downward toward 0, indicating the consumer has resumed processing at full speed."
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:00:36.561719Z",
+      "updated_at": "2026-08-11T11:01:27.560473Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "1c9f6917-fc5b-4b27-9b21-389234ca24aa",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "medium",
+        "fingerprint": "consumer_lag_warning",
+        "group": "notifications-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 32573,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 57.119255,
+        "max_usd": "1.00",
+        "usd_used": "0.085784"
+      },
+      "evidence": [
+        {
+          "evidence_id": "02161753-8dcc-41a8-8ea0-d8dad68b2dbc",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "medium",
+            "dedup_key": "7dc69b32e58daea711c56b3f7edaab1f"
+          },
+          "result_summary": "severity=medium classified as investigating",
+          "timestamp": "2026-08-11T11:00:36.583122Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "88f3129a-1824-4c9a-bc7b-4cc769723098",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "notifications-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"cache_key\":\"kafka:consumer_lag:notifications-consumer\"}",
+          "timestamp": "2026-08-11T11:00:36.583174Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dc6f32b7-d84b-450c-85de-5e239fb7b5df",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 20.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'consumer_saturation' (0.70 >= 0.7); re-probing after 20s before accepting the contradiction",
+          "timestamp": "2026-08-11T11:00:36.583174Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "de0e164c-787e-406e-b594-0a793e9eef4f",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "notifications-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"cache_key\":\"kafka:consumer_lag:notifications-consumer\"}",
+          "timestamp": "2026-08-11T11:00:36.583174Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "11872fa8-2d29-440d-ad93-e9b87f091daf",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": "notifications",
+            "remediation_hint": null,
+            "limit": 20
+          },
+          "result_summary": "{\"total\":0,\"items\":[]}",
+          "timestamp": "2026-08-11T11:00:36.583174Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d28da482-f595-4dd2-a2bb-8b6cb0325572",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The notifications-consumer lag is consistently 500 across two independent readings 20s apart with zero DLQ entries, confirming consumer saturation without poison messages. Confidence is 0.72 and consumer_saturation has a Tier-1 fix."
+          },
+          "result_summary": "planner handoff to PLANNING: The notifications-consumer lag is consistently 500 across two independent readings 20s apart with zero DLQ entries, confirming consumer saturation without poison messages. Confidence is 0.72 and consumer_saturation has a Tier-1 fix.",
+          "timestamp": "2026-08-11T11:00:36.583174Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "350a7fcb-966b-4dcc-a927-a1b5797f94a1",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "notifications-consumer-lag-500-sustained"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"notifications-consumer\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-08-11T11:01:27.560473Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "473eb2c6-c178-4b27-b939-0b9fd841c21a",
+          "tool_name": "_remediation_escalate",
+          "arguments": {
+            "from_state": "remediating",
+            "reason": "remediation tool error (restart_consumer_group): MCP error -32002: missing required scope: actions:execute"
+          },
+          "result_summary": "remediation tool error (restart_consumer_group): MCP error -32002: missing required scope: actions:execute",
+          "timestamp": "2026-08-11T11:01:33.680974Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "notifications-consumer-lag-500-sustained",
+          "confidence": 0.72,
+          "reasoning": "Lag of 500 has been consistent across two readings (60s apart) with no DLQ entries, indicating the consumer is falling behind without poison messages causing stalls."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-causing-consumer-slowdown",
+          "confidence": 0.15,
+          "reasoning": "A recent deploy could have introduced a performance regression in the notifications consumer; not yet checked."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "external-notification-provider-latency",
+          "confidence": 0.08,
+          "reasoning": "If an external SMTP or push-notification provider is slow, consumers could back up processing messages without failing them to DLQ."
+        },
+        {
+          "category": "unknown",
+          "name": "undetermined-cause",
+          "confidence": 0.05,
+          "reasoning": "No discriminating evidence yet to rule out other causes entirely."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "notifications-consumer-lag-500-sustained",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "notifications-consumer"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "notifications-consumer"
+        },
+        "verify_expectation": "After the restart (allowing ~30s for the cached value to refresh), the reported lag for notifications-consumer drops well below 500 and continues trending downward toward 0, indicating the consumer has resumed processing at full speed."
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:00:36.561719Z",
+      "updated_at": "2026-08-11T11:01:33.680974Z"
+    }
+  ],
+  "invocation_id": "71a0abe0e8b0"
+}

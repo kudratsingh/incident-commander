@@ -1,0 +1,14 @@
+{
+  "incident_id": "b5a61fdb-c41c-4cc2-982c-1fd8f48d3683",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.canary severity=low fingerprint=canary_blip group=analytics-consumer",
+  "investigation_trail": [],
+  "findings": "No investigation probes were run before escalation, so there is no additional diagnostic data beyond the raw alert: a low-severity canary signal from platform.canary in the analytics-consumer group (fingerprint: canary_blip).",
+  "recommendation": "Start by reviewing the raw alert details for fingerprint canary_blip in the analytics-consumer group to determine whether this is a genuine canary regression or a transient blip before taking further action.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.034568,
+    "usd": "0"
+  }
+}

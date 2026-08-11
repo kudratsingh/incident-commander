@@ -41,8 +41,14 @@ evals/trajectories/*
 !evals/trajectories/.gitkeep
 evals/briefings/*
 !evals/briefings/.gitkeep
-evals/traces/*
-!evals/traces/.gitkeep
+# evals/traces/ — the append-only cross-invocation trace log. NOT a
+# refreshable pointer, despite sitting next to them: for a scenario
+# killed before its per-scenario archive slice is written, this file is
+# the ONLY record that the work happened and was billed. Proven on
+# 2026-08-11, when saga_stuck died mid-scenario and existed nowhere
+# else. Tracked so `git clean -fdx` cannot erase paid evidence
+# (invariant 9: an artifact that can erase its own history cannot be
+# used as evidence).
 evals/reports/latest.json
 evals/reports/human/*
 !evals/reports/human/.gitkeep

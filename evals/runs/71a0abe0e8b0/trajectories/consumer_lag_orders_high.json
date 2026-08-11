@@ -1,0 +1,428 @@
+{
+  "scenario": "consumer_lag_orders_high",
+  "incident_id": "1f06eb34-3cd7-4dad-bdf5-eba645fbb944",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "1f06eb34-3cd7-4dad-bdf5-eba645fbb944",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "orders-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:02:48.529521Z",
+      "updated_at": "2026-08-11T11:02:48.529521Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "1f06eb34-3cd7-4dad-bdf5-eba645fbb944",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "orders-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.03806,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7f01cfe7-ae2c-4895-9004-16ebdbd7b131",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-11T11:02:48.567581Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:02:48.529521Z",
+      "updated_at": "2026-08-11T11:02:48.567581Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "1f06eb34-3cd7-4dad-bdf5-eba645fbb944",
+      "state": "planning",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "orders-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 18257,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.038122,
+        "max_usd": "1.00",
+        "usd_used": "0.047997"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7f01cfe7-ae2c-4895-9004-16ebdbd7b131",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-11T11:02:48.567581Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ee62912f-8e3d-48d0-a4c5-4002e8a9df6d",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "orders-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"orders-consumer\",\"lag\":7500,\"cache_key\":\"kafka:consumer_lag:orders-consumer\"}",
+          "timestamp": "2026-08-11T11:02:48.567643Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a67edfc4-4e94-4c49-84cd-11eae4380875",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 20.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'consumer_saturation' (0.75 >= 0.7); re-probing after 20s before accepting the contradiction",
+          "timestamp": "2026-08-11T11:02:48.567643Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dd442d71-4572-42b3-b0dd-924c44ed4a91",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "orders-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"orders-consumer\",\"lag\":7500,\"cache_key\":\"kafka:consumer_lag:orders-consumer\"}",
+          "timestamp": "2026-08-11T11:02:48.567643Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "afe18f3f-da67-47a1-b9a1-e32ffa78e764",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "orders-consumer lag is confirmed at 7500 across two independent readings 20 seconds apart (no downward movement), meeting the threshold for consumer_saturation Tier-1 remediation (confidence 0.82 > 0.7). The sustained flat lag strongly indicates a stalled consumer requiring restart or scale-up."
+          },
+          "result_summary": "planner handoff to PLANNING: orders-consumer lag is confirmed at 7500 across two independent readings 20 seconds apart (no downward movement), meeting the threshold for consumer_saturation Tier-1 remediation (confidence 0.82 > 0.7). The sustained flat lag strongly indicates a stalled consumer requiring restart or scale-up.",
+          "timestamp": "2026-08-11T11:02:48.567643Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "orders-consumer-lag-7500-sustained",
+          "confidence": 0.82,
+          "reasoning": "Two consecutive readings (after a 20s re-probe) both report lag=7500 for orders-consumer, indicating a stable/rising backlog consistent with a stalled or under-resourced consumer rather than a transient spike."
+        },
+        {
+          "category": "poison_message",
+          "name": "orders-consumer-blocked-by-poison-message",
+          "confidence": 0.3,
+          "reasoning": "A poison message could cause the consumer to stall, producing a sustained lag plateau; DLQ check needed to confirm or rule out."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-regression-orders-consumer",
+          "confidence": 0.2,
+          "reasoning": "A recent deploy to the orders-consumer service could have introduced a bug causing the stall; deploy history not yet checked."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:02:48.529521Z",
+      "updated_at": "2026-08-11T11:02:48.567643Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "1f06eb34-3cd7-4dad-bdf5-eba645fbb944",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "orders-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 26355,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 44.149583,
+        "max_usd": "1.00",
+        "usd_used": "0.069352"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7f01cfe7-ae2c-4895-9004-16ebdbd7b131",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-11T11:02:48.567581Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ee62912f-8e3d-48d0-a4c5-4002e8a9df6d",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "orders-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"orders-consumer\",\"lag\":7500,\"cache_key\":\"kafka:consumer_lag:orders-consumer\"}",
+          "timestamp": "2026-08-11T11:02:48.567643Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a67edfc4-4e94-4c49-84cd-11eae4380875",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 20.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'consumer_saturation' (0.75 >= 0.7); re-probing after 20s before accepting the contradiction",
+          "timestamp": "2026-08-11T11:02:48.567643Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dd442d71-4572-42b3-b0dd-924c44ed4a91",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "orders-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"orders-consumer\",\"lag\":7500,\"cache_key\":\"kafka:consumer_lag:orders-consumer\"}",
+          "timestamp": "2026-08-11T11:02:48.567643Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "afe18f3f-da67-47a1-b9a1-e32ffa78e764",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "orders-consumer lag is confirmed at 7500 across two independent readings 20 seconds apart (no downward movement), meeting the threshold for consumer_saturation Tier-1 remediation (confidence 0.82 > 0.7). The sustained flat lag strongly indicates a stalled consumer requiring restart or scale-up."
+          },
+          "result_summary": "planner handoff to PLANNING: orders-consumer lag is confirmed at 7500 across two independent readings 20 seconds apart (no downward movement), meeting the threshold for consumer_saturation Tier-1 remediation (confidence 0.82 > 0.7). The sustained flat lag strongly indicates a stalled consumer requiring restart or scale-up.",
+          "timestamp": "2026-08-11T11:02:48.567643Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7898770d-3328-4e09-91cb-c79b71643dad",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "orders-consumer-lag-7500-sustained"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"orders-consumer\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-08-11T11:03:32.679104Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "orders-consumer-lag-7500-sustained",
+          "confidence": 0.82,
+          "reasoning": "Two consecutive readings (after a 20s re-probe) both report lag=7500 for orders-consumer, indicating a stable/rising backlog consistent with a stalled or under-resourced consumer rather than a transient spike."
+        },
+        {
+          "category": "poison_message",
+          "name": "orders-consumer-blocked-by-poison-message",
+          "confidence": 0.3,
+          "reasoning": "A poison message could cause the consumer to stall, producing a sustained lag plateau; DLQ check needed to confirm or rule out."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-regression-orders-consumer",
+          "confidence": 0.2,
+          "reasoning": "A recent deploy to the orders-consumer service could have introduced a bug causing the stall; deploy history not yet checked."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "orders-consumer-lag-7500-sustained",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "orders-consumer"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "orders-consumer"
+        },
+        "verify_expectation": "After allowing ~30–60s for the cache to refresh post-restart, the reported lag for orders-consumer should drop measurably below 7500 and trend toward 0, indicating the consumer has resumed processing."
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:02:48.529521Z",
+      "updated_at": "2026-08-11T11:03:32.679104Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "1f06eb34-3cd7-4dad-bdf5-eba645fbb944",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "orders-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 26355,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 49.427981,
+        "max_usd": "1.00",
+        "usd_used": "0.069352"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7f01cfe7-ae2c-4895-9004-16ebdbd7b131",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-11T11:02:48.567581Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ee62912f-8e3d-48d0-a4c5-4002e8a9df6d",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "orders-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"orders-consumer\",\"lag\":7500,\"cache_key\":\"kafka:consumer_lag:orders-consumer\"}",
+          "timestamp": "2026-08-11T11:02:48.567643Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a67edfc4-4e94-4c49-84cd-11eae4380875",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 20.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'consumer_saturation' (0.75 >= 0.7); re-probing after 20s before accepting the contradiction",
+          "timestamp": "2026-08-11T11:02:48.567643Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dd442d71-4572-42b3-b0dd-924c44ed4a91",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "orders-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"orders-consumer\",\"lag\":7500,\"cache_key\":\"kafka:consumer_lag:orders-consumer\"}",
+          "timestamp": "2026-08-11T11:02:48.567643Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "afe18f3f-da67-47a1-b9a1-e32ffa78e764",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "orders-consumer lag is confirmed at 7500 across two independent readings 20 seconds apart (no downward movement), meeting the threshold for consumer_saturation Tier-1 remediation (confidence 0.82 > 0.7). The sustained flat lag strongly indicates a stalled consumer requiring restart or scale-up."
+          },
+          "result_summary": "planner handoff to PLANNING: orders-consumer lag is confirmed at 7500 across two independent readings 20 seconds apart (no downward movement), meeting the threshold for consumer_saturation Tier-1 remediation (confidence 0.82 > 0.7). The sustained flat lag strongly indicates a stalled consumer requiring restart or scale-up.",
+          "timestamp": "2026-08-11T11:02:48.567643Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7898770d-3328-4e09-91cb-c79b71643dad",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "orders-consumer-lag-7500-sustained"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"orders-consumer\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-08-11T11:03:32.679104Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0031d55b-5e06-446a-8d1b-4ad4186be088",
+          "tool_name": "_remediation_escalate",
+          "arguments": {
+            "from_state": "remediating",
+            "reason": "remediation tool error (restart_consumer_group): MCP error -32002: missing required scope: actions:execute"
+          },
+          "result_summary": "remediation tool error (restart_consumer_group): MCP error -32002: missing required scope: actions:execute",
+          "timestamp": "2026-08-11T11:03:37.957502Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "orders-consumer-lag-7500-sustained",
+          "confidence": 0.82,
+          "reasoning": "Two consecutive readings (after a 20s re-probe) both report lag=7500 for orders-consumer, indicating a stable/rising backlog consistent with a stalled or under-resourced consumer rather than a transient spike."
+        },
+        {
+          "category": "poison_message",
+          "name": "orders-consumer-blocked-by-poison-message",
+          "confidence": 0.3,
+          "reasoning": "A poison message could cause the consumer to stall, producing a sustained lag plateau; DLQ check needed to confirm or rule out."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-regression-orders-consumer",
+          "confidence": 0.2,
+          "reasoning": "A recent deploy to the orders-consumer service could have introduced a bug causing the stall; deploy history not yet checked."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "orders-consumer-lag-7500-sustained",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "orders-consumer"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "orders-consumer"
+        },
+        "verify_expectation": "After allowing ~30–60s for the cache to refresh post-restart, the reported lag for orders-consumer should drop measurably below 7500 and trend toward 0, indicating the consumer has resumed processing."
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:02:48.529521Z",
+      "updated_at": "2026-08-11T11:03:37.957502Z"
+    }
+  ],
+  "invocation_id": "71a0abe0e8b0"
+}

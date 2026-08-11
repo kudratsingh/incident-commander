@@ -1,0 +1,199 @@
+{
+  "scenario": "consumer_lag_missing_group",
+  "incident_id": "2a5bae68-2741-4506-bebb-58552e45c817",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "2a5bae68-2741-4506-bebb-58552e45c817",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:01:47.080393Z",
+      "updated_at": "2026-08-11T11:01:47.080393Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "2a5bae68-2741-4506-bebb-58552e45c817",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.033912,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "8fd6cbf4-210e-4e9c-9e6c-a993b58124d9",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-11T11:01:47.114305Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:01:47.080393Z",
+      "updated_at": "2026-08-11T11:01:47.114305Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "2a5bae68-2741-4506-bebb-58552e45c817",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 5,
+        "max_tokens": 200000,
+        "tokens_used": 30794,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.033966,
+        "max_usd": "1.00",
+        "usd_used": "0.084764"
+      },
+      "evidence": [
+        {
+          "evidence_id": "8fd6cbf4-210e-4e9c-9e6c-a993b58124d9",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-11T11:01:47.114305Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "32d81aed-9512-4527-ab3b-820dd037172b",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-11T11:01:47.114359Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a3d7b112-8425-4767-8e52-10564dba985f",
+          "tool_name": "list_active_alerts",
+          "arguments": {
+            "severity": "high",
+            "limit": 50
+          },
+          "result_summary": "{\"total\":0,\"alerts\":[]}",
+          "timestamp": "2026-08-11T11:01:47.114359Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "df28438a-02e8-4538-887d-0bac7a237ea0",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-11T11:01:47.114359Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9b38a48a-ee4a-4873-b6b6-88395676e21e",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":1.403,\"connected_clients\":11,\"used_memory_bytes\":1728272,\"used_memory_human\":\"1.65M\",\"keyspace_hits\":329,\"keyspace_misses\":2913525,\"error\":null}",
+          "timestamp": "2026-08-11T11:01:47.114359Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ac5b14b9-ce00-4501-abbd-bb5c701565bf",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-11T11:01:47.114359Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b612ed75-e4a2-4429-b580-5bce61a3ddc8",
+          "tool_name": "_planner_escalate",
+          "arguments": {
+            "reason": "max iterations (5) exceeded"
+          },
+          "result_summary": "max iterations (5) exceeded",
+          "timestamp": "2026-08-11T11:01:47.114359Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "stale-redis-cache-masking-real-consumer-lag",
+          "confidence": 0.45,
+          "reasoning": "Redis shows extremely high keyspace misses (2,913,525 vs 329 hits — a ~99.9% miss rate), suggesting the cache is not serving data correctly; the consumer lag cache key may be stale or returning 0 incorrectly."
+        },
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-lag-alert-with-zero-cached-reading",
+          "confidence": 0.35,
+          "reasoning": "The alert fired for high consumer lag from platform.kafka, but the cached lag reads 0 — this could be a stale cache masking real lag, or the consumer was recently restarted and lag dropped after the alert was raised."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-correlated-with-lag-spike",
+          "confidence": 0.1,
+          "reasoning": "No deploy history has been checked yet; a recent deploy could have caused a transient lag spike that has since recovered."
+        },
+        {
+          "category": "unknown",
+          "name": "alert-already-resolved-or-false-positive",
+          "confidence": 0.1,
+          "reasoning": "With lag now at 0 and no active alerts, the incident may have self-resolved or been a false positive from a brief spike."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:01:47.080393Z",
+      "updated_at": "2026-08-11T11:01:47.114359Z"
+    }
+  ],
+  "invocation_id": "71a0abe0e8b0"
+}

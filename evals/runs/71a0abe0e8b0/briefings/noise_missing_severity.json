@@ -1,0 +1,14 @@
+{
+  "incident_id": "da79ed57-99c5-40a6-b5c0-f93004745387",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.unknown severity=unknown fingerprint=no_severity",
+  "investigation_trail": [],
+  "findings": "No investigation probes were run before escalation; the alert carries unknown source and severity with fingerprint \"no_severity\", leaving the underlying issue entirely uncharacterized.",
+  "recommendation": "Start by reviewing the raw alert payload for incident da79ed57-99c5-40a6-b5c0-f93004745387 directly in the alerting platform to determine the true source, severity, and any attached labels or annotations before taking further action.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.029037,
+    "usd": "0"
+  }
+}

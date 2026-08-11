@@ -250,9 +250,15 @@ class TestS18Probe:
             _validate_case(case, schemas)
 
     def test_unknown_tool_points_at_the_pin_bump_flow(self) -> None:
-        # seed_dlq_messages exists only on platform master, not in the pinned
-        # snapshot — exactly the situation the failure message must explain.
-        case = _ChaosCase(source="probe:unknown-tool", tool="seed_dlq_messages", arguments={})
+        # The sentinel is a name that cannot ever be blessed, not a real tool
+        # awaiting a pin bump. This probe used seed_dlq_messages until the
+        # v0.5.0 rebless made it the 27th snapshot tool — at which point the
+        # case stopped exercising the unknown-tool branch and started failing
+        # on a missing required argument instead. A synthetic name keeps the
+        # branch pinned across every future rebless.
+        case = _ChaosCase(
+            source="probe:unknown-tool", tool="chaos_tool_that_does_not_exist", arguments={}
+        )
         with pytest.raises(AssertionError, match="bump the platform pin"):
             _validate_case(case, _chaos_tool_schemas())
 

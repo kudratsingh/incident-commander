@@ -132,7 +132,7 @@ services:
     # One-shot schema migration, mirroring the dev compose's migrate
     # service: with two app-code services (mcp + api) neither should
     # race `alembic upgrade head` at boot.
-    image: ghcr.io/kudratsingh/incident-platform@sha256:a73f16ac8d926baa9609dadc082b52099b466a8000be07fb3bef4a7d8d5d6aea
+    image: ghcr.io/kudratsingh/incident-platform@sha256:8b57d0c90fee70ea3a9099d3337c2d8d04a3d7085a6143d74c8440e20a6463cb
     platform: linux/amd64
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
@@ -148,7 +148,7 @@ services:
     # Do not switch to `:latest` — the whole point of pinning by digest is
     # that a platform-side prompt or schema change can't shift agent
     # behavior without an explicit bump here.
-    image: ghcr.io/kudratsingh/incident-platform@sha256:a73f16ac8d926baa9609dadc082b52099b466a8000be07fb3bef4a7d8d5d6aea
+    image: ghcr.io/kudratsingh/incident-platform@sha256:8b57d0c90fee70ea3a9099d3337c2d8d04a3d7085a6143d74c8440e20a6463cb
     # v0.4.9 publishes linux/amd64 only. On Apple Silicon this runs under
     # Rosetta (slower cold start, correct output) — REQUIRED there; without
     # it `make demo` fails to resolve a runnable manifest. Drop when the
@@ -227,7 +227,7 @@ services:
     # Env copied deliberately from the dev compose's `app` service
     # (drift between services is platform bug #69's class); minio/jaeger
     # endpoints omitted with the services (see header note).
-    image: ghcr.io/kudratsingh/incident-platform@sha256:a73f16ac8d926baa9609dadc082b52099b466a8000be07fb3bef4a7d8d5d6aea
+    image: ghcr.io/kudratsingh/incident-platform@sha256:8b57d0c90fee70ea3a9099d3337c2d8d04a3d7085a6143d74c8440e20a6463cb
     platform: linux/amd64
     ports:
       - "${DEMO_API_HOST_PORT:-8000}:8000"

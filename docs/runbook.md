@@ -354,13 +354,16 @@ For deeper introspection, `evals/trajectories/<scenario>.json` has every `RunSta
 
 ## Contract-test target (constraint in force)
 
-**Run contract tests ONLY against the pinned demo stack until further
-notice.** Platform master currently serves one more tool than the v0.4.9
-tag (a dormant, flag-off addition), and no new tag lands until the
-clean-baseline rerun completes. A contract check against the dev stack
-will therefore fail **by design** — that is master drift, not drift in
-the pinned artifact, and it must not trigger a snapshot rebless from the
-dev stack. Bless snapshots from the pinned stack only.
+**Run contract tests ONLY against the pinned demo stack.** The pin is
+v0.5.0 by digest and the committed snapshot carries its 27 tools, blessed
+from that stack with the full 4-scope service-account token.
+
+The rule outlives the v0.4.9 → v0.5.0 bump that motivated it: platform
+master moves ahead of whatever tag is pinned, so a contract check against
+a master-built dev stack can fail **by design**. That is master drift, not
+drift in the pinned artifact, and it must never trigger a snapshot rebless
+from the dev stack. Bless snapshots from the pinned stack only, and only
+through the one-PR flow below.
 
 ## Bumping the pinned platform image
 

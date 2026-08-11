@@ -1,0 +1,14 @@
+{
+  "incident_id": "2da5ec37-c0ed-4bc7-950b-6c928a6baf10",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.healthcheck severity=info fingerprint=health_ping group=unknown",
+  "investigation_trail": [],
+  "findings": "No investigation probes were run before escalation; the only available context is the raw alert from source `platform.healthcheck` with fingerprint `health_ping` and severity `info`.",
+  "recommendation": "Start by reviewing the raw alert details for fingerprint `health_ping` in the platform healthcheck system to determine which endpoint or service failed its health ping and whether any associated logs or metrics show anomalies.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.032975,
+    "usd": "0"
+  }
+}

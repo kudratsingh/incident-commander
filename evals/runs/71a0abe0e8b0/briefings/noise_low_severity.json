@@ -1,0 +1,14 @@
+{
+  "incident_id": "8161e6be-39a9-403c-88c6-c72b52e61400",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.canary severity=low fingerprint=canary_blip group=billing-consumer",
+  "investigation_trail": [],
+  "findings": "No probes were run before escalation, so there is no investigation trail to draw from for this low-severity canary alert originating from the billing-consumer group.",
+  "recommendation": "Review the raw alert directly using fingerprint `canary_blip` from source `platform.canary` to determine whether this is a transient canary blip or indicative of a real billing-consumer issue.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.031541,
+    "usd": "0"
+  }
+}

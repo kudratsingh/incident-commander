@@ -1,0 +1,213 @@
+{
+  "scenario": "deploy_correlation",
+  "incident_id": "dedfc35b-fa1c-4668-8ddd-5c8da0f77a06",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "dedfc35b-fa1c-4668-8ddd-5c8da0f77a06",
+      "state": "triage",
+      "alert": {
+        "source": "platform.api",
+        "severity": "high",
+        "fingerprint": "post_deploy_error_spike",
+        "group": null,
+        "service": "billing-api"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:05:41.132467Z",
+      "updated_at": "2026-08-11T11:05:41.132467Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "dedfc35b-fa1c-4668-8ddd-5c8da0f77a06",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.api",
+        "severity": "high",
+        "fingerprint": "post_deploy_error_spike",
+        "group": null,
+        "service": "billing-api"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.035996,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c3b5c305-cd1b-482b-bd2a-f1bb12684692",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "967a9726b65f57874a306bcfe1ed253f"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-11T11:05:41.168463Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:05:41.132467Z",
+      "updated_at": "2026-08-11T11:05:41.168463Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "dedfc35b-fa1c-4668-8ddd-5c8da0f77a06",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.api",
+        "severity": "high",
+        "fingerprint": "post_deploy_error_spike",
+        "group": null,
+        "service": "billing-api"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 5,
+        "max_tokens": 200000,
+        "tokens_used": 32751,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.036053,
+        "max_usd": "1.00",
+        "usd_used": "0.091847"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c3b5c305-cd1b-482b-bd2a-f1bb12684692",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "967a9726b65f57874a306bcfe1ed253f"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-11T11:05:41.168463Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "bdbf6e5a-dc26-4622-be0a-24ab93ca3f39",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 5
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-11T07:43:54.982864Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-11T06:43:54.982864Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-08-11T03:43:54.982864Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-08-10T15:43:54.982864Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-08-10T11:43:54.982864Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-08-11T11:05:41.168520Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "95d11351-6f2c-4c65-b491-7ed39da4dbbf",
+          "tool_name": "search_traces",
+          "arguments": {
+            "status": "failed",
+            "job_type": null,
+            "since_hours": 2,
+            "limit": 20
+          },
+          "result_summary": "{\"matches\":[{\"trace_id\":\"edeeb994-56d2-53e6-88fd-8af47e695dbc\",\"job_id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"job_type\":\"doc_analysis\",\"status\":\"failed\",\"created_at\":\"2026-08-11T09:13:55.005835Z\"}]}",
+          "timestamp": "2026-08-11T11:05:41.168520Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "246cb05a-4862-4a05-853e-7734e0298385",
+          "tool_name": "get_trace",
+          "arguments": {
+            "trace_id": "edeeb994-56d2-53e6-88fd-8af47e695dbc",
+            "include_audit": true
+          },
+          "result_summary": "{\"trace_id\":\"edeeb994-56d2-53e6-88fd-8af47e695dbc\",\"jobs\":[{\"id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"type\":\"doc_analysis\",\"status\":\"failed\",\"user_id\":\"ee7c82cb-bab6-5780-8590-55b57064cbe3\",\"retry_count\":2,\"error_message\":\"pdf extraction failed: file is corrupted\",\"created_at\":\"2026-08-11T09:13:55.005835Z\",\"updated_at\":\"2026-08-11T09:13:55.005835Z\"}],\"audit_events\":[{\"action\":\"job.failed\",\"resource_type\":\"job\",\"resource_id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"principal_type\":\"user\",\"created_at\":\"2026-08-11T09:43:54.714014Z\",\"extra_data\":{\"error_message\":\"pdf extraction failed: file is corrupted\"}}]}",
+          "timestamp": "2026-08-11T11:05:41.168520Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9265918a-0257-453e-be5e-b415cf1049f4",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": "doc_analysis",
+            "remediation_hint": null,
+            "limit": 20
+          },
+          "result_summary": "{\"total\":0,\"items\":[]}",
+          "timestamp": "2026-08-11T11:05:41.168520Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "fd968247-3166-48a9-a2b7-71154535d71b",
+          "tool_name": "search_traces",
+          "arguments": {
+            "status": "failed",
+            "job_type": null,
+            "since_hours": 4,
+            "limit": 50
+          },
+          "result_summary": "{\"matches\":[{\"trace_id\":\"edeeb994-56d2-53e6-88fd-8af47e695dbc\",\"job_id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"job_type\":\"doc_analysis\",\"status\":\"failed\",\"created_at\":\"2026-08-11T09:13:55.005835Z\"},{\"trace_id\":\"0e24ca29-1d47-57e9-b898-4d79bb6da981\",\"job_id\":\"5967d510-0290-5627-a9db-4e29e3a38e44\",\"job_type\":\"report_gen\",\"status\":\"failed\",\"created_at\":\"2026-08-11T08:58:55.005835Z\"}]}",
+          "timestamp": "2026-08-11T11:05:41.168520Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d2eeedc2-f247-466e-84ae-44be6efbc71e",
+          "tool_name": "_planner_escalate",
+          "arguments": {
+            "reason": "max iterations (5) exceeded"
+          },
+          "result_summary": "max iterations (5) exceeded",
+          "timestamp": "2026-08-11T11:05:41.168520Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "persistent_data_bug",
+          "name": "corrupted-pdf-causing-doc-analysis-failures",
+          "confidence": 0.65,
+          "reasoning": "The trace shows 'pdf extraction failed: file is corrupted' with retry_count=2, indicating a bad input file that won't recover on retry — a data quality issue, not infrastructure."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "billing-api-v0.4.2-or-v0.4.3-regression",
+          "confidence": 0.55,
+          "reasoning": "Deploy history shows v0.4.2 was 'correlated with billing failures' and v0.4.3 was just deployed to prod ~2h ago — a new regression introduced by a recent deploy is plausible given the post-deploy error spike alert."
+        },
+        {
+          "category": "poison_message",
+          "name": "doc-analysis-jobs-stuck-in-dlq",
+          "confidence": 0.15,
+          "reasoning": "DLQ currently shows 0 items, making this unlikely — the corrupted-PDF jobs may be failing inline rather than landing in DLQ."
+        },
+        {
+          "category": "unknown",
+          "name": "broader-error-spike-beyond-single-trace",
+          "confidence": 0.15,
+          "reasoning": "The alert is a post-deploy error spike but only one failed trace has been found so far; the full scope of failures is unclear."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:05:41.132467Z",
+      "updated_at": "2026-08-11T11:05:41.168520Z"
+    }
+  ],
+  "invocation_id": "71a0abe0e8b0"
+}

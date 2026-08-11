@@ -1,0 +1,75 @@
+{
+  "scenario": "noise_info_severity",
+  "incident_id": "2da5ec37-c0ed-4bc7-950b-6c928a6baf10",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "2da5ec37-c0ed-4bc7-950b-6c928a6baf10",
+      "state": "triage",
+      "alert": {
+        "source": "platform.healthcheck",
+        "severity": "info",
+        "fingerprint": "health_ping",
+        "group": "unknown"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:10:18.444075Z",
+      "updated_at": "2026-08-11T11:10:18.444075Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "2da5ec37-c0ed-4bc7-950b-6c928a6baf10",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.healthcheck",
+        "severity": "info",
+        "fingerprint": "health_ping",
+        "group": "unknown"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.032975,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "a496b721-96d5-413e-8977-c97316f26ee0",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "info",
+            "dedup_key": "a4395bbcbf2b231158306ea746a40edd"
+          },
+          "result_summary": "severity=info classified as escalated",
+          "timestamp": "2026-08-11T11:10:18.477050Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-11T11:10:18.444075Z",
+      "updated_at": "2026-08-11T11:10:18.477050Z"
+    }
+  ],
+  "invocation_id": "71a0abe0e8b0"
+}

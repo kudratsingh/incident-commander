@@ -1,0 +1,14 @@
+{
+  "incident_id": "ff91fbe1-a6a7-4d2c-ba81-1d0eedc2fed3",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.healthcheck severity=info fingerprint=health_ping group=orders-consumer",
+  "investigation_trail": [],
+  "findings": "No automated probes were run before escalation, so there is no investigation trail to report beyond the raw alert: a platform health-check ping at info severity fired against the orders-consumer group.",
+  "recommendation": "Review the raw alert directly (fingerprint: health_ping, group: orders-consumer) to determine whether the orders-consumer service is failing its health-check endpoint, then inspect recent deployment or configuration changes for that consumer group.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.03115,
+    "usd": "0"
+  }
+}

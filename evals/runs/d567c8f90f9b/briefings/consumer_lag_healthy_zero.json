@@ -1,0 +1,27 @@
+{
+  "incident_id": "e1af350e-fe8c-4dd4-9578-91ba7fbacf6b",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=high fingerprint=consumer_lag_high group=healthy-consumer",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}"
+    },
+    {
+      "tool": "list_active_alerts",
+      "summary": "{\"total\":0,\"alerts\":[]}"
+    }
+  ],
+  "findings": "Two consecutive get_consumer_lag probes for group \"healthy-consumer\" both returned a lag of 0, and list_active_alerts returned no active alerts, contradicting the high-severity consumer_lag_high alert from platform.kafka. The alert may be stale, cached, or sourced from a metric pipeline that has since recovered.",
+  "recommendation": "Check the Kafka alerting pipeline and metric source directly for group \"healthy-consumer\" to confirm whether the lag spike has genuinely cleared or if a delayed/cached alert was incorrectly fired, paying particular attention to the alert's evaluation timestamp versus current lag metrics.",
+  "budget_used": {
+    "tool_calls": 3,
+    "tokens": 24568,
+    "wall_seconds": 0.038732,
+    "usd": "0.066328"
+  }
+}

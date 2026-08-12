@@ -1,0 +1,14 @@
+{
+  "incident_id": "ed4bb441-af97-487e-a0e8-e8704baded12",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high group=shipping-consumer",
+  "investigation_trail": [],
+  "findings": "",
+  "recommendation": "",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.035291,
+    "usd": "0"
+  }
+}

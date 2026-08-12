@@ -1,0 +1,14 @@
+{
+  "incident_id": "ce5f0d58-d464-4d09-8f14-06078023f45a",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.canary severity=low fingerprint=canary_blip group=billing-consumer",
+  "investigation_trail": [],
+  "findings": "",
+  "recommendation": "",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.032602,
+    "usd": "0"
+  }
+}

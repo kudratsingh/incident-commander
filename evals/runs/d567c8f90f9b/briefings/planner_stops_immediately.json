@@ -1,0 +1,14 @@
+{
+  "incident_id": "0e279b52-46a4-4592-9736-f00fae2ca680",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.custom severity=high fingerprint=opaque_paging_signal group=opaque-source",
+  "investigation_trail": [],
+  "findings": "Alert fingerprint opaque_paging_signal has no matching investigation tool on the current agent surface. No probes were run.\n",
+  "recommendation": "Ask the alert-source owner for a runbook or the meaning of the opaque_paging_signal fingerprint before deciding on a response.\n",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.001546,
+    "usd": "0.000000"
+  }
+}

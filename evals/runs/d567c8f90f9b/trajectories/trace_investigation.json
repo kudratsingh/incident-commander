@@ -1,0 +1,131 @@
+{
+  "scenario": "trace_investigation",
+  "incident_id": "0d7cd837-0d39-4741-a3bd-09e10e819565",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "0d7cd837-0d39-4741-a3bd-09e10e819565",
+      "state": "triage",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "high",
+        "fingerprint": "job_failed",
+        "group": null,
+        "trace_id": "trace-abc-123",
+        "job_type": "process_payment"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:01:03.066147Z",
+      "updated_at": "2026-08-12T01:01:03.066147Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "0d7cd837-0d39-4741-a3bd-09e10e819565",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "high",
+        "fingerprint": "job_failed",
+        "group": null,
+        "trace_id": "trace-abc-123",
+        "job_type": "process_payment"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.028984,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "97844337-0e2d-42c8-96e1-237caee81998",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "e4ac416c9e159e9d2fe620cc02696ffd"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-12T01:01:03.095131Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:01:03.066147Z",
+      "updated_at": "2026-08-12T01:01:03.095131Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "0d7cd837-0d39-4741-a3bd-09e10e819565",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "high",
+        "fingerprint": "job_failed",
+        "group": null,
+        "trace_id": "trace-abc-123",
+        "job_type": "process_payment"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.02902,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "97844337-0e2d-42c8-96e1-237caee81998",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "e4ac416c9e159e9d2fe620cc02696ffd"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-12T01:01:03.095131Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "bb5bc51d-cb5e-4918-8a33-71e4d960d828",
+          "tool_name": "_planner_escalate",
+          "arguments": {
+            "reason": "planner output invalid: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx6PBvAGhJh2qFjWDrU'}"
+          },
+          "result_summary": "planner output invalid: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx6PBvAGhJh2qFjWDrU'}",
+          "timestamp": "2026-08-12T01:01:03.095167Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:01:03.066147Z",
+      "updated_at": "2026-08-12T01:01:03.095167Z"
+    }
+  ],
+  "invocation_id": "d567c8f90f9b"
+}

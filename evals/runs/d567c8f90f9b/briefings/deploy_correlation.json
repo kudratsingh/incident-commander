@@ -1,0 +1,14 @@
+{
+  "incident_id": "33ce2064-cc37-489c-8c0c-6085e6307338",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.api severity=high fingerprint=post_deploy_error_spike",
+  "investigation_trail": [],
+  "findings": "",
+  "recommendation": "",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.028981,
+    "usd": "0"
+  }
+}

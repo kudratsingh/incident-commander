@@ -1,0 +1,14 @@
+{
+  "incident_id": "d2c80597-4723-4698-8565-791d87c950b1",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.db severity=high fingerprint=db_latency_high",
+  "investigation_trail": [],
+  "findings": "",
+  "recommendation": "",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.033048,
+    "usd": "0"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "incident_id": "1e91d36e-c668-41e2-9d6c-838eb7651c38",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.unknown severity=unknown fingerprint=no_severity",
+  "investigation_trail": [],
+  "findings": "",
+  "recommendation": "",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.03004,
+    "usd": "0"
+  }
+}

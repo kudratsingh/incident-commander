@@ -1,0 +1,14 @@
+{
+  "incident_id": "5a23d61b-68ae-44ec-8bda-bea876b942a0",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.jobs severity=high fingerprint=failure_rate_high",
+  "investigation_trail": [],
+  "findings": "",
+  "recommendation": "",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.036563,
+    "usd": "0"
+  }
+}

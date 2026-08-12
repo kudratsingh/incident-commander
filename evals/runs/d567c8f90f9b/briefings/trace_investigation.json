@@ -1,0 +1,14 @@
+{
+  "incident_id": "0d7cd837-0d39-4741-a3bd-09e10e819565",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.jobs severity=high fingerprint=job_failed",
+  "investigation_trail": [],
+  "findings": "",
+  "recommendation": "",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.02902,
+    "usd": "0"
+  }
+}

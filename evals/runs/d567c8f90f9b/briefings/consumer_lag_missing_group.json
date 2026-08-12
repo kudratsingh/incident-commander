@@ -1,0 +1,14 @@
+{
+  "incident_id": "3a250e4c-4b8c-4672-950e-707e3081bc48",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=high fingerprint=consumer_lag_high",
+  "investigation_trail": [],
+  "findings": "",
+  "recommendation": "",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.03181,
+    "usd": "0"
+  }
+}

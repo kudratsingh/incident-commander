@@ -1,0 +1,181 @@
+{
+  "scenario": "consumer_lag_medium",
+  "incident_id": "359fa4c9-ef10-4529-8cba-95cd02629e34",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "359fa4c9-ef10-4529-8cba-95cd02629e34",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "medium",
+        "fingerprint": "consumer_lag_warning",
+        "group": "notifications-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:00:15.353776Z",
+      "updated_at": "2026-08-12T01:00:15.353776Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "359fa4c9-ef10-4529-8cba-95cd02629e34",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "medium",
+        "fingerprint": "consumer_lag_warning",
+        "group": "notifications-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.035804,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "876d64b6-ba28-4630-a084-bd92e029fddf",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "medium",
+            "dedup_key": "7dc69b32e58daea711c56b3f7edaab1f"
+          },
+          "result_summary": "severity=medium classified as investigating",
+          "timestamp": "2026-08-12T01:00:15.389580Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:00:15.353776Z",
+      "updated_at": "2026-08-12T01:00:15.389580Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "359fa4c9-ef10-4529-8cba-95cd02629e34",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "medium",
+        "fingerprint": "consumer_lag_warning",
+        "group": "notifications-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 12067,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.035864,
+        "max_usd": "1.00",
+        "usd_used": "0.031325"
+      },
+      "evidence": [
+        {
+          "evidence_id": "876d64b6-ba28-4630-a084-bd92e029fddf",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "medium",
+            "dedup_key": "7dc69b32e58daea711c56b3f7edaab1f"
+          },
+          "result_summary": "severity=medium classified as investigating",
+          "timestamp": "2026-08-12T01:00:15.389580Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "411c3df1-897d-4cad-92ba-8b6f9f28a037",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "notifications-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"cache_key\":\"kafka:consumer_lag:notifications-consumer\"}",
+          "timestamp": "2026-08-12T01:00:15.389640Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e273d46c-d6f2-4e53-9f16-b912ecc31957",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 20.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'consumer_saturation' (0.75 >= 0.7); re-probing after 20s before accepting the contradiction",
+          "timestamp": "2026-08-12T01:00:15.389640Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8e732ead-169e-41d6-94d8-16818c51750d",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "notifications-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"cache_key\":\"kafka:consumer_lag:notifications-consumer\"}",
+          "timestamp": "2026-08-12T01:00:15.389640Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "451b5041-4cd8-4eb9-b3bf-f959321c47b9",
+          "tool_name": "_planner_escalate",
+          "arguments": {
+            "reason": "planner output invalid: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5QCfLSkg7YbE1ckF5'}"
+          },
+          "result_summary": "planner output invalid: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5QCfLSkg7YbE1ckF5'}",
+          "timestamp": "2026-08-12T01:00:15.389640Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "notifications-consumer-lag-500",
+          "confidence": 0.65,
+          "reasoning": "Consumer lag of 500 is elevated and consistent with a saturated or stalled consumer, but the magnitude alone is not yet sufficient to confirm without checking trend, DLQ, or recent deploys."
+        },
+        {
+          "category": "poison_message",
+          "name": "notifications-consumer-dlq-poison-message",
+          "confidence": 0.2,
+          "reasoning": "A poison message could cause repeated failures and growing lag; DLQ has not been checked yet."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "notifications-consumer-deploy-regression",
+          "confidence": 0.1,
+          "reasoning": "A recent deploy may have introduced a regression causing the consumer to slow or stall."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "notifications-consumer-external-dep-degraded",
+          "confidence": 0.05,
+          "reasoning": "An external dependency (e.g. SMTP or third-party API) being slow could cause consumer processing to back up."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:00:15.353776Z",
+      "updated_at": "2026-08-12T01:00:15.389640Z"
+    }
+  ],
+  "invocation_id": "d567c8f90f9b"
+}

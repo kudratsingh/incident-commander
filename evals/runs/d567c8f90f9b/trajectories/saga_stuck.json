@@ -1,0 +1,128 @@
+{
+  "scenario": "saga_stuck",
+  "incident_id": "9b920cb8-855e-4b5e-9687-38a6625ffe9f",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "9b920cb8-855e-4b5e-9687-38a6625ffe9f",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "high",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:01:02.278193Z",
+      "updated_at": "2026-08-12T01:01:02.278193Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "9b920cb8-855e-4b5e-9687-38a6625ffe9f",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "high",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.03501,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "01f954a7-0a95-4404-afa4-32ad164fcefd",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-12T01:01:02.313203Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:01:02.278193Z",
+      "updated_at": "2026-08-12T01:01:02.313203Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "9b920cb8-855e-4b5e-9687-38a6625ffe9f",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "high",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.035058,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "01f954a7-0a95-4404-afa4-32ad164fcefd",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-12T01:01:02.313203Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "29ed3dc9-6747-4cd5-96b0-c62a9636c90a",
+          "tool_name": "_planner_escalate",
+          "arguments": {
+            "reason": "planner output invalid: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx6KwxXozLZsKP1rBWK'}"
+          },
+          "result_summary": "planner output invalid: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx6KwxXozLZsKP1rBWK'}",
+          "timestamp": "2026-08-12T01:01:02.313251Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:01:02.278193Z",
+      "updated_at": "2026-08-12T01:01:02.313251Z"
+    }
+  ],
+  "invocation_id": "d567c8f90f9b"
+}

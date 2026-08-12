@@ -1,0 +1,14 @@
+{
+  "incident_id": "60499c57-c631-4dea-aaaa-778d70234fda",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.healthcheck severity=info fingerprint=health_ping group=unknown",
+  "investigation_trail": [],
+  "findings": "",
+  "recommendation": "",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.033676,
+    "usd": "0"
+  }
+}

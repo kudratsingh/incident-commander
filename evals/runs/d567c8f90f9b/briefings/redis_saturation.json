@@ -1,0 +1,14 @@
+{
+  "incident_id": "935c6b87-a993-4e48-ad49-a47b838a4ea7",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.cache severity=high fingerprint=cache_miss_spike",
+  "investigation_trail": [],
+  "findings": "",
+  "recommendation": "",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.037828,
+    "usd": "0"
+  }
+}

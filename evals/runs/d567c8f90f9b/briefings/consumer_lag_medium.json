@@ -1,0 +1,23 @@
+{
+  "incident_id": "359fa4c9-ef10-4529-8cba-95cd02629e34",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=medium fingerprint=consumer_lag_warning group=notifications-consumer",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"cache_key\":\"kafka:consumer_lag:notifications-consumer\"}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"cache_key\":\"kafka:consumer_lag:notifications-consumer\"}"
+    }
+  ],
+  "findings": "",
+  "recommendation": "",
+  "budget_used": {
+    "tool_calls": 2,
+    "tokens": 12067,
+    "wall_seconds": 0.035864,
+    "usd": "0.031325"
+  }
+}

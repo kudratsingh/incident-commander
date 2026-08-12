@@ -1,0 +1,128 @@
+{
+  "scenario": "redis_saturation",
+  "incident_id": "935c6b87-a993-4e48-ad49-a47b838a4ea7",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "935c6b87-a993-4e48-ad49-a47b838a4ea7",
+      "state": "triage",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "high",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:01:01.191754Z",
+      "updated_at": "2026-08-12T01:01:01.191754Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "935c6b87-a993-4e48-ad49-a47b838a4ea7",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "high",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.037788,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7fbb5fa5-cb5e-430e-b29d-2831818cac28",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-12T01:01:01.229542Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:01:01.191754Z",
+      "updated_at": "2026-08-12T01:01:01.229542Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "935c6b87-a993-4e48-ad49-a47b838a4ea7",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "high",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.037828,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7fbb5fa5-cb5e-430e-b29d-2831818cac28",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-12T01:01:01.229542Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "03b0b1b1-d99a-4ade-b2e8-f8d02eb2c283",
+          "tool_name": "_planner_escalate",
+          "arguments": {
+            "reason": "planner output invalid: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx6FejkwkM9Fbzusdgt'}"
+          },
+          "result_summary": "planner output invalid: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx6FejkwkM9Fbzusdgt'}",
+          "timestamp": "2026-08-12T01:01:01.229582Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:01:01.191754Z",
+      "updated_at": "2026-08-12T01:01:01.229582Z"
+    }
+  ],
+  "invocation_id": "d567c8f90f9b"
+}

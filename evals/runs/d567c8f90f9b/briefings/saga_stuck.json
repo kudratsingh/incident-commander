@@ -1,0 +1,14 @@
+{
+  "incident_id": "9b920cb8-855e-4b5e-9687-38a6625ffe9f",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.dag severity=high fingerprint=saga_stalled",
+  "investigation_trail": [],
+  "findings": "",
+  "recommendation": "",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.035058,
+    "usd": "0"
+  }
+}

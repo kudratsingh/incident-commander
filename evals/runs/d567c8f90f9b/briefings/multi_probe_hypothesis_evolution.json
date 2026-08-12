@@ -1,0 +1,14 @@
+{
+  "incident_id": "b9715487-8fd6-4065-a1b2-27e74933fd09",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=high fingerprint=consumer_lag_high group=payments-consumer",
+  "investigation_trail": [],
+  "findings": "",
+  "recommendation": "",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.030077,
+    "usd": "0"
+  }
+}

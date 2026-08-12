@@ -1,0 +1,1180 @@
+{
+  "generated_at": "2026-08-12T01:01:04.012961Z",
+  "total": 26,
+  "passed": 13,
+  "failed": 13,
+  "judged_count": 7,
+  "judge_useful_count": 7,
+  "judge_mean_overall": 0.8407142857142856,
+  "invocation_id": "d567c8f90f9b",
+  "degraded_count": 0,
+  "only_patterns": [
+    "alert_storm",
+    "deploy_correlation",
+    "failed_traces",
+    "incidents_overview",
+    "multi_probe",
+    "noise_",
+    "planner_stops",
+    "postgres_slow",
+    "redis_saturation",
+    "saga_stuck",
+    "tool_",
+    "trace_investigation",
+    "consumer_lag_healthy",
+    "consumer_lag_medium",
+    "consumer_lag_missing",
+    "consumer_lag_orders",
+    "consumer_lag_payments",
+    "consumer_lag_shipping",
+    "consumer_lag_analytics"
+  ],
+  "outcomes": [
+    {
+      "scenario": "alert_storm",
+      "final_state": "escalated",
+      "tool_calls_used": 4,
+      "report": {
+        "scenario": "alert_storm",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 4 tool calls, cap 10"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.92,
+        "actionability": 0.75,
+        "reasoning": "Groundedness: Every claim in findings is directly sourced from the alert and investigation trail (three active alerts named with exact severities and descriptions, lag value of 15,000, four DLQ jobs with their error types, and the v0.4.2/v0.4.3 deploy timestamps and notes); the reasoning about correlation is supported by the \"correlated with billing failures\" annotation on v0.4.2 and the timing chain. Actionability: The recommendation names specific verification steps (check changelogs, verify ECS task health for smtp.mailer.internal:587, check Stripe status page) and identifies concrete targets, but stops short of naming the exact commit diffs to review or which team owns the SMTP relay, leaving some search effort on the human's shoulders."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "consumer_lag_analytics_critical",
+      "final_state": "escalated",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "consumer_lag_analytics_critical",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 11"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.85,
+        "reasoning": "Every finding is directly sourced from the investigation trail: lag (50,000 from get_consumer_lag), the four DLQ entries with their specific error types and root-cause categories, and the temporal correlation with v0.4.2 and v0.4.3 deployments. The recommendation names two concrete verification steps (check smtp.mailer.internal ECS task and TCP port 587, consult Stripe status page) that a human can execute in 15 minutes, though it omits the exact tool or command to verify the ECS task and assumes familiarity with internal infrastructure naming."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "consumer_lag_healthy_zero",
+      "final_state": "escalated",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "consumer_lag_healthy_zero",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.75,
+        "reasoning": "Findings are well-grounded: both lag probes and the alert list directly from the trail support the claim of a contradiction. Recommendation is concrete (check alerting pipeline and metric source for group \"healthy-consumer\") but somewhat open-ended on *how* to verify the timestamp comparison and lacks a specific named tool, dashboard, or team contact to accelerate the check."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "consumer_lag_medium",
+      "final_state": "escalated",
+      "tool_calls_used": 2,
+      "report": {
+        "scenario": "consumer_lag_medium",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 2 tool calls, cap 11"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "passed",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5SP8KPToXARkZFb8F'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5RQb2cq5aixnuH3XY'}",
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "consumer_lag_missing_group",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "consumer_lag_missing_group",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "missing signals: cache_key"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "transport",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5WMkCgN8c2kF4PUho'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5VAp4R9GCZsN6aTDH'}",
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "consumer_lag_orders_high",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "consumer_lag_orders_high",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "missing signals: orders-consumer, lag"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "transport",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5aEAbfz4Ba6MoAJ1t'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5ZJrAjdb1ABkobCUQ'}",
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "consumer_lag_payments_critical",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "consumer_lag_payments_critical",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "missing signals: payments-consumer, lag"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 12"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "transport",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5dgmqrrBfMWoFvnRe'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5cSN3ajufHbdkBAiS'}",
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "consumer_lag_shipping_extreme",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "consumer_lag_shipping_extreme",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "missing signals: shipping-consumer, cache_key"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 10"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "transport",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5go3oc1H1fv9K7Qmx'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5fpWeHw9pLj5u87Wu'}",
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "deploy_correlation",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "deploy_correlation",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "missing signals: deploy"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "transport",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5jbUTwd2crHyqv8a9'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5ijPCa1RrtAuxvWLx'}",
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "failed_traces_scan",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "failed_traces_scan",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "missing signals: trace"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "transport",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5oB2d4vX3h63oosqM'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5n25gXdzNHrCKNwqQ'}",
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "incidents_overview",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "incidents_overview",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "missing signals: total"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 6"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "transport",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5rF5eqHZjLQTu5Hno'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5qMkM37NiwaYs99wm'}",
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "multi_probe_billing",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "multi_probe_billing",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "missing signals: billing-consumer, lag"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "transport",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5uAh71Sn1S18UG4AW'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5tN5LvnLs96tNYBMa'}",
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "multi_probe_hypothesis_evolution",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "multi_probe_hypothesis_evolution",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "missing signals: payments-consumer, lag"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "transport",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5xj1AGC6YziNNuNGv'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5wPtK2xSieR4vPotV'}",
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "noise_info_orders",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_info_orders",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "passed",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx61KmnMnuJCtJmJaUV'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5zRCzg6KjM5qShExv'}",
+      "live_mcp": false,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "noise_info_severity",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_info_severity",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "passed",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx63ZiFqPgSWMEsR6o6'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx62RW6zXNyjrmhoHHA'}",
+      "live_mcp": false,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "noise_low_analytics",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_low_analytics",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "passed",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx66CDULBYyGL7r66wb'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx65Efzrm9KRNDTcUCW'}",
+      "live_mcp": false,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "noise_low_severity",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_low_severity",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "passed",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx68baeGxfeaNkib6E7'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx67QPwNffGARCesz5b'}",
+      "live_mcp": false,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "noise_missing_severity",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_missing_severity",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "passed",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx6ASTSwoZESYwWMPkT'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx69dLyDWhbaCYqnynp'}",
+      "live_mcp": false,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "planner_stops_immediately",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "planner_stops_immediately",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.75,
+        "reasoning": "Findings correctly note the missing tool coverage; recommendation names a concrete next step (ask alert-source owner for a runbook).\n"
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": false,
+      "live_llm": false,
+      "degraded": false
+    },
+    {
+      "scenario": "postgres_slow",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "postgres_slow",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "missing signals: postgres"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "transport",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx6DuZasxf1CMfVz4NX'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx6CwGmLXxWDz3WkZ51'}",
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "redis_saturation",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "redis_saturation",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "missing signals: keyspace"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "transport",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx6JYsPCMr4255MMdBV'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx6HV87dQarkT9HrBHQ'}",
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "saga_stuck",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "saga_stuck",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "missing signals: seed_id, nodes"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 11"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "transport",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx6MmbMPjc1rKLaVUwK'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx6Lp3TiFiHGM1rmcu8'}",
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "tool_missing_response",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "tool_missing_response",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.75,
+        "reasoning": "Findings correctly attribute the failure to the transport layer; recommendation names the platform-tooling team as the concrete owner.\n"
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": false,
+      "live_llm": false,
+      "degraded": false
+    },
+    {
+      "scenario": "tool_output_schema_mismatch",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "tool_output_schema_mismatch",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.8,
+        "reasoning": "Findings identify the schema violation precisely; recommendation names both a concrete bug-file target and a CloudWatch fallback path.\n"
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": false,
+      "live_llm": false,
+      "degraded": false
+    },
+    {
+      "scenario": "tool_result_marked_error",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "tool_result_marked_error",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.85,
+        "reasoning": "Findings quote the is_error=True response accurately; recommendation offers two concrete fallback steps (manual retry + CloudWatch metric).\n"
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": false,
+      "live_llm": false,
+      "degraded": false
+    },
+    {
+      "scenario": "trace_investigation",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "trace_investigation",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "missing signals: trace"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": null,
+      "failure_class": "transport",
+      "judge_error": "judge call failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx6RoRwWzu2BoAmeCmr'}",
+      "briefing_error": "briefing enrichment failed: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx6Q8imzh5MxmgbeZsV'}",
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    }
+  ]
+}

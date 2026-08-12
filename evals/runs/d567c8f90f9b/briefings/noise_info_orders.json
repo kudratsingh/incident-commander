@@ -1,0 +1,14 @@
+{
+  "incident_id": "a179a232-1565-4e7d-9585-915c471b96a2",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.healthcheck severity=info fingerprint=health_ping group=orders-consumer",
+  "investigation_trail": [],
+  "findings": "",
+  "recommendation": "",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.033971,
+    "usd": "0"
+  }
+}

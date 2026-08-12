@@ -1,0 +1,125 @@
+{
+  "scenario": "multi_probe_billing",
+  "incident_id": "169a3763-26b9-4c4a-af73-9f74d7e6eef3",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "169a3763-26b9-4c4a-af73-9f74d7e6eef3",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "billing-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:00:56.121856Z",
+      "updated_at": "2026-08-12T01:00:56.121856Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "169a3763-26b9-4c4a-af73-9f74d7e6eef3",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "billing-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.029752,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "d44c7015-6771-4216-80aa-64e13da280b7",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-12T01:00:56.151608Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:00:56.121856Z",
+      "updated_at": "2026-08-12T01:00:56.151608Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "169a3763-26b9-4c4a-af73-9f74d7e6eef3",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "billing-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.029799,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "d44c7015-6771-4216-80aa-64e13da280b7",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-12T01:00:56.151608Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "86d24064-9e0c-4b3b-8b59-351009bfc1e8",
+          "tool_name": "_planner_escalate",
+          "arguments": {
+            "reason": "planner output invalid: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5sRGXXC6XBWcmh2Ww'}"
+          },
+          "result_summary": "planner output invalid: LLM API error 400: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.'}, 'request_id': 'req_011Cdwx5sRGXXC6XBWcmh2Ww'}",
+          "timestamp": "2026-08-12T01:00:56.151655Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:00:56.121856Z",
+      "updated_at": "2026-08-12T01:00:56.151655Z"
+    }
+  ],
+  "invocation_id": "d567c8f90f9b"
+}

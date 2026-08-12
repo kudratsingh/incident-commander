@@ -1,0 +1,23 @@
+{
+  "incident_id": "5d79e4aa-e1da-4011-8af3-3b03c4e79b61",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=medium fingerprint=consumer_lag_warning group=notifications-consumer",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"cache_key\":\"kafka:consumer_lag:notifications-consumer\"}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"cache_key\":\"kafka:consumer_lag:notifications-consumer\"}"
+    }
+  ],
+  "findings": "Two consecutive probes of the `notifications-consumer` group both returned a lag of 500 messages with no change between readings, indicating the consumer is stalled and not making progress against the Kafka topic.",
+  "recommendation": "Verify that the notifications-consumer instances are running and actively processing by checking their process/pod status and inspecting recent consumer-side logs for errors or stuck threads before considering any partition or offset intervention.",
+  "budget_used": {
+    "tool_calls": 2,
+    "tokens": 26471,
+    "wall_seconds": 49.27095,
+    "usd": "0.070696"
+  }
+}

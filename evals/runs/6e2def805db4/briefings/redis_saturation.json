@@ -1,0 +1,19 @@
+{
+  "incident_id": "39a46e54-dd5d-484c-9404-8244354a7e79",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.cache severity=high fingerprint=cache_miss_spike",
+  "investigation_trail": [
+    {
+      "tool": "get_redis_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":0.325,\"connected_clients\":11,\"used_memory_bytes\":1808040,\"used_memory_human\":\"1.72M\",\"keyspace_hits\":365,\"keyspace_misses\":3168890,\"error\":null}"
+    }
+  ],
+  "findings": "Redis is healthy and reachable (ping latency 0.325 ms, 11 connected clients), but the keyspace shows an extreme miss-to-hit ratio: 3,168,890 misses against only 365 hits, confirming the cache miss spike alert is real and severe.",
+  "recommendation": "Check whether a recent deployment flushed or re-keyed the cache, then inspect the keyspace (e.g., via `INFO keyspace` and `DBSIZE`) to confirm whether expected keys are present and unexpired.",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 20275,
+    "wall_seconds": 22.901073,
+    "usd": "0.054066"
+  }
+}

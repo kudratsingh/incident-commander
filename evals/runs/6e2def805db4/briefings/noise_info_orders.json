@@ -1,0 +1,14 @@
+{
+  "incident_id": "655486bc-ce7d-4d7b-93a1-841b6b40b846",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.healthcheck severity=info fingerprint=health_ping group=orders-consumer",
+  "investigation_trail": [],
+  "findings": "No automated probes were run before escalation, so the investigation trail is empty and the root cause of the orders-consumer health-check alert remains unknown.",
+  "recommendation": "Start by reviewing the raw alert details for fingerprint `health_ping` on the `orders-consumer` group in the platform health-check system, and check recent logs and health-check history for that consumer to identify any failures.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.033031,
+    "usd": "0"
+  }
+}

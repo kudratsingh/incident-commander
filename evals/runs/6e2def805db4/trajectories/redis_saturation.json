@@ -1,0 +1,360 @@
+{
+  "scenario": "redis_saturation",
+  "incident_id": "39a46e54-dd5d-484c-9404-8244354a7e79",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "39a46e54-dd5d-484c-9404-8244354a7e79",
+      "state": "triage",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "high",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:18:43.751680Z",
+      "updated_at": "2026-08-12T01:18:43.751680Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "39a46e54-dd5d-484c-9404-8244354a7e79",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "high",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.03721,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "90deed36-ba05-463d-bf77-626f3a0fc3db",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-12T01:18:43.788890Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:18:43.751680Z",
+      "updated_at": "2026-08-12T01:18:43.788890Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "39a46e54-dd5d-484c-9404-8244354a7e79",
+      "state": "planning",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "high",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 12190,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.037253,
+        "max_usd": "1.00",
+        "usd_used": "0.032654"
+      },
+      "evidence": [
+        {
+          "evidence_id": "90deed36-ba05-463d-bf77-626f3a0fc3db",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-12T01:18:43.788890Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f5c2a120-105b-4a8f-8bfe-74cc4ce67e9c",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.325,\"connected_clients\":11,\"used_memory_bytes\":1808040,\"used_memory_human\":\"1.72M\",\"keyspace_hits\":365,\"keyspace_misses\":3168890,\"error\":null}",
+          "timestamp": "2026-08-12T01:18:43.788933Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "54f29cae-0f27-4adf-aa3b-b5cbd88d8e74",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "Redis shows a catastrophic cache miss ratio (3,168,890 misses vs 365 hits, ~99.99% miss rate) with very low memory usage (1.72M), strongly indicating stale/evicted hot key cache collapse. Confidence is 0.82, above the 0.7 threshold, and stale_cache has a Tier-1 fix."
+          },
+          "result_summary": "planner handoff to PLANNING: Redis shows a catastrophic cache miss ratio (3,168,890 misses vs 365 hits, ~99.99% miss rate) with very low memory usage (1.72M), strongly indicating stale/evicted hot key cache collapse. Confidence is 0.82, above the 0.7 threshold, and stale_cache has a Tier-1 fix.",
+          "timestamp": "2026-08-12T01:18:43.788933Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "redis-hot-key-cache-miss-spike-3168890-misses",
+          "confidence": 0.82,
+          "reasoning": "Redis health shows an extreme miss-to-hit ratio (3,168,890 misses vs 365 hits), which is the hallmark of a stale cache / hot key collapse; memory usage is very low (1.72M) suggesting keys may have been evicted or never populated."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-invalidated-cache-keys",
+          "confidence": 0.25,
+          "reasoning": "A recent deploy could have changed cache key schemas, causing all lookups to miss; needs deploy history to confirm."
+        },
+        {
+          "category": "unknown",
+          "name": "external-cache-population-failure",
+          "confidence": 0.15,
+          "reasoning": "If the service responsible for warming the cache is failing, misses would spike without a clear Redis-side cause; no evidence yet."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:18:43.751680Z",
+      "updated_at": "2026-08-12T01:18:43.788933Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "39a46e54-dd5d-484c-9404-8244354a7e79",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "high",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 20275,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 17.222648,
+        "max_usd": "1.00",
+        "usd_used": "0.054066"
+      },
+      "evidence": [
+        {
+          "evidence_id": "90deed36-ba05-463d-bf77-626f3a0fc3db",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-12T01:18:43.788890Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f5c2a120-105b-4a8f-8bfe-74cc4ce67e9c",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.325,\"connected_clients\":11,\"used_memory_bytes\":1808040,\"used_memory_human\":\"1.72M\",\"keyspace_hits\":365,\"keyspace_misses\":3168890,\"error\":null}",
+          "timestamp": "2026-08-12T01:18:43.788933Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "54f29cae-0f27-4adf-aa3b-b5cbd88d8e74",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "Redis shows a catastrophic cache miss ratio (3,168,890 misses vs 365 hits, ~99.99% miss rate) with very low memory usage (1.72M), strongly indicating stale/evicted hot key cache collapse. Confidence is 0.82, above the 0.7 threshold, and stale_cache has a Tier-1 fix."
+          },
+          "result_summary": "planner handoff to PLANNING: Redis shows a catastrophic cache miss ratio (3,168,890 misses vs 365 hits, ~99.99% miss rate) with very low memory usage (1.72M), strongly indicating stale/evicted hot key cache collapse. Confidence is 0.82, above the 0.7 threshold, and stale_cache has a Tier-1 fix.",
+          "timestamp": "2026-08-12T01:18:43.788933Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "fe59cacc-fa36-455a-ac2e-c99becc542b1",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "redis-hot-key-cache-miss-spike-3168890-misses"
+          },
+          "result_summary": "plan: invalidate_cache_key({\"key\": \"cache_miss_spike\"}) then verify via get_redis_health",
+          "timestamp": "2026-08-12T01:19:00.974328Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "redis-hot-key-cache-miss-spike-3168890-misses",
+          "confidence": 0.82,
+          "reasoning": "Redis health shows an extreme miss-to-hit ratio (3,168,890 misses vs 365 hits), which is the hallmark of a stale cache / hot key collapse; memory usage is very low (1.72M) suggesting keys may have been evicted or never populated."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-invalidated-cache-keys",
+          "confidence": 0.25,
+          "reasoning": "A recent deploy could have changed cache key schemas, causing all lookups to miss; needs deploy history to confirm."
+        },
+        {
+          "category": "unknown",
+          "name": "external-cache-population-failure",
+          "confidence": 0.15,
+          "reasoning": "If the service responsible for warming the cache is failing, misses would spike without a clear Redis-side cause; no evidence yet."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "redis-hot-key-cache-miss-spike-3168890-misses",
+        "action_tool": "invalidate_cache_key",
+        "action_arguments": {
+          "key": "cache_miss_spike"
+        },
+        "verify_tool": "get_redis_health",
+        "verify_arguments": {},
+        "verify_expectation": "The keyspace_misses count stops climbing rapidly and the miss-to-hit ratio returns toward baseline (misses and hits are closer in proportion), indicating the stale/evicted hot key has been refreshed and cache lookups are resolving successfully again."
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:18:43.751680Z",
+      "updated_at": "2026-08-12T01:19:00.974328Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "39a46e54-dd5d-484c-9404-8244354a7e79",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "high",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 20275,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 22.901073,
+        "max_usd": "1.00",
+        "usd_used": "0.054066"
+      },
+      "evidence": [
+        {
+          "evidence_id": "90deed36-ba05-463d-bf77-626f3a0fc3db",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-12T01:18:43.788890Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f5c2a120-105b-4a8f-8bfe-74cc4ce67e9c",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.325,\"connected_clients\":11,\"used_memory_bytes\":1808040,\"used_memory_human\":\"1.72M\",\"keyspace_hits\":365,\"keyspace_misses\":3168890,\"error\":null}",
+          "timestamp": "2026-08-12T01:18:43.788933Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "54f29cae-0f27-4adf-aa3b-b5cbd88d8e74",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "Redis shows a catastrophic cache miss ratio (3,168,890 misses vs 365 hits, ~99.99% miss rate) with very low memory usage (1.72M), strongly indicating stale/evicted hot key cache collapse. Confidence is 0.82, above the 0.7 threshold, and stale_cache has a Tier-1 fix."
+          },
+          "result_summary": "planner handoff to PLANNING: Redis shows a catastrophic cache miss ratio (3,168,890 misses vs 365 hits, ~99.99% miss rate) with very low memory usage (1.72M), strongly indicating stale/evicted hot key cache collapse. Confidence is 0.82, above the 0.7 threshold, and stale_cache has a Tier-1 fix.",
+          "timestamp": "2026-08-12T01:18:43.788933Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "fe59cacc-fa36-455a-ac2e-c99becc542b1",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "redis-hot-key-cache-miss-spike-3168890-misses"
+          },
+          "result_summary": "plan: invalidate_cache_key({\"key\": \"cache_miss_spike\"}) then verify via get_redis_health",
+          "timestamp": "2026-08-12T01:19:00.974328Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "6ba8dc07-e835-46db-a825-f8299d56e275",
+          "tool_name": "_remediation_escalate",
+          "arguments": {
+            "from_state": "remediating",
+            "reason": "remediation tool error (invalidate_cache_key): MCP error -32002: missing required scope: actions:execute"
+          },
+          "result_summary": "remediation tool error (invalidate_cache_key): MCP error -32002: missing required scope: actions:execute",
+          "timestamp": "2026-08-12T01:19:06.652753Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "redis-hot-key-cache-miss-spike-3168890-misses",
+          "confidence": 0.82,
+          "reasoning": "Redis health shows an extreme miss-to-hit ratio (3,168,890 misses vs 365 hits), which is the hallmark of a stale cache / hot key collapse; memory usage is very low (1.72M) suggesting keys may have been evicted or never populated."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-invalidated-cache-keys",
+          "confidence": 0.25,
+          "reasoning": "A recent deploy could have changed cache key schemas, causing all lookups to miss; needs deploy history to confirm."
+        },
+        {
+          "category": "unknown",
+          "name": "external-cache-population-failure",
+          "confidence": 0.15,
+          "reasoning": "If the service responsible for warming the cache is failing, misses would spike without a clear Redis-side cause; no evidence yet."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "redis-hot-key-cache-miss-spike-3168890-misses",
+        "action_tool": "invalidate_cache_key",
+        "action_arguments": {
+          "key": "cache_miss_spike"
+        },
+        "verify_tool": "get_redis_health",
+        "verify_arguments": {},
+        "verify_expectation": "The keyspace_misses count stops climbing rapidly and the miss-to-hit ratio returns toward baseline (misses and hits are closer in proportion), indicating the stale/evicted hot key has been refreshed and cache lookups are resolving successfully again."
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:18:43.751680Z",
+      "updated_at": "2026-08-12T01:19:06.652753Z"
+    }
+  ],
+  "invocation_id": "6e2def805db4"
+}

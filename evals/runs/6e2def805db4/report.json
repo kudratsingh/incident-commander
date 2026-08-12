@@ -1,0 +1,1256 @@
+{
+  "generated_at": "2026-08-12T01:21:13.159488Z",
+  "total": 26,
+  "passed": 26,
+  "failed": 0,
+  "judged_count": 26,
+  "judge_useful_count": 26,
+  "judge_mean_overall": 0.864423076923077,
+  "invocation_id": "6e2def805db4",
+  "degraded_count": 0,
+  "only_patterns": [
+    "alert_storm",
+    "deploy_correlation",
+    "failed_traces",
+    "incidents_overview",
+    "multi_probe",
+    "noise_",
+    "planner_stops",
+    "postgres_slow",
+    "redis_saturation",
+    "saga_stuck",
+    "tool_",
+    "trace_investigation",
+    "consumer_lag_healthy",
+    "consumer_lag_medium",
+    "consumer_lag_missing",
+    "consumer_lag_orders",
+    "consumer_lag_payments",
+    "consumer_lag_shipping",
+    "consumer_lag_analytics"
+  ],
+  "outcomes": [
+    {
+      "scenario": "alert_storm",
+      "final_state": "escalated",
+      "tool_calls_used": 4,
+      "report": {
+        "scenario": "alert_storm",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 4 tool calls, cap 10"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.9,
+        "reasoning": "Groundedness: Every finding derives directly from the trail—API 5xx rate (3.2%), billing-consumer lag (15,000), DLQ entries (4 jobs), v0.4.2 deploy correlation, and SMTP connection error are all present. Minor: the briefing infers \"VPC egress rules\" from the DLQ triage suggestion without the trail explicitly confirming that v0.4.2 changed egress rules, though the triage note strongly implies it. Actionability: The recommendation names two specific verification targets (smtp.mailer.internal reachability and ECS task health, Stripe status page) that a human can check within 15 minutes, with clear sequence and expected outcomes to unblock lag."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "consumer_lag_analytics_critical",
+      "final_state": "escalated",
+      "tool_calls_used": 2,
+      "report": {
+        "scenario": "consumer_lag_analytics_critical",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 2 tool calls, cap 11"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.85,
+        "reasoning": "All findings are directly sourced from the investigation trail: the lag value (50,000), DLQ message count (4), and all four failure categories with error messages are verbatim from the list_dlq_messages output. The recommendation names specific targets (smtp.mailer.internal ECS task health, VPC egress rules, Stripe status page, the CSV uploader) and concrete verification steps (check health, review VPC rules, check status page, contact uploader) that an on-call engineer can execute within 15 minutes, though the suggestion to cross-reference deploy history (get_deploy_history) is slightly speculative despite being indicated as a triage hint."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "consumer_lag_healthy_zero",
+      "final_state": "escalated",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "consumer_lag_healthy_zero",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.75,
+        "reasoning": "Findings are fully grounded: both `get_consumer_lag` calls returned lag=0 and `list_active_alerts` returned zero current alerts, directly supporting the claim of no current anomaly. The recommendation is concrete (check alerting rule definition and review lag history around trigger timestamp) but slightly vague on how to access the rule definition or history system and which specific tool or team owns the alerting rule verification."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "consumer_lag_medium",
+      "final_state": "escalated",
+      "tool_calls_used": 2,
+      "report": {
+        "scenario": "consumer_lag_medium",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 2 tool calls, cap 11"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 1.0,
+        "actionability": 1.0,
+        "reasoning": "Findings directly mirror the investigation trail: two identical lag readings of 500 with no change, all specific terms present in the trail. Recommendation names concrete actions (check pod/process status, inspect consumer logs) a human can execute in 15 minutes with clear targets (notifications-consumer instances)."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "consumer_lag_missing_group",
+      "final_state": "escalated",
+      "tool_calls_used": 4,
+      "report": {
+        "scenario": "consumer_lag_missing_group",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 4 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 1.0,
+        "actionability": 0.75,
+        "reasoning": "Every claim in findings is directly sourced from the investigation trail: billing-consumer lag of 15,000 and worker-dispatcher lag of 0 are both from get_consumer_lag responses; all four DLQ message descriptions and error details match the list_dlq_messages output exactly. The recommendation names specific, concrete checks (smtp.mailer.internal ECS task health, VPC egress rules post-v0.4.2, Stripe status page) that an on-call operator can complete in 15 minutes, though it omits the exact method to verify ECS task status (AWS console vs. CLI command) and does not prioritize which check to perform first."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "consumer_lag_orders_high",
+      "final_state": "escalated",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "consumer_lag_orders_high",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.9,
+        "reasoning": "Every specific claim—7,500 lag, four DLQ entries, three root causes, the missing user_id field, row 15,382 non-numeric value, smtp.mailer.internal:587 refusal, v0.4.2 hotfix reference, Stripe 30s timeout—is present verbatim in the investigation trail. The recommendation names concrete actions: check smtp.mailer.internal ECS task health, verify Stripe status page, and notify the uploader about the CSV row, with a clear sequencing and target for each step."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "consumer_lag_payments_critical",
+      "final_state": "escalated",
+      "tool_calls_used": 4,
+      "report": {
+        "scenario": "consumer_lag_payments_critical",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 4 tool calls, cap 12"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.9,
+        "reasoning": "Findings and recommendation are tightly anchored to the investigation trail: lag of 30,000 (from get_consumer_lag), four DLQ items with exact error messages and root-cause categories present in list_dlq_messages, v0.4.2 deploy timing and billing failure note from get_deploy_history. Minor deduction (−0.05) because \"may reflect changed VPC egress rules\" slightly outpaces the evidence—the deploy note mentions correlation but does not explicitly describe the rule change. Recommendation names specific, executable verification steps (ECS task status, TCP reachability on 587, Stripe status page check) that an on-call engineer can perform in 15 minutes; the only small gap (−0.1) is that it omits the team or tool to use for VPC rule inspection."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "consumer_lag_shipping_extreme",
+      "final_state": "escalated",
+      "tool_calls_used": 2,
+      "report": {
+        "scenario": "consumer_lag_shipping_extreme",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 2 tool calls, cap 10"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.9,
+        "reasoning": "Every specific claim—lag of 100,000, four DLQ entries, their error types, retry counts, and the SMTP host and Stripe timeout details—is directly present in the investigation trail with no invention or speculation. The recommendation names concrete verification steps (check ECS task status, verify Stripe status page, confirm producer fix) and a specific precondition before replay, all grounded in the triage hints and root cause categories from the DLQ data; the only minor softness is \"potentially changed by deploy v0.4.2\" which is appropriately hedged as a cross-reference suggestion already in the trail."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "deploy_correlation",
+      "final_state": "escalated",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "deploy_correlation",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.85,
+        "reasoning": "Findings derive directly from DLQ items and deploy history—all four error types, timestamps, and the v0.4.2 billing failure note are present in the trail. The recommendation names two concrete first steps (check smtp.mailer.internal ECS task health, verify Stripe status page) that an on-call engineer can execute in 15 minutes, though it omits the specific tool or dashboard for accessing ECS task status, preventing a perfect 1.0 on actionability."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "failed_traces_scan",
+      "final_state": "escalated",
+      "tool_calls_used": 2,
+      "report": {
+        "scenario": "failed_traces_scan",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 2 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.85,
+        "reasoning": "Groundedness: all four DLQ entries, their error messages, retry counts, triage summaries, and the deploy history (v0.4.2 flagged as \"correlated with billing failures,\" v0.4.3 deployed at 07:43) are directly present in the trail; the temporal correlation between the SMTP error and v0.4.2 is stated explicitly in the triage data. Actionability: the recommendation names two specific verification steps a human can complete in 15 minutes (check `smtp.mailer.internal` ECS task health via the AWS console, cross-reference v0.4.2/v0.4.3 VPC egress rule changes, and visit the Stripe status page), though it could have been more concrete by naming the exact tool or dashboard (e.g., \"AWS CloudWatch\" or \"Stripe's public status page\")."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "incidents_overview",
+      "final_state": "escalated",
+      "tool_calls_used": 4,
+      "report": {
+        "scenario": "incidents_overview",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 4 tool calls, cap 6"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.9,
+        "reasoning": "All findings are grounded in the investigation trail: the 3.2% 5xx rate, 15k billing-consumer lag, four DLQ messages with their specific error types and root causes are all directly present in the alerts and DLQ output; the v0.4.2 deploy timestamp (03:43 UTC) and its \"correlated with billing failures\" note are exact matches from deploy history. The recommendation names two specific verification steps a human can perform in 15 minutes: test TCP connectivity to smtp.mailer.internal:587 from prod and check the Stripe status page, both of which directly target the highest-confidence root causes identified in the triage data."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "multi_probe_billing",
+      "final_state": "escalated",
+      "tool_calls_used": 2,
+      "report": {
+        "scenario": "multi_probe_billing",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 2 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.85,
+        "reasoning": "Findings are directly extracted from the investigation trail: lag 15,000 is from get_consumer_lag, all four DLQ entries and their error messages, categories, and retry status come verbatim from list_dlq_messages. Recommendation names two specific checks (smtp.mailer.internal ECS task health and Stripe status page) that a human can verify in ~15 minutes, though it could be sharper by adding \"then contact the infrastructure team to restart the SMTP task\" or \"check the VPC egress rules in the console\" as a concrete next step rather than stopping at \"check.\""
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "multi_probe_hypothesis_evolution",
+      "final_state": "escalated",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "multi_probe_hypothesis_evolution",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.9,
+        "reasoning": "Findings are tightly grounded: lag of 30,000 and all four DLQ entries with exact error types and timestamps are present in the trail; the correlation with v0.4.2 deployment at 03:43 UTC and v0.4.3 at 07:43 UTC is explicitly documented in deploy_history notes. Recommendation gives concrete 15-minute steps: check smtp.mailer.internal ECS task health (named dependency), verify v0.4.3 deployment against v0.4.2 VPC changes (named version delta), and check Stripe status page (named external service). One minor quibble: \"confirming whether v0.4.3 resolved\" the v0.4.2 change invokes a comparison not fully explicit in the trail, though the deploy history does note the correlation."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "noise_info_orders",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_info_orders",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.75,
+        "reasoning": "Findings are well-grounded in the alert structure (fingerprint, group, source are all present) and accurately report the absence of investigation data. Recommendation names specific targets (fingerprint `health_ping`, `orders-consumer` group, platform health-check system, recent logs) and concrete actions (review alert details, check logs and health-check history), but omits how to access these systems or which interface to use, making execution somewhat dependent on the on-call engineer's system knowledge."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": false,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "noise_info_severity",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_info_severity",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.6,
+        "reasoning": "Findings and alert details are fully grounded in the provided data (source, severity, group, and absence of probes all stated). Recommendation names a specific action (review health-check endpoint reachability) but lacks a concrete target—it should name the specific endpoint URL or team owner to contact for verification within 15 minutes."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": false,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "noise_low_analytics",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_low_analytics",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 1.0,
+        "actionability": 0.5,
+        "reasoning": "All findings and recommendation language derive directly from the alert and the stated fact that no probes were run; every component (source, fingerprint, group) is present in the alert data. However, the recommendation to \"review the raw alert details\" is directional but lacks concrete specificity—it omits which tool or system the human should access to view those details or what specific metrics or patterns to look for to distinguish a transient blip from a real signal."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": false,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "noise_low_severity",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_low_severity",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 1.0,
+        "actionability": 0.5,
+        "reasoning": "Every claim in findings and recommendation derives directly from the alert and incident metadata: source=platform.canary, group=billing-consumer, fingerprint=canary_blip are all present in the alert definition, and the finding that no probes were run is a factual statement about the investigation trail. The recommendation names specific targets (billing-consumer canary metrics and logs) and a time window (around alert fire), but lacks a concrete verification action—it says \"check for anomalies\" without specifying which metrics to inspect, what thresholds would constitute a problem, or how to query them."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": false,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "noise_missing_severity",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_missing_severity",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 1.0,
+        "actionability": 0.5,
+        "reasoning": "All findings and the recommendation anchor directly to the alert data provided (source=platform.unknown, severity=unknown, fingerprint=no_severity, empty investigation trail). However, the recommendation to \"review the raw alert directly\" and \"locate the originating platform signal\" is directional but lacks a concrete target — it does not name a specific system, log location, or alert management interface the on-call should access in the next 15 minutes."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": false,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "planner_stops_immediately",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "planner_stops_immediately",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.75,
+        "reasoning": "Findings correctly note the missing tool coverage; recommendation names a concrete next step (ask alert-source owner for a runbook).\n"
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": false,
+      "live_llm": false,
+      "degraded": false
+    },
+    {
+      "scenario": "postgres_slow",
+      "final_state": "escalated",
+      "tool_calls_used": 4,
+      "report": {
+        "scenario": "postgres_slow",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 4 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.65,
+        "reasoning": "Findings are well-grounded in the investigation trail: the Postgres health metrics (0.59 ms ping, 1 connection) and Kafka lag (15,000 messages, 20+ minute duration) are directly sourced, and the v0.4.2 \"correlated with billing failures\" note is present in deploy history. However, the recommendation speculates somewhat: \"application query patterns and slow-query logs\" are not mentioned in the trail, and while the deploy timeline is actionable, the briefing doesn't specify which team owns slow-query log access or provide a concrete target metric to verify in the next 15 minutes."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "redis_saturation",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "redis_saturation",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.85,
+        "reasoning": "All findings derive directly from the Redis health check output: ping latency (0.325 ms), connected clients (11), and the exact keyspace miss/hit counts (3,168,890 vs 365) are present in the trail. The recommendation specifies concrete Redis commands (INFO keyspace, DBSIZE) and a plausible root-cause hypothesis (recent deployment flushing cache), though the deployment check step is slightly speculative and could be more precisely scoped to a named deployment system or version-control log."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "saga_stuck",
+      "final_state": "escalated",
+      "tool_calls_used": 5,
+      "report": {
+        "scenario": "saga_stuck",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 5 tool calls, cap 11"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.9,
+        "reasoning": "The findings faithfully extract three root causes from the DLQ triage objects (schema violation, Stripe timeout, SMTP connection refusal) and correctly reference the v0.4.2 deploy annotation (\"correlated with billing failures\") and the VPC-change inference from the triage hint. The recommendation names four specific verification actions (SMTP ECS task health, VPC rule comparison, Stripe status page, producer fix) that an on-call operator can execute in 15 minutes; the only minor ambiguity is that VPC rule comparison may require cross-team coordination, but the steps and targets are concrete enough for immediate triage."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    },
+    {
+      "scenario": "tool_missing_response",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "tool_missing_response",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.75,
+        "reasoning": "Findings correctly attribute the failure to the transport layer; recommendation names the platform-tooling team as the concrete owner.\n"
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": false,
+      "live_llm": false,
+      "degraded": false
+    },
+    {
+      "scenario": "tool_output_schema_mismatch",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "tool_output_schema_mismatch",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.8,
+        "reasoning": "Findings identify the schema violation precisely; recommendation names both a concrete bug-file target and a CloudWatch fallback path.\n"
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": false,
+      "live_llm": false,
+      "degraded": false
+    },
+    {
+      "scenario": "tool_result_marked_error",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "tool_result_marked_error",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.85,
+        "reasoning": "Findings quote the is_error=True response accurately; recommendation offers two concrete fallback steps (manual retry + CloudWatch metric).\n"
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": false,
+      "live_llm": false,
+      "degraded": false
+    },
+    {
+      "scenario": "trace_investigation",
+      "final_state": "escalated",
+      "tool_calls_used": 4,
+      "report": {
+        "scenario": "trace_investigation",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 4 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.9,
+        "reasoning": "All findings derive directly from the investigation trail: lag=30000 from get_consumer_lag, empty DLQ from list_dlq_messages, deployment timestamps and notes from get_deploy_history, and the absence of trace data from get_trace. The recommendation names two concrete steps with specific targets—check lag timing against the 03:43 and 07:43 UTC deployment windows, then inspect the payments-consumer pod/process logs—both executable within 15 minutes; the only minor weakness is that \"pod/process logs\" could name a more specific log aggregation system (e.g., \"check Datadog logs for payments-consumer\"), but the action is still sufficiently concrete."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    }
+  ]
+}

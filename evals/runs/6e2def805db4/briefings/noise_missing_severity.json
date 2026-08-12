@@ -1,0 +1,14 @@
+{
+  "incident_id": "f85a9ad8-2255-42ba-ac55-0a35d9f3fdf3",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.unknown severity=unknown fingerprint=no_severity",
+  "investigation_trail": [],
+  "findings": "No investigation probes were run before escalation; the incident trail is entirely empty, so no root cause or affected components can be identified from automated checks.",
+  "recommendation": "Start by reviewing the raw alert directly — source, severity, and fingerprint fields all read as unknown, so the first step is to locate the originating platform signal and establish basic context before any further diagnosis.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.034775,
+    "usd": "0"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "incident_id": "e2df0af6-0613-4b7a-ad35-1e0491cacb8e",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.dag severity=high fingerprint=saga_stalled",
+  "investigation_trail": [
+    {
+      "tool": "get_dag_state",
+      "summary": "{\"seed_id\":\"25220882-1820-5cd3-b09b-f866ff5823c9\",\"nodes\":[{\"id\":\"25220882-1820-5cd3-b09b-f866ff5823c9\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-08-11T09:43:54.714014Z\"},{\"id\":\"b82d8fb4-a936-5cf4-b775-8d1f673a6f38\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-08-11T09:43:54.714014Z\"},{\"id\":\"a1b11d3c-48c6-5b13-9a71-13b4bbe2df8c\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-08-11T09:43:54.714014Z\"}],\"edges\":[{\"from_id\":\"25220882-1820-5cd3-b09b-f866ff5823c9\",\"to_id\":\"b82d8fb4-a936-5cf4-b775-8d1f673a6f38\"},{\"from_id\":\"a1b11d3c-48c6-5b13-9a71-13b4bbe2df8c\",\"to_id\":\"25220882-1820-5cd3-b09b-f866ff5823c9\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}"
+    },
+    {
+      "tool": "list_audit_events",
+      "summary": "{\"total\":0,\"events\":[]}"
+    },
+    {
+      "tool": "search_traces",
+      "summary": "{\"matches\":[]}"
+    },
+    {
+      "tool": "get_deploy_history",
+      "summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-11T07:43:54.982864Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-11T06:43:54.982864Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-08-11T03:43:54.982864Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-08-10T15:43:54.982864Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-08-10T11:43:54.982864Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}"
+    },
+    {
+      "tool": "list_dlq_messages",
+      "summary": "{\"total\":3,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"SchemaValidationError: payload missing required field 'user_id' (received keys: ['tenant_id', 'action', 'ts'])\",\"retry_count\":3,\"created_at\":\"2026-08-11T09:35:54.994755Z\",\"updated_at\":\"2026-08-11T09:35:54.994755Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"schema_violation\",\"summary\":\"Producer sent a payload missing user_id — schema rejected it three times.\",\"suggested_fix\":\"Fix the producer to include user_id, then replay the DLQ entry. Backwards-compatible producer fix + replay is the standard remediation.\",\"is_retryable\":true,\"confidence\":0.91},\"remediation_hint\":\"replay_safe\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"process_payment call timed out after 30s: TimeoutError('stripe.api')\",\"retry_count\":3,\"created_at\":\"2026-08-11T09:18:54.994755Z\",\"updated_at\":\"2026-08-11T09:18:54.994755Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"third_party_timeout\",\"summary\":\"Stripe API exceeded 30s deadline three consecutive attempts.\",\"suggested_fix\":\"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.\",\"is_retryable\":true,\"confidence\":0.71},\"remediation_hint\":\"wait_and_replay\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-08-11T09:03:54.994755Z\",\"updated_at\":\"2026-08-11T09:03:54.994755Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Replay once the dependency recovers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"extra\":null}]}"
+    }
+  ],
+  "findings": "The DAG itself completed without pausing, but 3 bulk_api_sync jobs landed in the DLQ across a ~33-minute window: one schema violation (missing `user_id` field), one Stripe API timeout after 30 s, and one SMTP connection refusal to `smtp.mailer.internal:587` — all exhausted 3 retries; notably, the v0.4.2 deploy (annotated \"correlated with billing failures\") preceded the incident and may have introduced VPC egress changes affecting the SMTP relay.",
+  "recommendation": "Start by checking the health of `smtp.mailer.internal` ECS tasks and comparing VPC egress rules before and after the v0.4.2→v0.4.3 deploy, then verify Stripe's status page for the timeout; once dependencies are confirmed healthy, the DLQ entries are all marked replay-safe, but the schema-violation entry requires a producer fix (add `user_id`) before replay.",
+  "budget_used": {
+    "tool_calls": 5,
+    "tokens": 32423,
+    "wall_seconds": 0.030398,
+    "usd": "0.087731"
+  }
+}

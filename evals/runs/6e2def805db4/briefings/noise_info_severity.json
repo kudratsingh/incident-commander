@@ -1,0 +1,14 @@
+{
+  "incident_id": "563753c8-c9ba-434a-8eee-8114d1273b5c",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.healthcheck severity=info fingerprint=health_ping group=unknown",
+  "investigation_trail": [],
+  "findings": "No investigative probes were run before escalation, so there is no additional diagnostic data beyond the original alert (source=platform.healthcheck, severity=info, group=unknown).",
+  "recommendation": "Start by reviewing the raw health-check alert directly — confirm whether the platform health-check endpoint is reachable and returning expected responses, as no automated investigation was completed to narrow the scope.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.033269,
+    "usd": "0"
+  }
+}

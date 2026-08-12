@@ -1,0 +1,332 @@
+{
+  "scenario": "postgres_slow",
+  "incident_id": "d53a6807-7be1-4d14-8db6-2236d75da26f",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "d53a6807-7be1-4d14-8db6-2236d75da26f",
+      "state": "triage",
+      "alert": {
+        "source": "platform.db",
+        "severity": "high",
+        "fingerprint": "db_latency_high",
+        "group": null,
+        "service": "postgres"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:17:39.848701Z",
+      "updated_at": "2026-08-12T01:17:39.848701Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "d53a6807-7be1-4d14-8db6-2236d75da26f",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.db",
+        "severity": "high",
+        "fingerprint": "db_latency_high",
+        "group": null,
+        "service": "postgres"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.027518,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "f5feae2c-f475-4222-9920-467aab3c3834",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "9500a4098745bb22ab4fd3543d6145bb"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-12T01:17:39.876219Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:17:39.848701Z",
+      "updated_at": "2026-08-12T01:17:39.876219Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "d53a6807-7be1-4d14-8db6-2236d75da26f",
+      "state": "planning",
+      "alert": {
+        "source": "platform.db",
+        "severity": "high",
+        "fingerprint": "db_latency_high",
+        "group": null,
+        "service": "postgres"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 32567,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.027559,
+        "max_usd": "1.00",
+        "usd_used": "0.094019"
+      },
+      "evidence": [
+        {
+          "evidence_id": "f5feae2c-f475-4222-9920-467aab3c3834",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "9500a4098745bb22ab4fd3543d6145bb"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-12T01:17:39.876219Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "805d4edc-44bf-4150-8646-bd4ed7f6ee59",
+          "tool_name": "get_postgres_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.592,\"active_connections\":1,\"dialect\":\"postgresql\",\"error\":null}",
+          "timestamp": "2026-08-12T01:17:39.876260Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "565cc444-1079-4251-9e00-9d4016d7b106",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 5
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-11T07:43:54.982864Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-11T06:43:54.982864Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-08-11T03:43:54.982864Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-08-10T15:43:54.982864Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-08-10T11:43:54.982864Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-08-12T01:17:39.876260Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4f4a8478-7c1b-47ce-84bd-246cc2249155",
+          "tool_name": "list_active_alerts",
+          "arguments": {
+            "severity": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"alerts\":[{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-08-11T09:35:54.989799Z\",\"extra_data\":null},{\"id\":\"c6c4e180-f625-53c2-85c2-2d505fec61e5\",\"severity\":\"warning\",\"source\":\"dlq\",\"title\":\"DLQ backlog growing\",\"description\":\"3 send_email jobs dead-lettered in last hour.\",\"fired_at\":\"2026-08-11T09:28:54.989799Z\",\"extra_data\":null},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-08-11T09:18:54.989799Z\",\"extra_data\":null}]}",
+          "timestamp": "2026-08-12T01:17:39.876260Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "00ad8d1a-26f2-40f5-a985-f4790b58736e",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "billing-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"cache_key\":\"kafka:consumer_lag:billing-consumer\"}",
+          "timestamp": "2026-08-12T01:17:39.876260Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f07f9602-a3f1-4abb-9ff6-29501b2accab",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "billing-consumer lag is confirmed at 15,000 (sustained 20+ minutes per active alert), postgres itself is healthy (ping 0.592ms, 1 connection), and the 5xx rate and DB latency alert are consistent with a saturated Kafka consumer creating downstream pressure. Confidence 0.82 exceeds threshold and category consumer_saturation has a Tier-1 fix."
+          },
+          "result_summary": "planner handoff to PLANNING: billing-consumer lag is confirmed at 15,000 (sustained 20+ minutes per active alert), postgres itself is healthy (ping 0.592ms, 1 connection), and the 5xx rate and DB latency alert are consistent with a saturated Kafka consumer creating downstream pressure. Confidence 0.82 exceeds threshold and category consumer_saturation has a Tier-1 fix.",
+          "timestamp": "2026-08-12T01:17:39.876260Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "billing-consumer-lag-15k-sustained-20min",
+          "confidence": 0.82,
+          "reasoning": "billing-consumer lag is at 15,000 and has been sustained for 20+ minutes per the active alert, directly correlating with the high DB latency and 5xx rate — a saturated consumer creating DB backpressure is the most likely cause."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "v0.4.3-prod-deploy-correlated-with-billing-failures",
+          "confidence": 0.45,
+          "reasoning": "v0.4.2 deploy notes explicitly mention correlation with billing failures, and v0.4.3 was deployed ~2 hours before the incident window, making a deploy regression plausible."
+        },
+        {
+          "category": "poison_message",
+          "name": "dlq-backlog-3-send-email-dead-lettered",
+          "confidence": 0.3,
+          "reasoning": "DLQ alert shows 3 dead-lettered send_email jobs in the last hour; poison messages could be blocking the consumer and causing lag, though the count is small."
+        },
+        {
+          "category": "persistent_data_bug",
+          "name": "malformed-billing-events-causing-consumer-stall",
+          "confidence": 0.2,
+          "reasoning": "If billing events contain malformed data, the consumer could stall repeatedly; the sustained lag without recovery suggests possible data-level issue."
+        },
+        {
+          "category": "unknown",
+          "name": "db-latency-independent-of-consumer-lag",
+          "confidence": 0.1,
+          "reasoning": "Postgres ping latency is healthy at 0.592ms with only 1 active connection, so the DB itself may not be the bottleneck — the alert source may be stale or from a different path."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:17:39.848701Z",
+      "updated_at": "2026-08-12T01:17:39.876260Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "d53a6807-7be1-4d14-8db6-2236d75da26f",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.db",
+        "severity": "high",
+        "fingerprint": "db_latency_high",
+        "group": null,
+        "service": "postgres"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 32567,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 50.179407,
+        "max_usd": "1.00",
+        "usd_used": "0.094019"
+      },
+      "evidence": [
+        {
+          "evidence_id": "f5feae2c-f475-4222-9920-467aab3c3834",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "9500a4098745bb22ab4fd3543d6145bb"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-12T01:17:39.876219Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "805d4edc-44bf-4150-8646-bd4ed7f6ee59",
+          "tool_name": "get_postgres_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.592,\"active_connections\":1,\"dialect\":\"postgresql\",\"error\":null}",
+          "timestamp": "2026-08-12T01:17:39.876260Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "565cc444-1079-4251-9e00-9d4016d7b106",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 5
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-11T07:43:54.982864Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-11T06:43:54.982864Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-08-11T03:43:54.982864Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-08-10T15:43:54.982864Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-08-10T11:43:54.982864Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-08-12T01:17:39.876260Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4f4a8478-7c1b-47ce-84bd-246cc2249155",
+          "tool_name": "list_active_alerts",
+          "arguments": {
+            "severity": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"alerts\":[{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-08-11T09:35:54.989799Z\",\"extra_data\":null},{\"id\":\"c6c4e180-f625-53c2-85c2-2d505fec61e5\",\"severity\":\"warning\",\"source\":\"dlq\",\"title\":\"DLQ backlog growing\",\"description\":\"3 send_email jobs dead-lettered in last hour.\",\"fired_at\":\"2026-08-11T09:28:54.989799Z\",\"extra_data\":null},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-08-11T09:18:54.989799Z\",\"extra_data\":null}]}",
+          "timestamp": "2026-08-12T01:17:39.876260Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "00ad8d1a-26f2-40f5-a985-f4790b58736e",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "billing-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"cache_key\":\"kafka:consumer_lag:billing-consumer\"}",
+          "timestamp": "2026-08-12T01:17:39.876260Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f07f9602-a3f1-4abb-9ff6-29501b2accab",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "billing-consumer lag is confirmed at 15,000 (sustained 20+ minutes per active alert), postgres itself is healthy (ping 0.592ms, 1 connection), and the 5xx rate and DB latency alert are consistent with a saturated Kafka consumer creating downstream pressure. Confidence 0.82 exceeds threshold and category consumer_saturation has a Tier-1 fix."
+          },
+          "result_summary": "planner handoff to PLANNING: billing-consumer lag is confirmed at 15,000 (sustained 20+ minutes per active alert), postgres itself is healthy (ping 0.592ms, 1 connection), and the 5xx rate and DB latency alert are consistent with a saturated Kafka consumer creating downstream pressure. Confidence 0.82 exceeds threshold and category consumer_saturation has a Tier-1 fix.",
+          "timestamp": "2026-08-12T01:17:39.876260Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "49922cb6-5415-4fba-8ab8-7c295762ce58",
+          "tool_name": "_remediation_escalate",
+          "arguments": {
+            "from_state": "planning",
+            "reason": "plan rejected before execution: resource argument(s) not evidence-sourced: restart_consumer_group.consumer_group='billing-consumer', get_consumer_lag.consumer_group='billing-consumer'. Resource names must be copied verbatim from the alert or tool results."
+          },
+          "result_summary": "plan rejected before execution: resource argument(s) not evidence-sourced: restart_consumer_group.consumer_group='billing-consumer', get_consumer_lag.consumer_group='billing-consumer'. Resource names must be copied verbatim from the alert or tool results.",
+          "timestamp": "2026-08-12T01:18:30.028108Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "billing-consumer-lag-15k-sustained-20min",
+          "confidence": 0.82,
+          "reasoning": "billing-consumer lag is at 15,000 and has been sustained for 20+ minutes per the active alert, directly correlating with the high DB latency and 5xx rate — a saturated consumer creating DB backpressure is the most likely cause."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "v0.4.3-prod-deploy-correlated-with-billing-failures",
+          "confidence": 0.45,
+          "reasoning": "v0.4.2 deploy notes explicitly mention correlation with billing failures, and v0.4.3 was deployed ~2 hours before the incident window, making a deploy regression plausible."
+        },
+        {
+          "category": "poison_message",
+          "name": "dlq-backlog-3-send-email-dead-lettered",
+          "confidence": 0.3,
+          "reasoning": "DLQ alert shows 3 dead-lettered send_email jobs in the last hour; poison messages could be blocking the consumer and causing lag, though the count is small."
+        },
+        {
+          "category": "persistent_data_bug",
+          "name": "malformed-billing-events-causing-consumer-stall",
+          "confidence": 0.2,
+          "reasoning": "If billing events contain malformed data, the consumer could stall repeatedly; the sustained lag without recovery suggests possible data-level issue."
+        },
+        {
+          "category": "unknown",
+          "name": "db-latency-independent-of-consumer-lag",
+          "confidence": 0.1,
+          "reasoning": "Postgres ping latency is healthy at 0.592ms with only 1 active connection, so the DB itself may not be the bottleneck — the alert source may be stale or from a different path."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:17:39.848701Z",
+      "updated_at": "2026-08-12T01:18:30.028108Z"
+    }
+  ],
+  "invocation_id": "6e2def805db4"
+}

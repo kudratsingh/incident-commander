@@ -1,0 +1,14 @@
+{
+  "incident_id": "b04c05d5-5128-4980-bb90-843911e999a3",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.canary severity=low fingerprint=canary_blip group=billing-consumer",
+  "investigation_trail": [],
+  "findings": "No automated probes were run during this incident's investigation trail, so no additional diagnostic information beyond the original alert is available.",
+  "recommendation": "Review the raw alert directly — source: platform.canary, group: billing-consumer, fingerprint: canary_blip — and check the billing-consumer canary metrics and logs for anomalies around the time the alert fired.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.029265,
+    "usd": "0"
+  }
+}

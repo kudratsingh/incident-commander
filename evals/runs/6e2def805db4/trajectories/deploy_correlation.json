@@ -1,0 +1,189 @@
+{
+  "scenario": "deploy_correlation",
+  "incident_id": "ad555102-d983-4df4-9074-76f1fcdec337",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "ad555102-d983-4df4-9074-76f1fcdec337",
+      "state": "triage",
+      "alert": {
+        "source": "platform.api",
+        "severity": "high",
+        "fingerprint": "post_deploy_error_spike",
+        "group": null,
+        "service": "billing-api"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:12:41.807081Z",
+      "updated_at": "2026-08-12T01:12:41.807081Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ad555102-d983-4df4-9074-76f1fcdec337",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.api",
+        "severity": "high",
+        "fingerprint": "post_deploy_error_spike",
+        "group": null,
+        "service": "billing-api"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.037457,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "1ac85481-7ca5-42ee-8f0c-6aa9bb70a742",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "967a9726b65f57874a306bcfe1ed253f"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-12T01:12:41.844538Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:12:41.807081Z",
+      "updated_at": "2026-08-12T01:12:41.844538Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ad555102-d983-4df4-9074-76f1fcdec337",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.api",
+        "severity": "high",
+        "fingerprint": "post_deploy_error_spike",
+        "group": null,
+        "service": "billing-api"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 26890,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.037518,
+        "max_usd": "1.00",
+        "usd_used": "0.078286"
+      },
+      "evidence": [
+        {
+          "evidence_id": "1ac85481-7ca5-42ee-8f0c-6aa9bb70a742",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "967a9726b65f57874a306bcfe1ed253f"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-12T01:12:41.844538Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "47eba4d0-43d3-4d3e-88fe-66c9e0f60587",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 10
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-11T07:43:54.982864Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-11T06:43:54.982864Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-08-11T03:43:54.982864Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-08-10T15:43:54.982864Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-08-10T11:43:54.982864Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-08-09T09:43:54.982864Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-08-12T01:12:41.844599Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c380cbff-3304-4cd0-af01-9e4970dba8f2",
+          "tool_name": "search_traces",
+          "arguments": {
+            "status": "failed",
+            "job_type": null,
+            "since_hours": 2,
+            "limit": 50
+          },
+          "result_summary": "{\"matches\":[]}",
+          "timestamp": "2026-08-12T01:12:41.844599Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9538ee69-6aa7-4262-9d31-a87c0a46e03d",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 20
+          },
+          "result_summary": "{\"total\":4,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"SchemaValidationError: payload missing required field 'user_id' (received keys: ['tenant_id', 'action', 'ts'])\",\"retry_count\":3,\"created_at\":\"2026-08-11T09:35:54.994755Z\",\"updated_at\":\"2026-08-11T09:35:54.994755Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"schema_violation\",\"summary\":\"Producer sent a payload missing user_id — schema rejected it three times.\",\"suggested_fix\":\"Fix the producer to include user_id, then replay the DLQ entry. Backwards-compatible producer fix + replay is the standard remediation.\",\"is_retryable\":true,\"confidence\":0.91},\"remediation_hint\":\"replay_safe\",\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-08-11T09:31:54.994755Z\",\"updated_at\":\"2026-08-11T09:31:54.994755Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"process_payment call timed out after 30s: TimeoutError('stripe.api')\",\"retry_count\":3,\"created_at\":\"2026-08-11T09:18:54.994755Z\",\"updated_at\":\"2026-08-11T09:18:54.994755Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"third_party_timeout\",\"summary\":\"Stripe API exceeded 30s deadline three consecutive attempts.\",\"suggested_fix\":\"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.\",\"is_retryable\":true,\"confidence\":0.71},\"remediation_hint\":\"wait_and_replay\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-08-11T09:03:54.994755Z\",\"updated_at\":\"2026-08-11T09:03:54.994755Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Replay once the dependency recovers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"extra\":null}]}",
+          "timestamp": "2026-08-12T01:12:41.844599Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0e9506a4-db98-4d22-9d86-d46e529c9d34",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "The DLQ contains 4 entries spanning multiple remediation hints: one replay_safe (schema violation), two wait_and_replay (Stripe timeout, SMTP refusal), and one human_required (bad CSV data). No single Tier-1 fix covers all categories simultaneously. The deploy regression hypothesis (v0.4.2 annotated as correlated with billing failures, possible VPC egress change) further complicates automated remediation. A human operator is needed to: (1) fix the producer sending payloads missing user_id and replay the replay_safe entry; (2) verify Stripe status and SMTP relay health before replaying wait_and_replay entries; (3) notify the CSV uploader about the bad-input row; and (4) assess whether v0.4.2's VPC egress changes need to be rolled back or patched in v0.4.3."
+          },
+          "result_summary": "planner stop: The DLQ contains 4 entries spanning multiple remediation hints: one replay_safe (schema violation), two wait_and_replay (Stripe timeout, SMTP refusal), and one human_required (bad CSV data). No single Tier-1 fix covers all categories simultaneously. The deploy regression hypothesis (v0.4.2 annotated as correlated with billing failures, possible VPC egress change) further complicates automated remediation. A human operator is needed to: (1) fix the producer sending payloads missing user_id and replay the replay_safe entry; (2) verify Stripe status and SMTP relay health before replaying wait_and_replay entries; (3) notify the CSV uploader about the bad-input row; and (4) assess whether v0.4.2's VPC egress changes need to be rolled back or patched in v0.4.3.",
+          "timestamp": "2026-08-12T01:12:41.844599Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "dlq-mixed-hints-schema-violation-timeout-smtp-failure",
+          "confidence": 0.82,
+          "reasoning": "DLQ has 4 entries with diverse error categories (schema violation replay_safe, bad input human_required, Stripe timeout wait_and_replay, SMTP refused wait_and_replay) — these DLQ messages directly explain the post-deploy error spike in billing-api."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "v0.4.2-correlated-billing-failures-vpc-egress",
+          "confidence": 0.65,
+          "reasoning": "Deploy history shows v0.4.2 was annotated 'correlated with billing failures' and DLQ triage for the SMTP error specifically calls out v0.4.2 as potentially changing VPC egress rules, explaining connection refusal to smtp.mailer.internal."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "stripe-api-timeout-and-smtp-connection-refused",
+          "confidence": 0.55,
+          "reasoning": "Two of the four DLQ entries are external dependency failures (Stripe 30s timeout, SMTP ConnectionRefusedError) marked wait_and_replay, suggesting ongoing transient dependency issues independent of code changes."
+        },
+        {
+          "category": "persistent_data_bug",
+          "name": "csv-upload-non-numeric-int-column-row-15382",
+          "confidence": 0.45,
+          "reasoning": "One DLQ entry is a non-retryable bad-input ValueError in a CSV upload at row 15,382, marked human_required — this is a persistent data quality issue requiring uploader notification."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-12T01:12:41.807081Z",
+      "updated_at": "2026-08-12T01:12:41.844599Z"
+    }
+  ],
+  "invocation_id": "6e2def805db4"
+}

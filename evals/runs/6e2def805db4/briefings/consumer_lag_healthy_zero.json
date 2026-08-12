@@ -1,0 +1,27 @@
+{
+  "incident_id": "1e05fd04-26b0-444b-acb5-4ca7238a4b16",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=high fingerprint=consumer_lag_high group=healthy-consumer",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}"
+    },
+    {
+      "tool": "list_active_alerts",
+      "summary": "{\"total\":0,\"alerts\":[]}"
+    }
+  ],
+  "findings": "Both probes of the `healthy-consumer` group returned a lag of 0, and a sweep of active alerts found none — the monitored metrics show no current anomaly supporting the high-severity `consumer_lag_high` alert. The alert may have been triggered by a transient spike that has since resolved, or it could reflect a stale or misconfigured alert rule.",
+  "recommendation": "Check the alerting rule definition and its evaluation window for `consumer_lag_high` on `healthy-consumer` to confirm whether the threshold was genuinely breached historically or if the rule is firing erroneously, then review the Kafka consumer lag history around the alert's trigger timestamp to determine if a real spike occurred.",
+  "budget_used": {
+    "tool_calls": 3,
+    "tokens": 24460,
+    "wall_seconds": 0.032868,
+    "usd": "0.064708"
+  }
+}

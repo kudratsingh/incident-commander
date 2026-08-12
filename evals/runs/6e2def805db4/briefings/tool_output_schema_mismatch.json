@@ -1,0 +1,14 @@
+{
+  "incident_id": "92276f0c-6ce7-44b0-93bf-a4992e0a8ac3",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=high fingerprint=consumer_lag_high group=billing-consumer",
+  "investigation_trail": [],
+  "findings": "The get_consumer_lag response for billing-consumer violated the expected output schema (required cache_key field missing). The reading was discarded.\n",
+  "recommendation": "File a bug against the platform tool implementation returning invalid lag values, and check the raw metric from CloudWatch as a fallback.\n",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.000659,
+    "usd": "0.000000"
+  }
+}

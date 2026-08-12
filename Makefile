@@ -110,7 +110,7 @@ eval-live-remediation:
 # the next live campaign, once a run confirms it green — not before.
 # Rationale for both exclusions: docs/eval-methodology.md, "The
 # read-only smoke pass".
-SMOKE_ONLY ?= alert_storm,deploy_correlation,failed_traces,incidents_overview,multi_probe,noise_,planner_stops,postgres_slow,redis_saturation,saga_stuck,tool_,trace_investigation,consumer_lag_healthy,consumer_lag_medium,consumer_lag_missing,consumer_lag_orders,consumer_lag_payments,consumer_lag_shipping,consumer_lag_analytics,consumer_lag_high
+SMOKE_ONLY ?= alert_storm,deploy_correlation,failed_traces,incidents_overview,multi_probe,noise_,planner_stops,postgres_slow,redis_saturation,saga_stuck,tool_,trace_investigation,consumer_lag_healthy,consumer_lag_medium,consumer_lag_missing,consumer_lag_orders,consumer_lag_payments,consumer_lag_shipping,consumer_lag_analytics
 eval-smoke:
 	@if [ -z "$(PLATFORM_SMOKE_TOKEN)" ]; then \
 		echo "ERROR: PLATFORM_SMOKE_TOKEN not set. Run 'make bootstrap-token' and add it to .env" >&2; exit 2; \

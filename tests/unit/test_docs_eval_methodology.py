@@ -36,7 +36,12 @@ _TABLE_ROW: Final[re.Pattern[str]] = re.compile(r"^\|\s*`([A-Za-z_]+)`\s*\|")
 # "scores five dimensions with pure logic" — the prose count that drifted.
 _COUNT_PHRASE: Final[re.Pattern[str]] = re.compile(r"scores\s+([a-z]+)\s+dimensions")
 # Tokens shaped like a ScenarioExpectation field, anywhere in the doc.
-_FIELD_SHAPED: Final[re.Pattern[str]] = re.compile(r"\b(?:expected|forbidden|max)_[a-z0-9_]+\b")
+# ``expect_`` is here as well as ``expected_``: ``expect_briefing_contains``
+# is a real field, and a prefix list that missed it would leave the newest
+# expectation outside the only lint that keeps this page honest.
+_FIELD_SHAPED: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:expected|expect|forbidden|max)_[a-z0-9_]+\b"
+)
 
 _NUMBER_WORDS: Final[dict[int, str]] = {
     3: "three",

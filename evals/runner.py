@@ -355,13 +355,17 @@ def run_scenario(
             transitions=transitions,
             checkpointer=checkpointer,
         )
-        report = grade(final, scenario.expectation)
         trajectory = Trajectory(
             invocation_id=invocation_id,
             scenario=scenario.name,
             incident_id=str(final.incident_id),
             checkpoints=tuple(checkpointer.history(final.incident_id)),
         )
+        # The briefing is built BEFORE grading, because ``ScenarioExpectation.
+        # expect_briefing_contains`` grades the handoff artifact as the human
+        # receives it — enrichment included, since ``findings`` and
+        # ``recommendation`` are empty in the deterministic template. Grading
+        # still makes no LLM call of its own; it reads a finished object.
         briefing = render_briefing(final)
         briefing_error: str | None = None
         if scenario.use_live_llm or (
@@ -370,16 +374,20 @@ def run_scenario(
             try:
                 briefing = enrich_briefing(briefing, briefing_llm, model=settings.agent_model)
             except (LLMError, ValidationError) as err:
-                # Enrichment is a decoration on an already-graded run, same
-                # as the judge below. Losing the briefing writer must not
-                # void the run (ADR 0007: a crashed scenario is an
-                # eval-infrastructure bug by definition) — the deterministic
-                # briefing stands. ValidationError is caught alongside
-                # LLMError deliberately even though LLMClient._parse now
-                # wraps schema violations: CannedLLMClient validates its
-                # payloads directly (llm/fakes.py) and never goes through
-                # _parse, so the raw pydantic error is still reachable.
+                # Enrichment is a decoration on the run, same as the judge
+                # below. Losing the briefing writer must not void it (ADR
+                # 0007: a crashed scenario is an eval-infrastructure bug by
+                # definition) — the deterministic briefing stands and the run
+                # is still graded. A scenario that asserts on briefing text
+                # will grade that dimension red, which is the honest outcome:
+                # the assertion was about a briefing we could not produce.
+                # ValidationError is caught alongside LLMError deliberately
+                # even though LLMClient._parse now wraps schema violations:
+                # CannedLLMClient validates its payloads directly
+                # (llm/fakes.py) and never goes through _parse, so the raw
+                # pydantic error is still reachable.
                 briefing_error = f"briefing enrichment failed: {err}"
+        report = grade(final, scenario.expectation, briefing=briefing)
         judge_score: JudgeScore | None = None
         judge_error: str | None = None
         if scenario.use_live_llm or (

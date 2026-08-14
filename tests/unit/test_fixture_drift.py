@@ -14,7 +14,17 @@ from typing import Any
 import pytest
 
 from evals.fixture_drift import CannedCall, Drift, canned_calls, compare
-from evals.fixture_drift_ledger import classify, dump_ledger, load_ledger
+from evals.fixture_drift_ledger import (
+    _JUSTIFIED,
+    FIXTURE_DEFECT,
+    POST_FAULT,
+    classify,
+    context_of,
+    defect_count,
+    dump_ledger,
+    load_entries,
+    load_ledger,
+)
 from evals.fixture_probe import UnseededPlatformError, assert_seeded
 from evals.scenarios.loader import load_scenarios
 from incident_commander.tools.mcp_client import ToolResult
@@ -292,8 +302,8 @@ class TestCommittedLedger:
         from evals.fixture_drift_ledger import LEDGER_PATH
 
         rows = json.loads(LEDGER_PATH.read_text())["known_drift"]
-        as_tuples = [tuple(r) for r in rows]
-        assert as_tuples == sorted(set(as_tuples)), (
+        keys = [(r["scenario"], r["tool"], r["path"], r["kind"]) for r in rows]
+        assert keys == sorted(set(keys)), (
             "ledger is unsorted or has duplicates — regenerate with `make fixture-drift-bless`"
         )
 
@@ -376,3 +386,69 @@ class _Response:
 
     def json(self) -> dict[str, Any]:
         return self._payload
+
+
+class TestLedgerContext:
+    """Not every recorded disagreement is work, and the number has to say so."""
+
+    def test_default_is_that_it_is_work(self) -> None:
+        assert context_of(("some_scenario", "some_tool", "some.path", "value")) == (
+            FIXTURE_DEFECT,
+            "",
+        )
+
+    def test_a_justified_entry_carries_its_reason(self) -> None:
+        context, why = context_of(("consumer_lag_high", "get_consumer_lag", "lag", "value"))
+        assert context == POST_FAULT
+        assert "kill_consumer" in why
+
+    def test_the_stale_cache_memory_fixture_is_still_a_defect(self) -> None:
+        """The case that rules out inferring context from the scenario.
+
+        `remediate_stale_cache_success` seeds a fault, so a blanket "fault
+        scenarios get a pass on value drift" rule would absolve this. But
+        `create_stale_cache` writes ONE Redis key; it cannot explain a
+        fixture claiming 1.00G of memory in use against a live 1.60M. A rule
+        would have deleted this from the work list. It stays work.
+        """
+        context, _ = context_of(
+            ("remediate_stale_cache_success", "get_redis_health", "used_memory_human", "value")
+        )
+        assert context == FIXTURE_DEFECT
+
+    def test_every_justification_names_a_real_ledger_entry(self) -> None:
+        # A justification for something the check no longer reports is a
+        # suppression nobody can discharge.
+        recorded = load_ledger()
+        orphans = sorted(key for key in _JUSTIFIED if key not in recorded)
+        assert orphans == [], f"justifications with no matching ledger entry: {orphans}"
+
+    def test_every_justification_names_a_shipped_scenario(self) -> None:
+        shipped = {s.name for s in load_scenarios(_SCENARIOS_DIR)}
+        orphans = sorted({key[0] for key in _JUSTIFIED} - shipped)
+        assert orphans == []
+
+    def test_the_burn_down_number_excludes_the_explained_ones(self) -> None:
+        entries = load_entries()
+        assert defect_count() == sum(1 for e in entries if e.is_defect)
+        assert defect_count() < len(entries), "nothing is explained — the split is not working"
+
+    def test_committed_ledger_counts_match_its_own_header(self) -> None:
+        from evals.fixture_drift_ledger import LEDGER_PATH
+
+        payload = json.loads(LEDGER_PATH.read_text())
+        counts = payload["_counts"]
+        assert counts["recorded"] == len(payload["known_drift"])
+        assert counts[FIXTURE_DEFECT] == defect_count()
+        assert counts["explained"] == counts["recorded"] - counts[FIXTURE_DEFECT]
+
+    def test_the_original_array_format_still_parses(self, tmp_path: Path) -> None:
+        # The committed ledger predates the annotated format; a checkout
+        # mid-migration must not read as an empty ledger, which is the
+        # strictest possible reading and would fail every run.
+        path = tmp_path / "old.json"
+        path.write_text(
+            json.dumps({"known_drift": [["consumer_lag_high", "get_consumer_lag", "lag", "value"]]})
+        )
+        assert load_ledger(path) == {("consumer_lag_high", "get_consumer_lag", "lag", "value")}
+        assert load_entries(path)[0].context == POST_FAULT

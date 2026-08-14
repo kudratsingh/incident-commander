@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 from evals.fixture_drift import canned_calls
-from evals.fixture_drift_ledger import classify, dump_ledger, load_ledger
+from evals.fixture_drift_ledger import classify, defect_count, dump_ledger, load_ledger
 from evals.fixture_probe import UnseededPlatformError, probe_live
 from evals.scenarios.loader import load_scenarios
 
@@ -120,7 +120,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.bless:
         count = dump_ledger(result.drifts)
+        defects = defect_count()
         print(f"wrote {count} known-drift entries to evals/fixture-drift-ledger.json")
+        print(f"  {defects} are fixture defects — the burn-down number")
+        print(f"  {count - defects} are explained (post-fault / canned-only) and are NOT work")
         print("git add + commit the ledger to bless the current fixture state.")
         return 0
 

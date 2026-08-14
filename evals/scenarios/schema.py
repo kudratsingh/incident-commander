@@ -10,11 +10,13 @@ one-probe shape; more elaborate matching lands with multi-probe scenarios.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Final
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from evals.graders.deterministic import ScenarioExpectation
 from incident_commander.api.schemas import AlertPayload
@@ -32,32 +34,48 @@ _CHAOS_PREFIX: Final = "[chaos:"
 # Chaos tools the platform registers but the commander deliberately does not
 # use. ``seed_dlq_messages`` is deferred, flag-off platform work that stays
 # out of this repo entirely — not in TOOL_REGISTRY, not in a ``chaos_setup``,
-# not in a scenario. It is absent from the pinned 26-tool snapshot today and
-# the post-campaign rebless will add it; excluding it here by construction
-# means that rebless cannot silently widen the closed set.
+# not in a scenario. The v0.5.0 rebless made it the snapshot's 27th tool;
+# excluding it here by construction means that rebless could not, and no
+# future one can, silently widen the closed set.
 _DEFERRED_CHAOS_TOOLS: Final = frozenset({"seed_dlq_messages"})
+
+
+def _chaos_schemas_from_snapshot(payload: object) -> dict[str, dict[str, Any]]:
+    """Chaos tools in a parsed ``tools/list`` snapshot: name → ``inputSchema``.
+
+    Selected by the same structural ``[chaos:`` description prefix used for
+    the name closure, minus deferrals. A chaos tool that somehow ships
+    without an ``inputSchema`` maps to an empty schema, which admits any
+    arguments — the same "nothing to check against" posture the per-property
+    type walk takes below, rather than a spurious load-time failure.
+    """
+    if not isinstance(payload, dict):
+        return {}
+    tools = payload.get("tools", [])
+    if not isinstance(tools, list):
+        return {}
+    schemas: dict[str, dict[str, Any]] = {}
+    for tool in tools:
+        if not isinstance(tool, dict) or not isinstance(tool.get("name"), str):
+            continue
+        if not str(tool.get("description", "")).startswith(_CHAOS_PREFIX):
+            continue
+        name = str(tool["name"])
+        if name in _DEFERRED_CHAOS_TOOLS:
+            continue
+        schema = tool.get("inputSchema")
+        schemas[name] = schema if isinstance(schema, dict) else {}
+    return schemas
 
 
 def _chaos_names_from_snapshot(payload: object) -> frozenset[str]:
     """Chaos tool names in a parsed ``tools/list`` snapshot, minus deferrals."""
-    if not isinstance(payload, dict):
-        return frozenset()
-    tools = payload.get("tools", [])
-    if not isinstance(tools, list):
-        return frozenset()
-    names = {
-        str(tool["name"])
-        for tool in tools
-        if isinstance(tool, dict)
-        and isinstance(tool.get("name"), str)
-        and str(tool.get("description", "")).startswith(_CHAOS_PREFIX)
-    }
-    return frozenset(names - _DEFERRED_CHAOS_TOOLS)
+    return frozenset(_chaos_schemas_from_snapshot(payload))
 
 
 @lru_cache(maxsize=1)
-def chaos_tool_names() -> frozenset[str]:
-    """The closed set of chaos hooks a scenario may declare.
+def chaos_tool_schemas() -> Mapping[str, dict[str, Any]]:
+    """The declarable chaos hooks and their ``inputSchema``s.
 
     Derived from the committed contract snapshot, read lazily and cached:
     ``evals`` is imported at unit-test collection time and this must not
@@ -65,7 +83,90 @@ def chaos_tool_names() -> frozenset[str]:
     checkout; a missing one is a broken checkout, and the resulting
     ``FileNotFoundError`` says so more usefully than a silent empty set.
     """
-    return _chaos_names_from_snapshot(json.loads(_SNAPSHOT_PATH.read_text()))
+    return MappingProxyType(_chaos_schemas_from_snapshot(json.loads(_SNAPSHOT_PATH.read_text())))
+
+
+def chaos_tool_names() -> frozenset[str]:
+    """The closed set of chaos hook names a scenario may declare."""
+    return frozenset(chaos_tool_schemas())
+
+
+def json_types_for(prop: object) -> frozenset[str]:
+    """JSON ``type`` names a schema property admits (direct or via ``anyOf``)."""
+    if not isinstance(prop, dict):
+        return frozenset()
+    if "type" in prop:
+        return frozenset({str(prop["type"])})
+    return frozenset(
+        str(branch["type"])
+        for branch in prop.get("anyOf", [])
+        if isinstance(branch, dict) and "type" in branch
+    )
+
+
+# bool must precede int: bool is a subclass of int, and JSON "integer"
+# does not admit true/false on the platform side.
+_PY_TO_JSON: Final[tuple[tuple[type[object], frozenset[str]], ...]] = (
+    (bool, frozenset({"boolean"})),
+    (int, frozenset({"integer", "number"})),
+    (float, frozenset({"number"})),
+    (str, frozenset({"string"})),
+    (dict, frozenset({"object"})),
+    (list, frozenset({"array"})),
+)
+
+
+def value_compatible(value: object, admitted: frozenset[str]) -> bool:
+    """Is this Python argument value serializable into one of the JSON types?"""
+    if not admitted:
+        return True  # property declares no type — nothing to check against
+    if value is None:
+        return "null" in admitted
+    for py_type, json_types in _PY_TO_JSON:
+        if isinstance(value, py_type):
+            return bool(json_types & admitted)
+    return True  # non-primitive value — out of scope for this check
+
+
+def chaos_argument_errors(name: str, arguments: Mapping[str, Any]) -> list[str]:
+    """Ways one chaos invocation disagrees with the snapshot's ``inputSchema``.
+
+    Empty list means the invocation is well formed as far as the committed
+    contract can tell. Checks unknown argument names, missing required ones,
+    and primitive value types — a name-and-required-only check would miss a
+    ``ttl_seconds`` integer→string flip, which is the exact shape of the S-18
+    probe in ``tests/unit/test_chaos_schema_alignment.py``.
+    """
+    schema = chaos_tool_schemas().get(name)
+    if schema is None:
+        return []  # unknown hook — the name validator already rejected it
+    raw_properties = schema.get("properties")
+    properties: dict[str, Any] = raw_properties if isinstance(raw_properties, dict) else {}
+    if not properties:
+        return []  # schema declares no properties — nothing to check against
+    errors: list[str] = []
+    unknown = sorted(set(arguments) - set(properties))
+    if unknown:
+        errors.append(
+            f"unknown argument(s) {unknown} — {name} accepts {sorted(properties)}. "
+            "The platform declares additionalProperties=false, so live seeding "
+            "would fail on this."
+        )
+    raw_required = schema.get("required")
+    required = raw_required if isinstance(raw_required, list) else []
+    missing = sorted({str(field) for field in required} - set(arguments))
+    if missing:
+        errors.append(f"missing required argument(s) {missing} for {name}")
+    for argument, value in sorted(arguments.items()):
+        if argument not in properties:
+            continue  # already reported as unknown
+        admitted = json_types_for(properties[argument])
+        if not value_compatible(value, admitted):
+            errors.append(
+                f"{name}.{argument}={value!r} ({type(value).__name__}) is not "
+                f"compatible with the snapshot's JSON type(s) {sorted(admitted)}"
+            )
+    return errors
 
 
 class ChaosHook(BaseModel):
@@ -82,6 +183,14 @@ class ChaosHook(BaseModel):
     ``ChaosClient.call`` forwards the name verbatim as a ``tools/call``, so
     an unconstrained name lets a scenario YAML execute any platform tool,
     Tier-1 writes included, under that principal (S-03).
+
+    ``arguments`` is closed the same way, against the same snapshot entry's
+    ``inputSchema``. The name closure alone left half the invocation
+    unchecked: a typo'd argument name or a flipped value type validated
+    happily at load time and surfaced only as a live ``ChaosInvocationError``
+    during seeding — mid-campaign, after the platform had already been
+    touched under the write principal and after run startup was paid for.
+    Both halves now fail in the same place, at scenario load (G1-07).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -103,6 +212,19 @@ class ChaosHook(BaseModel):
                 f"contracts/platform-tools.snapshot.json, never hand-edited."
             )
         return value
+
+    @model_validator(mode="after")
+    def _arguments_match_the_snapshot_input_schema(self) -> ChaosHook:
+        errors = chaos_argument_errors(self.name, self.arguments)
+        if errors:
+            raise ValueError(
+                f"chaos_setup {self.name!r} arguments disagree with "
+                f"contracts/platform-tools.snapshot.json: {'; '.join(errors)}. "
+                "Fix the invocation, or — if the platform moved — bump the pinned "
+                "digest in demo/compose.yml and re-bless with `make snapshot` "
+                "(docs/runbook.md). Never hand-edit the snapshot."
+            )
+        return self
 
 
 class Scenario(BaseModel):

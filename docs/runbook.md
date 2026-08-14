@@ -272,6 +272,18 @@ hand-editing a list. Re-tokening chaos onto a dedicated lower-privilege
 principal is deliberately out of scope: it is a platform-side scope
 design change, not a commander one.
 
+The hook's **arguments** are closed the same way, against the same
+snapshot entry's `inputSchema`: unknown argument names, missing required
+ones, and flipped primitive types are all rejected when the YAML loads.
+Every chaos `inputSchema` declares `additionalProperties: false`, so each
+of those is a guaranteed `ChaosInvocationError` live — and seeding runs
+*before* the agent starts, which means the failure used to land
+mid-campaign, after the platform had been touched under the write
+principal and after run startup was already paid for. Both halves of an
+invocation now fail in the same place, for free, at load time. When this
+rejection fires the fix is in the scenario YAML, or — if the platform
+genuinely moved — a digest bump plus `make snapshot`.
+
 An **empty** `PLATFORM_SMOKE_TOKEN` counts as unset and exits 3 rather
 than falling through to the write-scoped `PLATFORM_TOKEN`; likewise
 `make_client` raises on an explicitly-empty token instead of selecting

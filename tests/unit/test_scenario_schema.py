@@ -1,17 +1,61 @@
+from pathlib import Path
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
 from evals.graders.deterministic import ScenarioExpectation
+from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import (
     ChaosHook,
     Scenario,
     _chaos_names_from_snapshot,
+    chaos_argument_errors,
     chaos_tool_names,
+    chaos_tool_schemas,
+    json_types_for,
 )
 from incident_commander.agent.state import IncidentState
 from incident_commander.api.schemas import AlertPayload
+
+_SCENARIOS_DIR = Path(__file__).resolve().parents[2] / "evals" / "scenarios"
+
+
+def _shipped_scenarios_with_chaos() -> list[Scenario]:
+    return [s for s in load_scenarios(_SCENARIOS_DIR) if s.chaos_setup is not None]
+
+
+# A value of each JSON type, for synthesizing an argument the snapshot admits.
+_SAMPLE_BY_JSON_TYPE: dict[str, Any] = {
+    "string": "x",
+    "integer": 1,
+    "number": 1.0,
+    "boolean": True,
+    "object": {},
+    "array": [],
+    "null": None,
+}
+
+
+def _minimal_arguments(hook: str) -> dict[str, Any]:
+    """The smallest argument set the snapshot accepts for ``hook``.
+
+    Derived from the snapshot's ``required`` list and each property's declared
+    JSON type, never hand-listed: a hook that gains a required argument on a
+    future platform pin keeps working here, and one whose argument type flips
+    fails in ``test_chaos_schema_alignment.py`` where that is the subject.
+    """
+    schema = chaos_tool_schemas()[hook]
+    properties = schema.get("properties") or {}
+    arguments: dict[str, Any] = {}
+    for field in schema.get("required") or []:
+        admitted = json_types_for(properties.get(field))
+        # Prefer a non-null sample: `null` is last-resort for a property whose
+        # only declared branch is null, and a required field is never that.
+        for json_type in sorted(admitted - {"null"}) or sorted(admitted):
+            arguments[str(field)] = _SAMPLE_BY_JSON_TYPE[json_type]
+            break
+    return arguments
 
 
 class TestScenario:
@@ -165,7 +209,7 @@ class TestChaosHookClosedSet:
 
     @pytest.mark.parametrize("name", sorted(chaos_tool_names()))
     def test_every_allowed_chaos_tool_validates(self, name: str) -> None:
-        assert ChaosHook(name=name).name == name
+        assert ChaosHook(name=name, arguments=_minimal_arguments(name)).name == name
 
     def test_allowed_set_is_the_snapshots_chaos_tools(self) -> None:
         # The seven the pinned v0.4.9 platform registers. Pinned as a subset,
@@ -223,4 +267,86 @@ class TestChaosHookClosedSet:
         # create_stale_cache and misspelled create_bad_data_job: adopting it
         # would have broken a shipped scenario at load time.
         for name in ("inject_latency", "create_stale_cache", "create_bad_data_job"):
-            assert ChaosHook(name=name).name == name
+            assert ChaosHook(name=name, arguments=_minimal_arguments(name)).name == name
+
+
+class TestChaosHookArgumentClosure:
+    """G1-07: the arguments are a closed set too, against the same snapshot entry.
+
+    The name closure (#116) left half of every chaos invocation unchecked.
+    ``ChaosClient.call`` forwards ``arguments`` verbatim to ``tools/call``
+    under the full write+chaos principal, and every chaos ``inputSchema``
+    declares ``additionalProperties: false`` — so a typo'd argument name, a
+    missing required one, or a flipped value type is a guaranteed live
+    ``ChaosInvocationError``. Before this closure all three validated happily
+    at load time and surfaced only during seeding: mid-campaign, after the
+    platform had been touched and after run startup was already paid for.
+    """
+
+    def test_missing_required_argument_rejected(self) -> None:
+        # inject_latency requires consumer_group AND latency_ms.
+        with pytest.raises(ValidationError, match="missing required argument"):
+            ChaosHook(name="inject_latency")
+
+    def test_missing_one_of_two_required_arguments_rejected(self) -> None:
+        with pytest.raises(ValidationError, match=r"missing required argument.*latency_ms"):
+            ChaosHook(name="inject_latency", arguments={"consumer_group": "worker-dispatcher"})
+
+    def test_typo_in_an_argument_name_rejected(self) -> None:
+        with pytest.raises(ValidationError, match=r"unknown argument.*consumer_grp"):
+            ChaosHook(
+                name="kill_consumer",
+                arguments={"consumer_grp": "worker-dispatcher", "ttl_seconds": 300},
+            )
+
+    def test_flipped_argument_type_rejected(self) -> None:
+        # The S-18 shape: ttl_seconds integer→string. Caught at load, not at
+        # seeding — tests/unit/test_chaos_schema_alignment.py pins the same
+        # flip for the shipped invocations.
+        with pytest.raises(ValidationError, match="not compatible"):
+            ChaosHook(
+                name="kill_consumer",
+                arguments={"consumer_group": "worker-dispatcher", "ttl_seconds": "300"},
+            )
+
+    def test_bool_is_not_accepted_for_an_integer_argument(self) -> None:
+        # bool is a subclass of int in Python; JSON "integer" does not admit
+        # true/false on the platform side.
+        with pytest.raises(ValidationError, match="not compatible"):
+            ChaosHook(
+                name="kill_consumer",
+                arguments={"consumer_group": "worker-dispatcher", "ttl_seconds": True},
+            )
+
+    def test_explicit_null_on_a_nullable_argument_stays_legal(self) -> None:
+        # bad_deploy.note is anyOf[string, null]; the CLI sends None by default.
+        hook = ChaosHook(name="bad_deploy", arguments={"note": None})
+        assert hook.arguments["note"] is None
+
+    def test_null_on_a_non_nullable_argument_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="not compatible"):
+            ChaosHook(name="kill_consumer", arguments={"consumer_group": None})
+
+    def test_all_optional_hook_accepts_no_arguments(self) -> None:
+        # saturate_redis declares defaults for everything; an empty block is
+        # a legal invocation and must stay one.
+        assert ChaosHook(name="saturate_redis").arguments == {}
+
+    def test_error_message_points_at_the_snapshot_not_a_hand_edit(self) -> None:
+        with pytest.raises(ValidationError) as excinfo:
+            ChaosHook(name="inject_latency")
+        message = str(excinfo.value)
+        assert "platform-tools.snapshot.json" in message
+        assert "make snapshot" in message
+        assert "Never hand-edit" in message
+
+    def test_every_shipped_scenario_chaos_block_is_well_formed(self) -> None:
+        # The shipped four load through the real loader elsewhere; this is the
+        # direct statement that the new closure admits every one of them, so a
+        # future author reading this file sees the closure is not vacuous.
+        for scenario in _shipped_scenarios_with_chaos():
+            assert scenario.chaos_setup is not None
+            assert (
+                chaos_argument_errors(scenario.chaos_setup.name, scenario.chaos_setup.arguments)
+                == []
+            )

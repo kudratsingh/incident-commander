@@ -1,0 +1,63 @@
+{
+  "generated_at": "2026-08-12T01:41:01.139255Z",
+  "total": 1,
+  "passed": 0,
+  "failed": 1,
+  "judged_count": 1,
+  "judge_useful_count": 1,
+  "judge_mean_overall": 0.925,
+  "invocation_id": "bb1fa70abb4c",
+  "degraded_count": 0,
+  "only_patterns": [
+    "remediate_consumer_lag_success"
+  ],
+  "outcomes": [
+    {
+      "scenario": "remediate_consumer_lag_success",
+      "final_state": "resolved",
+      "tool_calls_used": 4,
+      "report": {
+        "scenario": "remediate_consumer_lag_success",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state resolved matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "no ['restart_consumer_group'] evidence entry carried field 'kill_key_cleared' (expected equals True)"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 4 tool calls, cap 13"
+          },
+          {
+            "dimension": "action",
+            "passed": false,
+            "detail": "no tool from equivalence set ['restart_consumer_group'] was called; tools called: ['get_consumer_lag', 'list_dlq_messages', 'replay_dlq_by_category']"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.9,
+        "reasoning": "All findings and steps derive directly from the investigation trail: consumer lag returned to zero (verified by get_consumer_lag), DLQ was cleared (confirmed by the second list_dlq_messages call showing 0 items), the schema-violation entry was replayed (shown in replay_dlq_by_category), and each of the three remaining messages is cited with exact trace IDs and root-cause categories from the triage data. The recommendation names specific verification steps (check smtp.mailer.internal reachability, verify VPC egress rules from v0.4.2 deploy history, check Stripe status page) and identifies three actionable targets (the SMTP service, the two retryable trace IDs, and the uploader), making each step concretely executable in a 15-minute window."
+      },
+      "failure_class": "unclassified",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    }
+  ]
+}

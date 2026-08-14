@@ -18,9 +18,11 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from evals.graders.deterministic import ScenarioExpectation
+from evals.graders.deterministic import FieldComparator, ScenarioExpectation
 from incident_commander.api.schemas import AlertPayload
 from incident_commander.tools.mcp_client import ToolResult
+from incident_commander.tools.policies import Tier, tier_of
+from incident_commander.tools.registry import TOOL_REGISTRY
 
 _SNAPSHOT_PATH: Final = (
     Path(__file__).resolve().parents[2] / "contracts" / "platform-tools.snapshot.json"
@@ -227,6 +229,56 @@ class ChaosHook(BaseModel):
         return self
 
 
+class PreconditionField(FieldComparator):
+    """One assertion about the world, before the agent is allowed to start.
+
+    ``path`` reads the probe's parsed response, descending into lists at
+    ``[]`` — ``total``, or ``items[].remediation_hint``. An assertion holds
+    when ANY observed value satisfies it, which is the only useful reading
+    for a fixture pack whose row order is not guaranteed.
+    """
+
+    path: str = Field(min_length=1)
+
+
+class PreconditionProbe(BaseModel):
+    """One read the runner performs to confirm the scenario's premise is true.
+
+    Read tools only, enforced below. A precondition establishes what is
+    already the case; a probe that changed anything would be manufacturing
+    the state it claims to be verifying, and the run would prove nothing.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tool: str = Field(min_length=1)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    expect: tuple[PreconditionField, ...] = Field(min_length=1)
+    # Chaos effects are not instantaneous — a killed consumer's lag climbs
+    # over the platform's 60s metrics interval — so a scenario whose fault
+    # takes time to become observable declares how long to wait for it.
+    # Defaults to one look, because most preconditions are about seeded
+    # state that is either there or is not.
+    attempts: int = Field(default=1, ge=1, le=30)
+    delay_seconds: float = Field(default=0.0, ge=0.0, le=60.0)
+
+    @field_validator("tool")
+    @classmethod
+    def _tool_is_read_only(cls, value: str) -> str:
+        if value not in TOOL_REGISTRY:
+            raise ValueError(
+                f"{value!r} is not a registered tool. Preconditions probe the platform "
+                f"through the same typed registry the agent uses: {sorted(TOOL_REGISTRY)}."
+            )
+        if tier_of(value) is not Tier.READ:
+            raise ValueError(
+                f"{value!r} is tier {tier_of(value).value}, and a precondition may only "
+                "read. A probe that mutates would manufacture the state it claims to "
+                "verify, and the run would prove nothing."
+            )
+        return value
+
+
 class Scenario(BaseModel):
     """One eval scenario. Loaded from YAML, validated at load time."""
 
@@ -260,3 +312,9 @@ class Scenario(BaseModel):
     # setup in the scenario file instead of in operator memory (see the
     # live-eval noise-source lessons doc, "shared mutable environment").
     chaos_setup: ChaosHook | None = None
+    # What must be true of the world before the agent is allowed to start.
+    # Live-only: canned runs serve the broken state by construction, so
+    # there is nothing to establish. An unmet precondition abandons the run
+    # BEFORE any model call, and reports that the fault was never
+    # manufactured rather than grading the agent on a false premise.
+    expected_precondition: tuple[PreconditionProbe, ...] = ()

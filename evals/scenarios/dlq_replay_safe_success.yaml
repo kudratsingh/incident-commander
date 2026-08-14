@@ -96,3 +96,11 @@ expectation:
   # the agent is bounded by it, told it, and escalates on exhausting it, and
   # reaching it grades BUDGET red. The margin is headroom, not an annotation.
   max_tool_calls: 13
+# The premise: at least one entry is safe to replay. The seeder writes one
+# (dlq-job-schema-violation); if it is missing the agent correctly declines
+# to bulk-replay and grades red for declining.
+expected_precondition:
+- tool: list_dlq_messages
+  expect:
+  - path: items[].remediation_hint
+    equals: replay_safe

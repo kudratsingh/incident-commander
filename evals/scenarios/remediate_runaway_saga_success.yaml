@@ -114,3 +114,18 @@ expectation:
   # the agent is bounded by it, told it, and escalates on exhausting it, and
   # reaching it grades BUDGET red. The margin is headroom, not an annotation.
   max_tool_calls: 13
+# The premise: the seeded DAG job exists and is not already paused. Note
+# what this does NOT assert — that the DAG is actually runaway. No chaos
+# hook produces one (BUILD_PLAN 2.2), and the resolver completes the chain
+# within seconds, so a truthful "is it running away" assertion would fail
+# every time. This catches the setup failures that are catchable: a missing
+# seed job, or a pause left behind by an earlier run.
+expected_precondition:
+- tool: get_dag_state
+  arguments:
+    job_id: 25220882-1820-5cd3-b09b-f866ff5823c9
+  expect:
+  - path: nodes[].id
+    is_null: false
+  - path: paused
+    equals: false

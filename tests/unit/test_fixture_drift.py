@@ -49,12 +49,22 @@ class TestValueDrift:
         assert drifts[0].canned == 1200
         assert drifts[0].live == 0
 
-    def test_type_change_is_reported_as_type_not_value(self) -> None:
+    def test_a_real_type_change_is_reported_as_type(self) -> None:
         drifts = compare(
             _call("get_consumer_lag", {"lag": 15000}),
-            {"lag": None},
+            {"lag": "15000"},
         )
         assert _kinds(drifts) == {"type"}
+
+    def test_null_against_a_number_is_a_value_disagreement_not_a_type_one(self) -> None:
+        """`null` is a legal value here, and treating it as a type made the
+        ledger flake: a freshly booted platform reports `lag: null` for
+        worker-dispatcher until the 60s metrics loop first runs, then `0`.
+        Same fixture defect, two ledger keys, depending on timing."""
+        as_null = compare(_call("get_consumer_lag", {"lag": 15000}), {"lag": None})
+        as_zero = compare(_call("get_consumer_lag", {"lag": 15000}), {"lag": 0})
+        assert _kinds(as_null) == {"value"}
+        assert [d.key for d in as_null] == [d.key for d in as_zero]
 
     def test_declared_volatile_field_is_checked_for_type_only(self) -> None:
         # get_redis_health.ping_latency_ms moves between any two honest reads.
@@ -65,7 +75,7 @@ class TestValueDrift:
     def test_a_volatile_field_still_drifts_on_a_type_change(self) -> None:
         drifts = compare(
             _call("get_redis_health", {"ok": True, "ping_latency_ms": 0.5}),
-            {"ok": True, "ping_latency_ms": None},
+            {"ok": True, "ping_latency_ms": "fast"},
         )
         assert _kinds(drifts) == {"type"}
 

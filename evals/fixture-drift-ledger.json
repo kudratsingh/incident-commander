@@ -322,8 +322,20 @@
     [
       "failed_traces_scan",
       "search_traces",
-      "matches[]",
-      "no_live_rows"
+      "matches[].job_id[]",
+      "not_live_reachable"
+    ],
+    [
+      "failed_traces_scan",
+      "search_traces",
+      "matches[].job_type[]",
+      "not_live_reachable"
+    ],
+    [
+      "failed_traces_scan",
+      "search_traces",
+      "matches[].trace_id[]",
+      "not_live_reachable"
     ],
     [
       "incidents_overview",
@@ -509,13 +521,13 @@
       "remediate_runaway_saga_success",
       "get_dag_state",
       "paused_by",
-      "type"
+      "value"
     ],
     [
       "remediate_runaway_saga_success",
       "get_dag_state",
       "paused_expires_in_seconds",
-      "type"
+      "value"
     ],
     [
       "remediate_stale_cache_success",
@@ -601,5 +613,6 @@
       "jobs[]",
       "no_live_rows"
     ]
-  ]
+  ],
+  "_blessed_against": "a freshly seeded stack (CI's contract job). A developer volume that has drifted from a fresh seed will disagree \u2014 that disagreement is a true statement about the volume, not about the fixtures."
 }

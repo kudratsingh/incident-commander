@@ -303,6 +303,8 @@ Rows are *not* compared positionally: a fixture legitimately models a different 
 
 Re-bless with `make fixture-drift-bless`, in a dedicated commit with the reason in the message — the same discipline `make baseline` gets, and for the same reason.
 
+**The ledger is blessed against a freshly seeded stack** — CI's `contract` job. A local `make fixture-drift` run can legitimately disagree with it, because `make demo-down` preserves the postgres volume and a long-lived developer stack drifts from a fresh seed. When it does, the disagreement is a true statement about *your volume*, not about the fixtures: `failed_traces_scan` reporting `no_live_rows` locally means your stack has no seeded failed traces, where a fresh one has two. Reach for `make eval-reset` before re-blessing from a local run, and never re-bless to silence that.
+
 ## Reading a live report — required first pass
 
 Every failed live-eval run gets bucketed *before* any code is opened:

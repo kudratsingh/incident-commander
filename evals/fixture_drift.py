@@ -272,11 +272,11 @@ def compare(call: CannedCall, live: Mapping[str, Any]) -> list[Drift]:
             return
 
         if _policy_path(path) in volatile:
-            if _json_type(canned_node) != _json_type(live_node):
+            if _differs_in_type(canned_node, live_node):
                 record(path, "type", canned_node, live_node)
             return
 
-        if _json_type(canned_node) != _json_type(live_node) and not in_list:
+        if _differs_in_type(canned_node, live_node) and not in_list:
             record(path, "type", canned_node, live_node)
             return
 
@@ -299,6 +299,25 @@ def compare(call: CannedCall, live: Mapping[str, Any]) -> list[Drift]:
 
     walk(dict(call.payload), dict(live), "", False)
     return drifts
+
+
+def _differs_in_type(canned: Any, live: Any) -> bool:
+    """A real contract type change — null on either side does not count.
+
+    ``null`` is a legal VALUE of most fields here, not a different type: the
+    platform returns ``lag: null`` for a group it cannot resolve, and that
+    null contract is load-bearing enough to have its own scenario
+    (``consumer_lag_null_unknown_state``). Calling number-vs-null a type
+    change also made the drift kind depend on how long the stack had been
+    up — a freshly booted platform reports ``null`` for worker-dispatcher
+    until the 60s metrics loop first runs, then ``0`` — so the same fixture
+    defect landed in the ledger under two different keys depending on
+    timing, and the ratchet's stale check would flip one of them red on
+    every other run.
+    """
+    if canned is None or live is None:
+        return False
+    return _json_type(canned) != _json_type(live)
 
 
 def _policy_path(path: str) -> str:

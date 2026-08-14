@@ -75,6 +75,20 @@ A scenario that sets `expect_briefing_contains` and is graded without a briefing
 
 A separate LLM judge (`evals/graders/llm_judge.py`, Haiku) scores briefing quality on `groundedness` + `actionability`. Judge scores are informational — they don't gate the pass/fail. Deterministic dimensions do.
 
+### The alert is a fixture too
+
+Everything else in the suite is checked against the platform somewhere — tool schemas by the contract diff, canned response values by `make test-drift`, chaos arguments at scenario load. The alert that *starts* every run was checked against nothing, and it is the most wrong part of the corpus. `tests/unit/test_scenario_alert_premise.py` now holds two separate claims:
+
+**32 of 38 scenarios declare a severity the platform rejects.** It accepts `info` / `warning` / `critical` and raises `AlertValidationError` on anything else; the suite is mostly `high`, plus `medium`, `low` and one `unknown`. Those alerts could not be created, let alone delivered — the run starts from a premise the platform could never produce.
+
+They are recorded rather than fixed, because TRIAGE classifies on severity: rewriting `high` to `critical` changes what every one of those scenarios tests. That is a deliberate re-calibration with the grades re-read afterwards, not a find-and-replace. The list may only shrink — a scenario that becomes legal fails the test until its line is removed.
+
+**`AlertPayload` declares two fields the webhook does not send**, `fingerprint` and `group`. This is not a scenario defect: the scenarios are faithful to `AlertPayload`, and it is `AlertPayload` that is unfaithful to the platform.
+
+`fingerprint` is the load-bearing case and it has a production symptom. `derive_incident_id` ([ADR 0016](ADR/0016-incident-identity-and-single-flight.md)) keys deduplication on it, and the webhook body has no such field — so a real alert arrives with `fingerprint=None`, the derivation declines to dedupe and returns a fresh `uuid4`, and every redelivery of the same alert opens a new incident. That is the mechanism behind platform issue #141, *alert dedupe inert in production*.
+
+Zero of 38 scenario alerts are wire-shaped. A test records that count as a fact rather than leaving it in a report.
+
 ## Preconditions
 
 A live scenario asserts a fault. Until `expected_precondition` existed, nothing verified the fault was there — so when seeding silently failed, or when the fault was one the chaos framework cannot manufacture at all, the agent investigated a healthy system, failed to find the problem it was told about, and was marked down for it.

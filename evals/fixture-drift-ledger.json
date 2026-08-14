@@ -46,38 +46,8 @@
     [
       "alert_storm",
       "list_audit_events",
-      "events[].action",
-      "canned_only_field"
-    ],
-    [
-      "alert_storm",
-      "list_audit_events",
-      "events[].created_at",
-      "canned_only_field"
-    ],
-    [
-      "alert_storm",
-      "list_audit_events",
-      "events[].extra_data",
-      "canned_only_field"
-    ],
-    [
-      "alert_storm",
-      "list_audit_events",
-      "events[].id",
-      "canned_only_field"
-    ],
-    [
-      "alert_storm",
-      "list_audit_events",
-      "events[].principal_id",
-      "canned_only_field"
-    ],
-    [
-      "alert_storm",
-      "list_audit_events",
-      "events[].principal_type",
-      "canned_only_field"
+      "events[]",
+      "no_live_rows"
     ],
     [
       "alert_storm",
@@ -352,32 +322,8 @@
     [
       "failed_traces_scan",
       "search_traces",
-      "matches[].created_at",
-      "canned_only_field"
-    ],
-    [
-      "failed_traces_scan",
-      "search_traces",
-      "matches[].job_id",
-      "canned_only_field"
-    ],
-    [
-      "failed_traces_scan",
-      "search_traces",
-      "matches[].job_type",
-      "canned_only_field"
-    ],
-    [
-      "failed_traces_scan",
-      "search_traces",
-      "matches[].status",
-      "canned_only_field"
-    ],
-    [
-      "failed_traces_scan",
-      "search_traces",
-      "matches[].trace_id",
-      "canned_only_field"
+      "matches[]",
+      "no_live_rows"
     ],
     [
       "incidents_overview",
@@ -646,56 +592,14 @@
     [
       "trace_investigation",
       "get_trace",
-      "audit_events[].action",
-      "canned_only_field"
+      "audit_events[]",
+      "no_live_rows"
     ],
     [
       "trace_investigation",
       "get_trace",
-      "audit_events[].created_at",
-      "canned_only_field"
-    ],
-    [
-      "trace_investigation",
-      "get_trace",
-      "audit_events[].principal_type",
-      "canned_only_field"
-    ],
-    [
-      "trace_investigation",
-      "get_trace",
-      "jobs[].created_at",
-      "canned_only_field"
-    ],
-    [
-      "trace_investigation",
-      "get_trace",
-      "jobs[].error_message",
-      "canned_only_field"
-    ],
-    [
-      "trace_investigation",
-      "get_trace",
-      "jobs[].id",
-      "canned_only_field"
-    ],
-    [
-      "trace_investigation",
-      "get_trace",
-      "jobs[].retry_count",
-      "canned_only_field"
-    ],
-    [
-      "trace_investigation",
-      "get_trace",
-      "jobs[].status",
-      "canned_only_field"
-    ],
-    [
-      "trace_investigation",
-      "get_trace",
-      "jobs[].type",
-      "canned_only_field"
+      "jobs[]",
+      "no_live_rows"
     ]
   ]
 }

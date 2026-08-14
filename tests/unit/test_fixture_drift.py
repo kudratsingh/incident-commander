@@ -11,8 +11,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from evals.fixture_drift import CannedCall, Drift, canned_calls, compare
 from evals.fixture_drift_ledger import classify, dump_ledger, load_ledger
+from evals.fixture_probe import UnseededPlatformError, assert_seeded
 from evals.scenarios.loader import load_scenarios
 from incident_commander.tools.mcp_client import ToolResult
 
@@ -142,14 +145,15 @@ class TestValueDomain:
         live = {"items": [{"created_at": "2026-08-14T03:35:00.019523Z"}]}
         assert compare(_call("list_dlq_messages", canned), live) == []
 
-    def test_an_empty_live_list_makes_every_canned_row_unreachable(self) -> None:
+    def test_an_empty_live_list_is_one_finding(self) -> None:
         # `trace_investigation` pins a trace id the platform returns nothing
-        # for, so every field its fixture asserts is invented.
+        # for. That is one fact — the rows do not exist — and reporting it
+        # once beats reporting it per field the fixture happened to write.
         drifts = compare(
             _call("get_trace", {"jobs": [{"status": "failed"}]}),
             {"jobs": []},
         )
-        assert drifts and _kinds(drifts) == {"canned_only_field"}
+        assert [d.kind for d in drifts] == ["no_live_rows"]
 
     def test_null_canned_values_are_not_domain_checked(self) -> None:
         canned = {"items": [{"remediation_hint": None}]}
@@ -282,3 +286,83 @@ class TestCommittedLedger:
         assert as_tuples == sorted(set(as_tuples)), (
             "ledger is unsorted or has duplicates — regenerate with `make fixture-drift-bless`"
         )
+
+
+class TestEmptyLiveList:
+    """One finding, not one per field.
+
+    The first CI run of this check hit an unseeded platform and turned a
+    single fact — "the platform has no rows here" — into 64 per-field
+    findings, which made the result depend on how wide each fixture happened
+    to be rather than on what was wrong.
+    """
+
+    def test_empty_live_list_reports_one_drift(self) -> None:
+        drifts = compare(
+            _call(
+                "list_dlq_messages",
+                {"total": 2, "items": [{"id": "a", "type": "x", "retry_count": 1}]},
+            ),
+            {"total": 0, "items": []},
+        )
+        row_drifts = [d for d in drifts if d.path.startswith("items")]
+        assert [d.kind for d in row_drifts] == ["no_live_rows"]
+        assert row_drifts[0].path == "items[]"
+
+    def test_an_empty_canned_list_against_live_rows_is_shape_drift_not_no_rows(self) -> None:
+        drifts = compare(
+            _call("list_dlq_messages", {"items": []}),
+            {"items": [{"id": "a"}]},
+        )
+        assert "no_live_rows" not in {d.kind for d in drifts}
+
+    def test_both_empty_is_agreement(self) -> None:
+        assert compare(_call("search_traces", {"matches": []}), {"matches": []}) == []
+
+
+class TestSeededPrecondition:
+    """A check whose premise was never established reports that, not a result."""
+
+    class _Stub:
+        def __init__(self, payloads: dict[str, dict[str, Any]]) -> None:
+            self.payloads = payloads
+            self.calls: list[str] = []
+
+        def post(self, url: str, **kwargs: Any) -> Any:  # noqa: ARG002
+            name = kwargs["json"]["params"]["name"]
+            self.calls.append(name)
+            body = json.dumps(self.payloads.get(name, {}))
+            return _Response({"result": {"content": [{"type": "text", "text": body}]}})
+
+    def test_seeded_platform_passes(self) -> None:
+        client = self._Stub({"list_dlq_messages": {"total": 4, "items": [{"id": "a"}]}})
+        assert_seeded(client, "http://x/mcp", "tok")  # type: ignore[arg-type]
+
+    def test_unseeded_platform_is_refused(self) -> None:
+        client = self._Stub(
+            {"list_dlq_messages": {"total": 0, "items": []}, "list_active_alerts": {"alerts": []}}
+        )
+        with pytest.raises(UnseededPlatformError, match="not\n?\\s*seeded|not seeded"):
+            assert_seeded(client, "http://x/mcp", "tok")  # type: ignore[arg-type]
+
+    def test_a_second_witness_can_carry_the_proof(self) -> None:
+        # DLQ empty but alerts present is still a seeded world.
+        client = self._Stub(
+            {
+                "list_dlq_messages": {"total": 0, "items": []},
+                "list_active_alerts": {"alerts": [{"id": "a"}]},
+            }
+        )
+        assert_seeded(client, "http://x/mcp", "tok")  # type: ignore[arg-type]
+        assert client.calls == ["list_dlq_messages", "list_active_alerts"]
+
+
+class _Response:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict[str, Any]:
+        return self._payload

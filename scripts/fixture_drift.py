@@ -17,15 +17,53 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
 from evals.fixture_drift import canned_calls
 from evals.fixture_drift_ledger import classify, dump_ledger, load_ledger
-from evals.fixture_probe import probe_live
+from evals.fixture_probe import UnseededPlatformError, probe_live
 from evals.scenarios.loader import load_scenarios
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SCENARIOS_DIR = _REPO_ROOT / "evals" / "scenarios"
+
+
+def _await_fixtures(calls, mcp_url: str, token: str, budget_seconds: int) -> int:  # type: ignore[no-untyped-def]
+    """Poll until every call the drift check makes resolves.
+
+    The platform seeds its fixture pack asynchronously at boot, and CI's
+    readiness loop waits for the REST app's ``/healthz`` — not for the data.
+    ``test-contract`` never noticed because ``tools/list`` needs no rows; the
+    drift check is the first thing in CI that does, and its first run compared
+    every fixture against an empty world.
+
+    This waits for exactly the calls the check will make, so it cannot pass
+    while a fixture the check probes is still missing. It is a readiness gate,
+    not a retry: a failure that survives the budget is reported with the calls
+    still unresolved, never swallowed.
+    """
+    deadline = time.monotonic() + budget_seconds
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            result = probe_live(calls, mcp_url=mcp_url, token=token)
+            if not result.errors:
+                print(f"fixture pack ready after {attempt} attempt(s)")
+                return 0
+            detail = "; ".join(f"{e.scenario}:{e.tool} — {e.detail}" for e in result.errors)
+        except UnseededPlatformError as err:
+            detail = str(err)
+        if time.monotonic() >= deadline:
+            print(
+                f"ERROR: the platform never became ready within {budget_seconds}s. "
+                f"Unresolved: {detail}",
+                file=sys.stderr,
+            )
+            return 2
+        print(f"not ready (attempt {attempt}): {detail[:160]}")
+        time.sleep(5)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -34,6 +72,15 @@ def main(argv: list[str] | None = None) -> int:
         "--bless",
         action="store_true",
         help="rewrite the known-drift ledger from this run (a deliberate act)",
+    )
+    parser.add_argument(
+        "--await-fixtures",
+        type=int,
+        metavar="SECONDS",
+        help=(
+            "poll until every call the check makes resolves, then exit. For CI, "
+            "where the platform seeds its fixture pack asynchronously at boot."
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -53,7 +100,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     calls = canned_calls(load_scenarios(_SCENARIOS_DIR))
-    result = probe_live(calls, mcp_url=mcp_url, token=token)
+
+    if args.await_fixtures is not None:
+        return _await_fixtures(calls, mcp_url, token, args.await_fixtures)
+
+    try:
+        result = probe_live(calls, mcp_url=mcp_url, token=token)
+    except UnseededPlatformError as err:
+        print(f"ERROR: {err}", file=sys.stderr)
+        return 2
 
     print(
         f"canned fixtures checked: {result.checked} "

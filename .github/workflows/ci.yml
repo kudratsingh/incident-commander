@@ -141,6 +141,17 @@ jobs:
           PLATFORM_MCP_URL: http://localhost:8001/mcp
         run: make test-contract
 
+      # Wait for the SEEDER, not just for the app. `up --wait` clears the
+      # healthchecks and the loop above clears the REST app, but nothing
+      # waited for SEED_EVAL_FIXTURES to finish writing the fixture pack —
+      # test-contract never noticed because tools/list needs no data. The
+      # first run of the drift step did notice: it compared every fixture
+      # against an empty world and reported 64 confident falsehoods.
+      - name: Wait for the eval fixture pack
+        env:
+          PLATFORM_MCP_URL: http://localhost:8001/mcp
+        run: PYTHONPATH=. uv run python scripts/fixture_drift.py --await-fixtures 90
+
       # The value-level half of the same question, against the same stack:
       # test-contract asks whether the tool SCHEMAS still match, this asks
       # whether the canned fixture VALUES are ones the platform can produce.

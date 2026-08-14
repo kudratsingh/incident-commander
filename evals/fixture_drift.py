@@ -33,6 +33,13 @@ Three checks, because the drift arrives in three different shapes:
     settle this: its ``outputSchema`` types these fields as plain strings
     with no ``enum``, so the running platform is the only authority.
 
+``no_live_rows``
+    The fixture carries rows where the platform has none. Deliberately ONE
+    finding rather than a ``canned_only_field`` per key: an empty live list
+    supports exactly one conclusion and says nothing about row shape, so
+    fanning it out would make the result depend on how wide the fixture
+    happens to be rather than on what is wrong.
+
 The comparison is pure and lives here so it can be unit-tested offline
 against synthetic payloads; ``tests/integration/test_canned_fixtures_match_live.py``
 supplies the live half.
@@ -249,6 +256,15 @@ def compare(call: CannedCall, live: Mapping[str, Any]) -> list[Drift]:
             # objects collapse to one representative row; lists of scalars go
             # straight to the leaf check (merging them again would recurse
             # forever, since the merge of a scalar list is a scalar list).
+            if canned_node and not live_node:
+                # ONE finding, not one per field. An empty live list supports
+                # exactly one conclusion — the platform currently has no rows
+                # here — and nothing at all about row shape. Reporting a
+                # `canned_only_field` per key would turn that single fact into
+                # a dozen, and make the result depend on how wide the fixture
+                # happens to be rather than on what is wrong.
+                record(f"{path}[]", "no_live_rows", len(canned_node), 0)
+                return
             if _has_mappings(canned_node) or _has_mappings(live_node):
                 walk(_merge_rows(canned_node), _merge_rows(live_node), f"{path}[]", True)
             else:

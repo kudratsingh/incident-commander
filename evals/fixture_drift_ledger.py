@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
@@ -34,24 +35,132 @@ LEDGER_PATH: Final[Path] = Path(__file__).resolve().parent / "fixture-drift-ledg
 
 DriftKey = tuple[str, str, str, str]
 
+# Contexts. Only the first is work.
+FIXTURE_DEFECT: Final = "fixture-defect"
+POST_FAULT: Final = "post-fault"
+CANNED_ONLY: Final = "canned-only"
+
+# Entries that are NOT fixture defects, each with the claim that makes it so.
+#
+# Deliberately hand-recorded rather than inferred. The obvious rule — "a
+# scenario that seeds a fault gets a pass on value drift" — is wrong in a way
+# that hides real defects: `create_stale_cache` writes ONE Redis key, so it
+# cannot explain a fixture claiming 1.00G of memory in use against a live
+# 1.60M. That entry stays a defect. A rule would have absolved it; a person
+# has to look.
+#
+# The cost of being wrong here is asymmetric. Wrongly calling something a
+# defect wastes an investigation; wrongly absolving one deletes it from the
+# work list forever. So the bar is a specific mechanism, named.
+_JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
+    ("consumer_lag_high", "get_consumer_lag", "lag", "value"): (
+        POST_FAULT,
+        "kill_consumer makes worker-dispatcher's lag climb; the check probes "
+        "the un-faulted world, so the canned backlog cannot match by design",
+    ),
+    ("remediate_consumer_lag_success", "get_consumer_lag", "lag", "value"): (
+        POST_FAULT,
+        "same fault, same reason",
+    ),
+    ("remediate_dlq_backlog_success", "list_dlq_messages", "total", "value"): (
+        POST_FAULT,
+        "poison_message adds a dead-letter row, so the canned total counts a "
+        "row the un-faulted world has not produced yet",
+    ),
+    ("remediate_verify_fails", "get_consumer_lag", "lag", "value"): (
+        CANNED_ONLY,
+        "use_live_mcp is false — the scenario never runs live, so its canned "
+        "responses are its premise rather than a recording of anything",
+    ),
+    ("tool_output_schema_mismatch", "get_consumer_lag", "lag", "value"): (
+        CANNED_ONLY,
+        "the scenario exists to feed the agent a malformed response; its "
+        "fixture is deliberately not what the platform returns",
+    ),
+    ("tool_output_schema_mismatch", "get_consumer_lag", "cache_key", "live_only_field"): (
+        CANNED_ONLY,
+        "same scenario, same deliberate malformation",
+    ),
+}
+
+
+@dataclass(frozen=True)
+class LedgerEntry:
+    """One recorded disagreement and why it is (or is not) work."""
+
+    key: DriftKey
+    context: str
+    why: str
+
+    @property
+    def is_defect(self) -> bool:
+        return self.context == FIXTURE_DEFECT
+
+
+def context_of(key: DriftKey) -> tuple[str, str]:
+    """``(context, why)`` for one drift key. Unjustified means it is work."""
+    return _JUSTIFIED.get(key, (FIXTURE_DEFECT, ""))
+
 
 def load_ledger(path: Path | None = None) -> frozenset[DriftKey]:
     """The recorded drift keys. A missing ledger is an empty one — strictest."""
+    return frozenset(entry.key for entry in load_entries(path))
+
+
+def load_entries(path: Path | None = None) -> list[LedgerEntry]:
+    """Recorded drift with its context, newest format or the original arrays."""
     target = path or LEDGER_PATH
     if not target.exists():
-        return frozenset()
+        return []
     payload = json.loads(target.read_text())
-    return frozenset(
-        (str(row[0]), str(row[1]), str(row[2]), str(row[3]))
-        for row in payload.get("known_drift", [])
-        if isinstance(row, list) and len(row) == 4
-    )
+    entries: list[LedgerEntry] = []
+    for row in payload.get("known_drift", []):
+        if isinstance(row, list) and len(row) == 4:
+            key = (str(row[0]), str(row[1]), str(row[2]), str(row[3]))
+            context, why = context_of(key)
+        elif isinstance(row, dict):
+            key = (
+                str(row["scenario"]),
+                str(row["tool"]),
+                str(row["path"]),
+                str(row["kind"]),
+            )
+            context, why = str(row.get("context", FIXTURE_DEFECT)), str(row.get("why", ""))
+        else:
+            continue
+        entries.append(LedgerEntry(key=key, context=context, why=why))
+    return entries
+
+
+def defect_count(path: Path | None = None) -> int:
+    """Recorded disagreements that are actually work — the burn-down number.
+
+    The others are recorded because the check will keep reporting them, not
+    because anyone should go and "fix" them. Counting them as work would set
+    a target that cannot be reached, and the first person to try would break
+    a scenario making its fixture match a world it was never describing.
+    """
+    return sum(1 for entry in load_entries(path) if entry.is_defect)
 
 
 def dump_ledger(drifts: Iterable[Drift], path: Path | None = None) -> int:
     """Write the ledger from an observed drift set. Returns the entry count."""
     target = path or LEDGER_PATH
     keys = sorted({drift.key for drift in drifts})
+    rows = []
+    for key in keys:
+        context, why = context_of(key)
+        row: dict[str, object] = {
+            "scenario": key[0],
+            "tool": key[1],
+            "path": key[2],
+            "kind": key[3],
+            "context": context,
+        }
+        if why:
+            row["why"] = why
+        rows.append(row)
+    defects = sum(1 for row in rows if row["context"] == FIXTURE_DEFECT)
     target.write_text(
         json.dumps(
             {
@@ -62,8 +171,23 @@ def dump_ledger(drifts: Iterable[Drift], path: Path | None = None) -> int:
                     "longer observed. Regenerate with `make fixture-drift-bless` against the "
                     "pinned platform; never hand-edit."
                 ),
-                "_fields": ["scenario", "tool", "path", "kind"],
-                "known_drift": [list(key) for key in keys],
+                "_context": {
+                    FIXTURE_DEFECT: "the recording is wrong — this is work",
+                    POST_FAULT: (
+                        "the scenario seeds a fault and the check probes the un-faulted "
+                        "world; not a defect and must not be 'fixed'"
+                    ),
+                    CANNED_ONLY: (
+                        "the scenario never runs live, so its recordings are its premise "
+                        "rather than a recording of anything"
+                    ),
+                },
+                "_counts": {
+                    "recorded": len(rows),
+                    FIXTURE_DEFECT: defects,
+                    "explained": len(rows) - defects,
+                },
+                "known_drift": rows,
             },
             indent=2,
         )

@@ -331,6 +331,18 @@ Rows are *not* compared positionally: a fixture legitimately models a different 
 
 Re-bless with `make fixture-drift-bless`, in a dedicated commit with the reason in the message — the same discipline `make baseline` gets, and for the same reason.
 
+**Not every recorded entry is work.** Each carries a `context`:
+
+| context | meaning |
+|---|---|
+| `fixture-defect` | the recording is wrong — this is the burn-down list |
+| `post-fault` | the scenario seeds a fault and the check probes the un-faulted world, so the disagreement is expected and must **not** be "fixed" |
+| `canned-only` | the scenario never runs live, so its recordings are its premise rather than a recording of anything |
+
+Contexts are hand-recorded with a named mechanism, never inferred from the scenario. The obvious rule — *a scenario that seeds a fault gets a pass on value drift* — is wrong in a way that hides real defects: `create_stale_cache` writes one Redis key, so it cannot explain a fixture claiming 1.00G of memory in use against a live 1.60M. A rule would have absolved that entry; it is still work, and a test pins that it stays so.
+
+The asymmetry is the reason for the bar. Wrongly calling something a defect wastes an investigation. Wrongly absolving one deletes it from the work list forever, and the first person to act on it breaks a scenario making its fixture match a world it was never describing.
+
 **The ledger is blessed against a freshly seeded stack** — CI's `contract` job. A local `make fixture-drift` run can legitimately disagree with it, because `make demo-down` preserves the postgres volume and a long-lived developer stack drifts from a fresh seed. When it does, the disagreement is a true statement about *your volume*, not about the fixtures: `failed_traces_scan` reporting `no_live_rows` locally means your stack has no seeded failed traces, where a fresh one has two. Reach for `make eval-reset` before re-blessing from a local run, and never re-bless to silence that.
 
 ## Reading a live report — required first pass

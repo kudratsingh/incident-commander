@@ -1,618 +1,729 @@
 {
   "_comment": "Known canned-vs-live fixture drift, recorded when the drift check was introduced. This file may only SHRINK: evals/fixture_drift_ledger.py fails on drift not listed here AND on entries listed here that are no longer observed. Regenerate with `make fixture-drift-bless` against the pinned platform; never hand-edit.",
-  "_fields": [
-    "scenario",
-    "tool",
-    "path",
-    "kind"
-  ],
+  "_blessed_against": "a freshly seeded stack (CI's contract job). A developer volume that has drifted from a fresh seed will disagree \u2014 that disagreement is a true statement about the volume, not about the fixtures.",
+  "_context": {
+    "fixture-defect": "the recording is wrong \u2014 this is work",
+    "post-fault": "the scenario seeds a fault and the check probes the un-faulted world; not a defect and must not be 'fixed'",
+    "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything"
+  },
+  "_counts": {
+    "recorded": 101,
+    "fixture-defect": 95,
+    "explained": 6
+  },
   "known_drift": [
-    [
-      "alert_storm",
-      "list_active_alerts",
-      "alerts[].description",
-      "live_only_field"
-    ],
-    [
-      "alert_storm",
-      "list_active_alerts",
-      "alerts[].extra_data",
-      "live_only_field"
-    ],
-    [
-      "alert_storm",
-      "list_active_alerts",
-      "alerts[].id[]",
-      "not_live_reachable"
-    ],
-    [
-      "alert_storm",
-      "list_active_alerts",
-      "alerts[].severity[]",
-      "not_live_reachable"
-    ],
-    [
-      "alert_storm",
-      "list_active_alerts",
-      "alerts[].source[]",
-      "not_live_reachable"
-    ],
-    [
-      "alert_storm",
-      "list_active_alerts",
-      "total",
-      "value"
-    ],
-    [
-      "alert_storm",
-      "list_audit_events",
-      "events[]",
-      "no_live_rows"
-    ],
-    [
-      "alert_storm",
-      "list_audit_events",
-      "total",
-      "value"
-    ],
-    [
-      "consumer_lag_high",
-      "get_consumer_lag",
-      "lag",
-      "value"
-    ],
-    [
-      "consumer_lag_payments_critical",
-      "get_consumer_lag",
-      "lag",
-      "value"
-    ],
-    [
-      "consumer_lag_shipping_extreme",
-      "get_consumer_lag",
-      "lag",
-      "value"
-    ],
-    [
-      "deploy_correlation",
-      "get_deploy_history",
-      "entries[].image_tag",
-      "live_only_field"
-    ],
-    [
-      "deploy_correlation",
-      "get_deploy_history",
-      "entries[].revision",
-      "live_only_field"
-    ],
-    [
-      "deploy_correlation",
-      "get_deploy_history",
-      "entries[].version[]",
-      "not_live_reachable"
-    ],
-    [
-      "deploy_correlation",
-      "get_deploy_history",
-      "total",
-      "value"
-    ],
-    [
-      "dlq_backlog",
-      "list_dlq_messages",
-      "items[].extra",
-      "live_only_field"
-    ],
-    [
-      "dlq_backlog",
-      "list_dlq_messages",
-      "items[].id[]",
-      "not_live_reachable"
-    ],
-    [
-      "dlq_backlog",
-      "list_dlq_messages",
-      "items[].remediation_hint",
-      "live_only_field"
-    ],
-    [
-      "dlq_backlog",
-      "list_dlq_messages",
-      "items[].trace_id",
-      "live_only_field"
-    ],
-    [
-      "dlq_backlog",
-      "list_dlq_messages",
-      "items[].triage[].confidence[]",
-      "not_live_reachable"
-    ],
-    [
-      "dlq_backlog",
-      "list_dlq_messages",
-      "items[].triage[].root_cause_category",
-      "live_only_field"
-    ],
-    [
-      "dlq_backlog",
-      "list_dlq_messages",
-      "items[].triage[].suggested_fix",
-      "live_only_field"
-    ],
-    [
-      "dlq_backlog",
-      "list_dlq_messages",
-      "items[].type[]",
-      "not_live_reachable"
-    ],
-    [
-      "dlq_backlog",
-      "list_dlq_messages",
-      "items[].updated_at",
-      "live_only_field"
-    ],
-    [
-      "dlq_backlog",
-      "list_dlq_messages",
-      "total",
-      "value"
-    ],
-    [
-      "dlq_human_required_escalates",
-      "list_dlq_messages",
-      "items[].extra",
-      "live_only_field"
-    ],
-    [
-      "dlq_human_required_escalates",
-      "list_dlq_messages",
-      "items[].id[]",
-      "not_live_reachable"
-    ],
-    [
-      "dlq_human_required_escalates",
-      "list_dlq_messages",
-      "items[].trace_id",
-      "live_only_field"
-    ],
-    [
-      "dlq_human_required_escalates",
-      "list_dlq_messages",
-      "items[].triage",
-      "live_only_field"
-    ],
-    [
-      "dlq_human_required_escalates",
-      "list_dlq_messages",
-      "items[].updated_at",
-      "live_only_field"
-    ],
-    [
-      "dlq_human_required_escalates",
-      "list_dlq_messages",
-      "total",
-      "value"
-    ],
-    [
-      "dlq_mixed_partial",
-      "list_dlq_messages",
-      "items[].extra",
-      "live_only_field"
-    ],
-    [
-      "dlq_mixed_partial",
-      "list_dlq_messages",
-      "items[].id[]",
-      "not_live_reachable"
-    ],
-    [
-      "dlq_mixed_partial",
-      "list_dlq_messages",
-      "items[].trace_id",
-      "live_only_field"
-    ],
-    [
-      "dlq_mixed_partial",
-      "list_dlq_messages",
-      "items[].triage",
-      "live_only_field"
-    ],
-    [
-      "dlq_mixed_partial",
-      "list_dlq_messages",
-      "items[].type[]",
-      "not_live_reachable"
-    ],
-    [
-      "dlq_mixed_partial",
-      "list_dlq_messages",
-      "items[].updated_at",
-      "live_only_field"
-    ],
-    [
-      "dlq_mixed_partial",
-      "list_dlq_messages",
-      "total",
-      "value"
-    ],
-    [
-      "dlq_replay_safe_success",
-      "list_dlq_messages",
-      "items[].extra",
-      "live_only_field"
-    ],
-    [
-      "dlq_replay_safe_success",
-      "list_dlq_messages",
-      "items[].id[]",
-      "not_live_reachable"
-    ],
-    [
-      "dlq_replay_safe_success",
-      "list_dlq_messages",
-      "items[].trace_id",
-      "live_only_field"
-    ],
-    [
-      "dlq_replay_safe_success",
-      "list_dlq_messages",
-      "items[].triage",
-      "live_only_field"
-    ],
-    [
-      "dlq_replay_safe_success",
-      "list_dlq_messages",
-      "items[].type[]",
-      "not_live_reachable"
-    ],
-    [
-      "dlq_replay_safe_success",
-      "list_dlq_messages",
-      "items[].updated_at",
-      "live_only_field"
-    ],
-    [
-      "dlq_replay_safe_success",
-      "list_dlq_messages",
-      "total",
-      "value"
-    ],
-    [
-      "dlq_wait_and_replay_success",
-      "list_dlq_messages",
-      "items[].extra",
-      "live_only_field"
-    ],
-    [
-      "dlq_wait_and_replay_success",
-      "list_dlq_messages",
-      "items[].id[]",
-      "not_live_reachable"
-    ],
-    [
-      "dlq_wait_and_replay_success",
-      "list_dlq_messages",
-      "items[].trace_id",
-      "live_only_field"
-    ],
-    [
-      "dlq_wait_and_replay_success",
-      "list_dlq_messages",
-      "items[].triage",
-      "live_only_field"
-    ],
-    [
-      "dlq_wait_and_replay_success",
-      "list_dlq_messages",
-      "items[].type[]",
-      "not_live_reachable"
-    ],
-    [
-      "dlq_wait_and_replay_success",
-      "list_dlq_messages",
-      "items[].updated_at",
-      "live_only_field"
-    ],
-    [
-      "dlq_wait_and_replay_success",
-      "list_dlq_messages",
-      "total",
-      "value"
-    ],
-    [
-      "failed_traces_scan",
-      "search_traces",
-      "matches[].job_id[]",
-      "not_live_reachable"
-    ],
-    [
-      "failed_traces_scan",
-      "search_traces",
-      "matches[].job_type[]",
-      "not_live_reachable"
-    ],
-    [
-      "failed_traces_scan",
-      "search_traces",
-      "matches[].trace_id[]",
-      "not_live_reachable"
-    ],
-    [
-      "incidents_overview",
-      "list_incidents",
-      "incidents[].description",
-      "live_only_field"
-    ],
-    [
-      "incidents_overview",
-      "list_incidents",
-      "incidents[].id[]",
-      "not_live_reachable"
-    ],
-    [
-      "incidents_overview",
-      "list_incidents",
-      "incidents[].resolved_at",
-      "live_only_field"
-    ],
-    [
-      "incidents_overview",
-      "list_incidents",
-      "incidents[].severity[]",
-      "not_live_reachable"
-    ],
-    [
-      "incidents_overview",
-      "list_incidents",
-      "incidents[].source[]",
-      "not_live_reachable"
-    ],
-    [
-      "incidents_overview",
-      "list_incidents",
-      "total",
-      "value"
-    ],
-    [
-      "multi_probe_hypothesis_evolution",
-      "get_consumer_lag",
-      "lag",
-      "value"
-    ],
-    [
-      "postgres_slow",
-      "get_postgres_health",
-      "error",
-      "live_only_field"
-    ],
-    [
-      "redis_saturation",
-      "get_redis_health",
-      "error",
-      "live_only_field"
-    ],
-    [
-      "redis_saturation",
-      "get_redis_health",
-      "keyspace_hits",
-      "value"
-    ],
-    [
-      "redis_saturation",
-      "get_redis_health",
-      "keyspace_misses",
-      "value"
-    ],
-    [
-      "redis_saturation",
-      "get_redis_health",
-      "used_memory_human",
-      "value"
-    ],
-    [
-      "remediate_consumer_lag_success",
-      "get_consumer_lag",
-      "lag",
-      "value"
-    ],
-    [
-      "remediate_dlq_backlog_success",
-      "list_dlq_messages",
-      "items[].extra",
-      "live_only_field"
-    ],
-    [
-      "remediate_dlq_backlog_success",
-      "list_dlq_messages",
-      "items[].id[]",
-      "not_live_reachable"
-    ],
-    [
-      "remediate_dlq_backlog_success",
-      "list_dlq_messages",
-      "items[].remediation_hint",
-      "live_only_field"
-    ],
-    [
-      "remediate_dlq_backlog_success",
-      "list_dlq_messages",
-      "items[].trace_id",
-      "live_only_field"
-    ],
-    [
-      "remediate_dlq_backlog_success",
-      "list_dlq_messages",
-      "items[].triage[].confidence[]",
-      "not_live_reachable"
-    ],
-    [
-      "remediate_dlq_backlog_success",
-      "list_dlq_messages",
-      "items[].triage[].root_cause_category",
-      "live_only_field"
-    ],
-    [
-      "remediate_dlq_backlog_success",
-      "list_dlq_messages",
-      "items[].triage[].suggested_fix",
-      "live_only_field"
-    ],
-    [
-      "remediate_dlq_backlog_success",
-      "list_dlq_messages",
-      "items[].type[]",
-      "not_live_reachable"
-    ],
-    [
-      "remediate_dlq_backlog_success",
-      "list_dlq_messages",
-      "items[].updated_at",
-      "live_only_field"
-    ],
-    [
-      "remediate_dlq_backlog_success",
-      "list_dlq_messages",
-      "total",
-      "value"
-    ],
-    [
-      "remediate_runaway_saga_success",
-      "get_dag_state",
-      "edges[].from_id[]",
-      "not_live_reachable"
-    ],
-    [
-      "remediate_runaway_saga_success",
-      "get_dag_state",
-      "edges[].to_id[]",
-      "not_live_reachable"
-    ],
-    [
-      "remediate_runaway_saga_success",
-      "get_dag_state",
-      "nodes[].id[]",
-      "not_live_reachable"
-    ],
-    [
-      "remediate_runaway_saga_success",
-      "get_dag_state",
-      "nodes[].retry_count[]",
-      "not_live_reachable"
-    ],
-    [
-      "remediate_runaway_saga_success",
-      "get_dag_state",
-      "nodes[].status[]",
-      "not_live_reachable"
-    ],
-    [
-      "remediate_runaway_saga_success",
-      "get_dag_state",
-      "nodes[].type[]",
-      "not_live_reachable"
-    ],
-    [
-      "remediate_runaway_saga_success",
-      "get_dag_state",
-      "paused",
-      "value"
-    ],
-    [
-      "remediate_runaway_saga_success",
-      "get_dag_state",
-      "paused_by",
-      "value"
-    ],
-    [
-      "remediate_runaway_saga_success",
-      "get_dag_state",
-      "paused_expires_in_seconds",
-      "value"
-    ],
-    [
-      "remediate_stale_cache_success",
-      "get_redis_health",
-      "keyspace_hits",
-      "value"
-    ],
-    [
-      "remediate_stale_cache_success",
-      "get_redis_health",
-      "keyspace_misses",
-      "value"
-    ],
-    [
-      "remediate_stale_cache_success",
-      "get_redis_health",
-      "used_memory_human",
-      "value"
-    ],
-    [
-      "remediate_verify_fails",
-      "get_consumer_lag",
-      "lag",
-      "value"
-    ],
-    [
-      "saga_stuck",
-      "get_dag_state",
-      "edges[].from_id[]",
-      "not_live_reachable"
-    ],
-    [
-      "saga_stuck",
-      "get_dag_state",
-      "edges[].to_id[]",
-      "not_live_reachable"
-    ],
-    [
-      "saga_stuck",
-      "get_dag_state",
-      "nodes[].id[]",
-      "not_live_reachable"
-    ],
-    [
-      "saga_stuck",
-      "get_dag_state",
-      "nodes[].retry_count[]",
-      "not_live_reachable"
-    ],
-    [
-      "saga_stuck",
-      "get_dag_state",
-      "nodes[].status[]",
-      "not_live_reachable"
-    ],
-    [
-      "saga_stuck",
-      "get_dag_state",
-      "nodes[].type[]",
-      "not_live_reachable"
-    ],
-    [
-      "tool_output_schema_mismatch",
-      "get_consumer_lag",
-      "cache_key",
-      "live_only_field"
-    ],
-    [
-      "tool_output_schema_mismatch",
-      "get_consumer_lag",
-      "lag",
-      "value"
-    ],
-    [
-      "trace_investigation",
-      "get_trace",
-      "audit_events[]",
-      "no_live_rows"
-    ],
-    [
-      "trace_investigation",
-      "get_trace",
-      "jobs[]",
-      "no_live_rows"
-    ]
-  ],
-  "_blessed_against": "a freshly seeded stack (CI's contract job). A developer volume that has drifted from a fresh seed will disagree \u2014 that disagreement is a true statement about the volume, not about the fixtures."
+    {
+      "scenario": "alert_storm",
+      "tool": "list_active_alerts",
+      "path": "alerts[].description",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "alert_storm",
+      "tool": "list_active_alerts",
+      "path": "alerts[].extra_data",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "alert_storm",
+      "tool": "list_active_alerts",
+      "path": "alerts[].id[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "alert_storm",
+      "tool": "list_active_alerts",
+      "path": "alerts[].severity[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "alert_storm",
+      "tool": "list_active_alerts",
+      "path": "alerts[].source[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "alert_storm",
+      "tool": "list_active_alerts",
+      "path": "total",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "alert_storm",
+      "tool": "list_audit_events",
+      "path": "events[]",
+      "kind": "no_live_rows",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "alert_storm",
+      "tool": "list_audit_events",
+      "path": "total",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "consumer_lag_high",
+      "tool": "get_consumer_lag",
+      "path": "lag",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "kill_consumer makes worker-dispatcher's lag climb; the check probes the un-faulted world, so the canned backlog cannot match by design"
+    },
+    {
+      "scenario": "consumer_lag_payments_critical",
+      "tool": "get_consumer_lag",
+      "path": "lag",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "consumer_lag_shipping_extreme",
+      "tool": "get_consumer_lag",
+      "path": "lag",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "deploy_correlation",
+      "tool": "get_deploy_history",
+      "path": "entries[].image_tag",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "deploy_correlation",
+      "tool": "get_deploy_history",
+      "path": "entries[].revision",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "deploy_correlation",
+      "tool": "get_deploy_history",
+      "path": "entries[].version[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "deploy_correlation",
+      "tool": "get_deploy_history",
+      "path": "total",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_backlog",
+      "tool": "list_dlq_messages",
+      "path": "items[].extra",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_backlog",
+      "tool": "list_dlq_messages",
+      "path": "items[].id[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_backlog",
+      "tool": "list_dlq_messages",
+      "path": "items[].remediation_hint",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_backlog",
+      "tool": "list_dlq_messages",
+      "path": "items[].trace_id",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_backlog",
+      "tool": "list_dlq_messages",
+      "path": "items[].triage[].confidence[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_backlog",
+      "tool": "list_dlq_messages",
+      "path": "items[].triage[].root_cause_category",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_backlog",
+      "tool": "list_dlq_messages",
+      "path": "items[].triage[].suggested_fix",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_backlog",
+      "tool": "list_dlq_messages",
+      "path": "items[].type[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_backlog",
+      "tool": "list_dlq_messages",
+      "path": "items[].updated_at",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_backlog",
+      "tool": "list_dlq_messages",
+      "path": "total",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_human_required_escalates",
+      "tool": "list_dlq_messages",
+      "path": "items[].extra",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_human_required_escalates",
+      "tool": "list_dlq_messages",
+      "path": "items[].id[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_human_required_escalates",
+      "tool": "list_dlq_messages",
+      "path": "items[].trace_id",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_human_required_escalates",
+      "tool": "list_dlq_messages",
+      "path": "items[].triage",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_human_required_escalates",
+      "tool": "list_dlq_messages",
+      "path": "items[].updated_at",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_human_required_escalates",
+      "tool": "list_dlq_messages",
+      "path": "total",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_mixed_partial",
+      "tool": "list_dlq_messages",
+      "path": "items[].extra",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_mixed_partial",
+      "tool": "list_dlq_messages",
+      "path": "items[].id[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_mixed_partial",
+      "tool": "list_dlq_messages",
+      "path": "items[].trace_id",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_mixed_partial",
+      "tool": "list_dlq_messages",
+      "path": "items[].triage",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_mixed_partial",
+      "tool": "list_dlq_messages",
+      "path": "items[].type[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_mixed_partial",
+      "tool": "list_dlq_messages",
+      "path": "items[].updated_at",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_mixed_partial",
+      "tool": "list_dlq_messages",
+      "path": "total",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_replay_safe_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].extra",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_replay_safe_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].id[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_replay_safe_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].trace_id",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_replay_safe_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].triage",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_replay_safe_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].type[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_replay_safe_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].updated_at",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_replay_safe_success",
+      "tool": "list_dlq_messages",
+      "path": "total",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_wait_and_replay_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].extra",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_wait_and_replay_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].id[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_wait_and_replay_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].trace_id",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_wait_and_replay_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].triage",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_wait_and_replay_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].type[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_wait_and_replay_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].updated_at",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "dlq_wait_and_replay_success",
+      "tool": "list_dlq_messages",
+      "path": "total",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "failed_traces_scan",
+      "tool": "search_traces",
+      "path": "matches[].job_id[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "failed_traces_scan",
+      "tool": "search_traces",
+      "path": "matches[].job_type[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "failed_traces_scan",
+      "tool": "search_traces",
+      "path": "matches[].trace_id[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "incidents_overview",
+      "tool": "list_incidents",
+      "path": "incidents[].description",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "incidents_overview",
+      "tool": "list_incidents",
+      "path": "incidents[].id[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "incidents_overview",
+      "tool": "list_incidents",
+      "path": "incidents[].resolved_at",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "incidents_overview",
+      "tool": "list_incidents",
+      "path": "incidents[].severity[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "incidents_overview",
+      "tool": "list_incidents",
+      "path": "incidents[].source[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "incidents_overview",
+      "tool": "list_incidents",
+      "path": "total",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "multi_probe_hypothesis_evolution",
+      "tool": "get_consumer_lag",
+      "path": "lag",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "postgres_slow",
+      "tool": "get_postgres_health",
+      "path": "error",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "redis_saturation",
+      "tool": "get_redis_health",
+      "path": "error",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "redis_saturation",
+      "tool": "get_redis_health",
+      "path": "keyspace_hits",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "redis_saturation",
+      "tool": "get_redis_health",
+      "path": "keyspace_misses",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "redis_saturation",
+      "tool": "get_redis_health",
+      "path": "used_memory_human",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_consumer_lag_success",
+      "tool": "get_consumer_lag",
+      "path": "lag",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "same fault, same reason"
+    },
+    {
+      "scenario": "remediate_dlq_backlog_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].extra",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_dlq_backlog_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].id[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_dlq_backlog_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].remediation_hint",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_dlq_backlog_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].trace_id",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_dlq_backlog_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].triage[].confidence[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_dlq_backlog_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].triage[].root_cause_category",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_dlq_backlog_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].triage[].suggested_fix",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_dlq_backlog_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].type[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_dlq_backlog_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].updated_at",
+      "kind": "live_only_field",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_dlq_backlog_success",
+      "tool": "list_dlq_messages",
+      "path": "total",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "poison_message adds a dead-letter row, so the canned total counts a row the un-faulted world has not produced yet"
+    },
+    {
+      "scenario": "remediate_runaway_saga_success",
+      "tool": "get_dag_state",
+      "path": "edges[].from_id[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_runaway_saga_success",
+      "tool": "get_dag_state",
+      "path": "edges[].to_id[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_runaway_saga_success",
+      "tool": "get_dag_state",
+      "path": "nodes[].id[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_runaway_saga_success",
+      "tool": "get_dag_state",
+      "path": "nodes[].retry_count[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_runaway_saga_success",
+      "tool": "get_dag_state",
+      "path": "nodes[].status[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_runaway_saga_success",
+      "tool": "get_dag_state",
+      "path": "nodes[].type[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_runaway_saga_success",
+      "tool": "get_dag_state",
+      "path": "paused",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_runaway_saga_success",
+      "tool": "get_dag_state",
+      "path": "paused_by",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_runaway_saga_success",
+      "tool": "get_dag_state",
+      "path": "paused_expires_in_seconds",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_stale_cache_success",
+      "tool": "get_redis_health",
+      "path": "keyspace_hits",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_stale_cache_success",
+      "tool": "get_redis_health",
+      "path": "keyspace_misses",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_stale_cache_success",
+      "tool": "get_redis_health",
+      "path": "used_memory_human",
+      "kind": "value",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "remediate_verify_fails",
+      "tool": "get_consumer_lag",
+      "path": "lag",
+      "kind": "value",
+      "context": "canned-only",
+      "why": "use_live_mcp is false \u2014 the scenario never runs live, so its canned responses are its premise rather than a recording of anything"
+    },
+    {
+      "scenario": "saga_stuck",
+      "tool": "get_dag_state",
+      "path": "edges[].from_id[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "saga_stuck",
+      "tool": "get_dag_state",
+      "path": "edges[].to_id[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "saga_stuck",
+      "tool": "get_dag_state",
+      "path": "nodes[].id[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "saga_stuck",
+      "tool": "get_dag_state",
+      "path": "nodes[].retry_count[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "saga_stuck",
+      "tool": "get_dag_state",
+      "path": "nodes[].status[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "saga_stuck",
+      "tool": "get_dag_state",
+      "path": "nodes[].type[]",
+      "kind": "not_live_reachable",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "tool_output_schema_mismatch",
+      "tool": "get_consumer_lag",
+      "path": "cache_key",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "same scenario, same deliberate malformation"
+    },
+    {
+      "scenario": "tool_output_schema_mismatch",
+      "tool": "get_consumer_lag",
+      "path": "lag",
+      "kind": "value",
+      "context": "canned-only",
+      "why": "the scenario exists to feed the agent a malformed response; its fixture is deliberately not what the platform returns"
+    },
+    {
+      "scenario": "trace_investigation",
+      "tool": "get_trace",
+      "path": "audit_events[]",
+      "kind": "no_live_rows",
+      "context": "fixture-defect"
+    },
+    {
+      "scenario": "trace_investigation",
+      "tool": "get_trace",
+      "path": "jobs[]",
+      "kind": "no_live_rows",
+      "context": "fixture-defect"
+    }
+  ]
 }

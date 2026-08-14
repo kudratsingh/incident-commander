@@ -35,6 +35,7 @@ from typing import Any, Final
 import pytest
 
 from evals.scenarios.loader import load_scenarios
+from evals.scenarios.schema import json_types_for, value_compatible
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SNAPSHOT_PATH = _REPO_ROOT / "contracts" / "platform-tools.snapshot.json"
@@ -137,39 +138,16 @@ _CLI_CASES: Final[tuple[_ChaosCase, ...]] = (
 _ALL_CASES: Final[tuple[_ChaosCase, ...]] = tuple(_scenario_cases()) + _CLI_CASES
 
 
+# The type walk itself now lives in ``evals/scenarios/schema.py``, because
+# ``ChaosHook`` enforces the same rules at scenario-load time (G1-07). This
+# file keeps the CLI half of the corpus and the mutated-snapshot probes; the
+# comparison logic is imported so the two cannot drift apart.
 def _json_types_for(prop: dict[str, Any]) -> set[str]:
-    """JSON ``type`` names a property admits (direct or via ``anyOf``)."""
-    if "type" in prop:
-        return {prop["type"]}
-    types: set[str] = set()
-    for branch in prop.get("anyOf", []):
-        if isinstance(branch, dict) and "type" in branch:
-            types.add(branch["type"])
-    return types
-
-
-# bool must precede int: bool is a subclass of int, and JSON "integer"
-# does not admit true/false on the platform side.
-_PY_TO_JSON: Final[tuple[tuple[type[object], frozenset[str]], ...]] = (
-    (bool, frozenset({"boolean"})),
-    (int, frozenset({"integer", "number"})),
-    (float, frozenset({"number"})),
-    (str, frozenset({"string"})),
-    (dict, frozenset({"object"})),
-    (list, frozenset({"array"})),
-)
+    return set(json_types_for(prop))
 
 
 def _value_compatible(value: Any, admitted: set[str]) -> bool:
-    """Is this Python argument value serializable into one of the JSON types?"""
-    if not admitted:
-        return True  # property declares no type — nothing to check against
-    if value is None:
-        return "null" in admitted
-    for py_type, json_types in _PY_TO_JSON:
-        if isinstance(value, py_type):
-            return bool(json_types & admitted)
-    return True  # non-primitive value — out of scope for this tripwire
+    return value_compatible(value, frozenset(admitted))
 
 
 def _validate_case(case: _ChaosCase, schemas: dict[str, dict[str, Any]]) -> None:
@@ -212,7 +190,7 @@ class TestChaosInvocationsMatchSnapshot:
         _validate_case(case, _chaos_tool_schemas())
 
     def test_walk_is_not_vacuous(self) -> None:
-        # Three shipped scenarios carry a chaos_setup today. If the scenario
+        # Four shipped scenarios carry a chaos_setup today. If the scenario
         # side of the walk ever collapses to zero (e.g. a loader change
         # silently drops the field), the tripwire weakens with no red test —
         # pin a floor. The CLI side lives in this file, so its count is exact.

@@ -467,7 +467,17 @@ class TestBudgetDimension:
         assert result.passed is False
         assert "8" in result.detail and "5" in result.detail
 
-    def test_at_cap_passes(self, run_state: RunState) -> None:
+    def test_at_cap_fails(self, run_state: RunState) -> None:
+        """ADR 0019: reaching the cap is being cut off, not finishing.
+
+        This assertion used to read the other way. Once the cap became the
+        run's runtime ceiling, ``used > cap`` stopped being reachable through
+        the runner — ``BudgetLedger.is_exhausted`` stops the loop at
+        ``used >= max`` — so grading only the strict-greater case would have
+        left a dimension that can never fail. The cap means "a correct run
+        finishes inside this budget"; spending the last allowed call is the
+        budget overrun the >=30% margin rule exists to keep away from.
+        """
         used = run_state.budget.model_copy(update={"tool_calls_used": 5})
         run = run_state.model_copy(update={"state": IncidentState.ESCALATED, "budget": used})
         exp = ScenarioExpectation(
@@ -475,8 +485,46 @@ class TestBudgetDimension:
             expected_terminal_state=IncidentState.ESCALATED,
             max_tool_calls=5,
         )
-        report = grade(run, exp)
-        assert _dim(report, GradeDimension.BUDGET).passed is True
+        result = _dim(grade(run, exp), GradeDimension.BUDGET)
+        assert result.passed is False
+        assert "exhausted its allowance" in result.detail
+
+    def test_one_below_cap_passes(self, run_state: RunState) -> None:
+        used = run_state.budget.model_copy(update={"tool_calls_used": 4})
+        run = run_state.model_copy(update={"state": IncidentState.ESCALATED, "budget": used})
+        exp = ScenarioExpectation(
+            name="s",
+            expected_terminal_state=IncidentState.ESCALATED,
+            max_tool_calls=5,
+        )
+        assert _dim(grade(run, exp), GradeDimension.BUDGET).passed is True
+
+    def test_zero_cap_passes_on_zero_calls(self, run_state: RunState) -> None:
+        """The one case where spending the whole allowance is correct.
+
+        A cap of 0 asserts the agent made no tool call at all — the noise and
+        tool-error scenarios. 0 of 0 satisfies that, and there is no runtime
+        ceiling to be cut off by (start_run ignores a 0 override; see ADR
+        0019 and factory.start_run).
+        """
+        run = run_state.model_copy(update={"state": IncidentState.ESCALATED})
+        exp = ScenarioExpectation(
+            name="s",
+            expected_terminal_state=IncidentState.ESCALATED,
+            max_tool_calls=0,
+        )
+        assert run.budget.tool_calls_used == 0
+        assert _dim(grade(run, exp), GradeDimension.BUDGET).passed is True
+
+    def test_zero_cap_fails_on_any_call(self, run_state: RunState) -> None:
+        used = run_state.budget.model_copy(update={"tool_calls_used": 1})
+        run = run_state.model_copy(update={"state": IncidentState.ESCALATED, "budget": used})
+        exp = ScenarioExpectation(
+            name="s",
+            expected_terminal_state=IncidentState.ESCALATED,
+            max_tool_calls=0,
+        )
+        assert _dim(grade(run, exp), GradeDimension.BUDGET).passed is False
 
 
 class TestActionDimension:

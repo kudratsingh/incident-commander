@@ -348,7 +348,17 @@ def run_scenario(
 
     try:
         checkpointer = InMemoryCheckpointer()
-        run = start_run(scenario.alert.model_dump(), settings, now)
+        # The scenario's declared cap IS the run's tool-call ceiling (ADR
+        # 0019), not just the number it is graded against afterwards. Before
+        # this, the two were different numbers and the planner was told the
+        # fleet default of 25 in every scenario — including the ones whose
+        # whole subject is behaviour under a tight budget.
+        run = start_run(
+            scenario.alert.model_dump(),
+            settings,
+            now,
+            max_tool_calls=scenario.expectation.max_tool_calls,
+        )
         final = run_to_completion(
             run,
             clock=tick,

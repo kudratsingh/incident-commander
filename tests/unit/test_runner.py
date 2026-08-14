@@ -39,10 +39,12 @@ from evals.runner import (
     write_trajectories,
 )
 from evals.scenarios.schema import ChaosHook, Scenario
+from incident_commander.agent import factory
 from incident_commander.agent.briefing import EscalationBriefing
 from incident_commander.agent.state import BudgetLedger, EvidenceEntry, IncidentState, RunState
 from incident_commander.api.schemas import AlertPayload
 from incident_commander.config import Settings
+from incident_commander.llm.fakes import CannedLLMClient
 from incident_commander.tools.mcp_client import MCPError, ToolResult
 
 _NOW = datetime(2026, 8, 8, tzinfo=UTC)
@@ -1478,3 +1480,81 @@ class TestCannedEquivalentKnobWarning:
         assert runner_module.main() == 0
         assert len(run_all_calls) == 1
         assert "canned-equivalent probe knobs" not in capsys.readouterr().out
+
+
+class TestScenarioBudgetReachesTheRun:
+    """ADR 0019: the declared cap is the run's ceiling, and the agent is told it.
+
+    Two separate defects, one wire. The runtime ceiling was
+    ``settings.budget_max_tool_calls`` for every scenario regardless of what
+    the scenario declared, so a cap of 5 and a ceiling of 25 disagreed by
+    20 calls. And ``_format_planner_context`` renders "Budget remaining:
+    tool_calls=..." from that same ledger, so the investigation planner was
+    told 25 in every scenario — including the ones whose entire subject is
+    what the agent does when the budget is tight.
+    """
+
+    def test_ledger_is_seeded_from_the_scenario_cap(self) -> None:
+        scenario = _passing_scenario()
+        assert scenario.expectation.max_tool_calls == 5
+        captured: list[RunState] = []
+        real_start_run = factory.start_run
+
+        def _spy(*args: Any, **kwargs: Any) -> RunState:
+            run = real_start_run(*args, **kwargs)
+            captured.append(run)
+            return run
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(runner_module, "start_run", _spy)
+            run_scenario(scenario, _test_settings(budget_max_tool_calls=25))
+        assert captured, "start_run was not called"
+        assert captured[0].budget.max_tool_calls == 5
+
+    def test_planner_is_told_the_scenario_budget_not_the_fleet_default(self) -> None:
+        # The defect this closes is visible only in the prompt text: the
+        # planner reads "Budget remaining: tool_calls=N" and decides how many
+        # probes it can afford from it.
+        built: list[CannedLLMClient] = []
+
+        class _Recording(CannedLLMClient):
+            def __init__(self, payloads: Any) -> None:
+                super().__init__(payloads)
+                built.append(self)
+
+        scenario = _passing_scenario()
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(runner_module, "CannedLLMClient", _Recording)
+            run_scenario(scenario, _test_settings(budget_max_tool_calls=25))
+        contexts = [msg for client in built for _system, msg in client.calls]
+        planner_contexts = [c for c in contexts if "Budget remaining:" in c]
+        assert planner_contexts, "the planner context was never rendered"
+        assert "tool_calls=5" in planner_contexts[0]
+        assert "tool_calls=25" not in planner_contexts[0]
+
+    def test_a_scenario_without_a_cap_still_gets_the_setting(self) -> None:
+        scenario = _noise_scenario()
+        assert scenario.expectation.max_tool_calls is None
+        captured: list[RunState] = []
+        real_start_run = factory.start_run
+
+        def _spy(*args: Any, **kwargs: Any) -> RunState:
+            run = real_start_run(*args, **kwargs)
+            captured.append(run)
+            return run
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(runner_module, "start_run", _spy)
+            run_scenario(scenario, _test_settings(budget_max_tool_calls=17))
+        assert captured[0].budget.max_tool_calls == 17
+
+    def test_every_shipped_scenario_still_grades_green_under_its_own_ceiling(self) -> None:
+        # The suite-wide statement of the change: nine scenarios declare a cap
+        # of 0, which start_run ignores (a zero ledger is born exhausted), and
+        # the rest now run under the number they are graded against.
+        from evals.scenarios.loader import load_scenarios
+
+        scenarios = load_scenarios(Path(__file__).resolve().parents[2] / "evals" / "scenarios")
+        report, _, _ = run_all(scenarios, _test_settings())
+        failed = [o.scenario for o in report.outcomes if not o.report.passed]
+        assert failed == [], f"scenarios red under their own ceiling: {failed}"

@@ -175,11 +175,19 @@ services:
       # entrypoint.sh sets this; we override `command:` to run the standalone
       # MCP process instead of the full REST app, so we must set it ourselves.
       PYTHONPATH: /app/backend
-      # v0.2.1+: auto-seed the eval fixture pack (consumer groups, DLQ jobs,
-      # incidents, DAG jobs, traces, deploys) on every boot. Idempotent —
-      # existing rows are left alone. See /app/eval-fixtures-pins.json in
-      # the container for the pinned UUIDs the agent scenarios reference.
-      SEED_EVAL_FIXTURES: "true"
+      # Seeding is DELIBERATELY off here, and this is the opposite of what
+      # it used to say. The flag is read by `app/main.py`'s startup hook —
+      # the REST app's — and three lines above we override `command:` to run
+      # the standalone MCP process instead, so that hook never executes.
+      # Setting it true here did nothing: the flag was on the one service
+      # that cannot act on it and off on the one that can, so NOTHING seeded.
+      # Symptoms: /app/eval-fixtures-pins.json absent from this container,
+      # and a freshly booted stack answering every tenant-scoped list tool
+      # with []. It went unnoticed because the only CI job touching the
+      # stack diffs `tools/list`, which needs no rows, and local stacks kept
+      # working off fixture data persisted in the postgres volume from an
+      # earlier seed. `make test-drift` is what finally noticed.
+      SEED_EVAL_FIXTURES: "false"
       # v0.3.0+: register the 5 chaos hooks (kill_consumer, poison_message,
       # saturate_redis, inject_latency, bad_deploy). Required for the
       # `make chaos-*` targets and the live remediation-loop scenarios
@@ -238,9 +246,15 @@ services:
       DEBUG: "true"
       KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
       PYTHONPATH: /app/backend
-      # Seeding stays on the `platform` (MCP) service ONLY — exactly one
-      # seeder, no double-seed.
-      SEED_EVAL_FIXTURES: "false"
+      # Seeding runs HERE and only here — still exactly one seeder, just on
+      # the service that can actually perform it. This is the `app.main`
+      # REST app, whose startup hook (backend/app/main.py:68-85) is the sole
+      # reader of the flag; the MCP service overrides `command:` and never
+      # reaches it. Auto-seeds the eval fixture pack (consumer groups, DLQ
+      # jobs, incidents, DAG jobs, traces, deploys) on every boot, idempotent
+      # — existing rows are left alone — and writes the pinned UUIDs the
+      # scenarios reference to /app/eval-fixtures-pins.json in THIS container.
+      SEED_EVAL_FIXTURES: "true"
       # Must match the platform service's setting (chaos gate asserts at
       # startup; the kill flag is honored by the consumers in THIS
       # process).

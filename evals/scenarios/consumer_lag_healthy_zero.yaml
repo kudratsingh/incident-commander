@@ -67,4 +67,30 @@ expectation:
   expected_terminal_state: escalated
   expected_evidence_contains:
   - cache_key
+  # The scenario's whole premise — "the agent shouldn't invent a remediation"
+  # — had no mechanism until negative assertions existed. ESCALATED plus a
+  # cited cache_key is equally true of a run that first restarted a healthy
+  # consumer group and then escalated. Every Tier-1 tool is listed because
+  # the correct write count on a false-positive alert is zero, not "zero of
+  # the ones that looked relevant".
+  forbidden_action_tools:
+  - restart_consumer_group
+  - pause_dag
+  - invalidate_cache_key
+  - replay_dlq_messages
+  - replay_dlq_by_ids
+  - replay_dlq_by_category
+  - mark_dlq_permanent
+  # And the escalation must be a reasoned one. `tool error (<tool>): ...` is
+  # what investigation.py writes when a probe fails at the transport layer,
+  # which also terminates in ESCALATED — so without this the OUTCOME
+  # dimension cannot tell "read 0, concluded false positive" from "never got
+  # a reading at all". Same distinction the failure-class taxonomy draws.
+  forbidden_evidence_contains:
+  - 'tool error'
+  # Deterministic in both modes: alert_summary is rendered from RunState by
+  # briefing.py, never written by the LLM. Asserts the floor of a useful
+  # handoff — the briefing names the alert it is about.
+  expect_briefing_contains:
+  - fingerprint=consumer_lag_high
   max_tool_calls: 5

@@ -1,4 +1,4 @@
-.PHONY: demo-destroy help setup check lint types test test-unit test-integration test-contract test-e2e eval eval-live eval-live-remediation eval-smoke eval-reg eval-reset trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
+.PHONY: demo-destroy help setup check lint types test test-unit test-integration test-contract test-drift fixture-drift fixture-drift-bless test-e2e eval eval-live eval-live-remediation eval-smoke eval-reg eval-reset trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
 
 # Make does not read .env on its own — only the Python side does, via
 # dotenv. Without this include, a make-level var like PLATFORM_COMPOSE
@@ -28,6 +28,8 @@ help:
 	@echo "  test-unit        unit tests only"
 	@echo "  test-integration integration tests only"
 	@echo "  test-contract    diff platform tool schemas against snapshot"
+	@echo "  test-drift       diff canned fixture VALUES against the pinned platform"
+	@echo "  fixture-drift    the same walk, as a human-readable report"
 	@echo "  test-e2e         full compose end-to-end (spends tokens)"
 	@echo "  eval             full eval suite offline (writes report)"
 	@echo "  eval-live        run eval suite against live platform (needs .env);"
@@ -67,6 +69,26 @@ test-integration:
 
 test-contract:
 	uv run pytest tests/integration/test_contract_snapshot.py -v
+
+# The value-level sibling of test-contract: same pinned stack, same
+# read-scoped principal, but it asks whether the canned fixture VALUES are
+# ones the platform can produce rather than whether the schemas match.
+test-drift:
+	uv run pytest tests/integration/test_canned_fixtures_match_live.py -v
+
+# Human-readable version of the same walk, for working on a fixture.
+# PYTHONPATH=. because `python scripts/x.py` puts scripts/ on sys.path[0],
+# not the repo root, so `import evals` fails. pytest does not need it
+# (pyproject sets pythonpath), which is why `make test-drift` does not.
+fixture-drift:
+	PYTHONPATH=. uv run python scripts/fixture_drift.py
+
+# Re-record the known-drift ledger. A DELIBERATE act: it accepts the current
+# fixture state as the new floor, so it belongs in its own commit with the
+# reason in the message, exactly like `make baseline`.
+fixture-drift-bless:
+	PYTHONPATH=. uv run python scripts/fixture_drift.py --bless
+	@echo "Ledger rewritten. git add + commit evals/fixture-drift-ledger.json to bless."
 
 test-e2e:
 	@echo "TODO(phase-0+): compose up incident-platform + agent, inject scenario, assert audit"

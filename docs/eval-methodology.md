@@ -281,6 +281,30 @@ The null contract is also exercised end-to-end by `consumer_lag_null_unknown_sta
 
 Fixtures written from the platform's source contract rather than recorded from a live probe are a stopgap; re-record them verbatim at the next sanctioned live campaign.
 
+#### The general check: `make test-drift`
+
+The loader lint above covers one tool and two invariants, by hand. The general form is `tests/integration/test_canned_fixtures_match_live.py`, which runs in CI's `contract` job against the pinned, seeded platform and compares **every** canned fixture value against what the platform actually returns. It is the value-level sibling of the contract diff: `test-contract` asks whether the tool *schemas* still match, this asks whether the fixture *values* are ones the platform can produce.
+
+It finds three shapes of drift:
+
+| kind | meaning |
+|---|---|
+| `value` | a top-level scalar disagrees — the `lag: 1200` vs live `0` class |
+| `canned_only_field` / `live_only_field` | the key sets disagree: the fixture invents a field, or fails to model one the platform returns |
+| `not_live_reachable` | a value inside a list row that appears nowhere in the live response — a `status` the platform never emits, a pinned id that exists in no row |
+
+Rows are *not* compared positionally: a fixture legitimately models a different world state, so what must hold is that the row shape matches and that each value is one the platform can emit. Fields that move between two honest observations (clocks, latencies, memory gauges) are declared volatile per tool in `evals/fixture_drift.py` and checked for type only. `lag` is deliberately **not** volatile — its value is the whole subject of the lag scenarios.
+
+**Arguments come from the scenario, not a table.** `canned_tool_responses` is keyed by tool name only, so the fixture does not record which call it answers. The scenario's canned planner does: its scripted `next_action` is exactly the call the offline run makes. Deriving from there means a scenario that changes what it probes cannot drift away from what the check probes.
+
+**Read-scoped by construction.** The check runs under `PLATFORM_SMOKE_TOKEN` and refuses to fall back to `PLATFORM_TOKEN` — a check that measures the world must not hold a principal that can change it. Tier-1 fixtures are additionally never probed, since probing `replay_dlq_by_category` to see what it returns would replay the DLQ. Their canned payloads are therefore still unchecked by this guard; that is a known remaining hole.
+
+**The ledger is a ratchet.** Every fixture in the repo predates this check and most disagree with it, so the drift that existed at introduction is recorded in `evals/fixture-drift-ledger.json` and the check fails only on drift that is *not* recorded. The second rule is what makes it a ratchet rather than an allowlist: an entry that is no longer observed *also* fails, with an instruction to delete it. Fixing a fixture forces a line out of the ledger in the same PR, and the file can only shrink. Entries carry no observed values, so a wobbling gauge is one stable entry rather than a reason to re-bless.
+
+Re-bless with `make fixture-drift-bless`, in a dedicated commit with the reason in the message — the same discipline `make baseline` gets, and for the same reason.
+
+**The ledger is blessed against a freshly seeded stack** — CI's `contract` job. A local `make fixture-drift` run can legitimately disagree with it, because `make demo-down` preserves the postgres volume and a long-lived developer stack drifts from a fresh seed. When it does, the disagreement is a true statement about *your volume*, not about the fixtures: `failed_traces_scan` reporting `no_live_rows` locally means your stack has no seeded failed traces, where a fresh one has two. Reach for `make eval-reset` before re-blessing from a local run, and never re-bless to silence that.
+
 ## Reading a live report — required first pass
 
 Every failed live-eval run gets bucketed *before* any code is opened:

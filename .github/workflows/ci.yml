@@ -119,20 +119,52 @@ jobs:
             echo "bootstrap_agent_token.py printed no PLATFORM_TOKEN line"
             exit 1
           fi
-          echo "::add-mask::$token"
-          if [ -n "$smoke" ]; then
-            echo "::add-mask::$smoke"
+          # The fixture-drift step below reads the platform under the
+          # read-scoped principal and refuses to fall back to the write one,
+          # so an absent smoke token is a hard failure here rather than a
+          # silently skipped check.
+          if [ -z "$smoke" ]; then
+            echo "bootstrap_agent_token.py printed no PLATFORM_SMOKE_TOKEN line"
+            exit 1
           fi
+          echo "::add-mask::$token"
+          echo "::add-mask::$smoke"
           printf '%s\n' "$out"
 
-          # Masked above, so it is redacted anywhere it could resurface.
+          # Masked above, so they are redacted anywhere they could resurface.
           echo "PLATFORM_TOKEN=$token" >> "$GITHUB_ENV"
+          echo "PLATFORM_SMOKE_TOKEN=$smoke" >> "$GITHUB_ENV"
 
       - name: make test-contract
         # PLATFORM_TOKEN arrives from the masked GITHUB_ENV write above.
         env:
           PLATFORM_MCP_URL: http://localhost:8001/mcp
         run: make test-contract
+
+      # Wait for the SEEDER, not just for the app. `up --wait` clears the
+      # healthchecks and the loop above clears the REST app, but nothing
+      # waited for SEED_EVAL_FIXTURES to finish writing the fixture pack —
+      # test-contract never noticed because tools/list needs no data. The
+      # first run of the drift step did notice: it compared every fixture
+      # against an empty world and reported 64 confident falsehoods.
+      - name: Wait for the eval fixture pack
+        env:
+          PLATFORM_MCP_URL: http://localhost:8001/mcp
+        run: PYTHONPATH=. uv run python scripts/fixture_drift.py --await-fixtures 90
+
+      # The value-level half of the same question, against the same stack:
+      # test-contract asks whether the tool SCHEMAS still match, this asks
+      # whether the canned fixture VALUES are ones the platform can produce.
+      # Nothing asked that before, which is how consumer_lag_high asserted
+      # lag 1200 against a live 0 for months while the suite stayed green.
+      # Runs under PLATFORM_SMOKE_TOKEN (telemetry:read + incidents:read):
+      # a check that measures the world must not hold a principal that can
+      # change it, and the compose stack is seeded (SEED_EVAL_FIXTURES=true)
+      # so the values it reads are the pinned fixture pack.
+      - name: make test-drift
+        env:
+          PLATFORM_MCP_URL: http://localhost:8001/mcp
+        run: make test-drift
 
       - name: Dump stack state on failure
         if: failure()

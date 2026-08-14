@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 import re
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -68,7 +68,68 @@ _FAKE_GREEN_EVIDENCE_ITEM = "verified"
 _SERIALIZED_FRAGMENT_RE = re.compile(r'^"[^"]+":')
 
 
-class EvidenceFieldExpectation(BaseModel):
+class FieldComparator(BaseModel):
+    """One assertion about one already-parsed value. Exactly one comparator.
+
+    * ``equals``   — the parsed value must equal it. Booleans compare
+      identically, never numerically: ``equals: true`` is not satisfied by a
+      JSON ``1`` (that is contract drift, not a pass).
+    * ``at_least`` — the parsed value must be a real number ``>=`` it.
+    * ``is_null``  — ``true`` asserts the value is JSON ``null``, ``false``
+      asserts it is present and non-null.
+
+    Shared by ``EvidenceFieldExpectation`` (asserting on what a run
+    recorded) and ``PreconditionField`` (asserting on the world before a run
+    starts). They ask about different moments; the comparison is the same,
+    and a second copy of it would drift.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    equals: bool | int | float | str | None = None
+    at_least: float | None = None
+    is_null: bool | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_comparator(self) -> Self:
+        set_names = [
+            name
+            for name, value in (
+                ("equals", self.equals),
+                ("at_least", self.at_least),
+                ("is_null", self.is_null),
+            )
+            if value is not None
+        ]
+        if len(set_names) != 1:
+            raise ValueError(
+                f"{type(self).__name__} needs exactly one of equals/at_least/is_null, "
+                f"got {set_names or 'none'}"
+            )
+        return self
+
+    def describe(self) -> str:
+        """Human-readable comparator, for failure details."""
+        if self.is_null is not None:
+            return f"is_null {self.is_null}"
+        if self.at_least is not None:
+            return f"at_least {self.at_least}"
+        return f"equals {self.equals!r}"
+
+    def satisfied_by(self, value: object) -> bool:
+        """Does one observed (already parsed) value satisfy this assertion?"""
+        if self.is_null is not None:
+            return (value is None) is self.is_null
+        if self.at_least is not None:
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                return False
+            return float(value) >= self.at_least
+        if isinstance(self.equals, bool) or isinstance(value, bool):
+            return self.equals is value
+        return self.equals == value
+
+
+class EvidenceFieldExpectation(FieldComparator):
     """A structured assertion about one field of one tool's recorded output.
 
     ``EvidenceEntry.result_summary`` for a real tool call is the tool's output
@@ -91,56 +152,15 @@ class EvidenceFieldExpectation(BaseModel):
     ``any`` (the default) is the live-robust choice: an early poll may read
     pre-settlement state and a later entry carries the settled value. Use
     ``last`` only where the end state specifically matters.
-    """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    The comparators themselves live on ``FieldComparator``.
+    """
 
     # An entry matches when ``EvidenceEntry.tool_name`` is in this set — the
     # same same-effect equivalence idea as ``expected_action_tools``.
     tools: tuple[str, ...] = Field(min_length=1)
     field: str = Field(min_length=1)
-    equals: bool | int | float | str | None = None
-    at_least: float | None = None
-    is_null: bool | None = None
     which: Literal["any", "last"] = "any"
-
-    @model_validator(mode="after")
-    def _exactly_one_comparator(self) -> EvidenceFieldExpectation:
-        set_names = [
-            name
-            for name, value in (
-                ("equals", self.equals),
-                ("at_least", self.at_least),
-                ("is_null", self.is_null),
-            )
-            if value is not None
-        ]
-        if len(set_names) != 1:
-            raise ValueError(
-                "evidence field expectation needs exactly one of equals/at_least/is_null, "
-                f"got {set_names or 'none'}"
-            )
-        return self
-
-    def describe(self) -> str:
-        """Human-readable comparator, for grader failure details."""
-        if self.is_null is not None:
-            return f"is_null {self.is_null}"
-        if self.at_least is not None:
-            return f"at_least {self.at_least}"
-        return f"equals {self.equals!r}"
-
-    def satisfied_by(self, value: object) -> bool:
-        """Does one observed (already parsed) field value satisfy this assertion?"""
-        if self.is_null is not None:
-            return (value is None) is self.is_null
-        if self.at_least is not None:
-            if isinstance(value, bool) or not isinstance(value, int | float):
-                return False
-            return float(value) >= self.at_least
-        if isinstance(self.equals, bool) or isinstance(value, bool):
-            return self.equals is value
-        return self.equals == value
 
 
 class ScenarioExpectation(BaseModel):

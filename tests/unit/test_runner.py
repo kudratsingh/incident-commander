@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -38,7 +39,7 @@ from evals.runner import (
     write_report,
     write_trajectories,
 )
-from evals.scenarios.schema import ChaosHook, Scenario
+from evals.scenarios.schema import ChaosHook, PreconditionField, PreconditionProbe, Scenario
 from incident_commander.agent import factory
 from incident_commander.agent.briefing import EscalationBriefing
 from incident_commander.agent.state import BudgetLedger, EvidenceEntry, IncidentState, RunState
@@ -423,9 +424,7 @@ class TestChaosSetupHook:
         monkeypatch.setattr("evals.runner.invoke_chaos_hook", _fake_invoke)
         monkeypatch.setattr(
             "evals.runner.make_client",
-            lambda *_a, **_kw: _ClosableCannedMCP(
-                self._scenario_with_chaos().canned_tool_responses
-            ),
+            lambda *_a, **_kw: _ClosableCanned(self._scenario_with_chaos().canned_tool_responses),
         )
         settings = _test_settings(platform_mcp_url="http://real.host:8001/mcp")
         result = run_scenario(self._scenario_with_chaos(), settings)
@@ -1558,3 +1557,144 @@ class TestScenarioBudgetReachesTheRun:
         report, _, _ = run_all(scenarios, _test_settings())
         failed = [o.scenario for o in report.outcomes if not o.report.passed]
         assert failed == [], f"scenarios red under their own ceiling: {failed}"
+
+
+class _ClosableCanned(CannedMCPClient):
+    """CannedMCPClient with the close() the live path calls."""
+
+    def close(self) -> None:  # pragma: no cover - no-op
+        return None
+
+
+class TestPreconditions:
+    """An unmet premise abandons the run instead of grading the agent on it.
+
+    The distinction this draws is the one `bb1fa70abb4c` could not: a run
+    that never happened says nothing about the agent, and must not be
+    recorded as though it did.
+    """
+
+    @staticmethod
+    def _live_scenario_with_precondition(**overrides: Any) -> Scenario:
+        base = _passing_scenario()
+        return base.model_copy(
+            update={
+                "name": "precondition_probe",
+                "use_live_mcp": True,
+                "expected_precondition": (
+                    PreconditionProbe(
+                        tool="get_consumer_lag",
+                        arguments={"consumer_group": "billing"},
+                        expect=(PreconditionField(path="lag", at_least=1),),
+                        **overrides,
+                    ),
+                ),
+            }
+        )
+
+    @staticmethod
+    def _lag_result(lag: int | None) -> ToolResult:
+        return ToolResult(
+            content=[
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {"consumer_group": "billing", "lag": lag, "cache_key": "kafka:x"}
+                    ),
+                }
+            ]
+        )
+
+    def _run_live(
+        self, monkeypatch: pytest.MonkeyPatch, scenario: Scenario, client: Any
+    ) -> ScenarioResult:
+        monkeypatch.setattr(runner_module, "make_client", lambda *a, **k: client)
+        return run_scenario(scenario, _test_settings(platform_mcp_url="https://real.example"))
+
+    def test_met_precondition_lets_the_run_proceed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = _ClosableCanned({"get_consumer_lag": self._lag_result(4200)})
+        result = self._run_live(monkeypatch, self._live_scenario_with_precondition(), client)
+        assert result.outcome.report.passed
+        # The probe is the harness's, not the agent's: it must not be charged
+        # to the run's tool-call budget.
+        assert result.outcome.tool_calls_used == 1
+
+    def test_unmet_precondition_raises_before_the_agent_starts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _ClosableCanned({"get_consumer_lag": self._lag_result(0)})
+        with pytest.raises(runner_module.PreconditionNotMet, match="never manufactured"):
+            self._run_live(monkeypatch, self._live_scenario_with_precondition(), client)
+
+    def test_no_model_call_is_made_on_an_unmet_precondition(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The cost argument, pinned. Abandoning early is the point."""
+        built: list[CannedLLMClient] = []
+
+        class _Recording(CannedLLMClient):
+            def __init__(self, payloads: Any) -> None:
+                super().__init__(payloads)
+                built.append(self)
+
+        monkeypatch.setattr(runner_module, "CannedLLMClient", _Recording)
+        client = _ClosableCanned({"get_consumer_lag": self._lag_result(0)})
+        with pytest.raises(runner_module.PreconditionNotMet):
+            self._run_live(monkeypatch, self._live_scenario_with_precondition(), client)
+        assert all(not c.calls for c in built), "a model was called despite a false premise"
+
+    def test_an_unmet_precondition_is_its_own_failure_bucket(self) -> None:
+        # Not "shared-env": nothing was contended. Not an agent grade either.
+        result = runner_module._crashed_result(
+            _passing_scenario(), runner_module.PreconditionNotMet("nope")
+        )
+        assert result.outcome.failure_class == "precondition"
+
+    def test_polling_waits_for_a_fault_that_lands_late(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # kill_consumer stops the consumer at once; the lag metric trails by
+        # up to the platform's 60s interval. The first look must not decide.
+        slept: list[float] = []
+        monkeypatch.setattr(time, "sleep", slept.append)
+        client = _ClosableCanned(
+            {"get_consumer_lag": [self._lag_result(0), self._lag_result(0), self._lag_result(9000)]}
+        )
+        scenario = self._live_scenario_with_precondition(attempts=4, delay_seconds=15.0)
+        result = self._run_live(monkeypatch, scenario, client)
+        assert result.outcome.report.passed
+        assert slept == [15.0, 15.0]
+
+    def test_polling_gives_up_and_reports_the_last_reading(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(time, "sleep", lambda _s: None)
+        client = _ClosableCanned({"get_consumer_lag": self._lag_result(0)})
+        scenario = self._live_scenario_with_precondition(attempts=3, delay_seconds=1.0)
+        with pytest.raises(runner_module.PreconditionNotMet, match="3 attempt"):
+            self._run_live(monkeypatch, scenario, client)
+
+    def test_canned_runs_ignore_preconditions_entirely(self) -> None:
+        # Offline the broken state is served by construction, so there is
+        # nothing to establish — and an offline suite must never need a
+        # platform to run.
+        scenario = _passing_scenario().model_copy(
+            update={
+                "expected_precondition": (
+                    PreconditionProbe(
+                        tool="get_consumer_lag",
+                        expect=(PreconditionField(path="lag", at_least=999_999),),
+                    ),
+                ),
+            }
+        )
+        assert run_scenario(scenario, _test_settings()).outcome.report.passed
+
+    def test_a_probe_transport_failure_is_an_unmet_precondition(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Silence must not read as agreement: a probe we could not make is
+        # not a premise we established.
+        client = _ClosableCanned({})  # no canned response => MCPError
+        with pytest.raises(runner_module.PreconditionNotMet, match="probe failed"):
+            self._run_live(monkeypatch, self._live_scenario_with_precondition(), client)

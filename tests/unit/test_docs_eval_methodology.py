@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Final
 
 from evals.graders.deterministic import GradeDimension, ScenarioExpectation
+from evals.scenarios.schema import Scenario
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _DOC: Final[Path] = _REPO_ROOT / "docs" / "eval-methodology.md"
@@ -106,14 +107,20 @@ def test_documented_expectation_fields_exist_on_the_model() -> None:
     """No stale field name may survive in the doc — extra='forbid' has teeth.
 
     ``expected_action_tool`` (singular) is the specific regression: a scenario
-    copying it fails to load. Any other ``expected_``/``forbidden_``/``max_``
-    token that is not a real field is the same bug with a different name.
+    copying it fails to load. Any other ``expected_``/``expect_``/
+    ``forbidden_``/``max_`` token that is not a real field is the same bug
+    with a different name.
+
+    Both models are checked, because the field-shaped names are split across
+    them: the graded assertions live on ``ScenarioExpectation`` and
+    ``expected_precondition`` — a gate, not a grade — lives on ``Scenario``.
+    Checking only one made a real field look like a typo.
     """
-    fields = set(ScenarioExpectation.model_fields)
+    fields = set(ScenarioExpectation.model_fields) | set(Scenario.model_fields)
     unknown = sorted(set(_FIELD_SHAPED.findall(_doc_text())) - fields)
     assert unknown == [], (
-        f"{_DOC.name} names expectation fields that ScenarioExpectation does "
-        f"not define: {unknown}. The model is extra='forbid', so a scenario "
+        f"{_DOC.name} names expectation fields that neither ScenarioExpectation "
+        f"nor Scenario defines: {unknown}. Both are extra='forbid', so a scenario "
         f"author copying one of these gets a load failure. Real fields: "
         f"{sorted(fields)}."
     )

@@ -103,3 +103,12 @@ expectation:
   # the agent is bounded by it, told it, and escalates on exhausting it, and
   # reaching it grades BUDGET red. The margin is headroom, not an annotation.
   max_tool_calls: 13
+# The premise: there is a backlog to drain. poison_message adds to it, but
+# the seeded pack already carries entries, so this asserts the honest
+# minimum — a DLQ with something in it — rather than pretending to measure
+# the chaos hook's own effect, which no read tool distinguishes.
+expected_precondition:
+- tool: list_dlq_messages
+  expect:
+  - path: total
+    at_least: 1

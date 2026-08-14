@@ -122,3 +122,11 @@ expectation:
   # the agent is bounded by it, told it, and escalates on exhausting it, and
   # reaching it grades BUDGET red. The margin is headroom, not an annotation.
   max_tool_calls: 13
+# The premise: the DLQ holds at least one entry the platform classified as
+# needing a human. Without it the agent has nothing to mark, escalates for
+# the right reason on the wrong grounds, and grades red as if it misbehaved.
+expected_precondition:
+- tool: list_dlq_messages
+  expect:
+  - path: items[].remediation_hint
+    equals: human_required

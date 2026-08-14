@@ -125,3 +125,19 @@ expectation:
   # the agent is bounded by it, told it, and escalates on exhausting it, and
   # reaching it grades BUDGET red. The margin is headroom, not an annotation.
   max_tool_calls: 13
+# The premise: worker-dispatcher has a real backlog. This is the one
+# precondition that must WAIT: kill_consumer stops the consumer immediately,
+# but lag is recomputed on the platform's 60s metrics interval, so the
+# number is still 0 for up to a minute after seeding. Six looks at 15s
+# covers that window. A run that starts before the lag is real reads a
+# healthy group and grades the agent for failing to find a fault that had
+# not happened yet.
+expected_precondition:
+- tool: get_consumer_lag
+  arguments:
+    consumer_group: worker-dispatcher
+  attempts: 6
+  delay_seconds: 15.0
+  expect:
+  - path: lag
+    at_least: 1

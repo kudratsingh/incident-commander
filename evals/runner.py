@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 from pydantic import (
@@ -35,6 +37,7 @@ from evals.guards import (
     assert_no_tier1_successes,
     assert_read_only_principal,
 )
+from evals.preconditions import unmet
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
 from evals.tracing import JsonlTracer, tracer_for
@@ -58,6 +61,7 @@ from incident_commander.tools.mcp_client import (
     MCPClient,
     MCPClientProtocol,
     MCPError,
+    ToolResult,
     make_client,
 )
 
@@ -177,6 +181,71 @@ def _is_offline_api_key(key: str) -> bool:
     return key in {_EVAL_PLACEHOLDER_API_KEY, "placeholder", ""}
 
 
+class PreconditionNotMet(RuntimeError):
+    """The scenario's premise was not true, so the agent was never started.
+
+    Deliberately NOT a graded failure. A run that never happened has nothing
+    to say about the agent, and recording it as an agent failure is how
+    `bb1fa70abb4c` came to report that the agent fixed the wrong thing when
+    the right thing could not be made to exist.
+    """
+
+
+def _assert_preconditions(
+    scenario: Scenario,
+    client: MCPClientProtocol,
+    tracer: JsonlTracer | None,
+) -> None:
+    """Probe the world for the scenario's premise, polling where declared."""
+    for probe in scenario.expected_precondition:
+        failures: list[str] = []
+        for attempt in range(probe.attempts):
+            if attempt:
+                time.sleep(probe.delay_seconds)
+            try:
+                result = client.call_tool(probe.tool, dict(probe.arguments))
+            except MCPError as err:
+                failures = [f"{probe.tool}: probe failed: {err}"]
+                continue
+            if result.is_error:
+                failures = [f"{probe.tool}: probe returned is_error=True"]
+                continue
+            payload = _first_json_object(result)
+            if payload is None:
+                failures = [f"{probe.tool}: probe returned no JSON object"]
+                continue
+            failures = unmet(probe, payload)
+            if not failures:
+                break
+        if tracer is not None:
+            tracer.write(
+                {
+                    "kind": "precondition",
+                    "scenario": scenario.name,
+                    "tool": probe.tool,
+                    "arguments": dict(probe.arguments),
+                    "met": not failures,
+                    "failures": failures,
+                }
+            )
+        if failures:
+            raise PreconditionNotMet(
+                f"scenario {scenario.name!r} precondition not met after "
+                f"{probe.attempts} attempt(s): {'; '.join(failures)}. The fault this "
+                "scenario asserts was never manufactured, so the run was abandoned "
+                "before any model call — this says nothing about the agent."
+            )
+
+
+def _first_json_object(result: ToolResult) -> dict[str, Any] | None:
+    for block in result.content:
+        if block.get("type") == "text" and isinstance(block.get("text"), str):
+            parsed = json.loads(block["text"])
+            if isinstance(parsed, dict):
+                return parsed
+    return None
+
+
 def run_scenario(
     scenario: Scenario,
     settings: Settings,
@@ -262,6 +331,17 @@ def run_scenario(
             token=mcp_token,
         )
         mcp_client = live_mcp_client
+        # Establish the scenario's premise before spending anything on it.
+        # Runs after seeding and before the first model call, so a fault that
+        # was never manufactured costs one read instead of a full graded run
+        # (see evals/preconditions.py, and `bb1fa70abb4c` for the run that
+        # paid for this lesson).
+        if scenario.expected_precondition:
+            try:
+                _assert_preconditions(scenario, live_mcp_client, tracer)
+            except PreconditionNotMet:
+                live_mcp_client.close()
+                raise
     else:
         mcp_client = CannedMCPClient(scenario.canned_tool_responses)
 
@@ -521,7 +601,15 @@ def _crashed_result(
     # Post-#48 the transitions absorb transport failures as graded
     # escalations, so a crash that still reaches here is either the
     # scenario's own seeding (environment) or an unwrapped transport path.
-    crash_class = "shared-env" if "chaos_setup" in error_detail else "transport"
+    if isinstance(exc, PreconditionNotMet):
+        # Its own bucket on purpose. "shared-env" would be close but wrong:
+        # nothing was contended, the world simply was not in the state the
+        # scenario asserts, and no agent behaviour is being described.
+        crash_class = "precondition"
+    elif "chaos_setup" in error_detail:
+        crash_class = "shared-env"
+    else:
+        crash_class = "transport"
     outcome = ScenarioOutcome(
         scenario=scenario.name,
         final_state=IncidentState.TRIAGE,

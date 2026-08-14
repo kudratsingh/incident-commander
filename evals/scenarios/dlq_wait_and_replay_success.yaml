@@ -97,3 +97,10 @@ expectation:
   # the agent is bounded by it, told it, and escalates on exhausting it, and
   # reaching it grades BUDGET red. The margin is headroom, not an annotation.
   max_tool_calls: 13
+# The premise: at least one entry is a transient failure worth retrying
+# later. The seeder writes two (dlq-job-send-email, dlq-job-process-payment).
+expected_precondition:
+- tool: list_dlq_messages
+  expect:
+  - path: items[].remediation_hint
+    equals: wait_and_replay

@@ -96,9 +96,11 @@ class TestLoadScenarios:
 # 2 investigation probes + 1 freshness re-probe + 1 Tier-1 action +
 # up to 6 verify polls = 10 tool calls on a CORRECT remediation run.
 # The maintainer set the graded ceiling at 13 (~30% margin, rule 1 of
-# docs/eval-methodology.md). This is the GRADING cap read by
-# evals/graders/deterministic.py:_grade_budget — not the runtime
-# BudgetLedger ceiling of CLAUDE.md invariant 7.
+# docs/eval-methodology.md). Since ADR 0019 this is both the GRADING cap
+# read by evals/graders/deterministic.py:_grade_budget AND the runtime
+# BudgetLedger ceiling of CLAUDE.md invariant 7 — evals/runner.py passes it
+# to start_run — so a cap below the polling profile no longer grades a
+# correct run red, it truncates the verify loop.
 _REMEDIATION_MIN_CAP = 13
 
 

@@ -401,8 +401,10 @@ class TestLivePollingBudgetArithmetic:
     run therefore spends ~10 tool calls — which the shipped remediation
     scenario caps must admit. Eight of them sat at 8, so a correct run failed
     the BUDGET dimension. This is the arithmetic assertion that would have
-    caught it; it is about the grading cap in the scenario YAML, not the
-    runtime ``BudgetLedger`` ceiling of CLAUDE.md invariant 7.
+    caught it. Since ADR 0019 the scenario cap is also the runtime
+    ``BudgetLedger`` ceiling, which raises the stakes: a cap that cannot
+    admit this profile no longer grades a correct run red, it cuts the verify
+    loop short and changes what the run does.
     """
 
     @staticmethod
@@ -424,8 +426,10 @@ class TestLivePollingBudgetArithmetic:
         )
         run = _run_state(
             IncidentState.VERIFYING,
-            # Runtime ceiling stays the production default (invariant 7) —
-            # only the graded cap is under test here.
+            # 25 here is the arithmetic's own headroom, not a scenario cap:
+            # this test measures how many calls a correct run SPENDS, which
+            # is the input to choosing a cap (ADR 0019), so it must not be
+            # bounded by one.
             _budget(max_tool_calls=25, used=_CALLS_BEFORE_VERIFYING),
             remediation_plan=_PLAN.model_dump(mode="json"),
         )

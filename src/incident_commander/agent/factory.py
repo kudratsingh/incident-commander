@@ -74,6 +74,8 @@ def start_run(
     settings: Settings,
     at: datetime,
     incident_id: UUID | None = None,
+    *,
+    max_tool_calls: int | None = None,
 ) -> RunState:
     """Build a fresh TRIAGE-state run with a BudgetLedger seeded from settings.
 
@@ -82,13 +84,28 @@ def start_run(
     depends on a distinct incident per invocation. Folding
     ``derive_incident_id`` in here would collapse the canned scenarios that
     share a ``(source, fingerprint)`` pair onto one checkpointer history.
+
+    ``max_tool_calls`` overrides ``settings.budget_max_tool_calls`` for this
+    run only (ADR 0019). The eval runner passes the scenario's declared cap,
+    so the agent is bounded by — and told about — the budget the scenario
+    actually allots it, instead of the fleet default. Ingress does not pass
+    it: a production incident is bounded by configuration, not by a caller.
+
+    A ``max_tool_calls`` of 0 is deliberately ignored, and the setting
+    default stands. ``BudgetLedger.is_exhausted`` is ``used >= max``, so a
+    zero ledger is born exhausted and ``run_to_completion`` escalates before
+    TRIAGE ever classifies the alert — the run would end before doing the
+    thing such a scenario exists to observe. A cap of 0 means "a correct run
+    makes no tool call", which is a claim about the outcome and is graded
+    post-hoc by the BUDGET dimension; it is not a runtime ceiling that this
+    ledger can express.
     """
     return RunState(
         incident_id=incident_id or uuid4(),
         state=IncidentState.TRIAGE,
         alert=dict(alert),
         budget=BudgetLedger(
-            max_tool_calls=settings.budget_max_tool_calls,
+            max_tool_calls=max_tool_calls or settings.budget_max_tool_calls,
             max_tokens=settings.budget_max_tokens,
             max_wall_seconds=settings.budget_max_seconds,
             max_usd=settings.budget_max_usd,

@@ -212,3 +212,56 @@ class TestDeriveIncidentId:
         assert derived not in chain
         assert derive_incident_id(alert, ckpt) != derived
         assert any("recurrence" in record.getMessage() for record in caplog.records)
+
+
+class TestStartRunToolCallOverride:
+    """ADR 0019: the caller may bound one run below the fleet default.
+
+    Before this, every eval scenario ran on ``settings.budget_max_tool_calls``
+    regardless of the cap it declared, so the runtime ceiling and the graded
+    cap were different numbers — and the investigation planner was told the
+    default of 25 in every scenario, including the ones whose entire subject
+    is behaviour under a tight budget.
+    """
+
+    def test_override_seeds_the_ledger(self, now: datetime) -> None:
+        settings = _test_settings(budget_max_tool_calls=25)
+        run = start_run({"source": "s"}, settings, now, max_tool_calls=5)
+        assert run.budget.max_tool_calls == 5
+
+    def test_absent_override_keeps_the_setting(self, now: datetime) -> None:
+        settings = _test_settings(budget_max_tool_calls=25)
+        run = start_run({"source": "s"}, settings, now)
+        assert run.budget.max_tool_calls == 25
+
+    def test_none_override_keeps_the_setting(self, now: datetime) -> None:
+        # A scenario that declares no cap is bounded by configuration.
+        settings = _test_settings(budget_max_tool_calls=25)
+        run = start_run({"source": "s"}, settings, now, max_tool_calls=None)
+        assert run.budget.max_tool_calls == 25
+
+    def test_zero_override_is_ignored(self, now: datetime) -> None:
+        """A zero ledger is born exhausted, so it cannot be a runtime ceiling.
+
+        ``is_exhausted`` is ``used >= max``; at max 0 the loop escalates
+        before TRIAGE ever classifies the alert, ending the run before it
+        does the thing a cap-0 scenario exists to observe. The claim "a
+        correct run makes no tool call" is graded post-hoc instead.
+        """
+        settings = _test_settings(budget_max_tool_calls=25)
+        run = start_run({"source": "s"}, settings, now, max_tool_calls=0)
+        assert run.budget.max_tool_calls == 25
+        assert not run.budget.is_exhausted
+
+    def test_override_does_not_touch_the_other_meters(self, now: datetime) -> None:
+        settings = _test_settings(budget_max_tool_calls=25)
+        run = start_run({"source": "s"}, settings, now, max_tool_calls=5)
+        assert run.budget.max_tokens == settings.budget_max_tokens
+        assert run.budget.max_wall_seconds == settings.budget_max_seconds
+        assert run.budget.max_usd == settings.budget_max_usd
+
+    def test_override_is_keyword_only(self, now: datetime) -> None:
+        # Positional slot 4 is `incident_id` (ADR 0016) and must stay there;
+        # a positional cap would silently become an incident id.
+        with pytest.raises(TypeError):
+            start_run({"source": "s"}, _test_settings(), now, None, 5)  # type: ignore[call-arg]

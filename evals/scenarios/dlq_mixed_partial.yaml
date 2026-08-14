@@ -105,6 +105,8 @@ expectation:
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
   # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
   # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. Cap 13 is the
-  # maintainer's decision (A-02), keeping the >=30% margin rule. Grading cap
-  # only — the runtime BudgetLedger ceiling (invariant 7) is untouched.
+  # maintainer's decision (A-02), keeping the >=30% margin rule. Since ADR
+  # 0019 this is ALSO the run's runtime BudgetLedger ceiling (invariant 7):
+  # the agent is bounded by it, told it, and escalates on exhausting it, and
+  # reaching it grades BUDGET red. The margin is headroom, not an annotation.
   max_tool_calls: 13

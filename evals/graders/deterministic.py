@@ -461,9 +461,32 @@ def _grade_budget(run: RunState, exp: ScenarioExpectation) -> DimensionResult:
             passed=True,
             detail="no budget expectation set",
         )
-    passed = run.budget.tool_calls_used <= exp.max_tool_calls
-    detail = f"used {run.budget.tool_calls_used} tool calls, cap {exp.max_tool_calls}"
-    return DimensionResult(dimension=GradeDimension.BUDGET, passed=passed, detail=detail)
+    used = run.budget.tool_calls_used
+    detail = f"used {used} tool calls, cap {exp.max_tool_calls}"
+    if used > exp.max_tool_calls:
+        return DimensionResult(dimension=GradeDimension.BUDGET, passed=False, detail=detail)
+    # Reaching the cap is a failure too, not a pass at the boundary.
+    #
+    # Since ADR 0019 the cap is also the run's runtime ceiling, and
+    # ``BudgetLedger.is_exhausted`` stops the loop at ``used >= max``. So
+    # ``used > cap`` is no longer reachable through the runner, and grading
+    # only that would leave a dimension that cannot fail — the vacuous
+    # assertion this suite already refuses elsewhere. The cap means "a
+    # correct run finishes INSIDE this budget" (the >=30% margin rule in
+    # docs/eval-methodology.md); a run that spends its last allowed call was
+    # cut off rather than finished, which is exactly what the dimension
+    # exists to catch. The strict-greater branch above stays for runs graded
+    # outside the runner, where no ceiling was derived from the cap.
+    #
+    # A cap of 0 is the one case where using the whole allowance is correct:
+    # it asserts the agent made no tool call, and 0 of 0 satisfies that.
+    if exp.max_tool_calls > 0 and used == exp.max_tool_calls:
+        return DimensionResult(
+            dimension=GradeDimension.BUDGET,
+            passed=False,
+            detail=f"{detail} — exhausted its allowance; a correct run finishes inside the cap",
+        )
+    return DimensionResult(dimension=GradeDimension.BUDGET, passed=True, detail=detail)
 
 
 def _grade_action(run: RunState, exp: ScenarioExpectation) -> DimensionResult:

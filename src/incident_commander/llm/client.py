@@ -149,6 +149,16 @@ class LLMClient:
                 # numeric Retry-After when the platform sends one.
                 last_exc = err
                 retry_after = _retry_after_seconds(err)
+            except anthropic.APIError as err:
+                # The catch-all arm, and it is load-bearing rather than
+                # defensive. APIError has siblings the two arms above do not
+                # cover — APIResponseValidationError is the live one: the SDK
+                # got a 200 whose body it could not validate. Uncaught, it
+                # left LLMClient as a raw SDK exception, escaped every
+                # `except LLMError` in the transitions, and took out an
+                # already-graded run at the briefing or judge step. Wrapped,
+                # it escalates with a reason like any other transport failure.
+                raise LLMError(f"LLM API error: {type(err).__name__}: {err}") from err
             else:
                 # Trace BEFORE parsing: the API call is already billed at
                 # this point, and a response we fail to parse (no

@@ -100,11 +100,17 @@ eval:
 # construction — EVAL_TRACE_DIR is set inline so the human report is
 # always produced, matching the post-hardening one-scenario protocol
 # in docs/runbook.md.
+# The trace render runs whether or not the suite passed, then the recipe
+# exits with the runner's own code. Make aborts a recipe on the first
+# non-zero line, so a FAILING run — the one whose traces you actually need —
+# used to skip format_traces.py and leave only raw JSONL behind.
 eval-live:
-	EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live $(if $(ONLY),--only $(ONLY))
-	uv run python scripts/format_traces.py
-	@echo "JSONL traces: evals/traces/*.jsonl"
-	@echo "Human-readable trajectories: evals/reports/human/*.txt"
+	@EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live $(if $(ONLY),--only $(ONLY)); \
+	code=$$?; \
+	uv run python scripts/format_traces.py || true; \
+	echo "JSONL traces: evals/traces/*.jsonl"; \
+	echo "Human-readable trajectories: evals/reports/human/*.txt"; \
+	exit $$code
 
 # `eval-live-remediation` is gone. It selected `remediate_,dlq_` — nine
 # state-mutating scenarios in one invocation, against one shared platform,

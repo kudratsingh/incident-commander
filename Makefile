@@ -1,4 +1,4 @@
-.PHONY: demo-destroy help setup check lint types test test-unit test-integration test-contract test-drift fixture-drift fixture-drift-bless test-e2e eval eval-live eval-live-remediation eval-smoke eval-reg eval-reset trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
+.PHONY: demo-destroy help setup check lint types test test-unit test-integration test-contract test-drift fixture-drift fixture-drift-bless test-e2e eval eval-live eval-smoke eval-reg eval-reset trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
 
 # Make does not read .env on its own — only the Python side does, via
 # dotenv. Without this include, a make-level var like PLATFORM_COMPOSE
@@ -34,7 +34,6 @@ help:
 	@echo "  eval             full eval suite offline (writes report)"
 	@echo "  eval-live        run eval suite against live platform (needs .env);"
 	@echo "                   ONLY=<substr[,substr...]> to filter (e.g. ONLY=remediate_consumer_lag_success)"
-	@echo "  eval-live-remediation  DEPRECATED alias for 'eval-live ONLY=remediate_,dlq_'"
 	@echo "  eval-smoke       read-only smoke pass under the read-scoped smoke token"
 	@echo "  trace-report     render evals/traces/*.jsonl → readable txt files"
 	@echo "  chaos-help       list chaos setup subcommands (kill-consumer, etc.)"
@@ -107,12 +106,13 @@ eval-live:
 	@echo "JSONL traces: evals/traces/*.jsonl"
 	@echo "Human-readable trajectories: evals/reports/human/*.txt"
 
-# Kept as a deprecated alias for the batch remediation pattern the
-# post-hardening protocol retired. Prefer:
-#   make eval-live ONLY=remediate_consumer_lag_success
-# and `make eval-reset` between scenarios.
-eval-live-remediation:
-	$(MAKE) eval-live ONLY=remediate_,dlq_
+# `eval-live-remediation` is gone. It selected `remediate_,dlq_` — nine
+# state-mutating scenarios in one invocation, against one shared platform,
+# with no reset between them. The runner now refuses that selection (exit 7,
+# ADR 0020). Run them one at a time:
+#   make eval-live ONLY=remediate_consumer_lag_success && make eval-reset
+# It also swept in dlq_backlog, which sorts first and drains the DLQ pool
+# before any graded scenario starts.
 
 # Read-only smoke pass, structurally: runs under PLATFORM_SMOKE_TOKEN
 # (telemetry:read + incidents:read only, minted by `make bootstrap-token`),
@@ -189,10 +189,15 @@ chaos-restore:
 # Pass PURGE_IDEMPOTENCY=1 to also `DELETE` the idempotency_records rows
 # (usually unnecessary thanks to the 24h TTL from platform ADR 0010, but
 # useful when a scenario needs a guaranteed-fresh cache).
-PLATFORM_COMPOSE ?= ../incident-platform/docker-compose.yml
+# The stack the eval actually runs against. This defaulted to the platform's
+# own dev compose, which is a different Postgres and a different Redis — so a
+# checkout without these lines in .env resets a stack nobody is testing and
+# reports success. Both demo services share one database, so either service
+# name works; `api` is the REST app that owns seeding.
+PLATFORM_COMPOSE ?= demo/compose.yml
 # Compose service name running the platform app. The dev stack calls it
 # `app`; the pinned demo stack may name it differently.
-PLATFORM_SERVICE ?= app
+PLATFORM_SERVICE ?= api
 # PYTHONPATH prepend below: reset_eval_state.py does
 # `from scripts import seed_eval_fixtures`, which needs /app on the path
 # while the image ships PYTHONPATH=/app/backend for the app process.
@@ -201,7 +206,7 @@ PLATFORM_SERVICE ?= app
 # without this override; the fix exists on platform master but is
 # deliberately untagged until after the rerun.
 eval-reset:
-	@echo "eval-reset: full seed reset via platform reset_eval_state.py..."
+	@echo "eval-reset: resetting $(PLATFORM_COMPOSE) service $(PLATFORM_SERVICE)"
 	@if [ ! -f "$(PLATFORM_COMPOSE)" ]; then \
 		echo "ERROR: $(PLATFORM_COMPOSE) not found; set PLATFORM_COMPOSE=..." >&2; exit 2; \
 	fi

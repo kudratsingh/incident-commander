@@ -1068,6 +1068,31 @@ def main() -> int:
             )
             print("no scenarios ran, nothing was spent")
             return 6
+    if live:
+        # One state-mutating scenario per invocation, enforced rather than
+        # remembered (ADR 0020). Nine remediation scenarios share ONE platform,
+        # and the seeded pool has exactly one replay_safe row that two of them
+        # both consume — so in a single invocation a CORRECT agent greens one
+        # and reds the other, and the report blames the agent. The runner has
+        # no reset between scenarios; the reset lives outside it, which is why
+        # this is a selection refusal and not a scheduling fix.
+        mutating = [
+            s.name for s in scenarios if s.expectation.expected_action_tools or s.chaos_setup
+        ]
+        if len(mutating) > 1:
+            print(
+                f"LIVE FAIL: {len(mutating)} state-mutating scenarios selected — "
+                f"{', '.join(sorted(mutating))}. Each of these changes the world the "
+                "next one reads, and nothing resets between them inside one run."
+            )
+            print(
+                "Run them one at a time, resetting in between:\n"
+                + "\n".join(
+                    f"  make eval-live ONLY={name} && make eval-reset" for name in sorted(mutating)
+                )
+            )
+            print("no scenarios ran, nothing was spent")
+            return 7
     offline_mcp = _is_offline_placeholder(str(settings.platform_mcp_url))
     offline_llm = _is_offline_api_key(settings.anthropic_api_key.get_secret_value())
     degraded_to_canned = sum(

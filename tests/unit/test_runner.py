@@ -1163,7 +1163,13 @@ class TestMainExitCodes:
         # test_live_with_broken_env_exits_3_not_traceback.)
         _isolate_settings_env(monkeypatch, tmp_path, _PLACEHOLDER_LIVE_ENV)
         _forbid_run_all(monkeypatch)
-        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        # --only is load-bearing since ADR 0020: a full-suite --live selection is
+        # refused (exit 7) before the environment is examined, because a wrong
+        # SELECTION is knowable without touching the env. Narrow to one read-only
+        # scenario so this test still reaches the env path it is about.
+        monkeypatch.setattr(
+            sys, "argv", ["evals.runner", "--live", "--only", "consumer_lag_healthy_zero"]
+        )
         assert runner_module.main() == 3
 
     def test_smoke_without_live_refuses_exit_3_before_settings(
@@ -1461,7 +1467,13 @@ class TestCannedEquivalentKnobWarning:
         # surfaces it. Pre-spend: run_all stays forbidden.
         _isolate_settings_env(monkeypatch, tmp_path, _PLACEHOLDER_LIVE_ENV)
         _forbid_run_all(monkeypatch)
-        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        # --only is load-bearing since ADR 0020: a full-suite --live selection is
+        # refused (exit 7) before the environment is examined, because a wrong
+        # SELECTION is knowable without touching the env. Narrow to one read-only
+        # scenario so this test still reaches the env path it is about.
+        monkeypatch.setattr(
+            sys, "argv", ["evals.runner", "--live", "--only", "consumer_lag_healthy_zero"]
+        )
         assert runner_module.main() == 3
         assert "canned-equivalent probe knobs" in capsys.readouterr().out
 
@@ -1698,3 +1710,121 @@ class TestPreconditions:
         client = _ClosableCanned({})  # no canned response => MCPError
         with pytest.raises(runner_module.PreconditionNotMet, match="probe failed"):
             self._run_live(monkeypatch, self._live_scenario_with_precondition(), client)
+
+
+class TestLiveRefusesABatchOfMutatingScenarios:
+    """ADR 0020: one state-mutating scenario per live invocation, enforced.
+
+    Nine remediation scenarios share ONE platform and the runner has no reset
+    between them — the reset lives outside it. The seeded pool carries exactly
+    one replay_safe row that two scenarios both consume, so in a single
+    invocation a CORRECT agent greens one and reds the other, and the report
+    blames the agent. Refusing the selection is the only place that can be
+    stopped before spend.
+    """
+
+    @staticmethod
+    def _mutating(name: str) -> Scenario:
+        base = _passing_scenario()
+        return base.model_copy(
+            update={
+                "name": name,
+                "use_live_mcp": True,
+                "expectation": base.expectation.model_copy(
+                    update={"name": name, "expected_action_tools": ("restart_consumer_group",)}
+                ),
+            }
+        )
+
+    @staticmethod
+    def _read_only(name: str) -> Scenario:
+        base = _passing_scenario()
+        return base.model_copy(
+            update={
+                "name": name,
+                "use_live_mcp": True,
+                "expectation": base.expectation.model_copy(update={"name": name}),
+            }
+        )
+
+    def _run_main(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        scenarios: list[Scenario],
+        *,
+        expect_refusal: bool,
+    ) -> int:
+        # A fully real-looking live env: the guard must fire on the SELECTION,
+        # not as a side effect of a misconfigured environment.
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        monkeypatch.setattr(runner_module, "load_scenarios", lambda _d: scenarios)
+        if expect_refusal:
+            # Refusal must happen BEFORE the run boundary — that is the claim.
+            _forbid_run_all(monkeypatch)
+        else:
+            _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        return runner_module.main()
+
+    def test_two_mutating_scenarios_are_refused_before_any_spend(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code = self._run_main(
+            monkeypatch,
+            tmp_path,
+            [self._mutating("remediate_a"), self._mutating("remediate_b")],
+            expect_refusal=True,
+        )
+        assert code == 7
+        out = capsys.readouterr().out
+        assert "nothing was spent" in out
+        # The message must hand over the runnable form, not just refuse.
+        assert "make eval-live ONLY=remediate_a" in out
+        assert "make eval-reset" in out
+
+    def test_one_mutating_scenario_is_allowed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        code = self._run_main(
+            monkeypatch, tmp_path, [self._mutating("remediate_a")], expect_refusal=False
+        )
+        assert code != 7
+
+    def test_many_read_only_scenarios_are_allowed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The read-only stage runs 26 scenarios in one go and must keep doing so.
+        scenarios = [self._read_only(f"read_{i}") for i in range(5)]
+        assert self._run_main(monkeypatch, tmp_path, scenarios, expect_refusal=False) != 7
+
+    def test_a_chaos_seeding_scenario_counts_as_mutating(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # It changes the world even with no expected_action_tools.
+        seeding = self._read_only("seeds_chaos").model_copy(
+            update={
+                "chaos_setup": ChaosHook(
+                    name="kill_consumer", arguments={"consumer_group": "worker-dispatcher"}
+                )
+            }
+        )
+        code = self._run_main(
+            monkeypatch, tmp_path, [seeding, self._mutating("remediate_a")], expect_refusal=True
+        )
+        assert code == 7
+
+    def test_offline_runs_are_untouched(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Canned scenarios share no world, so the whole suite still runs in one
+        # invocation — the offline gate depends on it.
+        _isolate_settings_env(monkeypatch, tmp_path, _PLACEHOLDER_LIVE_ENV)
+        monkeypatch.setattr(
+            runner_module,
+            "load_scenarios",
+            lambda _d: [self._mutating("remediate_a"), self._mutating("remediate_b")],
+        )
+        _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["evals.runner"])
+        assert runner_module.main() != 7

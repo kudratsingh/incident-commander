@@ -129,6 +129,17 @@ make eval-smoke
 
 # 2) Remediation scenarios, one at a time, with reset between.
 #    Each scenario declares its own chaos_setup in the YAML (PR #54).
+#    This is now ENFORCED, not remembered: the runner refuses a --live
+#    selection holding more than one state-mutating scenario and exits 7
+#    before any spend (ADR 0020). The old `eval-live-remediation` batch
+#    target is deleted — it selected nine of them at once, against one
+#    shared platform, with no reset between.
+#
+#    The reset is what makes one-at-a-time work, so check it is pointed at
+#    the stack under test: `make eval-reset` echoes the compose file and
+#    service it resets. Defaults are demo/compose.yml + api; a .env that
+#    overrides PLATFORM_COMPOSE at the platform's own dev stack cleans a
+#    different database and reports success.
 make eval-live ONLY=remediate_consumer_lag_success && make eval-reset
 make eval-live ONLY=remediate_dlq_backlog_success  && make eval-reset
 make eval-live ONLY=remediate_stale_cache_success  && make eval-reset

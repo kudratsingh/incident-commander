@@ -98,3 +98,7 @@ and therefore cannot trip this.
   without an eval run).
 * Raised during the Phase 6 re-sync as a documentation-coherence defect found by the campaign's own
   completion review, not by a failure.
+
+---
+
+**Amended by [ADR 0020](0020-one-mutating-scenario-per-live-invocation.md):** the contract is now 0–7, and exit 7 refuses a live selection holding more than one state-mutating scenario. Exit 4 also widened — it now covers the *write* principal guard on a live remediation stage, not only the read-only guard under `--smoke`.

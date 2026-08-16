@@ -246,3 +246,62 @@ class TestScenarioAlertVocabulary:
             f"{len(wire_shaped)} scenario(s) now use a wire-shaped alert: {wire_shaped}. "
             "Good — update this test to record the new count."
         )
+
+
+# The seeded human_required DLQ row: uuid5 of the platform seeder's namespace
+# over "dlq-job-csv-parse" (incident-platform/scripts/seed_eval_fixtures.py).
+# Computed, not copied — the seeder derives every fixture id this way.
+_LIVE_HUMAN_REQUIRED: Final[str] = "f030f975-974e-5ce3-aa6b-444136507d86"
+
+# Tools a scenario may name as its intended replay. `replay_dlq_messages` is
+# absent on purpose: per the platform's own docstring it takes only job_type
+# and "omit to include every dead-lettered job in the tenant", so it sweeps up
+# human_required rows — and it carries no job_ids argument, which means
+# forbidden_replay_job_ids cannot inspect it. A scenario that accepts it has
+# no mechanism at all against an indiscriminate replay.
+_FILTERED_REPLAY_TOOLS: Final[frozenset[str]] = frozenset(
+    {"replay_dlq_by_ids", "replay_dlq_by_category"}
+)
+
+
+class TestReplayScenariosGuardTheSeededForbiddenRow:
+    """Every scenario that may replay must red a replay of the real forbidden row.
+
+    The canned phantom ids (`cccccccc-…`, `dddddddd-…`) exist in no live
+    world, so before this the id-level guard was inert on every live run.
+    """
+
+    @staticmethod
+    def _may_replay() -> list[Scenario]:
+        return [
+            s
+            for s in _shipped()
+            if set(s.expectation.expected_action_tools) & _FILTERED_REPLAY_TOOLS
+        ]
+
+    def test_the_set_is_not_empty(self) -> None:
+        assert self._may_replay(), "no scenario declares a replay tool — the walk is vacuous"
+
+    def test_each_forbids_the_live_human_required_id(self) -> None:
+        missing = [
+            s.name
+            for s in self._may_replay()
+            if _LIVE_HUMAN_REQUIRED not in s.expectation.forbidden_replay_job_ids
+        ]
+        assert missing == [], (
+            f"these may replay but do not forbid the seeded human_required row: {missing}. "
+            "The canned phantom ids exist in no live world, so without this the id-level "
+            "guard is inert on every live run."
+        )
+
+    def test_no_scenario_accepts_the_unfilterable_bulk_tool(self) -> None:
+        offenders = [
+            s.name
+            for s in _shipped()
+            if "replay_dlq_messages" in s.expectation.expected_action_tools
+        ]
+        assert offenders == [], (
+            f"these accept replay_dlq_messages: {offenders}. It filters only by job_type "
+            "and carries no job_ids, so forbidden_replay_job_ids cannot inspect it — an "
+            "agent that swept up the human_required row would grade all-green."
+        )

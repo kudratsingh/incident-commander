@@ -85,6 +85,12 @@ expectation:
   # execute_at evidence below, never on DLQ shrink (the 5-minute timer
   # fires outside any sane verify window by design).
   expected_action_tools: [replay_dlq_by_ids, replay_dlq_by_category]
+  # This scenario replays by ids, so it can reach the seeded human_required
+  # row — and must red if it does. The id is uuid5 over "dlq-job-csv-parse"
+  # (the platform seeder's derivation); the canned phantoms elsewhere exist
+  # in no live world, which is why the id-level guard was inert live.
+  forbidden_replay_job_ids:
+  - f030f975-974e-5ce3-aa6b-444136507d86
   expected_evidence_contains:
   - wait_and_replay
   - scheduled

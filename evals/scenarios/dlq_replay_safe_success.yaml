@@ -78,16 +78,27 @@ canned_llm_responses:
 expectation:
   name: dlq_replay_safe_success
   expected_terminal_state: resolved
-  expected_action_tools: [replay_dlq_by_category]
+  # BOTH replay tools, because the planner prompt lists by_ids FIRST for
+  # replay_safe ("replay_dlq_by_ids (up to 50 ids) or replay_dlq_by_category
+  # ... for bulk"). Pinning only by_category made a correct agent following
+  # its own instructions grade red on ACTION — a wrong-reason FAIL.
+  expected_action_tools: [replay_dlq_by_category, replay_dlq_by_ids]
   expected_evidence_contains:
   - replay_safe
   # Structured effect assert (A-09): replaces the bare `verified` substring,
   # which also matched a `not_verified: ...` verdict. Not pinned to an exact
   # count — live DLQ seeding varies.
   expected_evidence_fields:
-  - tools: [replay_dlq_by_category]
+  - tools: [replay_dlq_by_category, replay_dlq_by_ids]
     field: replayed
     at_least: 1
+  # Landed WITH the widening above, never after it. Widening alone converts
+  # today's wrong-reason FAIL for a by-ids replay of the human_required row
+  # into a wrong-agent GREEN: the id-level guard below is what still reds it.
+  # The canned phantom stays for offline runs; the uuid5 id is the one that
+  # exists live (seed_eval_fixtures.py: stable("dlq-job-csv-parse")).
+  forbidden_replay_job_ids:
+  - f030f975-974e-5ce3-aa6b-444136507d86
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
   # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
   # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. Cap 13 is the

@@ -32,6 +32,7 @@ from uuid import uuid4
 
 from evals.graders.deterministic import GradeDimension, grade
 from evals.scenarios.loader import load_scenarios
+from incident_commander.agent import remediation
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
 from incident_commander.agent.loop import run_to_completion
 from incident_commander.agent.remediation import (
@@ -455,3 +456,116 @@ class TestLivePollingBudgetArithmetic:
             if not budget.passed:
                 failures[scenario.name] = budget.detail
         assert failures == {}, f"correct live run fails the BUDGET dimension: {failures}"
+
+
+class TestVerifyJudgeSeesTheActionResult:
+    """Some fixes report their effect rather than show it.
+
+    A delayed replay reports `scheduled` / `execute_at` in the ACTION
+    response, and the platform then holds the timer — so the DLQ cannot
+    shrink inside the ~100s verify window by design. The judge was shown
+    only the plan and the probe, told by its own prompt to err toward
+    `not_verified`, and a correct agent escalated instead of resolving.
+    """
+
+    @staticmethod
+    def _plan() -> RemediationPlan:
+        return RemediationPlan(
+            target_hypothesis="transient_dependency_failure",
+            action_tool="replay_dlq_by_ids",
+            action_arguments={"job_ids": ["j1"], "delay_seconds": 300},
+            verify_tool="list_dlq_messages",
+            verify_arguments={},
+            verify_expectation="the replay is scheduled",
+        )
+
+    def test_the_action_result_reaches_the_judge(self) -> None:
+        now = _clock()
+        plan = self._plan()
+        run = _run_state(
+            IncidentState.VERIFYING,
+            _budget(),
+            remediation_plan=plan.model_dump(mode="json"),
+            evidence=(
+                EvidenceEntry(
+                    tool_name="replay_dlq_by_ids",
+                    arguments={},
+                    result_summary='{"scheduled":1,"execute_at":1753868400.0}',
+                    timestamp=now,
+                ),
+            ),
+        )
+        context = remediation._format_verify_context(
+            plan, '{"total":4}', remediation._action_result_of(run, plan)
+        )
+        # The only success signal for a delayed replay lives here.
+        assert "scheduled" in context
+        assert "execute_at" in context
+
+    def test_a_missing_action_result_says_so_rather_than_vanishing(self) -> None:
+        context = remediation._format_verify_context(self._plan(), '{"total":4}', None)
+        assert "not recorded" in context
+
+    def test_the_probe_result_is_still_shown(self) -> None:
+        context = remediation._format_verify_context(self._plan(), '{"total":4}', '{"scheduled":1}')
+        assert '{"total":4}' in context
+
+    def test_the_transition_actually_passes_it_through(self) -> None:
+        """The wiring, not just the formatter.
+
+        Testing `_format_verify_context` alone would pass even if the call
+        site never looked the action result up — which is exactly the shape
+        of the original bug.
+        """
+        plan = self._plan()
+        judge = CannedLLMClient([{"verdict": "verified", "reasoning": "scheduled"}])
+        mcp = _SequencedMCP(
+            [ToolResult(content=[{"type": "text", "text": '{"total":4,"items":[]}'}])]
+        )
+        transition = make_llm_verify(mcp, judge, model="test-model")
+        run = _run_state(
+            IncidentState.VERIFYING,
+            _budget(),
+            remediation_plan=plan.model_dump(mode="json"),
+            evidence=(
+                EvidenceEntry(
+                    tool_name="replay_dlq_by_ids",
+                    arguments={},
+                    result_summary='{"scheduled":1,"execute_at":1753868400.0}',
+                    timestamp=_clock(),
+                ),
+            ),
+        )
+        transition(run, _clock())
+        _system, user_message = judge.calls[0]
+        assert "execute_at" in user_message, (
+            "the judge was not shown the action's own result — for a delayed "
+            "replay that is the only success signal there is"
+        )
+
+    def test_the_latest_call_of_the_action_tool_wins(self) -> None:
+        now = _clock()
+        # The remediation loop is single-attempt per incident, but the ledger
+        # can carry an earlier probe of the same tool name; the action that
+        # was just executed is the last one.
+        plan = self._plan()
+        run = _run_state(
+            IncidentState.VERIFYING,
+            _budget(),
+            remediation_plan=plan.model_dump(mode="json"),
+            evidence=(
+                EvidenceEntry(
+                    tool_name="replay_dlq_by_ids",
+                    arguments={},
+                    result_summary='{"scheduled":0}',
+                    timestamp=now,
+                ),
+                EvidenceEntry(
+                    tool_name="replay_dlq_by_ids",
+                    arguments={},
+                    result_summary='{"scheduled":9}',
+                    timestamp=now,
+                ),
+            ),
+        )
+        assert remediation._action_result_of(run, plan) == '{"scheduled":9}'

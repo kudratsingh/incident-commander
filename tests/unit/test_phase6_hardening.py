@@ -39,6 +39,7 @@ from incident_commander.agent.remediation import (
     RemediationPlan,
     make_llm_plan,
     make_llm_verify,
+    make_remediate,
 )
 from incident_commander.agent.state import (
     BudgetLedger,
@@ -47,7 +48,7 @@ from incident_commander.agent.state import (
     RunState,
 )
 from incident_commander.llm.fakes import CannedLLMClient
-from incident_commander.tools.mcp_client import ToolResult
+from incident_commander.tools.mcp_client import MCPError, ToolResult
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -569,3 +570,49 @@ class TestVerifyJudgeSeesTheActionResult:
             ),
         )
         assert remediation._action_result_of(run, plan) == '{"scheduled":9}'
+
+
+class TestRefusedTier1AttemptsAreRecorded:
+    """The remediation loop must record WHAT it tried, not just that it failed."""
+
+    @staticmethod
+    def _plan() -> RemediationPlan:
+        return RemediationPlan(
+            target_hypothesis="dlq_poison_message",
+            action_tool="replay_dlq_by_ids",
+            # A well-formed id: the seeded human_required row. A malformed
+            # one is rejected by local argument validation BEFORE any call,
+            # which is the right behaviour and a different path — there is no
+            # attempt to record when nothing was attempted.
+            action_arguments={"job_ids": ["f030f975-974e-5ce3-aa6b-444136507d86"]},
+            verify_tool="list_dlq_messages",
+            verify_arguments={},
+            verify_expectation="the DLQ shrinks",
+        )
+
+    def _run_refused(self, error: MCPError) -> RunState:
+        class _Refusing:
+            def call_tool(self, name: str, arguments: Any, **_kw: Any) -> ToolResult:
+                raise error
+
+        transition = make_remediate(_Refusing())
+        run = _run_state(
+            IncidentState.REMEDIATING,
+            _budget(),
+            remediation_plan=self._plan().model_dump(mode="json"),
+        )
+        return transition(run, _clock())
+
+    def test_the_attempted_tool_and_arguments_survive(self) -> None:
+        result = self._run_refused(MCPError(-32002, "missing required scope: actions:execute"))
+        entry = result.evidence[-1]
+        assert entry.arguments["attempted_tool"] == "replay_dlq_by_ids"
+        attempted = entry.arguments["attempted_arguments"]
+        assert isinstance(attempted, dict)
+        assert attempted["job_ids"] == ["f030f975-974e-5ce3-aa6b-444136507d86"]
+
+    def test_the_run_still_escalates(self) -> None:
+        # Recording the attempt must not change the outcome — a refused
+        # action is still a failed remediation.
+        result = self._run_refused(MCPError(-32002, "refused"))
+        assert result.state is IncidentState.ESCALATED

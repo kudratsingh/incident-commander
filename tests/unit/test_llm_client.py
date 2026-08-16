@@ -353,7 +353,17 @@ class TestTracer:
         assert captured[0]["parse_failed"] is True
         assert captured[0]["output_model"] == "_SampleOutput"
 
-    def test_tracer_not_called_on_error(self) -> None:
+    def test_a_failed_call_is_traced_as_llm_error(self) -> None:
+        """This assertion used to read `captured == []`, and that was the bug.
+
+        The test encoded the behaviour rather than the intent. `tracing.py`
+        has listed `llm_error` in its documented kind set since it was
+        written, and nothing ever emitted one — so a transport failure left
+        no record of a call the provider may well have billed. The repo has
+        already paid for this exact shape once: the `parse_failed` trace
+        exists because F-002 was "billed calls with no record", and the
+        transport path had the identical hole with a test holding it open.
+        """
         sdk = MagicMock()
         sdk.messages.create.side_effect = anthropic.APIConnectionError(request=MagicMock())
         captured: list[dict[str, Any]] = []
@@ -372,7 +382,9 @@ class TestTracer:
                 output_model=_SampleOutput,
                 model="claude-sonnet-4-6",
             )
-        assert captured == []
+        assert len(captured) == 1
+        assert "APIConnectionError" in captured[0]["error"]
+        assert captured[0]["terminal"] is True
 
 
 class TestUnexpectedApiErrorsAreWrapped:
@@ -435,3 +447,101 @@ class TestUnexpectedApiErrorsAreWrapped:
         with pytest.raises(LLMError, match="transport failure after"):
             self._call(sdk)
         assert sdk.messages.create.call_count == 3
+
+
+class TestFailuresAreTraced:
+    """A billed call that did not return must leave a record.
+
+    `llm_error` was in tracing.py's documented kind set from the start and
+    nothing ever wrote one. An exhausted 429 or a dropped connection left a
+    silent gap exactly where billed work had happened — the trace showed the
+    call before it and the call after it, and nothing in between.
+    """
+
+    @staticmethod
+    def _traced(sdk: MagicMock) -> list[dict[str, Any]]:
+        traces: list[dict[str, Any]] = []
+        client = LLMClient(
+            api_key="test",
+            max_attempts=3,
+            retry_base_delay=0.0,
+            sleep=lambda _s: None,
+            client=sdk,
+            tracer=traces.append,
+        )
+        with pytest.raises(LLMError):
+            client.call(
+                system_prompt="s",
+                user_message="u",
+                output_model=_SampleOutput,
+                model="claude-test",
+            )
+        return traces
+
+    def test_every_retry_of_a_429_is_recorded(self) -> None:
+        sdk = MagicMock()
+        sdk.messages.create.side_effect = anthropic.APIStatusError(
+            "rate limited",
+            response=httpx.Response(429, request=httpx.Request("POST", "http://x")),
+            body=None,
+        )
+        traces = self._traced(sdk)
+        # Three attempts, three records — not one summary at the end. Each
+        # attempt is a separate request the provider may have billed.
+        assert len(traces) == 3
+        assert all("error" in t for t in traces)
+        assert [t["attempt"] for t in traces] == [0, 1, 2]
+        assert [t["terminal"] for t in traces] == [False, False, True]
+
+    def test_a_connection_failure_is_recorded(self) -> None:
+        sdk = MagicMock()
+        sdk.messages.create.side_effect = anthropic.APIConnectionError(
+            request=httpx.Request("POST", "http://x")
+        )
+        traces = self._traced(sdk)
+        assert len(traces) == 3
+        assert "APIConnectionError" in traces[0]["error"]
+
+    def test_a_non_retryable_status_is_recorded_once(self) -> None:
+        sdk = MagicMock()
+        sdk.messages.create.side_effect = anthropic.APIStatusError(
+            "bad request",
+            response=httpx.Response(400, request=httpx.Request("POST", "http://x")),
+            body=None,
+        )
+        traces = self._traced(sdk)
+        assert len(traces) == 1
+        assert traces[0]["terminal"] is True
+
+    def test_the_catch_all_arm_is_recorded(self) -> None:
+        sdk = MagicMock()
+        sdk.messages.create.side_effect = anthropic.APIResponseValidationError(
+            response=httpx.Response(200, request=httpx.Request("POST", "http://x")),
+            body=None,
+        )
+        traces = self._traced(sdk)
+        assert len(traces) == 1
+        assert "APIResponseValidationError" in traces[0]["error"]
+
+    def test_the_request_body_is_kept_so_the_call_can_be_costed(self) -> None:
+        sdk = MagicMock()
+        sdk.messages.create.side_effect = anthropic.APIConnectionError(
+            request=httpx.Request("POST", "http://x")
+        )
+        traces = self._traced(sdk)
+        assert traces[0]["request"]["model"] == "claude-test"
+        assert "duration_seconds" in traces[0]
+
+    def test_a_successful_call_still_traces_as_a_success(self) -> None:
+        sdk = MagicMock()
+        sdk.messages.create.return_value = _tool_use_message({"label": "x", "confidence": 0.5})
+        traces: list[dict[str, Any]] = []
+        LLMClient(
+            api_key="test",
+            retry_base_delay=0.0,
+            sleep=lambda _s: None,
+            client=sdk,
+            tracer=traces.append,
+        ).call(system_prompt="s", user_message="u", output_model=_SampleOutput, model="claude-test")
+        assert len(traces) == 1
+        assert "error" not in traces[0]

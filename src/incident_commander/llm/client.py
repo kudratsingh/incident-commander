@@ -130,6 +130,29 @@ class LLMClient:
             ],
             "tool_choice": {"type": "tool", "name": _STRUCTURED_TOOL_NAME},
         }
+
+        def _trace_error(err: Exception, attempt: int, *, terminal: bool) -> None:
+            """Record a call that was billed (or attempted) and did not return.
+
+            `llm_error` was in tracing.py's documented kind set from the
+            start and nothing ever wrote one, so an exhausted 429 or a
+            dropped connection left a silent gap exactly where billed work
+            had happened. A cost or forensics pass saw the call before and
+            the call after, and nothing in between.
+            """
+            if self._tracer is None:
+                return
+            self._tracer(
+                {
+                    "request": request_body,
+                    "error": f"{type(err).__name__}: {err}",
+                    "attempt": attempt,
+                    "terminal": terminal,
+                    "output_model": output_model.__name__,
+                    "duration_seconds": time.monotonic() - started,
+                }
+            )
+
         last_exc: Exception | None = None
         retry_after: float | None = None
         for attempt in range(self._max_attempts):
@@ -137,6 +160,7 @@ class LLMClient:
             try:
                 response = self._client.messages.create(**request_body)
             except anthropic.APIConnectionError as err:
+                _trace_error(err, attempt, terminal=attempt == self._max_attempts - 1)
                 last_exc = err
                 retry_after = None
             except anthropic.APIStatusError as err:
@@ -144,12 +168,15 @@ class LLMClient:
                     # Client-side error (bad request, auth). Retrying can't
                     # help; wrap so the transition escalates-with-reason
                     # instead of the scenario crashing on a raw SDK error.
+                    _trace_error(err, attempt, terminal=True)
                     raise LLMError(f"LLM API error {err.status_code}: {err}") from err
                 # 429 + 5xx are transient: retry with backoff, honoring a
                 # numeric Retry-After when the platform sends one.
+                _trace_error(err, attempt, terminal=attempt == self._max_attempts - 1)
                 last_exc = err
                 retry_after = _retry_after_seconds(err)
             except anthropic.APIError as err:
+                _trace_error(err, attempt, terminal=True)
                 # The catch-all arm, and it is load-bearing rather than
                 # defensive. APIError has siblings the two arms above do not
                 # cover — APIResponseValidationError is the live one: the SDK

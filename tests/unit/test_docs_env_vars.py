@@ -53,6 +53,7 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "PLATFORM_COMPOSE",  # read by `make eval-reset`, not by the agent
         "PURGE_IDEMPOTENCY",  # `make eval-reset` opt-in purge flag
         "SMOKE_ONLY",  # `make eval-smoke` scenario-list override
+        "UNTIL_LAG",  # `make traffic` stop-at-this-backlog flag (scripts/traffic_loop.py)
     }
 )
 

@@ -132,6 +132,11 @@ expectation:
 # covers that window. A run that starts before the lag is real reads a
 # healthy group and grades the agent for failing to find a fault that had
 # not happened yet.
+# REQUIRES `make traffic` running in another terminal. Lag is arrival minus
+# service: kill_consumer supplies the service half, and without a producer
+# the backlog stays at 0 no matter how long you wait. See docs/runbook.md,
+# "consumer_lag live notes". Forgetting it is safe — this precondition
+# aborts the run before any model call.
 expected_precondition:
 - tool: get_consumer_lag
   arguments:

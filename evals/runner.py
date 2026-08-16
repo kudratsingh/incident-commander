@@ -36,6 +36,7 @@ from evals.guards import (
     PrincipalGuardError,
     assert_no_tier1_successes,
     assert_read_only_principal,
+    assert_write_capable_principal,
 )
 from evals.preconditions import unmet
 from evals.scenarios.loader import load_scenarios
@@ -1212,6 +1213,30 @@ def main() -> int:
             print("no scenarios ran, nothing was spent")
             return 4
         print("principal guard: token is read-scoped (negative probe refused on scope)")
+    # The mirror, for the stage that must be able to act. Until now every
+    # principal check was gated on `smoke`, so the remediation stage — the
+    # only one that spends money AND mutates — was the one stage running
+    # unguarded. A read-scoped token there does not fail fast: each scenario
+    # investigates, plans, attempts its action, is refused, and grades red
+    # after full spend.
+    write_guard_required = (
+        live
+        and not smoke
+        and not _is_offline_placeholder(str(settings.platform_mcp_url))
+        and any(s.expectation.expected_action_tools for s in scenarios)
+    )
+    if write_guard_required:
+        try:
+            guard_client = make_client(settings, token=mcp_token)
+            try:
+                assert_write_capable_principal(guard_client)
+            finally:
+                guard_client.close()
+        except PrincipalGuardError as err:
+            print(f"PRINCIPAL GUARD FAIL: {err}")
+            print("no scenarios ran, nothing was spent")
+            return 4
+        print("principal guard: token can act (negative probe refused on arguments, not scope)")
 
     # Create the archive directory BEFORE the suite runs: from here on every
     # scenario streams its own evidence into it as it finishes, so a Ctrl-C

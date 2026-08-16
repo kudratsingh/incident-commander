@@ -1885,3 +1885,77 @@ class TestCrashedRowsKeepTheirProvenance:
         outcome = runner_module._crashed_result(_passing_scenario(), RuntimeError("boom")).outcome
         assert outcome.live_mcp is False
         assert outcome.live_llm is False
+
+
+class TestLiveRemediationGuardsTheWriteScope:
+    """The stage that spends money AND mutates was the one running unguarded.
+
+    Every principal check was gated on `smoke`. A remediation stage under a
+    read-scoped token does not fail fast — each scenario investigates, plans,
+    attempts its action, is refused, and grades red after full spend.
+    """
+
+    @staticmethod
+    def _remediation(name: str = "remediate_a") -> Scenario:
+        base = _passing_scenario()
+        return base.model_copy(
+            update={
+                "name": name,
+                "use_live_mcp": True,
+                "expectation": base.expectation.model_copy(
+                    update={"name": name, "expected_action_tools": ("restart_consumer_group",)}
+                ),
+            }
+        )
+
+    def _main(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, probe: Any) -> int:
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        monkeypatch.setattr(runner_module, "load_scenarios", lambda _d: [self._remediation()])
+        monkeypatch.setattr(runner_module, "make_client", lambda *a, **k: probe)
+        _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        return runner_module.main()
+
+    def test_a_read_scoped_token_is_refused_before_any_spend(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        probe = _ClosableCanned({})
+        monkeypatch.setattr(
+            probe,
+            "call_tool",
+            lambda *a, **k: (_ for _ in ()).throw(
+                MCPError(-32002, "missing required scope: actions:execute")
+            ),
+        )
+        assert self._main(monkeypatch, tmp_path, probe) == 4
+        assert "nothing was spent" in capsys.readouterr().out
+
+    def test_a_write_capable_token_proceeds(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        probe = _ClosableCanned({})
+        monkeypatch.setattr(
+            probe,
+            "call_tool",
+            lambda *a, **k: (_ for _ in ()).throw(MCPError(-32602, "invalid tool arguments")),
+        )
+        assert self._main(monkeypatch, tmp_path, probe) != 4
+
+    def test_a_read_only_live_selection_is_not_guarded(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # No expected_action_tools means nothing will be executed, so there
+        # is no write scope to require — and demanding one would break the
+        # read-only live stage.
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        base = _passing_scenario()
+        read_only = base.model_copy(update={"name": "read_only", "use_live_mcp": True})
+        monkeypatch.setattr(runner_module, "load_scenarios", lambda _d: [read_only])
+
+        def _never(*_a: Any, **_k: Any) -> Any:
+            raise AssertionError("the write guard must not probe a read-only selection")
+
+        monkeypatch.setattr(runner_module, "assert_write_capable_principal", _never)
+        _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        assert runner_module.main() != 4

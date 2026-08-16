@@ -100,6 +100,62 @@ def assert_read_only_principal(client: MCPClientProtocol) -> None:
     )
 
 
+def assert_write_capable_principal(client: MCPClientProtocol) -> None:
+    """Hard-fail unless the client's token genuinely CARRIES write scope.
+
+    The mirror of ``assert_read_only_principal``, and it exists because the
+    guards were only ever wired into ``--smoke``. A remediation stage run
+    under a read-scoped token does not fail fast: every scenario
+    investigates, plans, attempts its Tier-1 action, gets ``-32002``, and
+    escalates. Each one grades red on ACTION or OUTCOME after a full
+    investigation, so the report reads as eight agent failures and the model
+    spend is already gone. The token was wrong before the first call.
+
+    Same negative probe, opposite expectation. A Tier-1 tool invoked with
+    invalid arguments:
+
+    * Scope refusal (``-32002 missing required scope``) → the token is
+      read-scoped. Fail: this stage needs ``actions:execute``.
+    * Any other MCP error (argument validation, not-found) → the scope check
+      passed and the arguments were rejected. That is exactly what we want to
+      see, and nothing executed.
+    * Success → fail loudly. A deliberately malformed payload must never be
+      accepted; if it was, the probe is no longer safe and the platform's
+      contract has moved.
+
+    Safe by construction, same as its mirror: the handler's scope check
+    precedes argument parsing, so the malformed payload cannot execute under
+    either token.
+    """
+    try:
+        result = client.call_tool(_PROBE_TOOL, _PROBE_ARGS)
+    except MCPError as err:
+        if err.code == _SCOPE_REFUSAL_CODE and "scope" in str(err).lower():
+            raise PrincipalGuardError(
+                "write guard: the negative probe was refused on SCOPE "
+                f"(MCPError {err.code}: {err}). This token lacks "
+                "actions:execute, so every remediation scenario would "
+                "investigate, attempt its action, be refused, and grade red "
+                "— eight environment failures dressed as agent failures, "
+                "after full model spend. Use PLATFORM_TOKEN, not "
+                "PLATFORM_SMOKE_TOKEN."
+            ) from err
+        # Refused on the arguments, not the scope: the principal can act.
+        return
+    except Exception as err:  # noqa: BLE001 — fail closed, deliberately
+        raise PrincipalGuardError(
+            "write guard: could not verify the principal "
+            f"({type(err).__name__}: {err}). Failing closed — the run does "
+            "not proceed on an unverified control."
+        ) from err
+    raise PrincipalGuardError(
+        "write guard: the negative probe SUCCEEDED "
+        f"(result: {str(result)[:200]}). A deliberately invalid Tier-1 call "
+        "must never be accepted — the probe is no longer safe to fire and "
+        "the platform's argument validation has moved. Refusing to run."
+    )
+
+
 def assert_no_tier1_successes(
     client: MCPClientProtocol,
     since: datetime,

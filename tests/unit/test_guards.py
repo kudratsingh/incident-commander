@@ -12,6 +12,7 @@ from evals.guards import (
     PrincipalGuardError,
     assert_no_tier1_successes,
     assert_read_only_principal,
+    assert_write_capable_principal,
 )
 from incident_commander.tools.mcp_client import MCPError, ToolResult
 
@@ -404,3 +405,49 @@ class TestSelfOwnedPrincipals:
         with pytest.raises(PrincipalGuardError, match="pause_dag") as excinfo:
             assert_no_tier1_successes(client, self._SINCE, principal_ids=self._OURS)
         assert "restart_consumer_group" not in str(excinfo.value)
+
+
+class TestWriteCapablePrincipal:
+    """The mirror guard, for the one stage that spends money AND mutates.
+
+    Every principal check was gated on --smoke, so the remediation stage ran
+    unguarded. A read-scoped token there does not fail fast: each scenario
+    investigates, plans, attempts its action, is refused, and grades red —
+    eight environment failures dressed as agent failures, after full spend.
+    """
+
+    def test_a_scope_refusal_fails_the_guard(self) -> None:
+        # The exact wrong-token case: PLATFORM_SMOKE_TOKEN in the remediation
+        # stage. This is the outcome the read-only guard treats as success.
+        client = _Client(MCPError(-32002, "missing required scope: actions:execute"))
+        with pytest.raises(PrincipalGuardError, match="lacks\\s+actions:execute"):
+            assert_write_capable_principal(client)
+
+    def test_an_argument_refusal_passes_the_guard(self) -> None:
+        # Scope check passed, arguments rejected — nothing executed, and the
+        # principal is demonstrably able to act.
+        client = _Client(MCPError(-32602, "invalid tool arguments"))
+        assert_write_capable_principal(client)  # no raise
+
+    def test_a_successful_probe_fails_loudly(self) -> None:
+        # A deliberately invalid Tier-1 call must never be accepted. If it
+        # was, the probe is no longer safe to fire.
+        client = _Client(ToolResult(content=[{"type": "text", "text": "{}"}]))
+        with pytest.raises(PrincipalGuardError, match="SUCCEEDED"):
+            assert_write_capable_principal(client)
+
+    def test_an_unexpected_error_fails_closed(self) -> None:
+        client = _Client(RuntimeError("connection reset"))
+        with pytest.raises(PrincipalGuardError, match="Failing closed"):
+            assert_write_capable_principal(client)
+
+    def test_the_two_guards_disagree_on_the_same_response(self) -> None:
+        """The pair is the point: each stage requires the opposite token.
+
+        One response, two verdicts — which is what makes running the wrong
+        stage with the wrong token detectable at all.
+        """
+        scope_refused = _Client(MCPError(-32002, "missing required scope"))
+        assert_read_only_principal(scope_refused)  # passes
+        with pytest.raises(PrincipalGuardError):
+            assert_write_capable_principal(scope_refused)  # fails

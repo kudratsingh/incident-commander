@@ -1702,13 +1702,47 @@ class TestPreconditions:
         )
         assert run_scenario(scenario, _test_settings()).outcome.report.passed
 
-    def test_a_probe_transport_failure_is_an_unmet_precondition(
+    def test_a_probe_that_never_answered_is_unverifiable_not_unmet(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Silence must not read as agreement: a probe we could not make is
-        # not a premise we established.
+        """UNKNOWN is not FALSE, and the report must not conflate them.
+
+        "The fault was never manufactured" is a claim about the world; making
+        it requires the world to have answered. A refused scope or a dead
+        platform says nothing about the fault, and reporting one as the other
+        sends the reader to seeding when the platform is the problem.
+        """
         client = _ClosableCanned({})  # no canned response => MCPError
-        with pytest.raises(runner_module.PreconditionNotMet, match="probe failed"):
+        with pytest.raises(runner_module.PreconditionUnverifiable, match="UNKNOWN"):
+            self._run_live(monkeypatch, self._live_scenario_with_precondition(), client)
+
+    def test_an_unverifiable_precondition_buckets_as_transport_not_precondition(self) -> None:
+        result = runner_module._crashed_result(
+            _passing_scenario(), runner_module.PreconditionUnverifiable("no answer")
+        )
+        assert result.outcome.failure_class == "transport"
+
+    def test_an_unreadable_probe_response_does_not_crash_the_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A bare json.loads here escaped the polling loop entirely.
+
+        One malformed text block ended the run as an uncaught crash bucketed
+        "transport", losing both the probe that failed and the fact that it
+        was a precondition at all.
+        """
+        garbage = ToolResult(content=[{"type": "text", "text": "<html>502 Bad Gateway</html>"}])
+        client = _ClosableCanned({"get_consumer_lag": garbage})
+        with pytest.raises(runner_module.PreconditionUnverifiable, match="readable"):
+            self._run_live(monkeypatch, self._live_scenario_with_precondition(), client)
+
+    def test_a_world_that_answers_falsely_is_still_unmet(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The other side of the pair: the platform answered, the premise is
+        # false, and that IS a claim about the world.
+        client = _ClosableCanned({"get_consumer_lag": self._lag_result(0)})
+        with pytest.raises(runner_module.PreconditionNotMet, match="never manufactured"):
             self._run_live(monkeypatch, self._live_scenario_with_precondition(), client)
 
 
@@ -1828,3 +1862,26 @@ class TestLiveRefusesABatchOfMutatingScenarios:
         _stub_run_pipeline(monkeypatch, tmp_path)
         monkeypatch.setattr(sys, "argv", ["evals.runner"])
         assert runner_module.main() != 7
+
+
+class TestCrashedRowsKeepTheirProvenance:
+    """A crashed row must not claim it ran canned.
+
+    live_mcp/live_llm defaulted to False on the synthesized outcome, so every
+    crashed row in a live report described itself as an offline run — and
+    `degraded` False alongside said that was intended. A reader counting live
+    coverage counted wrong, and the report is the artifact.
+    """
+
+    def test_a_live_scenario_that_crashes_is_recorded_as_live(self) -> None:
+        scenario = _passing_scenario().model_copy(
+            update={"use_live_mcp": True, "use_live_llm": True}
+        )
+        outcome = runner_module._crashed_result(scenario, RuntimeError("boom")).outcome
+        assert outcome.live_mcp is True
+        assert outcome.live_llm is True
+
+    def test_a_canned_scenario_that_crashes_is_still_recorded_as_canned(self) -> None:
+        outcome = runner_module._crashed_result(_passing_scenario(), RuntimeError("boom")).outcome
+        assert outcome.live_mcp is False
+        assert outcome.live_llm is False

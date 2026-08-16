@@ -373,3 +373,65 @@ class TestTracer:
                 model="claude-sonnet-4-6",
             )
         assert captured == []
+
+
+class TestUnexpectedApiErrorsAreWrapped:
+    """Every anthropic error must leave this client as an LLMError.
+
+    The transitions catch LLMError and escalate with a reason. An SDK
+    exception that escapes uncaught is not absorbed anywhere — it takes out
+    an already-graded run at the briefing or judge step, and the run is
+    recorded as a crash rather than as the result it had already earned.
+    """
+
+    @staticmethod
+    def _validation_error() -> anthropic.APIResponseValidationError:
+        # The live one: a 200 whose body the SDK cannot validate. It is
+        # neither APIConnectionError nor APIStatusError, so before the
+        # catch-all arm it escaped the retry block entirely.
+        return anthropic.APIResponseValidationError(
+            response=httpx.Response(200, request=httpx.Request("POST", "http://x")),
+            body=None,
+        )
+
+    def _call(self, sdk: MagicMock) -> None:
+        _client(sdk).call(
+            system_prompt="s",
+            user_message="u",
+            output_model=_SampleOutput,
+            model="claude-test",
+        )
+
+    def test_a_response_validation_error_becomes_an_llm_error(self) -> None:
+        sdk = MagicMock()
+        sdk.messages.create.side_effect = self._validation_error()
+        with pytest.raises(LLMError, match="APIResponseValidationError"):
+            self._call(sdk)
+
+    def test_the_original_is_kept_as_the_cause(self) -> None:
+        err = self._validation_error()
+        sdk = MagicMock()
+        sdk.messages.create.side_effect = err
+        with pytest.raises(LLMError) as excinfo:
+            self._call(sdk)
+        assert excinfo.value.__cause__ is err
+
+    def test_a_wrapped_error_is_not_retried(self) -> None:
+        # It is not transient: retrying burns money for the same answer.
+        sdk = MagicMock()
+        sdk.messages.create.side_effect = self._validation_error()
+        with pytest.raises(LLMError):
+            self._call(sdk)
+        assert sdk.messages.create.call_count == 1
+
+    def test_a_transient_status_error_is_still_retried(self) -> None:
+        # The catch-all must not swallow the retry paths above it.
+        sdk = MagicMock()
+        sdk.messages.create.side_effect = anthropic.APIStatusError(
+            "rate limited",
+            response=httpx.Response(429, request=httpx.Request("POST", "http://x")),
+            body=None,
+        )
+        with pytest.raises(LLMError, match="transport failure after"):
+            self._call(sdk)
+        assert sdk.messages.create.call_count == 3

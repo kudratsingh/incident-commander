@@ -181,13 +181,29 @@ def _is_offline_api_key(key: str) -> bool:
     return key in {_EVAL_PLACEHOLDER_API_KEY, "placeholder", ""}
 
 
-class PreconditionNotMet(RuntimeError):
-    """The scenario's premise was not true, so the agent was never started.
+class PreconditionFailure(RuntimeError):
+    """Base: the run was abandoned before the agent started."""
+
+
+class PreconditionNotMet(PreconditionFailure):
+    """The world answered, and the scenario's premise is false.
 
     Deliberately NOT a graded failure. A run that never happened has nothing
     to say about the agent, and recording it as an agent failure is how
     `bb1fa70abb4c` came to report that the agent fixed the wrong thing when
     the right thing could not be made to exist.
+    """
+
+
+class PreconditionUnverifiable(PreconditionFailure):
+    """The probe never returned a usable answer, so the premise is unknown.
+
+    Distinct from ``PreconditionNotMet`` on purpose, and the distinction is
+    the whole point of the pair. "The fault was never manufactured" is a
+    claim about the world; it requires the world to have answered. A refused
+    scope, a dead platform, or a malformed response tells you nothing about
+    the fault, and reporting one as the other sends the reader to seeding
+    when the problem is the platform.
     """
 
 
@@ -199,6 +215,10 @@ def _assert_preconditions(
     """Probe the world for the scenario's premise, polling where declared."""
     for probe in scenario.expected_precondition:
         failures: list[str] = []
+        # Did the platform ever answer with something we could read? Without
+        # this, a probe that never succeeded reports as "the fault was never
+        # manufactured" — a claim about the world, made without hearing from it.
+        answered = False
         for attempt in range(probe.attempts):
             if attempt:
                 time.sleep(probe.delay_seconds)
@@ -212,8 +232,9 @@ def _assert_preconditions(
                 continue
             payload = _first_json_object(result)
             if payload is None:
-                failures = [f"{probe.tool}: probe returned no JSON object"]
+                failures = [f"{probe.tool}: probe returned no readable JSON object"]
                 continue
+            answered = True
             failures = unmet(probe, payload)
             if not failures:
                 break
@@ -225,8 +246,16 @@ def _assert_preconditions(
                     "tool": probe.tool,
                     "arguments": dict(probe.arguments),
                     "met": not failures,
+                    "answered": answered,
                     "failures": failures,
                 }
+            )
+        if failures and not answered:
+            raise PreconditionUnverifiable(
+                f"scenario {scenario.name!r} precondition could not be checked after "
+                f"{probe.attempts} attempt(s): {'; '.join(failures)}. The platform "
+                "never returned a readable answer, so whether the fault exists is "
+                "UNKNOWN — look at the platform, not at the seeding."
             )
         if failures:
             raise PreconditionNotMet(
@@ -238,9 +267,19 @@ def _assert_preconditions(
 
 
 def _first_json_object(result: ToolResult) -> dict[str, Any] | None:
+    """First text block that parses as a JSON object, or None.
+
+    Tolerates unparseable text rather than raising: a bare ``json.loads``
+    here escaped the polling loop entirely, so one malformed block ended the
+    run as an uncaught crash bucketed "transport" — losing both the probe
+    that failed and the fact that it was a precondition at all.
+    """
     for block in result.content:
         if block.get("type") == "text" and isinstance(block.get("text"), str):
-            parsed = json.loads(block["text"])
+            try:
+                parsed = json.loads(block["text"])
+            except ValueError:
+                continue
             if isinstance(parsed, dict):
                 return parsed
     return None
@@ -339,7 +378,7 @@ def run_scenario(
         if scenario.expected_precondition:
             try:
                 _assert_preconditions(scenario, live_mcp_client, tracer)
-            except PreconditionNotMet:
+            except PreconditionFailure:
                 live_mcp_client.close()
                 raise
     else:
@@ -606,6 +645,10 @@ def _crashed_result(
         # nothing was contended, the world simply was not in the state the
         # scenario asserts, and no agent behaviour is being described.
         crash_class = "precondition"
+    elif isinstance(exc, PreconditionUnverifiable):
+        # The premise is UNKNOWN, not false. Bucketing this as "precondition"
+        # would send the reader to seeding when the platform is the problem.
+        crash_class = "transport"
     elif "chaos_setup" in error_detail:
         crash_class = "shared-env"
     else:
@@ -617,6 +660,13 @@ def _crashed_result(
         report=report,
         judge_score=None,
         failure_class=crash_class,
+        # Provenance survives the crash (ADR 0013). These defaulted to False,
+        # so every crashed row in a live report claimed it had run canned —
+        # and `degraded` False alongside said that was intended. A row that
+        # misdescribes how it ran is worse than a missing row: the report is
+        # the artifact, and a reader counting live coverage counted wrong.
+        live_mcp=scenario.use_live_mcp,
+        live_llm=scenario.use_live_llm,
     )
     trajectory = Trajectory(
         invocation_id=invocation_id,

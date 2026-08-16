@@ -63,15 +63,37 @@ class ChaosClient:
             "method": "tools/call",
             "params": {"name": tool_name, "arguments": arguments},
         }
-        response = self._client.post(self._url, json=body)
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise ChaosInvocationError(f"non-object JSON response: {type(payload).__name__}")
-        if "error" in payload:
-            err = payload["error"]
+        # Every transport-shaped failure becomes a ChaosInvocationError, so
+        # the caller's `except ChaosInvocationError` is the whole story. It
+        # was not: raise_for_status, .json() on an HTML error page, and the
+        # json.loads below all raised httpx/ValueError straight past the
+        # runner's handler, so a 502 during seeding surfaced as a bare
+        # "transport" crash with the hook name nowhere in it — the one
+        # detail that says which fault failed to seed.
+        try:
+            response = self._client.post(self._url, json=body)
+            response.raise_for_status()
+            payload = response.json()
+        except httpx.HTTPStatusError as err:
             raise ChaosInvocationError(
-                f"platform returned MCP error {err.get('code')}: {err.get('message')}"
+                f"{tool_name}: platform returned HTTP {err.response.status_code}: "
+                f"{err.response.text[:200]}"
+            ) from err
+        except httpx.HTTPError as err:
+            raise ChaosInvocationError(
+                f"{tool_name}: transport failure: {type(err).__name__}: {err}"
+            ) from err
+        except ValueError as err:
+            raise ChaosInvocationError(f"{tool_name}: response was not JSON: {err}") from err
+        if not isinstance(payload, dict):
+            raise ChaosInvocationError(
+                f"{tool_name}: non-object JSON response: {type(payload).__name__}"
+            )
+        if "error" in payload:
+            err_body = payload["error"]
+            raise ChaosInvocationError(
+                f"{tool_name}: platform returned MCP error "
+                f"{err_body.get('code')}: {err_body.get('message')}"
             )
         result = payload.get("result", {})
         if not isinstance(result, dict):
@@ -79,7 +101,12 @@ class ChaosClient:
         content = result.get("content", [])
         for block in content:
             if block.get("type") == "text" and isinstance(block.get("text"), str):
-                parsed = json.loads(block["text"])
+                try:
+                    parsed = json.loads(block["text"])
+                except ValueError as err:
+                    raise ChaosInvocationError(
+                        f"{tool_name}: result content was not JSON: {err}"
+                    ) from err
                 if isinstance(parsed, dict):
                     return parsed
         return {}

@@ -19,6 +19,7 @@ An archive listed as *transcript only* means the raw session data is on disk und
 | 2026-08-13 | *transcript only* | **The completeness sweep.** Asked "does this system have all its parts?" rather than "is this code correct?" — found **137 gaps, 121 never built**. `COMPLETENESS_REPORT.md` §3 is the most valuable part: the four mechanisms that produced them. |
 | 2026-08-13 | *transcript only* | **Stage 1 built.** PRs #123–#129. Negative assertions, `max_tool_calls` wired to the runtime, canned-vs-live drift check in CI, precondition assertions. A red remediation result is now attributable to the agent. |
 | 2026-08-16 | `2026-08-16-campaign-backfill.zip` | **This convention, plus a backfill.** `context/` added to both repos; the whole campaign's transcripts packed into one archive. No product code changed. |
+| 2026-08-16 | `2026-08-16-stage-1-and-remediation-readiness.zip` | **Five shapes closed, three more found by running it.** PRs #133–#143 closed every blocker the readiness sweep named (807 → 1027 tests). Then a free dress rehearsal against the live stack found three defects invisible in source — including that `failed_traces_scan` passed the trusted 26/26 run **without ever calling `search_traces`**. Read `SUMMARY.md` §"What is still wrong" before planning the paid run. |
 
 ## Things a future session should not have to rediscover
 
@@ -41,8 +42,15 @@ Promoted out of the archives because they cost real time or money the first time
 - **`git stash` is shared across worktrees.** `refs/stash` is one stack per repository, so a stash
   taken in one worktree is visible and poppable from another. Three obsolete entries are still
   sitting in the commander checkout.
-- **Every `make chaos-*` target is broken at import** — `python scripts/x.py` puts `scripts/` on
-  `sys.path[0]` instead of the repo root, so `import evals` fails. One line to fix; still unfixed.
+- ~~**Every `make chaos-*` target is broken at import**~~ — **fixed 2026-08-16.** `python
+  scripts/x.py` put `scripts/` on `sys.path[0]` instead of the repo root, so `import evals`
+  failed. The recipes now set `PYTHONPATH=.`. They still need `.env` sourced by hand, which is
+  deliberate: make does not `-include .env` because that is exactly what silently overrode the
+  token in PR #62.
+- **A default that only CI exercises is a default nobody tests.** `make bootstrap-token` named a
+  container from the *platform's* dev compose, so the documented `make demo && make
+  bootstrap-token` pair could never work — CI passed `--postgres-container` explicitly and never
+  saw it. Found by running the documented path, not by reading it.
 
 ## Standing rules that outlive any session
 

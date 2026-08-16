@@ -196,9 +196,9 @@ chaos-restore:
 # optionally purges idempotency records. Runs inside the platform
 # `app` container so it has DB/Redis credentials.
 #
-# PLATFORM_COMPOSE defaults to the sibling checkout — override if the
-# incident-platform repo lives elsewhere, either per-invocation or once
-# in .env (see the `-include .env` note at the top of this file).
+# PLATFORM_COMPOSE defaults to this repo's demo stack (see below) — override
+# to point at a sibling incident-platform checkout, either per-invocation or
+# once in .env (see the `-include .env` note at the top of this file).
 #
 # Pass PURGE_IDEMPOTENCY=1 to also `DELETE` the idempotency_records rows
 # (usually unnecessary thanks to the 24h TTL from platform ADR 0010, but

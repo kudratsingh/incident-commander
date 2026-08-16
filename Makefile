@@ -156,25 +156,25 @@ trace-report:
 # See docs/runbook.md for the full workflow.
 
 chaos-help:
-	uv run python scripts/chaos_setup.py --help
+	PYTHONPATH=. uv run python scripts/chaos_setup.py --help
 
 chaos-kill-consumer:
-	uv run python scripts/chaos_setup.py kill-consumer
+	PYTHONPATH=. uv run python scripts/chaos_setup.py kill-consumer
 
 chaos-poison:
-	uv run python scripts/chaos_setup.py poison-message
+	PYTHONPATH=. uv run python scripts/chaos_setup.py poison-message
 
 chaos-saturate:
-	uv run python scripts/chaos_setup.py saturate-redis
+	PYTHONPATH=. uv run python scripts/chaos_setup.py saturate-redis
 
 chaos-latency:
-	uv run python scripts/chaos_setup.py inject-latency
+	PYTHONPATH=. uv run python scripts/chaos_setup.py inject-latency
 
 chaos-bad-deploy:
-	uv run python scripts/chaos_setup.py bad-deploy
+	PYTHONPATH=. uv run python scripts/chaos_setup.py bad-deploy
 
 chaos-restore:
-	uv run python scripts/chaos_setup.py restore-consumer
+	PYTHONPATH=. uv run python scripts/chaos_setup.py restore-consumer
 
 # Between live scenarios: full seed reset via the platform-owned
 # scripts/reset_eval_state.py (shipped in platform v0.4.6). Clears
@@ -211,7 +211,7 @@ eval-reset:
 		$(if $(PURGE_IDEMPOTENCY),--purge-idempotency,)
 
 chaos-bad-data-job:
-	uv run python scripts/chaos_setup.py bad-data-job
+	PYTHONPATH=. uv run python scripts/chaos_setup.py bad-data-job
 
 # ONLY= must never reach the regression gate: `eval-reg: eval` forwards
 # ONLY into the runner, so a filtered run would overwrite latest.json and

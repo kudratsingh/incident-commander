@@ -26,6 +26,7 @@ import yaml
 _REPO = Path(__file__).resolve().parents[2]
 _WORKFLOW = _REPO / ".github" / "workflows" / "evals.yml"
 _PROMPTS_DIR = _REPO / "src" / "incident_commander" / "llm" / "prompts"
+_CI = _REPO / ".github" / "workflows" / "ci.yml"
 
 
 def _github_match(pattern: str, path: str) -> bool:
@@ -100,3 +101,48 @@ def test_gate_covers_runner() -> None:
     assert _covered("evals/runner.py"), (
         "evals.yml path filter no longer covers the eval harness itself"
     )
+
+
+class TestContractJobRetriesItsFlakySteps:
+    """The contract job gates both platform checks, so its flakes lie.
+
+    It boots a stack and mints a token before running either the schema diff
+    or the fixture-drift check. Two of its steps failed for unrelated
+    environmental reasons on 2026-08-16 — a registry 502 pulling postgres,
+    and a 404 minting a service-account token that passed unchanged on
+    re-run — and both presented as a platform-contract failure. A gate that
+    cries wolf gets ignored exactly when it is right.
+    """
+
+    @staticmethod
+    def _contract_steps() -> list[dict[str, object]]:
+        workflow = yaml.safe_load(_CI.read_text())
+        steps = workflow["jobs"]["contract"]["steps"]
+        assert isinstance(steps, list)
+        return steps
+
+    @staticmethod
+    def _step(name_fragment: str) -> str:
+        for step in TestContractJobRetriesItsFlakySteps._contract_steps():
+            if name_fragment in str(step.get("name", "")):
+                return str(step.get("run", ""))
+        raise AssertionError(f"no contract step named like {name_fragment!r}")
+
+    def test_the_image_pull_retries(self) -> None:
+        run = self._step("Boot the pinned demo stack")
+        assert "pull" in run, (
+            "the pull is implicit in `up`, so a registry blip reads as a boot failure"
+        )
+        assert "attempt" in run, "no retry around the image pull"
+
+    def test_the_token_bootstrap_retries(self) -> None:
+        run = self._step("Mint a platform service-account token")
+        assert "attempt" in run, "no retry around the five-step bootstrap"
+
+    def test_both_still_fail_hard_after_their_retries(self) -> None:
+        # Retrying must not become swallowing: a genuine failure has to end
+        # the job, or the drift check runs against a stack that never booted.
+        for fragment in ("Boot the pinned demo stack", "Mint a platform service-account token"):
+            assert "exit 1" in self._step(fragment), (
+                f"{fragment}: retries with no terminal failure would hide a real break"
+            )

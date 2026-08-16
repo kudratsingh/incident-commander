@@ -78,12 +78,34 @@ jobs:
       # No docker/login-action and no registry secret: ghcr.io/kudratsingh/
       # incident-platform is a public package, so an anonymous ghcr.io pull
       # token resolves the pinned digest. demo/compose.yml is used AS-IS —
-      # the v0.4.9 digest and nothing else. Never `:latest` and never a
-      # locally built master image: master serves 27 tools and would red-flag
-      # seed_dlq_messages against the committed 26-tool snapshot by design,
-      # until the post-campaign v0.5.0 pin-bump PR moves the pin.
+      # the pinned digest and nothing else. Never `:latest` and never a
+      # locally built master image, which would diff against a snapshot
+      # blessed from a different build.
+      #
+      # (This comment used to describe the v0.4.9 pin and a 26-tool
+      # snapshot. Both moved with the v0.5.0 pin bump in #120; the pin
+      # itself lives in demo/compose.yml, which is the one place to read
+      # it.)
       - name: Boot the pinned demo stack
         run: |
+          # Pull first, with retries. `up` does the pull implicitly, but a
+          # registry hiccup then reads as "the stack failed to boot" — and
+          # this job gates BOTH the schema diff and the fixture-drift check,
+          # so an infrastructure blip presents as a platform-contract
+          # failure. Seen on 2026-08-16: "received unexpected HTTP status:
+          # 502 Bad Gateway" pulling postgres.
+          for attempt in 1 2 3; do
+            if docker compose -f demo/compose.yml pull --quiet \
+                 postgres redis redpanda platform api; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "image pull failed three times — registry, not this branch" >&2
+              exit 1
+            fi
+            echo "pull failed (attempt ${attempt}/3); retrying in 15s"
+            sleep 15
+          done
           docker compose -f demo/compose.yml up -d --wait \
             postgres redis redpanda platform api
 
@@ -107,8 +129,25 @@ jobs:
           # postgres container is incident-commander-demo-postgres-1. The
           # script's default names the platform's OWN dev stack, which does
           # not exist here.
-          out="$(uv run python scripts/bootstrap_agent_token.py \
-            --postgres-container incident-commander-demo-postgres-1)"
+          # Retried: the script does five stateful steps — register,
+          # promote via direct SQL, log in, create-or-get the service
+          # account, mint a token — with no retry of its own, against a
+          # stack that is still seeding itself. Seen on 2026-08-16: a 404
+          # minting the token, which passed unchanged on a re-run. The
+          # script is idempotent by design (register tolerates 409,
+          # create-or-get reuses), so repeating it is safe.
+          for attempt in 1 2 3; do
+            if out="$(uv run python scripts/bootstrap_agent_token.py \
+                 --postgres-container incident-commander-demo-postgres-1)"; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "bootstrap failed three times — not a transient" >&2
+              exit 1
+            fi
+            echo "bootstrap failed (attempt ${attempt}/3); retrying in 10s"
+            sleep 10
+          done
 
           # The script prints BOTH tokens in plaintext. Register the masks
           # BEFORE anything echoes its output: the stack dies with the job but

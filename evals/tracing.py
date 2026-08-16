@@ -57,10 +57,21 @@ class JsonlTracer:
             f.write(json.dumps(record, default=str) + "\n")
 
     def llm_hook(self, role: str) -> Callable[[dict[str, Any]], None]:
-        """Return a tracer callable to pass to ``LLMClient(tracer=...)``."""
+        """Return a tracer callable to pass to ``LLMClient(tracer=...)``.
+
+        Mirrors ``mcp_hook``'s discrimination: a payload carrying ``error``
+        is an ``llm_error``. ``llm_error`` was in this module's documented
+        kind set from the start and nothing ever wrote one, so an exhausted
+        429 or a dropped connection left a silent gap exactly where billed
+        work had happened — the trace showed the call before it and the call
+        after it, and nothing in between (invariant 9's concern, one layer
+        down: an artifact that omits a failure is a lower bound presented as
+        a record).
+        """
 
         def hook(payload: dict[str, Any]) -> None:
-            self.write({"kind": "llm", "role": role, **payload})
+            kind = "llm_error" if "error" in payload else "llm"
+            self.write({"kind": kind, "role": role, **payload})
 
         return hook
 

@@ -352,9 +352,33 @@ operate by:
   `INVESTIGATE_REPROBE_ATTEMPTS=1`.
 - Supervisor re-spawn after `restart_consumer_group` clears the kill
   flag: **~2.4s**. Verify polling absorbs it easily.
-- Traffic: **modest suffices** — the standard 1-job/2s loop against a
-  dead consumer (service rate 0) builds real backlog. No soak
-  engineering, no heavy bursts (the rate limiter would eat them anyway). As of platform v0.4.7 the previously-blocked `remediate_stale_cache_success` uses the new `create_stale_cache` chaos hook and is winnable live.
+- Traffic: **required, and it now exists.** "The standard 1-job/2s loop"
+  described here since 2026-08-04 was never a thing you could run — no
+  such script existed in either repo, so lag stayed at 0 and the scenario
+  asserted a fault that could not be made. `make traffic` is it.
+
+  Run it in a second terminal BEFORE seeding `kill_consumer`:
+
+  ```bash
+  make traffic                      # until Ctrl-C
+  make traffic UNTIL_LAG=1500       # stop once the backlog is deep
+  ```
+
+  Two corrections to the old note. It submits every **3s, not 2s**:
+  `jobs:create` is limited to 30/60s and 1-job/2s sits exactly on that
+  limit, so half the requests would 429. And it needs the **user** login,
+  not the service-account token the eval uses — `POST /jobs` depends on
+  `get_current_user`.
+
+  Expect 503s once lag passes 1000. That is not a failure: the platform's
+  backpressure check reads `kafka:consumer_lag:worker-dispatcher`, the
+  same key the scenario measures, so a 503 is the platform telling you the
+  fault is fully built. Lag does not drain while the consumer is dead, so
+  the loop keeps going and says so.
+
+  Forgetting it fails safely: the scenario's precondition polls for
+  `lag >= 1` over 6×15s and aborts before any model call, reporting that
+  the fault was never manufactured. As of platform v0.4.7 the previously-blocked `remediate_stale_cache_success` uses the new `create_stale_cache` chaos hook and is winnable live.
 
 ## Debugging one scenario
 

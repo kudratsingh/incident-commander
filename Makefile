@@ -1,4 +1,4 @@
-.PHONY: demo-destroy help setup check lint types test test-unit test-integration test-contract test-drift fixture-drift fixture-drift-bless test-e2e eval eval-live eval-smoke eval-reg eval-reset trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
+.PHONY: traffic demo-destroy help setup check lint types test test-unit test-integration test-contract test-drift fixture-drift fixture-drift-bless test-e2e eval eval-live eval-smoke eval-reg eval-reset trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
 
 # Make does not read .env on its own — only the Python side does, via
 # dotenv. Without this include, a make-level var like PLATFORM_COMPOSE
@@ -160,6 +160,14 @@ trace-report:
 # All wrap scripts/chaos_setup.py. Effects self-clean on TTL. Requires
 # PLATFORM_MCP_URL + PLATFORM_TOKEN (with chaos:invoke scope) in env.
 # See docs/runbook.md for the full workflow.
+
+# Consumer lag is arrival minus service, and the eval only ever had the
+# service half. Run this in a second terminal BEFORE seeding kill_consumer
+# for remediate_consumer_lag_success: with nothing arriving, a killed
+# consumer builds no backlog and the scenario's precondition correctly
+# refuses to run it. `--until-lag N` stops once the backlog is deep enough.
+traffic:
+	uv run python scripts/traffic_loop.py $(if $(UNTIL_LAG),--until-lag $(UNTIL_LAG)) $(if $(COUNT),--count $(COUNT))
 
 chaos-help:
 	PYTHONPATH=. uv run python scripts/chaos_setup.py --help

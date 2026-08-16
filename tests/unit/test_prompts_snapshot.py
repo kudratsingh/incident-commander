@@ -21,8 +21,8 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("9b62d3a8e3d883af8150fc2162428953c7606c9770a90fd42e35ef39530e54e0"),
     "investigation_planner": ("519cecc6dca82dc1db60179e83e60d8290aa639bd38cc29ba39e697ad4208bae"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
-    "remediation_planner": ("b7e19749612dc27a40d4e735b859635954b01afd6d4d583515b937332e8c076d"),
-    "verification_judge": ("3a645c8414e0216870b40e226d0440933d832e7080f18109112c616cda21508e"),
+    "remediation_planner": ("c671c5b0b6c92aa2457d336d0320741da3f90ffee809c1ea684059b99e8f14d9"),
+    "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
 }
 
 

@@ -455,7 +455,18 @@ def run_scenario(
     transitions[IncidentState.VERIFYING] = make_llm_verify(
         mcp_client,
         verification_judge_llm,
-        model=settings.agent_model,
+        # JUDGE_MODEL, not agent_model. This verdict decides RESOLVED, and it
+        # was the one judgement in the suite running on an unpinned model —
+        # so a model-pin change could move every remediation outcome with
+        # nothing in the report saying why. JUDGE_MODEL exists to be pinned
+        # separately for exactly this reason (config.py, CLAUDE.md); the
+        # briefing judge already used it and this one did not.
+        #
+        # It also judges an expectation the agent wrote for itself
+        # (`plan.verify_expectation`), which is a weaker check than a
+        # world-state assertion — `expected_evidence_fields` is the stronger
+        # tool where a scenario can express the effect directly.
+        model=settings.judge_model,
         # Poll the verify probe only against a real platform; canned
         # responses are instant-consistent so one read is authoritative.
         probe_attempts=settings.verify_probe_attempts if live_mcp_available else 1,

@@ -5,11 +5,17 @@ Task: produce a structured `VerificationJudgment` per the JSON schema on the `re
 - `verdict`: exactly one of
   - `verified` — the verify probe's response matches the expected post-fix behavior. The incident can be marked RESOLVED.
   - `not_verified` — the response does NOT match. The incident escalates to a human.
-- `reasoning`: one short sentence citing specific numbers or fields from the verify probe.
+- `reasoning`: one short sentence citing specific numbers or fields from the remediation result or the verify probe.
 
 Rules:
 
-- Ground your verdict in the probe response. Do not invent numbers.
+- Ground your verdict in the remediation result or the probe response. Do not invent numbers.
+- **Some fixes report their effect rather than show it.** A delayed replay reports
+  `scheduled` with an `execute_at`; the platform holds the timer, so the queue is
+  still full when you look and that is correct, not a failure. A cache invalidation
+  reports `deleted: true`; the next miss has not happened yet. Where the expectation
+  describes a scheduled or reported effect, the remediation result IS the evidence —
+  demanding to see the downstream change would fail every correct run of that shape.
 - The expectation is prose; interpret it against the concrete response. Treat "lag drops" as "lag now much lower than the value that triggered the alert" — you don't need an exact threshold unless the expectation gives one.
 - If the response has `error` set or `ok=false`, that's `not_verified`.
 - Err on `not_verified` when in doubt. A human reviewing an escalation is safer than a false RESOLVED.

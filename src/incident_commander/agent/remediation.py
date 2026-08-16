@@ -568,7 +568,9 @@ def make_llm_verify(
             try:
                 judgment_result = llm_client.call(
                     system_prompt=load_prompt("verification_judge"),
-                    user_message=_format_verify_context(plan, probe_summary),
+                    user_message=_format_verify_context(
+                        plan, probe_summary, _action_result_of(run_state, plan)
+                    ),
                     output_model=VerificationJudgment,
                     model=model,
                 )
@@ -627,10 +629,40 @@ def _tool_context_block(name: str) -> str:
     return f"  - {name}: {indented}\n    input_schema={schema}"
 
 
-def _format_verify_context(plan: RemediationPlan, probe_summary: str) -> str:
+def _action_result_of(run_state: RunState, plan: RemediationPlan) -> str | None:
+    """What the executed action itself reported, if it is on the ledger."""
+    for entry in reversed(run_state.evidence):
+        if entry.tool_name == plan.action_tool:
+            return entry.result_summary
+    return None
+
+
+def _format_verify_context(
+    plan: RemediationPlan, probe_summary: str, action_summary: str | None = None
+) -> str:
+    """What the judge is shown.
+
+    ``action_summary`` is the executed action's own response, and leaving it
+    out made one whole class of remediation unjudgeable. A delayed replay
+    (``wait_and_replay``) reports its success as ``scheduled`` /
+    ``execute_at`` in the ACTION response; the platform then holds the timer,
+    so the DLQ cannot shrink inside the ~100s verify window by design. The
+    judge saw an unshrunk queue, was told by its own prompt to err toward
+    ``not_verified``, and a correct agent escalated instead of resolving.
+
+    The same omission blunted every other action whose effect is reported
+    rather than immediately observable — ``invalidate_cache_key``'s
+    ``deleted: true`` among them.
+    """
+    action_block = (
+        f"Remediation result:\n{action_summary}\n\n"
+        if action_summary is not None
+        else "Remediation result: (not recorded)\n\n"
+    )
     return (
         f"Remediation attempted: {plan.action_tool}({json.dumps(plan.action_arguments)})\n"
         f"Target hypothesis: {plan.target_hypothesis}\n\n"
+        f"{action_block}"
         f"Verify probe: {plan.verify_tool}({json.dumps(plan.verify_arguments)})\n"
         f"Verify probe result:\n{probe_summary}\n\n"
         f"Expected behavior after fix:\n{plan.verify_expectation}\n"

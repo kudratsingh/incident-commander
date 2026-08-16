@@ -42,6 +42,8 @@ from evals.runner import (
 from evals.scenarios.schema import ChaosHook, PreconditionField, PreconditionProbe, Scenario
 from incident_commander.agent import factory
 from incident_commander.agent.briefing import EscalationBriefing
+from incident_commander.agent.investigation import make_llm_investigate
+from incident_commander.agent.remediation import make_llm_verify
 from incident_commander.agent.state import BudgetLedger, EvidenceEntry, IncidentState, RunState
 from incident_commander.api.schemas import AlertPayload
 from incident_commander.config import Settings
@@ -1959,3 +1961,45 @@ class TestLiveRemediationGuardsTheWriteScope:
         _stub_run_pipeline(monkeypatch, tmp_path)
         monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
         assert runner_module.main() != 4
+
+
+class TestVerificationJudgeIsPinned:
+    """The verdict that decides RESOLVED must not ride the unpinned model.
+
+    JUDGE_MODEL exists to be pinned separately from AGENT_MODEL so eval
+    results stay comparable across a model-pin change. The briefing judge
+    already used it; the verification judge — the one whose verdict decides
+    whether an incident is RESOLVED — did not.
+    """
+
+    def test_the_verify_transition_gets_the_judge_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: dict[str, Any] = {}
+        real = make_llm_verify
+
+        def _spy(*args: Any, **kwargs: Any) -> Any:
+            seen.update(kwargs)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(runner_module, "make_llm_verify", _spy)
+        settings = _test_settings(agent_model="agent-model-x", judge_model="judge-model-y")
+        run_scenario(_passing_scenario(), settings)
+        assert seen["model"] == "judge-model-y"
+
+    def test_the_investigation_planner_still_gets_the_agent_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Only the judgement moves. The agent's own reasoning stays on the
+        # agent model, which is the thing under test.
+        seen: dict[str, Any] = {}
+        real = make_llm_investigate
+
+        def _spy(*args: Any, **kwargs: Any) -> Any:
+            seen.update(kwargs)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(runner_module, "make_llm_investigate", _spy)
+        settings = _test_settings(agent_model="agent-model-x", judge_model="judge-model-y")
+        run_scenario(_passing_scenario(), settings)
+        assert seen["model"] == "agent-model-x"

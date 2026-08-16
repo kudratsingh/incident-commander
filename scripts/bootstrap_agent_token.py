@@ -27,7 +27,13 @@ import httpx
 DEFAULT_BASE_URL = "http://localhost:8000/api/v1"
 DEFAULT_EMAIL = "agent-demo@example.com"
 DEFAULT_PASSWORD = "demo-agent-pass-123"  # noqa: S105 - dev-only placeholder
-DEFAULT_POSTGRES_CONTAINER = "incident-platform-postgres-1"
+# The DEMO stack's postgres — the one this repo owns and the one
+# docs/runbook.md tells you to boot with `make demo`. It used to default to
+# the platform's own dev-stack container, so the bare `make bootstrap-token`
+# in the live-eval protocol died on a CalledProcessError one line after
+# `make demo` succeeded. CI never noticed: it passes --postgres-container
+# explicitly. Same shape as eval-reset's compose default (ADR 0020).
+DEFAULT_POSTGRES_CONTAINER = "incident-commander-demo-postgres-1"
 DEFAULT_MCP_URL = "http://localhost:8001/mcp"
 SERVICE_ACCOUNT_NAME = "incident-commander"
 # Phase 6+ needs actions:execute (Tier-1 remediation) and chaos:invoke

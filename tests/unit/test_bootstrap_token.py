@@ -13,12 +13,15 @@ defense-in-depth backstop that fires before any subprocess is spawned.
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
-from scripts.bootstrap_agent_token import _promote
+from scripts.bootstrap_agent_token import DEFAULT_POSTGRES_CONTAINER, _promote
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 _CONTAINER = "incident-platform-postgres-1"
 _EMAIL = "agent-demo@example.com"
 
@@ -83,3 +86,49 @@ def test_unsafe_email_is_rejected_before_subprocess_runs(
         _promote(_CONTAINER, "a'b")
 
     assert recorder.calls == []
+
+
+class TestTheDefaultTargetsTheStackTheDocsTellYouToBoot:
+    """`make bootstrap-token` with no arguments must hit the demo stack.
+
+    The runbook's live-eval protocol is `make demo` then `make bootstrap-token`,
+    and for the whole life of that protocol the second command could not
+    work: the default named `incident-platform-postgres-1`, a container from
+    the *platform's* dev compose, which `make demo` never starts. The bare
+    invocation died on a CalledProcessError one line after `make demo`
+    reported success.
+
+    CI never caught it because the workflow passes --postgres-container
+    explicitly, so the default was exercised by exactly nobody except a human
+    following the documented path — the one case that matters for a protocol
+    whose whole job is to be followed under time pressure before a paid run.
+
+    Asserting against a literal would just re-pin today's string. These derive
+    the name from demo/compose.yml the way Compose itself does, so renaming
+    the project or the service reds the test instead of silently re-breaking
+    the default.
+    """
+
+    @staticmethod
+    def _compose() -> dict[str, Any]:
+        loaded: dict[str, Any] = yaml.safe_load((_REPO_ROOT / "demo" / "compose.yml").read_text())
+        return loaded
+
+    def test_the_default_container_is_the_one_make_demo_starts(self) -> None:
+        compose = self._compose()
+        project = compose["name"]
+        # Compose names containers <project>-<service>-<index>.
+        expected = f"{project}-postgres-1"
+        assert expected == DEFAULT_POSTGRES_CONTAINER, (
+            f"bootstrap defaults to {DEFAULT_POSTGRES_CONTAINER!r}, but `make demo` "
+            f"starts {expected!r}. The documented two-command protocol is broken."
+        )
+
+    def test_the_service_it_names_actually_exists_in_the_demo_stack(self) -> None:
+        # Guards the other half: a container name can match the project and
+        # still name a service the demo stack does not define.
+        services = self._compose()["services"]
+        assert "postgres" in services, (
+            "demo/compose.yml no longer defines a `postgres` service — the "
+            "bootstrap default names a container that will never exist"
+        )

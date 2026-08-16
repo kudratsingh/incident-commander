@@ -133,6 +133,11 @@ incident-commander/
 │   └── reports/                    # baseline.json + committed regression reports
 ├── contracts/
 │   └── platform-tools.snapshot.json   # generated from platform, diffed in CI
+├── context/                        # session history across sessions — see the section below
+│   ├── INDEX.md                    # one line per session; read this first
+│   ├── README.md                   # the convention: packing, redaction, immutability
+│   ├── pack.sh                     # scrub → verify → zip a session's transcripts
+│   └── archives/                   # gitignored + immutable; absent from a fresh clone
 ├── demo/
 │   ├── compose.yml                 # platform image pinned by digest + its dependencies
 │   └── README.md                   # one-command demo walkthrough
@@ -334,6 +339,35 @@ BUDGET_MAX_USD           # per incident hard cost ceiling
 4. New decisions have an ADR, superseded decisions are marked, never rewritten.
 5. No invariant from this file is weakened without an ADR that says so explicitly.
 6. The diff was self-reviewed in full and the PR description says how to verify the change.
+
+## Session history — `context/`
+
+This project has run across many sessions, and each one used to re-derive what the last already
+settled. `context/` is the fix.
+
+**Read [`context/INDEX.md`](context/INDEX.md) at the start of a session.** It is one line per
+session — what that session established — followed by a short list of things that cost real time
+the first time: a gap record that was read backwards and sent a whole build item after a defect
+that did not exist, a seeding bug that made an empty database look identical to a full one, an
+agent that routed around a safety prompt and crash-looped three consumer groups. It is much cheaper
+to read than to rediscover, and it is the counterpart to the workspace-root `STATE.md`: that file
+says where things *are*, this one says how they got there and what has already been ruled out.
+
+`context/archives/` holds the packed transcripts. They are **gitignored and absent from a clone** —
+transcripts carry live credentials and the raw set is ~120MB — so treat `INDEX.md` as the real
+interface. Do not try to read an archive into context; it is a haystack, and the index is the map.
+When you do need one, pull the single file you want:
+
+```bash
+unzip -p context/archives/<name>.zip SUMMARY.md
+```
+
+**At the end of a session**, `./context/pack.sh <slug>` stages the transcripts, redacts
+credentials, verifies the redaction before writing, and prints the `INDEX.md` line to paste. Add
+that line — an archive nobody indexed is an archive nobody will open. Archives are written
+read-only and user-immutable, so `rm`, `mv`, truncation and `git clean -xfd` all refuse: same
+append-only intent as invariant 9, enforced by the filesystem. `context/README.md` has the full
+convention, including why the scrubber's "clean" report is a narrower claim than "no secrets."
 
 ## Working in this repo with Claude Code
 

@@ -1,0 +1,142 @@
+{
+  "scenario": "consumer_lag_missing_group",
+  "incident_id": "cac532b9-9a65-4a2f-bbb4-90c638ae64db",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "cac532b9-9a65-4a2f-bbb4-90c638ae64db",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:51.276341Z",
+      "updated_at": "2026-08-22T02:21:51.276341Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "cac532b9-9a65-4a2f-bbb4-90c638ae64db",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000022,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "3cd0f8f4-ab46-472a-a9bb-859cd54817f7",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:51.276363Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:51.276341Z",
+      "updated_at": "2026-08-22T02:21:51.276363Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "cac532b9-9a65-4a2f-bbb4-90c638ae64db",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000034,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "3cd0f8f4-ab46-472a-a9bb-859cd54817f7",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:51.276363Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7d124529-ebb6-4a36-af1b-88f438b3a20c",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "unknown"
+          },
+          "result_summary": "{\"consumer_group\":\"unknown\",\"lag\":null,\"cache_key\":\"kafka:consumer_lag:unknown\"}",
+          "timestamp": "2026-08-22T02:21:51.276375Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f83f8110-154f-49c5-b5fb-da30aa913513",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "alert payload incomplete; human decision required"
+          },
+          "result_summary": "planner stop: alert payload incomplete; human decision required",
+          "timestamp": "2026-08-22T02:21:51.276375Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "unknown",
+          "name": "undiscriminated_alert",
+          "confidence": 0.6,
+          "reasoning": "Fallback probe returned lag: null — the platform could not determine lag for this group; null is unknown-not-healthy and carries no magnitude. The alert payload is still missing enough context to confirm which consumer is at fault.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:51.276341Z",
+      "updated_at": "2026-08-22T02:21:51.276375Z"
+    }
+  ],
+  "invocation_id": "5f92388a1f2b"
+}

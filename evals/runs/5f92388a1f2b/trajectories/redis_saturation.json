@@ -1,0 +1,143 @@
+{
+  "scenario": "redis_saturation",
+  "incident_id": "26cd7819-2b31-436d-ace0-dcee8577788c",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "26cd7819-2b31-436d-ace0-dcee8577788c",
+      "state": "triage",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "high",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:51.351693Z",
+      "updated_at": "2026-08-22T02:21:51.351693Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "26cd7819-2b31-436d-ace0-dcee8577788c",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "high",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000024,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "6678045b-f8c0-4ddf-9130-2cade5f77798",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:51.351717Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:51.351693Z",
+      "updated_at": "2026-08-22T02:21:51.351717Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "26cd7819-2b31-436d-ace0-dcee8577788c",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "high",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000035,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "6678045b-f8c0-4ddf-9130-2cade5f77798",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:51.351717Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7aa311cb-6033-447c-b069-dbb53c8ce54d",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":1.2,\"connected_clients\":250,\"used_memory_bytes\":1073741824,\"used_memory_human\":\"1.00G\",\"keyspace_hits\":10000,\"keyspace_misses\":50000,\"error\":null}",
+          "timestamp": "2026-08-22T02:21:51.351728Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8a5c9581-9737-4c7f-89c8-93237cb0fbdc",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "cache thrash confirmed; human should decide on eviction policy"
+          },
+          "result_summary": "planner stop: cache thrash confirmed; human should decide on eviction policy",
+          "timestamp": "2026-08-22T02:21:51.351728Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "cache_thrashing",
+          "confidence": 0.85,
+          "reasoning": "Hit/miss ratio is 10k/50k (16%) — cache is thrashing. Memory usage is 1GB with 250 clients; ping is healthy.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:51.351693Z",
+      "updated_at": "2026-08-22T02:21:51.351728Z"
+    }
+  ],
+  "invocation_id": "5f92388a1f2b"
+}

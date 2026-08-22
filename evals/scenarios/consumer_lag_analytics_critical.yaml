@@ -62,5 +62,12 @@ expectation:
   expected_terminal_state: escalated
   expected_evidence_contains:
   - analytics-consumer
-  - lag
+  # Tool-scoped (evidence sweep, evals/evidence_audit.py): the bare `lag`
+  # substring also matched list_active_alerts fixtures, so it could not
+  # prove the reading came from get_consumer_lag. Non-null: a real reading,
+  # not the platform's null for an unresolvable group.
+  expected_evidence_fields:
+  - tools: [get_consumer_lag]
+    field: lag
+    is_null: false
   max_tool_calls: 11

@@ -1,0 +1,132 @@
+{
+  "scenario": "tool_result_marked_error",
+  "incident_id": "319338ae-c287-4f3a-b2a9-f6b0c322af0f",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "319338ae-c287-4f3a-b2a9-f6b0c322af0f",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "billing-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:26:51.782270Z",
+      "updated_at": "2026-08-22T02:26:51.782270Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "319338ae-c287-4f3a-b2a9-f6b0c322af0f",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "billing-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000017,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "0eb83a6c-f250-4b4c-b7fb-a9566742dd3d",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:26:51.782287Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:26:51.782270Z",
+      "updated_at": "2026-08-22T02:26:51.782287Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "319338ae-c287-4f3a-b2a9-f6b0c322af0f",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "billing-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000029,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "0eb83a6c-f250-4b4c-b7fb-a9566742dd3d",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:26:51.782287Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "41bc37ea-d6e8-49a9-bf87-26f6be5a31b0",
+          "tool_name": "_planner_escalate",
+          "arguments": {
+            "reason": "tool reported is_error=True (get_consumer_lag)"
+          },
+          "result_summary": "tool reported is_error=True (get_consumer_lag)",
+          "timestamp": "2026-08-22T02:26:51.782299Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.5,
+          "reasoning": "Need current lag to confirm; probing billing-consumer.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:26:51.782270Z",
+      "updated_at": "2026-08-22T02:26:51.782299Z"
+    }
+  ],
+  "invocation_id": "82d114a34002"
+}

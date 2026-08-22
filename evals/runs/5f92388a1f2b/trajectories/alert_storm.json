@@ -1,0 +1,156 @@
+{
+  "scenario": "alert_storm",
+  "incident_id": "57cc4eb8-338f-46a4-9b7b-5a82d4efb77c",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "57cc4eb8-338f-46a4-9b7b-5a82d4efb77c",
+      "state": "triage",
+      "alert": {
+        "source": "platform.alerts",
+        "severity": "critical",
+        "fingerprint": "alert_storm_meta",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:51.259245Z",
+      "updated_at": "2026-08-22T02:21:51.259245Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "57cc4eb8-338f-46a4-9b7b-5a82d4efb77c",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.alerts",
+        "severity": "critical",
+        "fingerprint": "alert_storm_meta",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000091,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "a99dc9bf-c131-4fad-88df-4df0af511b90",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "82982035ba3ce76e53f643ff4e640aab"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-22T02:21:51.259336Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:51.259245Z",
+      "updated_at": "2026-08-22T02:21:51.259336Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "57cc4eb8-338f-46a4-9b7b-5a82d4efb77c",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.alerts",
+        "severity": "critical",
+        "fingerprint": "alert_storm_meta",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 2,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000131,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "a99dc9bf-c131-4fad-88df-4df0af511b90",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "82982035ba3ce76e53f643ff4e640aab"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-22T02:21:51.259336Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "af66ea05-f9ad-4418-a3ae-4493747c26f0",
+          "tool_name": "list_active_alerts",
+          "arguments": {
+            "severity": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":5,\"alerts\":[{\"id\":\"a1\",\"severity\":\"critical\",\"source\":\"platform.api\",\"title\":\"5xx spike\",\"description\":null,\"fired_at\":\"2026-07-28T10:00:00Z\",\"extra_data\":null},{\"id\":\"a2\",\"severity\":\"high\",\"source\":\"platform.db\",\"title\":\"latency high\",\"description\":null,\"fired_at\":\"2026-07-28T10:01:00Z\",\"extra_data\":null},{\"id\":\"a3\",\"severity\":\"high\",\"source\":\"platform.kafka\",\"title\":\"consumer lag\",\"description\":null,\"fired_at\":\"2026-07-28T10:01:00Z\",\"extra_data\":null},{\"id\":\"a4\",\"severity\":\"high\",\"source\":\"platform.dlq\",\"title\":\"dlq growth\",\"description\":null,\"fired_at\":\"2026-07-28T10:02:00Z\",\"extra_data\":null},{\"id\":\"a5\",\"severity\":\"medium\",\"source\":\"platform.cache\",\"title\":\"cache miss\",\"description\":null,\"fired_at\":\"2026-07-28T10:03:00Z\",\"extra_data\":null}]}",
+          "timestamp": "2026-08-22T02:21:51.259376Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d5d2c38a-fca0-487f-b83c-c15a45367970",
+          "tool_name": "list_audit_events",
+          "arguments": {
+            "action": null,
+            "action_prefix": "deploy",
+            "principal_type": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":1,\"events\":[{\"id\":\"e1\",\"action\":\"deploy.completed\",\"principal_type\":\"ci\",\"principal_id\":\"ci-bot\",\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-07-28T09:58:00Z\",\"extra_data\":{\"version\":\"v1.42.0\"}}]}",
+          "timestamp": "2026-08-22T02:21:51.259376Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d5d913d6-3325-4280-83e7-bd3c64fc8c86",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "deploy-triggered cascade; human should decide rollback"
+          },
+          "result_summary": "planner stop: deploy-triggered cascade; human should decide rollback",
+          "timestamp": "2026-08-22T02:21:51.259376Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "unknown",
+          "name": "cascading_failure",
+          "confidence": 0.9,
+          "reasoning": "Deploy v1.42.0 completed 2 minutes before the storm — high-confidence trigger candidate.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:51.259245Z",
+      "updated_at": "2026-08-22T02:21:51.259376Z"
+    }
+  ],
+  "invocation_id": "5f92388a1f2b"
+}

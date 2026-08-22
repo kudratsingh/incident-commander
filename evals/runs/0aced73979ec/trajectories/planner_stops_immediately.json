@@ -1,0 +1,132 @@
+{
+  "scenario": "planner_stops_immediately",
+  "incident_id": "afc4a6cc-3920-4d33-8610-9eacffbc2b4a",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "afc4a6cc-3920-4d33-8610-9eacffbc2b4a",
+      "state": "triage",
+      "alert": {
+        "source": "platform.custom",
+        "severity": "high",
+        "fingerprint": "opaque_paging_signal",
+        "group": "opaque-source"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:50.296312Z",
+      "updated_at": "2026-08-22T02:21:50.296312Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "afc4a6cc-3920-4d33-8610-9eacffbc2b4a",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.custom",
+        "severity": "high",
+        "fingerprint": "opaque_paging_signal",
+        "group": "opaque-source"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000016,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "0c743c80-9230-4e36-a922-0bea4867bada",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "3176bfdccbc9097d15d938aca9b4545f"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:50.296328Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:50.296312Z",
+      "updated_at": "2026-08-22T02:21:50.296328Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "afc4a6cc-3920-4d33-8610-9eacffbc2b4a",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.custom",
+        "severity": "high",
+        "fingerprint": "opaque_paging_signal",
+        "group": "opaque-source"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000028,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "0c743c80-9230-4e36-a922-0bea4867bada",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "3176bfdccbc9097d15d938aca9b4545f"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:50.296328Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "307018ca-b04c-4f3b-b58d-319f9902222f",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "no discriminating probe available on current tool surface"
+          },
+          "result_summary": "planner stop: no discriminating probe available on current tool surface",
+          "timestamp": "2026-08-22T02:21:50.296340Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "unknown",
+          "name": "opaque_paging_signal",
+          "confidence": 0.65,
+          "reasoning": "Alert fingerprint is opaque and no discriminating tool exists on the current surface. Human should investigate directly.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:50.296312Z",
+      "updated_at": "2026-08-22T02:21:50.296340Z"
+    }
+  ],
+  "invocation_id": "0aced73979ec"
+}

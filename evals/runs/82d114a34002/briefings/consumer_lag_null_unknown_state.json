@@ -1,0 +1,19 @@
+{
+  "incident_id": "ef78c54a-42b7-416c-9abd-98f9d9515184",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=high fingerprint=consumer_lag_high group=ledger-consumer",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"ledger-consumer\",\"lag\":null,\"cache_key\":\"kafka:consumer_lag:ledger-consumer\"}"
+    }
+  ],
+  "findings": "The alert pages on ledger-consumer, but get_consumer_lag returned lag: null for that group — the platform has no cached reading for it. Null is an unknown state, not a healthy one: it is deliberately not reported as 0 and carries no lag magnitude, so this probe neither confirms nor excludes consumer saturation.\n",
+  "recommendation": "Confirm whether ledger-consumer still exists under that name; if it was renamed or decommissioned, retarget the paging rule at the live group, otherwise check that the consumer is started and holds a partition assignment before treating the alert as noise.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.000032,
+    "usd": "0.000000"
+  }
+}

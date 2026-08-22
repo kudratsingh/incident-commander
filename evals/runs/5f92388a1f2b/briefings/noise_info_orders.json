@@ -1,0 +1,14 @@
+{
+  "incident_id": "782ce9a3-064a-48db-b0e7-a3462c8d7c5c",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.healthcheck severity=info fingerprint=health_ping group=orders-consumer",
+  "investigation_trail": [],
+  "findings": "Info-level health_ping alert tagged to orders-consumer; not investigated.\n",
+  "recommendation": "Verify the healthcheck fingerprint is expected to fire at info level for orders-consumer; consider filtering at the ingress if it is noise.\n",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.000021,
+    "usd": "0"
+  }
+}

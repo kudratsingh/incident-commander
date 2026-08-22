@@ -97,5 +97,12 @@ expectation:
   expected_terminal_state: escalated
   expected_evidence_contains:
   - cache_key
-  - worker-dispatcher
+  # Tool-scoped (evidence sweep, evals/evidence_audit.py): the bare
+  # `worker-dispatcher` substring also matched invalidate_cache_key and
+  # restart_consumer_group fixtures, so it could not prove the lag probe
+  # cited the group. get_consumer_lag echoes the group it was asked about.
+  expected_evidence_fields:
+  - tools: [get_consumer_lag]
+    field: consumer_group
+    equals: worker-dispatcher
   max_tool_calls: 5

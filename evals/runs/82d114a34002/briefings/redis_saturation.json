@@ -1,0 +1,19 @@
+{
+  "incident_id": "4d2c679a-c851-4255-a558-e75adec7e6dc",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.cache severity=high fingerprint=cache_miss_spike",
+  "investigation_trail": [
+    {
+      "tool": "get_redis_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":1.2,\"connected_clients\":250,\"used_memory_bytes\":1073741824,\"used_memory_human\":\"1.00G\",\"keyspace_hits\":10000,\"keyspace_misses\":50000,\"error\":null}"
+    }
+  ],
+  "findings": "Redis is up (ping 1.2ms) but the hit rate collapsed to 16% (10k hits / 50k misses). Working set likely exceeds cache capacity.\n",
+  "recommendation": "Review the recent workload for a hot key set that no longer fits; consider increasing memory or adjusting eviction policy.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.000081,
+    "usd": "0.000000"
+  }
+}

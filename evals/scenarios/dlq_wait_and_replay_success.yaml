@@ -93,8 +93,18 @@ expectation:
   - f030f975-974e-5ce3-aa6b-444136507d86
   expected_evidence_contains:
   - wait_and_replay
-  - scheduled
-  - execute_at
+  # Tool-scoped (evidence sweep, evals/evidence_audit.py): `scheduled` and
+  # `execute_at` are field names of BOTH replay siblings' outputs, so as
+  # substrings they were satisfied by ANY replay call — including an
+  # immediate one that ignored the wait_and_replay hint, the exact behavior
+  # this scenario exists to distinguish. The value assert grades the effect:
+  # the platform accepted at least one DELAYED replay. `scheduled` counts
+  # jobs holding an `execute_at` timer in both siblings, so the timestamp
+  # half of the old pair is implied by the count being non-zero.
+  expected_evidence_fields:
+  - tools: [replay_dlq_by_ids, replay_dlq_by_category]
+    field: scheduled
+    at_least: 1
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
   # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
   # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. Cap 13 is the

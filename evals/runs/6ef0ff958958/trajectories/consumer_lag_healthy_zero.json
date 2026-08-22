@@ -1,0 +1,142 @@
+{
+  "scenario": "consumer_lag_healthy_zero",
+  "incident_id": "f1202a76-3406-488a-a855-5d44ecb62823",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "f1202a76-3406-488a-a855-5d44ecb62823",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "healthy-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:52.265666Z",
+      "updated_at": "2026-08-22T02:21:52.265666Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "f1202a76-3406-488a-a855-5d44ecb62823",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "healthy-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000027,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "6eb66189-dc36-4589-9e1d-4bd7c03e7312",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:52.265693Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:52.265666Z",
+      "updated_at": "2026-08-22T02:21:52.265693Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "f1202a76-3406-488a-a855-5d44ecb62823",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "healthy-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000043,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "6eb66189-dc36-4589-9e1d-4bd7c03e7312",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:52.265693Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b00b6b22-bca2-4c8a-a614-fb7de81768a9",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "healthy-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}",
+          "timestamp": "2026-08-22T02:21:52.265709Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "58fc3f73-73ea-4511-8285-c9f77473627d",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "Lag reading contradicts alert; human should reconcile with the alerting rule.\n"
+          },
+          "result_summary": "planner stop: Lag reading contradicts alert; human should reconcile with the alerting rule.\n",
+          "timestamp": "2026-08-22T02:21:52.265709Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "unknown",
+          "name": "alerting_false_positive",
+          "confidence": 0.75,
+          "reasoning": "Lag reading is 0; the alerting rule may be misconfigured or firing on a spike that has already recovered.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:52.265666Z",
+      "updated_at": "2026-08-22T02:21:52.265709Z"
+    }
+  ],
+  "invocation_id": "6ef0ff958958"
+}

@@ -1,0 +1,19 @@
+{
+  "incident_id": "93c0c4bf-1db3-44f8-b17d-0d12ae90f10e",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=high fingerprint=consumer_lag_high group=healthy-consumer",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}"
+    }
+  ],
+  "findings": "Alert reports consumer_lag_high on healthy-consumer, but the probed lag reading is 0 messages. Likely a false positive or a spike that recovered before probing.\n",
+  "recommendation": "Reconcile the paging rule for healthy-consumer against the current lag metric and consider tightening the recovery window before re-arming.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.000045,
+    "usd": "0.000000"
+  }
+}

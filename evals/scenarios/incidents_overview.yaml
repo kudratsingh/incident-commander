@@ -62,6 +62,12 @@ canned_llm_responses:
 expectation:
   name: incidents_overview
   expected_terminal_state: escalated
-  expected_evidence_contains:
-  - total
+  # Tool-scoped (evidence sweep, evals/evidence_audit.py): `total` is a field
+  # of five different tools' outputs — the least discriminating token in the
+  # suite. `incidents` is list_incidents' own payload, present in every
+  # successful reading.
+  expected_evidence_fields:
+  - tools: [list_incidents]
+    field: incidents
+    is_null: false
   max_tool_calls: 6

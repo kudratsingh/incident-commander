@@ -83,8 +83,6 @@ expectation:
   # ... for bulk"). Pinning only by_category made a correct agent following
   # its own instructions grade red on ACTION — a wrong-reason FAIL.
   expected_action_tools: [replay_dlq_by_category, replay_dlq_by_ids]
-  expected_evidence_contains:
-  - replay_safe
   # Structured effect assert (A-09): replaces the bare `verified` substring,
   # which also matched a `not_verified: ...` verdict. Not pinned to an exact
   # count — live DLQ seeding varies.
@@ -92,6 +90,14 @@ expectation:
   - tools: [replay_dlq_by_category, replay_dlq_by_ids]
     field: replayed
     at_least: 1
+  # Tool-scoped (evidence sweep, evals/evidence_audit.py): the bare
+  # `replay_safe` substring was satisfiable by replay_dlq_by_category output
+  # as well, so it could not prove the agent SAW the classification before
+  # acting. This is the observation the description opens with: some DLQ row
+  # the agent listed carries the replay_safe hint.
+  - tools: [list_dlq_messages]
+    field: items[].remediation_hint
+    equals: replay_safe
   # Landed WITH the widening above, never after it. Widening alone converts
   # today's wrong-reason FAIL for a by-ids replay of the human_required row
   # into a wrong-agent GREEN: the id-level guard below is what still reds it.

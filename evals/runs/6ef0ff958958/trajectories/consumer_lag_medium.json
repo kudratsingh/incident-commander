@@ -1,0 +1,142 @@
+{
+  "scenario": "consumer_lag_medium",
+  "incident_id": "c07e6846-c03f-4b13-96de-d670eb6d79fe",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "c07e6846-c03f-4b13-96de-d670eb6d79fe",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "medium",
+        "fingerprint": "consumer_lag_warning",
+        "group": "notifications-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 11,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:52.271603Z",
+      "updated_at": "2026-08-22T02:21:52.271603Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "c07e6846-c03f-4b13-96de-d670eb6d79fe",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "medium",
+        "fingerprint": "consumer_lag_warning",
+        "group": "notifications-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 11,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000024,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "57a9c4c5-1e4c-4d53-9547-754f82c788c8",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "medium",
+            "dedup_key": "7dc69b32e58daea711c56b3f7edaab1f"
+          },
+          "result_summary": "severity=medium classified as investigating",
+          "timestamp": "2026-08-22T02:21:52.271627Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:52.271603Z",
+      "updated_at": "2026-08-22T02:21:52.271627Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "c07e6846-c03f-4b13-96de-d670eb6d79fe",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "medium",
+        "fingerprint": "consumer_lag_warning",
+        "group": "notifications-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 11,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000038,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "57a9c4c5-1e4c-4d53-9547-754f82c788c8",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "medium",
+            "dedup_key": "7dc69b32e58daea711c56b3f7edaab1f"
+          },
+          "result_summary": "severity=medium classified as investigating",
+          "timestamp": "2026-08-22T02:21:52.271627Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "06e0f1e9-eb1a-4336-bdeb-cabbfce7a8d4",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "notifications-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"cache_key\":\"kafka:consumer_lag:notifications-consumer\"}",
+          "timestamp": "2026-08-22T02:21:52.271641Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ab481f5a-0a8a-43f0-86c0-19bfa095fc7b",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "mild lag observed; human should decide on urgency"
+          },
+          "result_summary": "planner stop: mild lag observed; human should decide on urgency",
+          "timestamp": "2026-08-22T02:21:52.271641Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "mild_backlog",
+          "confidence": 0.75,
+          "reasoning": "Lag of 500 messages is present but not urgent.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:52.271603Z",
+      "updated_at": "2026-08-22T02:21:52.271641Z"
+    }
+  ],
+  "invocation_id": "6ef0ff958958"
+}

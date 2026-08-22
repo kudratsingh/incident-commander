@@ -1,0 +1,462 @@
+{
+  "scenario": "remediate_dlq_backlog_success",
+  "incident_id": "fdc9c80e-3e1e-48e0-b22d-fdf02874ee37",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "fdc9c80e-3e1e-48e0-b22d-fdf02874ee37",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:50.312513Z",
+      "updated_at": "2026-08-22T02:21:50.312513Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "fdc9c80e-3e1e-48e0-b22d-fdf02874ee37",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000039,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "fa346e79-d824-48f6-900c-0459ae0c0811",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:50.312552Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:50.312513Z",
+      "updated_at": "2026-08-22T02:21:50.312552Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "fdc9c80e-3e1e-48e0-b22d-fdf02874ee37",
+      "state": "planning",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000056,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "fa346e79-d824-48f6-900c-0459ae0c0811",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:50.312552Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9be27c52-666f-40b8-a412-20b7f665b011",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"job-1\",\"type\":\"send_email\",\"error_message\":\"transient upstream 503\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":{\"root_cause_category\":null,\"summary\":\"upstream flapped, safe to retry\",\"suggested_fix\":null,\"is_retryable\":true,\"confidence\":0.9},\"remediation_hint\":null,\"extra\":null}]}",
+          "timestamp": "2026-08-22T02:21:50.312569Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5ce75faf-1fab-4e79-abc9-faf03c7fea3a",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "retryable DLQ backlog — replay_dlq_by_category applies"
+          },
+          "result_summary": "planner handoff to PLANNING: retryable DLQ backlog — replay_dlq_by_category applies",
+          "timestamp": "2026-08-22T02:21:50.312569Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "transient_dependency_failure",
+          "confidence": 0.85,
+          "reasoning": "Triage flags jobs as retryable (upstream transient failure). Replay them.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:50.312513Z",
+      "updated_at": "2026-08-22T02:21:50.312569Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "fdc9c80e-3e1e-48e0-b22d-fdf02874ee37",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.002741,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "fa346e79-d824-48f6-900c-0459ae0c0811",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:50.312552Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9be27c52-666f-40b8-a412-20b7f665b011",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"job-1\",\"type\":\"send_email\",\"error_message\":\"transient upstream 503\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":{\"root_cause_category\":null,\"summary\":\"upstream flapped, safe to retry\",\"suggested_fix\":null,\"is_retryable\":true,\"confidence\":0.9},\"remediation_hint\":null,\"extra\":null}]}",
+          "timestamp": "2026-08-22T02:21:50.312569Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5ce75faf-1fab-4e79-abc9-faf03c7fea3a",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "retryable DLQ backlog — replay_dlq_by_category applies"
+          },
+          "result_summary": "planner handoff to PLANNING: retryable DLQ backlog — replay_dlq_by_category applies",
+          "timestamp": "2026-08-22T02:21:50.312569Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "08568b61-8ec5-4bca-a347-0e4ca3908a82",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "transient_dependency_failure"
+          },
+          "result_summary": "plan: replay_dlq_by_category({\"category\": \"replay_safe\"}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-22T02:21:50.315254Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "transient_dependency_failure",
+          "confidence": 0.85,
+          "reasoning": "Triage flags jobs as retryable (upstream transient failure). Replay them.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "transient_dependency_failure",
+        "action_tool": "replay_dlq_by_category",
+        "action_arguments": {
+          "category": "replay_safe"
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {},
+        "verify_expectation": "DLQ list should shrink — replayed jobs are re-submitted through the normal job path so they leave the dead-letter queue.\n"
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:50.312513Z",
+      "updated_at": "2026-08-22T02:21:50.315254Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "fdc9c80e-3e1e-48e0-b22d-fdf02874ee37",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.005255,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "fa346e79-d824-48f6-900c-0459ae0c0811",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:50.312552Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9be27c52-666f-40b8-a412-20b7f665b011",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"job-1\",\"type\":\"send_email\",\"error_message\":\"transient upstream 503\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":{\"root_cause_category\":null,\"summary\":\"upstream flapped, safe to retry\",\"suggested_fix\":null,\"is_retryable\":true,\"confidence\":0.9},\"remediation_hint\":null,\"extra\":null}]}",
+          "timestamp": "2026-08-22T02:21:50.312569Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5ce75faf-1fab-4e79-abc9-faf03c7fea3a",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "retryable DLQ backlog — replay_dlq_by_category applies"
+          },
+          "result_summary": "planner handoff to PLANNING: retryable DLQ backlog — replay_dlq_by_category applies",
+          "timestamp": "2026-08-22T02:21:50.312569Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "08568b61-8ec5-4bca-a347-0e4ca3908a82",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "transient_dependency_failure"
+          },
+          "result_summary": "plan: replay_dlq_by_category({\"category\": \"replay_safe\"}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-22T02:21:50.315254Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "665525bf-62c8-46ec-abd0-a90b855a3ed1",
+          "tool_name": "replay_dlq_by_category",
+          "arguments": {
+            "category": "replay_safe",
+            "job_type": null,
+            "max_replays": 20,
+            "idempotency_key": "ad86bbef8a2b4a77d41da9dc209fe19e",
+            "delay_seconds": null
+          },
+          "result_summary": "{\"category\":\"replay_safe\",\"matched\":3,\"replayed\":3,\"scheduled\":0,\"failed\":0,\"job_ids\":[\"job-1\",\"job-2\",\"job-3\"],\"execute_at\":null}",
+          "timestamp": "2026-08-22T02:21:50.317768Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "transient_dependency_failure",
+          "confidence": 0.85,
+          "reasoning": "Triage flags jobs as retryable (upstream transient failure). Replay them.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "transient_dependency_failure",
+        "action_tool": "replay_dlq_by_category",
+        "action_arguments": {
+          "category": "replay_safe"
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {},
+        "verify_expectation": "DLQ list should shrink — replayed jobs are re-submitted through the normal job path so they leave the dead-letter queue.\n"
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-22T02:21:50.312513Z",
+      "updated_at": "2026-08-22T02:21:50.317768Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "fdc9c80e-3e1e-48e0-b22d-fdf02874ee37",
+      "state": "resolved",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 3,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.005313,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "fa346e79-d824-48f6-900c-0459ae0c0811",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:50.312552Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9be27c52-666f-40b8-a412-20b7f665b011",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"job-1\",\"type\":\"send_email\",\"error_message\":\"transient upstream 503\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":{\"root_cause_category\":null,\"summary\":\"upstream flapped, safe to retry\",\"suggested_fix\":null,\"is_retryable\":true,\"confidence\":0.9},\"remediation_hint\":null,\"extra\":null}]}",
+          "timestamp": "2026-08-22T02:21:50.312569Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5ce75faf-1fab-4e79-abc9-faf03c7fea3a",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "retryable DLQ backlog — replay_dlq_by_category applies"
+          },
+          "result_summary": "planner handoff to PLANNING: retryable DLQ backlog — replay_dlq_by_category applies",
+          "timestamp": "2026-08-22T02:21:50.312569Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "08568b61-8ec5-4bca-a347-0e4ca3908a82",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "transient_dependency_failure"
+          },
+          "result_summary": "plan: replay_dlq_by_category({\"category\": \"replay_safe\"}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-22T02:21:50.315254Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "665525bf-62c8-46ec-abd0-a90b855a3ed1",
+          "tool_name": "replay_dlq_by_category",
+          "arguments": {
+            "category": "replay_safe",
+            "job_type": null,
+            "max_replays": 20,
+            "idempotency_key": "ad86bbef8a2b4a77d41da9dc209fe19e",
+            "delay_seconds": null
+          },
+          "result_summary": "{\"category\":\"replay_safe\",\"matched\":3,\"replayed\":3,\"scheduled\":0,\"failed\":0,\"job_ids\":[\"job-1\",\"job-2\",\"job-3\"],\"execute_at\":null}",
+          "timestamp": "2026-08-22T02:21:50.317768Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0a9b20ce-388a-4226-aafd-a6770bf2a4aa",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"job-1\",\"type\":\"send_email\",\"error_message\":\"transient upstream 503\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":{\"root_cause_category\":null,\"summary\":\"upstream flapped, safe to retry\",\"suggested_fix\":null,\"is_retryable\":true,\"confidence\":0.9},\"remediation_hint\":null,\"extra\":null}]}",
+          "timestamp": "2026-08-22T02:21:50.317838Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "1bc69d70-248e-478c-9263-f22fe5ba212d",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "DLQ list should shrink — replayed jobs are re-submitted through the normal job path so they leave the dead-letter queue.\n",
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "verified: Replay action reported 3 of 3 jobs successfully re-submitted; the DLQ should drain shortly.\n",
+          "timestamp": "2026-08-22T02:21:50.317838Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "transient_dependency_failure",
+          "confidence": 0.85,
+          "reasoning": "Triage flags jobs as retryable (upstream transient failure). Replay them.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "transient_dependency_failure",
+        "action_tool": "replay_dlq_by_category",
+        "action_arguments": {
+          "category": "replay_safe"
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {},
+        "verify_expectation": "DLQ list should shrink — replayed jobs are re-submitted through the normal job path so they leave the dead-letter queue.\n"
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-22T02:21:50.312513Z",
+      "updated_at": "2026-08-22T02:21:50.317838Z"
+    }
+  ],
+  "invocation_id": "0aced73979ec"
+}

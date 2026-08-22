@@ -1,0 +1,132 @@
+{
+  "scenario": "tool_output_schema_mismatch",
+  "incident_id": "3524513c-1c52-49e9-b9d1-6a858c948c77",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "3524513c-1c52-49e9-b9d1-6a858c948c77",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "billing-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:36.471413Z",
+      "updated_at": "2026-08-22T02:21:36.471413Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "3524513c-1c52-49e9-b9d1-6a858c948c77",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "billing-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000014,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "15af90a7-639c-4d2c-9f26-28fc56aebe40",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:36.471427Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:36.471413Z",
+      "updated_at": "2026-08-22T02:21:36.471427Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "3524513c-1c52-49e9-b9d1-6a858c948c77",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "billing-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000025,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "15af90a7-639c-4d2c-9f26-28fc56aebe40",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:36.471427Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8b74af56-7e4a-45ce-b464-9219fb3fd942",
+          "tool_name": "_planner_escalate",
+          "arguments": {
+            "reason": "output parse failed (get_consumer_lag): 1 validation error for GetConsumerLagOutput\ncache_key\n  Field required [type=missing, input_value={'consumer_group': 'billing-consumer', 'lag': 42}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing"
+          },
+          "result_summary": "output parse failed (get_consumer_lag): 1 validation error for GetConsumerLagOutput\ncache_key\n  Field required [type=missing, input_value={'consumer_group': 'billing-consumer', 'lag': 42}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing",
+          "timestamp": "2026-08-22T02:21:36.471438Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.5,
+          "reasoning": "Standard paging alert; probe for lag reading.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:36.471413Z",
+      "updated_at": "2026-08-22T02:21:36.471438Z"
+    }
+  ],
+  "invocation_id": "31267faa2f5c"
+}

@@ -92,8 +92,6 @@ expectation:
   # BOTH replay tools — see dlq_replay_safe_success. The prompt names by_ids
   # first, so pinning only by_category reds a correct agent.
   expected_action_tools: [replay_dlq_by_category, replay_dlq_by_ids]
-  expected_evidence_contains:
-  - replay_safe
   # Structured effect assert (A-09): replaces the bare `verified` substring,
   # which also matched a `not_verified: ...` verdict. Deliberately not
   # `equals: 1` — live seeding varies; "only the safe one was touched" stays
@@ -102,6 +100,13 @@ expectation:
   - tools: [replay_dlq_by_category, replay_dlq_by_ids]
     field: replayed
     at_least: 1
+  # Tool-scoped (evidence sweep, evals/evidence_audit.py): the bare
+  # `replay_safe` substring was satisfiable by replay_dlq_by_category output
+  # as well, so it could not prove the agent saw the classification in the
+  # DLQ listing before choosing a partial replay.
+  - tools: [list_dlq_messages]
+    field: items[].remediation_hint
+    equals: replay_safe
   forbidden_replay_job_ids:
   # The canned phantom, for offline runs.
   - dddddddd-4444-4444-4444-000000000003

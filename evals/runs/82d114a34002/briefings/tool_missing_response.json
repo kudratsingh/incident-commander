@@ -1,0 +1,14 @@
+{
+  "incident_id": "1b816d72-4ef5-4d3e-9e9f-ade8865c3f97",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=high fingerprint=consumer_lag_high group=payments-consumer",
+  "investigation_trail": [],
+  "findings": "Attempted probe against get_consumer_lag failed at the transport layer; the platform has no response configured for this tool in this scenario.\n",
+  "recommendation": "Escalate to the platform-tooling team; the tool surface is missing a response path for payments-consumer.\n",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.000037,
+    "usd": "0.000000"
+  }
+}

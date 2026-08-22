@@ -318,3 +318,18 @@ class Scenario(BaseModel):
     # BEFORE any model call, and reports that the fault was never
     # manufactured rather than grading the agent on a false premise.
     expected_precondition: tuple[PreconditionProbe, ...] = ()
+
+    @property
+    def canned_only(self) -> bool:
+        """True when the scenario declares no live leg at all.
+
+        Canned-only is a statement about the world, not the env: the live
+        platform cannot manufacture (or expose) the fault this scenario
+        grades, so a "live" run would grade the agent against a premise
+        that does not exist. The runner refuses such a selection under
+        ``--live`` (exit 8) instead of silently serving the canned
+        fixtures inside a live report. Each canned-only scenario's YAML
+        carries the reason and the platform change that unblocks it,
+        right above the ``use_live_*`` flags.
+        """
+        return not (self.use_live_mcp or self.use_live_llm)

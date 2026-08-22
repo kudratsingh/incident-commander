@@ -11,8 +11,17 @@ tags:
 - saga
 - live-mcp
 - live-llm
-use_live_mcp: true
-use_live_llm: true
+# Canned-only: the fault is unmanufacturable live. The platform's seeded
+# DAG auto-completes ~10 seconds after boot and no chaos hook builds a
+# runaway chain (BUILD_PLAN 2.2 — the precondition below documents the
+# same gap), so a "live" run would grade whether the agent believes an
+# alert describing a fault that does not exist — alert-credulity, not
+# remediation. The runner refuses to select this scenario under --live
+# (exit 8, docs/runbook.md "Runner exit codes"). Unblocked by: a platform
+# chaos hook that seeds a genuinely stuck DAG chain, released and pinned —
+# flip both flags back in that PR.
+use_live_mcp: false
+use_live_llm: false
 alert:
   source: platform.dag
   severity: high

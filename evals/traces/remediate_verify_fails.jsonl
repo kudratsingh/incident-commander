@@ -1,0 +1,2 @@
+{"kind": "scenario_start", "scenario": "remediate_verify_fails", "live_mcp": false, "live_llm": false, "model": "claude-sonnet-4-6", "judge_model": "eval-judge", "timestamp": "2026-08-03T08:41:52.392823+00:00"}
+{"kind": "scenario_end", "scenario": "remediate_verify_fails", "final_state": "escalated", "tool_calls_used": 3, "passed": true, "timestamp": "2026-08-03T08:41:52.752976+00:00"}

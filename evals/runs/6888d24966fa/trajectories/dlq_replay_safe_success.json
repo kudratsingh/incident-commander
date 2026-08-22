@@ -1,0 +1,474 @@
+{
+  "scenario": "dlq_replay_safe_success",
+  "incident_id": "4c197efd-a36d-4300-8da4-106f70a8077f",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "4c197efd-a36d-4300-8da4-106f70a8077f",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_replay_safe",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.778379Z",
+      "updated_at": "2026-08-08T05:54:25.778379Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "4c197efd-a36d-4300-8da4-106f70a8077f",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_replay_safe",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c3c0df43-45f1-478d-8ae6-dd1b20c70af7",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "ae87594c536b8c3069e6f2d6c7e486bb"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:25.778429Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.778379Z",
+      "updated_at": "2026-08-08T05:54:25.778429Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "4c197efd-a36d-4300-8da4-106f70a8077f",
+      "state": "planning",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_replay_safe",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c3c0df43-45f1-478d-8ae6-dd1b20c70af7",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "ae87594c536b8c3069e6f2d6c7e486bb"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:25.778429Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ed131742-3e28-487f-a652-4bfe0d2d6e9c",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"aaaaaaaa-1111-1111-1111-000000000001\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: payload missing required field user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null},{\"id\":\"aaaaaaaa-1111-1111-1111-000000000002\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: payload missing required field user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null},{\"id\":\"aaaaaaaa-1111-1111-1111-000000000003\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: payload missing required field user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:02:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null}]}",
+          "timestamp": "2026-08-08T05:54:25.778446Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2068ad3c-6644-446a-b0a4-0e6ef35057b4",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "all entries hint=replay_safe; bulk-replay via category"
+          },
+          "result_summary": "planner handoff to PLANNING: all entries hint=replay_safe; bulk-replay via category",
+          "timestamp": "2026-08-08T05:54:25.778446Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "poison_message_replay_safe",
+          "confidence": 0.85,
+          "reasoning": "All 3 DLQ entries carry remediation_hint=replay_safe (schema validation failures the consumer now handles). Bulk-replay is safe.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.778379Z",
+      "updated_at": "2026-08-08T05:54:25.778446Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "4c197efd-a36d-4300-8da4-106f70a8077f",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_replay_safe",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c3c0df43-45f1-478d-8ae6-dd1b20c70af7",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "ae87594c536b8c3069e6f2d6c7e486bb"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:25.778429Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ed131742-3e28-487f-a652-4bfe0d2d6e9c",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"aaaaaaaa-1111-1111-1111-000000000001\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: payload missing required field user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null},{\"id\":\"aaaaaaaa-1111-1111-1111-000000000002\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: payload missing required field user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null},{\"id\":\"aaaaaaaa-1111-1111-1111-000000000003\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: payload missing required field user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:02:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null}]}",
+          "timestamp": "2026-08-08T05:54:25.778446Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2068ad3c-6644-446a-b0a4-0e6ef35057b4",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "all entries hint=replay_safe; bulk-replay via category"
+          },
+          "result_summary": "planner handoff to PLANNING: all entries hint=replay_safe; bulk-replay via category",
+          "timestamp": "2026-08-08T05:54:25.778446Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9761e7d9-636b-43c0-9223-af9db37ca728",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "poison_message_replay_safe"
+          },
+          "result_summary": "plan: replay_dlq_by_category({\"category\": \"replay_safe\", \"max_replays\": 50}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-08T05:54:25.782016Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "poison_message_replay_safe",
+          "confidence": 0.85,
+          "reasoning": "All 3 DLQ entries carry remediation_hint=replay_safe (schema validation failures the consumer now handles). Bulk-replay is safe.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "poison_message_replay_safe",
+        "action_tool": "replay_dlq_by_category",
+        "action_arguments": {
+          "category": "replay_safe",
+          "max_replays": 50
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "replay_safe",
+          "limit": 50
+        },
+        "verify_expectation": "After replay, the DLQ filtered by remediation_hint=replay_safe should be empty or shrunk substantially — the platform re-enqueued them so they leave the dead-letter state on next consumer poll.\n"
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.778379Z",
+      "updated_at": "2026-08-08T05:54:25.782016Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "4c197efd-a36d-4300-8da4-106f70a8077f",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_replay_safe",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c3c0df43-45f1-478d-8ae6-dd1b20c70af7",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "ae87594c536b8c3069e6f2d6c7e486bb"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:25.778429Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ed131742-3e28-487f-a652-4bfe0d2d6e9c",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"aaaaaaaa-1111-1111-1111-000000000001\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: payload missing required field user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null},{\"id\":\"aaaaaaaa-1111-1111-1111-000000000002\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: payload missing required field user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null},{\"id\":\"aaaaaaaa-1111-1111-1111-000000000003\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: payload missing required field user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:02:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null}]}",
+          "timestamp": "2026-08-08T05:54:25.778446Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2068ad3c-6644-446a-b0a4-0e6ef35057b4",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "all entries hint=replay_safe; bulk-replay via category"
+          },
+          "result_summary": "planner handoff to PLANNING: all entries hint=replay_safe; bulk-replay via category",
+          "timestamp": "2026-08-08T05:54:25.778446Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9761e7d9-636b-43c0-9223-af9db37ca728",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "poison_message_replay_safe"
+          },
+          "result_summary": "plan: replay_dlq_by_category({\"category\": \"replay_safe\", \"max_replays\": 50}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-08T05:54:25.782016Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9907fca3-d6f3-41e0-8758-bb4b00d89a74",
+          "tool_name": "replay_dlq_by_category",
+          "arguments": {
+            "category": "replay_safe",
+            "job_type": null,
+            "max_replays": 50,
+            "idempotency_key": "ecdb764efceb130de59132343edc90a5",
+            "delay_seconds": null
+          },
+          "result_summary": "{\"category\":\"replay_safe\",\"matched\":3,\"replayed\":3,\"scheduled\":0,\"failed\":0,\"job_ids\":[\"aaaaaaaa-1111-1111-1111-000000000001\",\"aaaaaaaa-1111-1111-1111-000000000002\",\"aaaaaaaa-1111-1111-1111-000000000003\"],\"execute_at\":null}",
+          "timestamp": "2026-08-08T05:54:25.784634Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "poison_message_replay_safe",
+          "confidence": 0.85,
+          "reasoning": "All 3 DLQ entries carry remediation_hint=replay_safe (schema validation failures the consumer now handles). Bulk-replay is safe.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "poison_message_replay_safe",
+        "action_tool": "replay_dlq_by_category",
+        "action_arguments": {
+          "category": "replay_safe",
+          "max_replays": 50
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "replay_safe",
+          "limit": 50
+        },
+        "verify_expectation": "After replay, the DLQ filtered by remediation_hint=replay_safe should be empty or shrunk substantially — the platform re-enqueued them so they leave the dead-letter state on next consumer poll.\n"
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-08T05:54:25.778379Z",
+      "updated_at": "2026-08-08T05:54:25.784634Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "4c197efd-a36d-4300-8da4-106f70a8077f",
+      "state": "resolved",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_replay_safe",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c3c0df43-45f1-478d-8ae6-dd1b20c70af7",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "ae87594c536b8c3069e6f2d6c7e486bb"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:25.778429Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ed131742-3e28-487f-a652-4bfe0d2d6e9c",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"aaaaaaaa-1111-1111-1111-000000000001\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: payload missing required field user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null},{\"id\":\"aaaaaaaa-1111-1111-1111-000000000002\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: payload missing required field user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null},{\"id\":\"aaaaaaaa-1111-1111-1111-000000000003\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: payload missing required field user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:02:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null}]}",
+          "timestamp": "2026-08-08T05:54:25.778446Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2068ad3c-6644-446a-b0a4-0e6ef35057b4",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "all entries hint=replay_safe; bulk-replay via category"
+          },
+          "result_summary": "planner handoff to PLANNING: all entries hint=replay_safe; bulk-replay via category",
+          "timestamp": "2026-08-08T05:54:25.778446Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9761e7d9-636b-43c0-9223-af9db37ca728",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "poison_message_replay_safe"
+          },
+          "result_summary": "plan: replay_dlq_by_category({\"category\": \"replay_safe\", \"max_replays\": 50}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-08T05:54:25.782016Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9907fca3-d6f3-41e0-8758-bb4b00d89a74",
+          "tool_name": "replay_dlq_by_category",
+          "arguments": {
+            "category": "replay_safe",
+            "job_type": null,
+            "max_replays": 50,
+            "idempotency_key": "ecdb764efceb130de59132343edc90a5",
+            "delay_seconds": null
+          },
+          "result_summary": "{\"category\":\"replay_safe\",\"matched\":3,\"replayed\":3,\"scheduled\":0,\"failed\":0,\"job_ids\":[\"aaaaaaaa-1111-1111-1111-000000000001\",\"aaaaaaaa-1111-1111-1111-000000000002\",\"aaaaaaaa-1111-1111-1111-000000000003\"],\"execute_at\":null}",
+          "timestamp": "2026-08-08T05:54:25.784634Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "63f908f5-3376-4c7a-97dc-f8a2b3636633",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": "replay_safe",
+            "limit": 50,
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"aaaaaaaa-1111-1111-1111-000000000001\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: payload missing required field user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null},{\"id\":\"aaaaaaaa-1111-1111-1111-000000000002\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: payload missing required field user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null},{\"id\":\"aaaaaaaa-1111-1111-1111-000000000003\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: payload missing required field user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:02:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null}]}",
+          "timestamp": "2026-08-08T05:54:25.784681Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8202315b-25a3-43fb-ad45-828bba64a280",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "After replay, the DLQ filtered by remediation_hint=replay_safe should be empty or shrunk substantially — the platform re-enqueued them so they leave the dead-letter state on next consumer poll.\n",
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "verified: replay_dlq_by_category returned requested=replayed=3, failed=0. The follow-up filtered probe confirms the DLQ replay_safe set is empty.\n",
+          "timestamp": "2026-08-08T05:54:25.784681Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "poison_message_replay_safe",
+          "confidence": 0.85,
+          "reasoning": "All 3 DLQ entries carry remediation_hint=replay_safe (schema validation failures the consumer now handles). Bulk-replay is safe.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "poison_message_replay_safe",
+        "action_tool": "replay_dlq_by_category",
+        "action_arguments": {
+          "category": "replay_safe",
+          "max_replays": 50
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "replay_safe",
+          "limit": 50
+        },
+        "verify_expectation": "After replay, the DLQ filtered by remediation_hint=replay_safe should be empty or shrunk substantially — the platform re-enqueued them so they leave the dead-letter state on next consumer poll.\n"
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-08T05:54:25.778379Z",
+      "updated_at": "2026-08-08T05:54:25.784681Z"
+    }
+  ],
+  "invocation_id": "6888d24966fa"
+}

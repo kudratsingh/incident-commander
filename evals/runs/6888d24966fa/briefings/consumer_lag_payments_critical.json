@@ -1,0 +1,19 @@
+{
+  "incident_id": "cdc3f3dd-c510-4749-8f1f-efb0a4cd06a2",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high group=payments-consumer",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"payments-consumer\",\"lag\":25000,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    }
+  ],
+  "findings": "payments-consumer lag reads 25000 messages against a paging threshold. Consumer is not keeping up with input rate.\n",
+  "recommendation": "Check whether payments-consumer pod is running and whether upstream producer volume spiked in the last 15 minutes.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.0,
+    "usd": "0"
+  }
+}

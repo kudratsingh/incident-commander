@@ -1,0 +1,55 @@
+{
+  "generated_at": "2026-08-08T05:53:57.325847Z",
+  "total": 1,
+  "passed": 1,
+  "failed": 0,
+  "judged_count": 1,
+  "judge_useful_count": 1,
+  "judge_mean_overall": 0.8,
+  "invocation_id": "a87a9f4e17d8",
+  "outcomes": [
+    {
+      "scenario": "planner_stops_immediately",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "planner_stops_immediately",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no forbidden replay ids set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.75,
+        "reasoning": "Findings correctly note the missing tool coverage; recommendation names a concrete next step (ask alert-source owner for a runbook).\n"
+      },
+      "failure_class": "passed",
+      "judge_error": null
+    }
+  ]
+}

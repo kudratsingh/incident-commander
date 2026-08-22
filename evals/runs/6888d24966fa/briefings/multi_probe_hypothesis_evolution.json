@@ -1,0 +1,23 @@
+{
+  "incident_id": "5d8986c5-574a-4aff-a94e-55aeb63bd1fb",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=high fingerprint=consumer_lag_high group=payments-consumer",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"payments-consumer\",\"lag\":8000,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"payments-consumer\",\"lag\":8000,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    }
+  ],
+  "findings": "payments-consumer lag at 8000 messages appears stable rather than growing, most consistent with a transient producer-side surge.\n",
+  "recommendation": "Watch the payments producer's rate for the next 15 minutes; if it does not drop, page the payments team to investigate upstream volume.\n",
+  "budget_used": {
+    "tool_calls": 2,
+    "tokens": 0,
+    "wall_seconds": 0.0,
+    "usd": "0"
+  }
+}

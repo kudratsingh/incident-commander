@@ -1,0 +1,39 @@
+{
+  "incident_id": "d41458a7-3aa7-44fc-b321-721f052a0d91",
+  "final_state": "resolved",
+  "alert_summary": "source=platform.dlq severity=high fingerprint=dlq_depth_warning_wait_replay",
+  "investigation_trail": [
+    {
+      "tool": "list_dlq_messages",
+      "summary": "{\"total\":2,\"items\":[{\"id\":\"bbbbbbbb-2222-2222-2222-000000000001\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: upstream SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null},{\"id\":\"bbbbbbbb-2222-2222-2222-000000000002\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: upstream SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null}]}"
+    },
+    {
+      "tool": "_planner_remediate",
+      "summary": "planner handoff to PLANNING: wait_and_replay entries — schedule delayed replay via ids"
+    },
+    {
+      "tool": "_planner_plan",
+      "summary": "plan: replay_dlq_by_ids({\"job_ids\": [\"bbbbbbbb-2222-2222-2222-000000000001\", \"bbbbbbbb-2222-2222-2222-000000000002\"], \"delay_seconds\": 300}) then verify via list_dlq_messages"
+    },
+    {
+      "tool": "replay_dlq_by_ids",
+      "summary": "{\"requested\":2,\"replayed\":0,\"scheduled\":2,\"failed\":0,\"results\":[{\"id\":\"bbbbbbbb-2222-2222-2222-000000000001\",\"ok\":true,\"error\":null,\"scheduled\":true,\"execute_at\":1753868400.0},{\"id\":\"bbbbbbbb-2222-2222-2222-000000000002\",\"ok\":true,\"error\":null,\"scheduled\":true,\"execute_at\":1753868400.0}]}"
+    },
+    {
+      "tool": "list_dlq_messages",
+      "summary": "{\"total\":2,\"items\":[{\"id\":\"bbbbbbbb-2222-2222-2222-000000000001\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: upstream SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null},{\"id\":\"bbbbbbbb-2222-2222-2222-000000000002\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: upstream SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null}]}"
+    },
+    {
+      "tool": "_verify_judge",
+      "summary": "verified: replay_dlq_by_ids returned scheduled=2 with per-job execute_at timestamps. Platform is holding the timer — no agent-side wait needed. Entries remain in the DLQ until execute_at fires, matching the platform's timer-held behavior.\n"
+    }
+  ],
+  "findings": "DLQ had 2 wait_and_replay entries (SMTP transient timeouts). Scheduled a 5-minute-delayed replay via replay_dlq_by_ids; platform confirmed 2 scheduled with execute_at ~5 min out. Platform holds the timer end-to-end.\n",
+  "recommendation": "Monitor SMTP relay health for 15 minutes. If jobs return to DLQ after the scheduled retry, page the SMTP relay owner — the dependency is not recovering on its own.\n",
+  "budget_used": {
+    "tool_calls": 3,
+    "tokens": 0,
+    "wall_seconds": 0.0,
+    "usd": "0"
+  }
+}

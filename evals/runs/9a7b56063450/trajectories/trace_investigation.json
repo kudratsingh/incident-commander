@@ -1,0 +1,149 @@
+{
+  "scenario": "trace_investigation",
+  "incident_id": "72f6d407-51a6-44ca-ad4b-1e7091314bde",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "72f6d407-51a6-44ca-ad4b-1e7091314bde",
+      "state": "triage",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "high",
+        "fingerprint": "job_failed",
+        "group": null,
+        "trace_id": "trace-abc-123",
+        "job_type": "process_payment"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:27.348665Z",
+      "updated_at": "2026-08-08T05:54:27.348665Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "72f6d407-51a6-44ca-ad4b-1e7091314bde",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "high",
+        "fingerprint": "job_failed",
+        "group": null,
+        "trace_id": "trace-abc-123",
+        "job_type": "process_payment"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "070fdc2d-f6dc-4297-87f6-f2bf378f973d",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "e4ac416c9e159e9d2fe620cc02696ffd"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:27.348704Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:27.348665Z",
+      "updated_at": "2026-08-08T05:54:27.348704Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "72f6d407-51a6-44ca-ad4b-1e7091314bde",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "high",
+        "fingerprint": "job_failed",
+        "group": null,
+        "trace_id": "trace-abc-123",
+        "job_type": "process_payment"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "070fdc2d-f6dc-4297-87f6-f2bf378f973d",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "e4ac416c9e159e9d2fe620cc02696ffd"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:27.348704Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "edcc66f8-7231-4cbd-bac9-34944b1ba4fd",
+          "tool_name": "get_trace",
+          "arguments": {
+            "trace_id": "trace-abc-123",
+            "include_audit": true
+          },
+          "result_summary": "{\"trace_id\":\"trace-abc-123\",\"jobs\":[{\"id\":\"job-1\",\"type\":\"process_payment\",\"status\":\"failed\",\"user_id\":null,\"retry_count\":3,\"error_message\":\"stripe api timeout\",\"created_at\":\"2026-07-28T10:00:00Z\",\"updated_at\":null}],\"audit_events\":[{\"action\":\"job.retried\",\"resource_type\":null,\"resource_id\":null,\"principal_type\":\"system\",\"created_at\":\"2026-07-28T10:01:00Z\",\"extra_data\":null}]}",
+          "timestamp": "2026-08-08T05:54:27.348720Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "af05f8de-b24a-4701-ac61-7f183a022394",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "root cause is external dependency; escalate for retry policy tuning"
+          },
+          "result_summary": "planner stop: root cause is external dependency; escalate for retry policy tuning",
+          "timestamp": "2026-08-08T05:54:27.348720Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "transient_dependency",
+          "name": "downstream_timeout",
+          "confidence": 0.85,
+          "reasoning": "Trace shows 3 retries against Stripe timing out — root cause is the external dependency, not the job code.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:27.348665Z",
+      "updated_at": "2026-08-08T05:54:27.348720Z"
+    }
+  ],
+  "invocation_id": "9a7b56063450"
+}

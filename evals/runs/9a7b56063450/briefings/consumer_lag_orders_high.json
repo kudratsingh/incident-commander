@@ -1,0 +1,19 @@
+{
+  "incident_id": "56f56cd6-28ca-42d9-89b2-ad6f0e6a9131",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=high fingerprint=consumer_lag_high group=orders-consumer",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"orders-consumer\",\"lag\":7500,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    }
+  ],
+  "findings": "orders-consumer Kafka group has a lag of 7500 messages, consistent with the paging alert. Consumer is behind its input rate.\n",
+  "recommendation": "Verify orders-consumer pod is running and check whether processing time per message has increased in the last 10 minutes.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.0,
+    "usd": "0"
+  }
+}

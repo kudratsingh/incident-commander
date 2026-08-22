@@ -1,0 +1,156 @@
+{
+  "scenario": "alert_storm",
+  "incident_id": "a6aa8601-e6e2-495f-93cc-0e130547a913",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "a6aa8601-e6e2-495f-93cc-0e130547a913",
+      "state": "triage",
+      "alert": {
+        "source": "platform.alerts",
+        "severity": "critical",
+        "fingerprint": "alert_storm_meta",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.720218Z",
+      "updated_at": "2026-08-08T05:54:25.720218Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "a6aa8601-e6e2-495f-93cc-0e130547a913",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.alerts",
+        "severity": "critical",
+        "fingerprint": "alert_storm_meta",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "a3c96ccf-b79d-4e46-abc0-2a4ed7a13b73",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "82982035ba3ce76e53f643ff4e640aab"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-08T05:54:25.720348Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.720218Z",
+      "updated_at": "2026-08-08T05:54:25.720348Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "a6aa8601-e6e2-495f-93cc-0e130547a913",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.alerts",
+        "severity": "critical",
+        "fingerprint": "alert_storm_meta",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "a3c96ccf-b79d-4e46-abc0-2a4ed7a13b73",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "82982035ba3ce76e53f643ff4e640aab"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-08T05:54:25.720348Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9fe28977-a3f3-4d52-afb8-368394095916",
+          "tool_name": "list_active_alerts",
+          "arguments": {
+            "severity": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":5,\"alerts\":[{\"id\":\"a1\",\"severity\":\"critical\",\"source\":\"platform.api\",\"title\":\"5xx spike\",\"description\":null,\"fired_at\":\"2026-07-28T10:00:00Z\",\"extra_data\":null},{\"id\":\"a2\",\"severity\":\"high\",\"source\":\"platform.db\",\"title\":\"latency high\",\"description\":null,\"fired_at\":\"2026-07-28T10:01:00Z\",\"extra_data\":null},{\"id\":\"a3\",\"severity\":\"high\",\"source\":\"platform.kafka\",\"title\":\"consumer lag\",\"description\":null,\"fired_at\":\"2026-07-28T10:01:00Z\",\"extra_data\":null},{\"id\":\"a4\",\"severity\":\"high\",\"source\":\"platform.dlq\",\"title\":\"dlq growth\",\"description\":null,\"fired_at\":\"2026-07-28T10:02:00Z\",\"extra_data\":null},{\"id\":\"a5\",\"severity\":\"medium\",\"source\":\"platform.cache\",\"title\":\"cache miss\",\"description\":null,\"fired_at\":\"2026-07-28T10:03:00Z\",\"extra_data\":null}]}",
+          "timestamp": "2026-08-08T05:54:25.720394Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c70d53cc-ab66-476f-b1e0-eaf4051bb24c",
+          "tool_name": "list_audit_events",
+          "arguments": {
+            "action": null,
+            "action_prefix": "deploy",
+            "principal_type": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":1,\"events\":[{\"id\":\"e1\",\"action\":\"deploy.completed\",\"principal_type\":\"ci\",\"principal_id\":\"ci-bot\",\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-07-28T09:58:00Z\",\"extra_data\":{\"version\":\"v1.42.0\"}}]}",
+          "timestamp": "2026-08-08T05:54:25.720394Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b1566bb5-6fa8-4195-b3b8-12b255d83317",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "deploy-triggered cascade; human should decide rollback"
+          },
+          "result_summary": "planner stop: deploy-triggered cascade; human should decide rollback",
+          "timestamp": "2026-08-08T05:54:25.720394Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "unknown",
+          "name": "cascading_failure",
+          "confidence": 0.9,
+          "reasoning": "Deploy v1.42.0 completed 2 minutes before the storm — high-confidence trigger candidate.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.720218Z",
+      "updated_at": "2026-08-08T05:54:25.720394Z"
+    }
+  ],
+  "invocation_id": "6888d24966fa"
+}

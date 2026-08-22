@@ -1,0 +1,147 @@
+{
+  "scenario": "dlq_backlog",
+  "incident_id": "b0d95a80-c8b5-4b61-8f2d-7397c96be34a",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "b0d95a80-c8b5-4b61-8f2d-7397c96be34a",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "queue": "dlq"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:27.149800Z",
+      "updated_at": "2026-08-08T05:54:27.149800Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "b0d95a80-c8b5-4b61-8f2d-7397c96be34a",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "queue": "dlq"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "b10a4676-1bfa-4727-a97e-614b21395f50",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:27.149854Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:27.149800Z",
+      "updated_at": "2026-08-08T05:54:27.149854Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "b0d95a80-c8b5-4b61-8f2d-7397c96be34a",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "queue": "dlq"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "b10a4676-1bfa-4727-a97e-614b21395f50",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:27.149854Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "cd469f54-f383-4368-8fa6-1f85605dfa4f",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"job-1\",\"type\":\"send_email\",\"error_message\":\"connection refused\",\"retry_count\":3,\"created_at\":\"2026-07-28T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":{\"root_cause_category\":null,\"summary\":\"downstream mailer offline\",\"suggested_fix\":null,\"is_retryable\":true,\"confidence\":0.8},\"remediation_hint\":null,\"extra\":null}]}",
+          "timestamp": "2026-08-08T05:54:27.149871Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f30a5939-b24b-42e0-8707-f3096c53646c",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "root-cause candidate identified; hand off for retry/repair"
+          },
+          "result_summary": "planner stop: root-cause candidate identified; hand off for retry/repair",
+          "timestamp": "2026-08-08T05:54:27.149871Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "dependency_offline",
+          "confidence": 0.8,
+          "reasoning": "DLQ contains retry-exhausted email jobs failing with connection refused.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:27.149800Z",
+      "updated_at": "2026-08-08T05:54:27.149871Z"
+    }
+  ],
+  "invocation_id": "9a7b56063450"
+}

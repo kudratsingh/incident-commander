@@ -1,0 +1,19 @@
+{
+  "incident_id": "b9c35d52-2c72-40b2-ace9-d0693b9afe2e",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=high fingerprint=consumer_lag_high",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"unknown\",\"lag\":42,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    }
+  ],
+  "findings": "The paging alert did not name a consumer group. A fallback probe against \"unknown\" returned lag=42, but the alert payload is too thin to attribute the signal.\n",
+  "recommendation": "Ask the alert-source owner to include the consumer group in future payloads; in the meantime, spot-check the top three lag-prone groups.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.0,
+    "usd": "0"
+  }
+}

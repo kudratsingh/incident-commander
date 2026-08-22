@@ -1,0 +1,19 @@
+{
+  "incident_id": "1a09ef3d-a83e-49c7-83e4-7564cb2cd09e",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=medium fingerprint=consumer_lag_warning group=notifications-consumer",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    }
+  ],
+  "findings": "notifications-consumer shows a lag of 500 messages, above the warning threshold but not paging.\n",
+  "recommendation": "Watch the trend for the next 15 minutes; escalate to paging if lag continues to grow.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.0,
+    "usd": "0"
+  }
+}

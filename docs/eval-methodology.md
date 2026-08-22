@@ -132,7 +132,7 @@ Four properties are load-bearing:
 
 `attempts` / `delay_seconds` exist for faults that take time to become observable. `remediate_consumer_lag_success` is the case: `kill_consumer` stops the consumer immediately, but lag is recomputed on the platform's 60s metrics interval, so the number is still 0 for up to a minute after seeding. A single look would fail a correctly seeded world.
 
-Two remediation scenarios deliberately have none, and `tests/unit/test_preconditions.py` holds the reasons next to the names so the gap cannot become invisible: `remediate_stale_cache_success`, because no read tool exposes a Redis key and the fault is genuinely unobservable; and `remediate_verify_fails`, which never runs live. Every other remediation scenario has one, and the test fails if a new one arrives without either.
+Two remediation scenarios deliberately have none, and `tests/unit/test_preconditions.py` holds the reasons next to the names so the gap cannot become invisible: `remediate_stale_cache_success`, because no read tool exposes a Redis key and the fault is genuinely unobservable — the same gap that now makes it canned-only; and `remediate_verify_fails`, which never runs live. Every other remediation scenario has one, and the test fails if a new one arrives without either.
 
 ## Live vs canned modes
 
@@ -141,9 +141,12 @@ Every scenario has a `use_live_*` pair of flags. The runner interprets them as *
 - `use_live_mcp: true` → prefer live platform if `PLATFORM_MCP_URL` is real; else fall back to `canned_tool_responses`
 - `use_live_llm: true` → prefer live Anthropic if `ANTHROPIC_API_KEY` is real; else fall back to `canned_llm_responses`
 
-No scenario ever "skips" — every one runs in both modes. This is why `make eval` (offline, CI-safe) exercises the same 33 scenarios `make eval-live` does.
+No scenario ever *silently* skips: `make eval` (offline, CI-safe) always runs the full suite canned, and a declared-live scenario under a placeholder env falls back to canned rather than vanishing.
 
-Four scenarios are deliberately canned-only (`use_live_mcp: false` + `use_live_llm: false`): they test agent-side error handling that a real platform doesn't produce (`tool_missing_response`, `tool_output_schema_mismatch`, `tool_result_marked_error`, `planner_stops_immediately`).
+A scenario with *neither* flag is **canned-only**, and that carries a hard consequence under `--live`: a live selection containing one is refused outright, before any env probe, guard, or spend (exit 8, see the runbook's exit-code table). Without the refusal the scenario would fall back to canned inside the live invocation and its green would land in the live report's pass count — a row that grades fixtures, not the world. `--smoke` is exempt: its stage deliberately mixes canned harness-sanity rows with live reads, and its report is read that way. Canned-only scenarios come in two kinds:
+
+- **Agent-side behavior a healthy platform doesn't produce**: `tool_missing_response`, `tool_output_schema_mismatch`, `tool_result_marked_error`, `planner_stops_immediately`, and the `noise_*` triage set.
+- **Faults the live platform cannot manufacture or expose**: `remediate_verify_fails` (a healthy platform can't supply a fault verify then fails to see cleared), `remediate_runaway_saga_success` (the seeded DAG auto-completes within seconds; no chaos hook builds a runaway chain), `remediate_stale_cache_success` (`create_stale_cache` writes a Redis key invisible to every read tool). Each YAML documents the reason and the platform change that unblocks it directly above the flags; `tests/unit/test_scenario_loader.py::TestCannedOnlyMarking` pins the marker.
 
 **Provenance is part of the result** ([ADR 0013](ADR/0013-run-provenance-is-part-of-the-eval-result.md)). Which mode each leg actually ran in is persisted, not just printed:
 

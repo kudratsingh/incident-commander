@@ -1130,6 +1130,35 @@ def main() -> int:
             )
             print("no scenarios ran, nothing was spent")
             return 6
+    if live and not smoke:
+        # A canned-only scenario (no live leg declared) cannot run against
+        # the live platform: the platform cannot manufacture or expose its
+        # fault, so run_scenario would silently serve the canned fixtures
+        # and the row would land in the live report's pass count as if the
+        # world had been graded. Refusing the selection is the only honest
+        # outcome — a canned green here is a statement about fixtures, not
+        # the agent. Each such scenario's YAML says why it is canned-only
+        # and what platform change unblocks it. --smoke is exempt by
+        # design: its stage deliberately mixes canned harness-sanity
+        # scenarios (noise_*, tool_*, ...) with live reads, and its report
+        # is read that way (docs/eval-methodology.md, "The read-only smoke
+        # pass"). Runs before the ADR 0020 mutating gate so its "run each
+        # one alone" advice is only ever issued for scenarios that CAN run.
+        canned_only = sorted(s.name for s in scenarios if s.canned_only)
+        if canned_only:
+            print(
+                f"LIVE FAIL: {len(canned_only)} canned-only scenario(s) selected — "
+                f"{', '.join(canned_only)}. Each declares use_live_mcp/use_live_llm "
+                "false because the live platform cannot manufacture its fault; the "
+                "comment above those flags in the scenario YAML says why, and what "
+                "platform change unblocks it."
+            )
+            print(
+                "Run them offline instead:\n"
+                + "\n".join(f"  make eval ONLY={name}" for name in canned_only)
+            )
+            print("no scenarios ran, nothing was spent")
+            return 8
     if live:
         # One state-mutating scenario per invocation, enforced rather than
         # remembered (ADR 0020). Nine remediation scenarios share ONE platform,

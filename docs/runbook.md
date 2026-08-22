@@ -142,7 +142,15 @@ make eval-smoke
 #    different database and reports success.
 make eval-live ONLY=remediate_consumer_lag_success && make eval-reset
 make eval-live ONLY=remediate_dlq_backlog_success  && make eval-reset
-make eval-live ONLY=remediate_stale_cache_success  && make eval-reset
+
+# remediate_stale_cache_success, remediate_runaway_saga_success and
+# remediate_verify_fails are NOT in this list: they are canned-only
+# (use_live_mcp/use_live_llm false in the YAML, with the reason and the
+# unblocking platform change commented above the flags), because the live
+# platform cannot manufacture their faults — create_stale_cache writes a
+# Redis key no read tool can observe, and no chaos hook builds a runaway
+# DAG. Selecting one under --live is refused with exit 8 before any
+# spend; they run (and must stay green) in the offline suite instead.
 
 # After any consumer restart — the agent's restart_consumer_group or a
 # manual restore — confirm liveness with `rpk group describe
@@ -256,6 +264,31 @@ the degradation is now recorded in the report (`degraded_count` in
 | 4 | principal guard: the smoke token holds more than read scope |
 | 5 | post-stage audit failed, was unreadable, or was inconclusive |
 | 6 | `--smoke` selected a scenario that declares `chaos_setup` — a read-only stage does not seed chaos |
+| 7 | `--live` selected more than one state-mutating scenario — nothing resets the shared platform between them (ADR 0020) |
+| 8 | `--live` selected a canned-only scenario (`use_live_mcp`/`use_live_llm` both false) — the platform cannot manufacture its fault, so a "live" row would really be canned |
+
+### A live selection may not contain a canned-only scenario (exit 8)
+
+A scenario with both `use_live_mcp` and `use_live_llm` false is
+**canned-only**: a claim that the live platform cannot manufacture or
+expose its fault, not that nobody wired it up. Three scenarios carry the
+marker today — `remediate_verify_fails` (a healthy platform cannot supply
+a fault that verify then fails to see cleared), `remediate_runaway_saga_success`
+(the seeded DAG auto-completes within seconds and no chaos hook builds a
+runaway chain), and `remediate_stale_cache_success` (`create_stale_cache`
+writes a Redis key invisible to every read tool). Each YAML documents the
+reason and the platform change that unblocks it directly above the flags.
+
+Without the refusal, `run_scenario` would fall back to canned for such a
+scenario even under `--live`, and the row would land in the live report's
+pass count as a green that grades fixtures, not the agent. So the runner
+refuses the *selection* — after `--only` filtering, before the ADR 0020
+mutating gate, before any env probe, guard, or spend. There is no opt-out
+flag; re-enabling a scenario means flipping its flags in the YAML once the
+platform capability it names has shipped and been pinned. `--smoke` is
+exempt by design: its default selection deliberately mixes canned
+harness-sanity scenarios (`noise_*`, `tool_*`, ...) with live reads, and
+its report is read that way.
 
 ### A smoke selection may not seed chaos (S-03)
 
@@ -378,7 +411,12 @@ operate by:
 
   Forgetting it fails safely: the scenario's precondition polls for
   `lag >= 1` over 6×15s and aborts before any model call, reporting that
-  the fault was never manufactured. As of platform v0.4.7 the previously-blocked `remediate_stale_cache_success` uses the new `create_stale_cache` chaos hook and is winnable live.
+  the fault was never manufactured. (`remediate_stale_cache_success` is
+  not winnable live despite the v0.4.7 `create_stale_cache` hook: the
+  hook writes one Redis key that no read tool can observe, so the
+  miss-rate collapse the scenario grades never exists on the platform.
+  It is canned-only — a `--live` selection is refused with exit 8 —
+  until a platform `get_cache_key_info` read tool ships and is pinned.)
 
 ## Debugging one scenario
 

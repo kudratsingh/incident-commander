@@ -10,13 +10,22 @@ tags:
 - cache
 - live-mcp
 - live-llm
-use_live_mcp: true
-use_live_llm: true
+# Canned-only: the fault is unobservable live. create_stale_cache writes
+# one Redis key that no read tool can see — get_redis_health returns
+# server-wide stats only — so the "miss-rate collapse" this scenario
+# grades cannot exist on the live platform, and with no read surface
+# there is no precondition that could abort honestly (the same gap
+# recorded in tests/unit/test_preconditions.py). The runner refuses to
+# select this scenario under --live (exit 8, docs/runbook.md "Runner
+# exit codes"). Unblocked by: a platform get_cache_key_info read tool,
+# released and pinned — flip both flags back in that PR.
+use_live_mcp: false
+use_live_llm: false
 # v0.4.7 chaos hook — seeds cache:jobs:worker-dispatcher:hot_set with
 # obvious-fake stale content so the agent has something to observe +
 # invalidate. Compensator is invalidate_cache_key on that same key.
-# Ignored in canned/offline runs (canned get_redis_health already
-# encodes the collapsed hit rate).
+# Kept for the day the read tool ships; never fired in canned runs
+# (canned get_redis_health already encodes the collapsed hit rate).
 chaos_setup:
   name: create_stale_cache
   arguments:

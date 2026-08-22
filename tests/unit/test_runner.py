@@ -1866,6 +1866,116 @@ class TestLiveRefusesABatchOfMutatingScenarios:
         assert runner_module.main() != 7
 
 
+class TestLiveRefusesCannedOnlySelection:
+    """A canned-only scenario in a --live selection is refused: exit 8.
+
+    ``use_live_mcp``/``use_live_llm`` false is a statement about the WORLD,
+    not the env: the platform cannot manufacture (or expose) the fault —
+    remediate_runaway_saga_success's seeded DAG auto-completes and no chaos
+    hook builds a runaway one; remediate_stale_cache_success's seeded Redis
+    key is invisible to every read tool. Without this gate ``run_scenario``
+    silently serves the canned fixtures and the row lands in the live
+    report's pass count as if the world had been graded. Refusal is the
+    honest bucket: explicit, pre-spend, never a silent pass and never a
+    misattributed red.
+    """
+
+    _CANNED_ONLY_SHIPPED = (
+        "remediate_runaway_saga_success",
+        "remediate_stale_cache_success",
+        "remediate_verify_fails",
+    )
+
+    @staticmethod
+    def _forbid_clients_and_hooks(monkeypatch: pytest.MonkeyPatch) -> None:
+        # The refusal must precede every guard, preflight, and chaos hook —
+        # nothing may touch the platform on a refused selection.
+        def _boom(*_a: Any, **_kw: Any) -> Any:
+            raise AssertionError("a refused selection must not touch the platform")
+
+        monkeypatch.setattr(runner_module, "make_client", _boom)
+        monkeypatch.setattr(runner_module, "preflight_auth", _boom)
+        monkeypatch.setattr(runner_module, "invoke_chaos_hook", _boom)
+
+    @pytest.mark.parametrize("name", _CANNED_ONLY_SHIPPED)
+    def test_shipped_canned_only_scenario_selected_live_is_refused(
+        self,
+        name: str,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # Real shipped corpus, real-looking env: this pins BOTH halves —
+        # the YAML marker (flags false) and the runner gate that honors it.
+        # At HEAD (gate absent) the runaway_saga/stale_cache selections ran
+        # canned to exit 0 inside a "live" invocation.
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        _forbid_run_all(monkeypatch)
+        self._forbid_clients_and_hooks(monkeypatch)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--only", name])
+        assert runner_module.main() == 8
+        out = capsys.readouterr().out
+        assert "LIVE FAIL" in out
+        assert name in out
+        assert f"make eval ONLY={name}" in out
+        assert "no scenarios ran, nothing was spent" in out
+
+    def test_the_refusal_is_knowable_without_touching_the_env(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Placeholder env: a wrong SELECTION outranks a wrong env (the ADR
+        # 0020 precedent). Without the gate this exact invocation sails past
+        # the degraded fail-fast — canned-only scenarios are not "degraded",
+        # canned is their intended mode — and runs canned to exit 0: the
+        # silent pass this class exists to forbid.
+        _isolate_settings_env(monkeypatch, tmp_path, _PLACEHOLDER_LIVE_ENV)
+        _forbid_run_all(monkeypatch)
+        self._forbid_clients_and_hooks(monkeypatch)
+        monkeypatch.setattr(
+            sys, "argv", ["evals.runner", "--live", "--only", "remediate_runaway_saga_success"]
+        )
+        assert runner_module.main() == 8
+
+    def test_smoke_may_still_select_canned_only_scenarios(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The exemption, pinned: SMOKE_ONLY deliberately includes canned-only
+        # harness-sanity scenarios (noise_*, tool_*), and the smoke report
+        # mixes canned and live rows by design (docs/eval-methodology.md,
+        # "The read-only smoke pass"). Gating smoke would gut that stage.
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(runner_module, "load_scenarios", lambda _d: [_passing_scenario()])
+        monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
+        monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: _StubGuardClient())
+        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module, "assert_no_tier1_successes", lambda _client, _since, **_kw: None
+        )
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
+        assert runner_module.main() == 0
+
+    def test_a_live_declaring_selection_is_not_refused(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The gate keys on the declared flags, not on a name prefix.
+        live_scenario = _passing_scenario().model_copy(update={"use_live_mcp": True})
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(runner_module, "load_scenarios", lambda _d: [live_scenario])
+        monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: _StubGuardClient())
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        assert runner_module.main() == 0
+
+    def test_canned_only_is_the_absence_of_every_live_leg(self) -> None:
+        # The marker is derived from the existing flags, not a parallel
+        # field that could drift from them.
+        base = _passing_scenario()
+        assert base.canned_only is True
+        assert base.model_copy(update={"use_live_mcp": True}).canned_only is False
+        assert base.model_copy(update={"use_live_llm": True}).canned_only is False
+
+
 class TestCrashedRowsKeepTheirProvenance:
     """A crashed row must not claim it ran canned.
 

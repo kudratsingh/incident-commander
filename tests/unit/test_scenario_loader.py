@@ -213,6 +213,39 @@ _STRUCTURED_EVIDENCE_SCENARIOS: frozenset[str] = frozenset(
 )
 
 
+class TestCannedOnlyMarking:
+    """The unrunnable remediation scenarios stay marked canned-only.
+
+    Each entry is a claim that the live platform cannot manufacture (or
+    expose) the scenario's fault, so a live run would grade the agent on a
+    premise that does not exist. The marker is the ``use_live_*`` flags in
+    the YAML (with the reason and the unblocking platform change commented
+    right above them); the runner refuses a --live selection containing any
+    of these (exit 8). Removing a name here needs the platform capability
+    it is waiting on: a stuck-DAG chaos hook for runaway_saga, a
+    get_cache_key_info read tool for stale_cache, a seedable dead consumer
+    group for verify_fails.
+    """
+
+    _CANNED_ONLY: frozenset[str] = frozenset(
+        {
+            "remediate_runaway_saga_success",
+            "remediate_stale_cache_success",
+            "remediate_verify_fails",
+        }
+    )
+
+    def test_unmanufacturable_scenarios_are_canned_only(self) -> None:
+        by_name = {s.name: s for s in _shipped_scenarios()}
+        not_marked = sorted(name for name in self._CANNED_ONLY if not by_name[name].canned_only)
+        assert not_marked == [], (
+            f"scenarios whose fault the live platform cannot manufacture have "
+            f"regained a live leg: {not_marked}. If the platform capability "
+            "shipped and is pinned, remove the name here and in the YAML "
+            "comment; otherwise flip use_live_mcp/use_live_llm back to false."
+        )
+
+
 class TestEvidenceExpectationHygiene:
     """No shipped scenario may assert a grader-toxic evidence substring.
 

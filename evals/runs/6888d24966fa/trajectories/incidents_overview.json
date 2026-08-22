@@ -1,0 +1,148 @@
+{
+  "scenario": "incidents_overview",
+  "incident_id": "ef9d9738-cdf8-462a-a293-af2a9134c042",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "ef9d9738-cdf8-462a-a293-af2a9134c042",
+      "state": "triage",
+      "alert": {
+        "source": "platform.api",
+        "severity": "high",
+        "fingerprint": "elevated_error_rate",
+        "group": null,
+        "service": "api-gateway"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.794505Z",
+      "updated_at": "2026-08-08T05:54:25.794505Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ef9d9738-cdf8-462a-a293-af2a9134c042",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.api",
+        "severity": "high",
+        "fingerprint": "elevated_error_rate",
+        "group": null,
+        "service": "api-gateway"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e1a4d211-4c93-4fbc-a47d-51323634db71",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "26fb1911e2d21aa6706bc1edbcfc89f6"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:25.794528Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.794505Z",
+      "updated_at": "2026-08-08T05:54:25.794528Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ef9d9738-cdf8-462a-a293-af2a9134c042",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.api",
+        "severity": "high",
+        "fingerprint": "elevated_error_rate",
+        "group": null,
+        "service": "api-gateway"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e1a4d211-4c93-4fbc-a47d-51323634db71",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "26fb1911e2d21aa6706bc1edbcfc89f6"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:25.794528Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5b79e7e9-5af2-4fdf-90b1-b2865376290e",
+          "tool_name": "list_incidents",
+          "arguments": {
+            "include_resolved": false,
+            "severity": null,
+            "source": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":2,\"incidents\":[{\"id\":\"11111111-1111-1111-1111-111111111111\",\"severity\":\"high\",\"source\":\"platform.api\",\"title\":\"elevated error rate\",\"description\":null,\"fired_at\":\"2026-07-28T09:55:00Z\",\"resolved_at\":null,\"is_active\":true},{\"id\":\"22222222-2222-2222-2222-222222222222\",\"severity\":\"medium\",\"source\":\"platform.dlq\",\"title\":\"dlq depth warning\",\"description\":null,\"fired_at\":\"2026-07-28T09:50:00Z\",\"resolved_at\":null,\"is_active\":true}]}",
+          "timestamp": "2026-08-08T05:54:25.794540Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2fed9449-9433-4cd2-9d65-784f8f82d9ef",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "correlated incident cluster identified; human decision required"
+          },
+          "result_summary": "planner stop: correlated incident cluster identified; human decision required",
+          "timestamp": "2026-08-08T05:54:25.794540Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "unknown",
+          "name": "cascading_incident",
+          "confidence": 0.75,
+          "reasoning": "Two active incidents (api + dlq) firing close together suggest a shared root cause upstream.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.794505Z",
+      "updated_at": "2026-08-08T05:54:25.794540Z"
+    }
+  ],
+  "invocation_id": "6888d24966fa"
+}

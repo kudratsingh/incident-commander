@@ -1,0 +1,145 @@
+{
+  "scenario": "saga_stuck",
+  "incident_id": "680c524f-9a59-41d9-92d6-d9725519ed62",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "680c524f-9a59-41d9-92d6-d9725519ed62",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "high",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.865461Z",
+      "updated_at": "2026-08-08T05:54:25.865461Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "680c524f-9a59-41d9-92d6-d9725519ed62",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "high",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "6abd90e5-f1d7-4076-a929-9035ed7a28cb",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:25.865494Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.865461Z",
+      "updated_at": "2026-08-08T05:54:25.865494Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "680c524f-9a59-41d9-92d6-d9725519ed62",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "high",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "6abd90e5-f1d7-4076-a929-9035ed7a28cb",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:25.865494Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "3c32630f-7479-42f2-af6b-ee2cf8f83c3c",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+          },
+          "result_summary": "{\"seed_id\":\"25220882-1820-5cd3-b09b-f866ff5823c9\",\"nodes\":[{\"id\":\"n1\",\"type\":\"reserve_inventory\",\"status\":\"succeeded\",\"retry_count\":0,\"created_at\":\"2026-07-28T10:00:00Z\"},{\"id\":\"n2\",\"type\":\"charge_card\",\"status\":\"running\",\"retry_count\":2,\"created_at\":\"2026-07-28T10:01:00Z\"},{\"id\":\"n3\",\"type\":\"ship_order\",\"status\":\"pending\",\"retry_count\":0,\"created_at\":\"2026-07-28T10:01:00Z\"}],\"edges\":[{\"from_id\":\"n1\",\"to_id\":\"n2\"},{\"from_id\":\"n2\",\"to_id\":\"n3\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-08-08T05:54:25.865507Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b82b8752-5b19-45b0-a515-a3a2f31fd4a6",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "stuck node identified; human should decide compensation policy"
+          },
+          "result_summary": "planner stop: stuck node identified; human should decide compensation policy",
+          "timestamp": "2026-08-08T05:54:25.865507Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "runaway_saga",
+          "name": "stuck_saga_node",
+          "confidence": 0.85,
+          "reasoning": "charge_card node is running with 2 retries while downstream ship_order waits — payment dependency is failing.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.865461Z",
+      "updated_at": "2026-08-08T05:54:25.865507Z"
+    }
+  ],
+  "invocation_id": "6888d24966fa"
+}

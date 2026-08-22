@@ -1,0 +1,14 @@
+{
+  "incident_id": "e30a4644-e010-4c20-bf33-90a445f6a577",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=high fingerprint=consumer_lag_high group=billing-consumer",
+  "investigation_trail": [],
+  "findings": "The get_consumer_lag probe returned is_error=True from the platform side, so the lag reading is not trustworthy.\n",
+  "recommendation": "Retry manually after the platform-side Kafka client recovers, or fall back to CloudWatch's consumer-lag metric for a second reading.\n",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.0,
+    "usd": "0"
+  }
+}

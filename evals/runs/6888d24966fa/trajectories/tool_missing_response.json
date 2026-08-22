@@ -1,0 +1,132 @@
+{
+  "scenario": "tool_missing_response",
+  "incident_id": "5c41e9f9-993b-494b-a195-4a3c364025d4",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "5c41e9f9-993b-494b-a195-4a3c364025d4",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "payments-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.868966Z",
+      "updated_at": "2026-08-08T05:54:25.868966Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "5c41e9f9-993b-494b-a195-4a3c364025d4",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "payments-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "addbc477-4d7a-4ee8-abec-c340b1a1bf96",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:25.868988Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.868966Z",
+      "updated_at": "2026-08-08T05:54:25.868988Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "5c41e9f9-993b-494b-a195-4a3c364025d4",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "payments-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "addbc477-4d7a-4ee8-abec-c340b1a1bf96",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:25.868988Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "69d11699-bd3b-466d-8e64-2903a6e544a2",
+          "tool_name": "_planner_escalate",
+          "arguments": {
+            "reason": "tool error (get_consumer_lag): MCP error -32601: no canned response for tool: get_consumer_lag"
+          },
+          "result_summary": "tool error (get_consumer_lag): MCP error -32601: no canned response for tool: get_consumer_lag",
+          "timestamp": "2026-08-08T05:54:25.869007Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.5,
+          "reasoning": "Paging alert on payments-consumer; check current lag reading.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.868966Z",
+      "updated_at": "2026-08-08T05:54:25.869007Z"
+    }
+  ],
+  "invocation_id": "6888d24966fa"
+}

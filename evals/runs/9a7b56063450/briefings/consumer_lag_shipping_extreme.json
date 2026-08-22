@@ -1,0 +1,19 @@
+{
+  "incident_id": "12462b71-c688-4497-bf5b-33cba7075c14",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high group=shipping-consumer",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"shipping-consumer\",\"lag\":2500000,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    }
+  ],
+  "findings": "shipping-consumer lag reads 2500000 messages — a magnitude consistent with a stopped consumer rather than slow processing.\n",
+  "recommendation": "Check whether shipping-consumer pod is running at all; if it is, check for a deployment or config change in the last hour.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.0,
+    "usd": "0"
+  }
+}

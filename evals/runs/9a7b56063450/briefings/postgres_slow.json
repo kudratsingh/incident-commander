@@ -1,0 +1,19 @@
+{
+  "incident_id": "c60a8864-7109-4b60-bb11-ce6574c9d0b1",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.db severity=high fingerprint=db_latency_high",
+  "investigation_trail": [
+    {
+      "tool": "get_postgres_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":420.5,\"active_connections\":95,\"dialect\":\"postgresql\",\"error\":null}"
+    }
+  ],
+  "findings": "Postgres ping latency is 420ms (usual baseline < 20ms) with 95 active connections — the DB is degraded but still responsive.\n",
+  "recommendation": "Check for long-running queries and consider raising the connection pool limit or scaling the DB tier.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.0,
+    "usd": "0"
+  }
+}

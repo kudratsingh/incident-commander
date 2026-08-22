@@ -1,0 +1,39 @@
+{
+  "incident_id": "d0db76ee-cffc-45c3-adbd-4512695660e7",
+  "final_state": "resolved",
+  "alert_summary": "source=platform.kafka severity=high fingerprint=consumer_stalled",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":15000,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    },
+    {
+      "tool": "_planner_remediate",
+      "summary": "planner handoff to PLANNING: consumer_saturation confirmed; restart_consumer_group applies"
+    },
+    {
+      "tool": "_planner_plan",
+      "summary": "plan: restart_consumer_group({\"consumer_group\": \"worker-dispatcher\"}) then verify via get_consumer_lag"
+    },
+    {
+      "tool": "restart_consumer_group",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"kill_key_cleared\":true,\"latency_key_cleared\":false,\"accepted\":true}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    },
+    {
+      "tool": "_verify_judge",
+      "summary": "verified: The verify probe reads lag 0 after the restart: the kill flag was cleared (kill_key_cleared=true), the supervisor re-spawned the consumer, and the backlog has drained.\n"
+    }
+  ],
+  "findings": "worker-dispatcher had stopped processing while retaining its group assignment; lag climbed to 15000. The agent restarted the consumer group (kill flag cleared); the supervisor re-spawned it and the follow-up probe shows lag back at 0.\n",
+  "recommendation": "Monitor lag for the next 5 minutes to confirm sustained recovery. If the same alert re-fires within 30 minutes, escalate — a restart-loop suggests a deeper issue than saturation.\n",
+  "budget_used": {
+    "tool_calls": 3,
+    "tokens": 0,
+    "wall_seconds": 0.0,
+    "usd": "0"
+  }
+}

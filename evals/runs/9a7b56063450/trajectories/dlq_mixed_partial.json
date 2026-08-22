@@ -1,0 +1,474 @@
+{
+  "scenario": "dlq_mixed_partial",
+  "incident_id": "efc1b848-1544-4083-aba2-ef939a1acbb8",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "efc1b848-1544-4083-aba2-ef939a1acbb8",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_mixed",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:27.161597Z",
+      "updated_at": "2026-08-08T05:54:27.161597Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "efc1b848-1544-4083-aba2-ef939a1acbb8",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_mixed",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "2fd0f642-d5fe-4f2f-aca7-3d4da9214cf8",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "50a7e6f654c3a8ee0ac8967937258cf3"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:27.161635Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:27.161597Z",
+      "updated_at": "2026-08-08T05:54:27.161635Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "efc1b848-1544-4083-aba2-ef939a1acbb8",
+      "state": "planning",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_mixed",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "2fd0f642-d5fe-4f2f-aca7-3d4da9214cf8",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "50a7e6f654c3a8ee0ac8967937258cf3"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:27.161635Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "19101912-4fa2-4ae6-b3f3-fbf01a9eba1e",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"dddddddd-4444-4444-4444-000000000001\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: missing user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null},{\"id\":\"dddddddd-4444-4444-4444-000000000002\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null},{\"id\":\"dddddddd-4444-4444-4444-000000000003\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() at row 42\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:02:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"human_required\",\"extra\":null}]}",
+          "timestamp": "2026-08-08T05:54:27.161653Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7084236a-cb01-4079-b5d5-a8e0162373ae",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "replay the safe entries; escalate the human_required one"
+          },
+          "result_summary": "planner handoff to PLANNING: replay the safe entries; escalate the human_required one",
+          "timestamp": "2026-08-08T05:54:27.161653Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "mixed_dlq_pattern",
+          "confidence": 0.85,
+          "reasoning": "Mixed categories: 1 replay_safe (schema issue), 1 wait_and_replay (SMTP transient), 1 human_required (data bug). Bulk-replay the safe one; leave the persistent bug for the human briefing.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:27.161597Z",
+      "updated_at": "2026-08-08T05:54:27.161653Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "efc1b848-1544-4083-aba2-ef939a1acbb8",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_mixed",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "2fd0f642-d5fe-4f2f-aca7-3d4da9214cf8",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "50a7e6f654c3a8ee0ac8967937258cf3"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:27.161635Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "19101912-4fa2-4ae6-b3f3-fbf01a9eba1e",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"dddddddd-4444-4444-4444-000000000001\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: missing user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null},{\"id\":\"dddddddd-4444-4444-4444-000000000002\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null},{\"id\":\"dddddddd-4444-4444-4444-000000000003\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() at row 42\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:02:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"human_required\",\"extra\":null}]}",
+          "timestamp": "2026-08-08T05:54:27.161653Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7084236a-cb01-4079-b5d5-a8e0162373ae",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "replay the safe entries; escalate the human_required one"
+          },
+          "result_summary": "planner handoff to PLANNING: replay the safe entries; escalate the human_required one",
+          "timestamp": "2026-08-08T05:54:27.161653Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "464f881b-0d30-452f-8f24-abe851dc5074",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "mixed_dlq_pattern"
+          },
+          "result_summary": "plan: replay_dlq_by_category({\"category\": \"replay_safe\", \"max_replays\": 50}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-08T05:54:27.165466Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "mixed_dlq_pattern",
+          "confidence": 0.85,
+          "reasoning": "Mixed categories: 1 replay_safe (schema issue), 1 wait_and_replay (SMTP transient), 1 human_required (data bug). Bulk-replay the safe one; leave the persistent bug for the human briefing.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "mixed_dlq_pattern",
+        "action_tool": "replay_dlq_by_category",
+        "action_arguments": {
+          "category": "replay_safe",
+          "max_replays": 50
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "replay_safe",
+          "limit": 50
+        },
+        "verify_expectation": "The replay_safe filter should return an empty items list after replay. Other categories (wait_and_replay, human_required) still appear in unfiltered probes and go into the escalation briefing.\n"
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:27.161597Z",
+      "updated_at": "2026-08-08T05:54:27.165466Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "efc1b848-1544-4083-aba2-ef939a1acbb8",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_mixed",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "2fd0f642-d5fe-4f2f-aca7-3d4da9214cf8",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "50a7e6f654c3a8ee0ac8967937258cf3"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:27.161635Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "19101912-4fa2-4ae6-b3f3-fbf01a9eba1e",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"dddddddd-4444-4444-4444-000000000001\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: missing user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null},{\"id\":\"dddddddd-4444-4444-4444-000000000002\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null},{\"id\":\"dddddddd-4444-4444-4444-000000000003\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() at row 42\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:02:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"human_required\",\"extra\":null}]}",
+          "timestamp": "2026-08-08T05:54:27.161653Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7084236a-cb01-4079-b5d5-a8e0162373ae",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "replay the safe entries; escalate the human_required one"
+          },
+          "result_summary": "planner handoff to PLANNING: replay the safe entries; escalate the human_required one",
+          "timestamp": "2026-08-08T05:54:27.161653Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "464f881b-0d30-452f-8f24-abe851dc5074",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "mixed_dlq_pattern"
+          },
+          "result_summary": "plan: replay_dlq_by_category({\"category\": \"replay_safe\", \"max_replays\": 50}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-08T05:54:27.165466Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d0bd1ec4-7a18-4af1-8d08-2fbf28a3b318",
+          "tool_name": "replay_dlq_by_category",
+          "arguments": {
+            "category": "replay_safe",
+            "job_type": null,
+            "max_replays": 50,
+            "idempotency_key": "14eb185f2e3937aafe9072973997c3dc",
+            "delay_seconds": null
+          },
+          "result_summary": "{\"category\":\"replay_safe\",\"matched\":1,\"replayed\":1,\"scheduled\":0,\"failed\":0,\"job_ids\":[\"dddddddd-4444-4444-4444-000000000001\"],\"execute_at\":null}",
+          "timestamp": "2026-08-08T05:54:27.168567Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "mixed_dlq_pattern",
+          "confidence": 0.85,
+          "reasoning": "Mixed categories: 1 replay_safe (schema issue), 1 wait_and_replay (SMTP transient), 1 human_required (data bug). Bulk-replay the safe one; leave the persistent bug for the human briefing.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "mixed_dlq_pattern",
+        "action_tool": "replay_dlq_by_category",
+        "action_arguments": {
+          "category": "replay_safe",
+          "max_replays": 50
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "replay_safe",
+          "limit": 50
+        },
+        "verify_expectation": "The replay_safe filter should return an empty items list after replay. Other categories (wait_and_replay, human_required) still appear in unfiltered probes and go into the escalation briefing.\n"
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-08T05:54:27.161597Z",
+      "updated_at": "2026-08-08T05:54:27.168567Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "efc1b848-1544-4083-aba2-ef939a1acbb8",
+      "state": "resolved",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_mixed",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "2fd0f642-d5fe-4f2f-aca7-3d4da9214cf8",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "50a7e6f654c3a8ee0ac8967937258cf3"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:27.161635Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "19101912-4fa2-4ae6-b3f3-fbf01a9eba1e",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"dddddddd-4444-4444-4444-000000000001\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: missing user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null},{\"id\":\"dddddddd-4444-4444-4444-000000000002\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null},{\"id\":\"dddddddd-4444-4444-4444-000000000003\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() at row 42\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:02:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"human_required\",\"extra\":null}]}",
+          "timestamp": "2026-08-08T05:54:27.161653Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7084236a-cb01-4079-b5d5-a8e0162373ae",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "replay the safe entries; escalate the human_required one"
+          },
+          "result_summary": "planner handoff to PLANNING: replay the safe entries; escalate the human_required one",
+          "timestamp": "2026-08-08T05:54:27.161653Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "464f881b-0d30-452f-8f24-abe851dc5074",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "mixed_dlq_pattern"
+          },
+          "result_summary": "plan: replay_dlq_by_category({\"category\": \"replay_safe\", \"max_replays\": 50}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-08T05:54:27.165466Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d0bd1ec4-7a18-4af1-8d08-2fbf28a3b318",
+          "tool_name": "replay_dlq_by_category",
+          "arguments": {
+            "category": "replay_safe",
+            "job_type": null,
+            "max_replays": 50,
+            "idempotency_key": "14eb185f2e3937aafe9072973997c3dc",
+            "delay_seconds": null
+          },
+          "result_summary": "{\"category\":\"replay_safe\",\"matched\":1,\"replayed\":1,\"scheduled\":0,\"failed\":0,\"job_ids\":[\"dddddddd-4444-4444-4444-000000000001\"],\"execute_at\":null}",
+          "timestamp": "2026-08-08T05:54:27.168567Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "bfd42ec1-60a6-4eea-9e01-9f3b72702141",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": "replay_safe",
+            "limit": 50,
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"dddddddd-4444-4444-4444-000000000001\",\"type\":\"send_email\",\"error_message\":\"SchemaValidationError: missing user_id\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"extra\":null},{\"id\":\"dddddddd-4444-4444-4444-000000000002\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null},{\"id\":\"dddddddd-4444-4444-4444-000000000003\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() at row 42\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:02:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"human_required\",\"extra\":null}]}",
+          "timestamp": "2026-08-08T05:54:27.168638Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "876dc0ff-d3d7-4985-865f-37bef612ef68",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The replay_safe filter should return an empty items list after replay. Other categories (wait_and_replay, human_required) still appear in unfiltered probes and go into the escalation briefing.\n",
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "verified: replay_dlq_by_category(replay_safe) returned requested=replayed=1. The wait_and_replay + human_required entries were not touched.\n",
+          "timestamp": "2026-08-08T05:54:27.168638Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "mixed_dlq_pattern",
+          "confidence": 0.85,
+          "reasoning": "Mixed categories: 1 replay_safe (schema issue), 1 wait_and_replay (SMTP transient), 1 human_required (data bug). Bulk-replay the safe one; leave the persistent bug for the human briefing.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "mixed_dlq_pattern",
+        "action_tool": "replay_dlq_by_category",
+        "action_arguments": {
+          "category": "replay_safe",
+          "max_replays": 50
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "replay_safe",
+          "limit": 50
+        },
+        "verify_expectation": "The replay_safe filter should return an empty items list after replay. Other categories (wait_and_replay, human_required) still appear in unfiltered probes and go into the escalation briefing.\n"
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-08T05:54:27.161597Z",
+      "updated_at": "2026-08-08T05:54:27.168638Z"
+    }
+  ],
+  "invocation_id": "9a7b56063450"
+}

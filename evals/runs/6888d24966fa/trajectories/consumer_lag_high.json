@@ -1,0 +1,145 @@
+{
+  "scenario": "consumer_lag_high",
+  "incident_id": "38746287-3c2a-4fec-82e4-982b398e8c79",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "38746287-3c2a-4fec-82e4-982b398e8c79",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": null,
+        "consumer_group": "worker-dispatcher"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.734798Z",
+      "updated_at": "2026-08-08T05:54:25.734798Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "38746287-3c2a-4fec-82e4-982b398e8c79",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": null,
+        "consumer_group": "worker-dispatcher"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "06800583-12dd-4281-983e-b1fab4409bf0",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:25.734823Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.734798Z",
+      "updated_at": "2026-08-08T05:54:25.734823Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "38746287-3c2a-4fec-82e4-982b398e8c79",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": null,
+        "consumer_group": "worker-dispatcher"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "06800583-12dd-4281-983e-b1fab4409bf0",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:25.734823Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0395fa0e-f5fc-4679-a15c-d309e316b161",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":1200,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-08T05:54:25.734835Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "772ea618-8be0-47af-ba24-db67a3ed8886",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "Only one read tool available today; escalate the live reading to a human for judgment.\n"
+          },
+          "result_summary": "planner stop: Only one read tool available today; escalate the live reading to a human for judgment.\n",
+          "timestamp": "2026-08-08T05:54:25.734835Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.7,
+          "reasoning": "Platform returned the live lag reading; whether it's a spike or sustained is not knowable from one point without another tool.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.734798Z",
+      "updated_at": "2026-08-08T05:54:25.734835Z"
+    }
+  ],
+  "invocation_id": "6888d24966fa"
+}

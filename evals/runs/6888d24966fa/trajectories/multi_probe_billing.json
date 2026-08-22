@@ -1,0 +1,152 @@
+{
+  "scenario": "multi_probe_billing",
+  "incident_id": "ba7ab7fa-1764-492e-992d-8a42787af882",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "ba7ab7fa-1764-492e-992d-8a42787af882",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "billing-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.797988Z",
+      "updated_at": "2026-08-08T05:54:25.797988Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ba7ab7fa-1764-492e-992d-8a42787af882",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "billing-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "98ed4325-841e-41e9-ad27-8f5b6206944f",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:25.798028Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.797988Z",
+      "updated_at": "2026-08-08T05:54:25.798028Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ba7ab7fa-1764-492e-992d-8a42787af882",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "billing-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "98ed4325-841e-41e9-ad27-8f5b6206944f",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:25.798028Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "266ae6b0-a7a4-4fac-b0cf-0e622c399ac7",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "billing-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-08T05:54:25.798046Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e9ddf6b4-dc36-4d38-a1fa-6bf648a56f05",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "billing-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-08T05:54:25.798046Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c6f737f3-74a3-4b0e-995b-6551b5ad1945",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "two consistent readings; confidence high enough for handoff"
+          },
+          "result_summary": "planner stop: two consistent readings; confidence high enough for handoff",
+          "timestamp": "2026-08-08T05:54:25.798046Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.9,
+          "reasoning": "Repeat probe confirms sustained lag of 15000. Consumer is genuinely backlogged, not a momentary spike.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:25.797988Z",
+      "updated_at": "2026-08-08T05:54:25.798046Z"
+    }
+  ],
+  "invocation_id": "6888d24966fa"
+}

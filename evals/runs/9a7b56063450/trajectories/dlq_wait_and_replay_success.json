@@ -1,0 +1,485 @@
+{
+  "scenario": "dlq_wait_and_replay_success",
+  "incident_id": "211d2f24-4d73-488f-aa2e-3ba2b02d0b8f",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "211d2f24-4d73-488f-aa2e-3ba2b02d0b8f",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_wait_replay",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:27.181264Z",
+      "updated_at": "2026-08-08T05:54:27.181264Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "211d2f24-4d73-488f-aa2e-3ba2b02d0b8f",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_wait_replay",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "bc3a6898-b939-484a-9448-acaab7b70caf",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "4bbc77eee95bcd485b5808b5196029be"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:27.181314Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:27.181264Z",
+      "updated_at": "2026-08-08T05:54:27.181314Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "211d2f24-4d73-488f-aa2e-3ba2b02d0b8f",
+      "state": "planning",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_wait_replay",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "bc3a6898-b939-484a-9448-acaab7b70caf",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "4bbc77eee95bcd485b5808b5196029be"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:27.181314Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9c3eeee0-4f9d-4d69-aa3c-5433b3f3a986",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":2,\"items\":[{\"id\":\"bbbbbbbb-2222-2222-2222-000000000001\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: upstream SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null},{\"id\":\"bbbbbbbb-2222-2222-2222-000000000002\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: upstream SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null}]}",
+          "timestamp": "2026-08-08T05:54:27.181335Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7c9fc95c-f8ac-4f66-9c10-ee0b3f2d6eb9",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "wait_and_replay entries — schedule delayed replay via ids"
+          },
+          "result_summary": "planner handoff to PLANNING: wait_and_replay entries — schedule delayed replay via ids",
+          "timestamp": "2026-08-08T05:54:27.181335Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "transient_downstream_failure",
+          "confidence": 0.85,
+          "reasoning": "Both entries hint=wait_and_replay (SMTP transient timeouts). Schedule a delayed replay (5 min) so the platform holds the timer — SMTP will likely recover in that window.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:27.181264Z",
+      "updated_at": "2026-08-08T05:54:27.181335Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "211d2f24-4d73-488f-aa2e-3ba2b02d0b8f",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_wait_replay",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "bc3a6898-b939-484a-9448-acaab7b70caf",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "4bbc77eee95bcd485b5808b5196029be"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:27.181314Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9c3eeee0-4f9d-4d69-aa3c-5433b3f3a986",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":2,\"items\":[{\"id\":\"bbbbbbbb-2222-2222-2222-000000000001\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: upstream SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null},{\"id\":\"bbbbbbbb-2222-2222-2222-000000000002\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: upstream SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null}]}",
+          "timestamp": "2026-08-08T05:54:27.181335Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7c9fc95c-f8ac-4f66-9c10-ee0b3f2d6eb9",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "wait_and_replay entries — schedule delayed replay via ids"
+          },
+          "result_summary": "planner handoff to PLANNING: wait_and_replay entries — schedule delayed replay via ids",
+          "timestamp": "2026-08-08T05:54:27.181335Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "14a713bd-b053-47d0-910f-23d986550e7f",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "transient_downstream_failure"
+          },
+          "result_summary": "plan: replay_dlq_by_ids({\"job_ids\": [\"bbbbbbbb-2222-2222-2222-000000000001\", \"bbbbbbbb-2222-2222-2222-000000000002\"], \"delay_seconds\": 300}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-08T05:54:27.185825Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "transient_downstream_failure",
+          "confidence": 0.85,
+          "reasoning": "Both entries hint=wait_and_replay (SMTP transient timeouts). Schedule a delayed replay (5 min) so the platform holds the timer — SMTP will likely recover in that window.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "transient_downstream_failure",
+        "action_tool": "replay_dlq_by_ids",
+        "action_arguments": {
+          "job_ids": [
+            "bbbbbbbb-2222-2222-2222-000000000001",
+            "bbbbbbbb-2222-2222-2222-000000000002"
+          ],
+          "delay_seconds": 300
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "wait_and_replay",
+          "limit": 50
+        },
+        "verify_expectation": "After scheduling, the platform's response should show scheduled=2 with per-job execute_at timestamps ~5 minutes in the future. The entries REMAIN in the dead-letter list until the platform's promote loop fires them at execute_at. An unchanged wait_and_replay list immediately after the call is expected and is NOT a failure. Success = scheduled equals requested with future execute_at timestamps.\n"
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-08-08T05:54:27.181264Z",
+      "updated_at": "2026-08-08T05:54:27.185825Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "211d2f24-4d73-488f-aa2e-3ba2b02d0b8f",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_wait_replay",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "bc3a6898-b939-484a-9448-acaab7b70caf",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "4bbc77eee95bcd485b5808b5196029be"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:27.181314Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9c3eeee0-4f9d-4d69-aa3c-5433b3f3a986",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":2,\"items\":[{\"id\":\"bbbbbbbb-2222-2222-2222-000000000001\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: upstream SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null},{\"id\":\"bbbbbbbb-2222-2222-2222-000000000002\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: upstream SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null}]}",
+          "timestamp": "2026-08-08T05:54:27.181335Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7c9fc95c-f8ac-4f66-9c10-ee0b3f2d6eb9",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "wait_and_replay entries — schedule delayed replay via ids"
+          },
+          "result_summary": "planner handoff to PLANNING: wait_and_replay entries — schedule delayed replay via ids",
+          "timestamp": "2026-08-08T05:54:27.181335Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "14a713bd-b053-47d0-910f-23d986550e7f",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "transient_downstream_failure"
+          },
+          "result_summary": "plan: replay_dlq_by_ids({\"job_ids\": [\"bbbbbbbb-2222-2222-2222-000000000001\", \"bbbbbbbb-2222-2222-2222-000000000002\"], \"delay_seconds\": 300}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-08T05:54:27.185825Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "947e5c8c-f44c-4970-a383-1b7a30aa8aa9",
+          "tool_name": "replay_dlq_by_ids",
+          "arguments": {
+            "job_ids": [
+              "bbbbbbbb-2222-2222-2222-000000000001",
+              "bbbbbbbb-2222-2222-2222-000000000002"
+            ],
+            "idempotency_key": "a8f3277b3c507f8f45f741fbd921c723",
+            "delay_seconds": 300
+          },
+          "result_summary": "{\"requested\":2,\"replayed\":0,\"scheduled\":2,\"failed\":0,\"results\":[{\"id\":\"bbbbbbbb-2222-2222-2222-000000000001\",\"ok\":true,\"error\":null,\"scheduled\":true,\"execute_at\":1753868400.0},{\"id\":\"bbbbbbbb-2222-2222-2222-000000000002\",\"ok\":true,\"error\":null,\"scheduled\":true,\"execute_at\":1753868400.0}]}",
+          "timestamp": "2026-08-08T05:54:27.189214Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "transient_downstream_failure",
+          "confidence": 0.85,
+          "reasoning": "Both entries hint=wait_and_replay (SMTP transient timeouts). Schedule a delayed replay (5 min) so the platform holds the timer — SMTP will likely recover in that window.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "transient_downstream_failure",
+        "action_tool": "replay_dlq_by_ids",
+        "action_arguments": {
+          "job_ids": [
+            "bbbbbbbb-2222-2222-2222-000000000001",
+            "bbbbbbbb-2222-2222-2222-000000000002"
+          ],
+          "delay_seconds": 300
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "wait_and_replay",
+          "limit": 50
+        },
+        "verify_expectation": "After scheduling, the platform's response should show scheduled=2 with per-job execute_at timestamps ~5 minutes in the future. The entries REMAIN in the dead-letter list until the platform's promote loop fires them at execute_at. An unchanged wait_and_replay list immediately after the call is expected and is NOT a failure. Success = scheduled equals requested with future execute_at timestamps.\n"
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-08T05:54:27.181264Z",
+      "updated_at": "2026-08-08T05:54:27.189214Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "211d2f24-4d73-488f-aa2e-3ba2b02d0b8f",
+      "state": "resolved",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_wait_replay",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "bc3a6898-b939-484a-9448-acaab7b70caf",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "4bbc77eee95bcd485b5808b5196029be"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-08T05:54:27.181314Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9c3eeee0-4f9d-4d69-aa3c-5433b3f3a986",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":2,\"items\":[{\"id\":\"bbbbbbbb-2222-2222-2222-000000000001\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: upstream SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null},{\"id\":\"bbbbbbbb-2222-2222-2222-000000000002\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: upstream SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null}]}",
+          "timestamp": "2026-08-08T05:54:27.181335Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7c9fc95c-f8ac-4f66-9c10-ee0b3f2d6eb9",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "wait_and_replay entries — schedule delayed replay via ids"
+          },
+          "result_summary": "planner handoff to PLANNING: wait_and_replay entries — schedule delayed replay via ids",
+          "timestamp": "2026-08-08T05:54:27.181335Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "14a713bd-b053-47d0-910f-23d986550e7f",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "transient_downstream_failure"
+          },
+          "result_summary": "plan: replay_dlq_by_ids({\"job_ids\": [\"bbbbbbbb-2222-2222-2222-000000000001\", \"bbbbbbbb-2222-2222-2222-000000000002\"], \"delay_seconds\": 300}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-08T05:54:27.185825Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "947e5c8c-f44c-4970-a383-1b7a30aa8aa9",
+          "tool_name": "replay_dlq_by_ids",
+          "arguments": {
+            "job_ids": [
+              "bbbbbbbb-2222-2222-2222-000000000001",
+              "bbbbbbbb-2222-2222-2222-000000000002"
+            ],
+            "idempotency_key": "a8f3277b3c507f8f45f741fbd921c723",
+            "delay_seconds": 300
+          },
+          "result_summary": "{\"requested\":2,\"replayed\":0,\"scheduled\":2,\"failed\":0,\"results\":[{\"id\":\"bbbbbbbb-2222-2222-2222-000000000001\",\"ok\":true,\"error\":null,\"scheduled\":true,\"execute_at\":1753868400.0},{\"id\":\"bbbbbbbb-2222-2222-2222-000000000002\",\"ok\":true,\"error\":null,\"scheduled\":true,\"execute_at\":1753868400.0}]}",
+          "timestamp": "2026-08-08T05:54:27.189214Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ce99d6ad-2f53-42c7-a4b6-a91ae8d0049b",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": "wait_and_replay",
+            "limit": 50,
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "{\"total\":2,\"items\":[{\"id\":\"bbbbbbbb-2222-2222-2222-000000000001\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: upstream SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null},{\"id\":\"bbbbbbbb-2222-2222-2222-000000000002\",\"type\":\"send_email\",\"error_message\":\"ConnectionTimeout: upstream SMTP relay unreachable\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"wait_and_replay\",\"extra\":null}]}",
+          "timestamp": "2026-08-08T05:54:27.189527Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "db60eb64-fafc-4769-8e16-b9fd530f3d94",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "After scheduling, the platform's response should show scheduled=2 with per-job execute_at timestamps ~5 minutes in the future. The entries REMAIN in the dead-letter list until the platform's promote loop fires them at execute_at. An unchanged wait_and_replay list immediately after the call is expected and is NOT a failure. Success = scheduled equals requested with future execute_at timestamps.\n",
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "verified: replay_dlq_by_ids returned scheduled=2 with per-job execute_at timestamps. Platform is holding the timer — no agent-side wait needed. Entries remain in the DLQ until execute_at fires, matching the platform's timer-held behavior.\n",
+          "timestamp": "2026-08-08T05:54:27.189527Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "transient_downstream_failure",
+          "confidence": 0.85,
+          "reasoning": "Both entries hint=wait_and_replay (SMTP transient timeouts). Schedule a delayed replay (5 min) so the platform holds the timer — SMTP will likely recover in that window.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "transient_downstream_failure",
+        "action_tool": "replay_dlq_by_ids",
+        "action_arguments": {
+          "job_ids": [
+            "bbbbbbbb-2222-2222-2222-000000000001",
+            "bbbbbbbb-2222-2222-2222-000000000002"
+          ],
+          "delay_seconds": 300
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "wait_and_replay",
+          "limit": 50
+        },
+        "verify_expectation": "After scheduling, the platform's response should show scheduled=2 with per-job execute_at timestamps ~5 minutes in the future. The entries REMAIN in the dead-letter list until the platform's promote loop fires them at execute_at. An unchanged wait_and_replay list immediately after the call is expected and is NOT a failure. Success = scheduled equals requested with future execute_at timestamps.\n"
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-08T05:54:27.181264Z",
+      "updated_at": "2026-08-08T05:54:27.189527Z"
+    }
+  ],
+  "invocation_id": "9a7b56063450"
+}

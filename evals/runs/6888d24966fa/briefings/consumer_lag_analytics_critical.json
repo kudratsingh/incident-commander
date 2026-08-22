@@ -1,0 +1,19 @@
+{
+  "incident_id": "2d5b0bf9-0f00-4dee-84ef-0e2d0965a9f2",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high group=analytics-consumer",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"analytics-consumer\",\"lag\":50000,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    }
+  ],
+  "findings": "analytics-consumer shows a critical-tier lag of 50000 messages. Consumer is severely behind and cannot catch up at current rate.\n",
+  "recommendation": "Page the analytics team immediately; scale the consumer replica count or roll back the last consumer deploy if one occurred in the last hour.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.0,
+    "usd": "0"
+  }
+}

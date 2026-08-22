@@ -392,6 +392,121 @@ class TestEvidenceFieldExpectations:
         assert result.passed is False
 
 
+class TestEvidenceFieldPathDescent:
+    """``field`` accepts the preconditions' ``[]`` path syntax for nested values.
+
+    The evidence sweep that de-fanged ``failed_traces_scan`` needs asserts
+    like "some DLQ row the agent listed carries ``remediation_hint:
+    replay_safe``" — a value that only exists inside ``items[]``. A
+    top-level-only ``field`` cannot express that, and an unscoped substring
+    is exactly the cross-tool leak the sweep removes. Same walker, same
+    any-row semantics as ``PreconditionField.path``.
+    """
+
+    _DLQ_SAFE = (
+        '{"total":2,"items":['
+        '{"id":"a","remediation_hint":"replay_safe"},'
+        '{"id":"b","remediation_hint":"human_required"}]}'
+    )
+    _DLQ_HUMAN_ONLY = '{"total":1,"items":[{"id":"c","remediation_hint":"human_required"}]}'
+
+    def _graded(
+        self,
+        run_state: RunState,
+        now: datetime,
+        entries: tuple[tuple[str, str], ...],
+        *expectations: EvidenceFieldExpectation,
+    ) -> DimensionResult:
+        evidence = tuple(_evidence(now, tool, summary) for tool, summary in entries)
+        run = _with_terminal(run_state, IncidentState.RESOLVED, evidence)
+        exp = ScenarioExpectation(
+            name="s",
+            expected_terminal_state=IncidentState.RESOLVED,
+            expected_evidence_fields=expectations,
+        )
+        return _dim(grade(run, exp), GradeDimension.EVIDENCE)
+
+    def test_any_row_satisfying_the_path_passes(self, run_state: RunState, now: datetime) -> None:
+        result = self._graded(
+            run_state,
+            now,
+            (("list_dlq_messages", self._DLQ_SAFE),),
+            EvidenceFieldExpectation(
+                tools=("list_dlq_messages",),
+                field="items[].remediation_hint",
+                equals="replay_safe",
+            ),
+        )
+        assert result.passed is True
+
+    def test_no_row_satisfying_the_path_fails_with_detail(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        result = self._graded(
+            run_state,
+            now,
+            (("list_dlq_messages", self._DLQ_HUMAN_ONLY),),
+            EvidenceFieldExpectation(
+                tools=("list_dlq_messages",),
+                field="items[].remediation_hint",
+                equals="replay_safe",
+            ),
+        )
+        assert result.passed is False
+        assert "items[].remediation_hint" in result.detail
+
+    def test_path_reads_only_entries_from_the_scoped_tool(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # failed_traces_scan, structurally: DLQ rows carry trace_id too, but a
+        # search_traces-scoped path assert must not be satisfied by them.
+        dlq_with_traces = '{"total":1,"items":[{"id":"a","trace_id":"trace-x"}]}'
+        result = self._graded(
+            run_state,
+            now,
+            (("list_dlq_messages", dlq_with_traces),),
+            EvidenceFieldExpectation(
+                tools=("search_traces",), field="matches[].trace_id", is_null=False
+            ),
+        )
+        assert result.passed is False
+        assert "search_traces" in result.detail
+
+    def test_which_last_grades_only_the_final_entrys_rows(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        entries = (
+            ("list_dlq_messages", self._DLQ_SAFE),
+            ("list_dlq_messages", self._DLQ_HUMAN_ONLY),
+        )
+        expectation = EvidenceFieldExpectation(
+            tools=("list_dlq_messages",),
+            field="items[].remediation_hint",
+            equals="replay_safe",
+            which="last",
+        )
+        assert self._graded(run_state, now, entries, expectation).passed is False
+        settled_any = EvidenceFieldExpectation(
+            tools=("list_dlq_messages",),
+            field="items[].remediation_hint",
+            equals="replay_safe",
+        )
+        assert self._graded(run_state, now, entries, settled_any).passed is True
+
+    def test_plain_field_names_keep_their_exact_semantics(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # A plain name is a length-1 path; the pre-descent behavior must be
+        # byte-for-byte preserved for the five scenarios already using it.
+        result = self._graded(
+            run_state,
+            now,
+            (("invalidate_cache_key", '{"deleted":true}'),),
+            EvidenceFieldExpectation(tools=("invalidate_cache_key",), field="deleted", equals=True),
+        )
+        assert result.passed is True
+
+
 class TestEvidenceFieldExpectationSchema:
     def test_exactly_one_comparator_is_required(self) -> None:
         with pytest.raises(ValidationError, match="exactly one"):

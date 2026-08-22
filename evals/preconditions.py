@@ -18,41 +18,22 @@ instead of running an agent against a premise that is false and grading it
 on the result. The run is abandoned before a single model token is spent,
 which is also the cheapest possible failure.
 
-The resolution and comparison are pure and live here; ``evals/runner.py``
-supplies the probing.
+The comparison is pure and lives here; ``evals/runner.py`` supplies the
+probing, and the path walker lives with the comparators in
+``evals/graders/deterministic.py`` (``resolve_path``), because
+``EvidenceFieldExpectation.field`` shares its descent syntax and a second
+copy of the rules would drift.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
+from evals.graders.deterministic import resolve_path as resolve
 from evals.scenarios.schema import PreconditionProbe
 
-
-def resolve(payload: Mapping[str, Any], path: str) -> list[Any]:
-    """Every value observed at ``path``, descending into lists at ``[]``.
-
-    ``total`` reads one top-level field. ``items[].remediation_hint`` reads
-    that field from every row. Returning a list rather than one value is what
-    lets an assertion mean "some row satisfies this", which is the only
-    useful reading for a fixture pack whose row order is not guaranteed.
-    """
-    values: list[Any] = [payload]
-    for segment in path.split("."):
-        descend = segment.endswith("[]")
-        key = segment[:-2] if descend else segment
-        found: list[Any] = [
-            value[key] for value in values if isinstance(value, Mapping) and key in value
-        ]
-        if descend:
-            flattened: list[Any] = []
-            for value in found:
-                if isinstance(value, Sequence) and not isinstance(value, str | bytes):
-                    flattened.extend(value)
-            found = flattened
-        values = found
-    return values
+__all__ = ["resolve", "unmet"]
 
 
 def unmet(probe: PreconditionProbe, payload: Mapping[str, Any]) -> list[str]:

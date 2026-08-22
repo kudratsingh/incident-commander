@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 import sys
 import time
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -51,6 +54,43 @@ from incident_commander.llm.fakes import CannedLLMClient
 from incident_commander.tools.mcp_client import MCPError, ToolResult
 
 _NOW = datetime(2026, 8, 8, tzinfo=UTC)
+
+
+def _is_write_locked(path: Path) -> bool:
+    return path.stat().st_mode & 0o222 == 0
+
+
+def _unlock_tree(root: Path) -> None:
+    """Deliberately unlock an archive tree so pytest can clean tmp_path.
+
+    Mirrors the operator unlock in docs/runbook.md (``chflags -R nouchg``
+    then ``chmod -R u+w``): flags must clear before modes, because chmod
+    on a ``uchg`` path is itself EPERM. Tolerant of paths the lock never
+    reached — the lock-failure test leaves nothing locked at all.
+    """
+    if not root.exists():
+        return
+    paths = [root, *root.rglob("*")]
+    if hasattr(os, "chflags"):
+        for path in paths:
+            try:
+                os.chflags(path, getattr(path.stat(), "st_flags", 0) & ~stat.UF_IMMUTABLE)
+            except OSError:
+                continue
+    for path in paths:
+        try:
+            path.chmod(path.stat().st_mode | (0o700 if path.is_dir() else 0o600))
+        except OSError:
+            continue
+
+
+@pytest.fixture(autouse=True)
+def _tmp_archives_unlocked_for_cleanup(tmp_path: Path) -> Iterator[None]:
+    """Any test that finalizes an archive under tmp_path leaves immutable
+    files behind; without this, pytest's own retention sweep of old tmp
+    directories is what trips over them."""
+    yield
+    _unlock_tree(tmp_path)
 
 
 def _test_settings(**overrides: Any) -> Settings:
@@ -912,6 +952,130 @@ class TestIncrementalArchive:
 
         assert runner_module.main() == 0
         assert (targets[0] / "report.json").exists()
+
+
+class TestCompletedArchiveIsLocked:
+    """CLAUDE.md invariant 9, enforced by the filesystem (ADR 0021).
+
+    Exclusive-create protects the archive from the runner itself; nothing
+    protected it from everything else. Under ``evals/runs/`` 0 of 371
+    files carried any on-disk protection, and a routine cleanup of a
+    retired checkout came within one command of destroying 195 run files
+    that existed nowhere else. Session archives already solved this
+    (``context/README.md``: read-only + ``uchg``, unlock is a deliberate
+    documented act); these tests pin the same convention for run
+    archives. Write-bit assertions run everywhere including Linux CI;
+    the ``uchg`` layer is asserted only where the platform has it.
+    """
+
+    def _streamed_archive(self, tmp_path: Path) -> Path:
+        target = tmp_path / "runs" / "inv"
+        (target / "trajectories").mkdir(parents=True)
+        (target / "briefings").mkdir(parents=True)
+        runner_module.archive_scenario(
+            target, _finished_result("consumer_lag_pass"), invocation_id="inv", trace_dir=None
+        )
+        return target
+
+    def test_finalize_locks_every_path_in_the_archive(self, tmp_path: Path) -> None:
+        target = self._streamed_archive(tmp_path)
+        runner_module.finalize_archive(target, _stub_report("consumer_lag_pass"))
+
+        for path in (
+            target,
+            target / "report.json",
+            target / "trajectories",
+            target / "trajectories" / "consumer_lag_pass.json",
+            target / "briefings",
+            target / "briefings" / "consumer_lag_pass.json",
+        ):
+            assert _is_write_locked(path), f"{path} must have no write bits after finalize"
+        # The claims that matter, made against the filesystem itself:
+        # no truncation, no deletion, no new entries.
+        with pytest.raises(PermissionError):
+            (target / "report.json").open("a")
+        with pytest.raises(PermissionError):
+            (target / "trajectories" / "consumer_lag_pass.json").unlink()
+        with pytest.raises(PermissionError):
+            (target / "intruder.json").open("x")
+
+    def test_scenario_files_lock_as_they_land_but_the_run_stays_appendable(
+        self, tmp_path: Path
+    ) -> None:
+        # The killed-run half of the design: each scenario's evidence is
+        # protected the moment it is durable (a partial archive's rows are
+        # still evidence — ADR 0017), while the DIRECTORIES stay writable
+        # so scenario N+1 and the completion marker can still land. No
+        # future invocation ever writes into an existing run dir (fresh
+        # invocation_id per run), so the unlocked-directory window belongs
+        # to this run alone.
+        target = self._streamed_archive(tmp_path)
+
+        first = target / "trajectories" / "consumer_lag_pass.json"
+        assert _is_write_locked(first)
+        with pytest.raises(PermissionError):
+            first.open("w")
+        assert not _is_write_locked(target), "run dir must accept the next scenario"
+        assert not _is_write_locked(target / "trajectories")
+
+        runner_module.archive_scenario(
+            target, _finished_result("noise_alert"), invocation_id="inv", trace_dir=None
+        )
+        assert _is_write_locked(target / "trajectories" / "noise_alert.json")
+
+    @pytest.mark.skipif(not hasattr(os, "chflags"), reason="no file flags on this platform")
+    def test_uchg_backs_the_lock_where_the_platform_has_it(self, tmp_path: Path) -> None:
+        # On macOS the lock must survive what chmod alone cannot: unlink
+        # goes by the PARENT directory's write bit, so before finalize a
+        # read-only file in a writable directory would still delete. uchg
+        # is the layer that refuses that — the context/README.md table's
+        # "rm -f: refused" — and it is exactly what a killed run's rows
+        # rely on until a human decides their fate.
+        target = self._streamed_archive(tmp_path)
+        first = target / "trajectories" / "consumer_lag_pass.json"
+        assert first.stat().st_flags & stat.UF_IMMUTABLE
+        with pytest.raises(PermissionError):
+            first.unlink()
+
+        runner_module.finalize_archive(target, _stub_report("consumer_lag_pass"))
+        assert target.stat().st_flags & stat.UF_IMMUTABLE
+        assert (target / "report.json").stat().st_flags & stat.UF_IMMUTABLE
+
+    def test_lock_failure_is_logged_and_never_fatal(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # A filesystem that refuses chmod (network mounts, exotic CI) must
+        # not turn a finished run into a crashed one — by lock time the
+        # evidence bytes are already durable, and the lock is best-effort
+        # on top of them.
+        def _refuse(*_args: Any, **_kwargs: Any) -> None:
+            raise OSError("Operation not permitted: filesystem refuses chmod")
+
+        monkeypatch.setattr(os, "chmod", _refuse)
+        target = self._streamed_archive(tmp_path)
+        runner_module.finalize_archive(target, _stub_report("consumer_lag_pass"))
+
+        report = json.loads((target / "report.json").read_text())
+        assert report["total"] == 1, "the archive itself must be intact"
+        assert "archive lock skipped" in capsys.readouterr().out
+
+    def test_writing_into_a_finalized_archive_fails_loudly(self, tmp_path: Path) -> None:
+        # The re-run story, at the file layer. Reaching a finalized
+        # directory at all requires colliding with its invocation id,
+        # which already fails at mkdir/exclusive-create before any spend
+        # (test_reusing_an_invocation_id_fails_loudly). If a future
+        # refactor ever loses that guard, the lock is the second wall:
+        # a NEW scenario cannot land in a sealed archive, and the sealed
+        # marker cannot be rewritten.
+        target = self._streamed_archive(tmp_path)
+        runner_module.finalize_archive(target, _stub_report("consumer_lag_pass"))
+
+        with pytest.raises(PermissionError):
+            runner_module.archive_scenario(
+                target, _finished_result("noise_alert"), invocation_id="inv", trace_dir=None
+            )
+        with pytest.raises(FileExistsError):
+            runner_module.finalize_archive(target, _stub_report("consumer_lag_pass"))
 
 
 class TestRunsDirIsTracked:

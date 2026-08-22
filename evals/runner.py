@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import sys
 import time
 import uuid
@@ -87,7 +88,9 @@ _LATEST_REPORT = _REPORTS_DIR / "latest.json"
 # (archive_scenario). ``report.json`` is written LAST (finalize_archive)
 # and is the completion marker — a run directory without it is a killed
 # or crashed run whose per-scenario files are still first-class evidence
-# (ADR 0017).
+# (ADR 0017). Archived files are locked read-only (+``uchg`` on macOS)
+# as they land, and the whole directory is sealed when the marker goes
+# down (ADR 0021) — invariant 9, enforced by the filesystem.
 _RUNS_DIR = _REPO_ROOT / "evals" / "runs"
 _TRACE_DIR_ENV = "EVAL_TRACE_DIR"
 
@@ -789,20 +792,75 @@ def write_briefings(
         (directory / f"{name}.json").write_text(briefing.model_dump_json(indent=2))
 
 
+def _lock_path(path: Path) -> None:
+    """Make one archived path refuse writes: clear write bits, then set
+    ``uchg`` where the platform has it (macOS/BSD; Linux CI does not).
+
+    This is invariant 9 enforced by the filesystem instead of by
+    discipline — the same convention ``context/pack.sh`` applies to
+    session archives ("Archives cannot be deleted", context/README.md).
+    Exclusive-create already stops the *runner* from overwriting evidence;
+    this stops everything else: ``rm -rf``, ``git clean -fd``, a cleanup
+    script pointed at the wrong checkout. Before this, 0 of the files
+    under ``evals/runs/`` were protected on disk, and a routine cleanup
+    of a retired checkout came within one command of destroying 195 run
+    files that existed nowhere else.
+
+    Best-effort, never fatal: by the time anything is locked its bytes
+    are already durable, so a filesystem that refuses ``chmod`` or
+    ``chflags`` (some network mounts) gets a logged warning, not a
+    crashed run. Already-immutable paths are skipped, which makes the
+    finalize-time sweep idempotent — ``chmod`` on a ``uchg`` file is
+    itself EPERM.
+
+    Deliberate unlock (rare, announced): ``chflags -R nouchg`` +
+    ``chmod -R u+w`` — see docs/runbook.md §"Completed archives are
+    locked on disk".
+    """
+    try:
+        st = path.stat()
+        if getattr(st, "st_flags", 0) & stat.UF_IMMUTABLE:
+            return
+        os.chmod(path, st.st_mode & ~0o222)
+        if hasattr(os, "chflags"):
+            os.chflags(path, getattr(st, "st_flags", 0) | stat.UF_IMMUTABLE)
+    except OSError as exc:
+        print(f"archive lock skipped ({path}): {exc}")
+
+
+def _lock_archive_tree(target: Path) -> None:
+    """Lock every path under ``target``, children before parents.
+
+    Bottom-up because the directory locks must land last: ``uchg`` on a
+    directory refuses new entries, and the per-scenario files (locked
+    individually as they were archived) sit inside the directories this
+    seals. Called from ``finalize_archive`` only — a partial archive's
+    directories must stay writable so the next scenario, and eventually
+    ``report.json``, can still land.
+    """
+    for child in sorted(target.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        _lock_path(child)
+    _lock_path(target)
+
+
 def _archive_trajectory(target: Path, trajectory: Trajectory) -> None:
     """Exclusive-create ``<target>/trajectories/<scenario>.json``."""
     directory = target / "trajectories"
     directory.mkdir(parents=True, exist_ok=True)
-    with (directory / f"{trajectory.scenario}.json").open("x") as handle:
+    path = directory / f"{trajectory.scenario}.json"
+    with path.open("x") as handle:
         handle.write(trajectory.model_dump_json(indent=2))
+    _lock_path(path)
 
 
 def _archive_briefing(target: Path, scenario: str, briefing: EscalationBriefing) -> None:
     """Exclusive-create ``<target>/briefings/<scenario>.json``."""
     directory = target / "briefings"
     directory.mkdir(parents=True, exist_ok=True)
-    with (directory / f"{scenario}.json").open("x") as handle:
+    path = directory / f"{scenario}.json"
+    with path.open("x") as handle:
         handle.write(briefing.model_dump_json(indent=2))
+    _lock_path(path)
 
 
 def _archive_trace_slice(
@@ -839,9 +897,14 @@ def _archive_trace_slice(
             kept.append(line)
     directory = target / "traces"
     directory.mkdir(parents=True, exist_ok=True)
-    with (directory / f"{scenario}.jsonl").open("x") as handle:
+    path = directory / f"{scenario}.jsonl"
+    with path.open("x") as handle:
         for line in kept:
             handle.write(line + "\n")
+    # The lock lands on the archived SLICE only. The flat source file
+    # stays writable forever: later invocations APPEND to it (F-002's
+    # fix), and locking it would crash the next run's tracer.
+    _lock_path(path)
 
 
 def archive_scenario(
@@ -863,7 +926,10 @@ def archive_scenario(
 
     Every file is exclusive-create (``"x"``), as in ``archive_run``: a
     second write at a path that already holds evidence crashes instead of
-    deleting it. ``report.json`` is NOT written here — see
+    deleting it. And every file is LOCKED (``_lock_path``) the moment its
+    write completes, so a killed run's partial rows are already protected
+    on disk — evidence the instant they are durable, not the instant the
+    suite happens to finish. ``report.json`` is NOT written here — see
     ``finalize_archive``.
     """
     scenario = result.outcome.scenario
@@ -882,10 +948,23 @@ def finalize_archive(target: Path, report: RunReport) -> Path:
     is why the aggregate report moved from the FIRST archive write to the
     last (S-08): written first, a half-finished archive was
     indistinguishable from a complete one.
+
+    Once the marker is down, the whole archive is locked on disk
+    (``_lock_archive_tree``): every file and directory loses its write
+    bits and, where the platform supports it, gains ``uchg``. The marker
+    means "nothing will ever write here again", so this is the exact
+    moment enforcement can start — locking any earlier would refuse the
+    archive its own remaining writes. A killed run never reaches this
+    call: its per-scenario files are individually locked already, and its
+    directories stay writable, which costs nothing — no future invocation
+    ever writes there (fresh ``invocation_id`` per run, exclusive-create
+    on every file), so the writable window is only ever used by manual,
+    deliberate hands.
     """
     target.mkdir(parents=True, exist_ok=True)
     with (target / "report.json").open("x") as handle:
         handle.write(report.model_dump_json(indent=2))
+    _lock_archive_tree(target)
     return target
 
 

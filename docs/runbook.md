@@ -193,8 +193,11 @@ git commit -m "eval: archive live run <invocation_id>"
 
 `evals/runs/` is no longer gitignored, but un-gitignoring alone is NOT
 durability: `git clean -fd` deletes untracked files regardless of ignore
-status (only `-x` concerns ignored ones), so an uncommitted archive is
-still one `git clean -fd` away from erasure. The commit is the durability.
+status (only `-x` concerns ignored ones). Since ADR 0021 a finalized
+archive is also locked on disk (see §"Completed archives are locked on
+disk" below), which makes that `git clean` refuse locally — but locked is
+not backed up: the flag stops deletion, not disk failure, and flags do not
+travel through git. The commit is still the durability.
 
 Offline `make eval` / `make eval-reg` / `make baseline` invocations also
 leave untracked `evals/runs/<id>/` directories behind. Leaving them
@@ -239,7 +242,50 @@ is deliberate (ADR 0017).
 Re-using an invocation id fails loudly: the run directory is created with
 `exist_ok=False` and every file inside is opened exclusive-create, so a
 collision raises before a single tool call is spent instead of overwriting the
-earlier run.
+earlier run. Should any future path reach a finalized directory anyway, the
+lock below is the second wall: a sealed archive refuses new files too.
+
+### Completed archives are locked on disk ([ADR 0021](ADR/0021-run-archives-are-locked-by-the-filesystem.md))
+
+Invariant 9, enforced by the filesystem rather than requested of the reader —
+the same convention `context/README.md` applies to session archives. The
+runner locks in two moments:
+
+- **As each scenario lands**, its trajectory, briefing and trace-slice files
+  are made read-only (`chmod a-w`) and, where the platform supports file
+  flags (macOS), user-immutable (`chflags uchg`). A killed run's partial rows
+  are therefore already protected — evidence the instant it is durable.
+- **When `report.json` lands**, the whole `runs/<id>/` tree is sealed,
+  directories included. From that moment `rm -rf`, truncation, overwrite,
+  `git clean -fd`, and new-file creation inside it are all refused.
+
+On Linux (CI) there is no `uchg`; the write-bit removal still refuses all of
+the above for a *finalized* archive, because unlink needs write permission on
+the parent directory and the seal removes it. The one platform gap: a
+*partial* archive's rows on Linux are read-only but deletable until the seal
+lands — on macOS `uchg` refuses even that.
+
+The lock is best-effort by design: a filesystem that refuses `chmod` or
+`chflags` gets a logged `archive lock skipped (...)` line and the run
+completes normally. The evidence is already written by lock time; enforcement
+must never cost a paid run its report.
+
+The flat `evals/traces/*.jsonl` files are **never** locked — later
+invocations append to them (F-002's fix). Only the per-run slice inside the
+archive is sealed.
+
+**To unlock one on purpose** — rare, deliberate, announced:
+
+```bash
+chflags -R nouchg evals/runs/<invocation_id>   # macOS only; no-op elsewhere
+chmod -R u+w evals/runs/<invocation_id>
+```
+
+Unlocking in order to *edit* run data is invariant 9's definition of a bug.
+The legitimate reasons are migration to other storage and whatever a future
+retention ADR decides. If an archive does get removed, say so where the next
+reader will look (the commit message, or the run ledger): a gap that
+announces itself is fine; a gap that looks like it was never there is not.
 
 ### Runner exit codes and --live refusal (ADR 0013)
 

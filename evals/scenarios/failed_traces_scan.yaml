@@ -60,6 +60,14 @@ canned_llm_responses:
 expectation:
   name: failed_traces_scan
   expected_terminal_state: escalated
-  expected_evidence_contains:
-  - trace
+  # Tool-scoped (evidence sweep, evals/evidence_audit.py): the bare `trace`
+  # substring was satisfied by the `trace_id` field in list_dlq_messages
+  # output, and the 2026-08-16 dress rehearsal passed this scenario live
+  # without a single search_traces call. The scenario exists to prove the
+  # agent scans failed traces, so the evidence must name the tool: at least
+  # one search_traces match with a trace_id, recorded by search_traces.
+  expected_evidence_fields:
+  - tools: [search_traces]
+    field: matches[].trace_id
+    is_null: false
   max_tool_calls: 5

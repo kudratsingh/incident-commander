@@ -1,0 +1,142 @@
+{
+  "scenario": "consumer_lag_orders_high",
+  "incident_id": "1214f158-cc2d-4bce-8ffb-f257e8e3cafa",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "1214f158-cc2d-4bce-8ffb-f257e8e3cafa",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "orders-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:50.222978Z",
+      "updated_at": "2026-08-22T02:21:50.222978Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "1214f158-cc2d-4bce-8ffb-f257e8e3cafa",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "orders-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000025,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "ad8f42fb-a502-43f5-9936-0fa2c3a58e3d",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:50.223003Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:50.222978Z",
+      "updated_at": "2026-08-22T02:21:50.223003Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "1214f158-cc2d-4bce-8ffb-f257e8e3cafa",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": "orders-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000036,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "ad8f42fb-a502-43f5-9936-0fa2c3a58e3d",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:50.223003Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7bb8f172-6f78-4584-b194-a152aa15acb7",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "orders-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"orders-consumer\",\"lag\":7500,\"cache_key\":\"kafka:consumer_lag:orders-consumer\"}",
+          "timestamp": "2026-08-22T02:21:50.223014Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e9828969-ac17-4af6-a932-bd504f118ac4",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "confidence sufficient for handoff"
+          },
+          "result_summary": "planner stop: confidence sufficient for handoff",
+          "timestamp": "2026-08-22T02:21:50.223014Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.85,
+          "reasoning": "Lag of 7500 confirms orders-consumer is backlogged.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:50.222978Z",
+      "updated_at": "2026-08-22T02:21:50.223014Z"
+    }
+  ],
+  "invocation_id": "0aced73979ec"
+}

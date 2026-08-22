@@ -1,0 +1,14 @@
+{
+  "incident_id": "ea45e9e4-db2c-4dd6-8abd-595597adb4aa",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.canary severity=low fingerprint=canary_blip group=billing-consumer",
+  "investigation_trail": [],
+  "findings": "Alert severity classified as low; no investigation was warranted.\n",
+  "recommendation": "Confirm the canary_blip fingerprint should not page and adjust the alerting rule if this fires again within the noise window.\n",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.000018,
+    "usd": "0"
+  }
+}

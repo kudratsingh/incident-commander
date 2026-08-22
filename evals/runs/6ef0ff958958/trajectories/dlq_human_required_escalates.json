@@ -1,0 +1,470 @@
+{
+  "scenario": "dlq_human_required_escalates",
+  "incident_id": "dcf1e14c-b42c-427c-bcbd-7db3755f2569",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "dcf1e14c-b42c-427c-bcbd-7db3755f2569",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_persistent",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:52.297013Z",
+      "updated_at": "2026-08-22T02:21:52.297013Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "dcf1e14c-b42c-427c-bcbd-7db3755f2569",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_persistent",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000039,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "8dd8892a-65a6-4838-89da-779e8ba91f68",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "c58cf3fa76885b545fd58c02879e1285"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:52.297052Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:52.297013Z",
+      "updated_at": "2026-08-22T02:21:52.297052Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "dcf1e14c-b42c-427c-bcbd-7db3755f2569",
+      "state": "planning",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_persistent",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000057,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "8dd8892a-65a6-4838-89da-779e8ba91f68",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "c58cf3fa76885b545fd58c02879e1285"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:52.297052Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "48e6a098-faba-4182-9b8e-d19b09045731",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":2,\"items\":[{\"id\":\"cccccccc-3333-3333-3333-000000000001\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: not-a-number at row 15382\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"human_required\",\"extra\":null},{\"id\":\"cccccccc-3333-3333-3333-000000000002\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: could not convert string to float: NaN at row 42\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"human_required\",\"extra\":null}]}",
+          "timestamp": "2026-08-22T02:21:52.297070Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2ea6f298-dbc3-47dd-8295-a849264c0327",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "entries hint=human_required; mark permanent, don't replay"
+          },
+          "result_summary": "planner handoff to PLANNING: entries hint=human_required; mark permanent, don't replay",
+          "timestamp": "2026-08-22T02:21:52.297070Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "persistent_data_bug",
+          "confidence": 0.9,
+          "reasoning": "All entries hint=human_required (CSV data bugs). Replay would re-fail; correct action is mark_dlq_permanent + human review.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:52.297013Z",
+      "updated_at": "2026-08-22T02:21:52.297070Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "dcf1e14c-b42c-427c-bcbd-7db3755f2569",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_persistent",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.002691,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "8dd8892a-65a6-4838-89da-779e8ba91f68",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "c58cf3fa76885b545fd58c02879e1285"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:52.297052Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "48e6a098-faba-4182-9b8e-d19b09045731",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":2,\"items\":[{\"id\":\"cccccccc-3333-3333-3333-000000000001\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: not-a-number at row 15382\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"human_required\",\"extra\":null},{\"id\":\"cccccccc-3333-3333-3333-000000000002\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: could not convert string to float: NaN at row 42\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"human_required\",\"extra\":null}]}",
+          "timestamp": "2026-08-22T02:21:52.297070Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2ea6f298-dbc3-47dd-8295-a849264c0327",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "entries hint=human_required; mark permanent, don't replay"
+          },
+          "result_summary": "planner handoff to PLANNING: entries hint=human_required; mark permanent, don't replay",
+          "timestamp": "2026-08-22T02:21:52.297070Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "869e6450-67b9-47e9-b1b4-db4ca7ef9207",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "persistent_data_bug"
+          },
+          "result_summary": "plan: mark_dlq_permanent({\"job_id\": \"cccccccc-3333-3333-3333-000000000001\", \"reason\": \"CSV parse error at row 15382 is a source-data bug that will re-fail on replay. Excluding it from auto-replay for human review.\\n\"}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-22T02:21:52.299704Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "persistent_data_bug",
+          "confidence": 0.9,
+          "reasoning": "All entries hint=human_required (CSV data bugs). Replay would re-fail; correct action is mark_dlq_permanent + human review.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "persistent_data_bug",
+        "action_tool": "mark_dlq_permanent",
+        "action_arguments": {
+          "job_id": "cccccccc-3333-3333-3333-000000000001",
+          "reason": "CSV parse error at row 15382 is a source-data bug that will re-fail on replay. Excluding it from auto-replay for human review.\n"
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "human_required",
+          "limit": 50
+        },
+        "verify_expectation": "The marked job_id still appears in the DLQ list filtered by remediation_hint=human_required — the entry stays in the DLQ (status dead_letter) and is only excluded from auto-replay.\n"
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:52.297013Z",
+      "updated_at": "2026-08-22T02:21:52.299704Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "dcf1e14c-b42c-427c-bcbd-7db3755f2569",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_persistent",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.004963,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "8dd8892a-65a6-4838-89da-779e8ba91f68",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "c58cf3fa76885b545fd58c02879e1285"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:52.297052Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "48e6a098-faba-4182-9b8e-d19b09045731",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":2,\"items\":[{\"id\":\"cccccccc-3333-3333-3333-000000000001\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: not-a-number at row 15382\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"human_required\",\"extra\":null},{\"id\":\"cccccccc-3333-3333-3333-000000000002\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: could not convert string to float: NaN at row 42\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"human_required\",\"extra\":null}]}",
+          "timestamp": "2026-08-22T02:21:52.297070Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2ea6f298-dbc3-47dd-8295-a849264c0327",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "entries hint=human_required; mark permanent, don't replay"
+          },
+          "result_summary": "planner handoff to PLANNING: entries hint=human_required; mark permanent, don't replay",
+          "timestamp": "2026-08-22T02:21:52.297070Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "869e6450-67b9-47e9-b1b4-db4ca7ef9207",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "persistent_data_bug"
+          },
+          "result_summary": "plan: mark_dlq_permanent({\"job_id\": \"cccccccc-3333-3333-3333-000000000001\", \"reason\": \"CSV parse error at row 15382 is a source-data bug that will re-fail on replay. Excluding it from auto-replay for human review.\\n\"}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-22T02:21:52.299704Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5c8addce-a5e0-4fd3-8396-e423f151c161",
+          "tool_name": "mark_dlq_permanent",
+          "arguments": {
+            "job_id": "cccccccc-3333-3333-3333-000000000001",
+            "reason": "CSV parse error at row 15382 is a source-data bug that will re-fail on replay. Excluding it from auto-replay for human review.\n",
+            "idempotency_key": "72f0d1a5572e646aa3dd89b3335de115"
+          },
+          "result_summary": "{\"job_id\":\"cccccccc-3333-3333-3333-000000000001\",\"previous_hint\":\"human_required\",\"remediation_hint\":\"human_required\",\"already_marked\":false}",
+          "timestamp": "2026-08-22T02:21:52.301976Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "persistent_data_bug",
+          "confidence": 0.9,
+          "reasoning": "All entries hint=human_required (CSV data bugs). Replay would re-fail; correct action is mark_dlq_permanent + human review.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "persistent_data_bug",
+        "action_tool": "mark_dlq_permanent",
+        "action_arguments": {
+          "job_id": "cccccccc-3333-3333-3333-000000000001",
+          "reason": "CSV parse error at row 15382 is a source-data bug that will re-fail on replay. Excluding it from auto-replay for human review.\n"
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "human_required",
+          "limit": 50
+        },
+        "verify_expectation": "The marked job_id still appears in the DLQ list filtered by remediation_hint=human_required — the entry stays in the DLQ (status dead_letter) and is only excluded from auto-replay.\n"
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-22T02:21:52.297013Z",
+      "updated_at": "2026-08-22T02:21:52.301976Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "dcf1e14c-b42c-427c-bcbd-7db3755f2569",
+      "state": "resolved",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "high",
+        "fingerprint": "dlq_depth_warning_persistent",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 3,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.005037,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "8dd8892a-65a6-4838-89da-779e8ba91f68",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "c58cf3fa76885b545fd58c02879e1285"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:52.297052Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "48e6a098-faba-4182-9b8e-d19b09045731",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":2,\"items\":[{\"id\":\"cccccccc-3333-3333-3333-000000000001\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: not-a-number at row 15382\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"human_required\",\"extra\":null},{\"id\":\"cccccccc-3333-3333-3333-000000000002\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: could not convert string to float: NaN at row 42\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"human_required\",\"extra\":null}]}",
+          "timestamp": "2026-08-22T02:21:52.297070Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2ea6f298-dbc3-47dd-8295-a849264c0327",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "entries hint=human_required; mark permanent, don't replay"
+          },
+          "result_summary": "planner handoff to PLANNING: entries hint=human_required; mark permanent, don't replay",
+          "timestamp": "2026-08-22T02:21:52.297070Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "869e6450-67b9-47e9-b1b4-db4ca7ef9207",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "persistent_data_bug"
+          },
+          "result_summary": "plan: mark_dlq_permanent({\"job_id\": \"cccccccc-3333-3333-3333-000000000001\", \"reason\": \"CSV parse error at row 15382 is a source-data bug that will re-fail on replay. Excluding it from auto-replay for human review.\\n\"}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-22T02:21:52.299704Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5c8addce-a5e0-4fd3-8396-e423f151c161",
+          "tool_name": "mark_dlq_permanent",
+          "arguments": {
+            "job_id": "cccccccc-3333-3333-3333-000000000001",
+            "reason": "CSV parse error at row 15382 is a source-data bug that will re-fail on replay. Excluding it from auto-replay for human review.\n",
+            "idempotency_key": "72f0d1a5572e646aa3dd89b3335de115"
+          },
+          "result_summary": "{\"job_id\":\"cccccccc-3333-3333-3333-000000000001\",\"previous_hint\":\"human_required\",\"remediation_hint\":\"human_required\",\"already_marked\":false}",
+          "timestamp": "2026-08-22T02:21:52.301976Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f65f30d5-2594-410a-a95a-92856a124582",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": "human_required",
+            "limit": 50,
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "{\"total\":2,\"items\":[{\"id\":\"cccccccc-3333-3333-3333-000000000001\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: not-a-number at row 15382\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:00:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"human_required\",\"extra\":null},{\"id\":\"cccccccc-3333-3333-3333-000000000002\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: could not convert string to float: NaN at row 42\",\"retry_count\":3,\"created_at\":\"2026-07-30T10:01:00Z\",\"updated_at\":null,\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"human_required\",\"extra\":null}]}",
+          "timestamp": "2026-08-22T02:21:52.302061Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7766f7d5-38cd-4168-a46f-f7483c8640dd",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The marked job_id still appears in the DLQ list filtered by remediation_hint=human_required — the entry stays in the DLQ (status dead_letter) and is only excluded from auto-replay.\n",
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "verified: mark_dlq_permanent returned remediation_hint=human_required with the reason recorded. The verify probe shows the job still present in the human_required-filtered DLQ, which is the expected post-mark state — excluded from auto-replay, awaiting human review.\n",
+          "timestamp": "2026-08-22T02:21:52.302061Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "persistent_data_bug",
+          "confidence": 0.9,
+          "reasoning": "All entries hint=human_required (CSV data bugs). Replay would re-fail; correct action is mark_dlq_permanent + human review.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "persistent_data_bug",
+        "action_tool": "mark_dlq_permanent",
+        "action_arguments": {
+          "job_id": "cccccccc-3333-3333-3333-000000000001",
+          "reason": "CSV parse error at row 15382 is a source-data bug that will re-fail on replay. Excluding it from auto-replay for human review.\n"
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "human_required",
+          "limit": 50
+        },
+        "verify_expectation": "The marked job_id still appears in the DLQ list filtered by remediation_hint=human_required — the entry stays in the DLQ (status dead_letter) and is only excluded from auto-replay.\n"
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-22T02:21:52.297013Z",
+      "updated_at": "2026-08-22T02:21:52.302061Z"
+    }
+  ],
+  "invocation_id": "6ef0ff958958"
+}

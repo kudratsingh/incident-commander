@@ -1,0 +1,145 @@
+{
+  "scenario": "failed_traces_scan",
+  "incident_id": "b3d6b7be-6765-4b4c-a648-d703b0beb9bd",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "b3d6b7be-6765-4b4c-a648-d703b0beb9bd",
+      "state": "triage",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "high",
+        "fingerprint": "failure_rate_high",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:26:51.698555Z",
+      "updated_at": "2026-08-22T02:26:51.698555Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "b3d6b7be-6765-4b4c-a648-d703b0beb9bd",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "high",
+        "fingerprint": "failure_rate_high",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000031,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "486864e7-4138-4c25-86ea-5f3f8d7fa9e6",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "38d0c5c473912ed3319c1240cf61351e"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:26:51.698586Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:26:51.698555Z",
+      "updated_at": "2026-08-22T02:26:51.698586Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "b3d6b7be-6765-4b4c-a648-d703b0beb9bd",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "high",
+        "fingerprint": "failure_rate_high",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000045,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "486864e7-4138-4c25-86ea-5f3f8d7fa9e6",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "38d0c5c473912ed3319c1240cf61351e"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:26:51.698586Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b83595a7-5827-44f1-a21f-61318b3214fc",
+          "tool_name": "search_traces",
+          "arguments": {
+            "status": "failed",
+            "job_type": null,
+            "since_hours": 1,
+            "limit": 50
+          },
+          "result_summary": "{\"matches\":[{\"trace_id\":\"trace-a\",\"job_id\":\"job-a\",\"job_type\":\"send_email\",\"status\":\"failed\",\"created_at\":\"2026-07-28T10:05:00Z\"},{\"trace_id\":\"trace-b\",\"job_id\":\"job-b\",\"job_type\":\"send_email\",\"status\":\"failed\",\"created_at\":\"2026-07-28T10:06:00Z\"}]}",
+          "timestamp": "2026-08-22T02:26:51.698600Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e3a0f0af-c7ea-4553-b079-a538891b619e",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "single job type failing; human should inspect that worker"
+          },
+          "result_summary": "planner stop: single job type failing; human should inspect that worker",
+          "timestamp": "2026-08-22T02:26:51.698600Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "unknown",
+          "name": "job_type_regression",
+          "confidence": 0.8,
+          "reasoning": "Failed jobs are all send_email — regression is localized to one job type rather than platform-wide.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:26:51.698555Z",
+      "updated_at": "2026-08-22T02:26:51.698600Z"
+    }
+  ],
+  "invocation_id": "82d114a34002"
+}

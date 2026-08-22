@@ -82,5 +82,11 @@ expectation:
   expected_terminal_state: escalated
   expected_evidence_contains:
   - payments-consumer
-  - lag
+  # Tool-scoped (evidence sweep, evals/evidence_audit.py): the bare `lag`
+  # substring also matched list_active_alerts fixtures. Non-null reading,
+  # recorded by get_consumer_lag itself.
+  expected_evidence_fields:
+  - tools: [get_consumer_lag]
+    field: lag
+    is_null: false
   max_tool_calls: 5

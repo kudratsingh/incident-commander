@@ -1,0 +1,148 @@
+{
+  "scenario": "consumer_lag_high",
+  "incident_id": "b7b13ac1-ff5e-475b-85d5-38ded6d97dbd",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "b7b13ac1-ff5e-475b-85d5-38ded6d97dbd",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:50.211250Z",
+      "updated_at": "2026-08-22T02:21:50.211250Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "b7b13ac1-ff5e-475b-85d5-38ded6d97dbd",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000033,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "90e67881-bc06-45b4-ba4b-d0a37ece16e1",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:50.211283Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:50.211250Z",
+      "updated_at": "2026-08-22T02:21:50.211283Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "b7b13ac1-ff5e-475b-85d5-38ded6d97dbd",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "high",
+        "fingerprint": "consumer_lag_high",
+        "group": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000047,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "90e67881-bc06-45b4-ba4b-d0a37ece16e1",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:50.211283Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2ecf3798-5111-4743-a9ca-9297bc311d00",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":1200,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-22T02:21:50.211297Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2fcb3040-9e8a-4c19-9bdc-2b3d74433cf1",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "Fault confirmed: the consumer holds its assignment while the backlog climbs, so this is a stall rather than a throughput dip. A restart_consumer_group would be the fix, but the remaining budget cannot fund the action plus the verify polling it requires, and a half-executed remediation is worse than none. Escalate with the reading and the recommended action.\n"
+          },
+          "result_summary": "planner stop: Fault confirmed: the consumer holds its assignment while the backlog climbs, so this is a stall rather than a throughput dip. A restart_consumer_group would be the fix, but the remaining budget cannot fund the action plus the verify polling it requires, and a half-executed remediation is worse than none. Escalate with the reading and the recommended action.\n",
+          "timestamp": "2026-08-22T02:21:50.211297Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.7,
+          "reasoning": "Platform returned the live lag reading; whether it's a spike or sustained is not knowable from one point without another tool.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:50.211250Z",
+      "updated_at": "2026-08-22T02:21:50.211297Z"
+    }
+  ],
+  "invocation_id": "0aced73979ec"
+}

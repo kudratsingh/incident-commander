@@ -1,0 +1,27 @@
+{
+  "incident_id": "a88a76b3-5b25-4ee4-bc20-c85835d59532",
+  "final_state": "resolved",
+  "alert_summary": "source=platform.kafka severity=high fingerprint=consumer_stalled group=worker-dispatcher",
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":15000,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    },
+    {
+      "tool": "restart_consumer_group",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"kill_key_cleared\":true,\"latency_key_cleared\":false,\"accepted\":true}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    }
+  ],
+  "findings": "worker-dispatcher had stopped processing while retaining its group assignment; lag climbed to 15000. The agent restarted the consumer group (kill flag cleared); the supervisor re-spawned it and the follow-up probe shows lag back at 0.\n",
+  "recommendation": "Monitor lag for the next 5 minutes to confirm sustained recovery. If the same alert re-fires within 30 minutes, escalate — a restart-loop suggests a deeper issue than saturation.\n",
+  "budget_used": {
+    "tool_calls": 3,
+    "tokens": 0,
+    "wall_seconds": 0.005462,
+    "usd": "0.000000"
+  }
+}

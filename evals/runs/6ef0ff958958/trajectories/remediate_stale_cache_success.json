@@ -1,0 +1,443 @@
+{
+  "scenario": "remediate_stale_cache_success",
+  "incident_id": "9b0712f9-9aac-414a-9d17-e04ebbfa68f0",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "9b0712f9-9aac-414a-9d17-e04ebbfa68f0",
+      "state": "triage",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "high",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:52.372495Z",
+      "updated_at": "2026-08-22T02:21:52.372495Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "9b0712f9-9aac-414a-9d17-e04ebbfa68f0",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "high",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000026,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "3b34e53c-8910-42f7-8127-d01ac8a8d252",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:52.372521Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:52.372495Z",
+      "updated_at": "2026-08-22T02:21:52.372521Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "9b0712f9-9aac-414a-9d17-e04ebbfa68f0",
+      "state": "planning",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "high",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000039,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "3b34e53c-8910-42f7-8127-d01ac8a8d252",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:52.372521Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c8e72aa1-d96b-4d75-b7a2-7e60cd2f1171",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":1.1,\"connected_clients\":3,\"used_memory_bytes\":1073741824,\"used_memory_human\":\"1.00G\",\"keyspace_hits\":293,\"keyspace_misses\":449813,\"error\":null}",
+          "timestamp": "2026-08-22T02:21:52.372534Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "507ffa90-cab0-4313-b70f-8beda1f1d189",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "stale hot key identified — invalidate_cache_key applies"
+          },
+          "result_summary": "planner handoff to PLANNING: stale hot key identified — invalidate_cache_key applies",
+          "timestamp": "2026-08-22T02:21:52.372534Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "stale_cache_hot_key",
+          "confidence": 0.85,
+          "reasoning": "Hit/miss ratio collapsed (293 hits vs 449813 misses = 0.065%). Alert names a specific hot key. Invalidating forces a refresh from the source of truth and should restore cache behavior.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:52.372495Z",
+      "updated_at": "2026-08-22T02:21:52.372534Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "9b0712f9-9aac-414a-9d17-e04ebbfa68f0",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "high",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.00249,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "3b34e53c-8910-42f7-8127-d01ac8a8d252",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:52.372521Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c8e72aa1-d96b-4d75-b7a2-7e60cd2f1171",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":1.1,\"connected_clients\":3,\"used_memory_bytes\":1073741824,\"used_memory_human\":\"1.00G\",\"keyspace_hits\":293,\"keyspace_misses\":449813,\"error\":null}",
+          "timestamp": "2026-08-22T02:21:52.372534Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "507ffa90-cab0-4313-b70f-8beda1f1d189",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "stale hot key identified — invalidate_cache_key applies"
+          },
+          "result_summary": "planner handoff to PLANNING: stale hot key identified — invalidate_cache_key applies",
+          "timestamp": "2026-08-22T02:21:52.372534Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e23911a2-8204-44d4-8b77-2971df2071f0",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "stale_cache_hot_key"
+          },
+          "result_summary": "plan: invalidate_cache_key({\"key\": \"cache:jobs:worker-dispatcher:hot_set\"}) then verify via get_redis_health",
+          "timestamp": "2026-08-22T02:21:52.374985Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "stale_cache_hot_key",
+          "confidence": 0.85,
+          "reasoning": "Hit/miss ratio collapsed (293 hits vs 449813 misses = 0.065%). Alert names a specific hot key. Invalidating forces a refresh from the source of truth and should restore cache behavior.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "stale_cache_hot_key",
+        "action_tool": "invalidate_cache_key",
+        "action_arguments": {
+          "key": "cache:jobs:worker-dispatcher:hot_set"
+        },
+        "verify_tool": "get_redis_health",
+        "verify_arguments": {},
+        "verify_expectation": "Miss rate should stabilize as workers repopulate the key from the source of truth. deleted=true confirms the key existed and was cleared.\n"
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:52.372495Z",
+      "updated_at": "2026-08-22T02:21:52.374985Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "9b0712f9-9aac-414a-9d17-e04ebbfa68f0",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "high",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.004389,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "3b34e53c-8910-42f7-8127-d01ac8a8d252",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:52.372521Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c8e72aa1-d96b-4d75-b7a2-7e60cd2f1171",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":1.1,\"connected_clients\":3,\"used_memory_bytes\":1073741824,\"used_memory_human\":\"1.00G\",\"keyspace_hits\":293,\"keyspace_misses\":449813,\"error\":null}",
+          "timestamp": "2026-08-22T02:21:52.372534Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "507ffa90-cab0-4313-b70f-8beda1f1d189",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "stale hot key identified — invalidate_cache_key applies"
+          },
+          "result_summary": "planner handoff to PLANNING: stale hot key identified — invalidate_cache_key applies",
+          "timestamp": "2026-08-22T02:21:52.372534Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e23911a2-8204-44d4-8b77-2971df2071f0",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "stale_cache_hot_key"
+          },
+          "result_summary": "plan: invalidate_cache_key({\"key\": \"cache:jobs:worker-dispatcher:hot_set\"}) then verify via get_redis_health",
+          "timestamp": "2026-08-22T02:21:52.374985Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c57bca7c-5434-4f8e-9156-0be51552d05d",
+          "tool_name": "invalidate_cache_key",
+          "arguments": {
+            "key": "cache:jobs:worker-dispatcher:hot_set",
+            "idempotency_key": "1df92e952117d01e41fd57ca30b68145"
+          },
+          "result_summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"deleted\":true}",
+          "timestamp": "2026-08-22T02:21:52.376884Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "stale_cache_hot_key",
+          "confidence": 0.85,
+          "reasoning": "Hit/miss ratio collapsed (293 hits vs 449813 misses = 0.065%). Alert names a specific hot key. Invalidating forces a refresh from the source of truth and should restore cache behavior.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "stale_cache_hot_key",
+        "action_tool": "invalidate_cache_key",
+        "action_arguments": {
+          "key": "cache:jobs:worker-dispatcher:hot_set"
+        },
+        "verify_tool": "get_redis_health",
+        "verify_arguments": {},
+        "verify_expectation": "Miss rate should stabilize as workers repopulate the key from the source of truth. deleted=true confirms the key existed and was cleared.\n"
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-22T02:21:52.372495Z",
+      "updated_at": "2026-08-22T02:21:52.376884Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "9b0712f9-9aac-414a-9d17-e04ebbfa68f0",
+      "state": "resolved",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "high",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 3,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.004415,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "3b34e53c-8910-42f7-8127-d01ac8a8d252",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:52.372521Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c8e72aa1-d96b-4d75-b7a2-7e60cd2f1171",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":1.1,\"connected_clients\":3,\"used_memory_bytes\":1073741824,\"used_memory_human\":\"1.00G\",\"keyspace_hits\":293,\"keyspace_misses\":449813,\"error\":null}",
+          "timestamp": "2026-08-22T02:21:52.372534Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "507ffa90-cab0-4313-b70f-8beda1f1d189",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "stale hot key identified — invalidate_cache_key applies"
+          },
+          "result_summary": "planner handoff to PLANNING: stale hot key identified — invalidate_cache_key applies",
+          "timestamp": "2026-08-22T02:21:52.372534Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e23911a2-8204-44d4-8b77-2971df2071f0",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "stale_cache_hot_key"
+          },
+          "result_summary": "plan: invalidate_cache_key({\"key\": \"cache:jobs:worker-dispatcher:hot_set\"}) then verify via get_redis_health",
+          "timestamp": "2026-08-22T02:21:52.374985Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c57bca7c-5434-4f8e-9156-0be51552d05d",
+          "tool_name": "invalidate_cache_key",
+          "arguments": {
+            "key": "cache:jobs:worker-dispatcher:hot_set",
+            "idempotency_key": "1df92e952117d01e41fd57ca30b68145"
+          },
+          "result_summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"deleted\":true}",
+          "timestamp": "2026-08-22T02:21:52.376884Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7cf9ff33-79ca-4b52-af4b-1ced193d15da",
+          "tool_name": "get_redis_health",
+          "arguments": {
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":1.1,\"connected_clients\":3,\"used_memory_bytes\":1073741824,\"used_memory_human\":\"1.00G\",\"keyspace_hits\":293,\"keyspace_misses\":449813,\"error\":null}",
+          "timestamp": "2026-08-22T02:21:52.376916Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4e464313-0ccf-494c-ab46-33d6463717fd",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "Miss rate should stabilize as workers repopulate the key from the source of truth. deleted=true confirms the key existed and was cleared.\n",
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "verified: invalidate_cache_key returned deleted=true, confirming the stale key was cleared. Follow-up read shows Redis is healthy and the hit rate will stabilize as workers repopulate.\n",
+          "timestamp": "2026-08-22T02:21:52.376916Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "stale_cache_hot_key",
+          "confidence": 0.85,
+          "reasoning": "Hit/miss ratio collapsed (293 hits vs 449813 misses = 0.065%). Alert names a specific hot key. Invalidating forces a refresh from the source of truth and should restore cache behavior.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "stale_cache_hot_key",
+        "action_tool": "invalidate_cache_key",
+        "action_arguments": {
+          "key": "cache:jobs:worker-dispatcher:hot_set"
+        },
+        "verify_tool": "get_redis_health",
+        "verify_arguments": {},
+        "verify_expectation": "Miss rate should stabilize as workers repopulate the key from the source of truth. deleted=true confirms the key existed and was cleared.\n"
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-22T02:21:52.372495Z",
+      "updated_at": "2026-08-22T02:21:52.376916Z"
+    }
+  ],
+  "invocation_id": "6ef0ff958958"
+}

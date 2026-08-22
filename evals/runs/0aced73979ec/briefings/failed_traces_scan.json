@@ -1,0 +1,19 @@
+{
+  "incident_id": "590cdcf4-370f-4cd0-8429-3e665e8d7595",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.jobs severity=high fingerprint=failure_rate_high",
+  "investigation_trail": [
+    {
+      "tool": "search_traces",
+      "summary": "{\"matches\":[{\"trace_id\":\"trace-a\",\"job_id\":\"job-a\",\"job_type\":\"send_email\",\"status\":\"failed\",\"created_at\":\"2026-07-28T10:05:00Z\"},{\"trace_id\":\"trace-b\",\"job_id\":\"job-b\",\"job_type\":\"send_email\",\"status\":\"failed\",\"created_at\":\"2026-07-28T10:06:00Z\"}]}"
+    }
+  ],
+  "findings": "Recent failures are dominated by send_email jobs (2 of 2 matches in the last hour). Regression appears localized to that worker.\n",
+  "recommendation": "Check the send_email worker's recent deploys and downstream mailer health before broadening the investigation.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.000058,
+    "usd": "0.000000"
+  }
+}

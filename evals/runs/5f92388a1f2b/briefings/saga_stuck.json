@@ -1,0 +1,19 @@
+{
+  "incident_id": "4ad8e10f-c722-4a13-b74b-ac5640458762",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.dag severity=high fingerprint=saga_stalled",
+  "investigation_trail": [
+    {
+      "tool": "get_dag_state",
+      "summary": "{\"seed_id\":\"25220882-1820-5cd3-b09b-f866ff5823c9\",\"nodes\":[{\"id\":\"n1\",\"type\":\"reserve_inventory\",\"status\":\"succeeded\",\"retry_count\":0,\"created_at\":\"2026-07-28T10:00:00Z\"},{\"id\":\"n2\",\"type\":\"charge_card\",\"status\":\"running\",\"retry_count\":2,\"created_at\":\"2026-07-28T10:01:00Z\"},{\"id\":\"n3\",\"type\":\"ship_order\",\"status\":\"pending\",\"retry_count\":0,\"created_at\":\"2026-07-28T10:01:00Z\"}],\"edges\":[{\"from_id\":\"n1\",\"to_id\":\"n2\"},{\"from_id\":\"n2\",\"to_id\":\"n3\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}"
+    }
+  ],
+  "findings": "The saga's charge_card node has retried twice and is holding up the downstream ship_order node. reserve_inventory succeeded first.\n",
+  "recommendation": "Check payment gateway health; if the failure is external, kick off the saga's compensation flow to release the reserved inventory.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.000054,
+    "usd": "0.000000"
+  }
+}

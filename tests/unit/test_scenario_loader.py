@@ -35,7 +35,15 @@ class TestLoadScenario:
         assert scenario.name == "consumer_lag_high"
         assert scenario.alert.severity == "high"
         assert scenario.expectation.expected_terminal_state is IncidentState.ESCALATED
-        assert "worker-dispatcher" in scenario.expectation.expected_evidence_contains
+        # The group citation is tool-scoped since the evidence sweep: the bare
+        # `worker-dispatcher` substring was satisfiable by remediation-tool
+        # fixtures too (evals/evidence_audit.py).
+        group_asserts = [
+            f
+            for f in scenario.expectation.expected_evidence_fields
+            if f.tools == ("get_consumer_lag",) and f.field == "consumer_group"
+        ]
+        assert [f.equals for f in group_asserts] == ["worker-dispatcher"]
         assert scenario.expectation.max_tool_calls == 5
 
     def test_loads_valid_string_via_tmp_file(self, tmp_path: Path) -> None:

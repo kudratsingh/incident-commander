@@ -29,8 +29,8 @@ expectation:
 
 Optional fields drive richer grading:
 
-- `expected_evidence_contains: [<substring>, ...]` — grader checks the evidence corpus for the *presence* of a field name or concept. Never a value (see calibration rule 2)
-- `expected_evidence_fields: [{tools: [...], field: <name>, equals|at_least|is_null: <v>, which: any|last}, ...]` — structured *value* assertions, evaluated against the parsed tool output. Graded inside the same `EVIDENCE` dimension
+- `expected_evidence_contains: [<substring>, ...]` — grader checks the evidence corpus for the *presence* of a field name or concept. Never a value (see calibration rule 2), and never a token that more than one tool's output could carry (rule 6 — the cross-satisfiability audit fails CI on those)
+- `expected_evidence_fields: [{tools: [...], field: <name-or-path>, equals|at_least|is_null: <v>, which: any|last}, ...]` — structured *value* assertions, evaluated against the parsed tool output and scoped to the named tools. `field` is a top-level name or a path descending into lists at `[]` (`items[].remediation_hint`), the same syntax as a precondition `path`. Graded inside the same `EVIDENCE` dimension
 - `expected_action_tools: [restart_consumer_group, ...]` — for remediation scenarios, the equivalence set of Tier-1 tools any one of which satisfies the `ACTION` dimension. Plural, and a list even when it holds one name
 - `forbidden_replay_job_ids: [job-…, ...]` — DLQ entries the agent must never replay; drives the `SAFETY` dimension
 - `forbidden_action_tools: [restart_consumer_group, ...]` — tools the agent must not have called at all; also `SAFETY`
@@ -294,9 +294,10 @@ Every verify poll ([ADR 0006](ADR/0006-verification-is-a-polling-window.md)) and
 `expected_evidence_contains` items assert that a *field name* or a *concept* appears somewhere in the evidence corpus. They never assert a specific serialized-JSON fragment.
 
 - Wrong: `"\"scheduled\":2"` — depends on JSON serializer, field order, and observed count matching.
-- Right: `scheduled` — asserts the field was present in some evidence entry.
+- Also wrong, since the evidence sweep: the bare substring `scheduled` — it names a field of *both* replay siblings, so any replay call satisfied it, delayed or not (rule 6).
+- Right: `{tools: [replay_dlq_by_ids, replay_dlq_by_category], field: scheduled, at_least: 1}` in `expected_evidence_fields` — the effect, scoped to the tools that produce it, robust to the observed count.
 
-**When the value itself matters, use `expected_evidence_fields`.** That is the sanctioned escape hatch, and the only one. An entry matches when its `tool_name` is in `tools`; its `result_summary` is parsed as JSON (it is the tool output model's `model_dump_json`, so booleans and nulls are real), and `field` is compared with exactly one of:
+**When the value itself matters — or when the token must be attributable to a specific tool (rule 6) — use `expected_evidence_fields`.** That is the sanctioned escape hatch, and the only one. An entry matches when its `tool_name` is in `tools`; its `result_summary` is parsed as JSON (it is the tool output model's `model_dump_json`, so booleans and nulls are real), and `field` — a top-level name, or a path descending into lists at `[]` such as `items[].remediation_hint`, with the same any-row semantics as a precondition `path` — is compared with exactly one of:
 
 | comparator | holds when |
 |---|---|
@@ -359,6 +360,17 @@ It finds three shapes of drift:
 Rows are *not* compared positionally: a fixture legitimately models a different world state, so what must hold is that the row shape matches and that each value is one the platform can emit. Fields that move between two honest observations (clocks, latencies, memory gauges) are declared volatile per tool in `evals/fixture_drift.py` and checked for type only. `lag` is deliberately **not** volatile — its value is the whole subject of the lag scenarios.
 
 **Arguments come from the scenario, not a table.** `canned_tool_responses` is keyed by tool name only, so the fixture does not record which call it answers. The scenario's canned planner does: its scripted `next_action` is exactly the call the offline run makes. Deriving from there means a scenario that changes what it probes cannot drift away from what the check probes.
+
+### 6. A substring that more than one tool can produce proves nothing about which tool ran
+
+The evidence corpus is the joined `result_summary` of every entry, and it does not say which tool produced which entry. So an `expected_evidence_contains` token that could appear in the output of two or more tools is satisfied by *any* of them — including tools the scenario never intended.
+
+- `failed_traces_scan` passed the trusted 26/26 live run of 2026-08-11 **without ever calling `search_traces`**: the agent probed `list_dlq_messages` and `get_deploy_history`, escalated, and the scenario's one token `trace` was satisfied because DLQ rows carry a `trace_id` field. The scenario exists to prove the agent scans failed traces; it proved nothing. Found by the 2026-08-16 dress rehearsal (context/INDEX.md).
+- Rule 2 ("assert a field name, never a value") permits this class, because field names recur across tools: `total` is a field of five different tools' outputs.
+
+When a token is attributable to a tool, scope it: `expected_evidence_fields` with `tools: [<the intended tool or its same-effect siblings>]` matches on `EvidenceEntry.tool_name` and cannot be satisfied by a substring coincidence. Presence-only scoped asserts use `is_null: false` on a field the tool always returns; nested observations use a `[]` path (`items[].remediation_hint`). Substring tokens remain right for bookkeeping prose (`planner stop`, `classified as escalated`) and for tokens only one tool can produce.
+
+**Enforced mechanically, not by review.** `evals/evidence_audit.py` computes, per token, which tools could satisfy it — from every tool's reachable output-model field names (field names appear in every rendering) plus every canned fixture in the suite rendered exactly as the runtime records evidence (suite-wide on purpose: the DLQ fixtures that satisfied `failed_traces_scan` live belong to other scenarios). `tests/unit/test_evidence_audit.py` fails CI on any token satisfiable by two or more tools, so the next scenario with this weakness fails a free unit run instead of passing a paid live one.
 
 **Read-scoped by construction.** The check runs under `PLATFORM_SMOKE_TOKEN` and refuses to fall back to `PLATFORM_TOKEN` — a check that measures the world must not hold a principal that can change it. Tier-1 fixtures are additionally never probed, since probing `replay_dlq_by_category` to see what it returns would replay the DLQ. Their canned payloads are therefore still unchecked by this guard; that is a known remaining hole.
 

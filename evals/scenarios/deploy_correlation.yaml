@@ -60,6 +60,13 @@ canned_llm_responses:
 expectation:
   name: deploy_correlation
   expected_terminal_state: escalated
-  expected_evidence_contains:
-  - deploy
+  # Tool-scoped (evidence sweep, evals/evidence_audit.py): `deploy` also
+  # appears in list_audit_events fixtures, so it could not prove the deploy
+  # history was probed. `entries` is get_deploy_history's payload, present
+  # in every successful reading — the same "the probe happened" claim the
+  # substring made, minus the cross-tool leak.
+  expected_evidence_fields:
+  - tools: [get_deploy_history]
+    field: entries
+    is_null: false
   max_tool_calls: 5

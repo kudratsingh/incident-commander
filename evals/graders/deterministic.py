@@ -30,9 +30,9 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from enum import StrEnum
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -67,6 +67,37 @@ class GradeDimension(StrEnum):
 #    ``expected_evidence_fields`` below, which reads the parsed field.
 _FAKE_GREEN_EVIDENCE_ITEM = "verified"
 _SERIALIZED_FRAGMENT_RE = re.compile(r'^"[^"]+":')
+
+
+def resolve_path(payload: Mapping[str, Any], path: str) -> list[Any]:
+    """Every value observed at ``path``, descending into lists at ``[]``.
+
+    ``total`` reads one top-level field. ``items[].remediation_hint`` reads
+    that field from every row. Returning a list rather than one value is what
+    lets an assertion mean "some row satisfies this", which is the only
+    useful reading when row order is not guaranteed.
+
+    Shared by ``EvidenceFieldExpectation.field`` (asserting on what a run
+    recorded) and ``PreconditionField.path`` (asserting on the world before
+    a run starts, via ``evals/preconditions.py``). One walker on purpose:
+    two copies of the descent rules would drift, and this module is the one
+    both sides already import ``FieldComparator`` from.
+    """
+    values: list[Any] = [payload]
+    for segment in path.split("."):
+        descend = segment.endswith("[]")
+        key = segment[:-2] if descend else segment
+        found: list[Any] = [
+            value[key] for value in values if isinstance(value, Mapping) and key in value
+        ]
+        if descend:
+            flattened: list[Any] = []
+            for value in found:
+                if isinstance(value, Sequence) and not isinstance(value, str | bytes):
+                    flattened.extend(value)
+            found = flattened
+        values = found
+    return values
 
 
 class FieldComparator(BaseModel):
@@ -160,6 +191,12 @@ class EvidenceFieldExpectation(FieldComparator):
     # An entry matches when ``EvidenceEntry.tool_name`` is in this set — the
     # same same-effect equivalence idea as ``expected_action_tools``.
     tools: tuple[str, ...] = Field(min_length=1)
+    # A top-level field name, or a path descending into lists at ``[]``
+    # (``items[].remediation_hint``) — ``resolve_path``, the same walker and
+    # any-row semantics as ``PreconditionField.path``. The nested form is
+    # what lets a scenario scope a value that only exists inside rows
+    # ("some DLQ row the agent listed was classified replay_safe") to the
+    # tool that observed it, instead of leaving it as an unscoped substring.
     field: str = Field(min_length=1)
     which: Literal["any", "last"] = "any"
 
@@ -448,7 +485,11 @@ def _grade_evidence(
 
 def _grade_evidence_field(run: RunState, exp: EvidenceFieldExpectation) -> str | None:
     """Return a failure detail for one field assertion, or ``None`` when satisfied."""
-    observed: list[object] = []
+    # One inner list per matching entry, in entry order: ``which: any``
+    # flattens across entries, ``which: last`` grades only the final entry
+    # that carried the field — an entry-level cut, so a path that reads
+    # many rows from that entry still gets its any-row semantics.
+    observed: list[list[object]] = []
     for entry in run.evidence:
         if entry.tool_name not in exp.tools:
             continue
@@ -458,15 +499,20 @@ def _grade_evidence_field(run: RunState, exp: EvidenceFieldExpectation) -> str |
             parsed = json.loads(entry.result_summary)
         except ValueError:
             continue
-        if isinstance(parsed, dict) and exp.field in parsed:
-            observed.append(parsed[exp.field])
+        if isinstance(parsed, dict):
+            values = resolve_path(parsed, exp.field)
+            if values:
+                observed.append(values)
 
     if not observed:
         return (
             f"no {sorted(exp.tools)} evidence entry carried field "
             f"{exp.field!r} (expected {exp.describe()})"
         )
-    graded = observed if exp.which == "any" else observed[-1:]
+    if exp.which == "any":
+        graded = [value for values in observed for value in values]
+    else:
+        graded = observed[-1]
     if any(exp.satisfied_by(value) for value in graded):
         return None
     return (

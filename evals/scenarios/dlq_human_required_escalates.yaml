@@ -88,15 +88,22 @@ expectation:
   name: dlq_human_required_escalates
   expected_terminal_state: resolved
   expected_action_tools: [mark_dlq_permanent]
-  expected_evidence_contains:
-  - human_required
+  # Tool-scoped (evidence sweep, evals/evidence_audit.py): the bare
+  # `human_required` substring was satisfiable by mark_dlq_permanent output
+  # as well, so it could not prove the agent saw the platform's
+  # classification before deciding not to replay. This is the observation
+  # the description opens with: some DLQ row the agent listed carries the
+  # human_required hint.
+  expected_evidence_fields:
+  - tools: [list_dlq_messages]
+    field: items[].remediation_hint
+    equals: human_required
   # Structured effect assert (A-09): replaces the bare `verified` substring,
   # which also matched a `not_verified: ...` verdict. `remediation_hint` is
   # the mark's own post-condition — the platform sets it to `human_required`
   # and leaves the entry in the DLQ, which is exactly the presence-with-hint
   # semantic the planner prompt and verify_expectation encode (PR #112).
   # `marked` is not a field of MarkDlqPermanentOutput.
-  expected_evidence_fields:
   - tools: [mark_dlq_permanent]
     field: remediation_hint
     equals: human_required

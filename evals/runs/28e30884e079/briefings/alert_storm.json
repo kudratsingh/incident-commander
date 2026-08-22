@@ -1,0 +1,23 @@
+{
+  "incident_id": "fd737cd1-0271-4941-8afe-448c9d704a3c",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.alerts severity=critical fingerprint=alert_storm_meta",
+  "investigation_trail": [
+    {
+      "tool": "list_active_alerts",
+      "summary": "{\"total\":5,\"alerts\":[{\"id\":\"a1\",\"severity\":\"critical\",\"source\":\"platform.api\",\"title\":\"5xx spike\",\"description\":null,\"fired_at\":\"2026-07-28T10:00:00Z\",\"extra_data\":null},{\"id\":\"a2\",\"severity\":\"high\",\"source\":\"platform.db\",\"title\":\"latency high\",\"description\":null,\"fired_at\":\"2026-07-28T10:01:00Z\",\"extra_data\":null},{\"id\":\"a3\",\"severity\":\"high\",\"source\":\"platform.kafka\",\"title\":\"consumer lag\",\"description\":null,\"fired_at\":\"2026-07-28T10:01:00Z\",\"extra_data\":null},{\"id\":\"a4\",\"severity\":\"high\",\"source\":\"platform.dlq\",\"title\":\"dlq growth\",\"description\":null,\"fired_at\":\"2026-07-28T10:02:00Z\",\"extra_data\":null},{\"id\":\"a5\",\"severity\":\"medium\",\"source\":\"platform.cache\",\"title\":\"cache miss\",\"description\":null,\"fired_at\":\"2026-07-28T10:03:00Z\",\"extra_data\":null}]}"
+    },
+    {
+      "tool": "list_audit_events",
+      "summary": "{\"total\":1,\"events\":[{\"id\":\"e1\",\"action\":\"deploy.completed\",\"principal_type\":\"ci\",\"principal_id\":\"ci-bot\",\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-07-28T09:58:00Z\",\"extra_data\":{\"version\":\"v1.42.0\"}}]}"
+    }
+  ],
+  "findings": "Five alerts fired within 3 minutes across api, db, kafka, dlq, and cache. A deploy of v1.42.0 completed 2 minutes before the first alert.\n",
+  "recommendation": "Roll back v1.42.0 pending root-cause analysis; the correlation across subsystems suggests a shared code path was affected.\n",
+  "budget_used": {
+    "tool_calls": 2,
+    "tokens": 0,
+    "wall_seconds": 0.00015,
+    "usd": "0.000000"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "incident_id": "a2d44916-23de-44e8-96a7-c20d94521fb2",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.jobs severity=high fingerprint=job_failed",
+  "investigation_trail": [
+    {
+      "tool": "get_trace",
+      "summary": "{\"trace_id\":\"trace-abc-123\",\"jobs\":[{\"id\":\"job-1\",\"type\":\"process_payment\",\"status\":\"failed\",\"user_id\":null,\"retry_count\":3,\"error_message\":\"stripe api timeout\",\"created_at\":\"2026-07-28T10:00:00Z\",\"updated_at\":null}],\"audit_events\":[{\"action\":\"job.retried\",\"resource_type\":null,\"resource_id\":null,\"principal_type\":\"system\",\"created_at\":\"2026-07-28T10:01:00Z\",\"extra_data\":null}]}"
+    }
+  ],
+  "findings": "Job process_payment (trace trace-abc-123) failed after 3 retries with \"stripe api timeout\" as the error on each attempt.\n",
+  "recommendation": "Confirm Stripe is healthy from the platform's network; if so, consider widening the timeout or adding a circuit breaker on this job type.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.000031,
+    "usd": "0.000000"
+  }
+}

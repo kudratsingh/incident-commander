@@ -60,6 +60,12 @@ canned_llm_responses:
 expectation:
   name: trace_investigation
   expected_terminal_state: escalated
-  expected_evidence_contains:
-  - trace
+  # Tool-scoped (evidence sweep, evals/evidence_audit.py): `trace` is also a
+  # substring of the `trace_id` field DLQ rows and search results carry, so
+  # it could not prove the planner fetched the trace. get_trace's own output
+  # always carries a top-level trace_id.
+  expected_evidence_fields:
+  - tools: [get_trace]
+    field: trace_id
+    is_null: false
   max_tool_calls: 5

@@ -1,0 +1,14 @@
+{
+  "incident_id": "c8cdb8a3-b8e9-4867-8577-2644cf530fee",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.healthcheck severity=info fingerprint=health_ping group=unknown",
+  "investigation_trail": [],
+  "findings": "Info-level health_ping alert; not investigated.\n",
+  "recommendation": "Verify the healthcheck fingerprint is expected to fire at info level and consider filtering at the ingress if it is not actionable.\n",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.000015,
+    "usd": "0"
+  }
+}

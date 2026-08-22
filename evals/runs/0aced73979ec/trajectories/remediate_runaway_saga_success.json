@@ -1,0 +1,463 @@
+{
+  "scenario": "remediate_runaway_saga_success",
+  "incident_id": "0a2694a5-cf06-4b1d-9fdf-b56057986b2f",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "0a2694a5-cf06-4b1d-9fdf-b56057986b2f",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "high",
+        "fingerprint": "saga_runaway",
+        "group": null,
+        "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:50.318489Z",
+      "updated_at": "2026-08-22T02:21:50.318489Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "0a2694a5-cf06-4b1d-9fdf-b56057986b2f",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "high",
+        "fingerprint": "saga_runaway",
+        "group": null,
+        "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.00005,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "1aceafbc-90bf-4992-b593-a188b343566b",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "80f1f27904a5b256b2d5fd31acc572d3"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:50.318539Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:50.318489Z",
+      "updated_at": "2026-08-22T02:21:50.318539Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "0a2694a5-cf06-4b1d-9fdf-b56057986b2f",
+      "state": "planning",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "high",
+        "fingerprint": "saga_runaway",
+        "group": null,
+        "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000071,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "1aceafbc-90bf-4992-b593-a188b343566b",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "80f1f27904a5b256b2d5fd31acc572d3"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:50.318539Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "88422ba8-1be1-4641-b47a-4a0e91fd8b1a",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+          },
+          "result_summary": "{\"seed_id\":\"25220882-1820-5cd3-b09b-f866ff5823c9\",\"nodes\":[{\"id\":\"n1\",\"type\":\"reserve_inventory\",\"status\":\"succeeded\",\"retry_count\":0,\"created_at\":\"2026-07-30T10:00:00Z\"},{\"id\":\"n2\",\"type\":\"charge_card\",\"status\":\"running\",\"retry_count\":5,\"created_at\":\"2026-07-30T10:01:00Z\"},{\"id\":\"n3\",\"type\":\"ship_order\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-07-30T10:01:00Z\"}],\"edges\":[{\"from_id\":\"n1\",\"to_id\":\"n2\"},{\"from_id\":\"n2\",\"to_id\":\"n3\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-08-22T02:21:50.318560Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4d4a536d-7d2f-4636-b201-e18f8276fff2",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "charge_card retry-looping; pause_dag stops further promotion"
+          },
+          "result_summary": "planner handoff to PLANNING: charge_card retry-looping; pause_dag stops further promotion",
+          "timestamp": "2026-08-22T02:21:50.318560Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "runaway_saga",
+          "name": "runaway_saga_node",
+          "confidence": 0.85,
+          "reasoning": "charge_card is running with retry_count=5 while ship_order waits. Pausing the DAG prevents further promotion while the payment dependency is investigated.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:50.318489Z",
+      "updated_at": "2026-08-22T02:21:50.318560Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "0a2694a5-cf06-4b1d-9fdf-b56057986b2f",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "high",
+        "fingerprint": "saga_runaway",
+        "group": null,
+        "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.003222,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "1aceafbc-90bf-4992-b593-a188b343566b",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "80f1f27904a5b256b2d5fd31acc572d3"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:50.318539Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "88422ba8-1be1-4641-b47a-4a0e91fd8b1a",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+          },
+          "result_summary": "{\"seed_id\":\"25220882-1820-5cd3-b09b-f866ff5823c9\",\"nodes\":[{\"id\":\"n1\",\"type\":\"reserve_inventory\",\"status\":\"succeeded\",\"retry_count\":0,\"created_at\":\"2026-07-30T10:00:00Z\"},{\"id\":\"n2\",\"type\":\"charge_card\",\"status\":\"running\",\"retry_count\":5,\"created_at\":\"2026-07-30T10:01:00Z\"},{\"id\":\"n3\",\"type\":\"ship_order\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-07-30T10:01:00Z\"}],\"edges\":[{\"from_id\":\"n1\",\"to_id\":\"n2\"},{\"from_id\":\"n2\",\"to_id\":\"n3\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-08-22T02:21:50.318560Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4d4a536d-7d2f-4636-b201-e18f8276fff2",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "charge_card retry-looping; pause_dag stops further promotion"
+          },
+          "result_summary": "planner handoff to PLANNING: charge_card retry-looping; pause_dag stops further promotion",
+          "timestamp": "2026-08-22T02:21:50.318560Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c313a000-e357-4434-a7b7-89d6544e2a12",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "runaway_saga_node"
+          },
+          "result_summary": "plan: pause_dag({\"root_job_id\": \"25220882-1820-5cd3-b09b-f866ff5823c9\", \"ttl_seconds\": 600}) then verify via get_dag_state",
+          "timestamp": "2026-08-22T02:21:50.321711Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "runaway_saga",
+          "name": "runaway_saga_node",
+          "confidence": 0.85,
+          "reasoning": "charge_card is running with retry_count=5 while ship_order waits. Pausing the DAG prevents further promotion while the payment dependency is investigated.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "runaway_saga_node",
+        "action_tool": "pause_dag",
+        "action_arguments": {
+          "root_job_id": "25220882-1820-5cd3-b09b-f866ff5823c9",
+          "ttl_seconds": 600
+        },
+        "verify_tool": "get_dag_state",
+        "verify_arguments": {
+          "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+        },
+        "verify_expectation": "get_dag_state returns paused=true with a positive paused_expires_in_seconds — the enforced pause is active. Children remain in status waiting (pause halts promotion; it does not change node statuses or cancel running work) and no new promotions occur. The pause self-expires so operators have time to investigate.\n"
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-08-22T02:21:50.318489Z",
+      "updated_at": "2026-08-22T02:21:50.321711Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "0a2694a5-cf06-4b1d-9fdf-b56057986b2f",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "high",
+        "fingerprint": "saga_runaway",
+        "group": null,
+        "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.005358,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "1aceafbc-90bf-4992-b593-a188b343566b",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "80f1f27904a5b256b2d5fd31acc572d3"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:50.318539Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "88422ba8-1be1-4641-b47a-4a0e91fd8b1a",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+          },
+          "result_summary": "{\"seed_id\":\"25220882-1820-5cd3-b09b-f866ff5823c9\",\"nodes\":[{\"id\":\"n1\",\"type\":\"reserve_inventory\",\"status\":\"succeeded\",\"retry_count\":0,\"created_at\":\"2026-07-30T10:00:00Z\"},{\"id\":\"n2\",\"type\":\"charge_card\",\"status\":\"running\",\"retry_count\":5,\"created_at\":\"2026-07-30T10:01:00Z\"},{\"id\":\"n3\",\"type\":\"ship_order\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-07-30T10:01:00Z\"}],\"edges\":[{\"from_id\":\"n1\",\"to_id\":\"n2\"},{\"from_id\":\"n2\",\"to_id\":\"n3\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-08-22T02:21:50.318560Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4d4a536d-7d2f-4636-b201-e18f8276fff2",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "charge_card retry-looping; pause_dag stops further promotion"
+          },
+          "result_summary": "planner handoff to PLANNING: charge_card retry-looping; pause_dag stops further promotion",
+          "timestamp": "2026-08-22T02:21:50.318560Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c313a000-e357-4434-a7b7-89d6544e2a12",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "runaway_saga_node"
+          },
+          "result_summary": "plan: pause_dag({\"root_job_id\": \"25220882-1820-5cd3-b09b-f866ff5823c9\", \"ttl_seconds\": 600}) then verify via get_dag_state",
+          "timestamp": "2026-08-22T02:21:50.321711Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4f0ae1c3-cdaf-4493-95c2-c1f631dad2f8",
+          "tool_name": "pause_dag",
+          "arguments": {
+            "root_job_id": "25220882-1820-5cd3-b09b-f866ff5823c9",
+            "ttl_seconds": 600,
+            "idempotency_key": "ed710e577e2093df5e453bcbc3312d27"
+          },
+          "result_summary": "{\"root_job_id\":\"25220882-1820-5cd3-b09b-f866ff5823c9\",\"pause_key\":\"chaos:dag_pause:25220882-1820-5cd3-b09b-f866ff5823c9\",\"ttl_seconds\":600,\"accepted\":true}",
+          "timestamp": "2026-08-22T02:21:50.323847Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "runaway_saga",
+          "name": "runaway_saga_node",
+          "confidence": 0.85,
+          "reasoning": "charge_card is running with retry_count=5 while ship_order waits. Pausing the DAG prevents further promotion while the payment dependency is investigated.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "runaway_saga_node",
+        "action_tool": "pause_dag",
+        "action_arguments": {
+          "root_job_id": "25220882-1820-5cd3-b09b-f866ff5823c9",
+          "ttl_seconds": 600
+        },
+        "verify_tool": "get_dag_state",
+        "verify_arguments": {
+          "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+        },
+        "verify_expectation": "get_dag_state returns paused=true with a positive paused_expires_in_seconds — the enforced pause is active. Children remain in status waiting (pause halts promotion; it does not change node statuses or cancel running work) and no new promotions occur. The pause self-expires so operators have time to investigate.\n"
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-22T02:21:50.318489Z",
+      "updated_at": "2026-08-22T02:21:50.323847Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "0a2694a5-cf06-4b1d-9fdf-b56057986b2f",
+      "state": "resolved",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "high",
+        "fingerprint": "saga_runaway",
+        "group": null,
+        "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 3,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.005401,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "1aceafbc-90bf-4992-b593-a188b343566b",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "high",
+            "dedup_key": "80f1f27904a5b256b2d5fd31acc572d3"
+          },
+          "result_summary": "severity=high classified as investigating",
+          "timestamp": "2026-08-22T02:21:50.318539Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "88422ba8-1be1-4641-b47a-4a0e91fd8b1a",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+          },
+          "result_summary": "{\"seed_id\":\"25220882-1820-5cd3-b09b-f866ff5823c9\",\"nodes\":[{\"id\":\"n1\",\"type\":\"reserve_inventory\",\"status\":\"succeeded\",\"retry_count\":0,\"created_at\":\"2026-07-30T10:00:00Z\"},{\"id\":\"n2\",\"type\":\"charge_card\",\"status\":\"running\",\"retry_count\":5,\"created_at\":\"2026-07-30T10:01:00Z\"},{\"id\":\"n3\",\"type\":\"ship_order\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-07-30T10:01:00Z\"}],\"edges\":[{\"from_id\":\"n1\",\"to_id\":\"n2\"},{\"from_id\":\"n2\",\"to_id\":\"n3\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-08-22T02:21:50.318560Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4d4a536d-7d2f-4636-b201-e18f8276fff2",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "charge_card retry-looping; pause_dag stops further promotion"
+          },
+          "result_summary": "planner handoff to PLANNING: charge_card retry-looping; pause_dag stops further promotion",
+          "timestamp": "2026-08-22T02:21:50.318560Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c313a000-e357-4434-a7b7-89d6544e2a12",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "runaway_saga_node"
+          },
+          "result_summary": "plan: pause_dag({\"root_job_id\": \"25220882-1820-5cd3-b09b-f866ff5823c9\", \"ttl_seconds\": 600}) then verify via get_dag_state",
+          "timestamp": "2026-08-22T02:21:50.321711Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4f0ae1c3-cdaf-4493-95c2-c1f631dad2f8",
+          "tool_name": "pause_dag",
+          "arguments": {
+            "root_job_id": "25220882-1820-5cd3-b09b-f866ff5823c9",
+            "ttl_seconds": 600,
+            "idempotency_key": "ed710e577e2093df5e453bcbc3312d27"
+          },
+          "result_summary": "{\"root_job_id\":\"25220882-1820-5cd3-b09b-f866ff5823c9\",\"pause_key\":\"chaos:dag_pause:25220882-1820-5cd3-b09b-f866ff5823c9\",\"ttl_seconds\":600,\"accepted\":true}",
+          "timestamp": "2026-08-22T02:21:50.323847Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8d07bd0a-5405-4016-869c-9bf4fcde370e",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9",
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "{\"seed_id\":\"25220882-1820-5cd3-b09b-f866ff5823c9\",\"nodes\":[{\"id\":\"n1\",\"type\":\"reserve_inventory\",\"status\":\"succeeded\",\"retry_count\":0,\"created_at\":\"2026-07-30T10:00:00Z\"},{\"id\":\"n2\",\"type\":\"charge_card\",\"status\":\"running\",\"retry_count\":5,\"created_at\":\"2026-07-30T10:01:00Z\"},{\"id\":\"n3\",\"type\":\"ship_order\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-07-30T10:01:00Z\"}],\"edges\":[{\"from_id\":\"n1\",\"to_id\":\"n2\"},{\"from_id\":\"n2\",\"to_id\":\"n3\"}],\"paused\":true,\"paused_expires_in_seconds\":540,\"paused_by\":\"incident-commander\"}",
+          "timestamp": "2026-08-22T02:21:50.323899Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5390feab-51c7-4d44-bdee-acfe36cf1ac0",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "get_dag_state returns paused=true with a positive paused_expires_in_seconds — the enforced pause is active. Children remain in status waiting (pause halts promotion; it does not change node statuses or cancel running work) and no new promotions occur. The pause self-expires so operators have time to investigate.\n",
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "verified: The verify probe shows paused=true with paused_expires_in_seconds=540 — the enforced pause is active and observable. Children remain in waiting as expected (pause halts promotion without flipping node statuses), and no new promotions appear.\n",
+          "timestamp": "2026-08-22T02:21:50.323899Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "runaway_saga",
+          "name": "runaway_saga_node",
+          "confidence": 0.85,
+          "reasoning": "charge_card is running with retry_count=5 while ship_order waits. Pausing the DAG prevents further promotion while the payment dependency is investigated.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "runaway_saga_node",
+        "action_tool": "pause_dag",
+        "action_arguments": {
+          "root_job_id": "25220882-1820-5cd3-b09b-f866ff5823c9",
+          "ttl_seconds": 600
+        },
+        "verify_tool": "get_dag_state",
+        "verify_arguments": {
+          "job_id": "25220882-1820-5cd3-b09b-f866ff5823c9"
+        },
+        "verify_expectation": "get_dag_state returns paused=true with a positive paused_expires_in_seconds — the enforced pause is active. Children remain in status waiting (pause halts promotion; it does not change node statuses or cancel running work) and no new promotions occur. The pause self-expires so operators have time to investigate.\n"
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-22T02:21:50.318489Z",
+      "updated_at": "2026-08-22T02:21:50.323899Z"
+    }
+  ],
+  "invocation_id": "0aced73979ec"
+}

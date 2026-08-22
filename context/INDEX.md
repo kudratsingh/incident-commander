@@ -20,6 +20,7 @@ An archive listed as *transcript only* means the raw session data is on disk und
 | 2026-08-13 | *transcript only* | **Stage 1 built.** PRs #123–#129. Negative assertions, `max_tool_calls` wired to the runtime, canned-vs-live drift check in CI, precondition assertions. A red remediation result is now attributable to the agent. |
 | 2026-08-16 | `2026-08-16-campaign-backfill.zip` | **This convention, plus a backfill.** `context/` added to both repos; the whole campaign's transcripts packed into one archive. No product code changed. |
 | 2026-08-16 | `2026-08-16-stage-1-and-remediation-readiness.zip` | **Five shapes closed, three more found by running it.** PRs #133–#143 closed every blocker the readiness sweep named (807 → 1027 tests). Then a free dress rehearsal against the live stack found three defects invisible in source — including that `failed_traces_scan` passed the trusted 26/26 run **without ever calling `search_traces`**. Read `SUMMARY.md` §"What is still wrong" before planning the paid run. |
+| 2026-08-21 | *in progress* | **Six parallel builders + a read-only reliability sweep.** cmd #145 canned-only scenarios (exit 8, pre-spend), #146 run-archive filesystem locking (ADR 0021), #147 evidence tool-scoping — **16 cross-satisfiable evidence tokens across 15 of 38 scenarios**, not just the one known defect. plat #146 `get_cache_key_info`, #147 pins+timestamp re-baseline, #148 `create_stuck_dag`. The 14-finder reliability sweep lives at `audit-ws/sweeps/reliability-sweep.js` — see `sweeps/README.md`; run IDs change, the script is the artifact. |
 
 ## Things a future session should not have to rediscover
 
@@ -51,6 +52,20 @@ Promoted out of the archives because they cost real time or money the first time
   container from the *platform's* dev compose, so the documented `make demo && make
   bootstrap-token` pair could never work — CI passed `--postgres-container` explicitly and never
   saw it. Found by running the documented path, not by reading it.
+
+- **Subagents stall at "waiting for CI".** Their background watchers die when the agent stops, so a
+  PR sits green and unmerged forever. Shepherd them: on each completion notification check the PR
+  yourself — green+CLEAN, merge it directly (cheaper than resuming); red, resume the agent with a
+  `gh run view <id> --log-failed` pointer. Tell agents to poll `gh pr checks` themselves.
+- **ADR 0021's `uchg` archive locking blocks `git worktree remove`.** Needs `chflags -R nouchg` plus
+  `chmod -R u+w` first. Bites anyone who ran `make eval-reg` inside a worktree.
+- **The repo `.venv` editable install pins to the MAIN checkout's `backend/`,** so a repo-root
+  `pytest` from any worktree imports master's code and never sees your changes — it surfaced as 73
+  phantom failures. Run with `PYTHONPATH=<worktree>/backend`. (platform repo)
+- **`git branch --no-merged` and patch-id comparison BOTH lie under squash-merge.** Squashing rewrites
+  commits, so merged branches look unmerged forever and N-commits-to-1 defeats patch-id. Check branch
+  names against the merged-PR record, then compare file CONTENT. Two separate sessions concluded
+  "unmerged work exists" from these; both were wrong.
 
 ## Standing rules that outlive any session
 

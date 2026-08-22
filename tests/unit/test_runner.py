@@ -1033,13 +1033,13 @@ class TestCompletedArchiveIsLocked:
         # rely on until a human decides their fate.
         target = self._streamed_archive(tmp_path)
         first = target / "trajectories" / "consumer_lag_pass.json"
-        assert first.stat().st_flags & stat.UF_IMMUTABLE
+        assert getattr(first.stat(), "st_flags", 0) & stat.UF_IMMUTABLE
         with pytest.raises(PermissionError):
             first.unlink()
 
         runner_module.finalize_archive(target, _stub_report("consumer_lag_pass"))
-        assert target.stat().st_flags & stat.UF_IMMUTABLE
-        assert (target / "report.json").stat().st_flags & stat.UF_IMMUTABLE
+        assert getattr(target.stat(), "st_flags", 0) & stat.UF_IMMUTABLE
+        assert getattr((target / "report.json").stat(), "st_flags", 0) & stat.UF_IMMUTABLE
 
     def test_lock_failure_is_logged_and_never_fatal(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]

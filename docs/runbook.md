@@ -525,6 +525,47 @@ Platform ships a new digest → three steps on the agent side:
    ```
    If a required tool field was added/renamed, update `src/incident_commander/tools/registry.py` to match.
 
+## Connection pool and run capacity ([ADR 0022](ADR/0022-connection-pool-sizing-and-the-run-concurrency-ceiling.md))
+
+The agent runs at most **8 concurrent investigations** per process by default. That
+number is not a preference — it is derived from the connection pool, because a live
+run pins one Postgres connection for its whole duration (the single-flight lease,
+[ADR 0016](ADR/0016-incident-identity-and-single-flight.md)) and needs a second one
+for every checkpoint write:
+
+| Var | Default | Meaning |
+|---|---|---|
+| `DB_POOL_SIZE` | 10 | Connections held open. |
+| `DB_MAX_OVERFLOW` | 10 | Extra connections opened under burst. |
+| `DB_POOL_TIMEOUT_SECONDS` | 10 | Wait for a free connection before giving up. Was SQLAlchemy's implicit 30. |
+| `DB_INGEST_RESERVED_CONNECTIONS` | 4 | Held back from the run ceiling for webhook ingress and the crash rail. |
+| `AGENT_MAX_CONCURRENT_RUNS` | unset | Lowers the ceiling below what the pool allows. May only lower it. |
+
+```text
+ceiling = (DB_POOL_SIZE + DB_MAX_OVERFLOW - DB_INGEST_RESERVED_CONNECTIONS) / 2
+        = (10 + 10 - 4) / 2 = 8
+```
+
+**Symptom:** `at capacity (8 concurrent runs): incident <id> is recorded in TRIAGE but
+will not be investigated` in the log.
+
+That is the agent shedding load, working as designed, not an error. The alert was
+acknowledged, is durably recorded at TRIAGE, and humans are paged by the platform
+regardless (see [safety-model.md](safety-model.md#fail-open-on-paging)). It is *not*
+investigated, and it will not be retried later. Occasional lines during a genuine
+alert storm are expected; a steady stream means the ceiling is too low for the load.
+
+To raise it, raise the pool — `DB_POOL_SIZE` and `DB_MAX_OVERFLOW` — and restart.
+Settings are frozen and read once at startup. Before raising it much, check the
+server side: **this ceiling is per process and so is the pool, but Postgres'
+`max_connections` is shared.** Eight replicas at the defaults is 160 connections, and
+nothing in the agent checks that for you. Adding replicas is the better lever anyway
+— the advisory lock is per-database, so single-flight already holds across processes.
+
+The process refuses to start if the numbers cannot work (a pool too small for one
+run, or `AGENT_MAX_CONCURRENT_RUNS` above the derived ceiling). That is deliberate:
+the alternative is discovering it as a stall during an incident.
+
 ## Kill switch
 
 To pause the agent without stopping the FastAPI ingress (alerts keep flowing to the platform's normal oncall path):

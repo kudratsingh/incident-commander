@@ -76,18 +76,30 @@ def probe_live(
     ``read_tier_calls`` never asks for one. The scope check is the real
     boundary; the filter is so a bug fails loudly rather than at the
     platform.
+
+    Calls are probed in sequence order — every element 0 before any element
+    1 — so that a later element's snapshot is genuinely a later reading of
+    the world, which is the only thing that makes comparing it to a later
+    recording mean anything.
     """
     all_calls = tuple(calls)
-    probed = read_tier_calls(all_calls)
+    probed = sorted(read_tier_calls(all_calls), key=lambda call: call.index)
     owned = client is None
     http = client or httpx.Client(timeout=_TIMEOUT_SECONDS)
-    cache: dict[tuple[str, str], tuple[Mapping[str, Any] | None, str | None]] = {}
+    cache: dict[tuple[str, str, int], tuple[Mapping[str, Any] | None, str | None]] = {}
     drifts: list[Drift] = []
     errors: list[ProbeError] = []
     try:
         assert_seeded(http, mcp_url, token)
         for call in probed:
-            key = (call.tool, json.dumps(dict(call.arguments), sort_keys=True))
+            # Keyed by POSITION as well as by call. A sequenced fixture is a
+            # record of successive observations — element 1 is what the
+            # platform said after the agent acted — so answering every
+            # element from element 0's snapshot compares a post-action
+            # recording against the pre-action world, which no correct
+            # fixture can survive. One fresh read per position; elements at
+            # the same position still share it, so the cache keeps paying.
+            key = (call.tool, json.dumps(dict(call.arguments), sort_keys=True), call.index)
             if key not in cache:
                 cache[key] = _call_tool(http, mcp_url, token, call.tool, dict(call.arguments))
             payload, error = cache[key]

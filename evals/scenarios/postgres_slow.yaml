@@ -12,7 +12,7 @@ use_live_mcp: true
 use_live_llm: true
 alert:
   source: platform.db
-  severity: high
+  severity: critical
   fingerprint: db_latency_high
   service: postgres
 canned_tool_responses:

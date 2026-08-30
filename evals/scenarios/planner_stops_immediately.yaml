@@ -11,7 +11,7 @@ tags: [read-only, phase-0, immediate-stop]
 
 alert:
   source: platform.custom
-  severity: high
+  severity: critical
   fingerprint: opaque_paging_signal
   group: opaque-source
 

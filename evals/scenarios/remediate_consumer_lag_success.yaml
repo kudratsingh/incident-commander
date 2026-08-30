@@ -29,7 +29,7 @@ chaos_setup:
     ttl_seconds: 300
 alert:
   source: platform.kafka
-  severity: high
+  severity: critical
   fingerprint: consumer_stalled
   consumer_group: worker-dispatcher
   # A claim the kill-based fault can actually manufacture: the consumer

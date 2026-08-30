@@ -60,7 +60,15 @@ canned_llm_responses:
 expectation:
   name: saga_stuck
   expected_terminal_state: escalated
-  expected_evidence_contains:
-  - seed_id
-  - nodes
+  # `seed_id` and `nodes` are both keys get_dag_state always emits, so the
+  # pair asserted only that the DAG probe ran. The scenario is about a saga
+  # that is stuck retrying: assert a node the agent actually read is in that
+  # state. Any-row semantics, so node order does not matter.
+  expected_evidence_fields:
+  - tools: [get_dag_state]
+    field: nodes[].status
+    equals: running
+  - tools: [get_dag_state]
+    field: nodes[].retry_count
+    at_least: 1
   max_tool_calls: 11

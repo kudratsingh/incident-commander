@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from evals.graders.llm_judge import USEFUL_THRESHOLD, JudgeScore, judge_briefing
 from incident_commander.agent.briefing import (
+    AttemptedAction,
     EscalationBriefing,
     ProbeSummary,
     render_briefing,
@@ -168,6 +169,91 @@ class TestJudgeBriefing:
         judge_briefing(briefing, client, model="m")
         _system, user = client.calls[0]
         assert "No probes were run" in user
+
+
+class TestJudgeSeesTheDeterministicFields:
+    """The judge must see what the writer saw (WO-R2-34, after #152).
+
+    ``escalation_reason`` and ``attempted_action`` are deterministic fields
+    the briefing writer is given (``briefing_enrichment._format_context``).
+    The judge grades ``groundedness`` — does every claim derive from the
+    context — against a rendering that omitted both, so a recommendation
+    correctly built on them read as invented, and a recommendation that
+    told the human to re-run an already-attempted Tier-1 action could not
+    be marked down for it. Grading a briefing on less than it was written
+    from is the same vacuous-assertion shape this order is closing.
+    """
+
+    @staticmethod
+    def _judged(briefing: EscalationBriefing) -> str:
+        client = CannedLLMClient([{"groundedness": 0.8, "actionability": 0.8, "reasoning": "ok"}])
+        judge_briefing(briefing, client, model="m")
+        _system, user = client.calls[0]
+        return user
+
+    def test_escalation_reason_is_shown(self, run_state: RunState, now: datetime) -> None:
+        briefing = _sample_briefing(run_state, now).model_copy(
+            update={"escalation_reason": "budget exhausted before verify could run"}
+        )
+        assert "budget exhausted before verify could run" in self._judged(briefing)
+
+    def test_attempted_action_is_shown(self, run_state: RunState, now: datetime) -> None:
+        briefing = _sample_briefing(run_state, now).model_copy(
+            update={
+                "attempted_action": AttemptedAction(
+                    tool="restart_consumer_group",
+                    arguments={"consumer_group": "billing"},
+                )
+            }
+        )
+        user = self._judged(briefing)
+        assert "restart_consumer_group" in user
+        assert "billing" in user
+
+    def test_an_attempted_action_is_marked_as_already_attempted(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # Not just present — labelled. An unlabelled tool name in the context
+        # reads as one more thing the agent could do next.
+        briefing = _sample_briefing(run_state, now).model_copy(
+            update={"attempted_action": AttemptedAction(tool="pause_dag", arguments={})}
+        )
+        assert "ALREADY ATTEMPTED" in self._judged(briefing)
+
+    def test_the_judge_is_shown_what_the_writer_was_shown(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # The anti-drift pin. Two renderings exist on purpose (the writer
+        # also gets the budget, the judge also gets findings/recommendation),
+        # but the halves they share must stay word-for-word identical — a
+        # judge grading groundedness against different phrasing than the
+        # writer received is grading a different briefing.
+        from incident_commander.agent.briefing_enrichment import _format_context
+
+        briefing = _sample_briefing(run_state, now).model_copy(
+            update={
+                "escalation_reason": "budget exhausted before verify could run",
+                "attempted_action": AttemptedAction(
+                    tool="restart_consumer_group", arguments={"consumer_group": "billing"}
+                ),
+            }
+        )
+        writer_lines = set(_format_context(briefing).splitlines())
+        judge_lines = set(self._judged(briefing).splitlines())
+        shared = {
+            line
+            for line in writer_lines
+            if line.startswith(("Why the run ended:", "Tier-1 action ALREADY ATTEMPTED"))
+        }
+        assert len(shared) == 2
+        assert shared <= judge_lines
+
+    def test_absent_fields_add_no_lines(self, run_state: RunState, now: datetime) -> None:
+        # The default briefing carries neither; the rendering must not grow
+        # empty "Why the run ended:" noise the judge would have to ignore.
+        user = self._judged(_sample_briefing(run_state, now))
+        assert "Why the run ended:" not in user
+        assert "ALREADY ATTEMPTED" not in user
 
 
 class TestUnusedProbeSummary:

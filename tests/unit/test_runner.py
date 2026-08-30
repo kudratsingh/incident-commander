@@ -114,7 +114,10 @@ def _passing_scenario() -> Scenario:
         expectation=ScenarioExpectation(
             name="consumer_lag_pass",
             expected_terminal_state=IncidentState.ESCALATED,
-            expected_evidence_contains=("billing", "lag"),
+            # Value text, not key text: `lag` would name the field that
+            # get_consumer_lag serializes whatever the reading is, and the
+            # schema refuses that shape. The group name is an observation.
+            expected_evidence_contains=("billing",),
             max_tool_calls=5,
         ),
         canned_tool_responses={

@@ -95,8 +95,6 @@ canned_llm_responses:
 expectation:
   name: consumer_lag_high
   expected_terminal_state: escalated
-  expected_evidence_contains:
-  - cache_key
   # Tool-scoped (evidence sweep, evals/evidence_audit.py): the bare
   # `worker-dispatcher` substring also matched invalidate_cache_key and
   # restart_consumer_group fixtures, so it could not prove the lag probe

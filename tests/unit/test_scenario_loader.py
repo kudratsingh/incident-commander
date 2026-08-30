@@ -217,6 +217,19 @@ _STRUCTURED_EVIDENCE_SCENARIOS: frozenset[str] = frozenset(
         "remediate_dlq_backlog_success",
         "remediate_runaway_saga_success",
         "remediate_stale_cache_success",
+        # WO-R2-34: these traded a bare-field-name substring — key text that
+        # `model_dump_json` emits whatever the value is — for a real value
+        # assertion. Listed here so a future edit cannot quietly drop the
+        # replacement and leave the scenario with no value coverage at all.
+        "alert_storm",
+        "consumer_lag_healthy_zero",
+        "consumer_lag_high",
+        "consumer_lag_missing_group",
+        "consumer_lag_shipping_extreme",
+        "dlq_backlog",
+        "redis_saturation",
+        "remediate_verify_fails",
+        "saga_stuck",
     }
 )
 

@@ -58,11 +58,31 @@ def judge_briefing(
 
 
 def _format_briefing(briefing: EscalationBriefing) -> str:
+    """The context the judge grades against.
+
+    Must show everything the WRITER was shown
+    (``agent/briefing_enrichment.py::_format_context``), because
+    ``groundedness`` asks whether every claim derives from the context. While
+    ``escalation_reason`` and ``attempted_action`` were missing here, a
+    recommendation correctly built on them looked invented to the judge, and
+    one telling the human to re-run an already-attempted Tier-1 action could
+    not be marked down for it — the judge was grading a briefing on strictly
+    less than it was written from. The two lines below are worded exactly as
+    the writer sees them; ``tests/unit/test_llm_judge.py`` pins that.
+    """
     lines = [
         f"Incident: {briefing.incident_id}",
         f"Final state: {briefing.final_state.value}",
         f"Alert: {briefing.alert_summary}",
     ]
+    if briefing.escalation_reason:
+        lines.append(f"Why the run ended: {briefing.escalation_reason}")
+    if briefing.attempted_action is not None:
+        lines.append(
+            f"Tier-1 action ALREADY ATTEMPTED (do not recommend repeating it "
+            f"without checking its effect first): {briefing.attempted_action.tool} "
+            f"{briefing.attempted_action.arguments}"
+        )
     if briefing.investigation_trail:
         lines.append("Investigation trail:")
         for probe in briefing.investigation_trail:

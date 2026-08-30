@@ -62,5 +62,12 @@ expectation:
   expected_terminal_state: escalated
   expected_evidence_contains:
   - shipping-consumer
-  - cache_key
+  # The extreme reading itself. `cache_key` was satisfied by any reading at
+  # all, including a healthy zero, so the "extreme" in the name had no
+  # mechanism behind it. Floored well under the canned 2,500,000 so a live
+  # backlog that is merely enormous still grades green.
+  expected_evidence_fields:
+  - tools: [get_consumer_lag]
+    field: lag
+    at_least: 100000
   max_tool_calls: 10

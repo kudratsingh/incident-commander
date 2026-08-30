@@ -106,6 +106,45 @@ _SEVERITY_IS_THE_PREMISE: Final[dict[str, str]] = {
     "noise_missing_severity": "unknown",
 }
 
+# The other side of the WO-R2-45 split: name -> (value before, value now).
+# Held as data so the classification table in the PR body is checkable against
+# the YAML instead of being prose someone has to re-derive, and so the
+# triage-preservation property below names the exact scenarios it covers.
+# `high` -> `critical` because the corpus calls `high` "paging severity" and
+# `critical` is the platform's paging band; `medium` -> `warning` for the one
+# scenario documented as "not paging-grade but still actionable".
+_REWRITTEN: Final[dict[str, tuple[str, str]]] = {
+    "consumer_lag_healthy_zero": ("high", "critical"),
+    "consumer_lag_high": ("high", "critical"),
+    "consumer_lag_medium": ("medium", "warning"),
+    "consumer_lag_missing_group": ("high", "critical"),
+    "consumer_lag_null_unknown_state": ("high", "critical"),
+    "consumer_lag_orders_high": ("high", "critical"),
+    "deploy_correlation": ("high", "critical"),
+    "dlq_backlog": ("high", "critical"),
+    "dlq_human_required_escalates": ("high", "critical"),
+    "dlq_mixed_partial": ("high", "critical"),
+    "dlq_replay_safe_success": ("high", "critical"),
+    "dlq_wait_and_replay_success": ("high", "critical"),
+    "failed_traces_scan": ("high", "critical"),
+    "incidents_overview": ("high", "critical"),
+    "multi_probe_billing": ("high", "critical"),
+    "multi_probe_hypothesis_evolution": ("high", "critical"),
+    "planner_stops_immediately": ("high", "critical"),
+    "postgres_slow": ("high", "critical"),
+    "redis_saturation": ("high", "critical"),
+    "remediate_consumer_lag_success": ("high", "critical"),
+    "remediate_dlq_backlog_success": ("high", "critical"),
+    "remediate_runaway_saga_success": ("high", "critical"),
+    "remediate_stale_cache_success": ("high", "critical"),
+    "remediate_verify_fails": ("high", "critical"),
+    "saga_stuck": ("high", "critical"),
+    "tool_missing_response": ("high", "critical"),
+    "tool_output_schema_mismatch": ("high", "critical"),
+    "tool_result_marked_error": ("high", "critical"),
+    "trace_investigation": ("high", "critical"),
+}
+
 # Top-level alert keys the scenarios use that the webhook does not send. A
 # real alert carries these — where it carries them at all — inside
 # `extra_data`. Recorded at the vocabulary level rather than per scenario
@@ -133,7 +172,8 @@ class TestSeverityIsOneThePlatformCanEmit:
         offenders = {
             s.name: s.alert.severity
             for s in _shipped()
-            if s.alert.severity not in _PLATFORM_SEVERITIES and s.name not in _SEVERITY_IS_THE_PREMISE
+            if s.alert.severity not in _PLATFORM_SEVERITIES
+            and s.name not in _SEVERITY_IS_THE_PREMISE
         }
         assert offenders == {}, (
             f"scenario alerts declare severities the platform rejects: {offenders}. "
@@ -192,23 +232,42 @@ class TestTheSplitPreservedEveryTriageOutcome:
         alert = scenario.alert.model_dump()
         return transition_triage(run_state.model_copy(update={"alert": alert}), at).state
 
+    def test_the_split_covers_exactly_the_scenarios_that_were_illegal(self) -> None:
+        """29 rewritten + 3 deferred = the 32 the audit found. No silent third bucket."""
+        overlap = sorted(set(_REWRITTEN) & set(_SEVERITY_IS_THE_PREMISE))
+        assert overlap == [], f"a scenario cannot be both rewritten and deferred: {overlap}"
+        assert len(_REWRITTEN) + len(_SEVERITY_IS_THE_PREMISE) == 32
+
+    def test_every_rewritten_scenario_carries_its_recorded_new_value(self) -> None:
+        """Keeps the PR body's classification table honest against the YAML."""
+        by_name = {s.name: s.alert.severity for s in _shipped()}
+        wrong = {
+            name: (new, by_name.get(name))
+            for name, (_, new) in _REWRITTEN.items()
+            if by_name.get(name) != new
+        }
+        assert wrong == {}, (
+            f"rewritten severity is not what was recorded (recorded, actual): {wrong}"
+        )
+
     def test_no_rewritten_scenario_crossed_into_noise(
         self, run_state: RunState, now: datetime
     ) -> None:
         """The 29 incidental rewrites must still reach INVESTIGATING.
 
-        Had one landed on `info`, it would escalate at TRIAGE with
-        `max_tool_calls` unspent and never run the probe it exists to test.
+        Had one landed on `info`, it would escalate at TRIAGE with its budget
+        unspent and never run the probe it exists to test — the scenario would
+        still pass, while testing nothing it was written to test.
         """
+        by_name = {s.name: s for s in _shipped()}
         escalated = sorted(
-            s.name
-            for s in _shipped()
-            if s.name not in _SEVERITY_IS_THE_PREMISE
-            and s.expectation.max_tool_calls > 0
-            and self._classify(s, run_state, now) is not IncidentState.INVESTIGATING
+            name
+            for name in _REWRITTEN
+            if name in by_name
+            and self._classify(by_name[name], run_state, now) is not IncidentState.INVESTIGATING
         )
         assert escalated == [], (
-            f"these budget-spending scenarios now filter as noise at TRIAGE: {escalated}. "
+            f"these rewritten scenarios now filter as noise at TRIAGE: {escalated}. "
             "Their severity is not incidental after all — the rewrite changed what they "
             "test, so they belong in _SEVERITY_IS_THE_PREMISE instead."
         )

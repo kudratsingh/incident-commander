@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import Engine
+from sqlalchemy.exc import OperationalError
 
 from incident_commander.agent.factory import derive_incident_id, start_run
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
@@ -66,11 +67,59 @@ def client(spawned_runs: list[RunState], checkpointer: InMemoryCheckpointer) -> 
     return TestClient(app)
 
 
+class _UnreachableStore(InMemoryCheckpointer):
+    """A run store that is up as far as the process knows and down in fact."""
+
+    def load(self, incident_id: UUID) -> RunState | None:
+        raise OperationalError("SELECT 1", {}, Exception("connection refused"))
+
+
+class _SlowStore(InMemoryCheckpointer):
+    """A run store that answers, eventually — the pool-exhaustion shape."""
+
+    def load(self, incident_id: UUID) -> RunState | None:
+        time.sleep(5)
+        return None
+
+
 class TestHealth:
     def test_ok(self, client: TestClient) -> None:
         response = client.get("/health")
         assert response.status_code == 200
-        assert response.json() == {"status": "ok", "details": {}}
+        # The probe is reported, not implied: "ok" with an empty details bag
+        # was the answer a completely non-functional agent used to give.
+        assert response.json() == {"status": "ok", "details": {"datastore": "ok"}}
+
+    def test_reports_degraded_when_the_datastore_is_down(self) -> None:
+        # The finding: /health returned ok unconditionally, so an agent that
+        # could not read or write a single run reported healthy to whatever
+        # watches it — and the lease/pool availability work would be graded
+        # against that answer.
+        app = create_app(
+            settings=_test_settings(),
+            checkpointer=_UnreachableStore(),
+            run_task=lambda *_: None,
+        )
+        response = TestClient(app).get("/health")
+        assert response.status_code == 503
+        body = response.json()
+        assert body["status"] == "degraded"
+        assert "OperationalError" in body["details"]["datastore"]
+
+    def test_reports_degraded_when_the_probe_does_not_answer_in_time(self) -> None:
+        # A store that hangs is the pool-exhaustion shape, and it is the one a
+        # health check must not inherit: waiting for it makes the endpoint as
+        # unavailable as the thing it is reporting on.
+        app = create_app(
+            settings=_test_settings(health_probe_timeout_seconds=0.05),
+            checkpointer=_SlowStore(),
+            run_task=lambda *_: None,
+        )
+        started = time.monotonic()
+        response = TestClient(app).get("/health")
+        assert response.status_code == 503
+        assert response.json()["status"] == "degraded"
+        assert time.monotonic() - started < 4, "the endpoint waited for the hung probe"
 
 
 class TestIngestAlert:
@@ -244,6 +293,20 @@ class TestIngestAlert:
         assert response.status_code == 401
         assert spawned_runs == []
 
+    def test_absurdly_large_timestamp_is_refused_not_crashed(
+        self, client: TestClient, spawned_runs: list[RunState]
+    ) -> None:
+        # `int` is unbounded, so 10**400 parses fine and then overflowed the
+        # float conversion in the skew comparison — an OverflowError outside
+        # the `except ValueError`, i.e. an unauthenticated caller getting a
+        # 500 out of the ingress. It is a client error like every other
+        # unusable timestamp, and 401 is the code the two neighbouring
+        # rejections (non-numeric, out-of-window) already use.
+        response = self._platform_post(client, {"source": "billing"}, timestamp=str(10**400))
+        assert 400 <= response.status_code < 500, "an unusable header must not be a server error"
+        assert response.status_code == 401
+        assert spawned_runs == []
+
     def test_legacy_signature_header_still_accepted(
         self, client: TestClient, spawned_runs: list[RunState]
     ) -> None:
@@ -272,6 +335,96 @@ class TestIngestAlert:
         run = spawned_runs[0]
         assert run.alert["trace_id"] == "abc123"
         assert run.alert["labels"] == {"team": "payments"}
+
+
+class TestIngressBodyCap:
+    """An unauthenticated caller must not be able to make this process buffer.
+
+    ``/alerts`` reads the whole body before the HMAC check can reject anyone —
+    it has to, because the signature covers the body — so the only place a cap
+    can protect the process is ahead of the route. Both shapes are covered:
+    a declared Content-Length over the cap (refused without reading a byte)
+    and an undeclared/chunked body (refused the moment the running total
+    passes the cap, so lying about the length buys nothing).
+    """
+
+    _CAP = 1024
+
+    @pytest.fixture
+    def capped_client(self, spawned_runs: list[RunState]) -> TestClient:
+        def capture(run: RunState, _s: Settings, _c: object) -> None:
+            spawned_runs.append(run)
+
+        app = create_app(
+            settings=_test_settings(webhook_max_body_bytes=self._CAP),
+            checkpointer=InMemoryCheckpointer(),
+            run_task=capture,
+        )
+        return TestClient(app)
+
+    def test_oversized_unsigned_post_is_refused_and_never_reaches_the_route(
+        self, capped_client: TestClient, spawned_runs: list[RunState]
+    ) -> None:
+        response = capped_client.post(
+            "/alerts",
+            content=b"x" * (self._CAP * 4),
+            headers={"Content-Type": "application/json"},
+        )
+        # 413 and not 401 is the whole assertion: 401 would mean the body was
+        # buffered and handed to the signature check, which is the memory the
+        # cap exists to refuse to spend on an unauthenticated caller.
+        assert response.status_code == 413
+        assert spawned_runs == []
+
+    def test_a_declared_length_over_the_cap_is_refused_before_the_body_arrives(
+        self, capped_client: TestClient
+    ) -> None:
+        # The body sent here is two bytes; only the declaration is oversized.
+        # A 413 therefore proves the refusal came from the header alone.
+        response = capped_client.post(
+            "/alerts",
+            content=b"{}",
+            headers={"Content-Type": "application/json", "Content-Length": str(self._CAP * 100)},
+        )
+        assert response.status_code == 413
+
+    def test_an_undeclared_body_is_capped_as_it_streams(
+        self, capped_client: TestClient, spawned_runs: list[RunState]
+    ) -> None:
+        def chunks() -> Iterator[bytes]:
+            for _ in range(8):
+                yield b"x" * self._CAP
+
+        # A generator body makes httpx use chunked transfer-encoding, so there
+        # is no Content-Length to check and the running count is the only
+        # thing standing between the caller and the buffer.
+        response = capped_client.post(
+            "/alerts", content=chunks(), headers={"Content-Type": "application/json"}
+        )
+        assert response.status_code == 413
+        assert spawned_runs == []
+
+    def test_a_body_under_the_cap_is_untouched(
+        self, capped_client: TestClient, spawned_runs: list[RunState]
+    ) -> None:
+        # Green before and after: the cap must not become a second, quieter
+        # way for a legitimate delivery to fail.
+        body = json.dumps({"source": "billing", "group": "billing-consumer"}).encode()
+        assert len(body) < self._CAP
+        response = capped_client.post(
+            "/alerts",
+            content=body,
+            headers={
+                "X-Alert-Signature": sign(body, "hmac-secret"),
+                "X-Alert-Timestamp": str(int(time.time() * 1000)),
+                "Content-Type": "application/json",
+            },
+        )
+        assert response.status_code == 202
+        assert len(spawned_runs) == 1
+
+    def test_the_cap_does_not_touch_bodyless_routes(self, capped_client: TestClient) -> None:
+        assert capped_client.get("/health").status_code == 200
 
 
 class TestDurableIncidentIdentity:

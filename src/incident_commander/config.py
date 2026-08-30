@@ -74,6 +74,19 @@ class Settings(BaseSettings):
     # time by more than this many seconds. Also bounds the window in which
     # an identical redelivery is suppressed instead of spawning a run.
     webhook_max_skew_seconds: int = Field(default=300, ge=1)
+    # Largest alert body the ingress will read (WO-R2-86). The HMAC covers the
+    # body, so authentication cannot happen until the body is in memory —
+    # which means an unauthenticated caller decides how much memory this
+    # process spends unless something ahead of the route says no. 1 MiB is two
+    # orders of magnitude above the largest alert the platform emits and small
+    # enough that a flood of them is a bandwidth problem, not an OOM.
+    webhook_max_body_bytes: int = Field(default=1_048_576, ge=1)
+    # How long /health waits for its datastore probe before calling the agent
+    # degraded. Deliberately far below DB_POOL_TIMEOUT_SECONDS: an exhausted
+    # pool makes the probe wait the full checkout timeout, and a health check
+    # that waits as long as the fault it reports is one more thing that has
+    # stopped answering.
+    health_probe_timeout_seconds: float = Field(default=2.0, gt=0)
 
     # Agent-owned Postgres.
     database_url: PostgresDsn

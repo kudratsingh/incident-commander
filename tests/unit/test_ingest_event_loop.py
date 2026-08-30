@@ -13,6 +13,13 @@ The blocking is simulated with ``time.sleep`` in a fake checkpointer, which is
 what a pool-timeout wait looks like from the event loop's point of view: a
 synchronous call that does not yield. No Postgres needed to prove a coroutine
 does not yield.
+
+Since WO-R2-86 /health probes that same database rather than answering ``ok``
+unconditionally, so it is no longer free — but it is still *bounded*, by
+``HEALTH_PROBE_TIMEOUT_SECONDS`` rather than by the database. Under a stall the
+honest answer is ``degraded``, delivered on the health check's own schedule;
+what must never happen is /health inheriting the wait. Both halves are asserted
+below.
 """
 
 from __future__ import annotations
@@ -45,6 +52,10 @@ _YIELD_SECONDS = 0.05
 # order-of-magnitude gap between a free loop and a blocked one, not a latency
 # budget anybody should tune.
 _HEALTH_BUDGET_SECONDS = 0.25
+# What /health waits for its datastore probe. Set well inside the budget
+# above, because that is the point: the endpoint answers on this schedule even
+# though the store it is asking about is the thing that is stuck.
+_HEALTH_PROBE_TIMEOUT_SECONDS = 0.05
 
 
 @pytest.fixture
@@ -119,7 +130,7 @@ async def test_health_answers_while_an_ingest_is_blocked_on_the_database() -> No
     """
     checkpointer = StallingCheckpointer(_DB_STALL_SECONDS)
     app = create_app(
-        settings=_test_settings(),
+        settings=_test_settings(health_probe_timeout_seconds=_HEALTH_PROBE_TIMEOUT_SECONDS),
         checkpointer=checkpointer,
         run_task=lambda *_args: None,
     )
@@ -152,11 +163,17 @@ async def test_health_answers_while_an_ingest_is_blocked_on_the_database() -> No
             elapsed = time.monotonic() - started
             finished.append("health")
 
-    assert health.status_code == 200
-    assert health.json()["status"] == "ok"
+    # Degraded, and correctly so: the store this agent needs is stalled, and
+    # since WO-R2-86 /health says so instead of reporting ok. The claim under
+    # test is unchanged — it answered at all, and it answered early.
+    assert health.status_code == 503
+    assert health.json()["status"] == "degraded"
     assert finished == ["health", "ingest"], "/health did not overtake the stalled ingest"
     assert elapsed < _HEALTH_BUDGET_SECONDS, (
-        f"/health took {elapsed:.2f}s while an ingest was blocked on the database"
+        f"/health took {elapsed:.2f}s while an ingest was blocked on the database. "
+        "The probe is bounded by HEALTH_PROBE_TIMEOUT_SECONDS; a wait longer than "
+        "that means the endpoint inherited the database's stall instead of "
+        "reporting it."
     )
     assert checkpointer.calls > 0, "the ingest never reached the database; nothing was proven"
 

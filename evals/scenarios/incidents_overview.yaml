@@ -16,10 +16,19 @@ alert:
   fingerprint: elevated_error_rate
   service: api-gateway
 canned_tool_responses:
+  # Severities are the platform's own bands. ALLOWED_SEVERITIES is exactly
+  # {info, warning, critical} (platform models/alert.py), enforced in
+  # AlertService.create_alert before the row exists, and incidents ARE alert
+  # rows (platform mcp/tools/incidents.py) — so "high" and "medium" inside a
+  # recorded response are values no reading of the platform can contain.
+  # Rewritten on the mapping WO-R2-45 used for the alert premises, for the
+  # same reason and with the same care: high -> critical (the paging band),
+  # medium -> warning. The subject is unchanged — two concurrent active incidents suggesting a shared upstream cause — and no expectation
+  # grades a specific severity value.
   list_incidents:
     content:
     - type: text
-      text: '{"total":2,"incidents":[{"id":"11111111-1111-1111-1111-111111111111","severity":"high","source":"platform.api","title":"elevated error rate","fired_at":"2026-07-28T09:55:00Z","is_active":true},{"id":"22222222-2222-2222-2222-222222222222","severity":"medium","source":"platform.dlq","title":"dlq
+      text: '{"total":2,"incidents":[{"id":"11111111-1111-1111-1111-111111111111","severity":"critical","source":"platform.api","title":"elevated error rate","fired_at":"2026-07-28T09:55:00Z","is_active":true},{"id":"22222222-2222-2222-2222-222222222222","severity":"warning","source":"platform.dlq","title":"dlq
         depth warning","fired_at":"2026-07-28T09:50:00Z","is_active":true}]}'
     is_error: false
 canned_llm_responses:

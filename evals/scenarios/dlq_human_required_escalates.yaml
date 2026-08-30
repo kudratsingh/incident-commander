@@ -24,10 +24,21 @@ canned_tool_responses:
       text: '{"total":2,"items":[{"id":"cccccccc-3333-3333-3333-000000000001","type":"csv_upload","error_message":"ValueError: invalid literal for int() with base 10: not-a-number at row 15382","retry_count":3,"created_at":"2026-07-30T10:00:00Z","remediation_hint":"human_required"},{"id":"cccccccc-3333-3333-3333-000000000002","type":"csv_upload","error_message":"ValueError:
         could not convert string to float: NaN at row 42","retry_count":3,"created_at":"2026-07-30T10:01:00Z","remediation_hint":"human_required"}]}'
     is_error: false
+  # `already_marked` is not a free field. The platform computes it from the
+  # same pre-write read it returns as `previous_hint`
+  # (`already_marked = previous_hint == "human_required"`, platform
+  # actions/mark_dlq_permanent.py), so the recorded pair
+  # (previous_hint=human_required, already_marked=false) is a contradiction
+  # no run can produce. The listing above settles which half was wrong: both
+  # DLQ rows already carry remediation_hint=human_required, and this
+  # scenario's own precondition asserts exactly that — so the previous hint
+  # is the true half and the flag was the fabricated one. Nothing grades
+  # `already_marked`; `remediation_hint` is returned unconditionally on both
+  # branches, so the ACTION and EVIDENCE asserts are untouched.
   mark_dlq_permanent:
     content:
     - type: text
-      text: '{"job_id":"cccccccc-3333-3333-3333-000000000001","previous_hint":"human_required","remediation_hint":"human_required","already_marked":false}'
+      text: '{"job_id":"cccccccc-3333-3333-3333-000000000001","previous_hint":"human_required","remediation_hint":"human_required","already_marked":true}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

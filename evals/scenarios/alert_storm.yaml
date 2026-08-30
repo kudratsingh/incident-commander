@@ -16,12 +16,21 @@ alert:
   severity: critical
   fingerprint: alert_storm_meta
 canned_tool_responses:
+  # Severities are the platform's own bands. ALLOWED_SEVERITIES is exactly
+  # {info, warning, critical} (platform models/alert.py), enforced in
+  # AlertService.create_alert before the row exists, and incidents ARE alert
+  # rows (platform mcp/tools/incidents.py) — so "high" and "medium" inside a
+  # recorded response are values no reading of the platform can contain.
+  # Rewritten on the mapping WO-R2-45 used for the alert premises, for the
+  # same reason and with the same care: high -> critical (the paging band),
+  # medium -> warning. The subject is unchanged — five alerts across five subsystems inside three minutes — and no expectation
+  # grades a specific severity value.
   list_active_alerts:
     content:
     - type: text
-      text: '{"total":5,"alerts":[{"id":"a1","severity":"critical","source":"platform.api","title":"5xx spike","fired_at":"2026-07-28T10:00:00Z"},{"id":"a2","severity":"high","source":"platform.db","title":"latency
-        high","fired_at":"2026-07-28T10:01:00Z"},{"id":"a3","severity":"high","source":"platform.kafka","title":"consumer lag","fired_at":"2026-07-28T10:01:00Z"},{"id":"a4","severity":"high","source":"platform.dlq","title":"dlq
-        growth","fired_at":"2026-07-28T10:02:00Z"},{"id":"a5","severity":"medium","source":"platform.cache","title":"cache miss","fired_at":"2026-07-28T10:03:00Z"}]}'
+      text: '{"total":5,"alerts":[{"id":"a1","severity":"critical","source":"platform.api","title":"5xx spike","fired_at":"2026-07-28T10:00:00Z"},{"id":"a2","severity":"critical","source":"platform.db","title":"latency
+        high","fired_at":"2026-07-28T10:01:00Z"},{"id":"a3","severity":"critical","source":"platform.kafka","title":"consumer lag","fired_at":"2026-07-28T10:01:00Z"},{"id":"a4","severity":"critical","source":"platform.dlq","title":"dlq
+        growth","fired_at":"2026-07-28T10:02:00Z"},{"id":"a5","severity":"warning","source":"platform.cache","title":"cache miss","fired_at":"2026-07-28T10:03:00Z"}]}'
     is_error: false
   list_audit_events:
     content:

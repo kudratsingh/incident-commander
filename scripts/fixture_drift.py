@@ -31,6 +31,7 @@ from evals.fixture_drift_ledger import (
     split_for_bless,
 )
 from evals.fixture_probe import UnseededPlatformError, probe_live
+from evals.fixture_shape import check_calls, write_tier_calls
 from evals.scenarios.loader import load_scenarios
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -127,13 +128,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {err}", file=sys.stderr)
         return 2
 
+    # The Tier-1 half, which needs no platform and so is not gated on one:
+    # those fixtures are never probed (probing pause_dag would pause a DAG),
+    # and their shape is checked against the committed tool snapshot instead.
+    shape_defects = check_calls(write_tier_calls(calls))
+
     print(
         f"canned fixtures checked: {result.checked} "
-        f"({result.skipped_write_tier} Tier-1 fixtures never probed) "
+        f"({result.skipped_write_tier} Tier-1 fixtures shape-checked offline, never probed) "
         f"via {result.live_calls} live calls"
     )
     for error in result.errors:
         print(f"  UNCHECKED {error.scenario}:{error.tool} — {error.detail}")
+    for defect in shape_defects:
+        print(f"  SHAPE {defect.describe()}")
 
     if args.bless:
         if result.errors:
@@ -174,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  STALE {key} — no longer drifted; delete this line from the ledger")
     if result.errors:
         print("\nA fixture that could not be probed is not a fixture that agrees.")
-    return 1 if (new or stale or result.errors) else 0
+    return 1 if (new or stale or result.errors or shape_defects) else 0
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -115,6 +115,8 @@ A live scenario asserts a fault. Until `expected_precondition` existed, nothing 
 
 `bb1fa70abb4c` is a paid run that graded FAIL for exactly this reason. The report said the agent fixed the wrong thing. The truth was that the right thing could not be made to exist, and nothing in the harness could tell those apart.
 
+"Seeding silently failed" had a second, narrower source in the seeding client itself. An MCP tool that fails at the tool level answers with a JSON-RPC **success** carrying `isError: true` in the result — not with the JSON-RPC `error` member. `ChaosClient.call` read only the latter, so a hook that failed reported a successful seed and the run went on to grade the agent on a fault nobody had manufactured. It now raises `ChaosInvocationError` on a truthy `isError` (both the camelCase wire spelling and the snake_case fixture spelling, the same split that left the agent's own escalate-on-error guard dead against the wire in C-02), and isinstance-guards the `error` member and each content block so a malformed response cannot escape as an `AttributeError` past the runner's typed handler. Preconditions remain the stronger check — they probe the world rather than trusting the seeder's own report — but a seeder that lies is worth catching where it lies.
+
 A precondition probes the world after seeding and before the run. If the world is not in the asserted state, the scenario reports **that** — the fault was never manufactured — instead of running an agent against a false premise and grading it on the result:
 
 ```yaml

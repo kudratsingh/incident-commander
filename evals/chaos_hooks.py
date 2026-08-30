@@ -32,6 +32,21 @@ class ChaosInvocationError(RuntimeError):
     """The platform rejected or errored on a chaos-hook invocation."""
 
 
+def _error_text(content: list[Any]) -> str:
+    """Join the text blocks of an errored tool result, for the raised message.
+
+    The hook name says which fault failed to seed; this says why, which is
+    the difference between "re-run it" and "the consumer group is misnamed
+    in the scenario YAML".
+    """
+    parts = [
+        block["text"]
+        for block in content
+        if isinstance(block, dict) and isinstance(block.get("text"), str)
+    ]
+    return " ".join(parts)[:200]
+
+
 class ChaosClient:
     """Minimal JSON-RPC caller for the platform's chaos endpoints.
 
@@ -91,15 +106,39 @@ class ChaosClient:
             )
         if "error" in payload:
             err_body = payload["error"]
-            raise ChaosInvocationError(
-                f"{tool_name}: platform returned MCP error "
-                f"{err_body.get('code')}: {err_body.get('message')}"
-            )
+            # isinstance-guard before `.get`: a non-object error member (a
+            # bare string, a list) made `.get` raise AttributeError, which
+            # sails straight past the runner's `except ChaosInvocationError`
+            # and reproduces the untyped crash this comment block says was
+            # eliminated. The guard is what makes the claim above true for
+            # every response shape, not just the well-formed ones.
+            if isinstance(err_body, dict):
+                detail = f"{err_body.get('code')}: {err_body.get('message')}"
+            else:
+                detail = repr(err_body)
+            raise ChaosInvocationError(f"{tool_name}: platform returned MCP error {detail}")
         result = payload.get("result", {})
         if not isinstance(result, dict):
             return {}
         content = result.get("content", [])
+        if not isinstance(content, list):
+            content = []
+        # A tool-level failure rides on `result.isError`, not on the JSON-RPC
+        # `error` member — a failed hook is a 200 with a success envelope.
+        # Reading only the envelope reported an unseeded fault to the runner
+        # as a successful seed, and the run then graded the agent on a world
+        # nobody manufactured. Both spellings on purpose: the wire is
+        # camelCase, canned fixtures and trajectories are snake — the exact
+        # split that left the agent's own escalate-on-error guard dead
+        # against the wire until C-02.
+        if result.get("isError") or result.get("is_error"):
+            raise ChaosInvocationError(
+                f"{tool_name}: hook failed at the tool level (isError): "
+                f"{_error_text(content) or '<no content>'}"
+            )
         for block in content:
+            if not isinstance(block, dict):
+                continue
             if block.get("type") == "text" and isinstance(block.get("text"), str):
                 try:
                     parsed = json.loads(block["text"])

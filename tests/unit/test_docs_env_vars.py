@@ -52,6 +52,7 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "CHAOS_ENABLED",  # platform-side chaos gate (demo/compose.yml)
         "EVAL_TRACE_DIR",  # eval runner trace destination (evals/runner.py)
         "PLATFORM_COMPOSE",  # read by `make eval-reset`, not by the agent
+        "PLATFORM_SERVICE",  # the compose service `make eval-reset` execs into
         "PURGE_IDEMPOTENCY",  # `make eval-reset` opt-in purge flag
         "SMOKE_ONLY",  # `make eval-smoke` scenario-list override
         "UNTIL_LAG",  # `make traffic` stop-at-this-backlog flag (scripts/traffic_loop.py)

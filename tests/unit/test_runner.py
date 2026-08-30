@@ -51,7 +51,7 @@ from incident_commander.agent.investigation import make_llm_investigate
 from incident_commander.agent.remediation import make_llm_verify
 from incident_commander.agent.state import BudgetLedger, EvidenceEntry, IncidentState, RunState
 from incident_commander.api.schemas import AlertPayload
-from incident_commander.config import Settings
+from incident_commander.config import Settings, settings_env_var_names
 from incident_commander.llm.fakes import CannedLLMClient
 from incident_commander.tools.mcp_client import MCPError, ToolResult
 
@@ -1198,31 +1198,13 @@ class TestRunsDirIsTracked:
 
 # --- Run provenance + exit-code contract (ADR 0013; findings A-01/S-09/A-04/A-15) ---
 
-# Every env var Settings can read (config.py), upper-cased per pydantic-settings.
+# Every env var Settings can read, walked from the model (config.py).
 # Exit-code tests must clear ALL of them and chdir away from any real .env, or a
-# developer's environment leaks into the test — the exact A-04 mechanism.
-_SETTINGS_ENV_VARS = (
-    "ANTHROPIC_API_KEY",
-    "AGENT_MODEL",
-    "JUDGE_MODEL",
-    "PLATFORM_MCP_URL",
-    "PLATFORM_REST_URL",
-    "PLATFORM_TOKEN",
-    "PLATFORM_SMOKE_TOKEN",
-    "PLATFORM_WEBHOOK_SECRET",
-    "DATABASE_URL",
-    "BUDGET_MAX_TOOL_CALLS",
-    "BUDGET_MAX_TOKENS",
-    "BUDGET_MAX_SECONDS",
-    "BUDGET_MAX_USD",
-    "VERIFY_PROBE_ATTEMPTS",
-    "VERIFY_PROBE_DELAY_SECONDS",
-    "INVESTIGATE_REPROBE_ATTEMPTS",
-    "INVESTIGATE_REPROBE_DELAY_SECONDS",
-    "ACTION_TOOL_TIMEOUT_SECONDS",
-    "PLATFORM_AGENT_PRINCIPAL_ID",
-    "PLATFORM_SMOKE_PRINCIPAL_ID",
-)
+# developer's environment leaks into the test — the exact A-04 mechanism. This
+# was a hand-kept tuple until WO-R2-87, and it had drifted from the model it
+# claimed to mirror; tests/unit/test_config.py holds the written-down copy that
+# a new setting has to be added to.
+_SETTINGS_ENV_VARS = settings_env_var_names()
 
 # A present-but-offline env for a --live run: every field set and parseable,
 # ANTHROPIC_API_KEY an offline placeholder, platform URL the offline
@@ -1275,6 +1257,29 @@ def _isolate_settings_env(
         monkeypatch.delenv(var, raising=False)
     for var, value in (env or {}).items():
         monkeypatch.setenv(var, value)
+
+
+def test_isolate_settings_env_clears_every_variable_settings_reads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The exit-code tests below are only meaningful if this holds.
+
+    ``_SETTINGS_ENV_VARS`` used to be typed out by hand under the claim that
+    it was "every env var Settings can read (config.py)", and it was not:
+    AGENT_ENABLED, WEBHOOK_MAX_SKEW_SECONDS and the whole ADR-0022 pool group
+    were missing, so a developer with any of those exported ran the exit-code
+    contract against their own shell — the A-04 mechanism these tests exist to
+    prevent, reintroduced inside the guard against it. The list is derived
+    from the model now; this is the check that the derivation covers it.
+    """
+    for name in settings_env_var_names():
+        monkeypatch.setenv(name, "9999")
+    _isolate_settings_env(monkeypatch, tmp_path)
+    survivors = sorted(name for name in settings_env_var_names() if name in os.environ)
+    assert survivors == [], (
+        f"these Settings variables survive _isolate_settings_env: {survivors}. "
+        "Whatever the developer exported for them is what the exit-code tests read."
+    )
 
 
 def _forbid_run_all(monkeypatch: pytest.MonkeyPatch) -> None:

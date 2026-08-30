@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -7,41 +8,101 @@ from typing import Any
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from incident_commander.config import Settings, get_settings
+from incident_commander.config import Settings, get_settings, settings_env_var_names
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Every env var Settings can read (config.py), upper-cased per
-# pydantic-settings. Env vars outrank dotenv, so any of these leaking from
-# the developer's shell would silently override the file under test.
-_ENV_VARS = (
-    "ANTHROPIC_API_KEY",
-    "AGENT_ENABLED",
-    "AGENT_MODEL",
-    "JUDGE_MODEL",
-    "PLATFORM_MCP_URL",
-    "PLATFORM_REST_URL",
-    "PLATFORM_TOKEN",
-    "PLATFORM_SMOKE_TOKEN",
-    "PLATFORM_WEBHOOK_SECRET",
-    "WEBHOOK_MAX_SKEW_SECONDS",
-    "DATABASE_URL",
-    "BUDGET_MAX_TOOL_CALLS",
-    "BUDGET_MAX_TOKENS",
-    "BUDGET_MAX_SECONDS",
-    "BUDGET_MAX_USD",
-    "VERIFY_PROBE_ATTEMPTS",
-    "VERIFY_PROBE_DELAY_SECONDS",
-    "INVESTIGATE_REPROBE_ATTEMPTS",
-    "INVESTIGATE_REPROBE_DELAY_SECONDS",
-    "ACTION_TOOL_TIMEOUT_SECONDS",
+# Every env var Settings can read, walked from the model itself. Env vars
+# outrank dotenv, so any of these leaking from the developer's shell would
+# silently override the file under test — which is why this is derived and
+# not typed out. The hand-kept version of this tuple had drifted from the
+# model it claimed to describe (WO-R2-87).
+_ENV_VARS = settings_env_var_names()
+
+# The same surface, written down once, as a tripwire rather than as the
+# source: a new Settings field fails the assertion in TestEnvIsolation until
+# somebody adds it here, and adding it here is the prompt to ask whether the
+# new knob is also in .env.example and the operator docs. Nothing reads this
+# to build an isolation list — that is what the derived tuple above is for.
+_DOCUMENTED_ENV_VARS = frozenset(
+    {
+        "ACTION_TOOL_TIMEOUT_SECONDS",
+        "AGENT_ENABLED",
+        "AGENT_MAX_CONCURRENT_RUNS",
+        "AGENT_MODEL",
+        "ANTHROPIC_API_KEY",
+        "BUDGET_MAX_SECONDS",
+        "BUDGET_MAX_TOKENS",
+        "BUDGET_MAX_TOOL_CALLS",
+        "BUDGET_MAX_USD",
+        "DATABASE_URL",
+        "DB_INGEST_RESERVED_CONNECTIONS",
+        "DB_MAX_OVERFLOW",
+        "DB_POOL_SIZE",
+        "DB_POOL_TIMEOUT_SECONDS",
+        "HEALTH_PROBE_TIMEOUT_SECONDS",
+        "INVESTIGATE_REPROBE_ATTEMPTS",
+        "INVESTIGATE_REPROBE_DELAY_SECONDS",
+        "JUDGE_MODEL",
+        "PLATFORM_AGENT_PRINCIPAL_ID",
+        "PLATFORM_MCP_URL",
+        "PLATFORM_REST_URL",
+        "PLATFORM_SMOKE_PRINCIPAL_ID",
+        "PLATFORM_SMOKE_TOKEN",
+        "PLATFORM_TOKEN",
+        "PLATFORM_WEBHOOK_SECRET",
+        "VERIFY_PROBE_ATTEMPTS",
+        "VERIFY_PROBE_DELAY_SECONDS",
+        "WEBHOOK_MAX_BODY_BYTES",
+        "WEBHOOK_MAX_SKEW_SECONDS",
+    }
 )
+
+
+def _clear_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unset every variable Settings reads. The autouse fixture's whole body,
+    extracted so the isolation itself can be tested rather than assumed."""
+    for name in _ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in _ENV_VARS:
-        monkeypatch.delenv(name, raising=False)
+    _clear_settings_env(monkeypatch)
+
+
+class TestEnvIsolation:
+    """The isolation fixture must cover the settings surface, not a copy of it.
+
+    ``_ENV_VARS`` was a hand-kept list documented as "every env var Settings
+    can read", and it had drifted: the principal ids and the whole ADR-0022
+    pool group were missing, so a developer with any of them exported ran
+    these tests against their own environment while the file under test said
+    otherwise. Deriving the list removes the drift; these two tests are what
+    keep the derivation honest.
+    """
+
+    def test_the_fixture_clears_every_variable_settings_reads(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The developer's shell, reproduced: every variable set to a poison
+        # value, then the fixture's own isolation applied on top of it.
+        for name in settings_env_var_names():
+            monkeypatch.setenv(name, "9999")
+        _clear_settings_env(monkeypatch)
+        survivors = sorted(name for name in settings_env_var_names() if name in os.environ)
+        assert survivors == [], (
+            f"these Settings variables survive the isolation fixture: {survivors}. "
+            "Whatever value the developer has exported for them is what the tests "
+            "below actually read."
+        )
+
+    def test_the_settings_env_surface_is_the_documented_one(self) -> None:
+        # The derived list is the thing the fixtures use; this is the tripwire
+        # that a NEW setting was noticed. Adding a field to Settings fails
+        # here until its variable is added below, which is the moment to ask
+        # whether it also needs a line in .env.example and the docs.
+        assert set(settings_env_var_names()) == _DOCUMENTED_ENV_VARS
 
 
 def _settings(**overrides: Any) -> Settings:
@@ -117,6 +178,23 @@ class TestSettings:
         valid_kwargs["budget_max_tool_calls"] = 0
         with pytest.raises(ValidationError):
             _settings(**valid_kwargs)
+
+    @pytest.mark.parametrize("zero", [Decimal("0"), Decimal("0.00"), "0"])
+    def test_zero_budget_usd_rejected(self, valid_kwargs: dict[str, Any], zero: Any) -> None:
+        # BUDGET_MAX_USD=0 was the one budget dimension that accepted zero,
+        # and is_exhausted compares with >=, so every run was born exhausted:
+        # it terminates on its first check having done nothing, and the
+        # result reads exactly like a budget policy working correctly.
+        valid_kwargs["budget_max_usd"] = zero
+        with pytest.raises(ValidationError):
+            _settings(**valid_kwargs)
+
+    def test_a_sub_dollar_budget_is_still_allowed(self, valid_kwargs: dict[str, Any]) -> None:
+        # The bound is gt=0, not ge=1 like the integer dimensions: a cheap
+        # scenario capped at fifty cents is a legitimate operator choice, and
+        # unlike zero it is not exhausted before it starts.
+        valid_kwargs["budget_max_usd"] = Decimal("0.50")
+        assert _settings(**valid_kwargs).budget_max_usd == Decimal("0.50")
 
     def test_agent_enabled_defaults_true(self, valid_kwargs: dict[str, Any]) -> None:
         # The kill switch (docs/safety-model.md#kill-switch) must be ON by

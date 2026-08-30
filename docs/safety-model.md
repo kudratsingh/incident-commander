@@ -125,6 +125,12 @@ This is intentional. Aggressive auto-remediation with an unmapped hypothesis is 
 
 Exhausting any dimension forces escalation with `"budget exhausted"` on evidence. No dimension has a "just a little bit more" override.
 
+Every dimension is also bounded away from zero at startup. `is_exhausted` compares with `>=`, so a
+ceiling of zero is not "no budget" — it is a run that is exhausted before it begins, escalating on
+its first check having done nothing, which looks exactly like the policy working. The three integer
+dimensions have always been `ge=1`; `BUDGET_MAX_USD` accepted `0` until WO-R2-87 and is now `> 0`
+(fractions such as `0.50` remain valid — the refusal is of zero, not of small).
+
 ### Billed work is charged on every path, not just the happy one
 
 ADR 0015's rule is one-directional — the meter may over-report, never under-report — and the four token counters on a response cannot honor it alone, because they describe the one attempt that came back. Four paths used to bill the platform and charge the run nothing:

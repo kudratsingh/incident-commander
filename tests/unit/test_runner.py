@@ -1785,6 +1785,33 @@ class _ClosableCanned(CannedMCPClient):
         return None
 
 
+class _ScriptedCanned(_ClosableCanned):
+    """A canned client that stops answering on chosen (1-based) attempts.
+
+    CannedMCPClient scripts changing *answers*; it cannot script a platform
+    that stops answering mid-window, which is the sequence the
+    Not-Met/Unverifiable split actually turns on.
+    """
+
+    def __init__(self, responses: Any, *, dead_on: set[int]) -> None:
+        super().__init__(responses)
+        self._dead_on = dead_on
+        self._attempts = 0
+
+    def call_tool(
+        self,
+        name: str,
+        arguments: Any,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ToolResult:
+        self._attempts += 1
+        if self._attempts in self._dead_on:
+            self.calls.append((name, dict(arguments)))
+            raise MCPError(-32000, "connection reset by peer")
+        return super().call_tool(name, arguments, timeout_seconds=timeout_seconds)
+
+
 class TestPreconditions:
     """An unmet premise abandons the run instead of grading the agent on it.
 
@@ -1942,6 +1969,56 @@ class TestPreconditions:
         client = _ClosableCanned({"get_consumer_lag": garbage})
         with pytest.raises(runner_module.PreconditionUnverifiable, match="readable"):
             self._run_live(monkeypatch, self._live_scenario_with_precondition(), client)
+
+    def test_a_dead_platform_on_the_decisive_attempt_is_unverifiable_not_unmet(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A platform that dies mid-polling is UNKNOWN, not FALSE.
+
+        `answered` latched True on the first readable payload and was never
+        reset, while `failures` was overwritten by each attempt — so
+        [readable-but-unmet, dead platform] reported the transport error
+        under "the fault was never manufactured", pointing the operator at
+        seeding while the platform was the thing that was down, inside a
+        committed append-only artifact and at the cost of a paid re-run.
+        """
+        monkeypatch.setattr(time, "sleep", lambda _s: None)
+        client = _ScriptedCanned({"get_consumer_lag": self._lag_result(0)}, dead_on={2})
+        scenario = self._live_scenario_with_precondition(attempts=2, delay_seconds=1.0)
+        with pytest.raises(runner_module.PreconditionUnverifiable) as caught:
+            self._run_live(monkeypatch, scenario, client)
+        message = str(caught.value)
+        assert "connection reset by peer" in message
+        assert "UNKNOWN" in message
+        assert "never manufactured" not in message
+
+    def test_the_last_reading_still_decides_when_the_window_merely_expires(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The other half of "the decisive attempt decides": every attempt was
+        # readable, so this IS a claim about the world, and it quotes the LAST
+        # reading rather than the first.
+        monkeypatch.setattr(time, "sleep", lambda _s: None)
+        client = _ClosableCanned({"get_consumer_lag": [self._lag_result(0), self._lag_result(-1)]})
+        scenario = self._live_scenario_with_precondition(attempts=2, delay_seconds=1.0)
+        with pytest.raises(runner_module.PreconditionNotMet) as caught:
+            self._run_live(monkeypatch, scenario, client)
+        message = str(caught.value)
+        assert "never manufactured" in message
+        assert "observed [-1]" in message, "reported a stale reading, not the last one"
+        assert "observed [0]" not in message
+
+    def test_a_platform_that_comes_back_before_the_window_closes_is_unmet(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Symmetry check: transport failure FIRST, readable-but-unmet LAST.
+        # The decisive attempt answered, so the premise really is false and
+        # the transport blip must not promote it to Unverifiable.
+        monkeypatch.setattr(time, "sleep", lambda _s: None)
+        client = _ScriptedCanned({"get_consumer_lag": self._lag_result(0)}, dead_on={1})
+        scenario = self._live_scenario_with_precondition(attempts=2, delay_seconds=1.0)
+        with pytest.raises(runner_module.PreconditionNotMet, match="never manufactured"):
+            self._run_live(monkeypatch, scenario, client)
 
     def test_a_world_that_answers_falsely_is_still_unmet(
         self, monkeypatch: pytest.MonkeyPatch

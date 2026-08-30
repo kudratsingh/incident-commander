@@ -15,6 +15,7 @@ from uuid import UUID
 import pytest
 from pydantic import SecretStr
 
+from evals import guards as guards_module
 from evals import runner as runner_module
 from evals.chaos_hooks import ChaosInvocationError
 from evals.fakes import CannedMCPClient
@@ -1233,6 +1234,38 @@ class _StubGuardClient:
         return None
 
 
+def _stub_principal_probe(
+    monkeypatch: pytest.MonkeyPatch, behavior: Exception | None = None
+) -> list[str]:
+    """Give main()'s principal guards a local probe client.
+
+    Without this, any test that reaches a guard under a real-looking live env
+    builds a real ``MCPClient`` and fires a real ``tools/call`` at
+    PLATFORM_MCP_URL — which is what ``test_one_mutating_scenario_is_allowed``
+    did until the ``no_outbound_sockets`` fixture caught it. The guards fail
+    closed on the resulting error, so the network trip was invisible in the
+    exit code; the fixture reports it regardless.
+
+    The default behaviour is an argument refusal: the scope check passed and
+    the deliberately invalid probe arguments were rejected, which is what both
+    the write and the chaos guard require to let a run proceed.
+
+    Returns the list of probe tool names as they are called, so a test can
+    assert WHICH scope was probed and not merely that something was.
+    """
+    probed: list[str] = []
+    error = behavior if behavior is not None else MCPError(-32602, "invalid tool arguments")
+
+    def _call_tool(name: str, _arguments: Any, **_kw: Any) -> Any:
+        probed.append(name)
+        raise error
+
+    probe = _ClosableCanned({})
+    monkeypatch.setattr(probe, "call_tool", _call_tool)
+    monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: probe)
+    return probed
+
+
 class TestRunProvenance:
     """A-01/S-09: degradation must live in the artifact, not just stdout."""
 
@@ -1591,6 +1624,9 @@ class TestSmokeRefusesChaosSeeding:
         run_all_calls = _stub_run_pipeline(monkeypatch, tmp_path)
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
         monkeypatch.setattr(runner_module, "load_scenarios", lambda _dir: [self._chaos_scenario()])
+        # A chaos-seeding selection now clears the chaos:invoke guard before it
+        # is allowed to run — see TestLiveChaosSeedingGuardsTheChaosScope.
+        _stub_principal_probe(monkeypatch)
         monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
         assert runner_module.main() == 0
         assert len(run_all_calls) == 1
@@ -1968,6 +2004,11 @@ class TestLiveRefusesABatchOfMutatingScenarios:
             # Refusal must happen BEFORE the run boundary — that is the claim.
             _forbid_run_all(monkeypatch)
         else:
+            # An allowed selection runs on PAST the ADR 0020 gate and into the
+            # principal guards, which build a client from PLATFORM_MCP_URL. Stub
+            # it: unstubbed, this test fired a real Tier-1-capable tools/call at
+            # http://real.host:8001/mcp from the unit suite (WO-R2-35).
+            _stub_principal_probe(monkeypatch)
             _stub_run_pipeline(monkeypatch, tmp_path)
         monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
         return runner_module.main()
@@ -2239,6 +2280,126 @@ class TestLiveRemediationGuardsTheWriteScope:
         monkeypatch.setattr(runner_module, "assert_write_capable_principal", _never)
         _stub_run_pipeline(monkeypatch, tmp_path)
         monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        assert runner_module.main() != 4
+
+
+class TestLiveChaosSeedingGuardsTheChaosScope:
+    """A scenario that mutates only through ``chaos_setup`` ran unguarded.
+
+    The write guard is keyed on ``expected_action_tools``, and a chaos-only
+    scenario declares none — it seeds a fault and then grades the agent on
+    what it does about it, executing no Tier-1 action itself. So the one
+    principal check that could have caught a wrong token skipped it, and the
+    run reached ``run_scenario``, which fires the hook under
+    ``settings.platform_token``. Without ``chaos:invoke`` that seeding raises
+    mid-run, after the archive is open and the first scenario is under way.
+
+    The scope it needs is ``chaos:invoke``, not ``actions:execute``. Probing
+    for write scope here would be the wrong question twice over: it would
+    pass a token that cannot seed, and refuse a token that can.
+    """
+
+    @staticmethod
+    def _chaos_only(name: str = "seeds_chaos") -> Scenario:
+        base = _passing_scenario()
+        return base.model_copy(
+            update={
+                "name": name,
+                "use_live_mcp": True,
+                "chaos_setup": ChaosHook(
+                    name="kill_consumer", arguments={"consumer_group": "worker-dispatcher"}
+                ),
+                "expectation": base.expectation.model_copy(update={"name": name}),
+            }
+        )
+
+    def _main(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        scenarios: list[Scenario],
+        probe_error: Exception | None = None,
+    ) -> tuple[int, list[str]]:
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        monkeypatch.setattr(runner_module, "load_scenarios", lambda _d: scenarios)
+        probed = _stub_principal_probe(monkeypatch, probe_error)
+        _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        return runner_module.main(), probed
+
+    def test_a_chaos_only_selection_without_chaos_scope_is_refused_before_spend(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, _ = self._main(
+            monkeypatch,
+            tmp_path,
+            [self._chaos_only()],
+            MCPError(-32002, "missing required scope: chaos:invoke"),
+        )
+        assert code == 4
+        out = capsys.readouterr().out
+        assert "nothing was spent" in out
+        assert "chaos:invoke" in out
+
+    def test_a_chaos_capable_token_proceeds(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        code, _ = self._main(monkeypatch, tmp_path, [self._chaos_only()])
+        assert code != 4
+
+    def test_the_chaos_scope_is_the_one_probed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The naive fix — reuse the Tier-1 probe — asks about actions:execute
+        # for a scenario that executes no Tier-1 action.
+        def _never(*_a: Any, **_k: Any) -> Any:
+            raise AssertionError("a chaos-only selection must not be probed for write scope")
+
+        monkeypatch.setattr(runner_module, "assert_write_capable_principal", _never)
+        _, probed = self._main(monkeypatch, tmp_path, [self._chaos_only()])
+        assert probed == [guards_module._CHAOS_PROBE_TOOL]
+
+    def test_a_scenario_that_both_seeds_and_acts_is_probed_for_both(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        base = self._chaos_only("seeds_and_acts")
+        both = base.model_copy(
+            update={
+                "expectation": base.expectation.model_copy(
+                    update={"expected_action_tools": ("restart_consumer_group",)}
+                )
+            }
+        )
+        _, probed = self._main(monkeypatch, tmp_path, [both])
+        assert probed == [guards_module._PROBE_TOOL, guards_module._CHAOS_PROBE_TOOL]
+
+    def test_a_selection_that_seeds_nothing_is_not_chaos_guarded(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Requiring chaos:invoke from the read-only live stage would refuse a
+        # selection that is entitled to run.
+        def _never(*_a: Any, **_k: Any) -> Any:
+            raise AssertionError("the chaos guard must not probe a chaos-free selection")
+
+        monkeypatch.setattr(runner_module, "assert_chaos_capable_principal", _never)
+        base = _passing_scenario()
+        read_only = base.model_copy(update={"name": "read_only", "use_live_mcp": True})
+        code, _ = self._main(monkeypatch, tmp_path, [read_only])
+        assert code != 4
+
+    def test_an_offline_platform_is_not_chaos_guarded(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # A placeholder platform has no principal to verify, exactly as for
+        # the other two guards.
+        def _never(*_a: Any, **_k: Any) -> Any:
+            raise AssertionError("no principal to guard against a placeholder platform")
+
+        monkeypatch.setattr(runner_module, "assert_chaos_capable_principal", _never)
+        _isolate_settings_env(monkeypatch, tmp_path, _PLACEHOLDER_LIVE_ENV)
+        monkeypatch.setattr(runner_module, "load_scenarios", lambda _d: [self._chaos_only()])
+        _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["evals.runner"])
         assert runner_module.main() != 4
 
 

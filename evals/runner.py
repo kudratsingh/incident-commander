@@ -35,6 +35,7 @@ from evals.graders.deterministic import (
 from evals.graders.llm_judge import JudgeScore, judge_briefing
 from evals.guards import (
     PrincipalGuardError,
+    assert_chaos_capable_principal,
     assert_no_tier1_successes,
     assert_read_only_principal,
     assert_write_capable_principal,
@@ -1366,24 +1367,46 @@ def main() -> int:
     # unguarded. A read-scoped token there does not fail fast: each scenario
     # investigates, plans, attempts its action, is refused, and grades red
     # after full spend.
-    write_guard_required = (
-        live
-        and not smoke
-        and not _is_offline_placeholder(str(settings.platform_mcp_url))
-        and any(s.expectation.expected_action_tools for s in scenarios)
+    #
+    # Each half asks about the scope its half of the selection needs, keyed
+    # off the same two fields the ADR 0020 mutating gate above is keyed off.
+    # `expected_action_tools` alone was not enough: a scenario that mutates
+    # the platform solely through `chaos_setup` declares none, so it skipped
+    # the guard entirely and discovered its wrong token inside run_scenario,
+    # mid-invocation. And `actions:execute` is not the scope it needs —
+    # seeding is `chaos:invoke`, so probing for write scope would refuse
+    # tokens that can seed and pass tokens that cannot.
+    live_platform = (
+        live and not smoke and not _is_offline_placeholder(str(settings.platform_mcp_url))
     )
-    if write_guard_required:
+    write_guard_required = live_platform and any(
+        s.expectation.expected_action_tools for s in scenarios
+    )
+    chaos_guard_required = live_platform and any(s.chaos_setup is not None for s in scenarios)
+    if write_guard_required or chaos_guard_required:
+        # One client, both probes: in a live non-smoke run `mcp_token` is None,
+        # so this is `settings.platform_token` — the same principal
+        # `run_scenario` fires `chaos_setup` under.
         try:
             guard_client = make_client(settings, token=mcp_token)
             try:
-                assert_write_capable_principal(guard_client)
+                if write_guard_required:
+                    assert_write_capable_principal(guard_client)
+                if chaos_guard_required:
+                    assert_chaos_capable_principal(guard_client)
             finally:
                 guard_client.close()
         except PrincipalGuardError as err:
             print(f"PRINCIPAL GUARD FAIL: {err}")
             print("no scenarios ran, nothing was spent")
             return 4
-        print("principal guard: token can act (negative probe refused on arguments, not scope)")
+        if write_guard_required:
+            print("principal guard: token can act (negative probe refused on arguments, not scope)")
+        if chaos_guard_required:
+            print(
+                "principal guard: token can seed chaos (negative probe refused "
+                "on arguments, not scope)"
+            )
 
     # Create the archive directory BEFORE the suite runs: from here on every
     # scenario streams its own evidence into it as it finishes, so a Ctrl-C

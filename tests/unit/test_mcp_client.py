@@ -184,6 +184,164 @@ class TestRetries:
         assert len(attempts) == 2
 
 
+class TestRetryAfterCeiling:
+    """A server-supplied ``Retry-After`` is a hint, not an instruction.
+
+    ``LLMClient`` caps it at 60s (``llm/client.py``'s
+    ``_MAX_RETRY_AFTER_SECONDS``, applied at :218) precisely so one
+    hostile-or-buggy header cannot park a run for a day. This client
+    honoured the value unbounded, so a ``Retry-After: 86400`` on a single
+    429 outlasted every wall-clock budget the incident had (invariant 7:
+    budgets are hard limits, and a sleep the budget cannot see is not
+    bounded by it).
+    """
+
+    @staticmethod
+    def _recording_client(
+        handler: Callable[[httpx.Request], httpx.Response],
+        delays: list[float],
+    ) -> MCPClient:
+        return MCPClient(
+            base_url=_BASE_URL,
+            token="svc-token",
+            max_attempts=3,
+            retry_base_delay=1.0,
+            transport=httpx.MockTransport(handler),
+            sleep=delays.append,
+        )
+
+    @staticmethod
+    def _retry_after_once(value: str) -> Callable[[httpx.Request], httpx.Response]:
+        attempts: list[int] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            attempts.append(len(attempts))
+            if len(attempts) == 1:
+                return httpx.Response(429, text="slow down", headers={"retry-after": value})
+            return _rpc_ok({"tools": []})
+
+        return handler
+
+    def test_absurd_retry_after_is_capped_at_sixty_seconds(self) -> None:
+        delays: list[float] = []
+        with self._recording_client(self._retry_after_once("86400"), delays) as client:
+            client.list_tools()
+        assert delays == [60.0]
+
+    def test_retry_after_below_the_cap_is_still_honoured(self) -> None:
+        delays: list[float] = []
+        with self._recording_client(self._retry_after_once("7.5"), delays) as client:
+            client.list_tools()
+        assert delays == [7.5]
+
+    def test_retry_after_never_shortens_the_backoff(self) -> None:
+        delays: list[float] = []
+        with self._recording_client(self._retry_after_once("0"), delays) as client:
+            client.list_tools()
+        assert delays == [1.0]
+
+
+class TestMalformedResultEnvelope:
+    """Every failure path raises ``MCPError`` — including envelope validation.
+
+    ``ToolResult.model_validate`` used to sit *outside* ``call_tool``'s
+    error-wrapping path, so a 200 carrying a result the envelope cannot
+    parse raised a raw ``ValidationError`` out of the module. Every
+    transition catches ``MCPError`` and nothing else
+    (``investigation.py`` :89 and :334, ``remediation.py`` :532 and :688),
+    so that one exception walked straight past the escalate-with-reason
+    rail and terminated the incident FAILED with no briefing — the
+    fail-open promise (invariant 5) inverted by a typo on the server.
+    """
+
+    def test_non_list_content_raises_mcp_error(self) -> None:
+        with (
+            _client(lambda _r: _rpc_ok({"content": "not-a-list"})) as client,
+            pytest.raises(MCPError, match="malformed tools/call result"),
+        ):
+            client.call_tool("get_consumer_lag", {})
+
+    def test_non_object_content_blocks_raise_mcp_error(self) -> None:
+        with _client(lambda _r: _rpc_ok({"content": [1, 2, 3]})) as client, pytest.raises(MCPError):
+            client.call_tool("get_consumer_lag", {})
+
+    def test_non_boolean_is_error_flag_raises_mcp_error(self) -> None:
+        with _client(lambda _r: _rpc_ok({"isError": "perhaps"})) as client, pytest.raises(MCPError):
+            client.call_tool("get_consumer_lag", {})
+
+    def test_malformed_envelope_is_traced_like_any_other_failure(self) -> None:
+        traced: list[dict[str, Any]] = []
+        client = MCPClient(
+            base_url=_BASE_URL,
+            token="svc-token",
+            transport=httpx.MockTransport(lambda _r: _rpc_ok({"content": "not-a-list"})),
+            sleep=lambda _s: None,
+            tracer=traced.append,
+        )
+        with client, pytest.raises(MCPError):
+            client.call_tool("get_consumer_lag", {"consumer_group": "billing"})
+        assert len(traced) == 1
+        assert traced[0]["tool_name"] == "get_consumer_lag"
+        assert traced[0]["error"].startswith("MCPError:")
+        assert "result" not in traced[0]
+
+    def test_well_formed_envelope_is_unaffected(self) -> None:
+        with _client(lambda _r: _rpc_ok({"content": [{"type": "text", "text": "ok"}]})) as client:
+            result = client.call_tool("get_consumer_lag", {})
+        assert result.content == [{"type": "text", "text": "ok"}]
+
+
+class TestNonConformantErrorMember:
+    """``payload["error"]`` is server-controlled and need not be a mapping.
+
+    The branch called ``.get`` on it and ``int()`` on whatever came back,
+    so a bare-string error member raised ``AttributeError`` and a
+    non-numeric code raised ``ValueError`` — both escaping the module's
+    documented ``MCPError``-only contract in exactly the way the malformed
+    envelope did.
+    """
+
+    @staticmethod
+    def _with_error_member(member: Any) -> Callable[[httpx.Request], httpx.Response]:
+        return lambda _r: httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "error": member})
+
+    def test_string_error_member_raises_mcp_error(self) -> None:
+        with (
+            _client(self._with_error_member("boom")) as client,
+            pytest.raises(MCPError, match="non-object JSON-RPC error member"),
+        ):
+            client.call_tool("get_consumer_lag", {})
+
+    def test_list_error_member_raises_mcp_error(self) -> None:
+        with _client(self._with_error_member([1, 2])) as client, pytest.raises(MCPError):
+            client.call_tool("get_consumer_lag", {})
+
+    def test_null_error_member_raises_mcp_error(self) -> None:
+        with _client(self._with_error_member(None)) as client, pytest.raises(MCPError):
+            client.call_tool("get_consumer_lag", {})
+
+    def test_non_numeric_code_falls_back_without_losing_the_raw_value(self) -> None:
+        member = {"code": "not-a-number", "message": "boom"}
+        with _client(self._with_error_member(member)) as client, pytest.raises(MCPError) as excinfo:
+            client.call_tool("get_consumer_lag", {})
+        assert excinfo.value.code == -32603
+        assert "not-a-number" in str(excinfo.value)
+
+    def test_float_code_is_coerced(self) -> None:
+        member = {"code": -32601.0, "message": "no such tool"}
+        with _client(self._with_error_member(member)) as client, pytest.raises(MCPError) as excinfo:
+            client.call_tool("get_consumer_lag", {})
+        assert excinfo.value.code == -32601
+
+    def test_conformant_error_member_still_carries_code_message_and_data(self) -> None:
+        member = {"code": -32602, "message": "bad params", "data": {"field": "topic"}}
+        with _client(self._with_error_member(member)) as client, pytest.raises(MCPError) as excinfo:
+            client.call_tool("get_consumer_lag", {})
+        assert excinfo.value.code == -32602
+        assert excinfo.value.data == {"field": "topic"}
+        assert "bad params" in str(excinfo.value)
+
+
 class TestToolResultWireShape:
     """The platform wire emits camelCase ``isError`` (MCP spec — platform
     protocol.py:139); canned fixtures use snake ``is_error``. Both spellings

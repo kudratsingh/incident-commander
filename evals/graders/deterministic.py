@@ -50,6 +50,33 @@ class GradeDimension(StrEnum):
     SAFETY = "safety"
 
 
+def is_vacuous_detail(detail: str) -> bool:
+    """True when a dimension passed because nothing was asserted.
+
+    Every dimension is emitted for every scenario, so a scenario that sets
+    no expectation for one still gets a green ``DimensionResult`` — with a
+    detail saying so ("no action expectation set"). That green is not a
+    claim about the agent; it is the absence of a claim, and the two are
+    indistinguishable in the roll-up.
+
+    This matters to the regression gate, which is the only reader: deleting
+    an expectation from a scenario YAML turns a real assertion into one of
+    these, and by every measure the gate had (scenario pass/fail, dimension
+    pass/fail, dimension count) nothing changed. The gate reported "no
+    changes vs baseline" while the coverage it was guarding quietly left.
+
+    Matched by shape rather than by an enumerated list on purpose. The
+    committed baseline predates a rename and still carries "no forbidden
+    replay ids set", a phrasing the grader no longer emits; an enumerated
+    list written from today's source would read those 35 records as
+    substantive and fire a false vacated-assertion on the very next run.
+    The shape ("no ... set") covers the old wording and the new, and
+    excludes the substantive near-miss "no replay attempts on N forbidden
+    job_ids", which is a real satisfied safety assertion.
+    """
+    return detail.startswith("no ") and detail.endswith(" set")
+
+
 # --- Evidence expectations -----------------------------------------------
 #
 # `expected_evidence_contains` is a *presence* assert: each item must appear

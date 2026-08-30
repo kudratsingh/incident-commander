@@ -10,10 +10,19 @@ refused outright (exit 2) — a filtered report is not a comparable gate
 input. A baseline/latest provenance mismatch (``degraded_count``, ADR 0013)
 warns and never gates (S-14).
 
+Coverage loss also means the two shapes that keep every scenario green
+while the suite proves less (WO-R2-79): a DROPPED DIMENSION (the grader
+stopped scoring something the baseline scored) and a VACATED ASSERTION (a
+dimension that carried a real expectation now passes on an empty one,
+because the expectation left the scenario YAML). ``GradeReport.passed`` is
+an ``all()`` over the dimensions, so deleting a check can only make the
+roll-up greener — a gate that reads pass/fail alone reports "no changes"
+in exactly the case it exists to catch.
+
 Exit codes — the gate's slice of the ADR 0013 contract: 0 = comparable
 full-suite input with no regressions and no coverage loss; 1 = gate failed
-(regression or dropped scenario); 2 = not a comparable input (missing file,
-filtered report).
+(regression, dropped scenario, dropped dimension, or vacated assertion);
+2 = not a comparable input (missing file, filtered report).
 """
 
 from __future__ import annotations
@@ -22,7 +31,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from evals.runner import RunReport
+from evals.graders.deterministic import DimensionResult, is_vacuous_detail
+from evals.runner import RunReport, ScenarioOutcome
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _BASELINE = _REPO_ROOT / "evals" / "reports" / "baseline.json"
@@ -37,16 +47,48 @@ class ComparisonResult:
     improvements: tuple[str, ...]
     new_scenarios: tuple[str, ...]
     dropped_scenarios: tuple[str, ...]
+    # Coverage losses that leave every scenario's roll-up green. Both gate.
+    # Defaulted so a partial construction in a future test cannot silently
+    # assert their absence; ``compare`` always sets them explicitly.
+    dropped_dimensions: tuple[str, ...] = ()
+    vacated_assertions: tuple[str, ...] = ()
 
     @property
     def has_regressions(self) -> bool:
         return bool(self.regressions)
 
+    @property
+    def has_coverage_loss(self) -> bool:
+        """Coverage shrank without any scenario going red."""
+        return bool(self.dropped_scenarios or self.dropped_dimensions or self.vacated_assertions)
+
+    @property
+    def gate_failed(self) -> bool:
+        return self.has_regressions or self.has_coverage_loss
+
+
+def _dimensions_by_name(outcome: ScenarioOutcome) -> dict[str, DimensionResult]:
+    return {d.dimension.value: d for d in outcome.report.dimensions}
+
 
 def compare(baseline: RunReport, latest: RunReport) -> ComparisonResult:
-    """Diff two reports by scenario name."""
+    """Diff two reports by scenario name, and by what each scenario checked.
+
+    Scenario pass/fail alone cannot see the failure this gate exists to
+    catch. ``GradeReport.passed`` is ``all(d.passed for d in dimensions)``,
+    so anything that removes a check makes the roll-up *more* likely to be
+    green: delete a grading dimension and it stops being ANDed in; delete an
+    expectation from a scenario YAML and its dimension keeps passing on an
+    empty assertion. Either way every scenario still passes, the diff is
+    empty, and the gate prints "no changes vs baseline" over a suite that
+    now proves strictly less than it did.
+
+    So the diff also walks the dimensions inside each scenario and compares
+    what they actually asserted, not just how they scored.
+    """
     baseline_passed = {o.scenario for o in baseline.outcomes if o.report.passed}
-    baseline_all = {o.scenario for o in baseline.outcomes}
+    baseline_by_name = {o.scenario: o for o in baseline.outcomes}
+    baseline_all = set(baseline_by_name)
     latest_by_name = {o.scenario: o for o in latest.outcomes}
     latest_all = set(latest_by_name)
 
@@ -61,11 +103,26 @@ def compare(baseline: RunReport, latest: RunReport) -> ComparisonResult:
     new_scenarios = sorted(latest_all - baseline_all)
     dropped_scenarios = sorted(baseline_all - latest_all)
 
+    dropped_dimensions: list[str] = []
+    vacated_assertions: list[str] = []
+    for name in sorted(baseline_all & latest_all):
+        before = _dimensions_by_name(baseline_by_name[name])
+        after = _dimensions_by_name(latest_by_name[name])
+        for dimension in sorted(set(before) - set(after)):
+            dropped_dimensions.append(f"{name}:{dimension}")
+        for dimension in sorted(set(before) & set(after)):
+            was_substantive = not is_vacuous_detail(before[dimension].detail)
+            now_vacuous = is_vacuous_detail(after[dimension].detail)
+            if was_substantive and now_vacuous:
+                vacated_assertions.append(f"{name}:{dimension}")
+
     return ComparisonResult(
         regressions=tuple(regressions),
         improvements=tuple(improvements),
         new_scenarios=tuple(new_scenarios),
         dropped_scenarios=tuple(dropped_scenarios),
+        dropped_dimensions=tuple(dropped_dimensions),
+        vacated_assertions=tuple(vacated_assertions),
     )
 
 
@@ -90,11 +147,21 @@ def _print_comparison(result: ComparisonResult) -> None:
         print(f"dropped scenarios ({len(result.dropped_scenarios)}):")
         for name in result.dropped_scenarios:
             print(f"  x {name}")
+    if result.dropped_dimensions:
+        print(f"DROPPED DIMENSIONS ({len(result.dropped_dimensions)}):")
+        for name in result.dropped_dimensions:
+            print(f"  x {name}")
+    if result.vacated_assertions:
+        print(f"VACATED ASSERTIONS ({len(result.vacated_assertions)}):")
+        for name in result.vacated_assertions:
+            print(f"  ! {name}")
     if not (
         result.regressions
         or result.improvements
         or result.new_scenarios
         or result.dropped_scenarios
+        or result.dropped_dimensions
+        or result.vacated_assertions
     ):
         print("no changes vs baseline")
 
@@ -151,7 +218,23 @@ def main() -> int:
             "from latest — coverage shrank; if intentional, re-bless via 'make baseline'",
             file=sys.stderr,
         )
-    return 1 if result.has_regressions or result.dropped_scenarios else 0
+    if result.dropped_dimensions:
+        print(
+            f"GATE FAIL: {len(result.dropped_dimensions)} dimension(s) present in the "
+            "baseline are no longer graded — the grader stopped scoring something it "
+            "used to score. Every scenario can still pass while proving less; if "
+            "intentional, re-bless via 'make baseline'",
+            file=sys.stderr,
+        )
+    if result.vacated_assertions:
+        print(
+            f"GATE FAIL: {len(result.vacated_assertions)} dimension(s) now pass on an "
+            "empty assertion that carried a real one in the baseline — an expectation "
+            "was removed from the scenario YAML, so the dimension is green because "
+            "nothing is checked; if intentional, re-bless via 'make baseline'",
+            file=sys.stderr,
+        )
+    return 1 if result.gate_failed else 0
 
 
 if __name__ == "__main__":

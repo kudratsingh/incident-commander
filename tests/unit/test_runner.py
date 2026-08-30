@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
 import sys
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 from uuid import UUID
 
 import pytest
@@ -1088,17 +1089,110 @@ class TestRunsDirIsTracked:
     The append-only archive is the durable record, yet .gitignore carried an
     ``evals/runs/*`` entry, so no archive was ever tracked and routine git
     hygiene (a clean or a fresh clone) erased every one. This is the assertion
-    that would have caught it: the durable record's directory pattern must
-    never sit in .gitignore. The flat-pointer ignores (trajectories,
-    briefings, traces, latest.json, reports/human) are refreshable by design
-    and stay ignored.
+    that would have caught it.
+
+    It asks **git**, and does not pattern-match the file. The original form
+    scanned .gitignore for a line starting with the literal ``evals/runs``,
+    which is not the question: the ordinary anchored spelling ``/evals/runs/``
+    walks straight past it, and so do ``runs/``, ``**/runs/``, ``evals/*``, a
+    pattern in any parent or nested .gitignore, and anything in
+    ``.git/info/exclude`` or the user's global excludes file — every one of
+    which re-ignores the archive with the assertion still green. It failed in
+    the other direction too, reporting a violation for a *comment* line
+    beginning ``evals/runs``; the real file dodges that only because its
+    comment happens to start ``# ``. ``git check-ignore`` resolves the same
+    precedence git itself will apply when the archive is committed or cleaned,
+    and that resolver is the thing that erased the archives.
+
+    The flat-pointer ignores (trajectories, briefings, latest.json,
+    reports/human) are refreshable by design and stay ignored. ``evals/traces``
+    is deliberately NOT among them, despite sitting next to them in the same
+    .gitignore stanza: it is the append-only cross-invocation trace log, no
+    ``evals/traces/*`` pattern exists, and it is tracked on purpose — for a
+    scenario killed before its per-scenario archive slice is written it is the
+    only record that the work happened and was billed (see the comment at
+    .gitignore lines 44-51, and saga_stuck on 2026-08-11).
     """
 
-    def test_gitignore_does_not_ignore_the_durable_record(self) -> None:
-        gitignore = Path(__file__).resolve().parents[2] / ".gitignore"
-        text = gitignore.read_text(encoding="utf-8")
-        assert not any(line.strip().startswith("evals/runs") for line in text.splitlines()), (
-            "evals/runs is the invariant-9 durable record; it must not be gitignored"
+    # A path only a real archive contains: the per-invocation report a live
+    # campaign is required to commit. Asking about the bare directory would
+    # under-test, because ``evals/runs/*`` ignores the CONTENTS while leaving
+    # ``evals/runs`` itself unignored. The path need not exist — check-ignore
+    # answers from the patterns, which is what lets this run on a clean tree.
+    _DURABLE_RECORD: Final[str] = "evals/runs/inv-20260101-000000/report.json"
+
+    # A pointer that must stay ignored, used only to prove the probe below can
+    # still return "yes" (.gitignore line 40).
+    _REFRESHABLE_POINTER: Final[str] = "evals/trajectories/consumer_lag_pass.json"
+
+    @staticmethod
+    def _git_ignores(path: str) -> bool:
+        """Would git skip ``path``? Exit 0 = ignored, 1 = not, anything else = broken.
+
+        128 is git refusing to answer (not a work tree, unreadable ignore
+        file, bad invocation). That must fail loudly rather than be folded
+        into either answer: read as "not ignored" it is a guard that passes
+        because it broke, and read as "ignored" it is a confusing red about
+        the wrong thing.
+
+        No network is involved — this is a local subprocess against the
+        working tree — so it is unaffected by the autouse socket block in
+        tests/unit/conftest.py.
+        """
+        repo_root = Path(__file__).resolve().parents[2]
+        try:
+            result = subprocess.run(
+                ["git", "check-ignore", "-q", "--", path],
+                capture_output=True,
+                text=True,
+                cwd=repo_root,
+                check=False,
+            )
+        except FileNotFoundError:  # pragma: no cover - git is present in CI
+            pytest.skip(
+                "git is not on PATH, so the ignore rules for the invariant-9 "
+                "durable record cannot be resolved. This guard needs a real git."
+            )
+        if result.returncode not in (0, 1):
+            raise AssertionError(
+                f"`git check-ignore -q -- {path}` exited {result.returncode} in "
+                f"{repo_root} instead of 0 (ignored) or 1 (not ignored), so this "
+                f"guard could not be evaluated at all: {result.stderr.strip()!r}. "
+                f"128 usually means the tests are running outside a git work "
+                f"tree; run them from a checkout, or fix the ignore file git is "
+                f"complaining about."
+            )
+        return result.returncode == 0
+
+    def test_git_does_not_ignore_the_durable_record(self) -> None:
+        assert not self._git_ignores(self._DURABLE_RECORD), (
+            f"git ignores {self._DURABLE_RECORD}, the CLAUDE.md invariant-9 "
+            f"durable record. A live campaign's archive cannot be committed and "
+            f"`git clean -fdx` erases paid evidence — exactly finding S-06, when "
+            f"`evals/runs/*` sat in .gitignore and no archive was ever tracked. "
+            f"Run `git check-ignore -v {self._DURABLE_RECORD}` to see which file "
+            f"and line matched, and remove that pattern (or negate it with a "
+            f"`!evals/runs/**` line below it). Note this is not necessarily "
+            f".gitignore: nested ignore files, .git/info/exclude and the global "
+            f"excludes file all count."
+        )
+
+    def test_the_probe_can_still_say_yes(self) -> None:
+        """Canary: prove the check above is capable of failing.
+
+        ``_git_ignores`` returning False is only evidence if it can return
+        True. A wrong cwd, a mangled argument list or a git that quietly
+        stopped resolving patterns would answer "not ignored" for everything,
+        and the guard above would pass forever while the archive was being
+        deleted. So ask about a path that must be ignored.
+        """
+        assert self._git_ignores(self._REFRESHABLE_POINTER), (
+            f"git does NOT ignore {self._REFRESHABLE_POINTER}, which .gitignore "
+            f"holds as a refreshable per-run pointer. Either that ignore was "
+            f"deliberately dropped — in which case point this canary at another "
+            f"still-ignored path, it exists only to prove the probe discriminates "
+            f"— or `git check-ignore` is not resolving patterns here at all, "
+            f"which would make the durable-record guard above vacuous."
         )
 
 

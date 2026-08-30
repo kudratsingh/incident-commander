@@ -8,12 +8,20 @@ etc.) or a Pydantic default-fill change silently breaks legitimate
 resume-retry semantics.
 
 ``wire_arguments`` is the single canonical function that produces those
-bytes. Both ``transition_remediate`` (action call) and ``make_llm_verify``
-(verify probe) route through it, and the wire-contract tests
-(``tests/integration/test_idempotency_contract.py`` + the golden unit
-tests) assert against it. A test that re-implemented the serialization
-would drift from the thing it guards; production and tests must share
-this code.
+bytes. Every outgoing tool call routes through it — ``transition_remediate``
+(action call), ``make_llm_verify`` (verify probe), ``transition_investigate``
+(opening probe) and ``_execute_probe`` (investigation probes) — and the
+wire-contract tests (``tests/integration/test_idempotency_contract.py`` +
+the golden unit tests) assert against it. A test that re-implemented the
+serialization would drift from the thing it guards; production and tests
+must share this code.
+
+Note what this function does NOT do: refuse an omitted argument. It
+default-fills from ``tool.input_model``, because that is the platform's
+contract. Whether a caller is *allowed* to omit a resource-naming
+argument is a caller-layer question — the remediation planner is not
+(``remediation._absent_resource_args``, ADR 0022), the read-only
+investigation leg is.
 """
 
 from __future__ import annotations

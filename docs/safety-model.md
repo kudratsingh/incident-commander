@@ -49,6 +49,8 @@ No `TIER_2` tools ship today. When they land, they use the platform's propose/ap
           │ (only when top hypothesis > 0.7 AND a Tier-1 fix maps)
           ▼
       PLANNING  ── invalid plan (wrong tier / unknown tool) ────► ESCALATED
+          │      ── resource argument unnamed / unsourced / ────► ESCALATED
+          │         verify aimed elsewhere (see below)
           │
           │ RemediationPlan (target_hypothesis, action_tool,
           │  action_arguments, verify_tool, verify_arguments,
@@ -69,6 +71,22 @@ No `TIER_2` tools ship today. When they land, they use the platform's propose/ap
 One attempt, one way ([ADR 0008](ADR/0008-single-attempt-remediation.md)): `ALLOWED_TRANSITIONS` in `src/incident_commander/agent/orchestrator.py` gives VERIFYING no PLANNING successor — a `not_verified` verdict escalates for human review rather than re-planning autonomously — and REMEDIATING always proceeds through a real tool call, with no client-side skip-ahead branch (see crash recovery below).
 
 Every escalation carries the failure reason on evidence. `EscalationBriefing` (rendered by the briefing writer + judged by the judge) is the artifact a human reads.
+
+### Plan arguments must name the resource, on both legs
+
+A plan can be perfectly well-formed — right tier, real tools, confident hypothesis — and still act on, or check, the wrong object. `make_llm_plan` runs three checks over the plan's *resource-naming* arguments before anything is wired. The fields that count as resource-naming are declared per tool in `RESOURCE_ARG_FIELDS` (`src/incident_commander/tools/policies.py`), which is the single source of truth; `tests/unit/test_policies.py` fails if a new tool lands unclassified.
+
+| Check | Rejects | Failure it prevents |
+|---|---|---|
+| `_absent_resource_args` | a resource field the plan left out on either leg | the argument is default-filled from the platform's input schema, so the call targets whatever that default names |
+| `_unsourced_resource_args` | a value the platform never produced (not in the alert, not in a tool result) | copy, don't re-type — a re-typed cache key that targets a different object |
+| `_misdirected_verify_args` | a verify probe naming a resource the action never touched | verifying a healthy bystander and reporting RESOLVED on a still-broken system |
+
+All three escalate **pre-execution**, so a rejected plan costs planner tokens and nothing else.
+
+The absence check exists because omission used to be the quiet case. `GetConsumerLagInput.consumer_group` carries `default="worker-dispatcher"`, mirroring the platform's published input schema — so a verify leg of `get_consumer_lag` with no arguments probed `worker-dispatcher` no matter which consumer group the action had just restarted, read a healthy lag off an untouched consumer, and resolved the incident. The default is legitimate and stays (the contract snapshot pins it); the plan layer is where the agent's own "say which resource you mean" requirement belongs. Full rationale in [ADR 0022](ADR/0022-plan-arguments-name-their-resource.md).
+
+Note the asymmetry with the read-only investigation leg, which *may* default-fill: an alert that names no consumer group opens with a probe of the platform's default group. That leg mutates nothing, so a mis-aimed read costs one wasted probe, not a false RESOLVED.
 
 ## Evidence-driven caution is a feature
 

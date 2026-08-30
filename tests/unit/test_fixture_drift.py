@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from evals.fixture_drift import CannedCall, Drift, canned_calls, compare
@@ -25,7 +26,12 @@ from evals.fixture_drift_ledger import (
     load_entries,
     load_ledger,
 )
-from evals.fixture_probe import UnseededPlatformError, assert_seeded, probe_live
+from evals.fixture_probe import (
+    UnseededPlatformError,
+    assert_seeded,
+    probe_live,
+    unregistered_calls,
+)
 from evals.scenarios.loader import load_scenarios
 from incident_commander.tools.mcp_client import ToolResult
 
@@ -524,6 +530,130 @@ class TestSequencedFixturesProbePerElement:
         result = self._probe(calls, live=[{"paused": False}])
         assert result.checked == 2
         assert result.live_calls == 1
+
+
+class TestProbeErrorChannels:
+    """A call that could not be made is RECORDED, never fatal.
+
+    ``ProbeError`` exists to say "this fixture went unchecked", but only an
+    MCP-level JSON-RPC error could ever reach it: an HTTP status, a body
+    that is not JSON, and a connection that never opened all escaped
+    ``_call_tool`` uncaught and took the whole 95-fixture drift check with
+    them. One bad gateway on one tool is not a reason to learn nothing
+    about the other ninety-four.
+    """
+
+    _REQUEST = httpx.Request("POST", "http://x/mcp")
+
+    class _Stub:
+        """Per-tool scripted transport: a payload, a response, or a raise."""
+
+        def __init__(self, script: dict[str, Any]) -> None:
+            self.script = script
+            self.calls: list[str] = []
+
+        def post(self, url: str, **kwargs: Any) -> Any:  # noqa: ARG002
+            name = kwargs["json"]["params"]["name"]
+            self.calls.append(name)
+            behaviour = self.script[name]
+            if isinstance(behaviour, BaseException):
+                raise behaviour
+            if isinstance(behaviour, httpx.Response):
+                return behaviour
+            body = json.dumps(behaviour)
+            return _Response({"result": {"content": [{"type": "text", "text": body}]}})
+
+    _SEEDED: dict[str, Any] = {"list_dlq_messages": {"total": 1, "items": [{"id": "a"}]}}
+
+    def _probe(self, script: dict[str, Any], calls: list[CannedCall]) -> Any:
+        client = self._Stub({**self._SEEDED, **script})
+        return probe_live(
+            calls,
+            mcp_url="http://x/mcp",
+            token="read-scoped",
+            client=client,  # type: ignore[arg-type]
+        )
+
+    def _two_fixtures(self) -> list[CannedCall]:
+        return [
+            _call("get_consumer_lag", {"lag": 1200}, scenario="broken"),
+            _call("get_redis_health", {"ok": True}, scenario="fine"),
+        ]
+
+    def test_an_http_error_status_is_recorded_and_the_run_continues(self) -> None:
+        result = self._probe(
+            {
+                "get_consumer_lag": httpx.Response(502, text="Bad Gateway", request=self._REQUEST),
+                "get_redis_health": {"ok": False},
+            },
+            self._two_fixtures(),
+        )
+        assert [(e.scenario, e.tool) for e in result.errors] == [("broken", "get_consumer_lag")]
+        assert "502" in result.errors[0].detail
+        # The point of recording rather than raising: the OTHER fixture was
+        # still compared, and its disagreement still reported.
+        assert [d.path for d in result.drifts] == ["ok"]
+
+    def test_a_non_json_body_is_recorded_and_the_run_continues(self) -> None:
+        result = self._probe(
+            {
+                "get_consumer_lag": httpx.Response(
+                    200, text="<html>upstream timeout</html>", request=self._REQUEST
+                ),
+                "get_redis_health": {"ok": False},
+            },
+            self._two_fixtures(),
+        )
+        assert [e.tool for e in result.errors] == ["get_consumer_lag"]
+        assert [d.path for d in result.drifts] == ["ok"]
+
+    def test_a_transport_failure_is_recorded_and_the_run_continues(self) -> None:
+        result = self._probe(
+            {
+                "get_consumer_lag": httpx.ConnectError("connection refused"),
+                "get_redis_health": {"ok": False},
+            },
+            self._two_fixtures(),
+        )
+        assert [e.tool for e in result.errors] == ["get_consumer_lag"]
+        assert "connection refused" in result.errors[0].detail
+        assert [d.path for d in result.drifts] == ["ok"]
+
+    def test_a_fixture_key_no_tool_answers_is_reported_not_raised(self) -> None:
+        # `tier_of` raises KeyError for a name outside TOOL_REGISTRY, so a
+        # typo'd fixture key used to abort the check before it read anything.
+        result = self._probe(
+            {"get_redis_health": {"ok": True}},
+            [
+                _call("get_redis_healht", {"ok": True}, scenario="typo"),
+                _call("get_redis_health", {"ok": True}, scenario="fine"),
+            ],
+        )
+        assert [(e.scenario, e.tool) for e in result.errors] == [("typo", "get_redis_healht")]
+        assert "TOOL_REGISTRY" in result.errors[0].detail
+        assert result.drifts == ()
+        assert result.checked == 1, "the registered fixture must still be checked"
+
+    def test_an_unregistered_fixture_key_costs_no_live_call(self) -> None:
+        result = self._probe({}, [_call("get_redis_healht", {}, scenario="typo")])
+        assert result.live_calls == 0
+        assert len(result.errors) == 1
+
+    def test_the_shipped_fixtures_all_name_a_registered_tool(self) -> None:
+        # The offline half of the same guard: no live platform needed to know
+        # that every canned key names something the agent can actually call.
+        unknown = unregistered_calls(canned_calls(load_scenarios(_SCENARIOS_DIR)))
+        assert [c.label for c in unknown] == []
+
+    def test_a_probed_fixture_is_reported_as_compared(self) -> None:
+        result = self._probe({"get_redis_health": {"ok": True}}, self._two_fixtures()[1:])
+        assert result.compared == (("fine", "get_redis_health"),)
+
+    def test_a_fixture_that_errored_is_not_reported_as_compared(self) -> None:
+        result = self._probe(
+            {"get_redis_health": httpx.ConnectError("refused")}, self._two_fixtures()[1:]
+        )
+        assert result.compared == ()
 
 
 class TestLedgerContext:

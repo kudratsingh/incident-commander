@@ -20,6 +20,8 @@ import sys
 import time
 from pathlib import Path
 
+import httpx
+
 from evals.fixture_drift import canned_calls
 from evals.fixture_drift_ledger import classify, defect_count, dump_ledger, load_ledger
 from evals.fixture_probe import UnseededPlatformError, probe_live
@@ -42,6 +44,15 @@ def _await_fixtures(calls, mcp_url: str, token: str, budget_seconds: int) -> int
     while a fixture the check probes is still missing. It is a readiness gate,
     not a retry: a failure that survives the budget is reported with the calls
     still unresolved, never swallowed.
+
+    Both ways a not-yet-ready platform answers are caught. It only caught
+    ``UnseededPlatformError`` — the "up but empty" case — so the connection
+    errors a platform produces while it is *not yet listening* killed the
+    loop on attempt one, which is exactly the window this gate exists for.
+    ``httpx.HTTPError`` is belt to that braces: since the probe converts
+    transport failures into ``ProbeError`` they now arrive as unresolved
+    calls, and a raise from anywhere else in the client must not be fatal
+    to a poll loop either.
     """
     deadline = time.monotonic() + budget_seconds
     attempt = 0
@@ -53,8 +64,8 @@ def _await_fixtures(calls, mcp_url: str, token: str, budget_seconds: int) -> int
                 print(f"fixture pack ready after {attempt} attempt(s)")
                 return 0
             detail = "; ".join(f"{e.scenario}:{e.tool} — {e.detail}" for e in result.errors)
-        except UnseededPlatformError as err:
-            detail = str(err)
+        except (UnseededPlatformError, httpx.HTTPError) as err:
+            detail = f"{type(err).__name__}: {err}"
         if time.monotonic() >= deadline:
             print(
                 f"ERROR: the platform never became ready within {budget_seconds}s. "

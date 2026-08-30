@@ -1185,10 +1185,38 @@ def main() -> int:
     scenarios = load_scenarios(_SCENARIOS_DIR)
     if only_patterns:
         # OR-match: scenario keeps if any pattern is a substring of its name.
-        scenarios = [s for s in scenarios if any(p in s.name for p in only_patterns)]
-        if not scenarios:
-            print(f"no scenarios matched --only={only_patterns}")
+        # Accounted PER PATTERN, not just over the union. Refusing only when
+        # the whole selection came back empty is what let one dead pattern
+        # hide among the nineteen in SMOKE_ONLY: rename a read-only scenario
+        # and its pattern quietly matches nothing, the other eighteen still
+        # select scenarios, and the smoke pass reports green over a smaller
+        # suite than the reader believes (WO-R2-41). A pattern that matches
+        # nothing is a name that no longer exists, and the honest reading of
+        # that is "the selection you asked for is not there" — not "run the
+        # remainder". The per-pattern counts print on every filtered run so
+        # the smoke log carries its own coverage evidence.
+        matched: dict[str, list[str]] = {
+            pattern: [s.name for s in scenarios if pattern in s.name] for pattern in only_patterns
+        }
+        for pattern, names in matched.items():
+            print(f"  --only {pattern} → {len(names)} scenario(s)")
+        dead = [pattern for pattern, names in matched.items() if not names]
+        if dead:
+            # Subsumes the older "no scenarios matched at all" case: if every
+            # pattern is dead the whole selection is empty, and this names
+            # which patterns to fix instead of only reporting the total.
+            print(
+                f"SELECTION FAIL: {len(dead)} --only pattern(s) matched no "
+                f"scenario: {', '.join(dead)}"
+            )
+            print(
+                "A pattern that matches nothing is a scenario that was renamed "
+                "or deleted with the pattern left behind. Fix the pattern (or "
+                "restore the name) — do not run the remainder and call it a pass."
+            )
+            print("no scenarios ran, nothing was spent")
             return 2
+        scenarios = [s for s in scenarios if any(p in s.name for p in only_patterns)]
         print(f"filter --only={only_patterns} → {len(scenarios)} scenario(s)")
     if smoke:
         # A read-only stage does not seed chaos. run_scenario fires

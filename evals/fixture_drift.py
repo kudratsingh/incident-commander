@@ -72,8 +72,35 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
     # volatile — only the reading's freshness metadata would be.
     "get_consumer_lag": frozenset(),
     "get_postgres_health": frozenset({"ping_latency_ms", "active_connections"}),
+    # Every field here is a gauge of a running server, and the line that
+    # decides membership is whether the fixture pack FIXES the value.
+    # `lag` above is seeded to an exact number by the platform's
+    # seed_eval_fixtures `_CONSUMER_LAGS`, so a recording can match it and
+    # must — which is why it stays out. Nothing seeds Redis memory or the
+    # keyspace counters: `used_memory_bytes` is whatever the server has
+    # allocated, and `keyspace_hits` / `keyspace_misses` are monotonic
+    # counters over its lifetime, so their values are a property of how many
+    # reads happened before the probe rather than of the fixture. No canned
+    # value can be right about them, and pinning one to a single reading
+    # makes the check flip red on the next run — the rubber stamp the ledger
+    # exists to avoid. Type is the claim a recording can actually honour.
+    #
+    # `used_memory_human` is `used_memory_bytes` formatted by Redis itself.
+    # Declaring the bytes volatile and the string not made the same
+    # observation unfalsifiable through one field and mandatory through the
+    # other, which is how "1.00G" sat in the ledger against a live "1.60M".
+    #
+    # `evicted_keys` was in this set and is not in the v0.5.0 output model at
+    # all, so it silenced nothing and only implied a field the tool returns.
     "get_redis_health": frozenset(
-        {"ping_latency_ms", "connected_clients", "used_memory_bytes", "evicted_keys"}
+        {
+            "ping_latency_ms",
+            "connected_clients",
+            "used_memory_bytes",
+            "used_memory_human",
+            "keyspace_hits",
+            "keyspace_misses",
+        }
     ),
     "list_dlq_messages": frozenset({"items.created_at", "items.updated_at"}),
     "list_active_alerts": frozenset({"alerts.fired_at", "alerts.created_at"}),

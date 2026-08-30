@@ -19,7 +19,7 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ValidationError
 
-from incident_commander.agent.accounting import accrue_llm_usage
+from incident_commander.agent.accounting import accrue_llm_error, accrue_llm_usage
 from incident_commander.agent.hypothesis import (
     Hypothesis,
     HypothesisCategory,
@@ -185,6 +185,13 @@ def make_llm_investigate(
             try:
                 run_state, step = _plan_next_step(run_state, at, llm_client, model)
             except (ValueError, ValidationError, LLMError) as err:
+                # ``_plan_next_step`` accrues on its way out, so a call that
+                # raises accrues nothing — and this is the run's hottest LLM
+                # call, made once per investigation iteration. Charge what the
+                # failed call already billed before escalating (ADR 0015).
+                run_state = run_state.model_copy(
+                    update={"budget": accrue_llm_error(run_state.budget, err, model)}
+                )
                 return _escalate_investigation(run_state, at, f"planner output invalid: {err}")
 
             killed = _cached_probe_contradiction(prior_hypotheses, step.hypotheses, last_probe)

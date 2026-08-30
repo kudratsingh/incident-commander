@@ -44,19 +44,74 @@ _PREFLIGHT_TIMEOUT: Final[httpx.Timeout] = httpx.Timeout(30.0, connect=5.0)
 _MAX_RETRY_AFTER_SECONDS: Final[float] = 60.0
 
 
+@dataclass(frozen=True, kw_only=True)
+class LLMUsage:
+    """What one logical ``call`` billed — including work that never came back.
+
+    ADR 0015's rule is that the meter may over-report but never
+    under-report, and the four token counters alone cannot honor it: they
+    describe the one attempt that returned. A logical call can bill up to
+    ``max_attempts`` times (a 5xx after the model has already generated is
+    billed, then discarded and retried), and none of that reached the
+    ledger.
+
+    ``discarded_attempts`` counts the billed attempts whose response was
+    thrown away. There is no usage block for them — the exception carries
+    no ``Message`` — so they are charged the only conservative bound the
+    client has: the request's own ``max_tokens`` at the model's output
+    rate, which is the most a single attempt could have generated. That
+    deliberately over-charges an attempt that failed before generating
+    (a 429, a dropped connection). Over-reporting keeps the ceiling safe;
+    under-reporting is what lets an unattended run outspend its budget.
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    discarded_attempts: int = 0
+    discarded_max_tokens: int = 0
+
+    @property
+    def discarded_output_tokens(self) -> int:
+        """Conservative token charge for the billed-then-discarded attempts."""
+        return self.discarded_attempts * self.discarded_max_tokens
+
+    def with_output[T: BaseModel](self, output: T, stop_reason: str) -> LLMResult[T]:
+        """Promote a usage record to a full result once parsing has succeeded."""
+        return LLMResult(
+            output=output,
+            stop_reason=stop_reason,
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+            cache_creation_tokens=self.cache_creation_tokens,
+            cache_read_tokens=self.cache_read_tokens,
+            discarded_attempts=self.discarded_attempts,
+            discarded_max_tokens=self.discarded_max_tokens,
+        )
+
+
 class LLMError(RuntimeError):
-    """The response could not be parsed into the caller's output model."""
+    """The response could not be parsed into the caller's output model.
+
+    ``usage`` carries what the failed call already billed, when the client
+    knows it. A call that is billed and then raises is still money spent:
+    raising bare meant a parse failure or an exhausted retry loop charged
+    the run nothing, and ``BUDGET_MAX_USD`` was enforced against a number
+    that had a hole in it. Callers that swallow this exception into an
+    escalation charge it with ``accounting.accrue_llm_error``.
+    """
+
+    def __init__(self, message: str, *, usage: LLMUsage | None = None) -> None:
+        super().__init__(message)
+        self.usage = usage
 
 
-@dataclass(frozen=True)
-class LLMResult[T: BaseModel]:
+@dataclass(frozen=True, kw_only=True)
+class LLMResult[T: BaseModel](LLMUsage):
     """Parsed output + usage accounting from a single LLM call."""
 
     output: T
-    input_tokens: int
-    output_tokens: int
-    cache_creation_tokens: int
-    cache_read_tokens: int
     stop_reason: str
 
 
@@ -157,6 +212,11 @@ class LLMClient:
         retry_after: float | None = None
         for attempt in range(self._max_attempts):
             started = time.monotonic()
+            # `attempt` doubles as the count of attempts already billed and
+            # thrown away: on attempt 2, two responses have been discarded.
+            # Every exit below carries that count out so the ledger charges
+            # the whole logical call, not just the leg that returned.
+            discarded = LLMUsage(discarded_attempts=attempt, discarded_max_tokens=max_tokens)
             try:
                 response = self._client.messages.create(**request_body)
             except anthropic.APIConnectionError as err:
@@ -168,8 +228,13 @@ class LLMClient:
                     # Client-side error (bad request, auth). Retrying can't
                     # help; wrap so the transition escalates-with-reason
                     # instead of the scenario crashing on a raw SDK error.
+                    # Charges `attempt` discarded attempts, not `attempt + 1`:
+                    # a rejected request never reached the model, so this is
+                    # the one arm where the current attempt is known unbilled.
                     _trace_error(err, attempt, terminal=True)
-                    raise LLMError(f"LLM API error {err.status_code}: {err}") from err
+                    raise LLMError(
+                        f"LLM API error {err.status_code}: {err}", usage=discarded
+                    ) from err
                 # 429 + 5xx are transient: retry with backoff, honoring a
                 # numeric Retry-After when the platform sends one.
                 _trace_error(err, attempt, terminal=attempt == self._max_attempts - 1)
@@ -185,7 +250,12 @@ class LLMClient:
                 # `except LLMError` in the transitions, and took out an
                 # already-graded run at the briefing or judge step. Wrapped,
                 # it escalates with a reason like any other transport failure.
-                raise LLMError(f"LLM API error: {type(err).__name__}: {err}") from err
+                # `attempt + 1`: APIResponseValidationError is a 200 the SDK
+                # could not validate, so this attempt generated and billed.
+                raise LLMError(
+                    f"LLM API error: {type(err).__name__}: {err}",
+                    usage=LLMUsage(discarded_attempts=attempt + 1, discarded_max_tokens=max_tokens),
+                ) from err
             else:
                 # Trace BEFORE parsing: the API call is already billed at
                 # this point, and a response we fail to parse (no
@@ -202,7 +272,7 @@ class LLMClient:
                         "duration_seconds": time.monotonic() - started,
                     }
                 try:
-                    result = self._parse(response, output_model)
+                    result = self._parse(response, output_model, _usage_of(response, discarded))
                 except LLMError:
                     if trace is not None:
                         self._tracer(dict(trace, parse_failed=True))  # type: ignore[misc]
@@ -218,15 +288,20 @@ class LLMClient:
                     delay = max(delay, min(retry_after, _MAX_RETRY_AFTER_SECONDS))
                 self._sleep(delay)
         assert last_exc is not None
+        # Every attempt was discarded, so every attempt is charged. This is
+        # the path that under-reported worst: three billed 5xx retries used
+        # to charge the run exactly nothing.
         raise LLMError(
             f"LLM transport failure after {self._max_attempts} attempts: "
-            f"{type(last_exc).__name__}: {last_exc}"
+            f"{type(last_exc).__name__}: {last_exc}",
+            usage=LLMUsage(discarded_attempts=self._max_attempts, discarded_max_tokens=max_tokens),
         ) from last_exc
 
-    def _parse[T: BaseModel](self, response: Message, output_model: type[T]) -> LLMResult[T]:
+    def _parse[T: BaseModel](
+        self, response: Message, output_model: type[T], usage: LLMUsage
+    ) -> LLMResult[T]:
         for block in response.content:
             if block.type == "tool_use" and block.name == _STRUCTURED_TOOL_NAME:
-                usage = response.usage
                 try:
                     output = output_model.model_validate(block.input)
                 except ValidationError as err:
@@ -238,19 +313,32 @@ class LLMClient:
                     # here also skipped the parse_failed trace below,
                     # leaving billed calls with no record (F-002).
                     raise LLMError(
-                        f"output failed schema validation for {output_model.__name__}: {err}"
+                        f"output failed schema validation for {output_model.__name__}: {err}",
+                        usage=usage,
                     ) from err
-                return LLMResult(
-                    output=output,
-                    input_tokens=usage.input_tokens,
-                    output_tokens=usage.output_tokens,
-                    cache_creation_tokens=usage.cache_creation_input_tokens or 0,
-                    cache_read_tokens=usage.cache_read_input_tokens or 0,
-                    stop_reason=response.stop_reason or "unknown",
-                )
+                return usage.with_output(output, response.stop_reason or "unknown")
+        # Billed and unreturned. This is the max_tokens-truncation case:
+        # the model generated a full response, the platform charged for it,
+        # and there is no `record_output` block to parse. Raising without
+        # `usage` meant the most expensive failure the client has — a full
+        # output-token bill for nothing — was the one it charged the least.
         raise LLMError(
-            f"no {_STRUCTURED_TOOL_NAME} tool_use in response; stop_reason={response.stop_reason}"
+            f"no {_STRUCTURED_TOOL_NAME} tool_use in response; stop_reason={response.stop_reason}",
+            usage=usage,
         )
+
+
+def _usage_of(response: Message, discarded: LLMUsage) -> LLMUsage:
+    """This response's own counters, plus whatever earlier attempts discarded."""
+    usage = response.usage
+    return LLMUsage(
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cache_creation_tokens=usage.cache_creation_input_tokens or 0,
+        cache_read_tokens=usage.cache_read_input_tokens or 0,
+        discarded_attempts=discarded.discarded_attempts,
+        discarded_max_tokens=discarded.discarded_max_tokens,
+    )
 
 
 def _retry_after_seconds(err: anthropic.APIStatusError) -> float | None:
@@ -282,3 +370,11 @@ def preflight_auth(api_key: str) -> None:
         raise LLMError(f"auth preflight failed: HTTP {err.status_code}: {err}") from err
     except anthropic.APIConnectionError as err:
         raise LLMError(f"auth preflight failed: connection error: {err}") from err
+    except anthropic.APIError as err:
+        # The catch-all arm, for the same reason `call` has one. APIError has
+        # siblings the two arms above do not cover (APIResponseValidationError
+        # is the live one), and any of them escaped as a raw SDK exception —
+        # crashing the eval runner with a traceback and defeating the one
+        # thing this function exists to do: turn a preflight failure into one
+        # labeled line before 24 scenarios burn against a dead key.
+        raise LLMError(f"auth preflight failed: {type(err).__name__}: {err}") from err

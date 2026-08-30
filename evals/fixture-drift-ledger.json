@@ -8,8 +8,8 @@
     "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything"
   },
   "_counts": {
-    "recorded": 101,
-    "fixture-defect": 92,
+    "recorded": 99,
+    "fixture-defect": 90,
     "explained": 9
   },
   "known_drift": [
@@ -31,13 +31,6 @@
       "scenario": "alert_storm",
       "tool": "list_active_alerts",
       "path": "alerts[].id[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "alert_storm",
-      "tool": "list_active_alerts",
-      "path": "alerts[].severity[]",
       "kind": "not_live_reachable",
       "context": "fixture-defect"
     },
@@ -418,13 +411,6 @@
       "tool": "list_incidents",
       "path": "incidents[].resolved_at",
       "kind": "live_only_field",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "incidents_overview",
-      "tool": "list_incidents",
-      "path": "incidents[].severity[]",
-      "kind": "not_live_reachable",
       "context": "fixture-defect"
     },
     {

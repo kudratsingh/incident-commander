@@ -17,10 +17,15 @@ alert:
   fingerprint: consumer_lag_high
   group: payments-consumer
 canned_tool_responses:
+  # 30000 is what the platform's fixture pack actually seeds for
+  # payments-consumer (`kafka:consumer_lag:payments-consumer`). The recorded
+  # 25000 was hand-written and matched no reading of the platform — the same
+  # defect class as the lag-1200 recording that started the drift check.
+  # Still a critical-band backlog, so the scenario's subject is unchanged.
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"payments-consumer","lag":25000,"cache_key":"kafka:consumer_lag:payments-consumer"}'
+      text: '{"consumer_group":"payments-consumer","lag":30000,"cache_key":"kafka:consumer_lag:payments-consumer"}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

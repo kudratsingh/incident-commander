@@ -8,8 +8,8 @@
     "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything"
   },
   "_counts": {
-    "recorded": 99,
-    "fixture-defect": 90,
+    "recorded": 85,
+    "fixture-defect": 76,
     "explained": 9
   },
   "known_drift": [
@@ -69,48 +69,6 @@
       "kind": "value",
       "context": "post-fault",
       "why": "kill_consumer makes worker-dispatcher's lag climb; the check probes the un-faulted world, so the canned backlog cannot match by design"
-    },
-    {
-      "scenario": "consumer_lag_payments_critical",
-      "tool": "get_consumer_lag",
-      "path": "lag",
-      "kind": "value",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "consumer_lag_shipping_extreme",
-      "tool": "get_consumer_lag",
-      "path": "lag",
-      "kind": "value",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "deploy_correlation",
-      "tool": "get_deploy_history",
-      "path": "entries[].image_tag",
-      "kind": "live_only_field",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "deploy_correlation",
-      "tool": "get_deploy_history",
-      "path": "entries[].revision",
-      "kind": "live_only_field",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "deploy_correlation",
-      "tool": "get_deploy_history",
-      "path": "entries[].version[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "deploy_correlation",
-      "tool": "get_deploy_history",
-      "path": "total",
-      "kind": "value",
-      "context": "fixture-defect"
     },
     {
       "scenario": "dlq_backlog",
@@ -390,62 +348,6 @@
       "tool": "search_traces",
       "path": "matches[].trace_id[]",
       "kind": "not_live_reachable",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "incidents_overview",
-      "tool": "list_incidents",
-      "path": "incidents[].description",
-      "kind": "live_only_field",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "incidents_overview",
-      "tool": "list_incidents",
-      "path": "incidents[].id[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "incidents_overview",
-      "tool": "list_incidents",
-      "path": "incidents[].resolved_at",
-      "kind": "live_only_field",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "incidents_overview",
-      "tool": "list_incidents",
-      "path": "incidents[].source[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "incidents_overview",
-      "tool": "list_incidents",
-      "path": "total",
-      "kind": "value",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "multi_probe_hypothesis_evolution",
-      "tool": "get_consumer_lag",
-      "path": "lag",
-      "kind": "value",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "postgres_slow",
-      "tool": "get_postgres_health",
-      "path": "error",
-      "kind": "live_only_field",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "redis_saturation",
-      "tool": "get_redis_health",
-      "path": "error",
-      "kind": "live_only_field",
       "context": "fixture-defect"
     },
     {

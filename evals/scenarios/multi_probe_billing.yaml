@@ -73,12 +73,24 @@ canned_llm_responses:
 expectation:
   name: multi_probe_billing
   expected_terminal_state: escalated
-  expected_evidence_contains:
-  - billing-consumer
   # Tool-scoped (evidence sweep, evals/evidence_audit.py): the bare `lag`
   # substring also matched list_active_alerts fixtures. Non-null reading,
   # recorded by get_consumer_lag itself.
+  #
+  # `expected_evidence_contains: [billing-consumer]` used to sit above this
+  # and was dropped here rather than kept, because correcting
+  # incidents_overview's list_incidents fixture to the platform's real seeded
+  # alerts made it cross-satisfiable: the seeded kafka alert is titled
+  # "billing-consumer lag exceeds 10k", so list_incidents can now emit that
+  # token too and the substring stopped proving which tool ran — which is
+  # what test_no_expected_evidence_token_is_cross_satisfiable asserts.
+  # Replaced by the equivalent claim scoped to the tool that must produce it,
+  # which is strictly stronger: a substring anywhere in the evidence became
+  # an assertion that get_consumer_lag itself recorded this group.
   expected_evidence_fields:
+  - tools: [get_consumer_lag]
+    field: consumer_group
+    equals: billing-consumer
   - tools: [get_consumer_lag]
     field: lag
     is_null: false

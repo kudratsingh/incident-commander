@@ -41,9 +41,10 @@ CLAUDE.md invariant 2 requires: "The final authorization decision always happens
 ### What lives where
 
 **Agent side (`src/incident_commander/tools/policies.py`):**
-- `Tier` enum + `tier_of(tool_name)` classifier
+- `Tier` enum + `tier_of(tool_name)` classifier. Fail-closed: a name outside `TOOL_REGISTRY` raises `KeyError`, and a registered tool listed in none of the three tier sets raises `PolicyCoverageError`. There is no default tier — "unclassified" is not an answer, least of all `READ`.
+- `_READ_TOOLS` / `_TIER_1_TOOLS` / `_TIER_2_TOOLS` — three explicit frozensets that partition the registry exactly. The read set is written out rather than inferred as "everything else"; see the correction below for why.
 - `tools_at_or_below(max_tier)` — investigation planner asks for `READ`, remediation planner for `TIER_1`
-- `ensure_covered()` — new tool in registry without a policy entry fails the unit test
+- `ensure_covered()` — compares `set(TOOL_REGISTRY)` against the union of the three sets and fails the unit test on drift in either direction: a registered tool with no tier, a tier entry naming a tool that is no longer registered, or a tool claimed by two tiers
 
 **Agent side (`src/incident_commander/agent/remediation.py`):**
 - `make_llm_plan` rejects any `RemediationPlan` where `action_tool ∉ TIER_1` or `verify_tool ∉ READ`
@@ -79,6 +80,14 @@ Negative:
 * Tier-2 approvals not shipped yet. Mitigation: `_TIER_2_TOOLS` is an empty frozenset today. Adding a tool at Tier-2 requires the platform's approvals surface to exist first — the empty set makes that dependency loud.
 
 Revisit trigger: Tier-2 lands. At that point we need to decide whether the agent stores the approval id on `RunState`, how AWAITING_APPROVAL polls or is pushed to, and how the platform binds the approval to the specific param hash.
+
+## Correction (2026-08-30)
+
+This ADR claimed a fail-closed coverage guarantee the code did not provide, and had done since #32. `tier_of` ended in `return Tier.READ` — a fall-through for any name it did not recognise. So a tool added to `TOOL_REGISTRY` without a policy decision did not fail anything; it became a read tool, callable by the investigation planner, with nobody having decided that. `ensure_covered()` could not catch it either: it iterated the registry's own keys calling `tier_of`, and `tier_of` had no failure mode for a registered name, so the function had no failure mode at all and the unit test guarding it could not go red.
+
+Three statements agreed with each other and not with the code: this ADR's "new tool in registry without a policy entry fails the unit test", `ensure_covered`'s docstring, and the comment above the tier map in `policies.py`. Reaching the unsafe state needed a human to add a tool and then mis-resolve a red test — but no test went red, so there was nothing to mis-resolve.
+
+Fixed by making the mapping one source rather than two-plus-a-default: `_READ_TOOLS` is now explicit, `tier_of` raises `PolicyCoverageError` on a registered-but-unclassified name, and `ensure_covered` compares the registry against the union of the tier sets in both directions. The agent-side classification is unchanged for every tool that exists today — this is about what happens to the next one. Platform-side enforcement (CLAUDE.md invariant 2) was never affected: the `required_scope` check does not consult this map.
 
 ## More information
 

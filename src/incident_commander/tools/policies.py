@@ -38,8 +38,44 @@ class Tier(StrEnum):
     TIER_2 = "tier_2"
 
 
-# Explicit map — every tool the registry knows about is classified.
-# Adding a tool to the registry without adding it here fails ``ensure_covered``.
+class PolicyCoverageError(RuntimeError):
+    """A registered tool has no tier decision, or has more than one.
+
+    Deliberately not a ``KeyError``: an unclassified tool is not a lookup
+    miss the caller might reasonably paper over, it is a missing safety
+    decision. Raised by ``tier_of`` at the point of classification and by
+    ``ensure_covered`` over the whole registry.
+    """
+
+
+# Explicit map — every tool the registry knows about is classified, in
+# exactly one of the three sets below. Adding a tool to the registry
+# without adding it here fails ``ensure_covered`` AND ``tier_of``.
+#
+# The read set is written out rather than inferred as "everything else".
+# It used to be inferred: ``tier_of`` returned ``Tier.READ`` for any name
+# it did not recognise, which made the guarantee this comment claims a
+# fiction — ``ensure_covered`` iterated the registry's own keys and could
+# not fail, and a new tool landed as a read tool with no decision taken
+# and nothing raised. The default answer to "what may this tool do" is
+# now "refuse to say", which is the only safe one (ADR 0003).
+_READ_TOOLS: Final[frozenset[str]] = frozenset(
+    {
+        "get_consumer_lag",
+        "get_dag_state",
+        "get_deploy_history",
+        "get_incident",
+        "get_postgres_health",
+        "get_redis_health",
+        "get_trace",
+        "list_active_alerts",
+        "list_audit_events",
+        "list_dlq_messages",
+        "list_incidents",
+        "search_traces",
+    }
+)
+
 _TIER_1_TOOLS: Final[frozenset[str]] = frozenset(
     {
         "restart_consumer_group",
@@ -112,15 +148,32 @@ RESOURCE_ARG_FIELDS: Final[dict[str, frozenset[str]]] = {
 
 
 def tier_of(tool_name: str) -> Tier:
-    """Classify one tool. Unknown tools raise — callers should validate
-    against ``TOOL_REGISTRY`` first."""
+    """Classify one tool. Anything unclassified raises, never defaults.
+
+    Two failure modes, both closed:
+
+    * Not in ``TOOL_REGISTRY`` → ``KeyError``. Callers should validate
+      against the registry first.
+    * In the registry but in none of the tier sets →
+      ``PolicyCoverageError``. This is the case that used to return
+      ``Tier.READ``, which handed an unclassified tool to the
+      investigation planner as though someone had decided it was safe.
+      Nobody had.
+    """
     if tool_name not in TOOL_REGISTRY:
         raise KeyError(f"unknown tool: {tool_name}")
     if tool_name in _TIER_2_TOOLS:
         return Tier.TIER_2
     if tool_name in _TIER_1_TOOLS:
         return Tier.TIER_1
-    return Tier.READ
+    if tool_name in _READ_TOOLS:
+        return Tier.READ
+    raise PolicyCoverageError(
+        f"{tool_name!r} is in TOOL_REGISTRY but has no tier assignment in "
+        "policies.py. Classify it in _READ_TOOLS, _TIER_1_TOOLS or "
+        "_TIER_2_TOOLS — an unclassified tool is a policy decision nobody "
+        "has taken, and it does not default to read."
+    )
 
 
 def tools_at_or_below(max_tier: Tier) -> frozenset[str]:
@@ -135,10 +188,39 @@ def tools_at_or_below(max_tier: Tier) -> frozenset[str]:
 
 
 def ensure_covered() -> None:
-    """Assert every registered tool has a tier assignment. Called from tests.
+    """Assert the tier sets partition ``TOOL_REGISTRY`` exactly. From tests.
 
-    Guards against silent drift where a new tool is added to
-    ``TOOL_REGISTRY`` without a policy decision.
+    Guards against silent drift in both directions: a new tool added to
+    the registry with no policy decision, and a tier entry left behind by
+    a tool that has since been retired. Also rejects a tool claimed by two
+    tiers — ``tier_of`` would quietly answer with the more privileged one
+    and every reader of the other set would be wrong.
+
+    This used to iterate the registry's own keys calling ``tier_of``,
+    which could not fail while ``tier_of`` defaulted to ``Tier.READ``: the
+    check, the comment above ``_READ_TOOLS`` and ADR 0003 all promised a
+    coverage guarantee that no code enforced.
     """
-    for name in TOOL_REGISTRY:
-        _ = tier_of(name)  # raises if missing
+    registered = set(TOOL_REGISTRY)
+    classified = _READ_TOOLS | _TIER_1_TOOLS | _TIER_2_TOOLS
+    problems: list[str] = []
+    if unclassified := sorted(registered - classified):
+        problems.append(
+            f"in TOOL_REGISTRY with no tier: {', '.join(unclassified)} — "
+            "classify each in _READ_TOOLS, _TIER_1_TOOLS or _TIER_2_TOOLS"
+        )
+    if stale := sorted(classified - registered):
+        problems.append(
+            f"assigned a tier but not in TOOL_REGISTRY: {', '.join(stale)} — drop the stale entry"
+        )
+    overlaps = sorted(
+        (_READ_TOOLS & _TIER_1_TOOLS)
+        | (_READ_TOOLS & _TIER_2_TOOLS)
+        | (_TIER_1_TOOLS & _TIER_2_TOOLS)
+    )
+    if overlaps:
+        problems.append(f"classified in more than one tier: {', '.join(overlaps)}")
+    if problems:
+        raise PolicyCoverageError(
+            "tier policy does not cover the registry — " + "; ".join(problems)
+        )

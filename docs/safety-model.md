@@ -19,7 +19,7 @@ How the agent avoids doing damage. Every mechanism here is code the reviewer can
 
 ## Tier ladder
 
-Every registered tool is classified as `READ`, `TIER_1`, or `TIER_2`. See [ADR 0003](ADR/0003-platform-enforced-tier-policy.md) for the design rationale.
+Every registered tool is classified as `READ`, `TIER_1`, or `TIER_2` — in an explicit set, never by falling through to a default. `tier_of` raises `PolicyCoverageError` for a registered tool that no tier set claims, and `ensure_covered()` fails the unit suite on any gap between the registry and the union of the three sets. An unclassified tool is a decision nobody has taken, and the classifier's answer to that is to refuse rather than to guess `READ`. See [ADR 0003](ADR/0003-platform-enforced-tier-policy.md) for the design rationale, and its 2026-08-30 correction for the period when this paragraph was aspirational.
 
 | Tier | Blast radius | Who can propose | Who executes | Approval? |
 |---|---|---|---|---|

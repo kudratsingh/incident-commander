@@ -19,14 +19,21 @@ from incident_commander.agent.remediation import (
     Tier1ToolName,
     _absent_resource_args,
 )
+from incident_commander.tools import policies
 from incident_commander.tools.policies import (
     RESOURCE_ARG_FIELDS,
+    PolicyCoverageError,
     Tier,
     ensure_covered,
     tier_of,
     tools_at_or_below,
 )
 from incident_commander.tools.registry import TOOL_REGISTRY
+
+# A tool that lands in the registry with no tier decision taken. Named for
+# what the old fall-through made it: `tier_of` returned Tier.READ, so the
+# investigation planner was free to call it and nothing failed.
+_UNCLASSIFIED = "delete_all_the_things"
 
 # Every (tool, resource-naming field) pair the policy map declares. Driven
 # off RESOURCE_ARG_FIELDS rather than hand-listed so a newly classified
@@ -92,6 +99,30 @@ class TestTierOf:
         with pytest.raises(KeyError, match="unknown tool"):
             tier_of("not_a_real_tool")
 
+    def test_an_unclassified_registry_tool_raises_instead_of_reading_as_read(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The fail-closed guarantee the docstring and ADR 0003 both claim.
+
+        ``tier_of`` used to fall through to ``Tier.READ`` for anything not
+        explicitly listed, so a tool added to the registry without a policy
+        decision became a read tool — callable by the investigation planner,
+        with no check anywhere raising. Silence is the wrong answer to "what
+        may this tool do"; the only safe answer is to refuse to classify it.
+        """
+        monkeypatch.setitem(TOOL_REGISTRY, _UNCLASSIFIED, TOOL_REGISTRY["get_incident"])
+        with pytest.raises(PolicyCoverageError, match=_UNCLASSIFIED):
+            tier_of(_UNCLASSIFIED)
+
+    def test_the_tier_sets_partition_the_registry(self) -> None:
+        # One source of truth, three disjoint sets covering it exactly. Any
+        # other shape is what let the fall-through hide.
+        union = policies._READ_TOOLS | policies._TIER_1_TOOLS | policies._TIER_2_TOOLS
+        assert union == set(TOOL_REGISTRY)
+        assert not (policies._READ_TOOLS & policies._TIER_1_TOOLS)
+        assert not (policies._READ_TOOLS & policies._TIER_2_TOOLS)
+        assert not (policies._TIER_1_TOOLS & policies._TIER_2_TOOLS)
+
 
 class TestToolsAtOrBelow:
     def test_read_returns_only_read_tools(self) -> None:
@@ -113,10 +144,45 @@ class TestToolsAtOrBelow:
 
 
 class TestEnsureCovered:
+    """The check has to be able to fail, or it is not a check.
+
+    ``ensure_covered`` iterated the registry's own keys and called
+    ``tier_of`` on each — and ``tier_of`` answered ``Tier.READ`` for
+    everything unlisted, so no registry contents could ever make this raise.
+    The comment above ``_TIER_1_TOOLS``, the docstring, ADR 0003 and this
+    test all described a guarantee nothing implemented.
+    """
+
     def test_every_registered_tool_has_a_tier(self) -> None:
         # If someone adds a tool to the registry without touching policies,
         # this fails — that's the whole point.
         ensure_covered()
+
+    def test_a_registry_tool_with_no_tier_entry_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(TOOL_REGISTRY, _UNCLASSIFIED, TOOL_REGISTRY["get_incident"])
+        with pytest.raises(PolicyCoverageError, match=_UNCLASSIFIED):
+            ensure_covered()
+
+    def test_a_tier_entry_naming_no_registry_tool_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The other direction of the same drift: a tool retired from the
+        # registry leaves a tier entry behind, and the mapping now claims a
+        # decision about something that does not exist.
+        monkeypatch.setattr(policies, "_TIER_2_TOOLS", frozenset({"retired_tool"}))
+        with pytest.raises(PolicyCoverageError, match="retired_tool"):
+            ensure_covered()
+
+    def test_a_tool_classified_twice_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Two tiers for one tool is not a coverage gap but it is the same
+        # defect: the mapping stops being a single answer. tier_of would
+        # silently prefer the more privileged set and the reader of
+        # _READ_TOOLS would be wrong.
+        monkeypatch.setattr(policies, "_TIER_2_TOOLS", frozenset({"get_consumer_lag"}))
+        with pytest.raises(PolicyCoverageError, match="get_consumer_lag"):
+            ensure_covered()
 
 
 class TestLiteralRegistryDrift:

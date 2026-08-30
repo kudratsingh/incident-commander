@@ -1268,6 +1268,40 @@ def main() -> int:
             return 3
         mcp_token = settings.platform_smoke_token.get_secret_value()
     scenarios = load_scenarios(_SCENARIOS_DIR)
+    if smoke and not only_patterns:
+        # The smoke pass selects itself (WO-R2-123). Membership is the
+        # `in_smoke_pass` predicate on the scenario — eligible by the
+        # runner's own two refusals, minus whatever declares a
+        # `smoke_exclusion` reason in its own YAML. Until now this was a
+        # hand-written pattern list in the Makefile (`SMOKE_ONLY`), which
+        # #151 could only *check* after the fact: a renamed scenario or a
+        # new read-only one still fell out of the pass, and the test that
+        # caught it was a separate thing that had to be kept in step. A
+        # derived selection cannot fall out of step with the tree it is
+        # derived from. `SMOKE_ONLY=` remains as an operator override and
+        # arrives through --only, below, exactly as before.
+        held_back = sorted(
+            (s.name, s.smoke_exclusion) for s in scenarios if s.smoke_exclusion is not None
+        )
+        scenarios = [s for s in scenarios if s.in_smoke_pass]
+        print(f"smoke selection: {len(scenarios)} scenario(s) derived from {_SCENARIOS_DIR}")
+        for name, reason in held_back:
+            # Printed for the same reason the per-pattern counts below are:
+            # the smoke log has to carry its own record of what it covered
+            # and, here, of what it knowingly did not.
+            print(f"  held back (smoke_exclusion): {name} — {reason}")
+        if not scenarios:
+            # Not reachable from a healthy tree, and precisely why it is
+            # checked: a derivation that silently comes back empty is a
+            # green smoke pass over nothing, which is the failure #151 was
+            # written about wearing a different hat.
+            print(
+                "SELECTION FAIL: no scenario is in the smoke pass — every scenario "
+                "either declares chaos_setup/expected_action_tools or carries a "
+                "smoke_exclusion"
+            )
+            print("no scenarios ran, nothing was spent")
+            return 2
     if only_patterns:
         # OR-match: scenario keeps if any pattern is a substring of its name.
         # Accounted PER PATTERN, not just over the union. Refusing only when

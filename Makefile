@@ -142,46 +142,32 @@ eval-live:
 # so a Tier-1 attempt 403s at the platform, wraps as MCPError, and grades
 # as an escalation instead of mutating state. The 2026-08-03 campaign's
 # "read-only" pass fired a real DLQ replay; this target closes that door.
-# Override the scenario list with SMOKE_ONLY=... if needed.
+# WHICH scenarios it runs is no longer written here (WO-R2-123). The pass
+# derives itself from the scenario directory: a scenario is in it when it
+# declares no chaos_setup (else --smoke refuses the run outright, exit 6 /
+# S-03) and no expected_action_tools (a Tier-1 write the read-scoped token
+# 403s by design), unless its YAML carries a `smoke_exclusion:` reason.
+# `Scenario.in_smoke_pass` is that predicate; the runner applies it to a
+# bare `--smoke` and prints both the count and every hold-back it honoured.
 #
-# This list is hand-maintained but no longer hand-trusted. Two guards hold
-# it to the scenario directory, because it used to be able to shrink in
-# both directions without anyone noticing (WO-R2-41):
+# Two hand-maintained lists used to live here, SMOKE_ONLY and SMOKE_EXCLUDE.
+# They could rot in three ways (WO-R2-41 caught two of them the hard way):
+# a RENAMED scenario left its pattern behind matching nothing; a NEW
+# read-only scenario that nobody added just never ran
+# (consumer_lag_null_unknown_state had already dropped out that way); and an
+# exclusion could go on naming a scenario that no longer existed. #151 added
+# tests that CAUGHT all three — but catching drift after the fact needs the
+# check to be kept in step with the list, and a derivation cannot fall out
+# of step with the tree it derives from. dlq_human_required_escalates is held
+# out by the predicate rather than by hand, and dlq_backlog now carries its
+# own reason in evals/scenarios/dlq_backlog.yaml.
 #
-#   * a RENAMED scenario left its pattern behind matching nothing. The
-#     runner only refused when EVERY pattern matched nothing, so one dead
-#     pattern among nineteen was invisible. It now refuses on any dead
-#     pattern (exit 2) and prints the match count per pattern.
-#   * a NEW read-only scenario that nobody added here just never ran.
-#     consumer_lag_null_unknown_state had already dropped out this way.
-#     tests/unit/test_smoke_only_coverage.py derives the eligible set from
-#     the YAMLs and fails if one is neither matched here nor held back in
-#     SMOKE_EXCLUDE below.
-#
-# Eligibility is the runner's own predicate, not a second opinion: a
-# scenario belongs in the smoke pass when it declares no chaos_setup
-# (else --smoke refuses the run outright, exit 6 / S-03) and no
-# expected_action_tools (a Tier-1 write the read-scoped token 403s by
-# design). dlq_human_required_escalates is excluded by that predicate
-# rather than by hand — it expects RESOLVED via mark_dlq_permanent, so it
-# is guaranteed red here and runs in the remediation stage under the full
-# token instead.
-SMOKE_ONLY ?= alert_storm,deploy_correlation,failed_traces,incidents_overview,multi_probe,noise_,planner_stops,postgres_slow,redis_saturation,saga_stuck,tool_,trace_investigation,consumer_lag_healthy,consumer_lag_medium,consumer_lag_missing,consumer_lag_null,consumer_lag_orders,consumer_lag_payments,consumer_lag_shipping,consumer_lag_analytics
-
-# Scenarios that ARE eligible by the predicate above but are deliberately
-# held back. This is the only sanctioned way to keep an eligible scenario
-# out of the smoke pass: the coverage test reads this list, so a silent
-# omission is a test failure and a recorded one is a decision. Every name
-# here needs its reason written below and in docs/eval-methodology.md,
-# "The read-only smoke pass".
-#
-# dlq_backlog — COULD pass here, but is unvalidated. It is scope-compatible
-# with the smoke token (read-only, no chaos_setup, and its one probe
-# list_dlq_messages needs incidents:read only). What is unproven is its
-# behavior against the smoke stage's unseeded DLQ, and that cannot be
-# settled without a live smoke run. Move it into SMOKE_ONLY during the
-# next live campaign, once a run confirms it green — not before.
-SMOKE_EXCLUDE ?= dlq_backlog
+# SMOKE_ONLY survives as the OPERATOR OVERRIDE, unset by default: set it on
+# the command line (`make eval-smoke SMOKE_ONLY=consumer_lag_`) or in .env to
+# run a subset, e.g. when re-checking one scenario against a new pin. It
+# reaches the runner as --only, so the dead-pattern refusal (exit 2) and the
+# chaos refusal (exit 6) both still apply to it — an override cannot smuggle
+# a chaos scenario in, and it cannot silently match nothing.
 eval-smoke:
 	@if [ -z "$(PLATFORM_SMOKE_TOKEN)" ]; then \
 		echo "ERROR: PLATFORM_SMOKE_TOKEN not set. Run 'make bootstrap-token' and add it to .env" >&2; exit 2; \
@@ -198,7 +184,7 @@ eval-smoke:
 	# FAILING smoke run (the one whose trajectories you actually need) used to
 	# leave only raw JSONL behind. eval-live was fixed; this was not.
 	@EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live --smoke \
-		--only "$(SMOKE_ONLY)"; \
+		$(if $(SMOKE_ONLY),--only "$(SMOKE_ONLY)"); \
 	code=$$?; \
 	uv run python scripts/format_traces.py || true; \
 	echo "JSONL traces: evals/traces/*.jsonl"; \

@@ -164,6 +164,55 @@ sha256(f"{incident_id}|{action_tool}|{sorted_json_args}")[:32]
 - Different incidents → different keys. Concurrent runs can't collide.
 - The `idempotency_key` field itself is excluded from the hash so callers can't accidentally short-circuit it.
 
+## Rate limits
+
+Platform-enforced, per CLAUDE.md invariant 2 — the agent has no rate limiter of its own and must not
+grow one. The numbers below are the platform's, landed in
+[platform #169](https://github.com/kudratsingh/incident-platform/pull/169); until that PR `POST /mcp`
+had **no rate limiting of any kind**, while this file claimed the platform enforced "per-token rate
+limits sufficient for the eval workload". Both halves of that sentence were wrong: the limit did not
+exist, and it is keyed on the principal, not the token.
+
+| Surface | Ceiling | Window | Keyed on |
+|---|---|---|---|
+| `POST /mcp` — every tool, one shared bucket | `MCP_RATE_LIMIT_PER_PRINCIPAL` = **120** | `MCP_RATE_LIMIT_WINDOW_SECONDS` = **60s** | `Principal.id` |
+| `POST /admin/query` (paid) | `ADMIN_NL_QUERY_RATE_LIMIT` = **10** | 60s | admin user id |
+| `POST /admin/digests/generate` (paid) | `ADMIN_DIGEST_RATE_LIMIT` = **5** | 60s | admin user id |
+
+Four things about that MCP row decide how the agent has to behave around it:
+
+- **One bucket for every tool.** There is no separate read, write or chaos ceiling. A run's probes,
+  its Tier-1 action and its verify polls all spend from the same 120.
+- **Fixed window, not sliding.** The platform's own guarantee is "at most `limit` requests per
+  window, and at most `2 * limit` across any instant that straddles a window boundary". Size against
+  **240 in 60s**, not 120 — a burst can legitimately be twice the nominal ceiling and still be
+  inside the contract.
+- **Shared by every concurrent run.** The agent authenticates as one service-account principal, so
+  the ceiling is process-wide, not per-incident. At the shipped defaults that is worth checking
+  before a campaign: 8 concurrent investigations (the [ADR 0022](ADR/0022-connection-pool-sizing-and-the-run-concurrency-ceiling.md)
+  capacity ceiling) at `BUDGET_MAX_TOOL_CALLS` = 25 is 200 calls, above 120, and only the polling
+  delays keep a real storm from landing them inside one window. The per-incident budgets bound
+  spend, not arrival rate; nothing in this repo bounds arrival rate.
+- **Always on, with no disable knob.** No feature flag gates it, and `0` is not "off" — the check is
+  `count > limit`, so a ceiling of zero rejects everything. Raising the env var is the only lever.
+
+**On breach** the platform answers HTTP **429** with a well-formed JSON-RPC error: code **-32003**,
+`data.error_code == "rate_limit_exceeded"`. It sends **no `Retry-After` and no `X-RateLimit-*`
+headers**, so a client cannot learn when to come back — it can only back off. `MCPClient` treats 429
+as transient and retries it up to 3 attempts with exponential backoff from 1s, honouring a
+`Retry-After` when one is present and capping it at 60s so a server-controlled sleep cannot outlast
+the wall-clock budget (invariant 7). Since the platform sends none, the backoff is what governs.
+Retries exhausted raise `MCPError`, which is evidence like any other tool failure: the run escalates
+with what it has rather than retrying forever or proceeding on a missing read.
+
+Two exemptions worth knowing before reading a rate-limit incident. The limiter **fails open** if
+Redis is unavailable (platform [ADR 0005](https://github.com/kudratsingh/incident-platform/blob/master/docs/ADR/0005-llm-features-fail-open.md)),
+logging rather than rejecting — so "no 429s" is not proof the ceiling held. And unauthenticated MCP
+`initialize` is not limited at all; the bucket only exists once a principal does.
+
+MCP and REST are limited separately, in different processes with different buckets, so the agent's
+MCP allowance is independent of any REST allowance the same credentials hold.
+
 ## Crash recovery
 
 Three mechanisms (the first two introduced in [PR #35](https://github.com/kudratsingh/incident-commander/pull/35), reshaped by [ADR 0008](ADR/0008-single-attempt-remediation.md); the third by [ADR 0016](ADR/0016-incident-identity-and-single-flight.md)):
@@ -209,4 +258,4 @@ Set `AGENT_ENABLED=false` in the environment and restart the agent process — t
 
 - Threat model with adversary capabilities → `docs/threat-model.md` (Phase 7)
 - Approval object schema for Tier-2 → deferred until Wave 3 PR F lands on the platform
-- Rate limiting per tenant → planned; today's platform enforces per-token rate limits sufficient for the eval workload
+- Rate limiting **per tenant, on the MCP surface** → planned. The MCP ceiling is per *principal* (see "Rate limits" above); the platform's per-tenant `rate_limit_per_minute` bounds job admission on the REST side only, so one tenant's agent traffic is not isolated from another's.

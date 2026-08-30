@@ -10,6 +10,17 @@ tags:
 - live-llm
 use_live_mcp: true
 use_live_llm: true
+# Held out of `make eval-smoke` on purpose (WO-R2-41, moved here from the
+# Makefile's SMOKE_EXCLUDE by WO-R2-123). This scenario is scope-compatible
+# with the read-only smoke token and the predicate would otherwise put it in
+# the pass, so the hold-back has to be said out loud somewhere — and the
+# scenario is the one place it cannot be orphaned by a rename.
+smoke_exclusion: >-
+  COULD pass under the smoke token — read-only, no chaos_setup, and its one
+  probe list_dlq_messages needs incidents:read only — but its behaviour
+  against the smoke stage's UNSEEDED DLQ is unproven, and only a live smoke
+  run can settle it. Delete this field during the next live campaign once a
+  run confirms it green; not before.
 alert:
   source: platform.dlq
   severity: critical

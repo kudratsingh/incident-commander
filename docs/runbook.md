@@ -42,7 +42,10 @@ For remediation scenarios to prove something real, the platform needs to be brok
 # Consumer lag scenarios — restart_consumer_group is the fix
 make chaos-kill-consumer
 
-# DLQ scenarios — replay_dlq_messages is the fix
+# DLQ scenarios — replay_dlq_by_category / replay_dlq_by_ids is the fix
+# (replay_dlq_messages was demoted to legacy by the v0.4.0 categorization
+# tools; no scenario expects it, so watching for it is watching for a call
+# the agent will never make. mark_dlq_permanent is the human_required path.)
 make chaos-poison
 
 # Cache scenarios — invalidate_cache_key is the fix
@@ -64,12 +67,18 @@ uv run python scripts/bootstrap_agent_token.py --scope chaos:invoke
 ### 2. Run the live eval
 
 ```bash
-make eval-live
+make eval-live ONLY=remediate_consumer_lag_success
 ```
 
-This runs the full scenario suite against the live platform + live LLM. Trace files land in `evals/traces/*.jsonl`; the formatter turns them into readable stepwise trajectories in `evals/reports/human/*.txt`.
+`ONLY=` is not optional. An unfiltered `make eval-live` selects the whole
+suite and the runner refuses it before any spend, twice over: canned-only
+scenarios cannot run live (exit 8) and more than one state-mutating scenario
+cannot share an invocation (exit 7, ADR 0020). Run one at a time with a reset
+between — the full protocol is below.
 
-**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 33 (~29 live) is ~$1.60/run.
+Trace files land in `evals/traces/*.jsonl`; the formatter turns them into readable stepwise trajectories in `evals/reports/human/*.txt`.
+
+**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 38 (~31 live: 25 read-only, 6 remediation) is ~$1.70 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
 
 **Side effects:** remediation scenarios fire real Tier-1 mutations against the platform. Idempotent — repeat runs with the same `(incident_id, tool, args)` hash return the cached result. But the *first* run of a scenario does apply changes.
 
@@ -123,18 +132,20 @@ export EVAL_TRACE_DIR=evals/traces
 #    remediation attempt. ~$1 of tokens. Runs under the read-scoped
 #    PLATFORM_SMOKE_TOKEN, so "read-only" is enforced by the platform
 #    (a Tier-1 attempt 403s and grades as an escalation), not by the
-#    scenario list. Override the list with SMOKE_ONLY= if needed —
-#    but a smoke selection may not contain a chaos-declaring scenario
-#    (exit 6, see "Runner exit codes" below), so keep the remediate_*
-#    scenarios out of it.
-#    Every --only pattern must match at least one scenario: one that
-#    matches none is a renamed scenario that would silently drop out of
-#    the pass, so the runner refuses the whole selection (exit 2) and
-#    prints the match count per pattern. Read those counts — they are
-#    the run's own record of what it actually covered. Which scenarios
-#    the pass owes coverage to is derived from the YAMLs and enforced
-#    offline by tests/unit/test_smoke_only_coverage.py; see
-#    docs/eval-methodology.md, "The read-only smoke pass".
+#    scenario list.
+#    WHICH scenarios run is derived from the YAMLs, not listed anywhere:
+#    every scenario that seeds no chaos and expects no action tool, minus
+#    any that declares a `smoke_exclusion:` reason of its own. The run
+#    prints the count and every hold-back it honoured — read those, they
+#    are its own record of what it covered. See docs/eval-methodology.md,
+#    "The read-only smoke pass".
+#    Override with SMOKE_ONLY= (command line or .env) to run a subset,
+#    e.g. re-checking one scenario against a new pin. The override goes
+#    through --only, so both refusals still apply to it: a pattern that
+#    matches no scenario refuses the whole selection (exit 2, and the
+#    per-pattern counts say which), and a selection holding a
+#    chaos-declaring scenario refuses with exit 6 — an override cannot
+#    smuggle a remediate_* scenario into the read-only stage.
 make eval-smoke
 
 # 2) Remediation scenarios, one at a time, with reset between.
@@ -176,7 +187,9 @@ Every `make eval-live` invocation writes JSONL traces to `evals/traces/` and ren
 
 A filtered run (`ONLY=...`) still overwrites `evals/reports/latest.json`, but the report now self-describes via `only_patterns` (ADR 0013) and **can no longer feed the gate or the baseline**: `make eval-reg` exits 2 on a filtered `latest.json`, and `make eval-reg ONLY=x` / `make baseline ONLY=x` refuse at Makefile parse time before anything runs (A-03 — `study/runs.jsonl` records a full-suite `latest.json` lost to a later filtered run). The archive under `evals/runs/<invocation_id>/` remains the durable record for filtered runs; the flat `latest.json` is only a pointer to the most recent one.
 
-`make eval-reset` shells into the platform's `app` container via `docker compose -f $PLATFORM_COMPOSE exec` — defaults to `../incident-platform/docker-compose.yml`. If the platform repo isn't a sibling checkout, set `PLATFORM_COMPOSE` either per-invocation or once in `.env` (the Makefile `-include .env`s it, so a non-sibling layout is a one-time setup rather than a flag you have to remember on every call). Getting this wrong fails loudly on an exit-2 guard before anything runs — it can't half-reset. Pass `PURGE_IDEMPOTENCY=1` to also `DELETE` idempotency_records (24h TTL from platform ADR 0010 handles the common case; opt-in purge for guaranteed-fresh cache). Only the literal `1` enables it: the gate used to be make's `$(if ...)`, which asks whether the value is a non-empty string rather than whether it is true, so `PURGE_IDEMPOTENCY=0` — and `no`, and `false` — deleted the rows (WO-R2-89).
+`make eval-reset` shells into the platform app via `docker compose -f $PLATFORM_COMPOSE exec $PLATFORM_SERVICE`. `PLATFORM_COMPOSE` defaults to `demo/compose.yml` — **this repo's own demo stack**, the one `make demo` brings up — and `PLATFORM_SERVICE` defaults to the `api` container in it (both demo services share one database, and `api` is the REST app that owns seeding). Point them at a sibling `incident-platform` checkout only if that is genuinely the stack under test, either per-invocation or once in `.env` (the Makefile `-include .env`s it, so a non-default layout is a one-time setup rather than a flag you have to remember on every call).
+
+Getting this wrong does **not** reliably fail. The exit-2 guard only checks that `$PLATFORM_COMPOSE` is a file that exists, so a stale `PLATFORM_COMPOSE=../incident-platform/docker-compose.yml` in `.env` — the value this runbook itself used to give — passes the guard, resets the platform's dev Postgres and Redis, prints success, and leaves the stack you are actually evaluating untouched. The recipe echoes the compose file and service it is about to reset for exactly this reason: read that line, do not trust the exit code. The guard catches a missing file, nothing more. Pass `PURGE_IDEMPOTENCY=1` to also `DELETE` idempotency_records (24h TTL from platform ADR 0010 handles the common case; opt-in purge for guaranteed-fresh cache). Only the literal `1` enables it: the gate used to be make's `$(if ...)`, which asks whether the value is a non-empty string rather than whether it is true, so `PURGE_IDEMPOTENCY=0` — and `no`, and `false` — deleted the rows (WO-R2-89).
 
 Environment variable knobs for the live path (see [ADR 0006](ADR/0006-verification-is-a-polling-window.md)):
 
@@ -356,11 +369,11 @@ prove the stage is read-only. So `--smoke` now refuses, with **exit 6**,
 before preflight or any spend, if any *selected* scenario declares
 `chaos_setup`. The check runs after `--only` filtering, so an
 `SMOKE_ONLY=` override cannot smuggle a chaos scenario in. There is no
-opt-out flag: a scenario that seeds chaos is not a smoke scenario. The
-default `SMOKE_ONLY` list already excludes the three `remediate_*`
-scenarios, so `make eval-smoke` is unaffected; an unfiltered
-`python -m evals.runner --live --smoke` selects the whole suite and is
-refused.
+opt-out flag: a scenario that seeds chaos is not a smoke scenario. Since
+WO-R2-123 an unfiltered `--smoke` cannot trip it either — the derived
+selection admits only chaos-free, action-free scenarios, so the three
+`remediate_*` ones are never in it. Exit 6 is now reachable exactly
+through the `--only` override, which is the channel it was always for.
 
 The mirror of that rule on the `--live` side: a selection that *does*
 declare `chaos_setup` is checked, before any spend, for the scope it needs
@@ -545,9 +558,15 @@ Platform ships a new digest → three steps on the agent side:
    ```
 2. Regenerate the contract snapshot:
    ```bash
-   docker compose -f demo/compose.yml up -d --wait
+   make demo                    # scoped `up --wait`; see below
    make snapshot                # writes contracts/platform-tools.snapshot.json
    ```
+   Bring the stack up with `make demo`, not a bare
+   `docker compose -f demo/compose.yml up -d --wait`. Compose fails the wait
+   when a one-shot service exits during the watch window, and a digest bump
+   recreates every one-shot there is (`migrate`, `redpanda-init`), so the
+   unscoped form fails here every time. `make demo` scopes `--wait` to the
+   five long-running services; `depends_on` still runs the one-shots first.
 3. Address any registry drift the contract test surfaces:
    ```bash
    make test-contract           # will fail if tool schemas moved

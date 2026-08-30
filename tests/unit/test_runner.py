@@ -1644,6 +1644,12 @@ class TestSmokeRefusesChaosSeeding:
         # At HEAD this run proceeds: the hook fires inside run_scenario under
         # the FULL principal during the stage whose purpose is proving the
         # smoke token is read-only.
+        #
+        # Driven through --only since WO-R2-123, and that IS the case worth
+        # pinning: a bare --smoke now derives its selection from
+        # Scenario.in_smoke_pass, which excludes a chaos-declaring scenario
+        # by construction, so the only way one can still reach the stage is
+        # the operator override — the reachable channel ADR 0018 names.
         _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
         _forbid_run_all(monkeypatch)
         hook_calls: list[str] = []
@@ -1653,7 +1659,9 @@ class TestSmokeRefusesChaosSeeding:
             lambda _url, _token, name, _args: hook_calls.append(name),
         )
         monkeypatch.setattr(runner_module, "load_scenarios", lambda _dir: [self._chaos_scenario()])
-        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
+        monkeypatch.setattr(
+            sys, "argv", ["evals.runner", "--live", "--smoke", "--only", "remediate_"]
+        )
         assert runner_module.main() == 6
         assert hook_calls == []
         out = capsys.readouterr().out
@@ -1675,7 +1683,11 @@ class TestSmokeRefusesChaosSeeding:
         monkeypatch.setattr(runner_module, "preflight_auth", _boom)
         monkeypatch.setattr(runner_module, "invoke_chaos_hook", _boom)
         monkeypatch.setattr(runner_module, "load_scenarios", lambda _dir: [self._chaos_scenario()])
-        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
+        # --only for the same reason as the test above: the derived selection
+        # cannot contain a chaos scenario, so the override is the channel.
+        monkeypatch.setattr(
+            sys, "argv", ["evals.runner", "--live", "--smoke", "--only", "remediate_"]
+        )
         assert runner_module.main() == 6
 
     def test_only_filter_cannot_smuggle_a_chaos_scenario_past_the_gate(
@@ -1713,6 +1725,39 @@ class TestSmokeRefusesChaosSeeding:
         monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
         assert runner_module.main() == 0
         assert len(run_all_calls) == 1
+
+    def test_a_bare_smoke_run_derives_past_the_chaos_scenarios(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # WO-R2-123: the default path no longer needs the exit-6 refusal to
+        # keep chaos out, because a chaos-declaring scenario is not in the
+        # derived selection to begin with. The refusal above stays for the
+        # override channel; this pins that the two do not fight — a mixed
+        # tree runs the read-only half rather than refusing the whole pass.
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        run_all_calls = _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
+        monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: _StubGuardClient())
+        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(runner_module, "assert_no_tier1_successes", lambda *_a, **_kw: None)
+        monkeypatch.setattr(
+            runner_module,
+            "invoke_chaos_hook",
+            lambda *_a, **_kw: pytest.fail("no chaos hook may fire in the smoke stage"),
+        )
+        monkeypatch.setattr(
+            runner_module,
+            "load_scenarios",
+            lambda _dir: [
+                _passing_scenario().model_copy(update={"use_live_mcp": True}),
+                self._chaos_scenario(),
+            ],
+        )
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
+        assert runner_module.main() == 0
+        assert len(run_all_calls) == 1
+        assert "remediate_consumer_lag_success" not in run_all_calls[0]
+        assert "smoke selection: 1 scenario(s)" in capsys.readouterr().out
 
     def test_non_smoke_live_run_keeps_chaos_seeding(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

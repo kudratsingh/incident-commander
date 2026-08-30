@@ -55,6 +55,18 @@ Negative:
 
 Revisit trigger: if we add a third external client, extract the retry+wrap logic into a shared `RetryPolicy` helper rather than triple-implementing it.
 
+### Amendment 2026-08-30: the boundary has to distrust values, not just types (WO-R2-84)
+
+The decision above was implemented as "catch the SDK's exceptions", and that turned out to be narrower than the invariant it was defending. Three paths still crossed the boundary carrying something the transitions could not handle, all for the same reason: the client trusted what the server sent it.
+
+**Envelope validation sat outside the wrapper.** `ToolResult.model_validate` ran *after* `call_tool`'s `try`, so a 200 whose result the envelope could not parse raised `pydantic.ValidationError` — not an `MCPError`. Transitions catch `MCPError` and nothing else (`investigation.py:89`, `:334`; `remediation.py:532`, `:688`), so that exception reached `run_to_completion` as a crash. This is precisely the outcome the ADR's second decision driver rules out: no evidence, no briefing, no graded escalation, from a malformed field on the platform side rather than a bug on ours. The validation now runs inside the wrapper and a failure becomes `MCPError(-32700, "malformed tools/call result envelope: ...")`.
+
+**The JSON-RPC error member was assumed well-formed.** The branch called `.get` on `payload["error"]` and `int()` on the result, so a bare-string member raised `AttributeError` and a non-numeric code raised `ValueError`. Both escaped the same contract, by the same route. `_error_from_member` now isinstance-guards the member and coerces the code, falling back to `-32603` while folding the raw value into the message so the operator still sees what arrived.
+
+**`Retry-After` was honoured unbounded.** The Consequences section already noted that the two clients duplicate this logic; what it did not note is that they had diverged. `LLMClient` caps the header at 60s, `MCPClient` did not, so one `Retry-After: 86400` parked a run for a day — past every wall-clock budget the incident had, and invisible to the budget meter, which cannot see a `sleep`. Invariant 7 says budgets are hard limits; a delay the meter cannot observe is not bounded by one. `MCPClient` now applies the same 60s ceiling under the same constant name.
+
+The general form, worth carrying to the third client when it arrives: wrapping at the boundary means wrapping *everything* the boundary does, including parsing and arithmetic on server-supplied values. A wrapper that only catches the SDK's own exception types leaves the structural failures uncovered, and those are the ones that look like agent bugs.
+
 ## More information
 
 Implementing PR: [#48](https://github.com/kudratsingh/incident-commander/pull/48). Lives in `src/incident_commander/tools/mcp_client.py:MCPClient._call` and `src/incident_commander/llm/client.py:LLMClient.call`. Regression coverage in `tests/unit/test_mcp_client.py::TestRetries` and `tests/unit/test_llm_client.py::TestRetries`. Related lesson: [`docs/lessons/live-eval-noise-sources.md`](../lessons/live-eval-noise-sources.md) (the *transport flakiness* noise source).

@@ -16,13 +16,18 @@ from itertools import count
 from typing import Any, Final, Protocol
 
 import httpx
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 
 from incident_commander.config import Settings
 
 _DEFAULT_TIMEOUT_SECONDS: Final[float] = 30.0
 _DEFAULT_MAX_ATTEMPTS: Final[int] = 3
 _DEFAULT_RETRY_BASE_DELAY: Final[float] = 1.0
+# Ceiling on a server-supplied Retry-After, mirroring LLMClient's constant of
+# the same name. Both clients treat the header as a hint they may honour, not
+# an instruction they must obey.
+_MAX_RETRY_AFTER_SECONDS: Final[float] = 60.0
+_JSON_RPC_INTERNAL_ERROR: Final[int] = -32603
 
 
 class MCPError(RuntimeError):
@@ -32,6 +37,36 @@ class MCPError(RuntimeError):
         super().__init__(f"MCP error {code}: {message}")
         self.code = code
         self.data = data
+
+
+def _error_from_member(member: object) -> MCPError:
+    """Build an ``MCPError`` from a server-supplied JSON-RPC ``error`` member.
+
+    The member arrives from across the trust boundary, so nothing about its
+    shape is guaranteed. This branch used to call ``.get`` on it and ``int``
+    on whatever came back, so a bare-string member raised ``AttributeError``
+    and a non-numeric code raised ``ValueError`` — both escaping the
+    ``MCPError``-only contract this module's docstring promises, and with it
+    the escalate-with-reason rail every transition relies on.
+
+    A code that will not coerce is reported as an internal error rather than
+    dropped: the raw value is folded into the message so the operator reading
+    the briefing still sees what the server actually sent.
+    """
+    if not isinstance(member, Mapping):
+        return MCPError(
+            _JSON_RPC_INTERNAL_ERROR,
+            f"non-object JSON-RPC error member ({type(member).__name__}): {member!r:.200}",
+        )
+    raw_code = member.get("code", _JSON_RPC_INTERNAL_ERROR)
+    try:
+        code = int(raw_code)
+    except (TypeError, ValueError):
+        code = _JSON_RPC_INTERNAL_ERROR
+    message = str(member.get("message", "unknown error"))
+    if code != raw_code:
+        message = f"{message} (uncoercible error code {raw_code!r:.100})"
+    return MCPError(code, message, member.get("data"))
 
 
 class ToolResult(BaseModel):
@@ -108,6 +143,17 @@ class MCPClient:
                 {"name": name, "arguments": args_dict},
                 timeout_seconds=timeout_seconds,
             )
+            # Inside the wrapper on purpose. This validation used to sit
+            # below it, so a 200 whose result the envelope cannot parse
+            # raised a raw ValidationError out of call_tool. Transitions
+            # catch MCPError and nothing else, so that exception walked
+            # past every escalate-with-reason rail and ended the incident
+            # FAILED with no briefing — a malformed field on the server
+            # costing the on-call their handoff.
+            try:
+                tool_result = ToolResult.model_validate(result)
+            except ValidationError as exc:
+                raise MCPError(-32700, f"malformed tools/call result envelope: {exc}") from exc
         except Exception as exc:
             if self._tracer is not None:
                 self._tracer(
@@ -119,7 +165,6 @@ class MCPClient:
                     }
                 )
             raise
-        tool_result = ToolResult.model_validate(result)
         if self._tracer is not None:
             self._tracer(
                 {
@@ -168,7 +213,13 @@ class MCPClient:
                 retry_after = response.headers.get("retry-after")
                 if retry_after is not None:
                     with contextlib.suppress(ValueError):
-                        delay = max(delay, float(retry_after))
+                        # Capped like LLMClient's (llm/client.py:218). The
+                        # header is server-controlled, and honouring it
+                        # unbounded let a single `Retry-After: 86400`
+                        # outlast every wall-clock budget the incident had
+                        # — a sleep the budget cannot observe is not
+                        # bounded by it (invariant 7).
+                        delay = max(delay, min(float(retry_after), _MAX_RETRY_AFTER_SECONDS))
                 self._sleep(delay)
                 continue
             if status >= 400:
@@ -180,12 +231,7 @@ class MCPClient:
             if not isinstance(payload, dict):
                 raise MCPError(-32700, f"non-object JSON response: {type(payload).__name__}")
             if "error" in payload:
-                err = payload["error"]
-                raise MCPError(
-                    int(err.get("code", -32603)),
-                    str(err.get("message", "unknown error")),
-                    err.get("data"),
-                )
+                raise _error_from_member(payload["error"])
             result = payload.get("result", {})
             return result if isinstance(result, dict) else {}
         raise RuntimeError("unreachable: retry loop exited without response")

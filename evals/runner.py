@@ -209,6 +209,11 @@ class PreconditionUnverifiable(PreconditionFailure):
     scope, a dead platform, or a malformed response tells you nothing about
     the fault, and reporting one as the other sends the reader to seeding
     when the problem is the platform.
+
+    "Answered" means the DECISIVE attempt answered — the one that ended the
+    polling window. A readable-but-unmet reading followed by a dead platform
+    is Unverifiable, because the reading that was current when polling gave
+    up is the transport error, and the earlier one is stale.
     """
 
 
@@ -219,30 +224,41 @@ def _assert_preconditions(
 ) -> None:
     """Probe the world for the scenario's premise, polling where declared."""
     for probe in scenario.expected_precondition:
-        failures: list[str] = []
-        # Did the platform ever answer with something we could read? Without
-        # this, a probe that never succeeded reports as "the fault was never
-        # manufactured" — a claim about the world, made without hearing from it.
-        answered = False
+        # Only the DECISIVE attempt — the one that ended the polling window —
+        # speaks for the world. `reading` holds that attempt's verdict when it
+        # answered with something we could read (empty list = met), and is
+        # None while the newest attempt was unreadable; `unreadable` holds why.
+        # Latching "did any attempt ever answer" across the window is what let
+        # a dead platform on the last attempt report as "the fault was never
+        # manufactured" — a claim about the world, quoting a transport error.
+        reading: list[str] | None = None
+        unreadable: list[str] = []
+        # Kept only to say, in the Unverifiable message, that a now-stale
+        # reading exists. Always unmet: an attempt that reads MET breaks out.
+        stale_reading: list[str] = []
         for attempt in range(probe.attempts):
             if attempt:
                 time.sleep(probe.delay_seconds)
             try:
                 result = client.call_tool(probe.tool, dict(probe.arguments))
             except MCPError as err:
-                failures = [f"{probe.tool}: probe failed: {err}"]
+                reading, unreadable = None, [f"{probe.tool}: probe failed: {err}"]
                 continue
             if result.is_error:
-                failures = [f"{probe.tool}: probe returned is_error=True"]
+                reading, unreadable = None, [f"{probe.tool}: probe returned is_error=True"]
                 continue
             payload = _first_json_object(result)
             if payload is None:
-                failures = [f"{probe.tool}: probe returned no readable JSON object"]
+                reading = None
+                unreadable = [f"{probe.tool}: probe returned no readable JSON object"]
                 continue
-            answered = True
-            failures = unmet(probe, payload)
-            if not failures:
+            reading, unreadable = unmet(probe, payload), []
+            if not reading:
                 break
+            stale_reading = reading
+        # The predicate the report turns on: did the DECISIVE attempt answer?
+        answered = reading is not None
+        failures = reading if reading is not None else unreadable
         if tracer is not None:
             tracer.write(
                 {
@@ -252,15 +268,26 @@ def _assert_preconditions(
                     "arguments": dict(probe.arguments),
                     "met": not failures,
                     "answered": answered,
+                    # Whether the platform answered at any point in the window.
+                    # Diagnostic only — it must never decide Not-Met vs
+                    # Unverifiable, which is exactly the bug this pair records.
+                    "ever_answered": answered or bool(stale_reading),
                     "failures": failures,
                 }
             )
         if failures and not answered:
+            stale = (
+                f" An earlier attempt did read the world ({'; '.join(stale_reading)}), "
+                "but that reading is stale and did not decide."
+                if stale_reading
+                else ""
+            )
             raise PreconditionUnverifiable(
                 f"scenario {scenario.name!r} precondition could not be checked after "
                 f"{probe.attempts} attempt(s): {'; '.join(failures)}. The platform "
-                "never returned a readable answer, so whether the fault exists is "
-                "UNKNOWN — look at the platform, not at the seeding."
+                "never returned a readable answer to the deciding attempt, so whether "
+                "the fault exists is UNKNOWN — look at the platform, not at the "
+                f"seeding.{stale}"
             )
         if failures:
             raise PreconditionNotMet(

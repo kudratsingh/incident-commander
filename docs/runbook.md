@@ -125,6 +125,14 @@ export EVAL_TRACE_DIR=evals/traces
 #    but a smoke selection may not contain a chaos-declaring scenario
 #    (exit 6, see "Runner exit codes" below), so keep the remediate_*
 #    scenarios out of it.
+#    Every --only pattern must match at least one scenario: one that
+#    matches none is a renamed scenario that would silently drop out of
+#    the pass, so the runner refuses the whole selection (exit 2) and
+#    prints the match count per pattern. Read those counts — they are
+#    the run's own record of what it actually covered. Which scenarios
+#    the pass owes coverage to is derived from the YAMLs and enforced
+#    offline by tests/unit/test_smoke_only_coverage.py; see
+#    docs/eval-methodology.md, "The read-only smoke pass".
 make eval-smoke
 
 # 2) Remediation scenarios, one at a time, with reset between.
@@ -305,7 +313,7 @@ the degradation is now recorded in the report (`degraded_count` in
 |---|---|
 | 0 | all selected scenarios passed |
 | 1 | ≥1 scenario failed (regression gate: regression detected, or a baseline scenario dropped from latest) |
-| 2 | no scenario matched `--only` (regression gate: missing report, or a filtered `--only` `latest.json` — refused as gate input) |
+| 2 | an `--only` pattern matched no scenario — *any* single dead pattern, not only a wholly empty selection, since a dead pattern is a renamed scenario dropping silently out of the run (regression gate: missing report, or a filtered `--only` `latest.json` — refused as gate input) |
 | 3 | preflight/env failure: `--smoke` without `--live`, degraded `--live` env, invalid or missing settings, missing smoke token, LLM auth preflight failure |
 | 4 | principal guard: the smoke token holds more than read scope |
 | 5 | post-stage audit failed, was unreadable, or was inconclusive |
@@ -349,7 +357,8 @@ before preflight or any spend, if any *selected* scenario declares
 opt-out flag: a scenario that seeds chaos is not a smoke scenario. The
 default `SMOKE_ONLY` list already excludes the three `remediate_*`
 scenarios, so `make eval-smoke` is unaffected; an unfiltered
-`python -m evals.runner --live --smoke` selects all 37 and is refused.
+`python -m evals.runner --live --smoke` selects the whole suite and is
+refused.
 
 Relatedly, a chaos hook name is a **closed set**, validated at scenario
 load time against the chaos tools in

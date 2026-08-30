@@ -126,19 +126,45 @@ eval-live:
 # as an escalation instead of mutating state. The 2026-08-03 campaign's
 # "read-only" pass fired a real DLQ replay; this target closes that door.
 # Override the scenario list with SMOKE_ONLY=... if needed.
-# dlq_human_required_escalates is deliberately NOT in this list: it
-# expects RESOLVED via mark_dlq_permanent, which the read-scoped token
-# 403s by design — guaranteed red here. It runs in the remediation
-# stage under the full token instead.
-# dlq_backlog is also absent, but for the opposite reason: it IS
-# scope-compatible with the smoke token — read-only, no chaos_setup, and
-# its one probe (list_dlq_messages) needs incidents:read only. What is
-# unproven is its behavior against the smoke stage's unseeded DLQ, and
-# that cannot be settled without a live smoke run. Add it here during
-# the next live campaign, once a run confirms it green — not before.
-# Rationale for both exclusions: docs/eval-methodology.md, "The
-# read-only smoke pass".
-SMOKE_ONLY ?= alert_storm,deploy_correlation,failed_traces,incidents_overview,multi_probe,noise_,planner_stops,postgres_slow,redis_saturation,saga_stuck,tool_,trace_investigation,consumer_lag_healthy,consumer_lag_medium,consumer_lag_missing,consumer_lag_orders,consumer_lag_payments,consumer_lag_shipping,consumer_lag_analytics
+#
+# This list is hand-maintained but no longer hand-trusted. Two guards hold
+# it to the scenario directory, because it used to be able to shrink in
+# both directions without anyone noticing (WO-R2-41):
+#
+#   * a RENAMED scenario left its pattern behind matching nothing. The
+#     runner only refused when EVERY pattern matched nothing, so one dead
+#     pattern among nineteen was invisible. It now refuses on any dead
+#     pattern (exit 2) and prints the match count per pattern.
+#   * a NEW read-only scenario that nobody added here just never ran.
+#     consumer_lag_null_unknown_state had already dropped out this way.
+#     tests/unit/test_smoke_only_coverage.py derives the eligible set from
+#     the YAMLs and fails if one is neither matched here nor held back in
+#     SMOKE_EXCLUDE below.
+#
+# Eligibility is the runner's own predicate, not a second opinion: a
+# scenario belongs in the smoke pass when it declares no chaos_setup
+# (else --smoke refuses the run outright, exit 6 / S-03) and no
+# expected_action_tools (a Tier-1 write the read-scoped token 403s by
+# design). dlq_human_required_escalates is excluded by that predicate
+# rather than by hand — it expects RESOLVED via mark_dlq_permanent, so it
+# is guaranteed red here and runs in the remediation stage under the full
+# token instead.
+SMOKE_ONLY ?= alert_storm,deploy_correlation,failed_traces,incidents_overview,multi_probe,noise_,planner_stops,postgres_slow,redis_saturation,saga_stuck,tool_,trace_investigation,consumer_lag_healthy,consumer_lag_medium,consumer_lag_missing,consumer_lag_null,consumer_lag_orders,consumer_lag_payments,consumer_lag_shipping,consumer_lag_analytics
+
+# Scenarios that ARE eligible by the predicate above but are deliberately
+# held back. This is the only sanctioned way to keep an eligible scenario
+# out of the smoke pass: the coverage test reads this list, so a silent
+# omission is a test failure and a recorded one is a decision. Every name
+# here needs its reason written below and in docs/eval-methodology.md,
+# "The read-only smoke pass".
+#
+# dlq_backlog — COULD pass here, but is unvalidated. It is scope-compatible
+# with the smoke token (read-only, no chaos_setup, and its one probe
+# list_dlq_messages needs incidents:read only). What is unproven is its
+# behavior against the smoke stage's unseeded DLQ, and that cannot be
+# settled without a live smoke run. Move it into SMOKE_ONLY during the
+# next live campaign, once a run confirms it green — not before.
+SMOKE_EXCLUDE ?= dlq_backlog
 eval-smoke:
 	@if [ -z "$(PLATFORM_SMOKE_TOKEN)" ]; then \
 		echo "ERROR: PLATFORM_SMOKE_TOKEN not set. Run 'make bootstrap-token' and add it to .env" >&2; exit 2; \

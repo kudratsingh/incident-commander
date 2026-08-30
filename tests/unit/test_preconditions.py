@@ -18,6 +18,10 @@ from pydantic import ValidationError
 from evals.preconditions import resolve, unmet
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import PreconditionField, PreconditionProbe, Scenario
+from incident_commander.config import (
+    PLATFORM_METRICS_INTERVAL_SECONDS,
+    polling_window_seconds,
+)
 
 _SCENARIOS_DIR = Path(__file__).resolve().parents[2] / "evals" / "scenarios"
 
@@ -234,7 +238,25 @@ class TestRemediationScenarioCoverage:
         kill_consumer stops the consumer at once, but the platform recomputes
         lag on a 60s interval, so the number stays 0 for up to a minute after
         seeding. A single look would fail a correctly-seeded world.
+
+        The window is ``(attempts - 1) * delay`` — the runner sleeps BETWEEN
+        attempts, so 6 attempts at 15s wait 75s, not 90s. This guard used to
+        multiply ``attempts * delay`` and so overstated every window by one
+        delay: it passed a 5x14.9s probe (74.5s claimed, 59.6s real) that
+        cannot outlast the metrics interval it exists to outlast (WO-R2-88).
+        The arithmetic now comes from ``config.polling_window_seconds``, the
+        same helper the ADR 0006 verify window reports itself with.
         """
         scenario = next(s for s in _shipped() if s.name == "remediate_consumer_lag_success")
         probe = next(p for p in scenario.expected_precondition if p.tool == "get_consumer_lag")
-        assert probe.attempts * probe.delay_seconds >= 60.0
+        window = polling_window_seconds(probe.attempts, probe.delay_seconds)
+        assert window >= PLATFORM_METRICS_INTERVAL_SECONDS, (
+            f"the lag precondition polls for {window}s "
+            f"({probe.attempts} attempts, {probe.delay_seconds}s apart), which does not "
+            f"outlast the platform's {PLATFORM_METRICS_INTERVAL_SECONDS}s metrics "
+            "interval — a correctly seeded world can still read lag=0 for the whole "
+            "window and the scenario would abort as 'never manufactured'"
+        )
+        # Margin, stated so a future edit can see what it is spending: one
+        # whole extra delay beyond the interval at the shipped 6 x 15s.
+        assert window - PLATFORM_METRICS_INTERVAL_SECONDS >= probe.delay_seconds

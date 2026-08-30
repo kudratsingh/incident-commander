@@ -33,7 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Final
 
@@ -192,6 +192,74 @@ def _fmt_mcp_error(step: int, r: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _fmt_llm_error(step: int, r: dict[str, Any]) -> str:
+    """A billed-or-attempted LLM call that never returned (``evals/tracing.py``).
+
+    These are the records the tracer was extended to capture: an exhausted
+    429, a dropped connection, a client-side refusal. They used to render as
+    ``unknown kind`` — a raw JSON dump of the whole request — which put the
+    full system prompt on one line in the middle of the trajectory and told
+    the reader nothing about what failed. What matters here is the error, the
+    attempt ordinal, and whether the retry loop gave up.
+    """
+    role = r.get("role", "?")
+    attempt = r.get("attempt")
+    terminal = bool(r.get("terminal"))
+    outcome = "gave up" if terminal else "retried"
+    ordinal = "?" if attempt is None else str(int(attempt) + 1)
+    duration = r.get("duration_seconds")
+    took = "" if duration is None else f" ({float(duration):.2f}s)"
+    lines = [
+        _rule("="),
+        f"STEP {step} — LLM CALL FAILED ({role}) @ {_fmt_ts(r.get('timestamp', ''))}{took}",
+        _rule("="),
+        "",
+        f"Model: {r.get('request', {}).get('model', '?')}",
+        f"Attempt: {ordinal} — {outcome}",
+        f"Expected output: {r.get('output_model', '?')}",
+        "",
+        "--- ERROR ---",
+        str(r.get("error", "(no error recorded)")),
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _precondition_verdict(r: dict[str, Any]) -> str:
+    """MET / NOT MET / UNVERIFIABLE — the distinction the record exists for.
+
+    ``evals/runner.py`` raises two different failures here and the difference
+    is the whole point of the pair: NOT MET says the fault was never
+    manufactured (look at seeding), UNVERIFIABLE says the platform never
+    answered the deciding attempt (look at the platform). A report that
+    collapsed them would send the reader to the wrong half of the system.
+    """
+    if r.get("met"):
+        return "MET"
+    return "NOT MET" if r.get("answered") else "UNVERIFIABLE — no readable answer"
+
+
+def _fmt_precondition(step: int, r: dict[str, Any]) -> str:
+    """The world-state check that decides whether the premise ever existed."""
+    lines = [
+        _rule("="),
+        f"STEP {step} — PRECONDITION {_precondition_verdict(r)} "
+        f"@ {_fmt_ts(r.get('timestamp', ''))}",
+        _rule("="),
+        "",
+        f"Tool: {r.get('tool', '?')}",
+        f"Arguments: {json.dumps(r.get('arguments', {}), default=str)}",
+        f"Answered: {r.get('answered')}  (any attempt answered: {r.get('ever_answered')})",
+    ]
+    failures = r.get("failures") or []
+    if failures:
+        lines.append("")
+        lines.append("--- UNSATISFIED ---")
+        lines.extend(f"  - {failure}" for failure in failures)
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _fmt_chaos_setup(step: int, r: dict[str, Any]) -> str:
     """Compact step for the seeding hook a live scenario fires before the agent runs."""
     lines = [
@@ -205,6 +273,41 @@ def _fmt_chaos_setup(step: int, r: dict[str, Any]) -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+# The renderer's half of the tracer's ``TraceKind`` enumeration
+# (``evals/tracing.py``). Spelled as plain strings rather than imported: this
+# file is run as ``python scripts/format_traces.py`` from Makefile targets
+# that do not put the repo root on sys.path, and it must render an archived
+# slice from any checkout with only the stdlib. So the coupling is enforced
+# instead of assumed — ``tests/unit/test_format_traces.py::TestEveryKindRenders``
+# fails if ``TraceKind`` grows a member with no formatter here, which is what
+# stops the next new kind from landing in the report as ``unknown kind``.
+BOUNDARY_KINDS: Final[frozenset[str]] = frozenset({"scenario_start", "scenario_end"})
+STEP_FORMATTERS: Final[dict[str, Callable[[int, dict[str, Any]], str]]] = {
+    "llm": _fmt_llm,
+    "llm_error": _fmt_llm_error,
+    "mcp": _fmt_mcp,
+    "mcp_error": _fmt_mcp_error,
+    "precondition": _fmt_precondition,
+    "chaos_setup": _fmt_chaos_setup,
+}
+# Billed-but-failed calls count as calls. A header that counted `mcp_error`
+# as a tool call but dropped `llm_error` from the LLM total reported the
+# run's LLM spend as lower than it was — the trace is the record of what a
+# live run actually spent, and a record that omits failures is a lower bound
+# presented as a total.
+LLM_KINDS: Final[frozenset[str]] = frozenset({"llm", "llm_error"})
+TOOL_KINDS: Final[frozenset[str]] = frozenset({"mcp", "mcp_error"})
+
+
+def _count(records: list[dict[str, Any]], kinds: frozenset[str]) -> int:
+    return sum(1 for r in records if r["kind"] in kinds)
+
+
+def _with_failures(total: int, failed: int) -> str:
+    """``7`` or ``7 (1 failed)`` — never a total that hides the failures."""
+    return f"{total}" if not failed else f"{total} ({failed} failed)"
 
 
 def _group_by_invocation(records: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -258,8 +361,10 @@ def _fmt_header(
 ) -> str:
     starts = [r for r in records if r["kind"] == "scenario_start"]
     ends = [r for r in records if r["kind"] == "scenario_end"]
-    llm_calls = sum(1 for r in records if r["kind"] == "llm")
-    mcp_calls = sum(1 for r in records if r["kind"] in {"mcp", "mcp_error"})
+    llm_calls = _count(records, LLM_KINDS)
+    llm_failed = _count(records, frozenset({"llm_error"}))
+    mcp_calls = _count(records, TOOL_KINDS)
+    mcp_failed = _count(records, frozenset({"mcp_error"}))
 
     # Correct now that the group is one invocation: exactly one
     # scenario_start, and at most one scenario_end.
@@ -280,8 +385,8 @@ def _fmt_header(
         f"Planner model: {start.get('model')}",
         f"Judge model:   {start.get('judge_model')}",
         "",
-        f"LLM calls:     {llm_calls}",
-        f"Tool calls:    {mcp_calls}",
+        f"LLM calls:     {_with_failures(llm_calls, llm_failed)}",
+        f"Tool calls:    {_with_failures(mcp_calls, mcp_failed)}",
     ]
     if "final_state" in end:
         lines.append(f"Final state:   {end['final_state']}")
@@ -346,19 +451,18 @@ def _fmt_steps(records: list[dict[str, Any]]) -> list[str]:
     step = 0
     for r in records:
         kind = r["kind"]
-        if kind in {"scenario_start", "scenario_end"}:
+        if kind in BOUNDARY_KINDS:
             continue
         step += 1
-        if kind == "llm":
-            parts.append(_fmt_llm(step, r))
-        elif kind == "mcp":
-            parts.append(_fmt_mcp(step, r))
-        elif kind == "mcp_error":
-            parts.append(_fmt_mcp_error(step, r))
-        elif kind == "chaos_setup":
-            parts.append(_fmt_chaos_setup(step, r))
-        else:
+        formatter = STEP_FORMATTERS.get(kind)
+        if formatter is None:
+            # Reached only by a trace from a NEWER harness than this
+            # checkout. Dump rather than drop — an unrenderable record is
+            # still evidence — but the coverage test above means no kind
+            # this harness writes can land here.
             parts.append(f"STEP {step} — unknown kind={kind}: {json.dumps(r)}\n")
+            continue
+        parts.append(formatter(step, r))
     return parts
 
 

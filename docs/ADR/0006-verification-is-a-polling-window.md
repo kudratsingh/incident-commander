@@ -36,6 +36,20 @@ Two paired changes protect the action+verify atomicity:
 
 Together these are one atomic multi-step operation reserved up front and never severed mid-unit.
 
+### Amendment 2026-08-30: the crash-resume exemption (WO-R2-39)
+
+The exemption above was written as "VERIFYING is exempt", and that turned out to be narrower than the invariant it was defending. A run rebuilt from a checkpoint that reads REMEDIATING was still short-circuited: escalated without re-invoking the action, so the verify pass never ran and the briefing never disclosed the attempt.
+
+That checkpoint is written on *entry* to REMEDIATING — before the action tool is called, before any VERIFYING checkpoint exists — so the state alone cannot say whether the Tier-1 action executed. Escalating on it is exactly the executed-but-unverified outcome this ADR exists to prevent, reached by the resume path instead of by the budget meter.
+
+It is also not a rare corner. The wall meter is anchored on `created_at` by ADR 0015's deliberate design, so a run that resumes after any real outage is frequently already exhausted at the moment it resumes — the short-circuit fires on the *first* iteration, before anything is dispatched.
+
+`run_to_completion` therefore exempts REMEDIATING as well, but only on the first loop iteration of a run that entered already in that state, and only when a `remediation_plan` is stored. A run that reaches REMEDIATING from PLANNING inside the same process has dispatched nothing yet: escalating it pre-execution is the safe direction, and `make_llm_plan`'s headroom check is what keeps it from getting there. The two exemptions are now returned by name from `loop._budget_exemption` (`verify-after-execute`, `reinvoke-after-crash-resume`) rather than tested as a status list, so a new state must argue its way in rather than inherit an exemption.
+
+Re-invoking a possibly-executed action is safe because of the wire contract, not in spite of it: REMEDIATING rebuilds the same deterministic idempotency key from (incident, tool, args) and the platform replays the cached response instead of re-executing. This ADR's original "Negative" note below claims a reconciler "reads the platform audit before re-executing anything" — ADR 0008 has since removed that client-side execute-once guard, leaving the platform's idempotency store as the sole defence. The paired PR puts that contract under CI (`tests/integration/test_idempotency_contract.py`, WO-R2-43), which is what makes widening the exemption a safe trade rather than a wider blast radius.
+
+Regression tests: `tests/unit/test_loop.py::TestBudgetExemptsResumedRemediating`.
+
 ### Why the alternatives lose
 
 **Background scheduler.** Real durable polling with checkpoints between probe attempts is the right answer for a very long verify window (minutes to hours). At the current probe cadence (a 60s cache, one action to verify, seconds not hours) it is over-engineered — a new scheduler process, a new checkpoint edge, a new reconciliation case on resume. Revisit if the verify window ever needs to survive process restarts.

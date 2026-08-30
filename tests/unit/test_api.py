@@ -4,15 +4,17 @@ import json
 import logging
 import time
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
+from sqlalchemy import Engine
 
-from incident_commander.agent.factory import start_run
+from incident_commander.agent.factory import derive_incident_id, start_run
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 from incident_commander.api import app as app_module
 from incident_commander.api.app import create_app
@@ -579,7 +581,7 @@ class TestFailureRail:
         monkeypatch.setattr(app_module, "run_to_completion", _boom)
 
         app_module._run_investigation(run, _test_settings(), ckpt)
-        app_module._record_run_failure(run, ckpt, RuntimeError("boom"))
+        app_module._record_run_failure(run, ckpt, RuntimeError("boom"), held_lease=True)
 
         history = ckpt.history(run.incident_id)
         assert len(history) == 1
@@ -774,3 +776,116 @@ class TestResumeGate:
         assert latest is not None
         assert latest.state is IncidentState.AWAITING_APPROVAL
         assert any("awaiting_approval" in r.getMessage() for r in caplog.records)
+
+
+def _pool_exhausted(_engine: object, _incident_id: UUID) -> Iterator[bool]:
+    """A lease attempt that dies before it can answer — the realistic loser.
+
+    ``incident_lease`` checks a connection out of the pool and runs
+    ``pg_try_advisory_lock`` on it. Under the ADR 0022 bound, a pool with no
+    free connection (or a Postgres blip) raises here, and the process learns
+    nothing about who owns the incident — least of all that it does.
+    """
+    raise OSError("connection pool exhausted")
+
+
+@contextmanager
+def _granted_lease(_engine: object, _incident_id: UUID) -> Iterator[bool]:
+    yield True
+
+
+def _escalates(state: RunState, **kwargs: Any) -> RunState:
+    """A run that terminates, checkpointing its outcome as the real loop does."""
+    final = state.with_state(IncidentState.ESCALATED, datetime.now(UTC))
+    checkpointer = cast("InMemoryCheckpointer", kwargs["checkpointer"])
+    checkpointer.write(final)
+    return final
+
+
+class TestCrashRailIsLeaseAware:
+    """R2-40: only the lease HOLDER may write the terminal FAILED record.
+
+    The rail wraps admission as well as the run, so any exception on the way
+    to the lease — pool exhaustion above all — lands in the same ``except``.
+    Without a holder check it stamps FAILED on an incident this process never
+    owned, and per ADR 0016 that record is non-resumable: the worker that does
+    hold the lease has its run killed off from the outside, and because a
+    closed generation-0 makes ``derive_incident_id`` walk on, the next
+    redelivery forks a second investigation of one fault.
+    """
+
+    def _alert(self) -> dict[str, Any]:
+        return {"source": "billing", "severity": "high", "fingerprint": "kafka-lag-spike"}
+
+    def _contested(self) -> tuple[InMemoryCheckpointer, RunState]:
+        """One incident, mid-investigation, owned by a worker that is not us."""
+        ckpt = InMemoryCheckpointer()
+        alert = self._alert()
+        run = start_run(alert, _test_settings(), datetime.now(UTC), derive_incident_id(alert, ckpt))
+        ckpt.write(run.with_state(IncidentState.INVESTIGATING, datetime.now(UTC)))
+        return ckpt, run
+
+    def test_a_worker_that_never_held_the_lease_records_no_failure(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        ckpt, run = self._contested()
+        before = [state.state for state in ckpt.history(run.incident_id)]
+        monkeypatch.setattr(app_module, "incident_lease", _pool_exhausted)
+
+        with (
+            caplog.at_level(logging.WARNING, logger="incident_commander.api.app"),
+            pytest.raises(OSError, match="connection pool exhausted"),
+        ):
+            app_module._run_investigation(
+                run, _test_settings(), ckpt, engine=cast("Engine", object())
+            )
+
+        after = ckpt.history(run.incident_id)
+        assert [state.state for state in after] == before
+        assert not any(state.state is IncidentState.FAILED for state in after)
+        assert not any(
+            entry.tool_name == "_run_failure" for state in after for entry in state.evidence
+        )
+        assert any("lease" in record.getMessage() for record in caplog.records)
+
+    def test_the_holder_finishes_and_no_second_incident_is_derived(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The consequence the rail's spurious FAILED buys: a forked incident."""
+        ckpt, run = self._contested()
+        monkeypatch.setattr(app_module, "incident_lease", _pool_exhausted)
+
+        with pytest.raises(OSError):
+            app_module._run_investigation(
+                run, _test_settings(), ckpt, engine=cast("Engine", object())
+            )
+
+        # Generation 0 is still open, so the next redelivery of this alert
+        # joins the live run instead of forking a second investigation of one
+        # fault. A spurious FAILED closes it and this returns a new uuid.
+        assert derive_incident_id(self._alert(), ckpt) == run.incident_id
+
+        # And the holder, resuming under its own lease, still completes.
+        monkeypatch.setattr(app_module, "incident_lease", _granted_lease)
+        monkeypatch.setattr(app_module, "run_to_completion", _escalates)
+        app_module._run_investigation(run, _test_settings(), ckpt, engine=cast("Engine", object()))
+
+        latest = ckpt.load(run.incident_id)
+        assert latest is not None
+        assert latest.state is IncidentState.ESCALATED
+
+    def test_the_holder_still_records_its_own_crash(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The B-04 rail itself must survive the holder check: a crash under a
+        HELD lease is exactly the case FAILED exists to record."""
+        ckpt, run = self._contested()
+        monkeypatch.setattr(app_module, "incident_lease", _granted_lease)
+        monkeypatch.setattr(app_module, "run_to_completion", _boom)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            app_module._run_investigation(
+                run, _test_settings(), ckpt, engine=cast("Engine", object())
+            )
+
+        latest = ckpt.load(run.incident_id)
+        assert latest is not None
+        assert latest.state is IncidentState.FAILED

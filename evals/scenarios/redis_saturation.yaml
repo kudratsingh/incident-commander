@@ -12,7 +12,7 @@ use_live_mcp: true
 use_live_llm: true
 alert:
   source: platform.cache
-  severity: high
+  severity: critical
   fingerprint: cache_miss_spike
   service: redis
 canned_tool_responses:

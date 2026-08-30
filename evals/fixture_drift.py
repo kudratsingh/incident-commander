@@ -124,18 +124,33 @@ class Drift:
     kind: str
     canned: Any = None
     live: Any = None
+    # Which element of a sequenced fixture disagreed. Reported, never keyed
+    # — see ``key``.
+    index: int = 0
 
     @property
     def key(self) -> tuple[str, str, str, str]:
         """Identity for the known-drift ledger. Deliberately excludes the
         observed values: a fixture whose wrong value changes is still the
         same unfixed drift, and re-blessing on every value wobble would make
-        the ledger a rubber stamp."""
+        the ledger a rubber stamp.
+
+        It excludes ``index`` for the same reason, and the reason is worth
+        stating because the opposite is tempting. The ledger's unit is the
+        work: one line per recording that has to be corrected. A sequenced
+        fixture's elements are two recordings of ONE field, and whoever fixes
+        it opens one file and fixes the path — so keying by element would
+        split one job across two lines, and a scenario that grows a third
+        probe would silently regrow the ledger it is supposed to shrink.
+        The index belongs in the report, which is where you look to find out
+        which element to edit; ``describe`` carries it.
+        """
         return (self.scenario, self.tool, self.path, self.kind)
 
     def describe(self) -> str:
+        element = f"[{self.index}]" if self.index else ""
         return (
-            f"{self.scenario}:{self.tool} {self.path} [{self.kind}] "
+            f"{self.scenario}:{self.tool}{element} {self.path} [{self.kind}] "
             f"canned={_short(self.canned)} live={_short(self.live)}"
         )
 
@@ -222,7 +237,13 @@ def _json_type(value: Any) -> str:
 
 
 def compare(call: CannedCall, live: Mapping[str, Any]) -> list[Drift]:
-    """Every way ``call``'s canned payload disagrees with the live response."""
+    """Every way ``call``'s canned payload disagrees with the live response.
+
+    ``live`` must be the snapshot taken for THIS element's position in the
+    sequence — see ``fixture_probe.probe_live``. Handing element 1 the
+    snapshot element 0 was compared against is what made a deliberately
+    post-action recording drift by construction.
+    """
     volatile = _VOLATILE.get(call.tool, frozenset())
     unbounded = _UNBOUNDED_TEXT.get(call.tool, frozenset())
     drifts: list[Drift] = []
@@ -236,6 +257,7 @@ def compare(call: CannedCall, live: Mapping[str, Any]) -> list[Drift]:
                 kind=kind,
                 canned=canned,
                 live=live_value,
+                index=call.index,
             )
         )
 
@@ -288,13 +310,30 @@ def compare(call: CannedCall, live: Mapping[str, Any]) -> list[Drift]:
             record(path, "value", canned_node, live_node)
 
     def walk_leaves(canned_node: Any, live_node: Any, path: str) -> None:
-        """In-list leaves: every canned value must be one the platform emits."""
+        """In-list leaves: every canned value must be one the platform emits.
+
+        Membership is checked by JSON type first, then by value, mirroring
+        the grader's ``FieldComparator.satisfied_by``. Plain ``in`` uses
+        ``==``, and in Python ``True == 1`` — so a canned boolean counted as
+        reachable whenever the platform emitted the corresponding integer,
+        absorbing exactly the bool-vs-number contract drift the grader
+        refuses to let pass. A type the platform never emits at this path is
+        reported as ``type``, not as an unreachable value: the fixture is not
+        modelling a row the platform lacks, it is modelling a field the
+        platform does not have.
+        """
         normalized = _policy_path(path)
         if normalized in volatile or normalized in unbounded:
             return
         domain = [v for v in _flatten(live_node) if v is not None]
+        live_types = {_json_type(v) for v in domain}
         for value in (v for v in _flatten(canned_node) if v is not None):
-            if value not in domain:
+            # An all-null live domain says nothing about the field's type,
+            # so it stays an unreachable VALUE rather than becoming a
+            # contract claim the observation cannot support.
+            if live_types and _json_type(value) not in live_types:
+                record(path, "type", value, sorted(live_types))
+            elif not any(_json_type(v) == _json_type(value) and v == value for v in domain):
                 record(path, "not_live_reachable", value, sorted({_short(v) for v in domain}))
 
     walk(dict(call.payload), dict(live), "", False)

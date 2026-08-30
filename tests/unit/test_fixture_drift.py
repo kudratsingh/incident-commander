@@ -25,7 +25,7 @@ from evals.fixture_drift_ledger import (
     load_entries,
     load_ledger,
 )
-from evals.fixture_probe import UnseededPlatformError, assert_seeded
+from evals.fixture_probe import UnseededPlatformError, assert_seeded, probe_live
 from evals.scenarios.loader import load_scenarios
 from incident_commander.tools.mcp_client import ToolResult
 
@@ -179,6 +179,47 @@ class TestValueDomain:
         canned = {"items": [{"remediation_hint": None}]}
         live = {"items": [{"remediation_hint": "replay_safe"}]}
         assert compare(_call("list_dlq_messages", canned), live) == []
+
+
+class TestDomainMembershipIsTypeAware:
+    """`in` uses `==`, and in Python `True == 1`. That is a contract change.
+
+    The grader's `FieldComparator.satisfied_by` refuses to let bool-vs-number
+    pass — it compares `is` the moment either side is a bool — so a fixture
+    the drift guard calls reachable can still fail the grader on the exact
+    same value. Membership here mirrors that rule: JSON type first, value
+    second.
+    """
+
+    def test_canned_true_against_a_live_one_is_type_drift(self) -> None:
+        drifts = compare(
+            _call("list_dlq_messages", {"items": [{"replayable": True}]}),
+            {"items": [{"replayable": 1}]},
+        )
+        assert [d.kind for d in drifts] == ["type"]
+        assert drifts[0].canned is True
+
+    def test_canned_one_against_a_live_true_is_type_drift(self) -> None:
+        # The same confusion in the other direction.
+        drifts = compare(
+            _call("list_dlq_messages", {"items": [{"replayable": 1}]}),
+            {"items": [{"replayable": True}]},
+        )
+        assert [d.kind for d in drifts] == ["type"]
+
+    def test_a_same_typed_value_in_the_domain_is_still_reachable(self) -> None:
+        # The type check must not fire on values that genuinely match.
+        canned = {"items": [{"replayable": True}]}
+        live = {"items": [{"replayable": False}, {"replayable": True}]}
+        assert compare(_call("list_dlq_messages", canned), live) == []
+
+    def test_a_value_absent_from_a_same_typed_domain_is_still_not_reachable(self) -> None:
+        # Type-awareness narrows the domain; it does not replace the check.
+        drifts = compare(
+            _call("get_dag_state", {"nodes": [{"status": "succeeded"}]}),
+            {"nodes": [{"status": "completed"}]},
+        )
+        assert [d.kind for d in drifts] == ["not_live_reachable"]
 
 
 class TestCannedCallDerivation:
@@ -386,6 +427,103 @@ class _Response:
 
     def json(self) -> dict[str, Any]:
         return self._payload
+
+
+class TestSequencedFixturesProbePerElement:
+    """Each element of a sequenced fixture is answered by its own live read.
+
+    A sequenced fixture records a SEQUENCE of observations — the offline run
+    serves element 0 to the investigation probe and element 1 to the verify
+    probe that follows the agent's action. Comparing both against one cached
+    snapshot makes any element that deliberately records post-action state
+    drift by construction, and `Drift` carried no index, so the report could
+    not say which element it meant.
+    """
+
+    class _Stub:
+        """Answers the Nth call to a tool with the Nth payload for that tool."""
+
+        def __init__(self, payloads: dict[str, list[dict[str, Any]]]) -> None:
+            self.payloads = payloads
+            self.calls: list[str] = []
+
+        def post(self, url: str, **kwargs: Any) -> Any:  # noqa: ARG002
+            name = kwargs["json"]["params"]["name"]
+            self.calls.append(name)
+            queue = self.payloads.get(name) or [{}]
+            nth = min(self.calls.count(name) - 1, len(queue) - 1)
+            body = json.dumps(queue[nth])
+            return _Response({"result": {"content": [{"type": "text", "text": body}]}})
+
+    _SEEDED = {"list_dlq_messages": [{"total": 1, "items": [{"id": "a"}]}]}
+
+    def _probe(self, calls: list[CannedCall], live: list[dict[str, Any]]) -> Any:
+        client = self._Stub({**self._SEEDED, "get_dag_state": live})
+        return probe_live(
+            calls,
+            mcp_url="http://x/mcp",
+            token="read-scoped",
+            client=client,  # type: ignore[arg-type]
+        )
+
+    def _sequence(self, *payloads: dict[str, Any]) -> list[CannedCall]:
+        return [
+            CannedCall(
+                scenario="remediate_saga",
+                tool="get_dag_state",
+                arguments={"job_id": "j1"},
+                payload=payload,
+                index=index,
+            )
+            for index, payload in enumerate(payloads)
+        ]
+
+    def test_a_post_action_element_does_not_drift_against_its_own_snapshot(self) -> None:
+        # The fixture says: unpaused when we looked, paused after we paused it.
+        # Both statements are true of the world at the moment each was taken.
+        result = self._probe(
+            self._sequence({"paused": False}, {"paused": True}),
+            live=[{"paused": False}, {"paused": True}],
+        )
+        assert result.errors == ()
+        assert result.drifts == (), [d.describe() for d in result.drifts]
+
+    def test_a_genuine_post_action_divergence_is_reported_with_its_index(self) -> None:
+        result = self._probe(
+            self._sequence(
+                {"paused": False, "paused_by": None},
+                {"paused": True, "paused_by": "incident-commander"},
+            ),
+            live=[
+                {"paused": False, "paused_by": None},
+                {"paused": True, "paused_by": "some-other-actor"},
+            ],
+        )
+        assert [(d.path, d.kind, d.index) for d in result.drifts] == [("paused_by", "value", 1)]
+
+    def test_each_element_costs_its_own_live_call(self) -> None:
+        result = self._probe(
+            self._sequence({"paused": False}, {"paused": True}),
+            live=[{"paused": False}, {"paused": True}],
+        )
+        assert result.checked == 2
+        assert result.live_calls == 2, "elements shared a snapshot"
+
+    def test_repeated_unsequenced_calls_still_share_one_snapshot(self) -> None:
+        # The cache still earns its keep: two scenarios asking the same tool
+        # the same question at position 0 are one live call, not two.
+        calls = [
+            CannedCall(
+                scenario=name,
+                tool="get_dag_state",
+                arguments={"job_id": "j1"},
+                payload={"paused": False},
+            )
+            for name in ("scenario_a", "scenario_b")
+        ]
+        result = self._probe(calls, live=[{"paused": False}])
+        assert result.checked == 2
+        assert result.live_calls == 1
 
 
 class TestLedgerContext:

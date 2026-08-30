@@ -12,7 +12,7 @@ use_live_mcp: true
 use_live_llm: true
 alert:
   source: platform.api
-  severity: high
+  severity: critical
   fingerprint: elevated_error_rate
   service: api-gateway
 canned_tool_responses:

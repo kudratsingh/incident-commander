@@ -15,7 +15,7 @@ use_live_mcp: true
 use_live_llm: true
 alert:
   source: platform.dlq
-  severity: high
+  severity: critical
   fingerprint: dlq_depth_warning_persistent
 canned_tool_responses:
   list_dlq_messages:

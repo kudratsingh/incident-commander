@@ -187,9 +187,7 @@ class Settings(BaseSettings):
         2026-08-30 amendment quotes these two numbers and
         ``tests/unit/test_polling_window.py`` holds the ADR to them.
         """
-        return polling_window_seconds(
-            self.verify_probe_attempts, self.verify_probe_delay_seconds
-        )
+        return polling_window_seconds(self.verify_probe_attempts, self.verify_probe_delay_seconds)
 
     @property
     def db_pool_capacity(self) -> int:

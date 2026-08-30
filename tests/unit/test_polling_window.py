@@ -103,9 +103,7 @@ class TestBothLoopsSleepExactlyThatLong:
         slept: list[float] = []
         transition = make_llm_verify(
             _SequencedMCP([_lag_result(15_000)] * attempts),
-            CannedLLMClient(
-                [{"verdict": "not_verified", "reasoning": "cached read"}] * attempts
-            ),
+            CannedLLMClient([{"verdict": "not_verified", "reasoning": "cached read"}] * attempts),
             model="test-model",
             probe_attempts=attempts,
             probe_delay_seconds=delay,
@@ -247,19 +245,21 @@ def _lag_result(lag: int) -> ToolResult:
     return ToolResult(content=[{"type": "text", "text": json.dumps(payload)}], is_error=False)
 
 
+# Every required field, so a checkout with no .env still constructs one.
+_SETTINGS_KWARGS: Final[dict[str, Any]] = {
+    "anthropic_api_key": "sk-ant-test",
+    "judge_model": "claude-haiku-4-5",
+    "platform_mcp_url": "https://mcp.platform.local",
+    "platform_rest_url": "https://api.platform.local",
+    "platform_token": "svc-token",
+    "platform_webhook_secret": "hmac-secret",
+    "database_url": "postgresql://commander:commander@localhost:5432/commander",
+}
+
+
 def _settings(**overrides: Any) -> Settings:
     """Bypass any local ``.env`` — same constructor shape as test_config."""
-    return Settings(  # type: ignore[call-arg]
-        _env_file=None,
-        anthropic_api_key="sk-ant-test",
-        judge_model="claude-haiku-4-5",
-        platform_mcp_url="https://mcp.platform.local",
-        platform_rest_url="https://api.platform.local",
-        platform_token="svc-token",
-        platform_webhook_secret="hmac-secret",
-        database_url="postgresql://commander:commander@localhost:5432/commander",
-        **overrides,
-    )
+    return Settings(_env_file=None, **{**_SETTINGS_KWARGS, **overrides})  # type: ignore[call-arg]
 
 
 def _verifying_run() -> RunState:

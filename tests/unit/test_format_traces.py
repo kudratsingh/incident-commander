@@ -710,7 +710,11 @@ def test_a_kind_from_a_newer_harness_is_dumped_not_dropped(tmp_path: Path) -> No
         tmp_path / "redis_saturation.jsonl",
         [
             _scenario_start("inv1", "2026-08-01T10:00:00+00:00"),
-            _stamp({"kind": "from_the_future", "why": "not yet invented"}, "inv1", "2026-08-01T10:00:01+00:00"),
+            _stamp(
+                {"kind": "from_the_future", "why": "not yet invented"},
+                "inv1",
+                "2026-08-01T10:00:01+00:00",
+            ),
         ],
     )
 

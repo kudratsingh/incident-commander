@@ -71,12 +71,20 @@ Exit 6 is emitted after `--only` filtering and before preflight, the principal g
 Placing it after filtering is deliberate: `SMOKE_ONLY` is `.env`-overridable, so the gate has to
 judge the scenarios actually selected rather than the ones the Makefile would have selected.
 
+> **Amended by WO-R2-123.** The `SMOKE_ONLY`/`SMOKE_EXCLUDE` lists this ADR describes no longer
+> exist. `make eval-smoke` passes no `--only` by default, and the runner derives the selection from
+> `Scenario.in_smoke_pass`, which excludes a chaos-declaring scenario by construction. Nothing about
+> the placement decision changes — `SMOKE_ONLY` survives as an operator override and still arrives
+> as `--only`, so the gate must still judge the selection rather than the tree. What changes is the
+> reachability: the default path can no longer produce the condition, and the override is the one
+> channel that can.
+
 **How to read exit 6.** It is a *selection* problem, never an environment or platform problem. The
 smoke stage was asked to run a scenario that mutates state through the chaos surface. The fix is to
 correct the scenario selection (`SMOKE_ONLY` / `--only`), not to re-mint tokens, not to touch the
-platform, and never to widen the smoke principal. The documented flow — `make eval-smoke`, which
-always passes `--only "$(SMOKE_ONLY)"` — excludes the three chaos-declaring `remediate_*` scenarios
-and therefore cannot trip this.
+platform, and never to widen the smoke principal. The documented flow — a bare `make eval-smoke` —
+derives a selection that excludes the three chaos-declaring `remediate_*` scenarios and therefore
+cannot trip this.
 
 ## Consequences
 

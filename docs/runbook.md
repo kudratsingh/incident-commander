@@ -123,18 +123,13 @@ export EVAL_TRACE_DIR=evals/traces
 #    remediation attempt. ~$1 of tokens. Runs under the read-scoped
 #    PLATFORM_SMOKE_TOKEN, so "read-only" is enforced by the platform
 #    (a Tier-1 attempt 403s and grades as an escalation), not by the
-#    scenario list. Override the list with SMOKE_ONLY= if needed —
-#    but a smoke selection may not contain a chaos-declaring scenario
-#    (exit 6, see "Runner exit codes" below), so keep the remediate_*
-#    scenarios out of it.
-#    Every --only pattern must match at least one scenario: one that
-#    matches none is a renamed scenario that would silently drop out of
-#    the pass, so the runner refuses the whole selection (exit 2) and
-#    prints the match count per pattern. Read those counts — they are
-#    the run's own record of what it actually covered. Which scenarios
-#    the pass owes coverage to is derived from the YAMLs and enforced
-#    offline by tests/unit/test_smoke_only_coverage.py; see
-#    docs/eval-methodology.md, "The read-only smoke pass".
+#    scenario list.
+#    WHICH scenarios run is derived from the YAMLs, not listed anywhere:
+#    every scenario that seeds no chaos and expects no action tool, minus
+#    any that declares a `smoke_exclusion:` reason of its own. The run
+#    prints the count and every hold-back it honoured — read those, they
+#    are its own record of what it covered. See docs/eval-methodology.md,
+#    "The read-only smoke pass".
 make eval-smoke
 
 # 2) Remediation scenarios, one at a time, with reset between.
@@ -356,11 +351,11 @@ prove the stage is read-only. So `--smoke` now refuses, with **exit 6**,
 before preflight or any spend, if any *selected* scenario declares
 `chaos_setup`. The check runs after `--only` filtering, so an
 `SMOKE_ONLY=` override cannot smuggle a chaos scenario in. There is no
-opt-out flag: a scenario that seeds chaos is not a smoke scenario. The
-default `SMOKE_ONLY` list already excludes the three `remediate_*`
-scenarios, so `make eval-smoke` is unaffected; an unfiltered
-`python -m evals.runner --live --smoke` selects the whole suite and is
-refused.
+opt-out flag: a scenario that seeds chaos is not a smoke scenario. Since
+WO-R2-123 an unfiltered `--smoke` cannot trip it either — the derived
+selection admits only chaos-free, action-free scenarios, so the three
+`remediate_*` ones are never in it. Exit 6 is now reachable exactly
+through the `--only` override, which is the channel it was always for.
 
 The mirror of that rule on the `--live` side: a selection that *does*
 declare `chaos_setup` is checked, before any spend, for the scope it needs

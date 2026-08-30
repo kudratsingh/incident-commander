@@ -318,6 +318,74 @@ class Scenario(BaseModel):
     # BEFORE any model call, and reports that the fault was never
     # manufactured rather than grading the agent on a false premise.
     expected_precondition: tuple[PreconditionProbe, ...] = ()
+    # Why this scenario is held out of the read-only smoke pass despite
+    # being eligible for it (WO-R2-123, following WO-R2-41/#151). The value
+    # IS the reason; ``None`` means "in the pass".
+    #
+    # Membership of the smoke pass is otherwise DERIVED — see
+    # ``smoke_eligible`` below — so the only thing a human still declares is
+    # a deliberate hold-back, and they declare it on the scenario itself.
+    # It used to be two comma-separated pattern lists in the Makefile
+    # (``SMOKE_ONLY`` / ``SMOKE_EXCLUDE``) which could rot in three ways the
+    # scenario-local field cannot: a renamed scenario left a pattern
+    # matching nothing, a new eligible scenario nobody listed never ran, and
+    # an exclusion could name a scenario that no longer existed. A field
+    # travels with the rename, applies to the new scenario the moment it
+    # lands, and cannot name a scenario that is not there.
+    #
+    # Non-blank and substantive by construction: an exclusion with no reason
+    # is the un-recorded gap this mechanism exists to prevent, and "skip" is
+    # not a reason. Write what would have to be true to lift it.
+    smoke_exclusion: str | None = Field(default=None, min_length=20)
+
+    @property
+    def smoke_eligible(self) -> bool:
+        """Whether the read-only smoke stage can run and grade this honestly.
+
+        The runner's own two selection refusals, not a second opinion about
+        what "read-only" means:
+
+        * ``chaos_setup`` — ``--smoke`` refuses the whole run (exit 6, S-03,
+          ADR 0018) if any selected scenario declares one, because chaos
+          seeding fires under the full write+chaos ``PLATFORM_TOKEN`` and
+          that is precisely the claim the read-only stage exists to disprove.
+        * ``expected_action_tools`` — a graded Tier-1 write, which the
+          read-scoped smoke token 403s by design. Such a scenario is
+          guaranteed red here and belongs to the remediation stage under the
+          full token. ``dlq_human_required_escalates`` is held out by this
+          half rather than by hand.
+
+        Note this is NOT ``not canned_only``: the smoke stage deliberately
+        mixes canned harness-sanity rows (``noise_*``, ``tool_*``,
+        ``planner_stops_immediately``) with live reads, and its report is
+        read that way. Seeding no chaos and writing nothing is the line.
+        """
+        return self.chaos_setup is None and not self.expectation.expected_action_tools
+
+    @property
+    def in_smoke_pass(self) -> bool:
+        """Eligible, and not deliberately held back. The derivation itself."""
+        return self.smoke_eligible and self.smoke_exclusion is None
+
+    @model_validator(mode="after")
+    def _smoke_exclusion_is_not_redundant(self) -> Scenario:
+        """An exclusion the predicate already covers implies a live decision.
+
+        If the scenario declares ``chaos_setup`` or ``expected_action_tools``
+        the runner refuses it from a smoke selection anyway, so a hand-written
+        hold-back records a choice nobody still has to make — and would go on
+        implying one after the reason stopped being true. This was
+        ``test_smoke_exclude_entries_are_real_and_still_needed``; it is a
+        load-time refusal now, so the redundant entry cannot be committed.
+        """
+        if self.smoke_exclusion is not None and not self.smoke_eligible:
+            raise ValueError(
+                f"scenario {self.name!r} sets smoke_exclusion, but it declares "
+                "chaos_setup or expected_action_tools, so the runner already "
+                "refuses it from a smoke selection. The hand-written exclusion is "
+                "redundant — drop it and let the predicate speak."
+            )
+        return self
 
     @property
     def canned_only(self) -> bool:

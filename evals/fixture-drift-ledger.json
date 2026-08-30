@@ -8,8 +8,8 @@
     "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything"
   },
   "_counts": {
-    "recorded": 85,
-    "fixture-defect": 76,
+    "recorded": 60,
+    "fixture-defect": 51,
     "explained": 9
   },
   "known_drift": [
@@ -69,76 +69,6 @@
       "kind": "value",
       "context": "post-fault",
       "why": "kill_consumer makes worker-dispatcher's lag climb; the check probes the un-faulted world, so the canned backlog cannot match by design"
-    },
-    {
-      "scenario": "dlq_backlog",
-      "tool": "list_dlq_messages",
-      "path": "items[].extra",
-      "kind": "live_only_field",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "dlq_backlog",
-      "tool": "list_dlq_messages",
-      "path": "items[].id[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "dlq_backlog",
-      "tool": "list_dlq_messages",
-      "path": "items[].remediation_hint",
-      "kind": "live_only_field",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "dlq_backlog",
-      "tool": "list_dlq_messages",
-      "path": "items[].trace_id",
-      "kind": "live_only_field",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "dlq_backlog",
-      "tool": "list_dlq_messages",
-      "path": "items[].triage[].confidence[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "dlq_backlog",
-      "tool": "list_dlq_messages",
-      "path": "items[].triage[].root_cause_category",
-      "kind": "live_only_field",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "dlq_backlog",
-      "tool": "list_dlq_messages",
-      "path": "items[].triage[].suggested_fix",
-      "kind": "live_only_field",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "dlq_backlog",
-      "tool": "list_dlq_messages",
-      "path": "items[].type[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "dlq_backlog",
-      "tool": "list_dlq_messages",
-      "path": "items[].updated_at",
-      "kind": "live_only_field",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "dlq_backlog",
-      "tool": "list_dlq_messages",
-      "path": "total",
-      "kind": "value",
-      "context": "fixture-defect"
     },
     {
       "scenario": "dlq_human_required_escalates",
@@ -351,96 +281,12 @@
       "context": "fixture-defect"
     },
     {
-      "scenario": "redis_saturation",
-      "tool": "get_redis_health",
-      "path": "keyspace_hits",
-      "kind": "value",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "redis_saturation",
-      "tool": "get_redis_health",
-      "path": "keyspace_misses",
-      "kind": "value",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "redis_saturation",
-      "tool": "get_redis_health",
-      "path": "used_memory_human",
-      "kind": "value",
-      "context": "fixture-defect"
-    },
-    {
       "scenario": "remediate_consumer_lag_success",
       "tool": "get_consumer_lag",
       "path": "lag",
       "kind": "value",
       "context": "post-fault",
       "why": "same fault, same reason"
-    },
-    {
-      "scenario": "remediate_dlq_backlog_success",
-      "tool": "list_dlq_messages",
-      "path": "items[].extra",
-      "kind": "live_only_field",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "remediate_dlq_backlog_success",
-      "tool": "list_dlq_messages",
-      "path": "items[].id[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "remediate_dlq_backlog_success",
-      "tool": "list_dlq_messages",
-      "path": "items[].remediation_hint",
-      "kind": "live_only_field",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "remediate_dlq_backlog_success",
-      "tool": "list_dlq_messages",
-      "path": "items[].trace_id",
-      "kind": "live_only_field",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "remediate_dlq_backlog_success",
-      "tool": "list_dlq_messages",
-      "path": "items[].triage[].confidence[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "remediate_dlq_backlog_success",
-      "tool": "list_dlq_messages",
-      "path": "items[].triage[].root_cause_category",
-      "kind": "live_only_field",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "remediate_dlq_backlog_success",
-      "tool": "list_dlq_messages",
-      "path": "items[].triage[].suggested_fix",
-      "kind": "live_only_field",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "remediate_dlq_backlog_success",
-      "tool": "list_dlq_messages",
-      "path": "items[].type[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "remediate_dlq_backlog_success",
-      "tool": "list_dlq_messages",
-      "path": "items[].updated_at",
-      "kind": "live_only_field",
-      "context": "fixture-defect"
     },
     {
       "scenario": "remediate_dlq_backlog_success",
@@ -515,27 +361,6 @@
       "kind": "value",
       "context": "post-action",
       "why": "same element, same pause: the live DAG holds no pause, so its TTL is null rather than the fixture's remaining seconds"
-    },
-    {
-      "scenario": "remediate_stale_cache_success",
-      "tool": "get_redis_health",
-      "path": "keyspace_hits",
-      "kind": "value",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "remediate_stale_cache_success",
-      "tool": "get_redis_health",
-      "path": "keyspace_misses",
-      "kind": "value",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "remediate_stale_cache_success",
-      "tool": "get_redis_health",
-      "path": "used_memory_human",
-      "kind": "value",
-      "context": "fixture-defect"
     },
     {
       "scenario": "remediate_verify_fails",

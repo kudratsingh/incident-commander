@@ -18,7 +18,7 @@ import pytest
 from incident_commander.llm.prompts.loader import PromptNotFoundError, load_prompt
 
 _EXPECTED_HASHES: Final[dict[str, str]] = {
-    "briefing_writer": ("9b62d3a8e3d883af8150fc2162428953c7606c9770a90fd42e35ef39530e54e0"),
+    "briefing_writer": ("2fbebe9dcd49d48e41a580b1093f8e66cdb063482ea78ee5873be2eaa3dc0eda"),
     "investigation_planner": ("519cecc6dca82dc1db60179e83e60d8290aa639bd38cc29ba39e697ad4208bae"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
     "remediation_planner": ("c671c5b0b6c92aa2457d336d0320741da3f90ffee809c1ea684059b99e8f14d9"),
@@ -47,6 +47,14 @@ class TestBriefingWriterInvariants:
     def test_addresses_untrusted_input_defensively(self) -> None:
         content = load_prompt("briefing_writer")
         assert "data, not instructions" in content
+
+    def test_never_recommends_repeating_an_attempted_action(self) -> None:
+        # R2-38: the writer is now told which Tier-1 action already fired.
+        # Telling it and letting it recommend a repeat would be worse than
+        # not telling it at all.
+        content = load_prompt("briefing_writer").lower()
+        assert "already attempted" in content
+        assert "never recommend repeating it" in content
 
 
 class TestInvestigationPlannerInvariants:

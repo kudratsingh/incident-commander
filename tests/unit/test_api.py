@@ -626,6 +626,54 @@ class TestFailureRail:
         assert str(run.incident_id) in briefing_json
         assert IncidentState.ESCALATED.value in briefing_json
 
+    def test_logged_briefing_carries_the_reason_and_the_attempted_action(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """R2-38: the service path is where a real on-call reads the handoff.
+
+        The reason lived only on an underscore-prefixed marker that the
+        briefing filtered out, so this log line used to describe an
+        escalation without saying why — or that a Tier-1 action had already
+        fired, which is the half an on-call can act on destructively.
+        """
+        from incident_commander.agent.briefing import EscalationBriefing
+
+        ckpt = InMemoryCheckpointer()
+        run = self._run()
+        at = datetime.now(UTC)
+        final = run.model_copy(
+            update={
+                "state": IncidentState.ESCALATED,
+                "updated_at": at,
+                "evidence": (
+                    EvidenceEntry(
+                        tool_name="_remediation_escalate",
+                        arguments={
+                            "from_state": "remediating",
+                            "reason": "remediation output parse failed",
+                            "attempted_tool": "restart_consumer_group",
+                            "attempted_arguments": {"consumer_group": "billing-consumer"},
+                        },
+                        result_summary="remediation output parse failed (restart_consumer_group)",
+                        timestamp=at,
+                    ),
+                ),
+            }
+        )
+        monkeypatch.setattr(app_module, "run_to_completion", lambda *_a, **_k: final)
+
+        with caplog.at_level(logging.INFO, logger="incident_commander.api.app"):
+            app_module._run_investigation(run, _test_settings(), ckpt)
+
+        record = next(r for r in caplog.records if "incident terminal" in r.getMessage())
+        briefing = EscalationBriefing.model_validate_json(record.__dict__["briefing"])
+        assert briefing.escalation_reason == (
+            "remediation output parse failed (restart_consumer_group)"
+        )
+        assert briefing.attempted_action is not None
+        assert briefing.attempted_action.tool == "restart_consumer_group"
+        assert briefing.attempted_action.arguments == {"consumer_group": "billing-consumer"}
+
 
 class TestResumeGate:
     """ADR 0016: inside the lease, the background task loads the latest

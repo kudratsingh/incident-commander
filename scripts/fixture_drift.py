@@ -23,7 +23,13 @@ from pathlib import Path
 import httpx
 
 from evals.fixture_drift import canned_calls
-from evals.fixture_drift_ledger import classify, defect_count, dump_ledger, load_ledger
+from evals.fixture_drift_ledger import (
+    classify,
+    defect_count,
+    dump_ledger,
+    load_ledger,
+    split_for_bless,
+)
 from evals.fixture_probe import UnseededPlatformError, probe_live
 from evals.scenarios.loader import load_scenarios
 
@@ -130,11 +136,31 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  UNCHECKED {error.scenario}:{error.tool} — {error.detail}")
 
     if args.bless:
-        count = dump_ledger(result.drifts)
+        if result.errors:
+            # The ledger IS the burn-down list. Rewriting it from a run that
+            # could not read part of the suite deletes entries nothing
+            # disproved, and the deletion is silent — the file just gets
+            # shorter, which is what progress looks like.
+            print(
+                f"ERROR: refusing to bless — {len(result.errors)} fixture(s) could not be "
+                "probed (listed above), and a run that did not read them cannot say "
+                "whether their ledger entries still hold. Fix the probe failures and "
+                "re-run.",
+                file=sys.stderr,
+            )
+            return 2
+        before = load_ledger()
+        carried, disproved = split_for_bless(
+            {drift.key for drift in result.drifts}, before, result.compared
+        )
+        count = dump_ledger(result.drifts, checked=result.compared)
         defects = defect_count()
         print(f"wrote {count} known-drift entries to evals/fixture-drift-ledger.json")
         print(f"  {defects} are fixture defects — the burn-down number")
         print(f"  {count - defects} are explained (post-fault / canned-only) and are NOT work")
+        print(f"  {len(disproved)} dropped: probed this run and no longer drifting")
+        for key in carried:
+            print(f"  CARRIED {key} — not probed this run, so nothing disproved it")
         print("git add + commit the ledger to bless the current fixture state.")
         return 0
 

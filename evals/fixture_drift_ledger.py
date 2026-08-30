@@ -24,10 +24,10 @@ justified.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from evals.fixture_drift import Drift
 
@@ -138,7 +138,18 @@ def load_ledger(path: Path | None = None) -> frozenset[DriftKey]:
 
 
 def load_entries(path: Path | None = None) -> list[LedgerEntry]:
-    """Recorded drift with its context, newest format or the original arrays."""
+    """Recorded drift with its context, newest format or the original arrays.
+
+    Context comes from ``context_of`` for EVERY row, whichever format it is
+    written in. It used to come from the file for dict rows and from the
+    code for array rows, which made ``defect_count`` answer differently
+    depending on when a row was written: absolving an entry in ``_JUSTIFIED``
+    left the burn-down number unmoved, because the number was reading the
+    file's copy of a decision the code had already changed. The code is the
+    authority on classification and the file records it — a disagreement
+    between the two means the file is stale, which is a re-bless, and
+    ``test_the_committed_contexts_agree_with_the_code`` is what says so.
+    """
     target = path or LEDGER_PATH
     if not target.exists():
         return []
@@ -147,7 +158,6 @@ def load_entries(path: Path | None = None) -> list[LedgerEntry]:
     for row in payload.get("known_drift", []):
         if isinstance(row, list) and len(row) == 4:
             key = (str(row[0]), str(row[1]), str(row[2]), str(row[3]))
-            context, why = context_of(key)
         elif isinstance(row, dict):
             key = (
                 str(row["scenario"]),
@@ -155,9 +165,9 @@ def load_entries(path: Path | None = None) -> list[LedgerEntry]:
                 str(row["path"]),
                 str(row["kind"]),
             )
-            context, why = str(row.get("context", FIXTURE_DEFECT)), str(row.get("why", ""))
         else:
             continue
+        context, why = context_of(key)
         entries.append(LedgerEntry(key=key, context=context, why=why))
     return entries
 
@@ -173,10 +183,63 @@ def defect_count(path: Path | None = None) -> int:
     return sum(1 for entry in load_entries(path) if entry.is_defect)
 
 
-def dump_ledger(drifts: Iterable[Drift], path: Path | None = None) -> int:
-    """Write the ledger from an observed drift set. Returns the entry count."""
+def split_for_bless(
+    observed: Collection[DriftKey],
+    prior: Collection[DriftKey],
+    checked: Collection[tuple[str, str]],
+) -> tuple[tuple[DriftKey, ...], tuple[DriftKey, ...]]:
+    """``(carried, disproved)`` for the prior entries this run did not observe.
+
+    An entry is DISPROVED only when this run actually probed its fixture and
+    found no disagreement — that is the ratchet turning, and its line has to
+    go. An entry whose fixture the run never reached is CARRIED: the run
+    took no reading, so it holds no opinion, and deleting on no opinion is
+    how a transient 502 quietly shortens the burn-down list.
+
+    ``checked`` is per ``(scenario, tool)`` because that is the unit the
+    probe reports coverage in; the ledger's finer ``(path, kind)`` split is
+    within one reading of one fixture.
+    """
+    reached = set(checked)
+    seen = set(observed)
+    unobserved = [key for key in prior if key not in seen]
+    carried = tuple(sorted(key for key in unobserved if (key[0], key[1]) not in reached))
+    disproved = tuple(sorted(key for key in unobserved if (key[0], key[1]) in reached))
+    return carried, disproved
+
+
+def dump_ledger(
+    drifts: Iterable[Drift],
+    path: Path | None = None,
+    *,
+    checked: Collection[tuple[str, str]] = (),
+) -> int:
+    """Write the ledger from an observed drift set. Returns the entry count.
+
+    ``checked`` is the coverage the run established — the ``(scenario,
+    tool)`` pairs it actually read back from the platform. Entries this run
+    did not cover are carried over rather than dropped, so a bless can only
+    remove an entry it disproved. The default is the conservative one: a
+    caller that says nothing about coverage has established nothing and may
+    delete nothing.
+
+    Keys this module does not own are preserved verbatim. ``_blessed_against``
+    is the one that matters — it records which platform state the file was
+    blessed against, and so whether a local disagreement is about the
+    fixtures or about a developer's postgres volume — and every bless used
+    to drop it.
+    """
     target = path or LEDGER_PATH
-    keys = sorted({drift.key for drift in drifts})
+    existing: dict[str, Any] = {}
+    if target.exists():
+        loaded = json.loads(target.read_text())
+        if isinstance(loaded, dict):
+            existing = loaded
+    observed = {drift.key for drift in drifts}
+    carried, _disproved = split_for_bless(
+        observed, [entry.key for entry in load_entries(target)], checked
+    )
+    keys = sorted(observed | set(carried))
     rows = []
     for key in keys:
         context, why = context_of(key)
@@ -191,43 +254,41 @@ def dump_ledger(drifts: Iterable[Drift], path: Path | None = None) -> int:
             row["why"] = why
         rows.append(row)
     defects = sum(1 for row in rows if row["context"] == FIXTURE_DEFECT)
-    target.write_text(
-        json.dumps(
-            {
-                "_comment": (
-                    "Known canned-vs-live fixture drift, recorded when the drift check "
-                    "was introduced. This file may only SHRINK: evals/fixture_drift_ledger.py "
-                    "fails on drift not listed here AND on entries listed here that are no "
-                    "longer observed. Regenerate with `make fixture-drift-bless` against the "
-                    "pinned platform; never hand-edit."
+    payload: dict[str, Any] = {
+        **existing,
+        **{
+            "_comment": (
+                "Known canned-vs-live fixture drift, recorded when the drift check "
+                "was introduced. This file may only SHRINK: evals/fixture_drift_ledger.py "
+                "fails on drift not listed here AND on entries listed here that are no "
+                "longer observed. Regenerate with `make fixture-drift-bless` against the "
+                "pinned platform; never hand-edit."
+            ),
+            "_context": {
+                FIXTURE_DEFECT: "the recording is wrong — this is work",
+                POST_FAULT: (
+                    "the scenario seeds a fault and the check probes the un-faulted "
+                    "world; not a defect and must not be 'fixed'"
                 ),
-                "_context": {
-                    FIXTURE_DEFECT: "the recording is wrong — this is work",
-                    POST_FAULT: (
-                        "the scenario seeds a fault and the check probes the un-faulted "
-                        "world; not a defect and must not be 'fixed'"
-                    ),
-                    POST_ACTION: (
-                        "the fixture element records the world after the agent's own "
-                        "remediation and the check probes the world before it; "
-                        "unfixable by construction and must not be 'fixed'"
-                    ),
-                    CANNED_ONLY: (
-                        "the scenario never runs live, so its recordings are its premise "
-                        "rather than a recording of anything"
-                    ),
-                },
-                "_counts": {
-                    "recorded": len(rows),
-                    FIXTURE_DEFECT: defects,
-                    "explained": len(rows) - defects,
-                },
-                "known_drift": rows,
+                POST_ACTION: (
+                    "the fixture element records the world after the agent's own "
+                    "remediation and the check probes the world before it; "
+                    "unfixable by construction and must not be 'fixed'"
+                ),
+                CANNED_ONLY: (
+                    "the scenario never runs live, so its recordings are its premise "
+                    "rather than a recording of anything"
+                ),
             },
-            indent=2,
-        )
-        + "\n"
-    )
+            "_counts": {
+                "recorded": len(rows),
+                FIXTURE_DEFECT: defects,
+                "explained": len(rows) - defects,
+            },
+            "known_drift": rows,
+        },
+    }
+    target.write_text(json.dumps(payload, indent=2) + "\n")
     return len(keys)
 
 

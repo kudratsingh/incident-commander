@@ -15,6 +15,7 @@ import httpx
 import pytest
 
 from evals.fixture_drift import Drift
+from evals.fixture_drift_ledger import LEDGER_PATH
 from evals.fixture_probe import ProbeError, ProbeResult
 from scripts import fixture_drift as cli
 
@@ -91,3 +92,59 @@ class TestReadinessGate:
         _scripted(monkeypatch, [httpx.ConnectError("[Errno 61] Connection refused")])
         assert cli.main(["--await-fixtures", "0"]) == 2
         assert "Connection refused" in capsys.readouterr().err
+
+
+class TestBlessRefusesOnAnUnprobedFixture:
+    """The ledger may only shrink on evidence, and an error is not evidence.
+
+    ``--bless`` rewrote the whole ledger from the drift observed in one run,
+    including runs where ``result.errors`` said some fixtures were never
+    reached. Every ledger entry for an unreached fixture then vanished — a
+    silent deletion of work nobody had disproved, in the file that IS the
+    burn-down list.
+    """
+
+    def test_bless_refuses_and_leaves_the_ledger_untouched(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        platform_env: None,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        before = LEDGER_PATH.read_bytes()
+        written: list[Any] = []
+        monkeypatch.setattr(cli, "dump_ledger", lambda *a, **k: written.append((a, k)))
+        _scripted(
+            monkeypatch,
+            [
+                _result(
+                    errors=(ProbeError(scenario="s", tool="get_consumer_lag", detail="HTTP 502"),),
+                    compared=(("other", "get_redis_health"),),
+                )
+            ],
+        )
+
+        assert cli.main(["--bless"]) == 2
+        assert written == [], "the ledger was rewritten from an incomplete run"
+        assert LEDGER_PATH.read_bytes() == before
+        assert "refusing to bless" in capsys.readouterr().err
+
+    def test_bless_proceeds_when_every_fixture_was_probed(
+        self, monkeypatch: pytest.MonkeyPatch, platform_env: None
+    ) -> None:
+        before = LEDGER_PATH.read_bytes()
+        written: list[Any] = []
+
+        def fake_dump(drifts: Any, path: Any = None, **kwargs: Any) -> int:
+            written.append((tuple(drifts), kwargs))
+            return len(tuple(drifts))
+
+        monkeypatch.setattr(cli, "dump_ledger", fake_dump)
+        drift = Drift(scenario="s", tool="get_consumer_lag", path="lag", kind="value")
+        _scripted(monkeypatch, [_result(drifts=(drift,), compared=(("s", "get_consumer_lag"),))])
+
+        assert cli.main(["--bless"]) == 0
+        assert len(written) == 1
+        # The coverage the run actually established is what licenses a
+        # deletion, so it has to reach the writer.
+        assert written[0][1]["checked"] == (("s", "get_consumer_lag"),)
+        assert LEDGER_PATH.read_bytes() == before

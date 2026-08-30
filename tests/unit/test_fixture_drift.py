@@ -656,6 +656,96 @@ class TestProbeErrorChannels:
         assert result.compared == ()
 
 
+class TestBlessOnlyDropsWhatTheRunDisproved:
+    """The ledger is the burn-down list, so a bless may not shrink it by accident.
+
+    ``dump_ledger`` wrote the whole file from the drift observed in one run.
+    Any entry whose fixture that run did not reach — a 502, a scenario that
+    errored, anything the probe never compared — simply vanished, which is a
+    silent deletion of work nobody disproved. A ratchet that can also be
+    turned by a flake is not a ratchet.
+    """
+
+    def _drift(self, scenario: str, tool: str, path: str = "lag") -> Drift:
+        return Drift(scenario=scenario, tool=tool, path=path, kind="value")
+
+    def _prior(self, path: Path, *keys: tuple[str, str, str, str], **extra: Any) -> None:
+        path.write_text(
+            json.dumps(
+                {
+                    "_comment": "prior",
+                    **extra,
+                    "known_drift": [
+                        {"scenario": k[0], "tool": k[1], "path": k[2], "kind": k[3]} for k in keys
+                    ],
+                }
+            )
+        )
+
+    def test_an_entry_this_run_never_probed_is_carried_over(self, tmp_path: Path) -> None:
+        path = tmp_path / "ledger.json"
+        reached = ("scenario_a", "get_consumer_lag", "lag", "value")
+        unreached = ("scenario_b", "get_redis_health", "used_memory_human", "value")
+        self._prior(path, reached, unreached)
+
+        dump_ledger(
+            [self._drift("scenario_a", "get_consumer_lag")],
+            path,
+            checked=[("scenario_a", "get_consumer_lag")],
+        )
+
+        assert unreached in load_ledger(path), "an unprobed entry was deleted without evidence"
+        assert reached in load_ledger(path)
+
+    def test_an_entry_this_run_disproved_is_dropped(self, tmp_path: Path) -> None:
+        # The ratchet still turns: a fixture that WAS probed and no longer
+        # disagrees loses its line, which is the whole point of the file.
+        path = tmp_path / "ledger.json"
+        fixed = ("scenario_a", "get_consumer_lag", "lag", "value")
+        self._prior(path, fixed)
+
+        dump_ledger([], path, checked=[("scenario_a", "get_consumer_lag")])
+
+        assert load_ledger(path) == frozenset()
+
+    def test_the_default_is_the_conservative_one(self, tmp_path: Path) -> None:
+        # A caller that does not say what it probed has established nothing,
+        # so it may delete nothing.
+        path = tmp_path / "ledger.json"
+        entry = ("scenario_a", "get_consumer_lag", "lag", "value")
+        self._prior(path, entry)
+        dump_ledger([], path)
+        assert entry in load_ledger(path)
+
+    def test_a_carried_entry_keeps_its_context_from_the_code(self, tmp_path: Path) -> None:
+        path = tmp_path / "ledger.json"
+        justified = ("consumer_lag_high", "get_consumer_lag", "lag", "value")
+        self._prior(path, justified)
+        dump_ledger([], path)
+        rows = json.loads(path.read_text())["known_drift"]
+        assert [(r["context"], "kill_consumer" in r["why"]) for r in rows] == [(POST_FAULT, True)]
+
+    def test_a_round_trip_preserves_keys_this_module_does_not_own(self, tmp_path: Path) -> None:
+        # `_blessed_against` records WHICH platform state the file was
+        # blessed against — the one thing that says whether a local
+        # disagreement is about the fixtures or about your postgres volume.
+        # Every bless silently dropped it.
+        path = tmp_path / "ledger.json"
+        self._prior(
+            path,
+            ("scenario_a", "get_consumer_lag", "lag", "value"),
+            _blessed_against="a freshly seeded stack (CI's contract job)",
+        )
+        dump_ledger([self._drift("scenario_a", "get_consumer_lag")], path, checked=[])
+        payload = json.loads(path.read_text())
+        assert payload["_blessed_against"] == "a freshly seeded stack (CI's contract job)"
+        assert payload["_comment"].startswith("Known canned-vs-live fixture drift")
+
+    def test_a_first_bless_needs_no_prior_file(self, tmp_path: Path) -> None:
+        path = tmp_path / "absent.json"
+        assert dump_ledger([self._drift("s", "get_consumer_lag")], path, checked=[]) == 1
+
+
 class TestLedgerContext:
     """Not every recorded disagreement is work, and the number has to say so."""
 
@@ -709,6 +799,43 @@ class TestLedgerContext:
         assert counts["recorded"] == len(payload["known_drift"])
         assert counts[FIXTURE_DEFECT] == defect_count()
         assert counts["explained"] == counts["recorded"] - counts[FIXTURE_DEFECT]
+
+    def test_the_committed_contexts_agree_with_the_code(self) -> None:
+        """The file is a projection of `_JUSTIFIED`, and has to stay one.
+
+        `_JUSTIFIED` is where a human records the mechanism that makes a
+        disagreement not-work; the ledger's per-row `context` is that
+        decision written down for whoever opens the file. Nothing asserted
+        the two still said the same thing, so a re-classification in code
+        could sit next to a file that contradicted it indefinitely.
+        """
+        from evals.fixture_drift_ledger import LEDGER_PATH
+
+        stale = []
+        for row in json.loads(LEDGER_PATH.read_text())["known_drift"]:
+            key = (row["scenario"], row["tool"], row["path"], row["kind"])
+            recorded = (row["context"], row.get("why", ""))
+            if recorded != context_of(key):
+                stale.append((key, recorded, context_of(key)))
+        assert stale == [], (
+            f"the committed ledger disagrees with _JUSTIFIED: {stale}. "
+            "Re-bless with `make fixture-drift-bless`."
+        )
+
+    def test_a_reclassification_in_code_moves_the_burn_down_number(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Absolving an entry in code must remove it from the work list.
+
+        `load_entries` read a dict row's context from the FILE while reading
+        an array row's from `_JUSTIFIED`, so deciding in code that an entry
+        was post-fault changed nothing the burn-down number could see. The
+        code is the authority on classification; the file records it.
+        """
+        before = defect_count()
+        victim = next(entry.key for entry in load_entries() if entry.is_defect)
+        monkeypatch.setitem(_JUSTIFIED, victim, (POST_FAULT, "hypothetical reclassification"))
+        assert defect_count() == before - 1
 
     def test_the_original_array_format_still_parses(self, tmp_path: Path) -> None:
         # The committed ledger predates the annotated format; a checkout

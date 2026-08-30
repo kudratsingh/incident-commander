@@ -13,7 +13,7 @@ use_live_mcp: true
 use_live_llm: true
 alert:
   source: platform.jobs
-  severity: high
+  severity: critical
   fingerprint: failure_rate_high
 canned_tool_responses:
   search_traces:

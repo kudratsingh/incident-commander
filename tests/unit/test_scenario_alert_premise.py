@@ -6,8 +6,10 @@ arguments at scenario load. The alert — the thing that *starts* every run — 
 checked against nothing at all, and it is the most wrong part of the fixture
 corpus:
 
-* 32 of 38 scenarios declare a severity the platform's alert service rejects
-  outright, so the alert could not be created, let alone delivered.
+* 3 of 38 scenarios declare a severity the platform's alert service rejects
+  outright, so the alert could not be created, let alone delivered. It was 32
+  until WO-R2-45; see ``_SEVERITY_IS_THE_PREMISE`` for what the other 29 were
+  and why these three did not move with them.
 * Every scenario carries top-level fields the alert webhook does not send.
 
 The second one is not a scenario defect. The scenarios are faithful to
@@ -23,11 +25,14 @@ drift in ``list_active_alerts``'s observed value domain.
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Final
 
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
+from incident_commander.agent.state import IncidentState, RunState
+from incident_commander.agent.triage import transition_triage
 from incident_commander.api.schemas import AlertPayload
 
 _SCENARIOS_DIR = Path(__file__).resolve().parents[2] / "evals" / "scenarios"
@@ -62,47 +67,43 @@ def _alert_of(scenario: Scenario) -> dict[str, object]:
     return scenario.alert.model_dump()
 
 
-# Scenarios whose alert declares a severity the platform cannot emit, and the
-# value each uses. Recorded rather than fixed: TRIAGE classifies on severity,
-# so rewriting `high` to `critical` changes what every one of these scenarios
-# tests. That is a deliberate re-calibration, not a find-and-replace, and it
-# belongs in its own change with the grades re-read afterwards.
+# Scenarios that still declare a severity the platform cannot emit, and the
+# value each uses — kept illegal ON PURPOSE.
+#
+# This list held 32 entries until WO-R2-45, which split it by intent (user
+# decision, 2026-08-30). For 29 of them the severity was incidental: it only
+# had to be actionable enough to clear the TRIAGE noise filter so the scenario
+# could get on with testing probe selection, DLQ categorization, remediation,
+# or tool-error handling. Those were rewritten onto the platform's own bands
+# — `high` -> `critical` (the corpus calls `high` "paging severity", and
+# `critical` is the platform's paging band), `medium` -> `warning` (the one
+# scenario that is explicitly "not paging-grade but still actionable"). The
+# rewrite moved no scenario across the noise boundary, which is what
+# ``TestTheSplitPreservedEveryTriageOutcome`` below pins.
+#
+# The three left here are the ones where the severity IS the premise rather
+# than the setup. Each declares `max_tool_calls: 0` and asserts only that
+# TRIAGE escalated: the severity value is the entire input, so rewriting it to
+# `info` would not adapt the scenario, it would delete it and leave a
+# near-duplicate of `noise_info_severity`. `_NOISE_SEVERITIES` in
+# agent/triage.py has three members; `info` is already witnessed by
+# `noise_info_severity` and `noise_info_orders`, and these three are the only
+# witnesses `low` and `unknown` have.
+#
+# Resolving them is a platform-side question and is deliberately NOT decided
+# here: docs/wave4-specs/R2-45-platform-widening.md states the widening and
+# the counter-option (narrow `_NOISE_SEVERITIES` instead, since `low` and
+# `unknown` are unreachable on a live alert either way) for the coordinator's
+# ADR. Note `noise_missing_severity` is not a widening candidate at all — its
+# premise is the field's ABSENCE, and the webhook always sends `severity` from
+# a non-nullable column, so no accepted value can express it.
 #
 # This list may only SHRINK. An entry whose scenario now uses a legal severity
 # fails below, so a fix forces its line out in the same change.
-_ILLEGAL_SEVERITY: Final[dict[str, str]] = {
-    "consumer_lag_healthy_zero": "high",
-    "consumer_lag_high": "high",
-    "consumer_lag_medium": "medium",
-    "consumer_lag_missing_group": "high",
-    "consumer_lag_null_unknown_state": "high",
-    "consumer_lag_orders_high": "high",
-    "deploy_correlation": "high",
-    "dlq_backlog": "high",
-    "dlq_human_required_escalates": "high",
-    "dlq_mixed_partial": "high",
-    "dlq_replay_safe_success": "high",
-    "dlq_wait_and_replay_success": "high",
-    "failed_traces_scan": "high",
-    "incidents_overview": "high",
-    "multi_probe_billing": "high",
-    "multi_probe_hypothesis_evolution": "high",
+_SEVERITY_IS_THE_PREMISE: Final[dict[str, str]] = {
     "noise_low_analytics": "low",
     "noise_low_severity": "low",
     "noise_missing_severity": "unknown",
-    "planner_stops_immediately": "high",
-    "postgres_slow": "high",
-    "redis_saturation": "high",
-    "remediate_consumer_lag_success": "high",
-    "remediate_dlq_backlog_success": "high",
-    "remediate_runaway_saga_success": "high",
-    "remediate_stale_cache_success": "high",
-    "remediate_verify_fails": "high",
-    "saga_stuck": "high",
-    "tool_missing_response": "high",
-    "tool_output_schema_mismatch": "high",
-    "tool_result_marked_error": "high",
-    "trace_investigation": "high",
 }
 
 # Top-level alert keys the scenarios use that the webhook does not send. A
@@ -132,7 +133,7 @@ class TestSeverityIsOneThePlatformCanEmit:
         offenders = {
             s.name: s.alert.severity
             for s in _shipped()
-            if s.alert.severity not in _PLATFORM_SEVERITIES and s.name not in _ILLEGAL_SEVERITY
+            if s.alert.severity not in _PLATFORM_SEVERITIES and s.name not in _SEVERITY_IS_THE_PREMISE
         }
         assert offenders == {}, (
             f"scenario alerts declare severities the platform rejects: {offenders}. "
@@ -148,7 +149,7 @@ class TestSeverityIsOneThePlatformCanEmit:
         by_name = {s.name: s.alert.severity for s in _shipped()}
         wrong = {
             name: (recorded, by_name.get(name))
-            for name, recorded in _ILLEGAL_SEVERITY.items()
+            for name, recorded in _SEVERITY_IS_THE_PREMISE.items()
             if by_name.get(name) != recorded
         }
         assert wrong == {}, f"recorded severity no longer matches (recorded, actual): {wrong}"
@@ -158,20 +159,76 @@ class TestSeverityIsOneThePlatformCanEmit:
         by_name = {s.name: s.alert.severity for s in _shipped()}
         fixed = sorted(
             name
-            for name, _ in _ILLEGAL_SEVERITY.items()
+            for name, _ in _SEVERITY_IS_THE_PREMISE.items()
             if name in by_name and by_name[name] in _PLATFORM_SEVERITIES
         )
         assert fixed == [], f"these now use a legal severity — remove them from the list: {fixed}"
 
     def test_the_list_holds_no_deleted_scenario(self) -> None:
         names = {s.name for s in _shipped()}
-        orphans = sorted(set(_ILLEGAL_SEVERITY) - names)
+        orphans = sorted(set(_SEVERITY_IS_THE_PREMISE) - names)
         assert orphans == [], f"recorded for scenarios that no longer exist: {orphans}"
 
     def test_the_legal_ones_are_actually_legal(self) -> None:
         # Guards against the list quietly becoming the whole suite.
         legal = [s.name for s in _shipped() if s.alert.severity in _PLATFORM_SEVERITIES]
         assert legal, "no scenario uses a severity the platform can emit"
+
+
+class TestTheSplitPreservedEveryTriageOutcome:
+    """WO-R2-45's safety property, pinned rather than asserted in a PR body.
+
+    TRIAGE is the one place severity is load-bearing for control flow: a noise
+    severity escalates without spending a single tool call, anything else goes
+    to INVESTIGATING. So a severity rewrite is only "incidental" if it left the
+    scenario on the same side of that boundary — otherwise it silently deleted
+    the scenario's reason to exist. This drives the real classifier rather than
+    re-stating its constant, so a change to `_NOISE_SEVERITIES` that would
+    re-classify a scenario fails here instead of in a live run.
+    """
+
+    @staticmethod
+    def _classify(scenario: Scenario, run_state: RunState, at: datetime) -> IncidentState:
+        alert = scenario.alert.model_dump()
+        return transition_triage(run_state.model_copy(update={"alert": alert}), at).state
+
+    def test_no_rewritten_scenario_crossed_into_noise(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The 29 incidental rewrites must still reach INVESTIGATING.
+
+        Had one landed on `info`, it would escalate at TRIAGE with
+        `max_tool_calls` unspent and never run the probe it exists to test.
+        """
+        escalated = sorted(
+            s.name
+            for s in _shipped()
+            if s.name not in _SEVERITY_IS_THE_PREMISE
+            and s.expectation.max_tool_calls > 0
+            and self._classify(s, run_state, now) is not IncidentState.INVESTIGATING
+        )
+        assert escalated == [], (
+            f"these budget-spending scenarios now filter as noise at TRIAGE: {escalated}. "
+            "Their severity is not incidental after all — the rewrite changed what they "
+            "test, so they belong in _SEVERITY_IS_THE_PREMISE instead."
+        )
+
+    def test_every_premise_scenario_still_classifies_as_noise(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The other direction: the deferred three must still be noise.
+
+        This is what makes them load-bearing. Each one's whole assertion is
+        that TRIAGE escalated on the severity alone; if one stopped doing that,
+        the entry is no longer describing a premise worth widening for.
+        """
+        not_noise = sorted(
+            name
+            for name in _SEVERITY_IS_THE_PREMISE
+            for s in _shipped()
+            if s.name == name and self._classify(s, run_state, now) is not IncidentState.ESCALATED
+        )
+        assert not_noise == [], f"deferred scenarios that no longer triage as noise: {not_noise}"
 
 
 class TestIngressModelMatchesTheEmitter:

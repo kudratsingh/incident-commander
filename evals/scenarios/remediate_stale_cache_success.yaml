@@ -32,7 +32,7 @@ chaos_setup:
     key: cache:jobs:worker-dispatcher:hot_set
 alert:
   source: platform.cache
-  severity: high
+  severity: critical
   fingerprint: cache_miss_spike
   cache_key: cache:jobs:worker-dispatcher:hot_set
 canned_tool_responses:

@@ -1156,11 +1156,13 @@ _REAL_LOOKING_LIVE_ENV = {
 
 
 # A smoke pass selects chaos-free scenarios, exactly as `make eval-smoke`
-# does (`--only "$(SMOKE_ONLY)"`, Makefile:105-117 — the three remediate_*
-# scenarios are deliberately absent from that list). An unfiltered
-# `--live --smoke` selects all 37 and is refused with exit 6: it would seed
-# chaos under the full write+chaos principal during the read-only stage
-# (S-03). One representative pattern stands in for the full SMOKE_ONLY list.
+# does (`--only "$(SMOKE_ONLY)"` — see the SMOKE_ONLY block in the Makefile;
+# the remediate_* scenarios are deliberately absent from that list). An
+# unfiltered `--live --smoke` selects the whole suite and is refused with
+# exit 6: it would seed chaos under the full write+chaos principal during
+# the read-only stage (S-03). One representative pattern stands in for the
+# full SMOKE_ONLY list; that the list itself covers every eligible scenario
+# is what tests/unit/test_smoke_only_coverage.py checks.
 _SMOKE_ONLY_ARGS = ["--only", "consumer_lag_healthy,tool_"]
 
 

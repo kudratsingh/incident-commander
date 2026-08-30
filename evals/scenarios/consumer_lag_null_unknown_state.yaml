@@ -68,8 +68,6 @@ canned_llm_responses:
 expectation:
   name: consumer_lag_null_unknown_state
   expected_terminal_state: escalated
-  expected_evidence_contains:
-  - cache_key
   # The null has to survive parse -> evidence: a regression that coerced null
   # to 0 (or dropped the field) fails here rather than grading a fabricated
   # healthy reading (S-21). Structural rather than the `"lag":null` substring

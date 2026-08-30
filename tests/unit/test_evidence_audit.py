@@ -24,6 +24,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
+from pydantic import ValidationError
+
 from evals.evidence_audit import (
     audit_evidence_scoping,
     reachable_field_names,
@@ -48,6 +51,13 @@ _DLQ_WITH_TRACE_IDS = (
     '{"total":1,"items":[{"id":"aaaaaaaa-0000-0000-0000-000000000001",'
     '"type":"send_email","retry_count":3,"created_at":"2026-08-16T10:00:00Z",'
     '"trace_id":"trace-1a2b"}]}'
+)
+
+# SearchTracesOutput-shaped, carrying the SAME trace id the DLQ fixture does —
+# the value-level half of the cross-satisfiability defect.
+_SEARCH_TRACES_WITH_SHARED_ID = (
+    '{"matches":[{"trace_id":"trace-1a2b","job_id":"job-a","job_type":"send_email",'
+    '"status":"failed","created_at":"2026-08-16T10:05:00Z"}]}'
 )
 
 
@@ -132,21 +142,35 @@ class TestRenderedCannedEvidence:
 
 
 class TestAuditFlagsTheDefectClass:
-    def test_the_failed_traces_scan_token_is_flagged(self) -> None:
-        # The original defect, reconstructed: `trace` is satisfiable by the
-        # DLQ listing (and get_trace) as well as by search_traces.
-        scenarios = [
+    def test_the_original_token_never_reaches_the_audit_now(self) -> None:
+        # The original defect, reconstructed. `trace` is a substring of the
+        # `trace_id` FIELD NAME, and since WO-R2-34 the schema refuses key
+        # text outright — one layer earlier than this audit. The two layers
+        # divide cleanly: the schema refuses tokens matched by a key, the
+        # audit refuses VALUES that two or more tools could produce.
+        with pytest.raises(ValidationError, match="key text, not value text"):
             _scenario(
                 "failed_traces_scan_shape",
                 {"search_traces": _text_result('{"matches":[]}')},
                 tokens=("trace",),
+            )
+
+    def test_a_value_two_tools_could_produce_is_flagged(self) -> None:
+        # The half the schema cannot see: `trace-1a2b` is a value, not key
+        # text, and it appears in BOTH search_traces and list_dlq_messages
+        # renderings — so it still cannot prove which tool ran.
+        scenarios = [
+            _scenario(
+                "failed_traces_scan_shape",
+                {"search_traces": _text_result(_SEARCH_TRACES_WITH_SHARED_ID)},
+                tokens=("trace-1a2b",),
             ),
             _scenario("other", {"list_dlq_messages": _text_result(_DLQ_WITH_TRACE_IDS)}),
         ]
         violations = audit_evidence_scoping(scenarios)
         assert len(violations) == 1
         assert "failed_traces_scan_shape" in violations[0]
-        assert "'trace'" in violations[0]
+        assert "'trace-1a2b'" in violations[0]
         assert "list_dlq_messages" in violations[0]
         assert "search_traces" in violations[0]
         assert "expected_evidence_fields" in violations[0]
@@ -158,9 +182,16 @@ class TestAuditFlagsTheDefectClass:
         assert audit_evidence_scoping(scenarios) == []
 
     def test_tokens_unique_to_one_tool_stay_legal(self) -> None:
-        # `keyspace` only appears in get_redis_health's field names; a
-        # single-satisfier token still proves which tool ran.
-        scenarios = [_scenario("redis_shape", {}, tokens=("keyspace",))]
+        # A single-satisfier VALUE still proves which tool ran, so the audit
+        # leaves it alone. (Single-satisfier field NAMES no longer reach here
+        # — the schema refuses them as key text.)
+        scenarios = [
+            _scenario(
+                "dlq_shape",
+                {"list_dlq_messages": _text_result(_DLQ_WITH_TRACE_IDS)},
+                tokens=("trace-1a2b",),
+            )
+        ]
         assert audit_evidence_scoping(scenarios) == []
 
     def test_satisfiable_by_reports_field_name_reach_without_fixtures(self) -> None:
@@ -203,16 +234,20 @@ class TestFailedTracesScanRegression:
                 timestamp=now,
             ),
         )
-        old_expectation = ScenarioExpectation(
-            name="failed_traces_scan",
-            expected_terminal_state=IncidentState.ESCALATED,
-            expected_evidence_contains=("trace",),
-        )
         run = self._run(run_state, evidence)
-        # The pre-sweep expectation graded this run green — the wrong-reason
-        # pass the 2026-08-16 dress rehearsal caught.
-        assert _dim(grade(run, old_expectation), GradeDimension.EVIDENCE).passed is True
-        # The shipped, tool-scoped expectation refuses it.
+        # The pre-sweep expectation — `expected_evidence_contains: [trace]` —
+        # graded this run green: the wrong-reason pass the 2026-08-16 dress
+        # rehearsal caught. It is unbuildable now (key text), so the defect is
+        # pinned on the corpus it exploited rather than through the schema.
+        corpus = " ".join(e.result_summary for e in run.evidence)
+        assert "trace" in corpus
+        with pytest.raises(ValidationError, match="key text, not value text"):
+            ScenarioExpectation(
+                name="failed_traces_scan",
+                expected_terminal_state=IncidentState.ESCALATED,
+                expected_evidence_contains=("trace",),
+            )
+        # The shipped, tool-scoped expectation refuses the run itself.
         shipped = self._shipped_scenario().expectation
         result = _dim(grade(run, shipped), GradeDimension.EVIDENCE)
         assert result.passed is False

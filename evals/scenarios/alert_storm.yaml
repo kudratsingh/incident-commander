@@ -77,6 +77,18 @@ canned_llm_responses:
 expectation:
   name: alert_storm
   expected_terminal_state: escalated
-  expected_evidence_contains:
-  - alert
+  # The probe must have SUCCEEDED, not merely been attempted. The previous
+  # assertion was the substring `alert`, which the transport-failure
+  # escalation text `tool error (list_active_alerts): ...` also contains — so
+  # a run in which every probe failed graded PASS on the one dimension that
+  # exists to say what the agent saw. These read the parsed response, which
+  # only exists when the call came back and validated.
+  expected_evidence_fields:
+  - tools: [list_active_alerts]
+    field: total
+    at_least: 1
+  # A count alone could be reported with no rows; assert a row came back too.
+  - tools: [list_active_alerts]
+    field: alerts[].severity
+    is_null: false
   max_tool_calls: 10

@@ -60,6 +60,12 @@ canned_llm_responses:
 expectation:
   name: consumer_lag_missing_group
   expected_terminal_state: escalated
-  expected_evidence_contains:
-  - cache_key
+  # An unresolvable group answers with lag null, not with an error — the
+  # distinction the scenario exists to grade. `cache_key` said only that the
+  # tool serialized its cache_key field, which is equally true of a real
+  # reading; only the parsed null tells the two apart.
+  expected_evidence_fields:
+  - tools: [get_consumer_lag]
+    field: lag
+    is_null: true
   max_tool_calls: 5

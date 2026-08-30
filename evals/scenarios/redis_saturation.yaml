@@ -58,6 +58,14 @@ canned_llm_responses:
 expectation:
   name: redis_saturation
   expected_terminal_state: escalated
-  expected_evidence_contains:
-  - keyspace
+  # `keyspace` was matched by the `keyspace_hits`/`keyspace_misses` KEYS,
+  # so it held for a perfectly healthy Redis. The scenario is about cache
+  # saturation: assert the probe came back and that misses are real.
+  expected_evidence_fields:
+  - tools: [get_redis_health]
+    field: ok
+    equals: true
+  - tools: [get_redis_health]
+    field: keyspace_misses
+    at_least: 1
   max_tool_calls: 5

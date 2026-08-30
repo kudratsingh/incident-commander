@@ -60,6 +60,15 @@ canned_llm_responses:
 expectation:
   name: dlq_backlog
   expected_terminal_state: escalated
-  expected_evidence_contains:
-  - items
+  # `items` is the list KEY, present on an empty queue too — the scenario
+  # graded green on a DLQ with nothing in it. Assert the backlog is real and
+  # that the stuck jobs are retry-exhausted, which is the premise the
+  # briefing reasons from.
+  expected_evidence_fields:
+  - tools: [list_dlq_messages]
+    field: total
+    at_least: 1
+  - tools: [list_dlq_messages]
+    field: items[].retry_count
+    at_least: 1
   max_tool_calls: 5

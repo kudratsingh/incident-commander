@@ -102,15 +102,20 @@ expectation:
   name: remediate_runaway_saga_success
   expected_terminal_state: resolved
   expected_action_tools: [pause_dag]
-  expected_evidence_contains:
-  - pause_key
+  # `pause_key` was the bare field name pause_dag always emits, so it went
+  # green on any pause_dag response — including a refusal. The accepted flag
+  # below is the platform's own answer, and `paused` further down is the
+  # observable effect read back from get_dag_state.
+  expected_evidence_fields:
+  - tools: [pause_dag]
+    field: accepted
+    equals: true
   # v0.4.9 observable effect, now structural (A-10). PR #64 replaced the
   # fake-green `verified` assert with the `"paused":true` fragment, which is
   # the serializer-dependent shape grader-calibration rule 2 forbids. The
   # parsed field says the same thing without pinning the serialization.
   # `which: any` (the default): the pre-action get_dag_state reads
   # paused=false and the verify probe reads paused=true.
-  expected_evidence_fields:
   - tools: [get_dag_state]
     field: paused
     equals: true

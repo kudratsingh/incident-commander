@@ -86,9 +86,19 @@ expectation:
   name: remediate_verify_fails
   expected_terminal_state: escalated
   expected_action_tools: [restart_consumer_group]
+  # `not_verified` stays a substring: it is a verdict written as prose by
+  # the verify judge, not a serialized field, and it is discriminating
+  # (NOT a substring of `verified: ...`). `kill_key_cleared` was the bare
+  # field name and is now the structured assertion below.
   expected_evidence_contains:
-  - kill_key_cleared
   - not_verified
+  # The restart was accepted and cleared the kill switch — and the run STILL
+  # escalates because verify fails. That pairing is the whole scenario, and
+  # the key-text assert could not see the first half of it.
+  expected_evidence_fields:
+  - tools: [restart_consumer_group]
+    field: kill_key_cleared
+    equals: true
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
   # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
   # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. Cap 13 is the

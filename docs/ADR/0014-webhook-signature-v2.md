@@ -1,6 +1,6 @@
 # ADR 0014: Webhook signature scheme v2 (timestamp-bound HMAC) and replay-window semantics
 
-* Status: accepted
+* Status: accepted; the **v2 scheme** it defines is superseded by [ADR 0023](0023-nonce-bound-webhook-signatures.md) — the platform shipped a nonce-bound composition instead, and `sign_v2`/`verify_v2` are gone. The header-name unification, the skew window and the legacy duplicate-suppression decisions below remain in force.
 * Date: 2026-08-09
 * Decider: Kudrat Singh
 

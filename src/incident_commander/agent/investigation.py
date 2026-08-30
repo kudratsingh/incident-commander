@@ -41,6 +41,19 @@ from incident_commander.tools.registry import TOOL_REGISTRY, description_of
 from incident_commander.tools.wire import wire_arguments
 
 _TOOL_NAME: Final[str] = "get_consumer_lag"
+# The bookkeeping marker for a Phase-1 escalation, distinct from the tool
+# that failed. Underscore-prefixed on purpose: that prefix is the repo-wide
+# convention for "this evidence entry is a marker, not a probe result", and
+# it is what `briefing._terminal_marker` reads a reason from and what the
+# trail filter excludes. Recording an escalation under the *tool's* name
+# lost the reason at the handoff and put a failed call in the trail as if it
+# had returned data (WO-R2-119).
+#
+# Renaming the marker rather than widening the recognizer is deliberate: the
+# success path below also ends ESCALATED, with a real `get_consumer_lag`
+# result as its last entry, so a recognizer that accepted non-underscore
+# markers would report that probe's JSON as the reason the agent gave up.
+_ESCALATION_MARKER: Final[str] = "_investigate_escalate"
 _DEFAULT_MAX_ITERATIONS: Final[int] = 5
 _REMEDIATE_CONFIDENCE_THRESHOLD: Final[float] = 0.7
 
@@ -131,7 +144,7 @@ def _escalate(
     run_state: RunState, at: datetime, reason: str, arguments: dict[str, Any]
 ) -> RunState:
     entry = EvidenceEntry(
-        tool_name=_TOOL_NAME,
+        tool_name=_ESCALATION_MARKER,
         arguments=arguments,
         result_summary=reason,
         timestamp=at,

@@ -22,6 +22,12 @@ the world must not hold a principal that can change it. Tier-1 fixtures are
 additionally never probed — probing ``replay_dlq_by_category`` to see what it
 returns would replay the DLQ. The scope is the boundary; the filter is so a
 bug fails loudly instead of at the platform.
+
+That filter is asserted in ``tests/unit/test_fixture_probe_scope.py``, not
+here (WO-R2-122). It needs no platform, and the module-level skipif below
+meant the guard against probing a Tier-1 tool only ever ran in the
+environment where probing one would have done real damage. Everything left
+in this module genuinely needs the live stack.
 """
 
 from __future__ import annotations
@@ -33,9 +39,8 @@ import pytest
 
 from evals.fixture_drift import canned_calls
 from evals.fixture_drift_ledger import LEDGER_PATH, classify, load_ledger
-from evals.fixture_probe import probe_live, read_tier_calls
+from evals.fixture_probe import probe_live
 from evals.scenarios.loader import load_scenarios
-from incident_commander.tools.policies import Tier, tier_of
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCENARIOS_DIR = _REPO_ROOT / "evals" / "scenarios"
@@ -114,14 +119,3 @@ def test_the_walk_is_not_vacuous(probe) -> None:  # type: ignore[no-untyped-def]
     """Floors, so a loader or schema change cannot silently empty the check."""
     assert probe.checked >= 20, f"only {probe.checked} fixtures checked; the walk shrank"
     assert probe.live_calls >= 10, f"only {probe.live_calls} live calls made"
-
-
-def test_no_tier1_tool_is_ever_probed() -> None:
-    """The filter half of the two guards. The scope is the real boundary."""
-    calls = canned_calls(load_scenarios(_SCENARIOS_DIR))
-    probed = read_tier_calls(calls)
-    offenders = sorted({c.tool for c in probed if tier_of(c.tool) is not Tier.READ})
-    assert offenders == [], f"drift check would probe non-read tools: {offenders}"
-    # And the suite really does carry Tier-1 fixtures, so the filter is doing
-    # work rather than trivially passing over an all-read corpus.
-    assert any(tier_of(c.tool) is not Tier.READ for c in calls)

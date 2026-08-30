@@ -66,8 +66,10 @@ def anyio_backend() -> str:
 @pytest.fixture(autouse=True)
 def _fresh_replay_cache() -> Iterator[None]:
     app_module._replay_cache.clear()
+    app_module._nonce_cache.clear()
     yield
     app_module._replay_cache.clear()
+    app_module._nonce_cache.clear()
 
 
 def _test_settings(**overrides: Any) -> Settings:

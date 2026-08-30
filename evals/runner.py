@@ -1104,7 +1104,7 @@ def _eval_defaults() -> Settings:
     return Settings(  # type: ignore[call-arg]
         _env_file=None,
         anthropic_api_key=SecretStr("eval"),
-        judge_model="eval-judge",
+        judge_model="claude-haiku-4-5",
         platform_mcp_url=AnyHttpUrl("https://eval.local"),
         platform_rest_url=AnyHttpUrl("https://eval.local"),
         platform_token=SecretStr("eval"),

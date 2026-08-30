@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
 import time
@@ -40,10 +42,12 @@ def _test_settings(**overrides: Any) -> Settings:
 
 @pytest.fixture(autouse=True)
 def _fresh_replay_cache() -> Iterator[None]:
-    """Isolate the module-level webhook replay cache between tests."""
+    """Isolate the module-level webhook replay caches between tests."""
     app_module._replay_cache.clear()
+    app_module._nonce_cache.clear()
     yield
     app_module._replay_cache.clear()
+    app_module._nonce_cache.clear()
 
 
 @pytest.fixture
@@ -318,6 +322,127 @@ class TestIngestAlert:
         )
         assert response.status_code == 202
         assert len(spawned_runs) == 1
+
+    # ---- The nonce-bound scheme the platform emits (plat #183 / WO-R2-70) ----
+    #
+    # These sign the wire bytes by hand rather than through the commander's own
+    # helper on purpose: the contract is the platform's, and a test that reuses
+    # our composition would still pass if both ends drifted together. The bytes
+    # below are transcribed from platform `alerts.signed_material` and
+    # docs/ARCHITECTURE.md.
+
+    def _nonce_post(
+        self,
+        client: TestClient,
+        alert: dict[str, Any],
+        *,
+        timestamp: str | None = None,
+        nonce: str = "3f1c8a2b4d5e6f70",
+        secret: str = "hmac-secret",
+        sign_over_body_only: bool = False,
+        send_timestamp: bool = True,
+    ) -> Any:
+        body = json.dumps(alert).encode()
+        if timestamp is None:
+            timestamp = str(int(time.time() * 1000))
+        material = body if sign_over_body_only else f"{timestamp}.{nonce}.".encode() + body
+        digest = hmac.new(secret.encode(), material, hashlib.sha256).hexdigest()
+        headers = {
+            "X-Alert-Signature": f"sha256={digest}",
+            "X-Alert-Nonce": nonce,
+            "Content-Type": "application/json",
+        }
+        if send_timestamp:
+            headers["X-Alert-Timestamp"] = timestamp
+        return client.post("/alerts", content=body, headers=headers)
+
+    def test_nonce_scheme_delivery_accepted(
+        self, client: TestClient, spawned_runs: list[RunState]
+    ) -> None:
+        # Red before WO-R2-126: the verifier MAC'd the body alone, so every
+        # delivery from the re-pinned platform 401'd and the live alert path
+        # was dead.
+        response = self._nonce_post(
+            client,
+            {"source": "billing", "severity": "high", "group": "billing-consumer"},
+        )
+        assert response.status_code == 202
+        assert len(spawned_runs) == 1
+        assert spawned_runs[0].alert["group"] == "billing-consumer"
+
+    def test_nonce_reuse_is_refused(self, client: TestClient, spawned_runs: list[RunState]) -> None:
+        # The emitter mints a fresh nonce per delivery — a retry is a new
+        # delivery — so a repeated nonce is unambiguously a replay rather than
+        # legitimate at-least-once redelivery, and is refused outright.
+        alert = {"source": "billing", "severity": "high", "group": "billing-consumer"}
+        timestamp = str(int(time.time() * 1000))
+        first = self._nonce_post(client, alert, timestamp=timestamp, nonce="aaaa1111")
+        second = self._nonce_post(client, alert, timestamp=timestamp, nonce="aaaa1111")
+        assert first.status_code == 202
+        assert second.status_code == 401
+        assert len(spawned_runs) == 1
+
+    def test_redelivery_with_a_fresh_nonce_is_not_a_replay(
+        self, client: TestClient, spawned_runs: list[RunState]
+    ) -> None:
+        # The nonce cache must not swallow a genuinely new delivery of the same
+        # alert; deduping *that* is the incident-identity path's job (ADR 0016).
+        alert = {"source": "billing", "severity": "high", "group": "billing-consumer"}
+        first = self._nonce_post(client, alert, nonce="bbbb1111")
+        second = self._nonce_post(client, alert, nonce="cccc2222")
+        assert first.status_code == 202
+        assert second.status_code == 202
+        assert len(spawned_runs) == 2
+
+    def test_nonce_delivery_signed_over_the_body_alone_is_refused(
+        self, client: TestClient, spawned_runs: list[RunState]
+    ) -> None:
+        # Downgrade guard: presenting a nonce while signing the old material
+        # must not verify, or the new scheme buys nothing.
+        response = self._nonce_post(client, {"source": "billing"}, sign_over_body_only=True)
+        assert response.status_code == 401
+        assert spawned_runs == []
+
+    def test_nonce_delivery_without_a_timestamp_is_refused(
+        self, client: TestClient, spawned_runs: list[RunState]
+    ) -> None:
+        # The timestamp is inside the MAC, so it is not optional here the way
+        # it is on the legacy path.
+        response = self._nonce_post(client, {"source": "billing"}, send_timestamp=False)
+        assert response.status_code == 401
+        assert spawned_runs == []
+
+    def test_nonce_delivery_outside_the_skew_window_is_refused(
+        self, client: TestClient, spawned_runs: list[RunState]
+    ) -> None:
+        # Now that the timestamp is signed, the skew window genuinely bounds
+        # replay instead of merely bounding the honest case.
+        stale = str(int((time.time() - 100_000) * 1000))
+        response = self._nonce_post(client, {"source": "billing"}, timestamp=stale)
+        assert response.status_code == 401
+        assert spawned_runs == []
+
+    def test_nonce_scheme_body_tampering_still_caught(
+        self, client: TestClient, spawned_runs: list[RunState]
+    ) -> None:
+        timestamp = str(int(time.time() * 1000))
+        nonce = "dddd3333"
+        original = json.dumps({"source": "billing", "severity": "info"}).encode()
+        tampered = json.dumps({"source": "billing", "severity": "critical"}).encode()
+        material = f"{timestamp}.{nonce}.".encode() + original
+        digest = hmac.new(b"hmac-secret", material, hashlib.sha256).hexdigest()
+        response = client.post(
+            "/alerts",
+            content=tampered,
+            headers={
+                "X-Alert-Signature": f"sha256={digest}",
+                "X-Alert-Timestamp": timestamp,
+                "X-Alert-Nonce": nonce,
+                "Content-Type": "application/json",
+            },
+        )
+        assert response.status_code == 401
+        assert spawned_runs == []
 
     def test_extra_fields_preserved_in_alert(
         self, client: TestClient, spawned_runs: list[RunState]

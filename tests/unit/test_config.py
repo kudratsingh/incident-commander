@@ -9,6 +9,7 @@ import pytest
 from pydantic import SecretStr, ValidationError
 
 from incident_commander.config import Settings, get_settings, settings_env_var_names
+from incident_commander.llm.pricing import MODEL_PRICING
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -218,6 +219,49 @@ class TestSettings:
         valid_kwargs["judge_model"] = ""
         with pytest.raises(ValidationError):
             _settings(**valid_kwargs)
+
+    def test_unpriced_judge_model_refused_at_startup(self, valid_kwargs: dict[str, Any]) -> None:
+        # WO-R2-118: an id with no price row was accepted silently and only
+        # showed up as an over-billed run — pricing_for falls back to the
+        # per-class maximum of every registered row, so the meter reads high
+        # and nothing says why.
+        valid_kwargs["judge_model"] = "claude-not-a-real-model"
+        with pytest.raises(ValidationError) as err:
+            _settings(**valid_kwargs)
+        message = str(err.value)
+        assert "JUDGE_MODEL" in message
+        assert "claude-not-a-real-model" in message
+        # The refusal names the remedy and the ids that would work.
+        assert "MODEL_PRICING" in message
+        assert "claude-haiku-4-5" in message
+
+    def test_unpriced_agent_model_refused_at_startup(self, valid_kwargs: dict[str, Any]) -> None:
+        valid_kwargs["agent_model"] = "claude-not-a-real-model"
+        with pytest.raises(ValidationError) as err:
+            _settings(**valid_kwargs)
+        assert "AGENT_MODEL" in str(err.value)
+
+    def test_both_unpriced_models_named_in_one_refusal(self, valid_kwargs: dict[str, Any]) -> None:
+        # One boot, one list: fixing them one restart at a time is the shape
+        # of refusal that wastes an operator's afternoon.
+        valid_kwargs["agent_model"] = "bad-agent"
+        valid_kwargs["judge_model"] = "bad-judge"
+        with pytest.raises(ValidationError) as err:
+            _settings(**valid_kwargs)
+        message = str(err.value)
+        assert "bad-agent" in message
+        assert "bad-judge" in message
+
+    def test_priced_models_accepted(self, valid_kwargs: dict[str, Any]) -> None:
+        valid_kwargs["agent_model"] = "claude-sonnet-4-6"
+        valid_kwargs["judge_model"] = "claude-haiku-4-5"
+        settings = _settings(**valid_kwargs)
+        assert settings.agent_model == "claude-sonnet-4-6"
+
+    def test_the_default_agent_model_is_priced(self, valid_kwargs: dict[str, Any]) -> None:
+        # The default must not be the thing that trips the validator.
+        valid_kwargs.pop("agent_model", None)
+        assert _settings(**valid_kwargs).agent_model in MODEL_PRICING
 
     def test_frozen_direct_mutation_rejected(self, valid_kwargs: dict[str, Any]) -> None:
         settings = _settings(**valid_kwargs)

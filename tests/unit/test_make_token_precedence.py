@@ -68,7 +68,7 @@ def _smoke_settings(smoke_token: SecretStr | None) -> Settings:
     return Settings(  # type: ignore[call-arg]
         _env_file=None,
         anthropic_api_key=SecretStr("sk-ant-test-not-a-real-key"),
-        judge_model="claude-sonnet-4-5",
+        judge_model="claude-haiku-4-5",
         platform_mcp_url=AnyHttpUrl("http://real.host:8001/mcp"),
         platform_rest_url=AnyHttpUrl("http://real.host:8000"),
         platform_token=SecretStr("sa_full_scope"),

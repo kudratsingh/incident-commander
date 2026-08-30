@@ -164,6 +164,7 @@ class TestRenderBriefing:
             ("_escalate", "step budget exhausted"),
             ("_planner_escalate", "planner LLM invalid"),
             ("_planner_stop", "no Tier-1 fix for the top hypothesis"),
+            ("_investigate_escalate", "tool error: -32602 invalid group"),
         ):
             run = run_state.model_copy(
                 update={

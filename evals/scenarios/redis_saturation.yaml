@@ -16,10 +16,21 @@ alert:
   fingerprint: cache_miss_spike
   service: redis
 canned_tool_responses:
+  # `error` is always on the wire — get_redis_health fails open and
+  # serialises `error: null` on the healthy path — so a fixture without the
+  # key never offered the agent the field that carries the reason when ok is
+  # false.
+  #
+  # used_memory_human / keyspace_hits / keyspace_misses are still recorded
+  # wrong and are still in the drift ledger. They are NOT corrected here
+  # because no value can correct them: they are free-running Redis gauges, so
+  # pinning them to one run's reading would make the drift check flip red on
+  # the next run. See the PR body — the fix is a volatility declaration in
+  # fixture_drift._VOLATILE, not an edit to this file.
   get_redis_health:
     content:
     - type: text
-      text: '{"ok":true,"ping_latency_ms":1.2,"connected_clients":250,"used_memory_bytes":1073741824,"used_memory_human":"1.00G","keyspace_hits":10000,"keyspace_misses":50000}'
+      text: '{"ok":true,"ping_latency_ms":1.2,"connected_clients":250,"used_memory_bytes":1073741824,"used_memory_human":"1.00G","keyspace_hits":10000,"keyspace_misses":50000,"error":null}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

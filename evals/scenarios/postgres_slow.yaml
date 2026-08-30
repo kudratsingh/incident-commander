@@ -16,10 +16,17 @@ alert:
   fingerprint: db_latency_high
   service: postgres
 canned_tool_responses:
+  # `error` is always present on the wire: get_postgres_health fails OPEN, so
+  # the model carries `error: str | None` and serialises it as null on the
+  # healthy path rather than omitting it. A fixture without the key never
+  # offered the agent the field it is supposed to read when ok is false.
+  # ping_latency_ms and active_connections are declared volatile for this
+  # tool, so the slow-and-saturated reading this scenario is about is checked
+  # for type only and stays exactly as recorded.
   get_postgres_health:
     content:
     - type: text
-      text: '{"ok":true,"ping_latency_ms":420.5,"active_connections":95,"dialect":"postgresql"}'
+      text: '{"ok":true,"ping_latency_ms":420.5,"active_connections":95,"dialect":"postgresql","error":null}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

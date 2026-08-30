@@ -16,10 +16,27 @@ alert:
   fingerprint: post_deploy_error_spike
   service: billing-api
 canned_tool_responses:
+  # Re-recorded against the platform's seeded deploy_markers table. The
+  # v1.4x.x versions were invented — the platform ships v0.3.9 through
+  # v0.4.3 and nothing else — and `revision` / `image_tag` are always on the
+  # wire, so the fixture was hiding the git SHA an agent would want when
+  # naming a rollback target.
+  #
+  # `total` is 6 because DeployMarkerRepository.list_recent counts the whole
+  # table when no environment filter is given (this scenario probes with
+  # `{}`), and the seed writes six markers — five prod, one staging.
+  #
+  # The correlation this scenario is built on survives intact and is now
+  # real: the seeded v0.4.2 marker genuinely carries the "correlated with
+  # billing failures" annotation, and v0.4.1 is genuinely the prod release
+  # before it, so the rollback target the briefing names is a version that
+  # exists. Note the annotated deploy is no longer the newest row — v0.4.3
+  # shipped after it — which makes the annotation, not the ordering, the
+  # thing the agent has to notice. That is a fair reading of the tool.
   get_deploy_history:
     content:
     - type: text
-      text: '{"total":3,"source":"deploy_markers","entries":[{"version":"v1.42.0","deployed_at":"2026-07-28T10:00:00Z","environment":"prod","notes":"correlated with billing failures"},{"version":"v1.41.9","deployed_at":"2026-07-27T14:00:00Z","environment":"prod","notes":null},{"version":"v1.41.8","deployed_at":"2026-07-26T09:00:00Z","environment":"prod","notes":null}]}'
+      text: '{"total":6,"source":"deploy_markers","entries":[{"version":"v0.4.3","revision":"d1e5a83","image_tag":"v0.4.3","deployed_at":"2026-07-28T10:00:00Z","environment":"prod","notes":null},{"version":"v0.4.3","revision":"d1e5a83","image_tag":"v0.4.3","deployed_at":"2026-07-28T09:00:00Z","environment":"staging","notes":"staging soak before prod"},{"version":"v0.4.2","revision":"c9f4d02","image_tag":"v0.4.2","deployed_at":"2026-07-28T06:00:00Z","environment":"prod","notes":"correlated with billing failures"},{"version":"v0.4.1","revision":"b7c3e51","image_tag":"v0.4.1","deployed_at":"2026-07-27T18:00:00Z","environment":"prod","notes":null},{"version":"v0.4.0","revision":"a1940af","image_tag":"v0.4.0","deployed_at":"2026-07-27T14:00:00Z","environment":"prod","notes":null},{"version":"v0.3.9","revision":"e0f6b14","image_tag":"v0.3.9","deployed_at":"2026-07-26T12:00:00Z","environment":"prod","notes":null}]}'
     is_error: false
 canned_llm_responses:
   investigation_planner:
@@ -38,17 +55,17 @@ canned_llm_responses:
     - category: deploy_regression
       name: bad_deploy
       confidence: 0.85
-      reasoning: 'v1.42.0 shipped 15 minutes before the alert fired and is annotated with billing-failure correlation.
+      reasoning: 'v0.4.2 shipped shortly before the alert fired and is the one deploy annotated with billing-failure correlation.
 
         '
     next_action:
       kind: stop
       reason: bad-deploy hypothesis confirmed; human should decide rollback
   briefing_writer:
-  - findings: 'v1.42.0 shipped to prod 15 minutes before the billing-api error spike; deploy history annotates it as correlated with billing failures.
+  - findings: 'v0.4.2 shipped to prod shortly before the billing-api error spike; deploy history annotates it as correlated with billing failures.
 
       '
-    recommendation: 'Consider rolling back to v1.41.9 while the v1.42.0 change is diagnosed.
+    recommendation: 'Consider rolling back to v0.4.1 while the v0.4.2 change is diagnosed.
 
       '
   briefing_judge:

@@ -17,10 +17,16 @@ alert:
   fingerprint: consumer_lag_high
   group: payments-consumer
 canned_tool_responses:
+  # 30000 is the platform's seeded lag for payments-consumer. The recorded
+  # 8000 was a hand-written value the platform never emits. What this
+  # scenario tests is unaffected: both probes read the SAME group and get the
+  # same reading back, which is what makes "did not grow further" the honest
+  # second-iteration conclusion, and the subject is that RunState.hypotheses
+  # holds the latest ranked list rather than the union across iterations.
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"payments-consumer","lag":8000,"cache_key":"kafka:consumer_lag:payments-consumer"}'
+      text: '{"consumer_group":"payments-consumer","lag":30000,"cache_key":"kafka:consumer_lag:payments-consumer"}'
     is_error: false
 canned_llm_responses:
   investigation_planner:
@@ -65,7 +71,7 @@ canned_llm_responses:
       kind: stop
       reason: producer-spike hypothesis confident; escalate for observation
   briefing_writer:
-  - findings: 'payments-consumer lag at 8000 messages appears stable rather than growing, most consistent with a transient producer-side surge.
+  - findings: 'payments-consumer lag at 30000 messages appears stable rather than growing, most consistent with a transient producer-side surge.
 
       '
     recommendation: 'Watch the payments producer''s rate for the next 15 minutes; if it does not drop, page the payments team to investigate upstream volume.

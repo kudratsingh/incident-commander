@@ -50,6 +50,23 @@ Re-invoking a possibly-executed action is safe because of the wire contract, not
 
 Regression tests: `tests/unit/test_loop.py::TestBudgetExemptsResumedRemediating`.
 
+### Amendment 2026-08-30: what the window actually spans (WO-R2-88)
+
+The "Negative" note below bounds the window at "default 3 attempts × 15s = 45s". Both halves of that are wrong, in opposite directions, and the number it lands on is a window no configuration has ever run.
+
+**Nothing uses 3 attempts.** `Settings.verify_probe_attempts` defaults to **1** — one probe, no window at all, which is what keeps the canned suite instant-consistent. The operative live value is **6**, shipped uncommented in `.env.example` and tabled in `docs/runbook.md` ("Environment variable knobs") alongside a **20s** delay. 3 was never either of them.
+
+**The delay falls between attempts, not after each one.** `make_llm_verify` sleeps only when `attempt > 0`, so N attempts are separated by N-1 sleeps; `evals/runner.py::_assert_preconditions` polls the same shape. Multiplying `attempts × delay` therefore overstates the real wait by one whole delay.
+
+The window is `(attempts - 1) × delay`:
+
+* Defaults (`VERIFY_PROBE_ATTEMPTS=1`, `VERIFY_PROBE_DELAY_SECONDS=15`): window **0s**.
+* Live-recommended (`VERIFY_PROBE_ATTEMPTS=6`, `VERIFY_PROBE_DELAY_SECONDS=20`): window **100s**.
+
+This is not bookkeeping. A polling window exists to outlast a staleness — here the platform's 60s metrics interval — so an overstated window is a window that reports itself as covering an interval it does not cover. The overstatement had already spread beyond this ADR: the eval precondition guard multiplied `attempts × delay` and would have green-lit a 5-attempt, 14.9s-delay probe as 74.5s of polling when the real wait is 59.6s, under the interval it exists to outlast.
+
+The arithmetic now lives in exactly one place — `config.polling_window_seconds`, reported by `Settings.verify_polling_window_seconds` and used by the precondition guard — and `tests/unit/test_polling_window.py` holds this section's numbers to those constants while pinning that both loops really do sleep that long. The original note below is left as written; this section is the operative arithmetic.
+
 ### Why the alternatives lose
 
 **Background scheduler.** Real durable polling with checkpoints between probe attempts is the right answer for a very long verify window (minutes to hours). At the current probe cadence (a 60s cache, one action to verify, seconds not hours) it is over-engineered — a new scheduler process, a new checkpoint edge, a new reconciliation case on resume. Revisit if the verify window ever needs to survive process restarts.

@@ -18,6 +18,38 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # unsafe, so the two move together.
 _CONNECTIONS_PER_RUN: Final[int] = 2
 
+# How long the platform can keep serving a stale metric after the world
+# changed. ``get_consumer_lag`` reads a cache the platform recomputes on a
+# 60s interval (docs/eval-methodology.md, ADR 0006 "Context"), so any
+# polling window that must observe a *change* has to outlast this number —
+# a shorter window can only ever look at the pre-change value.
+PLATFORM_METRICS_INTERVAL_SECONDS: Final[float] = 60.0
+
+
+def polling_window_seconds(attempts: int, delay_seconds: float) -> float:
+    """Wall-clock span covered by a bounded polling loop, in seconds.
+
+    Both polling loops in this codebase — ADR 0006's verify window
+    (``agent/remediation.py::make_llm_verify``) and the eval precondition
+    probe (``evals/runner.py::_assert_preconditions``) — are written as::
+
+        for attempt in range(attempts):
+            if attempt:
+                sleep(delay_seconds)
+            ...probe...
+
+    so the delay falls BETWEEN attempts: ``attempts`` probes are separated
+    by ``attempts - 1`` sleeps. The window is therefore
+    ``(attempts - 1) * delay_seconds``, not ``attempts * delay_seconds`` —
+    the last probe fires at the end of the window, not one delay past it.
+
+    The distinction is not cosmetic: ``attempts * delay`` overstates the
+    real wait by one delay, so a guard using it green-lights a window that
+    does not actually outlast the staleness it was sized for (WO-R2-88).
+    A single attempt is not polling at all and returns 0.0.
+    """
+    return max(attempts - 1, 0) * delay_seconds
+
 
 class Settings(BaseSettings):
     """Immutable application settings. Constructed once at startup."""
@@ -145,6 +177,19 @@ class Settings(BaseSettings):
     # actions get their own knob so a slow-but-successful action doesn't
     # escalate as a transport error.
     action_tool_timeout_seconds: float = Field(default=60.0, ge=1.0)
+
+    @property
+    def verify_polling_window_seconds(self) -> float:
+        """Wall-clock span of the ADR 0006 verify window at these settings.
+
+        0.0 at the defaults (one probe is not a window); 100.0 at the
+        live-recommended knobs (6 attempts, 20s → five sleeps). ADR 0006's
+        2026-08-30 amendment quotes these two numbers and
+        ``tests/unit/test_polling_window.py`` holds the ADR to them.
+        """
+        return polling_window_seconds(
+            self.verify_probe_attempts, self.verify_probe_delay_seconds
+        )
 
     @property
     def db_pool_capacity(self) -> int:

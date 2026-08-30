@@ -575,6 +575,27 @@ The process refuses to start if the numbers cannot work (a pool too small for on
 run, or `AGENT_MAX_CONCURRENT_RUNS` above the derived ceiling). That is deliberate:
 the alternative is discovering it as a stall during an incident.
 
+### A run that crashed before it took the lease
+
+**Symptom:** `run for incident <id> crashed (OperationalError) without ever holding
+the single-flight lease; not recording FAILED — another worker may own this incident`.
+
+The background task died on its way to the lease, so it never learned who owns the
+incident. The usual cause is the pool: taking the lease is the first thing that asks
+for a connection, so pool exhaustion or a brief Postgres outage surfaces here first.
+
+The rail deliberately writes nothing. A FAILED record is a statement about a run
+*this* process was conducting, and FAILED is terminal and non-resumable
+([ADR 0016](ADR/0016-incident-identity-and-single-flight.md)) — so writing one on
+someone else's incident would end a live investigation from the outside and, because
+the closed generation makes the next redelivery derive a fresh incident id, split one
+fault across two investigations paying twice for the same evidence.
+
+What to do: nothing for the incident itself. The worker that holds the lease is
+unaffected, and if no worker held it, the alert sits at TRIAGE and the platform has
+already paged a human (invariant 5). Treat repeats as a database or pool signal and
+read them alongside the capacity section above.
+
 ## Kill switch
 
 To pause the agent without stopping the FastAPI ingress (alerts keep flowing to the platform's normal oncall path):

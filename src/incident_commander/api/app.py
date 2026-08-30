@@ -343,7 +343,15 @@ def _run_investigation(
     kills the task silently, leaving the incident stranded at whatever
     non-terminal checkpoint it reached with nothing recording why. Every exit
     path now leaves a terminal snapshot behind.
+
+    The rail spans admission too, so it also catches crashes from BEFORE this
+    process owns anything — pool exhaustion inside ``incident_lease`` above
+    all. ``held_lease`` is what separates the two: only a run that got past
+    the ``admitted`` verdict may write FAILED, because that write is terminal
+    and would otherwise close another worker's live incident (see
+    ``_record_run_failure``).
     """
+    held_lease = False
     try:
         with _admission(slots, engine, run.incident_id) as verdict:
             if verdict == "at_capacity":
@@ -357,6 +365,10 @@ def _run_investigation(
                 )
                 return
 
+            # Past this line the lease is ours and stays ours for the rest of
+            # the ``with`` body, which is exactly the window in which a crash
+            # is this process's to record.
+            held_lease = True
             latest = checkpointer.load(run.incident_id)
             if latest is None:
                 resuming = run
@@ -405,7 +417,7 @@ def _run_investigation(
                     transitions=transitions,
                 )
     except Exception as exc:
-        _record_run_failure(run, checkpointer, exc)
+        _record_run_failure(run, checkpointer, exc, held_lease=held_lease)
         # Re-raise the ORIGINAL exception: starlette runs background tasks
         # after the response, so this surfaces in the server log with its
         # stack intact. Swallowing it would hide the crash class this rail
@@ -448,8 +460,23 @@ def _shed_at_capacity(run: RunState, slots: RunSlots | None) -> None:
     )
 
 
-def _record_run_failure(run: RunState, checkpointer: Checkpointer, exc: Exception) -> None:
+def _record_run_failure(
+    run: RunState, checkpointer: Checkpointer, exc: Exception, *, held_lease: bool
+) -> None:
     """Best-effort terminal FAILED checkpoint for a crashed run.
+
+    ``held_lease`` is required, not defaulted, and it is the whole safety
+    argument: writing FAILED is a claim about a run THIS process was
+    conducting. A process that crashed on its way to the lease — the pool is
+    exhausted, Postgres blinked — knows nothing about the incident except that
+    someone may be investigating it right now, and per ADR 0016 the FAILED it
+    would write is non-resumable: the holder's next checkpoint gate sees a
+    terminal state and abandons a live investigation, and the closed
+    generation makes ``derive_incident_id`` fork the next redelivery into a
+    second incident for one fault. So a non-holder logs and steps aside. The
+    keyword is the guard against the ordering regressing silently — a future
+    caller cannot reach the terminal write without stating, at the call site,
+    that it owns the lease.
 
     Written directly via ``checkpointer.write``, not ``dispatch``: this is a
     crash rail, not a state-machine transition (``ALLOWED_TRANSITIONS`` already
@@ -464,6 +491,14 @@ def _record_run_failure(run: RunState, checkpointer: Checkpointer, exc: Exceptio
     refuses to re-run it (ADR 0016), so a deterministically-crashing run cannot
     be pushed into a redelivery-driven retry loop.
     """
+    if not held_lease:
+        _log.warning(
+            "run for incident %s crashed (%s) without ever holding the single-flight "
+            "lease; not recording FAILED — another worker may own this incident",
+            run.incident_id,
+            type(exc).__name__,
+        )
+        return
     try:
         latest = checkpointer.load(run.incident_id) or run
         if latest.state.is_terminal:

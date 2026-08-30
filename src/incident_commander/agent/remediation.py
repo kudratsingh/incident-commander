@@ -140,6 +140,17 @@ def make_llm_plan(
     planner LLM to produce a ``RemediationPlan``. Rejects plans whose
     action tool isn't Tier-1 (defense-in-depth; the prompt already
     lists only Tier-1 tools). Persists the plan on ``RunState``.
+
+    Three resource-argument guards run before anything is wired, all
+    escalating pre-execution (ADR 0022):
+
+    - ``_absent_resource_args`` — every resource-naming field on both
+      legs must be present, or the registry default silently picks the
+      resource for us.
+    - ``_unsourced_resource_args`` — its value must be one the platform
+      itself produced (copy, don't re-type).
+    - ``_misdirected_verify_args`` — the verify probe must observe the
+      resource the action mutated.
     """
 
     def transition_plan(run_state: RunState, at: datetime) -> RunState:
@@ -210,6 +221,21 @@ def make_llm_plan(
                 at,
                 f"verify tool must be read-only, got tier={tier_of(plan.verify_tool).value}",
             )
+        absent = _absent_resource_args(plan)
+        if absent:
+            # Say which resource you mean. An omitted field is not a smaller
+            # sin than a mis-typed one — `wire_arguments` default-fills it
+            # from the platform's input schema, so the call silently targets
+            # whatever that default names (WO-R2-15, ADR 0022).
+            return _escalate_remediation(
+                run_state,
+                at,
+                "plan rejected before execution: resource argument(s) not "
+                f"named by the plan: {', '.join(absent)}. An omitted resource "
+                "argument is filled from the platform's input-schema default "
+                "at wire time, so the call would target that default's "
+                "resource instead of this incident's.",
+            )
         unsourced = _unsourced_resource_args(plan, _evidence_value_corpus(run_state))
         if unsourced:
             # Copy, don't re-type: a resource name the platform never uttered
@@ -222,6 +248,20 @@ def make_llm_plan(
                 "plan rejected before execution: resource argument(s) not "
                 f"evidence-sourced: {', '.join(unsourced)}. Resource names must "
                 "be copied verbatim from the alert or tool results.",
+            )
+        misdirected = _misdirected_verify_args(plan)
+        if misdirected:
+            # Verify what you changed. A probe aimed at a resource the action
+            # never touched reads a healthy number off an untouched system
+            # and calls the incident resolved (ADR 0022).
+            return _escalate_remediation(
+                run_state,
+                at,
+                "plan rejected before execution: verify probe targets "
+                f"resource(s) the action does not: {', '.join(misdirected)}. "
+                f"{plan.action_tool} acts on "
+                f"{', '.join(sorted(_resource_values(plan.action_tool, plan.action_arguments)))}"
+                f"; {plan.verify_tool} must observe the same resource.",
             )
 
         new_budget = accrue_llm_usage(run_state.budget, result, model)
@@ -292,6 +332,83 @@ def _evidence_value_corpus(run_state: RunState) -> set[str]:
         _collect_strings(entry.arguments, argument_strings)
         corpus |= result_strings - argument_strings
     return corpus
+
+
+def _resource_values(tool: str, args: Mapping[str, Any]) -> set[str]:
+    """Every resource this leg of the plan names, per ``RESOURCE_ARG_FIELDS``.
+
+    List-valued fields (``replay_dlq_by_ids.job_ids``) contribute each
+    element. Non-string values are ignored — they cannot name a platform
+    resource and the input model rejects them at wire time anyway.
+    """
+    values: set[str] = set()
+    for field in RESOURCE_ARG_FIELDS.get(tool, frozenset()):
+        raw = args.get(field)
+        for value in raw if isinstance(raw, (list, tuple)) else [raw]:
+            if isinstance(value, str):
+                values.add(value)
+    return values
+
+
+def _absent_resource_args(plan: RemediationPlan) -> list[str]:
+    """Resource-naming fields the plan left out entirely, per leg.
+
+    Absence must be as loud as mis-sourcing, and for one specific reason:
+    ``wire_arguments`` validates the plan's arguments against the tool's
+    input model, and a field carrying a default is *filled* rather than
+    refused. ``GetConsumerLagInput.consumer_group`` defaults to
+    ``"worker-dispatcher"``, so a verify leg that omits the group probes
+    that group no matter which consumer the action just restarted — the
+    run reads a healthy lag off an untouched consumer and reports
+    RESOLVED on a still-broken one.
+
+    Checked here rather than by dropping the registry default: the
+    default mirrors the platform's own published input schema, and
+    ``tests/unit/test_registry_matches_snapshot.py::
+    TestInputModelMatchesSnapshot`` holds the model to exact equality
+    with the generated contract snapshot. "Name the resource you are
+    acting on, and the resource you are checking" is the *agent's*
+    requirement of its planner, so it belongs at the plan boundary.
+
+    Required fields are checked too, not just default-carrying ones.
+    Omitting a required field today survives planning and only fails
+    inside ``wire_arguments`` — for a verify leg, that is *after* the
+    Tier-1 action has already executed. Rejecting at plan time keeps the
+    whole class pre-execution. ``tests/unit/test_policies.py::
+    TestResourceArgFieldsCoverage`` pins that every registry entry is
+    covered, so a future optional field cannot reopen this hole.
+    """
+    problems: list[str] = []
+    for leg, tool, args in (
+        ("action", plan.action_tool, plan.action_arguments),
+        ("verify", plan.verify_tool, plan.verify_arguments),
+    ):
+        for field in sorted(RESOURCE_ARG_FIELDS.get(tool, frozenset())):
+            if field not in args:
+                problems.append(f"{leg} {tool}.{field}")
+    return problems
+
+
+def _misdirected_verify_args(plan: RemediationPlan) -> list[str]:
+    """Resources the verify probe names that the action never touched.
+
+    The verify leg exists to observe the effect of *this* action. A probe
+    aimed somewhere else is not weak verification, it is verification of
+    the wrong thing: it reads a healthy number off an untouched resource
+    and hands the judge evidence that the incident is over.
+
+    Only enforced when both legs name resources at all. Several correct
+    plans verify through a resource-free read — ``invalidate_cache_key``
+    then ``get_redis_health``, ``replay_dlq_by_ids`` then
+    ``list_dlq_messages`` — and those stay legal. Field names need not
+    match across legs (``pause_dag.root_job_id`` is verified by
+    ``get_dag_state.job_id``); the values are what must line up.
+    """
+    action_values = _resource_values(plan.action_tool, plan.action_arguments)
+    verify_values = _resource_values(plan.verify_tool, plan.verify_arguments)
+    if not action_values or not verify_values:
+        return []
+    return sorted(verify_values - action_values)
 
 
 def _unsourced_resource_args(plan: RemediationPlan, corpus: set[str]) -> list[str]:

@@ -14,14 +14,52 @@ import typing
 import pytest
 
 from incident_commander.agent.hypothesis import ReadToolName
-from incident_commander.agent.remediation import Tier1ToolName
+from incident_commander.agent.remediation import (
+    RemediationPlan,
+    Tier1ToolName,
+    _absent_resource_args,
+)
 from incident_commander.tools.policies import (
+    RESOURCE_ARG_FIELDS,
     Tier,
     ensure_covered,
     tier_of,
     tools_at_or_below,
 )
 from incident_commander.tools.registry import TOOL_REGISTRY
+
+# Every (tool, resource-naming field) pair the policy map declares. Driven
+# off RESOURCE_ARG_FIELDS rather than hand-listed so a newly classified
+# field is covered the moment it is added.
+_RESOURCE_ARG_ENTRIES = sorted(
+    (tool, field) for tool, fields in RESOURCE_ARG_FIELDS.items() for field in fields
+)
+
+# Resource-free stand-ins, one per leg, so the leg under test is the only
+# source of findings. Asserted to be resource-free by
+# ``test_plan_scaffold_tools_name_no_resources``.
+_FILLER_ACTION_TOOL = "replay_dlq_by_category"
+_FILLER_VERIFY_TOOL = "list_dlq_messages"
+
+
+def _plan_omitting(tool: str, field: str) -> dict[str, object]:
+    """A plan placing ``tool`` on its tier's leg with ``field`` left out.
+
+    Tier decides the leg: ``RemediationPlan.action_tool`` is Literal-typed
+    to Tier-1 names and ``verify_tool`` to read names, so a tool can only
+    be exercised on the leg its tier allows. Any other resource fields on
+    the same tool are filled, so the omission under test is the only one.
+    """
+    present = {f: f"placeholder-{f}" for f in RESOURCE_ARG_FIELDS[tool] if f != field}
+    on_action = tier_of(tool) is Tier.TIER_1
+    return {
+        "target_hypothesis": "h",
+        "action_tool": tool if on_action else _FILLER_ACTION_TOOL,
+        "action_arguments": present if on_action else {},
+        "verify_tool": _FILLER_VERIFY_TOOL if on_action else tool,
+        "verify_arguments": {} if on_action else present,
+        "verify_expectation": "e",
+    }
 
 
 class TestTierOf:
@@ -118,3 +156,60 @@ class TestResourceArgFieldsCoverage:
             model_fields = set(TOOL_REGISTRY[tool].input_model.model_fields)
             missing = fields - model_fields
             assert not missing, f"{tool}: {missing} not on input model"
+
+    def test_plan_scaffold_tools_name_no_resources(self) -> None:
+        # The parametrized test below is only meaningful if the filler
+        # leg contributes no findings of its own.
+        assert not RESOURCE_ARG_FIELDS[_FILLER_ACTION_TOOL]
+        assert not RESOURCE_ARG_FIELDS[_FILLER_VERIFY_TOOL]
+
+    @pytest.mark.parametrize(("tool", "field"), _RESOURCE_ARG_ENTRIES)
+    def test_omitting_any_resource_field_is_a_planning_violation(
+        self, tool: str, field: str
+    ) -> None:
+        """WO-R2-15 / ADR 0022: absence is as loud as mis-sourcing.
+
+        The registry hole was narrow — ``get_consumer_lag.consumer_group``
+        was the one resource-naming field with a default, so omitting it
+        got silently default-filled by ``wire_arguments`` instead of
+        refused. This test does not care which fields carry defaults: it
+        walks every ``RESOURCE_ARG_FIELDS`` entry and asserts the plan
+        layer refuses a leg that leaves it out. A future field that turns
+        optional cannot reopen the hole without failing here.
+        """
+        plan = RemediationPlan.model_validate(_plan_omitting(tool, field))
+        problems = _absent_resource_args(plan)
+
+        assert any(p.endswith(f"{tool}.{field}") for p in problems), (
+            f"{tool}.{field} is classified as resource-naming in "
+            f"RESOURCE_ARG_FIELDS, but a plan that omits it is not "
+            f"rejected: _absent_resource_args returned {problems}. An "
+            f"unnamed resource argument is default-filled or fails at "
+            f"wire time — after the Tier-1 action has run."
+        )
+
+    def test_default_carrying_resource_fields_are_the_known_inventory(self) -> None:
+        """Pins WHICH resource fields the platform lets us omit.
+
+        Every entry in this set is a field where a plan's silence becomes
+        a concrete resource name chosen by the platform's input schema
+        rather than by the incident — the WO-R2-15 shape exactly. The
+        fix lives at the plan layer precisely because these defaults are
+        legitimate: they mirror the platform's published schema, which
+        ``test_registry_matches_snapshot.py`` holds to exact equality.
+
+        If this set grows, that is not automatically a bug — but the new
+        field must be deliberate, and the parametrized test above must
+        cover it. Do not "fix" a failure here by deleting the registry
+        default; that breaks the contract snapshot test instead.
+        """
+        from incident_commander.tools.policies import RESOURCE_ARG_FIELDS
+        from incident_commander.tools.registry import TOOL_REGISTRY
+
+        optional = {
+            (tool, field)
+            for tool, fields in RESOURCE_ARG_FIELDS.items()
+            for field in fields
+            if not TOOL_REGISTRY[tool].input_model.model_fields[field].is_required()
+        }
+        assert optional == {("get_consumer_lag", "consumer_group")}

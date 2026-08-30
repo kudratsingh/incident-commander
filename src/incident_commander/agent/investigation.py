@@ -38,6 +38,7 @@ from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError, ToolResult
 from incident_commander.tools.policies import Tier, is_cached_read, tier_of, tools_at_or_below
 from incident_commander.tools.registry import TOOL_REGISTRY, description_of
+from incident_commander.tools.wire import wire_arguments
 
 _TOOL_NAME: Final[str] = "get_consumer_lag"
 _DEFAULT_MAX_ITERATIONS: Final[int] = 5
@@ -75,9 +76,13 @@ def make_investigate(
         # Accept legacy `group` field for backward-compat with older alert
         # producers; platform's tool arg is `consumer_group`.
         raw = run_state.alert.get("consumer_group") or run_state.alert.get("group")
-        arguments = spec.input_model.model_validate(
-            {"consumer_group": str(raw)} if raw else {}
-        ).model_dump()
+        # One canonical serialization for every outgoing call (wire.py's
+        # docstring: a second implementation drifts from the thing it
+        # guards). This leg is read-only and its default-fill is
+        # deliberate — an alert with no group named probes the platform's
+        # default group. The remediation legs may NOT default-fill; that
+        # asymmetry is the subject of ADR 0022.
+        arguments = wire_arguments(spec, {"consumer_group": str(raw)} if raw else {})
 
         try:
             result = mcp_client.call_tool(_TOOL_NAME, arguments)
@@ -315,9 +320,10 @@ def _execute_probe(
             f"(tier={tier_of(action.tool_name).value})",
         )
     try:
-        # mode="json" so UUID/datetime fields serialize to str/isoformat —
-        # httpx.json can't encode raw UUID objects.
-        arguments = spec.input_model.model_validate(action.arguments).model_dump(mode="json")
+        # Same canonical serialization the remediation legs use: mode="json"
+        # so UUID/datetime fields become str/isoformat (httpx.json can't
+        # encode raw UUID objects), and no second copy of the rule to drift.
+        arguments = wire_arguments(spec, action.arguments)
     except ValidationError as err:
         return _escalate_investigation(
             run_state, at, f"probe arguments invalid for {action.tool_name}: {err}"

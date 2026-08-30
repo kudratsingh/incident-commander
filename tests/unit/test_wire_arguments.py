@@ -24,10 +24,18 @@ regressions.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
+from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 import pytest
 
+from incident_commander.agent.hypothesis import ProbeAction
+from incident_commander.agent.investigation import _execute_probe, make_investigate
+from incident_commander.agent.state import IncidentState, RunState
+from incident_commander.tools.mcp_client import ToolResult
 from incident_commander.tools.registry import TOOL_REGISTRY
 from incident_commander.tools.wire import wire_arguments
 
@@ -112,3 +120,99 @@ class TestValidationBubblesUp:
                 TOOL_REGISTRY["replay_dlq_by_ids"],
                 {"idempotency_key": "01234567890abcdef"},  # no job_ids
             )
+
+
+class _RecordingMCP:
+    """Captures the exact argument dict handed to the transport."""
+
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self._payload = payload
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def call_tool(
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ToolResult:
+        self.calls.append((name, dict(arguments)))
+        return ToolResult(content=[{"type": "text", "text": json.dumps(self._payload)}])
+
+
+class TestEveryCallPathRoutesThroughWireArguments:
+    """One serialization, asserted at each call site (WO-R2-15 finding 3).
+
+    This module's docstring calls ``wire_arguments`` the canonical
+    producer of the bytes the platform hashes, and ``wire.py``'s own
+    docstring forbids re-implementing it. The investigation legs used to
+    do exactly that — ``spec.input_model.model_validate(...).model_dump()``
+    inline, and the opening probe's copy omitted ``mode="json"`` — so the
+    rule was stated in two places and enforced in neither.
+
+    These tests compare what the MCP client actually received against
+    ``wire_arguments`` output for the same inputs. A future inline
+    re-implementation that drifts (drops a default, skips ``mode="json"``,
+    adds ``exclude_none``) fails here rather than at a 409 on a
+    crash-recovery re-send.
+    """
+
+    def test_opening_probe_matches_wire_arguments_when_alert_names_no_group(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # This leg default-fills: a read-only probe with no group named is
+        # allowed to fall back to the registry default (unlike the
+        # remediation legs — ADR 0022). The bytes must still be canonical.
+        mcp = _RecordingMCP({"consumer_group": "worker-dispatcher", "lag": 5, "cache_key": "k"})
+        run = run_state.model_copy(
+            update={
+                "state": IncidentState.INVESTIGATING,
+                "alert": {"source": "platform.kafka", "severity": "high"},
+            }
+        )
+
+        make_investigate(mcp)(run, now)
+
+        name, sent = mcp.calls[0]
+        assert sent == wire_arguments(TOOL_REGISTRY[name], {})
+
+    def test_opening_probe_matches_wire_arguments_with_named_group(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        mcp = _RecordingMCP({"consumer_group": "billing", "lag": 5, "cache_key": "k"})
+        run = run_state.model_copy(
+            update={
+                "state": IncidentState.INVESTIGATING,
+                "alert": {
+                    "source": "platform.kafka",
+                    "severity": "high",
+                    "consumer_group": "billing",
+                },
+            }
+        )
+
+        make_investigate(mcp)(run, now)
+
+        name, sent = mcp.calls[0]
+        assert sent == wire_arguments(TOOL_REGISTRY[name], {"consumer_group": "billing"})
+
+    def test_planner_probe_matches_wire_arguments_including_uuid_coercion(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # get_dag_state.job_id is a UUID field, and mode="json" is what
+        # turns it into the string httpx can encode. An inline
+        # `.model_dump()` without a mode would reintroduce that bug here.
+        job_id = "33333333-3333-3333-3333-333333333333"
+        mcp = _RecordingMCP({"seed_id": job_id, "nodes": [], "edges": [], "paused": True})
+        action = ProbeAction(tool_name="get_dag_state", arguments={"job_id": job_id})
+
+        _execute_probe(
+            run_state.model_copy(update={"state": IncidentState.INVESTIGATING}),
+            now,
+            mcp,
+            action,
+        )
+
+        name, sent = mcp.calls[0]
+        assert sent == wire_arguments(TOOL_REGISTRY[name], action.arguments)
+        assert sent["job_id"] == job_id  # a str, not a UUID object

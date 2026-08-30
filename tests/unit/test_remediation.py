@@ -19,6 +19,8 @@ import pytest
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
 from incident_commander.agent.remediation import (
     RemediationPlan,
+    _evidence_value_corpus,
+    _unsourced_resource_args,
     build_idempotency_key,
     make_llm_plan,
     make_llm_verify,
@@ -772,6 +774,247 @@ class TestEvidenceSourcedArgs:
             action_arguments={"job_ids": [discovered]},
             verify_tool="list_dlq_messages",
             verify_arguments={},
+        )
+        result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(run, _now())
+        assert result.state is IncidentState.REMEDIATING
+
+
+class TestNamedResourceArgs:
+    """WO-R2-15 / ADR 0022: a plan must NAME the resource on both legs.
+
+    The hole this closes: ``GetConsumerLagInput.consumer_group`` carries
+    ``default="worker-dispatcher"`` (mirroring the platform's published
+    input schema, which the contract snapshot pins). When the planner
+    omitted the group on the verify leg, ``_unsourced_resource_args``
+    skipped the absent field, ``wire_arguments`` default-filled it, and
+    the run restarted one consumer group while verifying a *different*,
+    healthy one — then reported RESOLVED on a still-broken consumer.
+    """
+
+    _REMEDIATED = "billing-consumer"
+    _DEFAULT_FILLED = "worker-dispatcher"  # GetConsumerLagInput's default
+
+    def _run(self, **overrides: Any) -> RunState:
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.CONSUMER_SATURATION,
+                    name="consumer_saturation",
+                    confidence=0.9,
+                    reasoning="lag climbing",
+                ),
+            ),
+            **overrides,
+        )
+        return run.model_copy(
+            update={
+                "alert": {
+                    "source": "platform.kafka",
+                    "severity": "high",
+                    "consumer_group": self._REMEDIATED,
+                }
+            }
+        )
+
+    def _plan(self, **overrides: Any) -> dict[str, Any]:
+        fields: dict[str, Any] = {
+            "action_arguments": {"consumer_group": self._REMEDIATED},
+            "verify_arguments": {"consumer_group": self._REMEDIATED},
+        }
+        fields.update(overrides)
+        return _plan_dict(**fields)
+
+    # -- absence -------------------------------------------------------
+
+    def test_omitted_verify_group_is_rejected_before_execution(self) -> None:
+        # The confirmed defect. Pre-fix this reached REMEDIATING and the
+        # verify probe read `worker-dispatcher` — a group the incident
+        # never touched.
+        result = make_llm_plan(CannedLLMClient([self._plan(verify_arguments={})]), model=_MODEL)(
+            self._run(), _now()
+        )
+
+        assert result.state is IncidentState.ESCALATED
+        reasons = " ".join(e.result_summary for e in result.evidence)
+        assert "not named by the plan" in reasons
+        assert "verify get_consumer_lag.consumer_group" in reasons
+
+    def test_rejection_names_the_leg_so_the_trajectory_is_readable(self) -> None:
+        result = make_llm_plan(CannedLLMClient([self._plan(action_arguments={})]), model=_MODEL)(
+            self._run(), _now()
+        )
+
+        assert result.state is IncidentState.ESCALATED
+        reasons = " ".join(e.result_summary for e in result.evidence)
+        assert "action restart_consumer_group.consumer_group" in reasons
+
+    def test_omitted_required_field_is_caught_at_plan_time_not_wire_time(self) -> None:
+        # `get_dag_state.job_id` is REQUIRED, so wire_arguments would have
+        # raised — but only inside VERIFYING, i.e. after the Tier-1 pause
+        # already executed. Absence is a planning-time rejection for every
+        # resource field, not just the default-carrying ones.
+        seed = "33333333-3333-3333-3333-333333333333"
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.RUNAWAY_SAGA,
+                    name="runaway-saga",
+                    confidence=0.9,
+                    reasoning="r",
+                ),
+            ),
+            evidence=(
+                EvidenceEntry(
+                    tool_name="get_dag_state",
+                    arguments={},
+                    result_summary=f'{{"seed_id": "{seed}"}}',
+                    timestamp=_now(),
+                ),
+            ),
+        )
+        plan = _plan_dict(
+            target_hypothesis="runaway-saga",
+            action_tool="pause_dag",
+            action_arguments={"root_job_id": seed, "ttl_seconds": 600},
+            verify_tool="get_dag_state",
+            verify_arguments={},
+        )
+        result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(run, _now())
+
+        assert result.state is IncidentState.ESCALATED
+        assert result.remediation_attempts == 0
+        reasons = " ".join(e.result_summary for e in result.evidence)
+        assert "verify get_dag_state.job_id" in reasons
+
+    def test_fully_named_plan_passes(self) -> None:
+        # Positive control: same shape, group named on both legs.
+        result = make_llm_plan(CannedLLMClient([self._plan()]), model=_MODEL)(self._run(), _now())
+        assert result.state is IncidentState.REMEDIATING
+
+    def test_resource_free_verify_tool_needs_no_arguments(self) -> None:
+        # `get_redis_health` names no resource, so an empty verify leg is
+        # still a legal plan — the absence check reads RESOURCE_ARG_FIELDS,
+        # it does not demand arguments per se.
+        run = self._run()
+        run = run.model_copy(
+            update={
+                "alert": {
+                    "source": "platform.cache",
+                    "severity": "high",
+                    "cache_key": "cache:jobs:worker-dispatcher:hot_set",
+                }
+            }
+        )
+        plan = _plan_dict(
+            target_hypothesis="consumer_saturation",
+            action_tool="invalidate_cache_key",
+            action_arguments={"key": "cache:jobs:worker-dispatcher:hot_set"},
+            verify_tool="get_redis_health",
+            verify_arguments={},
+        )
+        result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(run, _now())
+        assert result.state is IncidentState.REMEDIATING
+
+    # -- verify targets the action ---------------------------------------
+
+    def _run_with_both_groups_in_corpus(self) -> RunState:
+        # Both names are legitimately platform-produced, so the
+        # evidence-sourcing guard has no objection to either one. Only the
+        # cross-leg check can catch this plan.
+        return self._run(
+            evidence=(
+                EvidenceEntry(
+                    tool_name="get_consumer_lag",
+                    arguments={},
+                    result_summary=(
+                        f'{{"consumer_group": "{self._DEFAULT_FILLED}", "lag": 0, '
+                        f'"cache_key": "kafka:consumer_lag:{self._DEFAULT_FILLED}"}}'
+                    ),
+                    timestamp=_now(),
+                ),
+            )
+        )
+
+    def test_verify_naming_a_different_group_than_the_action_is_refused(self) -> None:
+        run = self._run_with_both_groups_in_corpus()
+        plan = self._plan(verify_arguments={"consumer_group": self._DEFAULT_FILLED})
+
+        # Precondition: both values ARE evidence-sourced, so this plan
+        # survives the copy-don't-re-type guard.
+        assert not _unsourced_resource_args(
+            RemediationPlan.model_validate(plan), _evidence_value_corpus(run)
+        )
+
+        result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(run, _now())
+        assert result.state is IncidentState.ESCALATED
+        reasons = " ".join(e.result_summary for e in result.evidence)
+        assert "verify probe targets resource(s) the action does not" in reasons
+        assert self._DEFAULT_FILLED in reasons
+
+    def test_verify_may_name_the_action_resource_under_a_different_field(self) -> None:
+        # pause_dag.root_job_id is verified through get_dag_state.job_id.
+        # Values must line up; field names need not.
+        seed = "33333333-3333-3333-3333-333333333333"
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.RUNAWAY_SAGA,
+                    name="runaway-saga",
+                    confidence=0.9,
+                    reasoning="r",
+                ),
+            ),
+            evidence=(
+                EvidenceEntry(
+                    tool_name="get_dag_state",
+                    arguments={},
+                    result_summary=f'{{"seed_id": "{seed}"}}',
+                    timestamp=_now(),
+                ),
+            ),
+        )
+        plan = _plan_dict(
+            target_hypothesis="runaway-saga",
+            action_tool="pause_dag",
+            action_arguments={"root_job_id": seed, "ttl_seconds": 600},
+            verify_tool="get_dag_state",
+            verify_arguments={"job_id": seed},
+        )
+        result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(run, _now())
+        assert result.state is IncidentState.REMEDIATING
+
+    def test_verify_subset_of_a_multi_resource_action_is_allowed(self) -> None:
+        # Acting on two ids and verifying one of them observes the action.
+        first = "44444444-4444-4444-4444-444444444444"
+        second = "55555555-5555-5555-5555-555555555555"
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.POISON_MESSAGE,
+                    name="poison",
+                    confidence=0.9,
+                    reasoning="r",
+                ),
+            ),
+            evidence=(
+                EvidenceEntry(
+                    tool_name="list_dlq_messages",
+                    arguments={},
+                    result_summary=(f'{{"items": [{{"id": "{first}"}}, {{"id": "{second}"}}]}}'),
+                    timestamp=_now(),
+                ),
+            ),
+        )
+        plan = _plan_dict(
+            target_hypothesis="poison",
+            action_tool="replay_dlq_by_ids",
+            action_arguments={"job_ids": [first, second]},
+            verify_tool="get_dag_state",
+            verify_arguments={"job_id": first},
         )
         result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(run, _now())
         assert result.state is IncidentState.REMEDIATING

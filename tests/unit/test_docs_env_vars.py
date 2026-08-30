@@ -45,6 +45,7 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
     {
         # Code symbols named in the docs, not environment variables.
         "ALLOWED_TRANSITIONS",  # transition graph, agent/orchestrator.py
+        "RESOURCE_ARG_FIELDS",  # per-tool resource-naming fields, tools/policies.py
         "TIER_1",  # Tier enum values, tools/policies.py
         "TIER_2",
         # Environment variables / make flags consumed outside Settings.

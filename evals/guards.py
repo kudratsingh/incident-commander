@@ -7,9 +7,16 @@ re-exported the file's value. Ten Tier-1 writes landed under the full
 principal before the platform audit log revealed it.
 
 The lesson these guards encode: **a control must be asserted where it is
-used, not assumed from where it was configured.** Both checks run against
+used, not assumed from where it was configured.** Every check runs against
 the live platform with tools that exist on v0.4.9 — no whoami, no
 introspection endpoint, no platform change required.
+
+Each stage asserts the scope it actually needs, and only that one:
+``assert_read_only_principal`` (smoke: must NOT carry ``actions:execute``),
+``assert_write_capable_principal`` (remediation: must carry it), and
+``assert_chaos_capable_principal`` (any selection that seeds a fault: must
+carry ``chaos:invoke``). Asking about the wrong scope is its own bug — it
+refuses runs that are entitled to proceed and passes runs that are not.
 """
 
 from __future__ import annotations
@@ -39,6 +46,40 @@ _PROBE_ARGS: Final[dict[str, Any]] = {
 }
 
 _SCOPE_REFUSAL_CODE: Final[int] = -32002
+
+# The ONLY codes that count as "the scope check passed and the arguments were
+# rejected". Anything else — a vanished tool (-32601), an internal error
+# (-32603), a transport code — means the probe never reached argument
+# validation, and a probe that never got there proves nothing about the scope.
+#
+# The positive guards used to pass on any non-scope MCPError at all, which
+# made them vacuous the day the probe tool disappeared from the platform: a
+# read-scoped token answering "tool not found" read as "this principal can
+# act". A guard whose green survives the removal of the thing it probes is
+# not a guard.
+_ARGUMENT_REFUSAL_CODES: Final[frozenset[int]] = frozenset({-32602})
+
+# The chaos half. A scenario that mutates the platform solely through
+# ``chaos_setup`` executes no Tier-1 action, so ``actions:execute`` is the
+# wrong question to ask about it — it would refuse tokens that can seed and
+# pass tokens that cannot. The scope such a scenario cannot run without is
+# ``chaos:invoke``, so that is what gets probed, and the probe is a chaos
+# hook. ``inject_latency`` is the smallest blast radius on offer: the
+# snapshot marks it ``[chaos: single_consumer]``, against one named group,
+# self-cleaning on a TTL.
+_CHAOS_PROBE_TOOL: Final[str] = "inject_latency"
+
+# Deliberately invalid, and invalid twice over against the hook's committed
+# inputSchema (contracts/platform-tools.snapshot.json): ``consumer_group``
+# violates minLength 1 and ``latency_ms`` is not an integer at all. The type
+# error is the load-bearing one — it cannot be coerced into a value that
+# seeds anything, whatever the platform's constraint checking does.
+# ``tests/unit/test_guards.py`` pins both facts against the snapshot rather
+# than restating them here.
+_CHAOS_PROBE_ARGS: Final[dict[str, Any]] = {
+    "consumer_group": "",
+    "latency_ms": "not-a-latency",
+}
 # Derived from the tier map, never hand-copied. A second list of Tier-1
 # names would be one more mirror to drift out of sync — the same defect
 # issue #79 tracks for ReadToolName, and the same class as the audit
@@ -116,9 +157,14 @@ def assert_write_capable_principal(client: MCPClientProtocol) -> None:
 
     * Scope refusal (``-32002 missing required scope``) → the token is
       read-scoped. Fail: this stage needs ``actions:execute``.
-    * Any other MCP error (argument validation, not-found) → the scope check
-      passed and the arguments were rejected. That is exactly what we want to
-      see, and nothing executed.
+    * Argument validation refusal (``-32602``) → the scope check passed and
+      the arguments were rejected. That is exactly what we want to see, and
+      nothing executed. This is the ONLY passing outcome.
+    * Any other MCP error → fail closed. The probe did not reach argument
+      validation, so it says nothing about the scope. ``-32601 tool not
+      found`` is the case that mattered: this branch used to pass on it, so
+      the guard went green — vacuously — for a read-scoped token the day the
+      probe tool left the platform.
     * Success → fail loudly. A deliberately malformed payload must never be
       accepted; if it was, the probe is no longer safe and the platform's
       contract has moved.
@@ -127,32 +173,112 @@ def assert_write_capable_principal(client: MCPClientProtocol) -> None:
     precedes argument parsing, so the malformed payload cannot execute under
     either token.
     """
+    _assert_scope_carried(
+        client,
+        label="write guard",
+        probe_tool=_PROBE_TOOL,
+        probe_args=_PROBE_ARGS,
+        scope="actions:execute",
+        refusal_consequence=(
+            "so every remediation scenario would investigate, attempt its "
+            "action, be refused, and grade red — eight environment failures "
+            "dressed as agent failures, after full model spend. Use "
+            "PLATFORM_TOKEN, not PLATFORM_SMOKE_TOKEN."
+        ),
+        unreached_hint=(
+            f"Most likely {_PROBE_TOOL} no longer exists on the platform, or "
+            "the handler errored before the scope check."
+        ),
+    )
+
+
+def assert_chaos_capable_principal(client: MCPClientProtocol) -> None:
+    """Hard-fail unless the client's token genuinely carries ``chaos:invoke``.
+
+    The third guard, and it exists because the second one asks the wrong
+    question for a whole class of live scenario. ``assert_write_capable_principal``
+    is gated on ``expected_action_tools``; a scenario that mutates the
+    platform solely through ``chaos_setup`` declares none — it seeds a fault
+    and grades what the agent does about it, executing no Tier-1 action
+    itself. So that selection ran with no principal check at all, under a
+    token that may well be read-scoped, and the wrongness surfaced inside
+    ``run_scenario``: the hook fires under ``settings.platform_token``, the
+    platform refuses it, and the scenario crashes with the run archive
+    already open and the invocation already under way.
+
+    Probing ``actions:execute`` here would be wrong in both directions — it
+    would refuse a chaos-only token that can seed perfectly well, and pass a
+    write token that cannot seed at all. Same negative-probe shape, aimed at
+    the scope the selection actually needs.
+    """
+    _assert_scope_carried(
+        client,
+        label="chaos guard",
+        probe_tool=_CHAOS_PROBE_TOOL,
+        probe_args=_CHAOS_PROBE_ARGS,
+        scope="chaos:invoke",
+        refusal_consequence=(
+            "so the selected scenario would start, seed nothing, and crash "
+            "on ChaosInvocationError with the run already under way. Mint a "
+            "token with --scope chaos:invoke (docs/runbook.md)."
+        ),
+        unreached_hint=(
+            f"Most likely the platform was booted with CHAOS_ENABLED=false, "
+            f"so {_CHAOS_PROBE_TOOL} is not registered at all — in which case "
+            "seeding cannot work either."
+        ),
+    )
+
+
+def _assert_scope_carried(
+    client: MCPClientProtocol,
+    *,
+    label: str,
+    probe_tool: str,
+    probe_args: dict[str, Any],
+    scope: str,
+    refusal_consequence: str,
+    unreached_hint: str,
+) -> None:
+    """Shared body of the two positive guards: prove one scope is carried.
+
+    One implementation, two configurations, because the fail-open bug the
+    write guard shipped with — passing on any non-scope error — is exactly
+    the bug a second hand-written copy would reintroduce.
+    """
     try:
-        result = client.call_tool(_PROBE_TOOL, _PROBE_ARGS)
+        result = client.call_tool(probe_tool, probe_args)
     except MCPError as err:
         if err.code == _SCOPE_REFUSAL_CODE and "scope" in str(err).lower():
             raise PrincipalGuardError(
-                "write guard: the negative probe was refused on SCOPE "
-                f"(MCPError {err.code}: {err}). This token lacks "
-                "actions:execute, so every remediation scenario would "
-                "investigate, attempt its action, be refused, and grade red "
-                "— eight environment failures dressed as agent failures, "
-                "after full model spend. Use PLATFORM_TOKEN, not "
-                "PLATFORM_SMOKE_TOKEN."
+                f"{label}: the negative probe was refused on SCOPE "
+                f"(MCPError {err.code}: {err}). This token lacks {scope}, "
+                f"{refusal_consequence}"
             ) from err
-        # Refused on the arguments, not the scope: the principal can act.
-        return
+        if err.code in _ARGUMENT_REFUSAL_CODES:
+            # Refused on the arguments, not the scope: the principal can act.
+            return
+        raise PrincipalGuardError(
+            f"{label}: the negative probe on {probe_tool} failed with MCPError "
+            f"{err.code}: {err} — neither the scope refusal "
+            f"({_SCOPE_REFUSAL_CODE}) nor the argument-validation refusal "
+            f"({', '.join(str(c) for c in sorted(_ARGUMENT_REFUSAL_CODES))}) "
+            "this probe is built to elicit. It never reached argument "
+            f"validation, so it proves nothing about {scope}. {unreached_hint} "
+            "Failing closed — the run does not proceed on an unverified control."
+        ) from err
     except Exception as err:  # noqa: BLE001 — fail closed, deliberately
         raise PrincipalGuardError(
-            "write guard: could not verify the principal "
+            f"{label}: could not verify the principal "
             f"({type(err).__name__}: {err}). Failing closed — the run does "
             "not proceed on an unverified control."
         ) from err
     raise PrincipalGuardError(
-        "write guard: the negative probe SUCCEEDED "
-        f"(result: {str(result)[:200]}). A deliberately invalid Tier-1 call "
-        "must never be accepted — the probe is no longer safe to fire and "
-        "the platform's argument validation has moved. Refusing to run."
+        f"{label}: the negative probe SUCCEEDED "
+        f"(result: {str(result)[:200]}). A deliberately invalid "
+        f"{probe_tool} call must never be accepted — the probe is no longer "
+        "safe to fire and the platform's argument validation has moved. "
+        "Refusing to run."
     )
 
 

@@ -9,12 +9,19 @@ from typing import Any
 import pytest
 
 from evals.guards import (
+    _CHAOS_PROBE_ARGS,
+    _CHAOS_PROBE_TOOL,
+    _PROBE_ARGS,
+    _PROBE_TOOL,
     PrincipalGuardError,
+    assert_chaos_capable_principal,
     assert_no_tier1_successes,
     assert_read_only_principal,
     assert_write_capable_principal,
 )
+from evals.scenarios.schema import chaos_argument_errors, chaos_tool_names
 from incident_commander.tools.mcp_client import MCPError, ToolResult
+from incident_commander.tools.policies import Tier, tier_of
 
 
 class _Client:
@@ -451,3 +458,102 @@ class TestWriteCapablePrincipal:
         assert_read_only_principal(scope_refused)  # passes
         with pytest.raises(PrincipalGuardError):
             assert_write_capable_principal(scope_refused)  # fails
+
+    def test_a_vanished_probe_tool_fails_closed(self) -> None:
+        """ "Tool not found" is not proof that the principal can act.
+
+        The guard used to pass on ANY non-scope MCP error, so the day the
+        platform renames or retires ``mark_dlq_permanent`` the probe starts
+        answering ``-32601`` and the guard goes green — vacuously — for a
+        read-scoped token. A probe that never reached argument validation
+        proves nothing about the scope.
+        """
+        client = _Client(MCPError(-32601, f"Unknown tool: {_PROBE_TOOL}"))
+        with pytest.raises(PrincipalGuardError, match="-32601"):
+            assert_write_capable_principal(client)
+
+    def test_an_internal_platform_error_fails_closed(self) -> None:
+        client = _Client(MCPError(-32603, "internal server error"))
+        with pytest.raises(PrincipalGuardError, match="Failing closed"):
+            assert_write_capable_principal(client)
+
+    def test_a_scope_shaped_code_without_the_word_scope_fails_closed(self) -> None:
+        # -32002 whose message does not name a scope is not a scope refusal
+        # and is not an argument refusal either. Neither branch owns it, so
+        # the fail-closed branch must.
+        client = _Client(MCPError(-32002, "upstream timeout"))
+        with pytest.raises(PrincipalGuardError):
+            assert_write_capable_principal(client)
+
+    def test_the_probe_is_a_tier_1_tool(self) -> None:
+        # The probe only distinguishes the scopes because it needs
+        # actions:execute. A read tool would be refused by neither token.
+        assert tier_of(_PROBE_TOOL) is Tier.TIER_1
+
+
+class TestChaosCapablePrincipal:
+    """The scope a chaos-only scenario actually needs is ``chaos:invoke``.
+
+    A live scenario that mutates the platform solely through ``chaos_setup``
+    declares no ``expected_action_tools``, so the write guard never fired for
+    it and it ran unguarded. Probing ``actions:execute`` would be the wrong
+    question — such a scenario executes no Tier-1 action, and demanding write
+    scope would refuse a selection that is entitled to run. The chaos hooks
+    are the thing it cannot do without.
+    """
+
+    def test_a_scope_refusal_fails_the_guard(self) -> None:
+        client = _Client(MCPError(-32002, "missing required scope: chaos:invoke"))
+        with pytest.raises(PrincipalGuardError, match="chaos:invoke"):
+            assert_chaos_capable_principal(client)
+
+    def test_an_argument_refusal_passes_the_guard(self) -> None:
+        client = _Client(MCPError(-32602, "latency_ms: Input should be a valid integer"))
+        assert_chaos_capable_principal(client)  # no raise
+        assert client.calls[0][0] == _CHAOS_PROBE_TOOL
+
+    def test_a_successful_probe_fails_loudly(self) -> None:
+        client = _Client(ToolResult(content=[{"type": "text", "text": "{}"}]))
+        with pytest.raises(PrincipalGuardError, match="SUCCEEDED"):
+            assert_chaos_capable_principal(client)
+
+    def test_a_missing_chaos_tool_fails_closed(self) -> None:
+        # CHAOS_ENABLED=false is the common cause: the hook is not registered,
+        # so seeding would fail mid-run. Refusing before spend is the answer,
+        # and the message has to say so.
+        client = _Client(MCPError(-32601, f"Unknown tool: {_CHAOS_PROBE_TOOL}"))
+        with pytest.raises(PrincipalGuardError, match="CHAOS_ENABLED"):
+            assert_chaos_capable_principal(client)
+
+    def test_an_unexpected_error_fails_closed(self) -> None:
+        client = _Client(RuntimeError("connection reset"))
+        with pytest.raises(PrincipalGuardError, match="Failing closed"):
+            assert_chaos_capable_principal(client)
+
+    def test_the_probe_hook_is_one_the_platform_declares(self) -> None:
+        # Derived from contracts/platform-tools.snapshot.json, so a renamed or
+        # retired hook fails here — in CI, cheaply — instead of turning the
+        # guard into a permanent pre-spend refusal on a live campaign night.
+        assert _CHAOS_PROBE_TOOL in chaos_tool_names()
+
+    def test_the_probe_arguments_cannot_seed_anything(self) -> None:
+        # The safety claim of a negative probe: even if the scope check did
+        # NOT precede argument parsing, this invocation is rejected by the
+        # platform's own committed input schema. Checked against the snapshot
+        # rather than asserted in prose.
+        assert chaos_argument_errors(_CHAOS_PROBE_TOOL, _CHAOS_PROBE_ARGS)
+
+    def test_the_write_probe_arguments_are_not_reused(self) -> None:
+        # Two scopes, two probes. Firing the Tier-1 probe to test chaos scope
+        # is the naive fix this guard exists to avoid.
+        assert _CHAOS_PROBE_TOOL != _PROBE_TOOL
+        assert _CHAOS_PROBE_ARGS != _PROBE_ARGS
+
+    def test_chaos_scope_does_not_answer_for_write_scope(self) -> None:
+        """A token with chaos:invoke and no actions:execute must fail the
+        write guard and pass the chaos guard from the same platform."""
+        chaos_refused = _Client(MCPError(-32002, "missing required scope: chaos:invoke"))
+        with pytest.raises(PrincipalGuardError):
+            assert_chaos_capable_principal(chaos_refused)
+        args_refused = _Client(MCPError(-32602, "invalid arguments"))
+        assert_chaos_capable_principal(args_refused)  # no raise

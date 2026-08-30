@@ -315,7 +315,7 @@ the degradation is now recorded in the report (`degraded_count` in
 | 1 | ≥1 scenario failed (regression gate: regression detected, or a baseline scenario dropped from latest) |
 | 2 | an `--only` pattern matched no scenario — *any* single dead pattern, not only a wholly empty selection, since a dead pattern is a renamed scenario dropping silently out of the run (regression gate: missing report, or a filtered `--only` `latest.json` — refused as gate input) |
 | 3 | preflight/env failure: `--smoke` without `--live`, degraded `--live` env, invalid or missing settings, missing smoke token, LLM auth preflight failure |
-| 4 | principal guard: the smoke token holds more than read scope |
+| 4 | principal guard: the token is not the one the selection needs — the smoke token holds more than read scope, or a remediation selection lacks `actions:execute`, or a chaos-seeding selection lacks `chaos:invoke` (each guard probes only the scope its half of the selection needs, and each fails closed on any probe outcome that is neither a scope refusal nor an argument-validation refusal) |
 | 5 | post-stage audit failed, was unreadable, or was inconclusive |
 | 6 | `--smoke` selected a scenario that declares `chaos_setup` — a read-only stage does not seed chaos |
 | 7 | `--live` selected more than one state-mutating scenario — nothing resets the shared platform between them (ADR 0020) |
@@ -359,6 +359,18 @@ default `SMOKE_ONLY` list already excludes the three `remediate_*`
 scenarios, so `make eval-smoke` is unaffected; an unfiltered
 `python -m evals.runner --live --smoke` selects the whole suite and is
 refused.
+
+The mirror of that rule on the `--live` side: a selection that *does*
+declare `chaos_setup` is checked, before any spend, for the scope it needs
+to seed — `chaos:invoke`, probed with a deliberately invalid
+`inject_latency` call, exit 4 on refusal. The write guard could not cover
+this: it is keyed on `expected_action_tools`, and a scenario that mutates
+the platform solely through `chaos_setup` declares none, so it used to run
+unguarded and discovered its wrong token inside `run_scenario` — hook
+refused, scenario crashed, invocation already under way. Probing
+`actions:execute` instead would have been wrong in both directions: it
+refuses a chaos-capable token that can seed, and passes a write token that
+cannot.
 
 Relatedly, a chaos hook name is a **closed set**, validated at scenario
 load time against the chaos tools in

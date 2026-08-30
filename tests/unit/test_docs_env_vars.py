@@ -56,6 +56,14 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "PURGE_IDEMPOTENCY",  # `make eval-reset` opt-in purge flag
         "SMOKE_ONLY",  # `make eval-smoke` scenario-list override
         "UNTIL_LAG",  # `make traffic` stop-at-this-backlog flag (scripts/traffic_loop.py)
+        # Settings on the PLATFORM, quoted in docs/safety-model.md "Rate
+        # limits" (platform #169). Named here because the ceilings the agent
+        # has to live under are the platform's, and a doc that states them
+        # without naming the knob cannot be checked against the platform.
+        "MCP_RATE_LIMIT_PER_PRINCIPAL",
+        "MCP_RATE_LIMIT_WINDOW_SECONDS",
+        "ADMIN_NL_QUERY_RATE_LIMIT",
+        "ADMIN_DIGEST_RATE_LIMIT",
     }
 )
 

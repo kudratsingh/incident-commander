@@ -17,10 +17,21 @@ alert:
   fingerprint: consumer_lag_high
   group: shipping-consumer
 canned_tool_responses:
+  # 100000 is the platform's seeded lag for shipping-consumer, and it is
+  # still the largest backlog in the fixture pack — so this stays the
+  # "extreme" end of the lag scenarios, which is the whole subject. The
+  # recorded 2500000 was 25x anything the platform can report.
+  #
+  # Note for the reader: `expected_evidence_fields.at_least` below is 100000,
+  # which the corrected value now meets exactly rather than clearing by a
+  # wide margin. Left as-is deliberately — the assertion still passes (`>=`)
+  # and it is the honest threshold for "extreme" against this fixture pack —
+  # but any future reduction of the seeded lag breaks it, where before it had
+  # 2.4M of slack hiding that coupling.
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"shipping-consumer","lag":2500000,"cache_key":"kafka:consumer_lag:shipping-consumer"}'
+      text: '{"consumer_group":"shipping-consumer","lag":100000,"cache_key":"kafka:consumer_lag:shipping-consumer"}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

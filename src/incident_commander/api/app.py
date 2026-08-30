@@ -29,7 +29,7 @@ from incident_commander.agent.investigation import make_investigate
 from incident_commander.agent.loop import run_to_completion
 from incident_commander.agent.orchestrator import TRANSITIONS, Checkpointer, Transition
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
-from incident_commander.api.hmac_verify import verify
+from incident_commander.api.hmac_verify import verify, verify_delivery
 from incident_commander.api.schemas import AlertPayload, HealthResponse, IngestResponse
 from incident_commander.config import Settings, get_settings
 from incident_commander.persistence.lease import incident_lease
@@ -48,29 +48,38 @@ Admission = Literal["admitted", "at_capacity", "lease_lost"]
 
 _log = logging.getLogger(__name__)
 
-# Replay suppression (ADR 0014): remember the signature of each accepted
-# delivery so an identical redelivery within the skew window returns 202
-# without spawning a second investigation run. Process-local by design and
-# lost on restart — durable single-flight/dedupe is the ADR-0002 lease work
-# (finding B-05), not this cache.
+# Replay suppression (ADR 0014, ADR 0023). Two caches because the two
+# signature schemes give the receiver different amounts of certainty:
+#
+# * ``_replay_cache`` keys the *legacy* body-only scheme by signature. There
+#   the timestamp is outside the MAC, so a repeated signature is equally
+#   consistent with an attacker's replay and with the emitter's legitimate
+#   at-least-once redelivery — indistinguishable, hence suppressed quietly.
+# * ``_nonce_cache`` keys the nonce-bound scheme by ``X-Alert-Nonce``. The
+#   emitter mints a fresh nonce per delivery, retries included, so a repeated
+#   nonce is not ambiguous at all: it is a replay, and it is refused.
+#
+# Both are process-local by design and lost on restart — durable
+# single-flight/dedupe is the ADR-0002 lease work (finding B-05), not these.
 _REPLAY_CACHE_MAX_ENTRIES: Final[int] = 1024
 _replay_cache: dict[str, float] = {}
+_nonce_cache: dict[str, float] = {}
 
 
-def _is_replay(signature_hex: str, now: float, window_seconds: float) -> bool:
-    """True iff ``signature_hex`` was already accepted within the window.
+def _is_replay(cache: dict[str, float], key: str, now: float, window_seconds: float) -> bool:
+    """True iff ``key`` was already seen in ``cache`` within the window.
 
-    First sight records the signature and returns False. Expired entries are
+    First sight records the key and returns False. Expired entries are
     pruned on every call, and the cache stays capacity-bounded by evicting
     the oldest entry.
     """
-    for key in [k for k, seen in _replay_cache.items() if now - seen > window_seconds]:
-        del _replay_cache[key]
-    if signature_hex in _replay_cache:
+    for stale in [k for k, seen in cache.items() if now - seen > window_seconds]:
+        del cache[stale]
+    if key in cache:
         return True
-    if len(_replay_cache) >= _REPLAY_CACHE_MAX_ENTRIES:
-        del _replay_cache[min(_replay_cache, key=_replay_cache.__getitem__)]
-    _replay_cache[signature_hex] = now
+    if len(cache) >= _REPLAY_CACHE_MAX_ENTRIES:
+        del cache[min(cache, key=cache.__getitem__)]
+    cache[key] = now
     return False
 
 
@@ -286,34 +295,77 @@ def create_app(
         signature = request.headers.get("X-Alert-Signature") or request.headers.get(
             "X-Signature-256", ""
         )
-        if not verify(
-            body,
-            signature,
-            resolved_settings.platform_webhook_secret.get_secret_value(),
-        ):
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or missing signature")
-
-        # X-Alert-Timestamp is epoch MILLISECONDS platform-side. It is not
-        # part of the v1 signed material, so this skew check only bounds the
-        # replay window — it does not close it (ADR 0014).
+        # X-Alert-Timestamp is epoch MILLISECONDS platform-side.
         timestamp_header = request.headers.get("X-Alert-Timestamp")
+        # The scheme selector (ADR 0023). Both schemes carry the digest as
+        # `sha256=<hex>` in the same header — the platform added a header
+        # rather than versioning the value — so the nonce's presence, not the
+        # prefix, is what says which material was signed.
+        nonce_header = request.headers.get("X-Alert-Nonce")
+        secret = resolved_settings.platform_webhook_secret.get_secret_value()
+        skew_seconds = resolved_settings.webhook_max_skew_seconds
         now = time.time()
-        if timestamp_header is not None:
-            _reject_unless_within_skew(
-                timestamp_header, now, resolved_settings.webhook_max_skew_seconds
-            )
 
-        signature_hex = signature.removeprefix("sha256=")
-        if _is_replay(signature_hex, now, float(resolved_settings.webhook_max_skew_seconds)):
-            # 202, not 4xx: the platform emitter treats any >=400 as delivery
-            # failure and would log/retry, so legitimate at-least-once
-            # redelivery must look accepted. No run is spawned; the id is
-            # synthetic (the emitter only reads the status code).
-            _log.warning(
-                "suppressed replayed webhook delivery (signature %s...); no run spawned",
-                signature_hex[:12],
-            )
-            return IngestResponse(incident_id=uuid4())
+        if nonce_header is not None:
+            # Nonce-bound scheme: the MAC covers {timestamp}.{nonce}.{body}.
+            if timestamp_header is None:
+                # The timestamp is inside the MAC here, so there is nothing to
+                # verify against without it — not the legacy path's optional
+                # extra.
+                raise HTTPException(
+                    status.HTTP_401_UNAUTHORIZED,
+                    "X-Alert-Nonce present without X-Alert-Timestamp",
+                )
+            if not verify_delivery(body, timestamp_header, nonce_header, signature, secret):
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or missing signature")
+            # Signed timestamp, so this genuinely bounds replay rather than
+            # merely bounding the honest case.
+            _reject_unless_within_skew(timestamp_header, now, skew_seconds)
+            # Retained for twice the skew window, deliberately: a delivery is
+            # acceptable anywhere in [stamp - skew, stamp + skew], so a nonce
+            # first seen at the earliest acceptable moment must still be
+            # remembered at the latest one. A one-window cache would leave a
+            # gap at the end of the range where a replay is accepted again.
+            #
+            # Checked only after the MAC verifies, so an unauthenticated
+            # caller cannot poison the cache with a nonce of their choosing
+            # and get a genuine delivery refused.
+            if _is_replay(_nonce_cache, nonce_header, now, float(skew_seconds) * 2):
+                _log.warning(
+                    "refused replayed webhook delivery (nonce %s); no run spawned",
+                    nonce_header[:16],
+                )
+                # 401 here, unlike the legacy path below: the emitter mints a
+                # fresh nonce for every delivery including retries, so a
+                # repeated one is a replay rather than legitimate
+                # at-least-once redelivery, and saying so is more useful to
+                # both ends than swallowing it.
+                raise HTTPException(
+                    status.HTTP_401_UNAUTHORIZED, "replayed delivery: nonce already seen"
+                )
+        else:
+            # Legacy body-only scheme: the pinned platform image until the
+            # wave-9 re-pin, plus pre-fix tooling.
+            if not verify(body, signature, secret):
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or missing signature")
+
+            # Not part of the legacy signed material, so this skew check only
+            # bounds the replay window — it does not close it (ADR 0014).
+            if timestamp_header is not None:
+                _reject_unless_within_skew(timestamp_header, now, skew_seconds)
+
+            signature_hex = signature.removeprefix("sha256=")
+            if _is_replay(_replay_cache, signature_hex, now, float(skew_seconds)):
+                # 202, not 4xx: the platform emitter treats any >=400 as
+                # delivery failure and would log/retry, so legitimate
+                # at-least-once redelivery must look accepted. No run is
+                # spawned; the id is synthetic (the emitter only reads the
+                # status code).
+                _log.warning(
+                    "suppressed replayed webhook delivery (signature %s...); no run spawned",
+                    signature_hex[:12],
+                )
+                return IngestResponse(incident_id=uuid4())
 
         try:
             payload = AlertPayload.model_validate_json(body)

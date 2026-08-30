@@ -443,7 +443,7 @@ def _settings() -> Settings:
     return Settings(  # type: ignore[call-arg]
         _env_file=None,
         anthropic_api_key=SecretStr("sk-ant-test-not-a-real-key"),
-        judge_model="claude-sonnet-4-5",
+        judge_model="claude-haiku-4-5",
         platform_mcp_url=AnyHttpUrl(_BASE_URL),
         platform_rest_url=AnyHttpUrl(_BASE_URL),
         platform_token=SecretStr("sa_full_scope"),

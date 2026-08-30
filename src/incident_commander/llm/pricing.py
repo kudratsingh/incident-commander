@@ -20,9 +20,14 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
-from incident_commander.llm.client import LLMUsage
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    # Type-only: importing the client at runtime would drag the Anthropic SDK
+    # into every module that needs a price row, and `config.py` needs one to
+    # refuse an unpriced model at startup (WO-R2-118). This table is committed
+    # constants and arithmetic; it should cost nothing to import.
+    from incident_commander.llm.client import LLMUsage
 
 _LOG: Final = logging.getLogger(__name__)
 

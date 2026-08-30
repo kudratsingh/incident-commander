@@ -133,6 +133,62 @@ class TestMakeInvestigate:
         assert result.state is IncidentState.ESCALATED
         assert "tool error" in result.evidence[0].result_summary
 
+    def test_mcp_error_reason_reaches_the_briefing(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The whole point of escalating is telling a human why (WO-R2-119).
+
+        The marker was recorded under the *tool's* name, and the briefing
+        only reads a reason from an underscore-prefixed marker, so every
+        Phase-1 investigate escalation handed the on-call an empty reason —
+        and leaked the marker into the probe trail as a fake
+        ``get_consumer_lag`` result while it was there.
+        """
+
+        def raise_error(_n: str, _a: Mapping[str, Any]) -> ToolResult:
+            raise MCPError(-32602, "invalid group")
+
+        transition = make_investigate(_FakeMCPClient(raise_error))
+        run = _with_alert(
+            run_state.model_copy(update={"state": IncidentState.INVESTIGATING}),
+            {"consumer_group": "billing"},
+        )
+        briefing = render_briefing(transition(run, now))
+        assert "tool error" in briefing.escalation_reason
+        assert "invalid group" in briefing.escalation_reason
+        # The other half: a failed probe is not a probe result.
+        assert briefing.investigation_trail == ()
+
+    def test_successful_probe_is_not_read_as_an_escalation_reason(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The happy path also ends ESCALATED, and must NOT gain a reason.
+
+        Its last evidence entry is a real ``get_consumer_lag`` result, so
+        widening the briefing's recognizer instead of renaming the marker
+        would put a JSON blob under a heading that says why the agent gave
+        up. It stays a probe: trail yes, reason no.
+        """
+        transition = make_investigate(
+            _FakeMCPClient(
+                lambda _n, _a: _canned_result(
+                    {
+                        "consumer_group": "billing",
+                        "lag": 42,
+                        "cache_key": "kafka:consumer_lag:billing",
+                    }
+                )
+            )
+        )
+        run = _with_alert(
+            run_state.model_copy(update={"state": IncidentState.INVESTIGATING}),
+            {"consumer_group": "billing"},
+        )
+        briefing = render_briefing(transition(run, now))
+        assert briefing.final_state is IncidentState.ESCALATED
+        assert briefing.escalation_reason == ""
+        assert [probe.tool for probe in briefing.investigation_trail] == ["get_consumer_lag"]
+
     def test_mcp_error_does_not_increment_budget(self, run_state: RunState, now: datetime) -> None:
         def raise_error(_n: str, _a: Mapping[str, Any]) -> ToolResult:
             raise MCPError(-32602, "boom")
@@ -253,15 +309,11 @@ class TestMalformedEnvelopeReachesTheEscalationRail:
         the runner classified it as a crash, and the incident finished
         FAILED with no briefing rendered for anyone.
 
-        Note what this does *not* assert. ``briefing.escalation_reason`` is
-        empty on this path, and on every other escalation out of
-        ``make_investigate``: ``_escalate`` records its marker under
-        ``tool_name=_TOOL_NAME``, while ``briefing._terminal_marker`` only
-        recognises markers whose name starts with ``_``, so the reason is
-        dropped between the two. That is a pre-existing gap on the same
-        rail, unrelated to the envelope fix and shared with the plain
-        ``MCPError`` path above — filed separately rather than papered over
-        by asserting the empty string here.
+        The reason survives the handoff too (WO-R2-119): the marker is
+        recorded under ``_ESCALATION_MARKER``, which is what
+        ``briefing._terminal_marker`` reads. It used to be recorded under
+        the tool's own name and the reason was dropped between the two, so
+        this path reached a human with a blank "why".
         """
         with self._client_returning({"content": "not-a-list"}) as client:
             transition = make_investigate(client)
@@ -273,4 +325,5 @@ class TestMalformedEnvelopeReachesTheEscalationRail:
 
         briefing = render_briefing(result)
         assert briefing.final_state is IncidentState.ESCALATED
+        assert "malformed tools/call result envelope" in briefing.escalation_reason
         assert briefing.incident_id == str(result.incident_id)

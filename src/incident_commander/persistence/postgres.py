@@ -6,7 +6,7 @@ import json
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Engine, text
+from sqlalchemy import Connection, Engine, text
 from sqlalchemy.exc import IntegrityError
 
 from incident_commander.agent.state import RunState
@@ -34,11 +34,22 @@ class PostgresCheckpointer:
         return RunState.model_validate(payload)
 
     def write(self, run_state: RunState) -> None:
+        """Append one snapshot. One connection, one transaction, one attempt.
+
+        The version read used to happen on its own connection, checked out and
+        returned before the INSERT took a second one. Two checkouts per write,
+        and a window between them in which another writer could take the
+        version this one had just read. Doing both inside ``begin()`` closes
+        the window and halves the checkout traffic — which matters because a
+        run doing this is already holding a lease connection (ADR 0016), so
+        every checkout it makes is one the pool cannot give to anybody else
+        (ADR 0022).
+        """
         payload = json.loads(run_state.model_dump_json())
         for attempt in range(3):
-            next_version = self._next_version(run_state.incident_id)
             try:
                 with self._engine.begin() as conn:
+                    next_version = self._next_version(conn, run_state.incident_id)
                     conn.execute(
                         text(
                             "INSERT INTO run_snapshots "
@@ -88,14 +99,18 @@ class PostgresCheckpointer:
         """
         return self.load(incident_id)
 
-    def _next_version(self, incident_id: UUID) -> int:
-        with self._engine.connect() as conn:
-            row = conn.execute(
-                text(
-                    "SELECT COALESCE(MAX(version), -1) + 1 AS next "
-                    "FROM run_snapshots WHERE incident_id = :incident_id"
-                ),
-                {"incident_id": str(incident_id)},
-            ).first()
+    def _next_version(self, conn: Connection, incident_id: UUID) -> int:
+        """Next free version, read on the CALLER's connection.
+
+        Takes a connection rather than opening one so ``write`` can read the
+        version and insert the row in a single transaction.
+        """
+        row = conn.execute(
+            text(
+                "SELECT COALESCE(MAX(version), -1) + 1 AS next "
+                "FROM run_snapshots WHERE incident_id = :incident_id"
+            ),
+            {"incident_id": str(incident_id)},
+        ).first()
         assert row is not None
         return int(row[0])

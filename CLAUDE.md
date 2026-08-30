@@ -108,7 +108,9 @@ incident-commander/
 │       │   └── wire.py             # the exact request bytes the platform hashes
 │       ├── persistence/
 │       │   ├── postgres.py         # Postgres checkpointer, append-only snapshot log
-│       │   └── memory.py           # in-memory checkpointer for tests and the demo
+│       │   ├── memory.py           # in-memory checkpointer for tests and the demo
+│       │   ├── lease.py            # single-flight advisory-lock lease per incident (ADR 0016)
+│       │   └── pool.py             # engine pool sizing + run-admission bound (ADR 0022)
 │       ├── api/
 │       │   ├── app.py              # FastAPI app: webhook ingress, health, run inspection
 │       │   ├── schemas.py          # HTTP request/response models (untrusted input)

@@ -13,11 +13,12 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from typing import Final
+from typing import Final, Literal
 from uuid import UUID, uuid4
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, status
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine
+from starlette.concurrency import run_in_threadpool
 
 from incident_commander.agent.briefing import render_briefing
 from incident_commander.agent.factory import derive_incident_id, start_run
@@ -29,10 +30,18 @@ from incident_commander.api.hmac_verify import verify
 from incident_commander.api.schemas import AlertPayload, HealthResponse, IngestResponse
 from incident_commander.config import Settings, get_settings
 from incident_commander.persistence.lease import incident_lease
+from incident_commander.persistence.pool import RunSlots, create_pooled_engine
 from incident_commander.persistence.postgres import PostgresCheckpointer
 from incident_commander.tools.mcp_client import make_client
 
 RunTask = Callable[[RunState, Settings, Checkpointer], None]
+
+# Why a run did or did not get to execute. Three outcomes, named rather than
+# collapsed into a bool, because the two refusals are different events with
+# different operator meanings: "somebody else already owns this incident"
+# (routine, expected on every duplicate delivery) versus "this agent is full"
+# (a capacity signal that wants attention).
+Admission = Literal["admitted", "at_capacity", "lease_lost"]
 
 _log = logging.getLogger(__name__)
 
@@ -73,14 +82,22 @@ def create_app(
     # needs a real connection to take its advisory lock on. An injected
     # checkpointer means there is no engine — see ``_single_flight``.
     engine: Engine | None = None
+    slots: RunSlots | None = None
     if checkpointer is None:
-        engine = create_engine(str(resolved_settings.database_url))
+        engine = create_pooled_engine(resolved_settings)
         resolved_checkpointer: Checkpointer = PostgresCheckpointer(engine)
+        # Admission bound (ADR 0022), sized from the pool rather than chosen:
+        # a run holds a lease connection for its whole life, so allowing more
+        # live runs than the pool can serve is a deadlock, not merely slow.
+        # One instance per app, shared by every background task it spawns.
+        # Paired with the engine because it exists to protect that engine's
+        # pool — the injected-checkpointer wiring has no pool to protect.
+        slots = RunSlots(resolved_settings.max_concurrent_runs)
     else:
         resolved_checkpointer = checkpointer
 
     def investigate(run: RunState, run_settings: Settings, run_checkpointer: Checkpointer) -> None:
-        _run_investigation(run, run_settings, run_checkpointer, engine=engine)
+        _run_investigation(run, run_settings, run_checkpointer, engine=engine, slots=slots)
 
     task: RunTask = run_task or investigate
 
@@ -88,6 +105,7 @@ def create_app(
     app.state.settings = resolved_settings
     app.state.checkpointer = resolved_checkpointer
     app.state.engine = engine
+    app.state.run_slots = slots
 
     @app.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
@@ -158,8 +176,17 @@ def create_app(
         # the live run instead of starting a second investigation against one
         # fault. Fail-open like the write below — a store that is down
         # degrades to today's fresh id rather than failing the delivery.
+        #
+        # ``run_in_threadpool``, not a direct call: ``derive_incident_id``
+        # walks the generation chain with one synchronous indexed ``load`` per
+        # closed generation (up to 64), and each of those can now sit for
+        # ``DB_POOL_TIMEOUT_SECONDS`` waiting for a free connection. Called
+        # directly from this ``async def`` it blocks the event loop, and a
+        # blocked event loop means /health stops answering — so a database
+        # slow enough to be worth alerting on would also make the agent look
+        # dead to whatever watches it (ADR 0022).
         try:
-            incident_id = derive_incident_id(alert, resolved_checkpointer)
+            incident_id = await run_in_threadpool(derive_incident_id, alert, resolved_checkpointer)
         except Exception:
             _log.exception(
                 "incident identity derivation failed; falling back to a fresh id "
@@ -191,9 +218,12 @@ def create_app(
         # failures during exactly the kind of incident that took it down, and
         # paging runs through the platform's oncall route regardless of this
         # endpoint.
+        #
+        # Off the event loop for the same reason as the derivation above, and
+        # as ONE hop rather than two so the load and its conditional write
+        # stay adjacent.
         try:
-            if resolved_checkpointer.load(run.incident_id) is None:
-                resolved_checkpointer.write(run)
+            await run_in_threadpool(_write_ingress_checkpoint, resolved_checkpointer, run)
         except Exception:
             _log.exception(
                 "checkpoint write failed for incident %s (AGENT_ENABLED=%s); "
@@ -225,6 +255,51 @@ def create_app(
     return app
 
 
+def _write_ingress_checkpoint(checkpointer: Checkpointer, run: RunState) -> None:
+    """ADR 0016's conditional ingress write, as one threadpool-callable unit."""
+    if checkpointer.load(run.incident_id) is None:
+        checkpointer.write(run)
+
+
+@contextmanager
+def _admission(
+    slots: RunSlots | None, engine: Engine | None, incident_id: UUID
+) -> Iterator[Admission]:
+    """Take a run slot, then the single-flight lease. Hold both for the body.
+
+    The order is the whole point (ADR 0022). Taking the lease is what pins a
+    pooled connection for the length of the run, so a run that is going to be
+    refused for capacity has to be refused BEFORE it holds one — a bound
+    applied after the lease would be a bound on nothing.
+
+    Both are non-blocking tries, and both are held for the entire ``with``
+    body: the slot is what the pool arithmetic counts, so releasing it early
+    would let a second run in against connections the first has not given
+    back.
+    """
+    with _run_admission(slots) as admitted:
+        if not admitted:
+            yield "at_capacity"
+            return
+        with _single_flight(engine, incident_id) as acquired:
+            yield "admitted" if acquired else "lease_lost"
+
+
+@contextmanager
+def _run_admission(slots: RunSlots | None) -> Iterator[bool]:
+    """``RunSlots.acquire``, or unbounded admission when no pool is wired.
+
+    Same shape and the same reason as ``_single_flight``: the bound exists to
+    protect a connection pool, and the injected-checkpointer wiring that tests
+    use has no pool to protect.
+    """
+    if slots is None:
+        yield True
+        return
+    with slots.acquire() as admitted:
+        yield admitted
+
+
 @contextmanager
 def _single_flight(engine: Engine | None, incident_id: UUID) -> Iterator[bool]:
     """``incident_lease``, or an always-granted lease when no engine is wired.
@@ -248,8 +323,9 @@ def _run_investigation(
     checkpointer: Checkpointer,
     *,
     engine: Engine | None = None,
+    slots: RunSlots | None = None,
 ) -> None:
-    """Background task: take the single-flight lease, resume or start, run.
+    """Background task: take a run slot and the lease, resume or start, run.
 
     Single-flight + resume (ADR 0016, implementing ADR 0002's promise): the
     lease is held across the whole run, so one incident has at most one live
@@ -258,6 +334,10 @@ def _run_investigation(
     it died instead of re-spending its budget to rebuild evidence it already
     recorded.
 
+    Admission (ADR 0022) is the outer gate: above the configured concurrency
+    bound the run is shed rather than queued, because the pool cannot serve it
+    and waiting half an hour for a slot is not a better answer than saying so.
+
     Failure rail (finding B-04): without the ``except`` below, any exception
     here — a checkpointer failure with Postgres down is the realistic vector —
     kills the task silently, leaving the incident stranded at whatever
@@ -265,8 +345,11 @@ def _run_investigation(
     path now leaves a terminal snapshot behind.
     """
     try:
-        with _single_flight(engine, run.incident_id) as acquired:
-            if not acquired:
+        with _admission(slots, engine, run.incident_id) as verdict:
+            if verdict == "at_capacity":
+                _shed_at_capacity(run, slots)
+                return
+            if verdict == "lease_lost":
                 _log.info(
                     "another worker holds the single-flight lease for incident %s; "
                     "not starting a second run",
@@ -330,6 +413,39 @@ def _run_investigation(
         raise
     else:
         _log_briefing(final)
+
+
+def _shed_at_capacity(run: RunState, slots: RunSlots | None) -> None:
+    """Log an alert the agent is too busy to investigate. Do not queue it, do not fail it.
+
+    The choice here is forced by CLAUDE.md invariant 5. The agent augments the
+    incident response path and never gates it, so the one thing overload must
+    not do is make the delivery look failed: the platform emitter treats
+    anything >= 400 as a failed delivery and retries, and a retry storm aimed
+    at an agent that is already at capacity is how a busy agent becomes a down
+    one. The delivery was acknowledged 202 and the alert is already durably
+    recorded at TRIAGE by the ingress write, so nothing is lost — the platform
+    pages a human off that same alert whether or not this agent ever looks at
+    it, which is exactly what invariant 5 buys.
+
+    Nor does the alert vanish quietly. It leaves two marks: this WARNING, and
+    a TRIAGE-state run that never advances — the same visible residue the kill
+    switch leaves, and found the same way (incidents sitting at TRIAGE with no
+    investigation).
+
+    Deliberately no extra checkpoint write. Recording "shed" durably would
+    mean asking for a connection at the moment connections are the scarce
+    resource — adding load to the overload path in order to describe it. The
+    log line carries it instead.
+    """
+    _log.warning(
+        "at capacity (%s concurrent runs): incident %s is recorded in TRIAGE but will "
+        "not be investigated. Alerts still page humans through the platform "
+        "(invariant 5). Raise DB_POOL_SIZE/DB_MAX_OVERFLOW to lift the bound, or add "
+        "replicas.",
+        "unbounded" if slots is None else slots.ceiling,
+        run.incident_id,
+    )
 
 
 def _record_run_failure(run: RunState, checkpointer: Checkpointer, exc: Exception) -> None:

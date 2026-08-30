@@ -4,9 +4,19 @@ from __future__ import annotations
 
 from decimal import Decimal
 from functools import lru_cache
+from typing import Final
 
-from pydantic import AnyHttpUrl, Field, PostgresDsn, SecretStr
+from pydantic import AnyHttpUrl, Field, PostgresDsn, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Peak connections one investigation run holds AT ONCE (ADR 0022): the lease
+# connection, pinned for the whole run by ``incident_lease`` (ADR 0016), plus
+# at most one transient checkout for a checkpoint load or write.
+# ``PostgresCheckpointer.write`` does its version read and its INSERT in ONE
+# transaction on ONE connection, so the transient half is 1 and this total
+# is 2. Raising either of those makes this number wrong and the ceiling below
+# unsafe, so the two move together.
+_CONNECTIONS_PER_RUN: Final[int] = 2
 
 
 class Settings(BaseSettings):
@@ -68,6 +78,36 @@ class Settings(BaseSettings):
     # Agent-owned Postgres.
     database_url: PostgresDsn
 
+    # --- Connection pool and run admission (ADR 0022) ---------------------
+    # SQLAlchemy's unconfigured default pool (5 + 10 overflow, 30s timeout) is
+    # not a safe pool for this application, and the reason is the lease. A run
+    # PINS one connection for its whole life (ADR 0016, up to
+    # ``budget_max_seconds``) and then asks the SAME pool for a second one on
+    # every checkpoint write. Fifteen concurrent runs therefore hold all
+    # fifteen connections and every one of them blocks waiting for a
+    # connection only another lease holder could release — textbook
+    # hold-and-wait, and the crash rail that would record the failure needs a
+    # connection too. The pool is sized explicitly here, and the number of
+    # live runs is bounded to what that pool can actually serve.
+    db_pool_size: int = Field(default=10, ge=1)
+    db_max_overflow: int = Field(default=10, ge=0)
+    # Deliberately far below SQLAlchemy's 30s default. This is the wait a
+    # checkout endures before giving up; it is spent inside a threadpool
+    # worker on the ingress path, and every second of it is a second the
+    # alert is neither investigated nor refused.
+    db_pool_timeout_seconds: float = Field(default=10.0, gt=0)
+    # Connections held back from the run bound for work that is NOT a run:
+    # ingress identity derivation and its checkpoint write, plus the crash
+    # rail. Unlike a lease these are short-lived and always released, so they
+    # cause contention, never deadlock — headroom is the right instrument.
+    db_ingest_reserved_connections: int = Field(default=4, ge=0)
+    # Optional lower bound on concurrent runs. Unset means "whatever the pool
+    # safely serves" (``max_concurrent_runs`` below). It can only ever be set
+    # LOWER than that ceiling — the validator refuses a value that would
+    # reintroduce the deadlock, so the pool arithmetic is not something an
+    # operator can accidentally opt out of.
+    agent_max_concurrent_runs: int | None = Field(default=None, ge=1)
+
     # Per-incident hard budgets (CLAUDE.md invariant 7).
     budget_max_tool_calls: int = Field(default=25, ge=1)
     budget_max_tokens: int = Field(default=500_000, ge=1)
@@ -105,6 +145,58 @@ class Settings(BaseSettings):
     # actions get their own knob so a slow-but-successful action doesn't
     # escalate as a transport error.
     action_tool_timeout_seconds: float = Field(default=60.0, ge=1.0)
+
+    @property
+    def db_pool_capacity(self) -> int:
+        """Total connections the pool will ever hand out at once."""
+        return self.db_pool_size + self.db_max_overflow
+
+    @property
+    def max_concurrent_runs(self) -> int:
+        """How many investigation runs may hold a lease simultaneously.
+
+        Derived, not guessed: whatever is left of the pool after the ingest
+        reservation, divided by the connections one run needs at its peak.
+        ``AGENT_MAX_CONCURRENT_RUNS`` may lower it and — enforced below —
+        never raise it.
+        """
+        ceiling = (
+            self.db_pool_capacity - self.db_ingest_reserved_connections
+        ) // _CONNECTIONS_PER_RUN
+        if self.agent_max_concurrent_runs is None:
+            return ceiling
+        return min(self.agent_max_concurrent_runs, ceiling)
+
+    @model_validator(mode="after")
+    def _run_bound_fits_the_pool(self) -> Settings:
+        """Refuse at startup any pool that cannot serve a single run.
+
+        A misconfiguration here does not fail loudly on its own — it fails as
+        a 10-second stall under load, which is the failure this whole
+        arrangement exists to prevent. Better to never boot.
+        """
+        capacity = self.db_pool_capacity
+        for_runs = capacity - self.db_ingest_reserved_connections
+        if for_runs < _CONNECTIONS_PER_RUN:
+            raise ValueError(
+                f"pool capacity DB_POOL_SIZE+DB_MAX_OVERFLOW={capacity} minus "
+                f"DB_INGEST_RESERVED_CONNECTIONS={self.db_ingest_reserved_connections} "
+                f"leaves {for_runs} connections for runs, but one run needs "
+                f"{_CONNECTIONS_PER_RUN} at its peak (pinned lease + checkpoint "
+                "write). No run could finish. Raise the pool or lower the "
+                "reservation."
+            )
+        requested = self.agent_max_concurrent_runs
+        ceiling = for_runs // _CONNECTIONS_PER_RUN
+        if requested is not None and requested > ceiling:
+            raise ValueError(
+                f"AGENT_MAX_CONCURRENT_RUNS={requested} exceeds the {ceiling} runs this "
+                f"pool can serve without deadlocking ({capacity} capacity - "
+                f"{self.db_ingest_reserved_connections} reserved, {_CONNECTIONS_PER_RUN} "
+                "connections per run). Raise DB_POOL_SIZE/DB_MAX_OVERFLOW to lift the "
+                "ceiling, or lower the bound."
+            )
+        return self
 
 
 @lru_cache(maxsize=1)

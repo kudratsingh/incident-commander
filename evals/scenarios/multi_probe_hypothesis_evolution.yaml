@@ -13,7 +13,7 @@ use_live_mcp: true
 use_live_llm: true
 alert:
   source: platform.kafka
-  severity: high
+  severity: critical
   fingerprint: consumer_lag_high
   group: payments-consumer
 canned_tool_responses:

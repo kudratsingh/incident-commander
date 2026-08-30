@@ -1,5 +1,5 @@
 name: consumer_lag_medium
-description: "Medium-severity alert on consumer lag. Not paging-grade but still actionable \u2014 agent probes and escalates the finding.\n"
+description: "Warning-severity alert on consumer lag. Not paging-grade but still actionable \u2014 agent probes and escalates the finding. Scenario name keeps \"medium\" (the pre-WO-R2-45 value) because the regression baseline and run history are keyed on it.\n"
 tags:
 - read-only
 - phase-0
@@ -10,7 +10,7 @@ use_live_mcp: true
 use_live_llm: true
 alert:
   source: platform.kafka
-  severity: medium
+  severity: warning
   fingerprint: consumer_lag_warning
   group: notifications-consumer
 canned_tool_responses:
@@ -25,7 +25,7 @@ canned_llm_responses:
     - category: consumer_saturation
       name: mild_backlog
       confidence: 0.5
-      reasoning: 'Medium severity on notifications consumer; need lag reading.
+      reasoning: 'Warning severity on notifications consumer; need lag reading.
 
         '
     next_action:

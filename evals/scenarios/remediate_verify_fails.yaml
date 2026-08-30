@@ -19,7 +19,7 @@ use_live_mcp: false
 use_live_llm: false
 alert:
   source: platform.kafka
-  severity: high
+  severity: critical
   fingerprint: consumer_lag_high
   consumer_group: worker-dispatcher
 canned_tool_responses:

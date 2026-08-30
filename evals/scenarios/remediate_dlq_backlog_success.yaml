@@ -22,7 +22,7 @@ chaos_setup:
     payload: {}
 alert:
   source: platform.dlq
-  severity: high
+  severity: critical
   fingerprint: dlq_depth_warning
 canned_tool_responses:
   list_dlq_messages:

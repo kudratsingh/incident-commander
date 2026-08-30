@@ -33,7 +33,11 @@ class TestLoadScenario:
     def test_loads_shipped_example(self) -> None:
         scenario = load_scenario(_EXAMPLE)
         assert scenario.name == "consumer_lag_high"
-        assert scenario.alert.severity == "high"
+        # `critical`, not `high`, since WO-R2-45: the scenario name still says
+        # "high" (renaming it would break the regression baseline, which is
+        # keyed on scenario name) but the severity now has to be one the
+        # platform's ALLOWED_SEVERITIES can actually emit.
+        assert scenario.alert.severity == "critical"
         assert scenario.expectation.expected_terminal_state is IncidentState.ESCALATED
         # The group citation is tool-scoped since the evidence sweep: the bare
         # `worker-dispatcher` substring was satisfiable by remediation-tool

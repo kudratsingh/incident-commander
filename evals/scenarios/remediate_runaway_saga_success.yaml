@@ -24,7 +24,7 @@ use_live_mcp: false
 use_live_llm: false
 alert:
   source: platform.dag
-  severity: high
+  severity: critical
   fingerprint: saga_runaway
   job_id: 25220882-1820-5cd3-b09b-f866ff5823c9
 canned_tool_responses:

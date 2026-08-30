@@ -192,17 +192,56 @@ eval-smoke:
 	# above overrides recipe-exported values, which is exactly how every
 	# "read-scoped" smoke run before 2026-08-07 silently held write scope.
 	# The @ on the runner line also keeps tokens out of the log.
+	# Traces are rendered whether or not the pass succeeded, then the recipe
+	# exits with the runner's own code — the same shape as eval-live, and for
+	# the same reason: make aborts a recipe on the first non-zero line, so a
+	# FAILING smoke run (the one whose trajectories you actually need) used to
+	# leave only raw JSONL behind. eval-live was fixed; this was not.
 	@EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live --smoke \
-		--only "$(SMOKE_ONLY)"
-	uv run python scripts/format_traces.py
+		--only "$(SMOKE_ONLY)"; \
+	code=$$?; \
+	uv run python scripts/format_traces.py || true; \
+	echo "JSONL traces: evals/traces/*.jsonl"; \
+	echo "Human-readable trajectories: evals/reports/human/*.txt"; \
+	exit $$code
 
 trace-report:
 	uv run python scripts/format_traces.py
 
 # --- Chaos setup helpers (live-eval prep) -------------------------------
 # All wrap scripts/chaos_setup.py. Effects self-clean on TTL. Requires
-# PLATFORM_MCP_URL + PLATFORM_TOKEN (with chaos:invoke scope) in env.
+# PLATFORM_MCP_URL + PLATFORM_TOKEN (with chaos:invoke scope), which these
+# recipes hand to the child process themselves — see below.
 # See docs/runbook.md for the full workflow.
+
+# The credentials the chaos and traffic scripts read from os.environ.
+#
+# `-include .env` at the top of this file puts them in MAKE's variables, not
+# in the child environment, and there is deliberately no blanket `export`
+# (see the header). Nothing bridged that gap, so every documented `make
+# chaos-*` aborted with "PLATFORM_MCP_URL and PLATFORM_TOKEN must be set
+# (env or --flag)" and `make traffic UNTIL_LAG=N` could never read the lag it
+# was waiting for — the seeding step the live-eval runbook depends on, broken
+# for anyone who kept their credentials in .env like the runbook says to.
+#
+# Target-specific `export` with `:=` hands over exactly these variables to
+# exactly these targets. The right-hand side is expanded once, from make's
+# own variables, so .env and the ambient environment keep the precedence the
+# rest of this file documents, and nothing widens into unrelated recipes.
+# NOT `PLATFORM_TOKEN=$(PLATFORM_TOKEN) uv run ...`, which would print the
+# write-scoped token to the terminal on every invocation.
+#
+# NOTE: this makes PLATFORM_MCP_URL/PLATFORM_TOKEN/PLATFORM_SMOKE_TOKEN
+# make-consumed, so the header's caveat now applies to them: make parses
+# .env more naively than dotenv does. Keep these values unquoted in .env.
+CHAOS_TARGETS = chaos-help chaos-kill-consumer chaos-poison chaos-saturate \
+                chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job
+$(CHAOS_TARGETS): export PLATFORM_MCP_URL := $(PLATFORM_MCP_URL)
+$(CHAOS_TARGETS): export PLATFORM_TOKEN := $(PLATFORM_TOKEN)
+# traffic_loop.py is read-scoped by construction — it only ever reads lag —
+# so it takes PLATFORM_SMOKE_TOKEN and must never see the write-scoped one.
+traffic: export PLATFORM_MCP_URL := $(PLATFORM_MCP_URL)
+traffic: export PLATFORM_SMOKE_TOKEN := $(PLATFORM_SMOKE_TOKEN)
 
 # Consumer lag is arrival minus service, and the eval only ever had the
 # service half. Run this in a second terminal BEFORE seeding kill_consumer
@@ -246,6 +285,17 @@ chaos-restore:
 # Pass PURGE_IDEMPOTENCY=1 to also `DELETE` the idempotency_records rows
 # (usually unnecessary thanks to the 24h TTL from platform ADR 0010, but
 # useful when a scenario needs a guaranteed-fresh cache).
+#
+# Compared to the literal 1. The gate was `$(if $(PURGE_IDEMPOTENCY),...)`,
+# and make's $(if) asks whether the value is a non-empty STRING, not whether
+# it is true: PURGE_IDEMPOTENCY=0, =no and =false each turned the row
+# deletion ON — every spelling an operator reaches for to turn something off,
+# on the one flag here that destroys data. Only `1` enables it now.
+ifeq ($(PURGE_IDEMPOTENCY),1)
+PURGE_IDEMPOTENCY_FLAG := --purge-idempotency
+else
+PURGE_IDEMPOTENCY_FLAG :=
+endif
 # The stack the eval actually runs against. This defaulted to the platform's
 # own dev compose, which is a different Postgres and a different Redis — so a
 # checkout without these lines in .env resets a stack nobody is testing and
@@ -270,7 +320,7 @@ eval-reset:
 	@docker compose -f "$(PLATFORM_COMPOSE)" exec -T \
 		-e PYTHONPATH=/app:/app/backend $(PLATFORM_SERVICE) \
 		python /app/scripts/reset_eval_state.py \
-		$(if $(PURGE_IDEMPOTENCY),--purge-idempotency,)
+		$(PURGE_IDEMPOTENCY_FLAG)
 
 chaos-bad-data-job:
 	PYTHONPATH=. uv run python scripts/chaos_setup.py bad-data-job

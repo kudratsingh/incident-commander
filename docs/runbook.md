@@ -54,6 +54,8 @@ make chaos-bad-deploy
 
 Each hook self-cleans on TTL (5–10 minutes). Chaos setup requires the platform booted with `CHAOS_ENABLED=true` (default in `demo/compose.yml`) and a token with `chaos:invoke` scope.
 
+`PLATFORM_MCP_URL` and `PLATFORM_TOKEN` in `.env` are enough — the `chaos-*` recipes hand them to the script themselves (WO-R2-89). Until then they did not: make's `-include .env` sets a *make* variable, the script reads `os.environ`, and nothing bridged the two, so every one of these targets aborted with "PLATFORM_MCP_URL and PLATFORM_TOKEN must be set (env or --flag)" no matter how correct your `.env` was. Because make now expands these values, keep them **unquoted** in `.env` (make keeps the quotes; dotenv strips them).
+
 If your service-account token was minted without chaos scope, regenerate:
 ```bash
 uv run python scripts/bootstrap_agent_token.py --scope chaos:invoke
@@ -174,7 +176,7 @@ Every `make eval-live` invocation writes JSONL traces to `evals/traces/` and ren
 
 A filtered run (`ONLY=...`) still overwrites `evals/reports/latest.json`, but the report now self-describes via `only_patterns` (ADR 0013) and **can no longer feed the gate or the baseline**: `make eval-reg` exits 2 on a filtered `latest.json`, and `make eval-reg ONLY=x` / `make baseline ONLY=x` refuse at Makefile parse time before anything runs (A-03 — `study/runs.jsonl` records a full-suite `latest.json` lost to a later filtered run). The archive under `evals/runs/<invocation_id>/` remains the durable record for filtered runs; the flat `latest.json` is only a pointer to the most recent one.
 
-`make eval-reset` shells into the platform's `app` container via `docker compose -f $PLATFORM_COMPOSE exec` — defaults to `../incident-platform/docker-compose.yml`. If the platform repo isn't a sibling checkout, set `PLATFORM_COMPOSE` either per-invocation or once in `.env` (the Makefile `-include .env`s it, so a non-sibling layout is a one-time setup rather than a flag you have to remember on every call). Getting this wrong fails loudly on an exit-2 guard before anything runs — it can't half-reset. Pass `PURGE_IDEMPOTENCY=1` to also `DELETE` idempotency_records (24h TTL from platform ADR 0010 handles the common case; opt-in purge for guaranteed-fresh cache).
+`make eval-reset` shells into the platform's `app` container via `docker compose -f $PLATFORM_COMPOSE exec` — defaults to `../incident-platform/docker-compose.yml`. If the platform repo isn't a sibling checkout, set `PLATFORM_COMPOSE` either per-invocation or once in `.env` (the Makefile `-include .env`s it, so a non-sibling layout is a one-time setup rather than a flag you have to remember on every call). Getting this wrong fails loudly on an exit-2 guard before anything runs — it can't half-reset. Pass `PURGE_IDEMPOTENCY=1` to also `DELETE` idempotency_records (24h TTL from platform ADR 0010 handles the common case; opt-in purge for guaranteed-fresh cache). Only the literal `1` enables it: the gate used to be make's `$(if ...)`, which asks whether the value is a non-empty string rather than whether it is true, so `PURGE_IDEMPOTENCY=0` — and `no`, and `false` — deleted the rows (WO-R2-89).
 
 Environment variable knobs for the live path (see [ADR 0006](ADR/0006-verification-is-a-polling-window.md)):
 
@@ -463,6 +465,12 @@ operate by:
   make traffic                      # until Ctrl-C
   make traffic UNTIL_LAG=1500       # stop once the backlog is deep
   ```
+
+  `UNTIL_LAG` reads the backlog over MCP, so it needs `PLATFORM_MCP_URL`
+  and `PLATFORM_SMOKE_TOKEN` — from `.env` is enough, the recipe passes
+  them through (WO-R2-89; before that it did not, and `UNTIL_LAG` exited 2
+  every time). The **smoke** token deliberately: this loop only ever reads
+  lag, and giving it the write-scoped token would widen it for nothing.
 
   Two corrections to the old note. It submits every **3s, not 2s**:
   `jobs:create` is limited to 30/60s and 1-job/2s sits exactly on that

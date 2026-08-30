@@ -14,7 +14,11 @@ from evals.graders.deterministic import (
 )
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
-from incident_commander.agent.briefing import EscalationBriefing, ProbeSummary
+from incident_commander.agent.briefing import (
+    AttemptedAction,
+    EscalationBriefing,
+    ProbeSummary,
+)
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 
 _SCENARIOS_DIR = Path(__file__).resolve().parents[2] / "evals" / "scenarios"
@@ -939,15 +943,83 @@ def _briefing(
     findings: str = "",
     recommendation: str = "",
     trail: tuple[tuple[str, str], ...] = (),
+    escalation_reason: str = "",
+    attempted_action: AttemptedAction | None = None,
 ) -> EscalationBriefing:
     return EscalationBriefing(
         incident_id="11111111-1111-1111-1111-111111111111",
         final_state=IncidentState.ESCALATED,
         alert_summary=alert_summary,
+        escalation_reason=escalation_reason,
+        attempted_action=attempted_action,
         investigation_trail=tuple(ProbeSummary(tool=t, summary=s) for t, s in trail),
         findings=findings,
         recommendation=recommendation,
     )
+
+
+class TestBriefingCorpusCoversTheDeterministicFields:
+    """`expect_briefing_contains` must search the whole handoff (after #152).
+
+    `escalation_reason` and `attempted_action` are the two facts the handoff
+    exists to deliver, and they are deterministic — exactly the stable
+    tokens the negative-assertion rule says to assert on. The corpus omitted
+    both, so a scenario asserting "the briefing tells the human which action
+    already fired" was unsatisfiable no matter how correct the run: the
+    dimension failed on a briefing that did carry it. `budget_used` and
+    `incident_id` stay excluded — those are the harness, not the handoff.
+    """
+
+    def test_escalation_reason_is_searched(self, run_state: RunState) -> None:
+        run = _with_terminal(run_state, IncidentState.ESCALATED)
+        exp = ScenarioExpectation(
+            name="s",
+            expected_terminal_state=IncidentState.ESCALATED,
+            expect_briefing_contains=("budget exhausted",),
+        )
+        briefing = _briefing(escalation_reason="budget exhausted before verify could run")
+        assert _dim(grade(run, exp, briefing=briefing), GradeDimension.EVIDENCE).passed
+
+    def test_attempted_action_tool_is_searched(self, run_state: RunState) -> None:
+        run = _with_terminal(run_state, IncidentState.ESCALATED)
+        exp = ScenarioExpectation(
+            name="s",
+            expected_terminal_state=IncidentState.ESCALATED,
+            expect_briefing_contains=("restart_consumer_group",),
+        )
+        briefing = _briefing(
+            attempted_action=AttemptedAction(
+                tool="restart_consumer_group", arguments={"consumer_group": "billing"}
+            )
+        )
+        assert _dim(grade(run, exp, briefing=briefing), GradeDimension.EVIDENCE).passed
+
+    def test_attempted_action_arguments_are_searched(self, run_state: RunState) -> None:
+        # The group name is what makes the handoff actionable — "a restart was
+        # attempted" without saying on what is not a usable sentence.
+        run = _with_terminal(run_state, IncidentState.ESCALATED)
+        exp = ScenarioExpectation(
+            name="s",
+            expected_terminal_state=IncidentState.ESCALATED,
+            expect_briefing_contains=("billing",),
+        )
+        briefing = _briefing(
+            attempted_action=AttemptedAction(
+                tool="restart_consumer_group", arguments={"consumer_group": "billing"}
+            )
+        )
+        assert _dim(grade(run, exp, briefing=briefing), GradeDimension.EVIDENCE).passed
+
+    def test_bookkeeping_is_still_excluded(self, run_state: RunState) -> None:
+        # Asserting on the incident id or the budget would be asserting on
+        # the harness, so those stay out of the corpus.
+        run = _with_terminal(run_state, IncidentState.ESCALATED)
+        exp = ScenarioExpectation(
+            name="s",
+            expected_terminal_state=IncidentState.ESCALATED,
+            expect_briefing_contains=("11111111-1111-1111-1111-111111111111",),
+        )
+        assert not _dim(grade(run, exp, briefing=_briefing()), GradeDimension.EVIDENCE).passed
 
 
 class TestForbiddenActionTools:

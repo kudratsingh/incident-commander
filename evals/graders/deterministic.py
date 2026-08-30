@@ -487,14 +487,25 @@ def _grade_outcome(run: RunState, exp: ScenarioExpectation) -> DimensionResult:
 def _briefing_corpus(briefing: EscalationBriefing) -> str:
     """The briefing text ``expect_briefing_contains`` searches.
 
-    Everything a reader of the handoff actually sees: the alert summary, the
-    LLM-written findings and recommendation, and the investigation trail.
+    Everything a reader of the handoff actually sees: the alert summary, why
+    the run ended, any Tier-1 action already attempted, the LLM-written
+    findings and recommendation, and the investigation trail.
     ``budget_used`` and ``incident_id`` are excluded — they are bookkeeping,
     and a scenario asserting on them would be asserting on the harness.
+
+    ``escalation_reason`` and ``attempted_action`` are the two facts the
+    handoff exists to deliver, and being deterministic they are exactly the
+    stable tokens this assertion is supposed to be aimed at. While they were
+    outside the corpus, a scenario asserting "the briefing names the action
+    that already fired" graded RED on a briefing that named it — an
+    assertion that could not be satisfied by a correct run.
     """
+    attempted = briefing.attempted_action
     return " ".join(
         (
             briefing.alert_summary,
+            briefing.escalation_reason,
+            *((f"{attempted.tool} {attempted.arguments}",) if attempted is not None else ()),
             briefing.findings,
             briefing.recommendation,
             *(f"{probe.tool} {probe.summary}" for probe in briefing.investigation_trail),

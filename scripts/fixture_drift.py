@@ -20,9 +20,18 @@ import sys
 import time
 from pathlib import Path
 
+import httpx
+
 from evals.fixture_drift import canned_calls
-from evals.fixture_drift_ledger import classify, defect_count, dump_ledger, load_ledger
+from evals.fixture_drift_ledger import (
+    classify,
+    defect_count,
+    dump_ledger,
+    load_ledger,
+    split_for_bless,
+)
 from evals.fixture_probe import UnseededPlatformError, probe_live
+from evals.fixture_shape import check_calls, write_tier_calls
 from evals.scenarios.loader import load_scenarios
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -42,6 +51,15 @@ def _await_fixtures(calls, mcp_url: str, token: str, budget_seconds: int) -> int
     while a fixture the check probes is still missing. It is a readiness gate,
     not a retry: a failure that survives the budget is reported with the calls
     still unresolved, never swallowed.
+
+    Both ways a not-yet-ready platform answers are caught. It only caught
+    ``UnseededPlatformError`` — the "up but empty" case — so the connection
+    errors a platform produces while it is *not yet listening* killed the
+    loop on attempt one, which is exactly the window this gate exists for.
+    ``httpx.HTTPError`` is belt to that braces: since the probe converts
+    transport failures into ``ProbeError`` they now arrive as unresolved
+    calls, and a raise from anywhere else in the client must not be fatal
+    to a poll loop either.
     """
     deadline = time.monotonic() + budget_seconds
     attempt = 0
@@ -53,8 +71,8 @@ def _await_fixtures(calls, mcp_url: str, token: str, budget_seconds: int) -> int
                 print(f"fixture pack ready after {attempt} attempt(s)")
                 return 0
             detail = "; ".join(f"{e.scenario}:{e.tool} — {e.detail}" for e in result.errors)
-        except UnseededPlatformError as err:
-            detail = str(err)
+        except (UnseededPlatformError, httpx.HTTPError) as err:
+            detail = f"{type(err).__name__}: {err}"
         if time.monotonic() >= deadline:
             print(
                 f"ERROR: the platform never became ready within {budget_seconds}s. "
@@ -110,20 +128,47 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {err}", file=sys.stderr)
         return 2
 
+    # The Tier-1 half, which needs no platform and so is not gated on one:
+    # those fixtures are never probed (probing pause_dag would pause a DAG),
+    # and their shape is checked against the committed tool snapshot instead.
+    shape_defects = check_calls(write_tier_calls(calls))
+
     print(
         f"canned fixtures checked: {result.checked} "
-        f"({result.skipped_write_tier} Tier-1 fixtures never probed) "
+        f"({result.skipped_write_tier} Tier-1 fixtures shape-checked offline, never probed) "
         f"via {result.live_calls} live calls"
     )
     for error in result.errors:
         print(f"  UNCHECKED {error.scenario}:{error.tool} — {error.detail}")
+    for defect in shape_defects:
+        print(f"  SHAPE {defect.describe()}")
 
     if args.bless:
-        count = dump_ledger(result.drifts)
+        if result.errors:
+            # The ledger IS the burn-down list. Rewriting it from a run that
+            # could not read part of the suite deletes entries nothing
+            # disproved, and the deletion is silent — the file just gets
+            # shorter, which is what progress looks like.
+            print(
+                f"ERROR: refusing to bless — {len(result.errors)} fixture(s) could not be "
+                "probed (listed above), and a run that did not read them cannot say "
+                "whether their ledger entries still hold. Fix the probe failures and "
+                "re-run.",
+                file=sys.stderr,
+            )
+            return 2
+        before = load_ledger()
+        carried, disproved = split_for_bless(
+            {drift.key for drift in result.drifts}, before, result.compared
+        )
+        count = dump_ledger(result.drifts, checked=result.compared)
         defects = defect_count()
         print(f"wrote {count} known-drift entries to evals/fixture-drift-ledger.json")
         print(f"  {defects} are fixture defects — the burn-down number")
         print(f"  {count - defects} are explained (post-fault / canned-only) and are NOT work")
+        print(f"  {len(disproved)} dropped: probed this run and no longer drifting")
+        for key in carried:
+            print(f"  CARRIED {key} — not probed this run, so nothing disproved it")
         print("git add + commit the ledger to bless the current fixture state.")
         return 0
 
@@ -137,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  STALE {key} — no longer drifted; delete this line from the ledger")
     if result.errors:
         print("\nA fixture that could not be probed is not a fixture that agrees.")
-    return 1 if (new or stale or result.errors) else 0
+    return 1 if (new or stale or result.errors or shape_defects) else 0
 
 
 if __name__ == "__main__":  # pragma: no cover

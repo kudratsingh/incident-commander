@@ -103,6 +103,33 @@ class TestLoadScenarios:
         assert len(scenarios) >= 1
         assert any(s.name == "consumer_lag_high" for s in scenarios)
 
+    def test_two_files_may_not_share_a_scenario_name(self, tmp_path: Path) -> None:
+        """A name collision took the suite down mid-run, and nothing caught it.
+
+        The run archive exclusive-creates `trajectories/<name>.json`, so the
+        second scenario to reach it raised an unhandled `FileExistsError`
+        after the run had already been paid for. The quieter outcomes are
+        worse: the flat report, the regression baseline and the drift ledger
+        are all keyed on the name, so one scenario's result stands in for two.
+        """
+        (tmp_path / "first.yaml").write_text(_VALID_YAML.replace("name: valid", "name: twin"))
+        (tmp_path / "second.yaml").write_text(_VALID_YAML.replace("name: valid", "name: twin"))
+        with pytest.raises(ScenarioLoadError, match="duplicate scenario name 'twin'"):
+            load_scenarios(tmp_path)
+
+    def test_the_collision_error_names_both_files(self, tmp_path: Path) -> None:
+        # Neither file is wrong on its own, so the error is useless unless it
+        # says what the collision was with.
+        (tmp_path / "first.yaml").write_text(_VALID_YAML.replace("name: valid", "name: twin"))
+        (tmp_path / "second.yaml").write_text(_VALID_YAML.replace("name: valid", "name: twin"))
+        with pytest.raises(ScenarioLoadError) as err:
+            load_scenarios(tmp_path)
+        assert "first.yaml" in str(err.value) and "second.yaml" in str(err.value)
+
+    def test_the_shipped_scenario_names_are_unique(self) -> None:
+        names = [s.name for s in load_scenarios(_SCENARIO_DIR)]
+        assert len(names) == len(set(names))
+
 
 # Live polling profile (docs/runbook.md:152-154, ADR 0006 + ADR 0009):
 # 2 investigation probes + 1 freshness re-probe + 1 Tier-1 action +

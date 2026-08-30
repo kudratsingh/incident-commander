@@ -41,10 +41,17 @@ canned_tool_responses:
     - type: text
       text: '{"seed_id":"25220882-1820-5cd3-b09b-f866ff5823c9","nodes":[{"id":"n1","type":"reserve_inventory","status":"succeeded","retry_count":0,"created_at":"2026-07-30T10:00:00Z"},{"id":"n2","type":"charge_card","status":"running","retry_count":5,"created_at":"2026-07-30T10:01:00Z"},{"id":"n3","type":"ship_order","status":"waiting","retry_count":0,"created_at":"2026-07-30T10:01:00Z"}],"edges":[{"from_id":"n1","to_id":"n2"},{"from_id":"n2","to_id":"n3"}],"paused":true,"paused_expires_in_seconds":540,"paused_by":"incident-commander"}'
     is_error: false
+  # `pause_key` echoes the Redis key the platform really writes:
+  # `dag:paused:<root_job_id>` (platform utils/dag_pause.py::pause_key_for,
+  # pinned by its own unit test). The recorded `chaos:dag_pause:` namespace
+  # exists nowhere on the platform — a fabricated value in a correctly
+  # shaped field, which is the class the live drift check structurally
+  # cannot catch: Tier-1 fixtures are never probed, because probing
+  # pause_dag to see what it returns would pause a DAG.
   pause_dag:
     content:
     - type: text
-      text: '{"root_job_id":"25220882-1820-5cd3-b09b-f866ff5823c9","pause_key":"chaos:dag_pause:25220882-1820-5cd3-b09b-f866ff5823c9","ttl_seconds":600,"accepted":true}'
+      text: '{"root_job_id":"25220882-1820-5cd3-b09b-f866ff5823c9","pause_key":"dag:paused:25220882-1820-5cd3-b09b-f866ff5823c9","ttl_seconds":600,"accepted":true}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

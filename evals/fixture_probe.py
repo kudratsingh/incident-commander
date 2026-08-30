@@ -16,6 +16,7 @@ import httpx
 
 from evals.fixture_drift import CannedCall, Drift, compare
 from incident_commander.tools.policies import Tier, tier_of
+from incident_commander.tools.registry import TOOL_REGISTRY
 
 _TIMEOUT_SECONDS = 20.0
 
@@ -47,6 +48,28 @@ class ProbeResult:
     checked: int
     skipped_write_tier: int
     live_calls: int
+    # The ``(scenario, tool)`` pairs whose canned payload was actually
+    # compared against a live reading. This is the run's COVERAGE, and it is
+    # what licenses the bless path to delete a ledger entry: an entry may
+    # only be dropped when this run genuinely disproved it, which requires
+    # having probed it. ``checked`` is a count and cannot answer that.
+    compared: tuple[tuple[str, str], ...] = ()
+
+
+def unregistered_calls(calls: Iterable[CannedCall]) -> tuple[CannedCall, ...]:
+    """Canned fixtures keyed by a name no tool in ``TOOL_REGISTRY`` answers.
+
+    A ``canned_tool_responses`` key is the name the offline run serves the
+    fixture for, so a typo names a call the agent can never make: the
+    fixture is dead weight that no run will ever use, and it is invisible
+    because the offline suite only ever looks up keys it already has.
+
+    Reported rather than raised. ``tier_of`` raises ``KeyError`` for an
+    unregistered name, so this used to abort the whole 95-fixture check on
+    one misspelling — the loudest possible failure aimed at the smallest
+    possible defect, and it told you nothing about the other ninety-four.
+    """
+    return tuple(call for call in calls if call.tool not in TOOL_REGISTRY)
 
 
 def read_tier_calls(calls: Iterable[CannedCall]) -> tuple[CannedCall, ...]:
@@ -54,11 +77,19 @@ def read_tier_calls(calls: Iterable[CannedCall]) -> tuple[CannedCall, ...]:
 
     Tier-1 fixtures are excluded by construction, not by care: probing
     ``replay_dlq_by_category`` to see what it returns would replay the DLQ.
-    Their canned payloads stay unvalidated by this check — that is a real
-    remaining hole, and the reason the check also runs under the read-scoped
-    principal rather than trusting this filter alone.
+    Their canned payloads are checked for SHAPE only, offline, against the
+    committed tool snapshot (``evals.fixture_shape``) — no live call, so no
+    write. Their values stay unvalidated by any check, which is the real
+    remaining hole, and the reason this check also runs under the
+    read-scoped principal rather than trusting this filter alone.
+
+    Unregistered names are filtered out here rather than classified: they
+    are reported by ``unregistered_calls`` and must not reach ``tier_of``,
+    whose refusal to guess is correct and fatal.
     """
-    return tuple(call for call in calls if tier_of(call.tool) is Tier.READ)
+    return tuple(
+        call for call in calls if call.tool in TOOL_REGISTRY and tier_of(call.tool) is Tier.READ
+    )
 
 
 def probe_live(
@@ -83,12 +114,24 @@ def probe_live(
     recording mean anything.
     """
     all_calls = tuple(calls)
+    unregistered = unregistered_calls(all_calls)
     probed = sorted(read_tier_calls(all_calls), key=lambda call: call.index)
     owned = client is None
     http = client or httpx.Client(timeout=_TIMEOUT_SECONDS)
     cache: dict[tuple[str, str, int], tuple[Mapping[str, Any] | None, str | None]] = {}
     drifts: list[Drift] = []
-    errors: list[ProbeError] = []
+    compared: dict[tuple[str, str], None] = {}
+    errors: list[ProbeError] = [
+        ProbeError(
+            scenario=call.scenario,
+            tool=call.tool,
+            detail=(
+                f"{call.tool!r} is in no TOOL_REGISTRY entry, so no run can ever serve this "
+                "fixture — check the canned_tool_responses key for a typo"
+            ),
+        )
+        for call in {(c.scenario, c.tool): c for c in unregistered}.values()
+    ]
     try:
         assert_seeded(http, mcp_url, token)
         for call in probed:
@@ -113,6 +156,7 @@ def probe_live(
                 )
                 continue
             drifts.extend(compare(call, payload))
+            compared[call.scenario, call.tool] = None
     finally:
         if owned:
             http.close()
@@ -120,8 +164,9 @@ def probe_live(
         drifts=tuple(drifts),
         errors=tuple(errors),
         checked=len(probed),
-        skipped_write_tier=len(all_calls) - len(probed),
+        skipped_write_tier=len(all_calls) - len(probed) - len(unregistered),
         live_calls=len(cache),
+        compared=tuple(compared),
     )
 
 
@@ -161,18 +206,39 @@ def _call_tool(
     name: str,
     arguments: dict[str, Any],
 ) -> tuple[Mapping[str, Any] | None, str | None]:
-    response = client.post(
-        mcp_url,
-        json={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": name, "arguments": arguments},
-        },
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-    )
-    response.raise_for_status()
-    payload = response.json()
+    """``(payload, error)`` for one live call. Never raises on a failed call.
+
+    Every way a call can fail returns an error STRING, because the caller's
+    ``ProbeError`` channel is the whole point: "this fixture went unchecked"
+    is a result, and one bad gateway is not a reason to learn nothing about
+    the other ninety-four fixtures. Only the MCP-level JSON-RPC error ever
+    reached that channel before; an HTTP status, a body that was not JSON,
+    and a connection that never opened all escaped from here and took the
+    run with them.
+    """
+    try:
+        response = client.post(
+            mcp_url,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            },
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as err:
+        return None, f"HTTP {err.response.status_code} from the platform"
+    except httpx.HTTPError as err:
+        # Connect, read, write, timeout, protocol — the platform was not
+        # reachable, which is also what a platform still booting looks like.
+        return None, f"transport failure: {type(err).__name__}: {err}"
+    try:
+        payload = response.json()
+    except ValueError as err:
+        # A proxy's HTML error page, a truncated body, an empty 200.
+        return None, f"response body is not JSON: {err}"
     if not isinstance(payload, dict):
         return None, f"non-object JSON response: {type(payload).__name__}"
     if "error" in payload:
@@ -181,7 +247,10 @@ def _call_tool(
     result = payload.get("result") or {}
     for block in result.get("content", []):
         if block.get("type") == "text" and isinstance(block.get("text"), str):
-            parsed = json.loads(block["text"])
+            try:
+                parsed = json.loads(block["text"])
+            except ValueError as err:
+                return None, f"tool result text is not JSON: {err}"
             if isinstance(parsed, dict):
                 return parsed, None
     return None, "no text content block in result"

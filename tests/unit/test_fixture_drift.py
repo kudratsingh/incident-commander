@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from evals.fixture_drift import CannedCall, Drift, canned_calls, compare
@@ -25,7 +26,12 @@ from evals.fixture_drift_ledger import (
     load_entries,
     load_ledger,
 )
-from evals.fixture_probe import UnseededPlatformError, assert_seeded, probe_live
+from evals.fixture_probe import (
+    UnseededPlatformError,
+    assert_seeded,
+    probe_live,
+    unregistered_calls,
+)
 from evals.scenarios.loader import load_scenarios
 from incident_commander.tools.mcp_client import ToolResult
 
@@ -526,6 +532,220 @@ class TestSequencedFixturesProbePerElement:
         assert result.live_calls == 1
 
 
+class TestProbeErrorChannels:
+    """A call that could not be made is RECORDED, never fatal.
+
+    ``ProbeError`` exists to say "this fixture went unchecked", but only an
+    MCP-level JSON-RPC error could ever reach it: an HTTP status, a body
+    that is not JSON, and a connection that never opened all escaped
+    ``_call_tool`` uncaught and took the whole 95-fixture drift check with
+    them. One bad gateway on one tool is not a reason to learn nothing
+    about the other ninety-four.
+    """
+
+    _REQUEST = httpx.Request("POST", "http://x/mcp")
+
+    class _Stub:
+        """Per-tool scripted transport: a payload, a response, or a raise."""
+
+        def __init__(self, script: dict[str, Any]) -> None:
+            self.script = script
+            self.calls: list[str] = []
+
+        def post(self, url: str, **kwargs: Any) -> Any:  # noqa: ARG002
+            name = kwargs["json"]["params"]["name"]
+            self.calls.append(name)
+            behaviour = self.script[name]
+            if isinstance(behaviour, BaseException):
+                raise behaviour
+            if isinstance(behaviour, httpx.Response):
+                return behaviour
+            body = json.dumps(behaviour)
+            return _Response({"result": {"content": [{"type": "text", "text": body}]}})
+
+    _SEEDED: dict[str, Any] = {"list_dlq_messages": {"total": 1, "items": [{"id": "a"}]}}
+
+    def _probe(self, script: dict[str, Any], calls: list[CannedCall]) -> Any:
+        client = self._Stub({**self._SEEDED, **script})
+        return probe_live(
+            calls,
+            mcp_url="http://x/mcp",
+            token="read-scoped",
+            client=client,  # type: ignore[arg-type]
+        )
+
+    def _two_fixtures(self) -> list[CannedCall]:
+        return [
+            _call("get_consumer_lag", {"lag": 1200}, scenario="broken"),
+            _call("get_redis_health", {"ok": True}, scenario="fine"),
+        ]
+
+    def test_an_http_error_status_is_recorded_and_the_run_continues(self) -> None:
+        result = self._probe(
+            {
+                "get_consumer_lag": httpx.Response(502, text="Bad Gateway", request=self._REQUEST),
+                "get_redis_health": {"ok": False},
+            },
+            self._two_fixtures(),
+        )
+        assert [(e.scenario, e.tool) for e in result.errors] == [("broken", "get_consumer_lag")]
+        assert "502" in result.errors[0].detail
+        # The point of recording rather than raising: the OTHER fixture was
+        # still compared, and its disagreement still reported.
+        assert [d.path for d in result.drifts] == ["ok"]
+
+    def test_a_non_json_body_is_recorded_and_the_run_continues(self) -> None:
+        result = self._probe(
+            {
+                "get_consumer_lag": httpx.Response(
+                    200, text="<html>upstream timeout</html>", request=self._REQUEST
+                ),
+                "get_redis_health": {"ok": False},
+            },
+            self._two_fixtures(),
+        )
+        assert [e.tool for e in result.errors] == ["get_consumer_lag"]
+        assert [d.path for d in result.drifts] == ["ok"]
+
+    def test_a_transport_failure_is_recorded_and_the_run_continues(self) -> None:
+        result = self._probe(
+            {
+                "get_consumer_lag": httpx.ConnectError("connection refused"),
+                "get_redis_health": {"ok": False},
+            },
+            self._two_fixtures(),
+        )
+        assert [e.tool for e in result.errors] == ["get_consumer_lag"]
+        assert "connection refused" in result.errors[0].detail
+        assert [d.path for d in result.drifts] == ["ok"]
+
+    def test_a_fixture_key_no_tool_answers_is_reported_not_raised(self) -> None:
+        # `tier_of` raises KeyError for a name outside TOOL_REGISTRY, so a
+        # typo'd fixture key used to abort the check before it read anything.
+        result = self._probe(
+            {"get_redis_health": {"ok": True}},
+            [
+                _call("get_redis_healht", {"ok": True}, scenario="typo"),
+                _call("get_redis_health", {"ok": True}, scenario="fine"),
+            ],
+        )
+        assert [(e.scenario, e.tool) for e in result.errors] == [("typo", "get_redis_healht")]
+        assert "TOOL_REGISTRY" in result.errors[0].detail
+        assert result.drifts == ()
+        assert result.checked == 1, "the registered fixture must still be checked"
+
+    def test_an_unregistered_fixture_key_costs_no_live_call(self) -> None:
+        result = self._probe({}, [_call("get_redis_healht", {}, scenario="typo")])
+        assert result.live_calls == 0
+        assert len(result.errors) == 1
+
+    def test_the_shipped_fixtures_all_name_a_registered_tool(self) -> None:
+        # The offline half of the same guard: no live platform needed to know
+        # that every canned key names something the agent can actually call.
+        unknown = unregistered_calls(canned_calls(load_scenarios(_SCENARIOS_DIR)))
+        assert [c.label for c in unknown] == []
+
+    def test_a_probed_fixture_is_reported_as_compared(self) -> None:
+        result = self._probe({"get_redis_health": {"ok": True}}, self._two_fixtures()[1:])
+        assert result.compared == (("fine", "get_redis_health"),)
+
+    def test_a_fixture_that_errored_is_not_reported_as_compared(self) -> None:
+        result = self._probe(
+            {"get_redis_health": httpx.ConnectError("refused")}, self._two_fixtures()[1:]
+        )
+        assert result.compared == ()
+
+
+class TestBlessOnlyDropsWhatTheRunDisproved:
+    """The ledger is the burn-down list, so a bless may not shrink it by accident.
+
+    ``dump_ledger`` wrote the whole file from the drift observed in one run.
+    Any entry whose fixture that run did not reach — a 502, a scenario that
+    errored, anything the probe never compared — simply vanished, which is a
+    silent deletion of work nobody disproved. A ratchet that can also be
+    turned by a flake is not a ratchet.
+    """
+
+    def _drift(self, scenario: str, tool: str, path: str = "lag") -> Drift:
+        return Drift(scenario=scenario, tool=tool, path=path, kind="value")
+
+    def _prior(self, path: Path, *keys: tuple[str, str, str, str], **extra: Any) -> None:
+        path.write_text(
+            json.dumps(
+                {
+                    "_comment": "prior",
+                    **extra,
+                    "known_drift": [
+                        {"scenario": k[0], "tool": k[1], "path": k[2], "kind": k[3]} for k in keys
+                    ],
+                }
+            )
+        )
+
+    def test_an_entry_this_run_never_probed_is_carried_over(self, tmp_path: Path) -> None:
+        path = tmp_path / "ledger.json"
+        reached = ("scenario_a", "get_consumer_lag", "lag", "value")
+        unreached = ("scenario_b", "get_redis_health", "used_memory_human", "value")
+        self._prior(path, reached, unreached)
+
+        dump_ledger(
+            [self._drift("scenario_a", "get_consumer_lag")],
+            path,
+            checked=[("scenario_a", "get_consumer_lag")],
+        )
+
+        assert unreached in load_ledger(path), "an unprobed entry was deleted without evidence"
+        assert reached in load_ledger(path)
+
+    def test_an_entry_this_run_disproved_is_dropped(self, tmp_path: Path) -> None:
+        # The ratchet still turns: a fixture that WAS probed and no longer
+        # disagrees loses its line, which is the whole point of the file.
+        path = tmp_path / "ledger.json"
+        fixed = ("scenario_a", "get_consumer_lag", "lag", "value")
+        self._prior(path, fixed)
+
+        dump_ledger([], path, checked=[("scenario_a", "get_consumer_lag")])
+
+        assert load_ledger(path) == frozenset()
+
+    def test_the_default_is_the_conservative_one(self, tmp_path: Path) -> None:
+        # A caller that does not say what it probed has established nothing,
+        # so it may delete nothing.
+        path = tmp_path / "ledger.json"
+        entry = ("scenario_a", "get_consumer_lag", "lag", "value")
+        self._prior(path, entry)
+        dump_ledger([], path)
+        assert entry in load_ledger(path)
+
+    def test_a_carried_entry_keeps_its_context_from_the_code(self, tmp_path: Path) -> None:
+        path = tmp_path / "ledger.json"
+        justified = ("consumer_lag_high", "get_consumer_lag", "lag", "value")
+        self._prior(path, justified)
+        dump_ledger([], path)
+        rows = json.loads(path.read_text())["known_drift"]
+        assert [(r["context"], "kill_consumer" in r["why"]) for r in rows] == [(POST_FAULT, True)]
+
+    def test_a_round_trip_preserves_keys_this_module_does_not_own(self, tmp_path: Path) -> None:
+        # `_blessed_against` records WHICH platform state the file was
+        # blessed against — the one thing that says whether a local
+        # disagreement is about the fixtures or about your postgres volume.
+        # Every bless silently dropped it.
+        path = tmp_path / "ledger.json"
+        self._prior(
+            path,
+            ("scenario_a", "get_consumer_lag", "lag", "value"),
+            _blessed_against="a freshly seeded stack (CI's contract job)",
+        )
+        dump_ledger([self._drift("scenario_a", "get_consumer_lag")], path, checked=[])
+        payload = json.loads(path.read_text())
+        assert payload["_blessed_against"] == "a freshly seeded stack (CI's contract job)"
+        assert payload["_comment"].startswith("Known canned-vs-live fixture drift")
+
+    def test_a_first_bless_needs_no_prior_file(self, tmp_path: Path) -> None:
+        path = tmp_path / "absent.json"
+        assert dump_ledger([self._drift("s", "get_consumer_lag")], path, checked=[]) == 1
+
+
 class TestLedgerContext:
     """Not every recorded disagreement is work, and the number has to say so."""
 
@@ -579,6 +799,43 @@ class TestLedgerContext:
         assert counts["recorded"] == len(payload["known_drift"])
         assert counts[FIXTURE_DEFECT] == defect_count()
         assert counts["explained"] == counts["recorded"] - counts[FIXTURE_DEFECT]
+
+    def test_the_committed_contexts_agree_with_the_code(self) -> None:
+        """The file is a projection of `_JUSTIFIED`, and has to stay one.
+
+        `_JUSTIFIED` is where a human records the mechanism that makes a
+        disagreement not-work; the ledger's per-row `context` is that
+        decision written down for whoever opens the file. Nothing asserted
+        the two still said the same thing, so a re-classification in code
+        could sit next to a file that contradicted it indefinitely.
+        """
+        from evals.fixture_drift_ledger import LEDGER_PATH
+
+        stale = []
+        for row in json.loads(LEDGER_PATH.read_text())["known_drift"]:
+            key = (row["scenario"], row["tool"], row["path"], row["kind"])
+            recorded = (row["context"], row.get("why", ""))
+            if recorded != context_of(key):
+                stale.append((key, recorded, context_of(key)))
+        assert stale == [], (
+            f"the committed ledger disagrees with _JUSTIFIED: {stale}. "
+            "Re-bless with `make fixture-drift-bless`."
+        )
+
+    def test_a_reclassification_in_code_moves_the_burn_down_number(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Absolving an entry in code must remove it from the work list.
+
+        `load_entries` read a dict row's context from the FILE while reading
+        an array row's from `_JUSTIFIED`, so deciding in code that an entry
+        was post-fault changed nothing the burn-down number could see. The
+        code is the authority on classification; the file records it.
+        """
+        before = defect_count()
+        victim = next(entry.key for entry in load_entries() if entry.is_defect)
+        monkeypatch.setitem(_JUSTIFIED, victim, (POST_FAULT, "hypothetical reclassification"))
+        assert defect_count() == before - 1
 
     def test_the_original_array_format_still_parses(self, tmp_path: Path) -> None:
         # The committed ledger predates the annotated format; a checkout

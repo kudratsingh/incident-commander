@@ -100,6 +100,16 @@ unpinned `AGENT_MODEL` is an operator error, but aborting a live incident run ov
 gap is a worse outcome than an over-conservative charge. Over-reporting keeps the ceiling safe;
 silently under-reporting would not.
 
+**Amended by WO-R2-118.** The fallback above is unchanged and still the right behaviour at the
+point it fires — mid-run, with an incident in flight. But it was also the *only* check, so the
+operator error it tolerates was never reported anywhere except one `WARNING`, and a mistyped
+model id simply ran the whole campaign billed at the ceiling. `Settings` now refuses at
+construction to accept an `AGENT_MODEL` or `JUDGE_MODEL` with no price row. Nothing is in flight
+at that point, so the argument above does not apply: the honest answer to "which model am I
+about to bill?" is to demand one rather than to guess high. The two together mean an unpriced id
+cannot reach a run through configuration, and a model that somehow appears at runtime anyway is
+still charged conservatively rather than crashing the incident.
+
 The fallback was originally the single priciest *registered* row, ordered by the sum of its four
 rates. That is not an upper bound and the difference is not theoretical: a table can hold a row
 that is cheaper in total yet dearer in one class, and an unpinned model billed at the sum-winner's

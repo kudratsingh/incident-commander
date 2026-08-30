@@ -98,7 +98,7 @@ def _tmp_archives_unlocked_for_cleanup(tmp_path: Path) -> Iterator[None]:
 def _test_settings(**overrides: Any) -> Settings:
     defaults: dict[str, Any] = {
         "anthropic_api_key": SecretStr("eval"),
-        "judge_model": "eval-judge",
+        "judge_model": "claude-haiku-4-5",
         "platform_mcp_url": "https://eval.local",
         "platform_rest_url": "https://eval.local",
         "platform_token": SecretStr("eval"),
@@ -1213,7 +1213,7 @@ _SETTINGS_ENV_VARS = settings_env_var_names()
 # now dies as 'Field required' at construction — the broken-env exit-3 path.)
 _PLACEHOLDER_LIVE_ENV = {
     "ANTHROPIC_API_KEY": "eval",
-    "JUDGE_MODEL": "eval-judge",
+    "JUDGE_MODEL": "claude-haiku-4-5",
     "PLATFORM_MCP_URL": "https://eval.local",
     "PLATFORM_REST_URL": "https://eval.local",
     "PLATFORM_TOKEN": "eval",
@@ -1225,7 +1225,7 @@ _PLACEHOLDER_LIVE_ENV = {
 # No network is ever touched — every live-side collaborator is monkeypatched.
 _REAL_LOOKING_LIVE_ENV = {
     "ANTHROPIC_API_KEY": "sk-ant-test-not-a-real-key",
-    "JUDGE_MODEL": "eval-judge",
+    "JUDGE_MODEL": "claude-haiku-4-5",
     "PLATFORM_MCP_URL": "http://real.host:8001/mcp",
     "PLATFORM_REST_URL": "http://real.host:8000",
     "PLATFORM_TOKEN": "sa_full_scope",
@@ -2599,9 +2599,9 @@ class TestVerificationJudgeIsPinned:
             return real(*args, **kwargs)
 
         monkeypatch.setattr(runner_module, "make_llm_verify", _spy)
-        settings = _test_settings(agent_model="agent-model-x", judge_model="judge-model-y")
+        settings = _test_settings(agent_model="claude-sonnet-4-6", judge_model="claude-haiku-4-5")
         run_scenario(_passing_scenario(), settings)
-        assert seen["model"] == "judge-model-y"
+        assert seen["model"] == "claude-haiku-4-5"
 
     def test_the_investigation_planner_still_gets_the_agent_model(
         self, monkeypatch: pytest.MonkeyPatch
@@ -2616,9 +2616,9 @@ class TestVerificationJudgeIsPinned:
             return real(*args, **kwargs)
 
         monkeypatch.setattr(runner_module, "make_llm_investigate", _spy)
-        settings = _test_settings(agent_model="agent-model-x", judge_model="judge-model-y")
+        settings = _test_settings(agent_model="claude-sonnet-4-6", judge_model="claude-haiku-4-5")
         run_scenario(_passing_scenario(), settings)
-        assert seen["model"] == "agent-model-x"
+        assert seen["model"] == "claude-sonnet-4-6"
 
 
 class TestACrashedRowReportsWhatItSpent:

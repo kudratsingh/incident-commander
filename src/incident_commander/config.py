@@ -9,6 +9,8 @@ from typing import Final
 from pydantic import AnyHttpUrl, Field, PostgresDsn, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from incident_commander.llm.pricing import MODEL_PRICING
+
 # Peak connections one investigation run holds AT ONCE (ADR 0022): the lease
 # connection, pinned for the whole run by ``incident_lease`` (ADR 0016), plus
 # at most one transient checkout for a checkpoint load or write.
@@ -228,6 +230,52 @@ class Settings(BaseSettings):
         if self.agent_max_concurrent_runs is None:
             return ceiling
         return min(self.agent_max_concurrent_runs, ceiling)
+
+    @model_validator(mode="after")
+    def _configured_models_are_priced(self) -> Settings:
+        """Refuse at startup any model id with no row in the price table.
+
+        Without this the failure is silent and expensive rather than loud:
+        ``pricing_for`` falls back to ``class_ceiling``, the per-token-class
+        maximum of every registered row, so an unpriced model bills at the
+        dearest rate on record. Every budget the meter guards — the USD
+        ceiling, the per-run cap, the numbers in the briefing — is then
+        computed from a price nobody chose, and the only trace is one
+        ``WARNING`` on first use.
+
+        That fallback stays exactly as it is; it is the right behaviour for
+        the case it exists for, which is a *live run* discovering an
+        accounting gap mid-incident (ADR 0015 — do not abort an incident over
+        billing arithmetic). This check runs earlier, where the tradeoff is
+        different: nothing is in flight at construction time, so the honest
+        answer to "which model am I about to bill?" is to demand one rather
+        than to guess high.
+
+        The remedy is four numbers in ``MODEL_PRICING``, in this repo,
+        verified against docs.claude.com — the same rule CLAUDE.md already
+        applies to the model id strings themselves.
+        """
+        unpriced = {
+            name.upper(): value
+            for name, value in (
+                ("agent_model", self.agent_model),
+                ("judge_model", self.judge_model),
+            )
+            if value not in MODEL_PRICING
+        }
+        if unpriced:
+            # Both in one message: fixing them one restart at a time is the
+            # shape of refusal that wastes an operator's afternoon.
+            named = ", ".join(f"{var}={value!r}" for var, value in sorted(unpriced.items()))
+            known = ", ".join(sorted(MODEL_PRICING))
+            raise ValueError(
+                f"{named} has no row in MODEL_PRICING, so its cost would be billed at the "
+                f"per-class maximum of every priced model rather than its own rate. "
+                f"Priced ids: {known}. Add the model to MODEL_PRICING "
+                "(src/incident_commander/llm/pricing.py), with rates verified against "
+                "docs.claude.com, or configure one of the ids above."
+            )
+        return self
 
     @model_validator(mode="after")
     def _run_bound_fits_the_pool(self) -> Settings:

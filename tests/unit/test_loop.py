@@ -4,9 +4,15 @@ from uuid import uuid4
 
 import pytest
 
+from incident_commander.agent.briefing import render_briefing
 from incident_commander.agent.loop import MaxStepsExceededError, run_to_completion
 from incident_commander.agent.orchestrator import TRANSITIONS, TerminalStateError
-from incident_commander.agent.state import BudgetLedger, IncidentState, RunState
+from incident_commander.agent.state import (
+    BudgetLedger,
+    EvidenceEntry,
+    IncidentState,
+    RunState,
+)
 from incident_commander.persistence.memory import InMemoryCheckpointer
 
 
@@ -197,3 +203,183 @@ class TestRunToCompletion:
         assert history[0].updated_at == now
         assert history[1].updated_at == later
         assert result.updated_at == later
+
+
+# ---------------------------------------------------------------------------
+# WO-R2-39: the budget short-circuit and a crash-resumed REMEDIATING run.
+
+_PLAN: dict[str, object] = {
+    "target_hypothesis": "consumer_saturation",
+    "action_tool": "restart_consumer_group",
+    "action_arguments": {"consumer_group": "worker-dispatcher"},
+    "verify_tool": "get_consumer_lag",
+    "verify_arguments": {"consumer_group": "worker-dispatcher"},
+    "verify_expectation": "lag should drop toward zero",
+}
+
+
+def _exhausted(budget: BudgetLedger) -> BudgetLedger:
+    """A ledger with no tool calls left — the resume-time normal case.
+
+    ADR 0015 anchors the wall meter on ``created_at``, so a run resumed
+    after a crash is frequently already exhausted before it dispatches
+    anything.
+    """
+    return budget.model_copy(update={"tool_calls_used": budget.max_tool_calls})
+
+
+def _resumed_remediating(budget: BudgetLedger, now: datetime) -> RunState:
+    """What ``load()`` hands the loop after a crash inside REMEDIATING.
+
+    The REMEDIATING checkpoint is written on *entry* to the state, before
+    the action tool is called and before any VERIFYING checkpoint — so
+    this state cannot tell us whether the Tier-1 action executed.
+    """
+    return RunState(
+        incident_id=uuid4(),
+        state=IncidentState.REMEDIATING,
+        alert={"source": "billing", "severity": "high"},
+        budget=_exhausted(budget),
+        remediation_plan=_PLAN,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+class TestBudgetExemptsResumedRemediating:
+    """A crash-resumed REMEDIATING run must re-invoke before it escalates.
+
+    The re-invoke is safe because ``build_idempotency_key`` is deterministic
+    in (incident, tool, args) and the platform replays the cached response
+    instead of re-executing (ADR 0008; held to the wire by
+    tests/integration/test_idempotency_contract.py).
+    """
+
+    @staticmethod
+    def _stubs(calls: list[str]) -> dict[IncidentState, Callable[[RunState, datetime], RunState]]:
+        def remediate(rs: RunState, at: datetime) -> RunState:
+            calls.append("remediate")
+            entry = EvidenceEntry(
+                tool_name="restart_consumer_group",
+                arguments={"consumer_group": "worker-dispatcher"},
+                result_summary='{"restarted": true}',
+                timestamp=at,
+            )
+            return rs.model_copy(
+                update={
+                    "state": IncidentState.VERIFYING,
+                    "evidence": (*rs.evidence, entry),
+                    "remediation_attempts": rs.remediation_attempts + 1,
+                    "updated_at": at,
+                }
+            )
+
+        def verify(rs: RunState, at: datetime) -> RunState:
+            calls.append("verify")
+            entry = EvidenceEntry(
+                tool_name="get_consumer_lag",
+                arguments={"consumer_group": "worker-dispatcher"},
+                result_summary='{"lag": 0}',
+                timestamp=at,
+            )
+            return rs.model_copy(
+                update={
+                    "state": IncidentState.RESOLVED,
+                    "evidence": (*rs.evidence, entry),
+                    "updated_at": at,
+                }
+            )
+
+        return {
+            IncidentState.REMEDIATING: remediate,
+            IncidentState.VERIFYING: verify,
+        }
+
+    def test_resumed_remediating_reinvokes_and_verifies_over_budget(
+        self, budget: BudgetLedger, now: datetime
+    ) -> None:
+        """RED at HEAD: the run escalates without ever re-invoking or verifying.
+
+        HEAD exempts only VERIFYING, so an exhausted ledger short-circuits
+        the resumed REMEDIATING run straight to ESCALATED — leaving a
+        Tier-1 action that may already have executed permanently
+        unverified, which is the exact case ADR 0006's exemption exists to
+        prevent.
+        """
+        calls: list[str] = []
+        resumed = _resumed_remediating(budget, now)
+        assert resumed.budget.is_exhausted
+
+        final = run_to_completion(resumed, clock=_make_clock(now), transitions=self._stubs(calls))
+
+        assert calls == ["remediate", "verify"]
+        assert final.state is IncidentState.RESOLVED
+        assert not any(e.tool_name == "_escalate" for e in final.evidence)
+
+    def test_resumed_remediating_discloses_the_attempt_in_the_briefing(
+        self, budget: BudgetLedger, now: datetime
+    ) -> None:
+        """The briefing must name the Tier-1 action that was re-invoked.
+
+        RED at HEAD: the short-circuit writes an ``_escalate`` marker, which
+        the trail filters out as bookkeeping, and the action never runs — so
+        the handoff to the human never mentions the attempt at all.
+        """
+        calls: list[str] = []
+        resumed = _resumed_remediating(budget, now)
+
+        final = run_to_completion(resumed, clock=_make_clock(now), transitions=self._stubs(calls))
+
+        trail = [probe.tool for probe in render_briefing(final).investigation_trail]
+        assert "restart_consumer_group" in trail
+
+    def test_fresh_remediating_still_short_circuits(
+        self, budget: BudgetLedger, now: datetime
+    ) -> None:
+        """The exemption is for RESUME only, not for REMEDIATING in general.
+
+        A run that reached REMEDIATING from PLANNING inside this process has
+        not dispatched anything yet, so an exhausted ledger must still stop
+        it *before* the Tier-1 call. Escalating pre-execution is the safe
+        direction; the resume case is the one where refusing loses
+        information.
+        """
+        calls: list[str] = []
+        fresh = RunState(
+            incident_id=uuid4(),
+            state=IncidentState.PLANNING,
+            alert={"source": "billing", "severity": "high"},
+            budget=_exhausted(budget),
+            remediation_plan=_PLAN,
+            created_at=now,
+            updated_at=now,
+        )
+
+        def plan(rs: RunState, at: datetime) -> RunState:
+            calls.append("plan")
+            return rs.with_state(IncidentState.REMEDIATING, at)
+
+        transitions = {IncidentState.PLANNING: plan, **self._stubs(calls)}
+        final = run_to_completion(fresh, clock=_make_clock(now), transitions=transitions)
+
+        assert final.state is IncidentState.ESCALATED
+        assert "remediate" not in calls
+        assert any("budget exhausted" in e.result_summary for e in final.evidence)
+
+    def test_resumed_remediating_without_a_plan_still_short_circuits(
+        self, budget: BudgetLedger, now: datetime
+    ) -> None:
+        """No stored plan means nothing was ever dispatched — nothing to re-invoke.
+
+        REMEDIATING is only reachable via PLANNING committing a plan, so a
+        checkpoint in REMEDIATING with ``remediation_plan is None`` is a
+        corrupt row rather than a crash-resume. Short-circuiting is correct
+        and the transition would escalate on the missing plan anyway.
+        """
+        calls: list[str] = []
+        resumed = _resumed_remediating(budget, now).model_copy(update={"remediation_plan": None})
+
+        final = run_to_completion(resumed, clock=_make_clock(now), transitions=self._stubs(calls))
+
+        assert final.state is IncidentState.ESCALATED
+        assert calls == []

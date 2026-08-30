@@ -307,6 +307,7 @@ make setup        # uv sync, pre-commit hooks, pull pinned platform image
 make check        # ruff + mypy --strict
 make test         # unit + integration (containers auto-managed)
 make test-contract# contract snapshot diff against pinned platform
+make test-idempotency # wire idempotency contract (MUTATES; last in the contract job)
 make test-e2e     # full compose e2e, spends tokens, use deliberately
 make eval         # full eval suite, writes report
 make eval-reg     # regression subset only

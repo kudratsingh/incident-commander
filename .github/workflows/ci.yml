@@ -205,6 +205,31 @@ jobs:
           PLATFORM_MCP_URL: http://localhost:8001/mcp
         run: make test-drift
 
+      # The wire-level idempotency contract. Until now it executed in NO CI
+      # job: the `test` job runs it without PLATFORM_MCP_URL/PLATFORM_TOKEN
+      # so it self-skips, and this job ran only the schema and fixture-value
+      # checks — while ADR 0008 removed the client-side execute-once guard on
+      # the strength of exactly this test, leaving Tier-1 crash-resume
+      # defended by an unverified wire contract (WO-R2-43). The loop leans on
+      # it harder as of WO-R2-39, which re-invokes on a crash-resumed
+      # REMEDIATING run rather than escalating.
+      #
+      # LAST, deliberately. This is the only step here that WRITES: it fires
+      # the kill_consumer chaos hook and restarts worker-dispatcher several
+      # times. test-contract reads schemas and test-drift compares canned
+      # fixture VALUES against this same stack, so running the mutations
+      # first would surface as fixture drift — the "64 confident falsehoods"
+      # shape the fixture-wait step above already exists to prevent. Nothing
+      # reads the stack after this point.
+      #
+      # Runs under the write-scoped PLATFORM_TOKEN (actions:execute +
+      # chaos:invoke, minted above), not the read-only smoke token that
+      # test-drift holds.
+      - name: make test-idempotency
+        env:
+          PLATFORM_MCP_URL: http://localhost:8001/mcp
+        run: make test-idempotency
+
       - name: Dump stack state on failure
         if: failure()
         run: |

@@ -1,4 +1,4 @@
-.PHONY: traffic demo-destroy help setup check lint types test test-unit test-integration test-contract test-drift fixture-drift fixture-drift-bless test-e2e eval eval-live eval-smoke eval-reg eval-reset trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
+.PHONY: traffic demo-destroy help setup check lint types test test-unit test-integration test-contract test-drift test-idempotency fixture-drift fixture-drift-bless test-e2e eval eval-live eval-smoke eval-reg eval-reset trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
 
 # Make does not read .env on its own — only the Python side does, via
 # dotenv. Without this include, a make-level var like PLATFORM_COMPOSE
@@ -29,6 +29,7 @@ help:
 	@echo "  test-integration integration tests only"
 	@echo "  test-contract    diff platform tool schemas against snapshot"
 	@echo "  test-drift       diff canned fixture VALUES against the pinned platform"
+	@echo "  test-idempotency wire-level idempotency contract (MUTATES; run last)"
 	@echo "  fixture-drift    the same walk, as a human-readable report"
 	@echo "  test-e2e         full compose end-to-end (spends tokens)"
 	@echo "  eval             full eval suite offline (writes report)"
@@ -74,6 +75,22 @@ test-contract:
 # ones the platform can produce rather than whether the schemas match.
 test-drift:
 	uv run pytest tests/integration/test_canned_fixtures_match_live.py -v
+
+# The wire-level idempotency contract, against the same pinned stack.
+# ADR 0008 removed the client-side execute-once guard on the strength of
+# this test, so it is the sole automated defence for Tier-1 crash-resume —
+# and it ran in no CI job until WO-R2-43 wired it here.
+#
+# Its own target, and NOT folded into test-contract, for two reasons that
+# are both about ordering: it needs the WRITE-scoped PLATFORM_TOKEN with
+# chaos:invoke (test-drift deliberately holds the read-only smoke token),
+# and it MUTATES the world it runs against — it fires the kill_consumer
+# chaos hook and restarts worker-dispatcher several times. test-contract
+# and test-drift both READ that world, and test-drift compares canned
+# fixture VALUES against it, so running this first would report the
+# mutations as fixture drift. Keep it last in the contract job.
+test-idempotency:
+	uv run pytest tests/integration/test_idempotency_contract.py -v
 
 # Human-readable version of the same walk, for working on a fixture.
 # PYTHONPATH=. because `python scripts/x.py` puts scripts/ on sys.path[0],

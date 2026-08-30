@@ -119,11 +119,22 @@ This is intentional. Aggressive auto-remediation with an unmapped hypothesis is 
 | Dimension | Env var | Default | Charged by | Checked by |
 |---|---|---|---|---|
 | Tool calls | `BUDGET_MAX_TOOL_CALLS` | 25 | +1 per probe, action, and verify poll | `budget.is_exhausted`, pre-spend and once per loop step |
-| Tokens | `BUDGET_MAX_TOKENS` | 500000 | Total volume — input + output + cache-creation + cache-read — at every planner and judge call | Same |
+| Tokens | `BUDGET_MAX_TOKENS` | 500000 | Total volume — input + output + cache-creation + cache-read, plus the discarded-attempt estimate below — at every planner and judge call | Same |
 | Wall clock | `BUDGET_MAX_SECONDS` | 1800 | Elapsed since `RunState.created_at`, recomputed each loop step | Same |
 | Dollars | `BUDGET_MAX_USD` | 5.00 | Per-model rates from the pinned price map, at every LLM call | Same |
 
 Exhausting any dimension forces escalation with `"budget exhausted"` on evidence. No dimension has a "just a little bit more" override.
+
+### Billed work is charged on every path, not just the happy one
+
+ADR 0015's rule is one-directional — the meter may over-report, never under-report — and the four token counters on a response cannot honor it alone, because they describe the one attempt that came back. Four paths used to bill the platform and charge the run nothing:
+
+- **Retried attempts.** `LLMClient.call` retries a connection failure, a 429, or a 5xx up to `max_attempts`, and a 5xx after the model has already generated is billed. Only the final attempt's usage was returned, so `BUDGET_MAX_USD` was under-enforced by up to 3x. Each discarded attempt is now charged the request's own `max_tokens` at the model's *output* rate (`LLMUsage.discarded_output_tokens`) — the most a single attempt could have generated, and the dearest of the four rate classes, so the estimate cannot under-bill. It deliberately over-charges an attempt that failed before generating; that is the safe direction.
+- **A billed-but-unparseable response.** A `max_tokens` truncation is a full output-token bill with no `record_output` block to parse. `LLMError` now carries the usage it billed, and callers charge it with `accounting.accrue_llm_error`.
+- **Rejected plans.** The remediation planner's accrual sat after six validation branches that each return early, so the runs that made the most LLM calls were the runs the ledger saw least of. Accrual now happens the moment the call returns, before the plan is judged.
+- **Crashed eval rows.** `_crashed_result` hardcoded `tool_calls_used=0`. A crash now carries the run's last checkpoint, so the row reports what the scenario actually spent — still a lower bound (work inside the crashing transition is not checkpointed), but one derived from the run rather than from a constant.
+
+The briefing writer and judge remain outside the ledger for the reason below; the estimate applies to the metered calls only.
 
 All four columns are live writers, not aspirations. Until [ADR 0015](ADR/0015-wall-clock-and-usd-budget-meters.md), `wall_seconds_used` and `usd_used` had no writer anywhere in `src/`: both ceilings were unreachable and every briefing reported `$0`. The token meter summed only the un-cached input, so it under-counted exactly when prompt caching worked well. Anchoring wall time on `created_at` rather than a process-local start also makes the meter survive crash-resume — a run rebuilt from a checkpoint does not get a fresh wall budget.
 

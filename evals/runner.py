@@ -186,6 +186,37 @@ def _is_offline_api_key(key: str) -> bool:
     return key in {_EVAL_PLACEHOLDER_API_KEY, "placeholder", ""}
 
 
+class ScenarioCrash(Exception):
+    """A scenario's run raised, wrapped with the history it had accumulated.
+
+    The crash row used to be built from the exception alone, which is why
+    it hardcoded ``tool_calls_used=0``: nothing else was reachable from
+    ``run_suite``'s handler. A scenario that crashed after spending nine
+    tool calls therefore reported spending none, and the suite's cost and
+    budget columns were a lower bound that read like a measurement.
+
+    ``checkpoints`` is the run's own checkpoint history up to the last
+    completed transition — the same tuple the success path puts on the
+    trajectory. It is still a lower bound (work inside the transition that
+    crashed is not checkpointed) but it is a bound derived from what the
+    run did, not from a constant.
+
+    Raised only from ``run_scenario``'s own handler. Failures that happen
+    before the loop starts — chaos seeding, preconditions — propagate
+    unwrapped, because there is no run to describe.
+    """
+
+    def __init__(self, cause: BaseException, checkpoints: tuple[RunState, ...]) -> None:
+        super().__init__(f"{type(cause).__name__}: {cause}")
+        self.cause = cause
+        self.checkpoints = checkpoints
+
+    @property
+    def final(self) -> RunState | None:
+        """The last checkpointed state, if the run got far enough to write one."""
+        return self.checkpoints[-1] if self.checkpoints else None
+
+
 class PreconditionFailure(RuntimeError):
     """Base: the run was abandoned before the agent started."""
 
@@ -508,8 +539,11 @@ def run_scenario(
         clock=tick,
     )
 
+    # Outside the try so a crash can still read what the run had spent when
+    # it died — see ScenarioCrash.
+    checkpointer = InMemoryCheckpointer()
+    run: RunState | None = None
     try:
-        checkpointer = InMemoryCheckpointer()
         # The scenario's declared cap IS the run's tool-call ceiling (ADR
         # 0019), not just the number it is graded against afterwards. Before
         # this, the two were different numbers and the planner was told the
@@ -583,7 +617,12 @@ def run_scenario(
                     "error": f"{type(exc).__name__}: {exc}",
                 }
             )
-        raise
+        # Re-raise carrying the run's own history, so the crash row reports
+        # what the scenario actually spent instead of a hardcoded zero.
+        raise ScenarioCrash(
+            exc,
+            () if run is None else tuple(checkpointer.history(run.incident_id)),
+        ) from exc
     finally:
         if live_mcp_client is not None:
             live_mcp_client.close()
@@ -667,8 +706,16 @@ def _crashed_result(
     (network blip, unseeded fixture) would otherwise wipe every result
     that hadn't run yet. The synthesized report carries the error string
     so it's visible in the summary + written to disk.
+
+    A ``ScenarioCrash`` also carries the run's partial ledger and
+    checkpoints, so the row reports what the scenario spent before it died
+    rather than zero. The bucketing below reads the original cause, not the
+    wrapper — the wrapper is a carrier, not a new failure mode.
     """
-    error_detail = f"{type(exc).__name__}: {exc}"
+    cause = exc.cause if isinstance(exc, ScenarioCrash) else exc
+    partial = exc.final if isinstance(exc, ScenarioCrash) else None
+    checkpoints = exc.checkpoints if isinstance(exc, ScenarioCrash) else ()
+    error_detail = f"{type(cause).__name__}: {cause}"
     report = GradeReport(
         scenario=scenario.name,
         passed=False,
@@ -683,12 +730,12 @@ def _crashed_result(
     # Post-#48 the transitions absorb transport failures as graded
     # escalations, so a crash that still reaches here is either the
     # scenario's own seeding (environment) or an unwrapped transport path.
-    if isinstance(exc, PreconditionNotMet):
+    if isinstance(cause, PreconditionNotMet):
         # Its own bucket on purpose. "shared-env" would be close but wrong:
         # nothing was contended, the world simply was not in the state the
         # scenario asserts, and no agent behaviour is being described.
         crash_class = "precondition"
-    elif isinstance(exc, PreconditionUnverifiable):
+    elif isinstance(cause, PreconditionUnverifiable):
         # The premise is UNKNOWN, not false. Bucketing this as "precondition"
         # would send the reader to seeding when the platform is the problem.
         crash_class = "transport"
@@ -698,8 +745,13 @@ def _crashed_result(
         crash_class = "transport"
     outcome = ScenarioOutcome(
         scenario=scenario.name,
-        final_state=IncidentState.TRIAGE,
-        tool_calls_used=0,
+        # Both read off the last checkpoint the run wrote. Hardcoding TRIAGE
+        # and 0 described a run that never started, which is a different
+        # failure from the one being reported — and it made every crashed
+        # row's usage silently unusable for the cost columns (ADR 0015: the
+        # meter may over-report, never under-report).
+        final_state=IncidentState.TRIAGE if partial is None else partial.state,
+        tool_calls_used=0 if partial is None else partial.budget.tool_calls_used,
         report=report,
         judge_score=None,
         failure_class=crash_class,
@@ -711,11 +763,16 @@ def _crashed_result(
         live_mcp=scenario.use_live_mcp,
         live_llm=scenario.use_live_llm,
     )
+    # Invariant 9: the evidence a crashed run did produce is still evidence.
+    # An empty trajectory under a nil incident id is not "no data", it is
+    # data the harness threw away on its way to writing the row.
     trajectory = Trajectory(
         invocation_id=invocation_id,
         scenario=scenario.name,
-        incident_id="00000000-0000-0000-0000-000000000000",
-        checkpoints=(),
+        incident_id=(
+            "00000000-0000-0000-0000-000000000000" if partial is None else str(partial.incident_id)
+        ),
+        checkpoints=checkpoints,
     )
     briefing = EscalationBriefing(
         incident_id="00000000-0000-0000-0000-000000000000",

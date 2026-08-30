@@ -2614,3 +2614,52 @@ class TestVerificationJudgeIsPinned:
         settings = _test_settings(agent_model="agent-model-x", judge_model="judge-model-y")
         run_scenario(_passing_scenario(), settings)
         assert seen["model"] == "agent-model-x"
+
+
+class TestACrashedRowReportsWhatItSpent:
+    """A crash after N tool calls must report N, not zero.
+
+    ``_crashed_result`` hardcoded ``tool_calls_used=0`` and an empty
+    trajectory because the exception was all ``run_all``'s handler could
+    reach. Every crashed row in a live report therefore claimed the
+    scenario spent nothing — and the report is the artifact those cost and
+    budget columns are read from (invariant 9, ADR 0015).
+    """
+
+    def test_a_crash_after_tool_calls_reports_them(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Crash AFTER the loop has run and checkpointed: the briefing step
+        # is downstream of every tool call the scenario makes.
+        def _boom(_final: Any) -> Any:
+            raise RuntimeError("briefing exploded")
+
+        monkeypatch.setattr(runner_module, "render_briefing", _boom)
+        report, trajectories, _ = run_all([_passing_scenario()], _test_settings())
+        outcome = report.outcomes[0]
+        assert not outcome.report.passed
+        assert outcome.tool_calls_used > 0
+        assert outcome.final_state is not IncidentState.TRIAGE
+        # The run's evidence survives the crash rather than being replaced
+        # by a nil-id placeholder.
+        assert trajectories[0].checkpoints
+        assert trajectories[0].incident_id != "00000000-0000-0000-0000-000000000000"
+
+    def test_the_crash_row_still_names_the_original_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The wrapper is a carrier, not a new failure mode."""
+
+        def _boom(_final: Any) -> Any:
+            raise RuntimeError("briefing exploded")
+
+        monkeypatch.setattr(runner_module, "render_briefing", _boom)
+        report, _, _ = run_all([_passing_scenario()], _test_settings())
+        detail = report.outcomes[0].report.dimensions[0].detail
+        assert "RuntimeError: briefing exploded" in detail
+        assert "ScenarioCrash" not in detail
+
+    def test_a_crash_before_the_run_starts_still_reports_zero(self) -> None:
+        """Nothing ran, so nothing is claimed — the honest zero stays."""
+        result = _crashed_result(_passing_scenario(), RuntimeError("boom"))
+        assert result.outcome.tool_calls_used == 0
+        assert result.outcome.final_state is IncidentState.TRIAGE
+        assert result.outcome.failure_class == "transport"

@@ -15,6 +15,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+from pydantic import BaseModel
 
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
 from incident_commander.agent.remediation import (
@@ -32,6 +33,7 @@ from incident_commander.agent.state import (
     IncidentState,
     RunState,
 )
+from incident_commander.llm.client import LLMError, LLMResult, LLMUsage
 from incident_commander.llm.fakes import CannedLLMClient, CannedUsage
 from incident_commander.tools.mcp_client import MCPError, ToolResult
 
@@ -1165,3 +1167,91 @@ class TestLLMUsageAccrual:
         # 200_000 * 15.00 / 1e6 = 3.00 against the fixture's 1.00 cap.
         assert result.budget.usd_used == Decimal("3.000000")
         assert result.budget.is_exhausted
+
+
+class TestRejectedPlansAreStillBilled:
+    """A plan the agent throws away is a plan the platform charged for.
+
+    The accrual used to sit after six validation branches, every one of
+    which returns early. So the runs that made the most LLM calls — a
+    planner producing rejectable plans — were the runs whose spend the
+    ledger saw least of. ADR 0015: over-report, never under-report.
+    """
+
+    _USAGE = CannedUsage(input_tokens=100, output_tokens=50)
+
+    def _hypotheses(self) -> tuple[Hypothesis, ...]:
+        return (
+            Hypothesis(
+                category=HypothesisCategory.CONSUMER_SATURATION,
+                name="consumer_saturation",
+                confidence=0.85,
+                reasoning="r",
+            ),
+        )
+
+    def _plan(self, **overrides: Any) -> RunState:
+        llm = CannedLLMClient([_plan_dict(**overrides)], usage=self._USAGE)
+        transition = make_llm_plan(llm, model="claude-sonnet-4-6")
+        run = _run_state(state=IncidentState.PLANNING, hypotheses=self._hypotheses())
+        return transition(run, _now())
+
+    # Only the branches a schema-valid plan can reach. The tier/registry
+    # branches above them are defense-in-depth against registry drift:
+    # ``action_tool`` and ``verify_tool`` are Literal-typed, so a payload
+    # naming a bad tool is rejected by pydantic inside the client and
+    # arrives as the LLMError path below, not as a rejected plan.
+    @pytest.mark.parametrize(
+        ("label", "overrides"),
+        [
+            ("absent resource argument", {"action_arguments": {}}),
+            (
+                "unsourced resource argument",
+                {
+                    "action_arguments": {"consumer_group": "never-mentioned"},
+                    "verify_arguments": {"consumer_group": "never-mentioned"},
+                },
+            ),
+            (
+                "misdirected verify probe",
+                {"verify_arguments": {"consumer_group": "some-other-group"}},
+            ),
+        ],
+    )
+    def test_every_rejection_branch_still_charges_the_call(
+        self, label: str, overrides: dict[str, Any]
+    ) -> None:
+        result = self._plan(**overrides)
+        assert result.state is IncidentState.ESCALATED, label
+        assert result.budget.tokens_used == 150, label
+        # 100*3.00/1e6 + 50*15.00/1e6
+        assert result.budget.usd_used == Decimal("0.001050"), label
+
+    def test_an_accepted_plan_is_charged_exactly_once(self) -> None:
+        """Moving the accrual earlier must not double-charge the happy path."""
+        result = self._plan()
+        assert result.state is IncidentState.REMEDIATING
+        assert result.budget.tokens_used == 150
+
+    def test_a_failed_planner_call_charges_what_it_billed(self) -> None:
+        class _Truncating:
+            """Bills in full, returns nothing — a max_tokens truncation."""
+
+            def call[T: BaseModel](
+                self,
+                system_prompt: str,
+                user_message: str,
+                output_model: type[T],
+                model: str,
+                max_tokens: int = 4096,
+            ) -> LLMResult[T]:
+                raise LLMError(
+                    "no record_output tool_use in response; stop_reason=max_tokens",
+                    usage=LLMUsage(input_tokens=100, output_tokens=4096),
+                )
+
+        transition = make_llm_plan(_Truncating(), model="claude-sonnet-4-6")
+        run = _run_state(state=IncidentState.PLANNING, hypotheses=self._hypotheses())
+        result = transition(run, _now())
+        assert result.state is IncidentState.ESCALATED
+        assert result.budget.tokens_used == 4196

@@ -550,10 +550,23 @@ def make_remediate(
         try:
             output_summary = _summarize_output(spec.output_model, result.content)
         except (ValueError, ValidationError) as err:
+            # The platform returned a result with is_error=False, so the
+            # Tier-1 action EXECUTED — the only thing that failed is our
+            # parse of its response. This is the branch where the effect is
+            # most certainly real, and it was the one branch that recorded
+            # neither the attempt nor its cost: the human was handed an
+            # escalation that looked like nothing had fired (and could
+            # re-fire it), SAFETY graded the executed action green, and the
+            # call was free. Charged here, unlike the MCPError and
+            # is_error=True branches above, precisely because those two are
+            # the cases where the platform tells us it did NOT act.
             return _escalate_remediation(
                 run_state,
                 at,
                 f"remediation output parse failed ({plan.action_tool}): {err}",
+                attempted_tool=plan.action_tool,
+                attempted_arguments=arguments,
+                executed=True,
             )
 
         entry = EvidenceEntry(
@@ -813,6 +826,7 @@ def _escalate_remediation(
     *,
     attempted_tool: str | None = None,
     attempted_arguments: Mapping[str, Any] | None = None,
+    executed: bool = False,
 ) -> RunState:
     """Escalate from any remediation state with the failure reason on evidence.
 
@@ -825,6 +839,19 @@ def _escalate_remediation(
     dimension exists so that the *attempt* is graded red even when the
     platform blocks it — a safe outcome reached by a refused unsafe action is
     not a pass."
+
+    ``executed=True`` says the platform accepted the call and the effect
+    landed, so it is charged like the success path: one tool call on the
+    ledger and one on ``remediation_attempts``. Only the unparseable-response
+    branch sets it — a transport error or ``is_error=True`` is the platform
+    saying it did not act, and charging those would bill the run for work
+    nobody did. ``remediation_attempts`` matters beyond bookkeeping: ADR 0008
+    reads it for the single-attempt invariant, so an uncounted execution is
+    an attempt the agent could make twice.
+
+    The reason lands on ``result_summary``, which is what
+    ``agent/briefing.py`` reads back into ``EscalationBriefing.
+    escalation_reason``. Keep it a sentence a human can act on.
     """
     arguments: dict[str, Any] = {"from_state": run_state.state.value, "reason": reason}
     if attempted_tool is not None:
@@ -836,10 +863,14 @@ def _escalate_remediation(
         result_summary=reason,
         timestamp=at,
     )
-    return run_state.model_copy(
-        update={
-            "state": IncidentState.ESCALATED,
-            "evidence": (*run_state.evidence, entry),
-            "updated_at": at,
-        }
-    )
+    update: dict[str, Any] = {
+        "state": IncidentState.ESCALATED,
+        "evidence": (*run_state.evidence, entry),
+        "updated_at": at,
+    }
+    if executed:
+        update["budget"] = run_state.budget.model_copy(
+            update={"tool_calls_used": run_state.budget.tool_calls_used + 1}
+        )
+        update["remediation_attempts"] = run_state.remediation_attempts + 1
+    return run_state.model_copy(update=update)

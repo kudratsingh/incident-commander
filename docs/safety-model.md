@@ -59,6 +59,7 @@ No `TIER_2` tools ship today. When they land, they use the platform's propose/ap
       REMEDIATING
           │ execute action_tool with sha256 idempotency key
           │ tool_error / is_error=True ─────────────────────► ESCALATED
+          │ response unparseable (action DID execute) ──────► ESCALATED
           ▼
        VERIFYING
           │ probe verify_tool + judge LLM
@@ -70,7 +71,22 @@ No `TIER_2` tools ship today. When they land, they use the platform's propose/ap
 
 One attempt, one way ([ADR 0008](ADR/0008-single-attempt-remediation.md)): `ALLOWED_TRANSITIONS` in `src/incident_commander/agent/orchestrator.py` gives VERIFYING no PLANNING successor — a `not_verified` verdict escalates for human review rather than re-planning autonomously — and REMEDIATING always proceeds through a real tool call, with no client-side skip-ahead branch (see crash recovery below).
 
-Every escalation carries the failure reason on evidence. `EscalationBriefing` (rendered by the briefing writer + judged by the judge) is the artifact a human reads.
+Every escalation carries the failure reason on evidence. `EscalationBriefing` is the artifact a human reads.
+
+### The handoff artifact
+
+`render_briefing` (`src/incident_commander/agent/briefing.py`) turns a terminal run into the object the on-call sees. Two of its fields are load-bearing for safety:
+
+| Field | Source | Why it is there |
+|---|---|---|
+| `escalation_reason` | the terminal bookkeeping marker's `result_summary` | why the agent stopped. Every escalation writer records it; the briefing's underscore filter used to delete it, handing a human an escalation with no reason attached |
+| `attempted_action` | `attempted_tool` / `attempted_arguments` on that same marker | which Tier-1 action already fired. A refused or unparseable call writes no evidence entry under its own tool name, so without this the attempt is invisible — and an on-call who thinks nothing fired may fire it again |
+
+Both are read from the **last** evidence entry when it is an underscore-prefixed marker and the run did not RESOLVE. That is structural, matching the trail filter directly above it: every escalation path appends its marker and transitions to a terminal state, so a new writer following the convention is picked up with no list to maintain.
+
+`attempted_action` mirrors `_effective_call` in `evals/graders/deterministic.py`, which charges the same two keys to the SAFETY dimension. The rule both sides implement: **an executed Tier-1 action is recorded even when the run has nothing to show for it.** The unparseable-response branch of `make_remediate` is the sharpest case — the platform returned `is_error=False`, so the effect is real and only our parse of the response failed. It is charged to `tool_calls_used` and `remediation_attempts` like a success, unlike the transport-error and `is_error=True` branches, where the platform is telling us it did not act.
+
+**Production briefings are deterministic-only.** `findings` and `recommendation` are written by an LLM (`briefing_enrichment.py`) and `evals/runner.py` is the only caller — the service path (`api/app.py::_log_briefing`) renders the template and logs it. This is a decision, not an omission: the two facts above are deterministic fields, so a production handoff is complete without a model, and buying the prose would put an LLM call, a key, and another failure rail on the incident path. `tests/unit/test_briefing_enrichment.py::TestServiceAndEvalPathParity` holds the difference to exactly those two strings, so nothing a human needs can quietly drift back into being eval-only.
 
 ### Plan arguments must name the resource, on both legs
 

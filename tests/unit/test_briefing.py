@@ -133,6 +133,111 @@ class TestRenderBriefing:
         briefing = render_briefing(run)
         assert briefing.investigation_trail == ()
 
+    def test_escalation_reason_reaches_the_human(self, run_state: RunState, now: datetime) -> None:
+        # R2-38: the underscore filter is right about the *trail* and wrong
+        # about the reason — it ate the one line telling the human why the
+        # agent gave up.
+        evidence = (
+            _evidence(now, "get_consumer_lag", '{"group":"billing","lag":42}'),
+            EvidenceEntry(
+                tool_name="_remediation_escalate",
+                arguments={"from_state": "verifying", "reason": "lag unchanged after restart"},
+                result_summary="lag unchanged after restart",
+                timestamp=now,
+            ),
+        )
+        run = run_state.model_copy(update={"state": IncidentState.ESCALATED, "evidence": evidence})
+        briefing = render_briefing(run)
+        assert briefing.escalation_reason == "lag unchanged after restart"
+        # And the trail stays a trail — the marker is still filtered out of it.
+        assert briefing.investigation_trail == (
+            ProbeSummary(tool="get_consumer_lag", summary='{"group":"billing","lag":42}'),
+        )
+
+    def test_escalation_reason_read_from_every_terminal_marker(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # One structural rule, not a name list: whichever writer escalated,
+        # the terminal marker it appended is the last evidence entry.
+        for marker, reason in (
+            ("_remediation_escalate", "remediation tool error"),
+            ("_escalate", "step budget exhausted"),
+            ("_planner_escalate", "planner LLM invalid"),
+            ("_planner_stop", "no Tier-1 fix for the top hypothesis"),
+        ):
+            run = run_state.model_copy(
+                update={
+                    "state": IncidentState.ESCALATED,
+                    "evidence": (
+                        EvidenceEntry(
+                            tool_name=marker,
+                            arguments={"reason": reason},
+                            result_summary=reason,
+                            timestamp=now,
+                        ),
+                    ),
+                }
+            )
+            assert render_briefing(run).escalation_reason == reason
+
+    def test_attempted_tier_1_action_reaches_the_human(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # Safety: a human who is not told the action already fired may fire
+        # it again. The attempt lives only on the marker's arguments, because
+        # a refused call writes no evidence entry of its own.
+        evidence = (
+            EvidenceEntry(
+                tool_name="_remediation_escalate",
+                arguments={
+                    "from_state": "remediating",
+                    "reason": "remediation output parse failed (restart_consumer_group)",
+                    "attempted_tool": "restart_consumer_group",
+                    "attempted_arguments": {"consumer_group": "billing-consumer"},
+                },
+                result_summary="remediation output parse failed (restart_consumer_group)",
+                timestamp=now,
+            ),
+        )
+        run = run_state.model_copy(update={"state": IncidentState.ESCALATED, "evidence": evidence})
+        briefing = render_briefing(run)
+        assert briefing.attempted_action is not None
+        assert briefing.attempted_action.tool == "restart_consumer_group"
+        assert briefing.attempted_action.arguments == {"consumer_group": "billing-consumer"}
+
+    def test_no_attempted_action_when_nothing_was_attempted(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        run = run_state.model_copy(
+            update={
+                "state": IncidentState.ESCALATED,
+                "evidence": (
+                    EvidenceEntry(
+                        tool_name="_planner_stop",
+                        arguments={"reason": "no Tier-1 fix"},
+                        result_summary="planner stop: no Tier-1 fix",
+                        timestamp=now,
+                    ),
+                ),
+            }
+        )
+        assert render_briefing(run).attempted_action is None
+
+    def test_resolved_run_carries_no_escalation_reason(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # A resolved run's last marker is `_verify_judge`; its summary is a
+        # verdict, not a reason to hand a human.
+        run = run_state.model_copy(
+            update={
+                "state": IncidentState.RESOLVED,
+                "evidence": (_evidence(now, "_verify_judge", "verified: lag is zero"),),
+            }
+        )
+        briefing = render_briefing(run)
+        assert briefing.escalation_reason == ""
+        assert briefing.attempted_action is None
+
     def test_findings_and_recommendation_are_empty_placeholders(
         self, run_state: RunState, now: datetime
     ) -> None:

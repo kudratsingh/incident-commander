@@ -77,6 +77,35 @@ class TestEnrichBriefing:
         _, user_message = client.calls[0]
         assert "No probes were run" in user_message
 
+    def test_context_carries_the_escalation_reason(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        client = CannedLLMClient([{"findings": "f", "recommendation": "r"}])
+        run = run_state.model_copy(
+            update={
+                "state": IncidentState.ESCALATED,
+                "evidence": (
+                    EvidenceEntry(
+                        tool_name="_remediation_escalate",
+                        arguments={
+                            "reason": "lag unchanged after restart",
+                            "attempted_tool": "restart_consumer_group",
+                            "attempted_arguments": {"consumer_group": "billing"},
+                        },
+                        result_summary="lag unchanged after restart",
+                        timestamp=now,
+                    ),
+                ),
+            }
+        )
+        enrich_briefing(render_briefing(run), client, model="m")
+        _, user_message = client.calls[0]
+        assert "lag unchanged after restart" in user_message
+        # Safety: the writer must not recommend re-firing an action that
+        # already fired, so it has to be told the action fired.
+        assert "ALREADY ATTEMPTED" in user_message
+        assert "restart_consumer_group" in user_message
+
     def test_empty_string_output_rejected_by_schema(
         self, run_state: RunState, now: datetime
     ) -> None:
@@ -98,6 +127,61 @@ class TestBriefingContent:
     def test_recommendation_min_length(self) -> None:
         with pytest.raises(ValidationError):
             BriefingContent(findings="f", recommendation="")
+
+
+class TestServiceAndEvalPathParity:
+    """R2-38: the eval graded a briefing shape production never produced.
+
+    Enrichment stays eval-only (see the module docstring and
+    ``docs/safety-model.md``). What must hold is that the *difference* is
+    bounded to the two LLM-written strings, so nothing a human needs can
+    quietly become eval-only again.
+    """
+
+    def test_enrichment_changes_only_findings_and_recommendation(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        client = CannedLLMClient([{"findings": "a finding", "recommendation": "a rec"}])
+        service_path = _briefing_with_probe(run_state, now)
+        eval_path = enrich_briefing(service_path, client, model="m")
+
+        assert set(service_path.model_dump()) == set(eval_path.model_dump())
+        differing = {
+            field
+            for field in service_path.model_dump()
+            if getattr(service_path, field) != getattr(eval_path, field)
+        }
+        assert differing == {"findings", "recommendation"}
+
+    def test_reason_and_attempted_action_are_deterministic_not_enriched(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # The two facts the handoff exists to deliver must survive with no
+        # LLM in the loop at all — that is what makes an eval-only writer an
+        # acceptable decision rather than a hole.
+        run = run_state.model_copy(
+            update={
+                "state": IncidentState.ESCALATED,
+                "evidence": (
+                    EvidenceEntry(
+                        tool_name="_remediation_escalate",
+                        arguments={
+                            "reason": "remediation output parse failed",
+                            "attempted_tool": "restart_consumer_group",
+                            "attempted_arguments": {"consumer_group": "billing"},
+                        },
+                        result_summary="remediation output parse failed",
+                        timestamp=now,
+                    ),
+                ),
+            }
+        )
+        briefing = render_briefing(run)
+        assert briefing.escalation_reason == "remediation output parse failed"
+        assert briefing.attempted_action is not None
+        assert briefing.attempted_action.tool == "restart_consumer_group"
+        assert briefing.findings == ""
+        assert briefing.recommendation == ""
 
 
 def _mock_probe(now: datetime) -> ProbeSummary:

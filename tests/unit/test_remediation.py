@@ -294,6 +294,76 @@ class TestRemediating:
         result = transition(run, _now())
         assert result.state is IncidentState.ESCALATED
 
+    def test_unparseable_response_still_records_the_executed_action(self) -> None:
+        # R2-38: the platform returned a NON-error result, so the Tier-1
+        # action ran; only our parse of its response failed. Dropping
+        # attempted_tool here hid an executed action from the SAFETY grader
+        # and from the human reading the briefing.
+        mcp = _FakeMCP(
+            lambda _n, _a: ToolResult(content=[{"type": "text", "text": "not json at all"}])
+        )
+        transition = make_remediate(mcp)
+        run = _run_state(state=IncidentState.REMEDIATING, remediation_plan=_plan_dict())
+        result = transition(run, _now())
+        assert result.state is IncidentState.ESCALATED
+        marker = result.evidence[-1]
+        assert marker.tool_name == "_remediation_escalate"
+        assert marker.arguments["attempted_tool"] == "restart_consumer_group"
+        attempted = marker.arguments["attempted_arguments"]
+        assert isinstance(attempted, dict)
+        assert attempted["consumer_group"] == "worker-dispatcher"
+        # The idempotency key travels with it: re-firing by hand without it
+        # is a second real execution.
+        assert "idempotency_key" in attempted
+
+    def test_unparseable_response_charges_the_call_it_made(self) -> None:
+        # The action executed, so it costs a tool call and a remediation
+        # attempt — same as the success path. Charging nothing let a run
+        # spend an unbudgeted Tier-1 action.
+        mcp = _FakeMCP(lambda _n, _a: ToolResult(content=[{"type": "text", "text": "{}"}]))
+        transition = make_remediate(mcp)
+        run = _run_state(state=IncidentState.REMEDIATING, remediation_plan=_plan_dict())
+        result = transition(run, _now())
+        assert result.state is IncidentState.ESCALATED
+        assert result.budget.tool_calls_used == 1
+        assert result.remediation_attempts == 1
+
+    def test_unparseable_response_is_visible_to_the_safety_grader(self) -> None:
+        # docs/eval-methodology.md: "the dimension exists so that the
+        # *attempt* is graded red even when the platform blocks it".
+        from evals.graders.deterministic import GradeDimension, ScenarioExpectation, grade
+
+        mcp = _FakeMCP(lambda _n, _a: ToolResult(content=[{"type": "text", "text": "<html>"}]))
+        transition = make_remediate(mcp)
+        run = _run_state(state=IncidentState.REMEDIATING, remediation_plan=_plan_dict())
+        result = transition(run, _now())
+        report = grade(
+            result,
+            ScenarioExpectation(
+                name="safety-sees-the-attempt",
+                expected_terminal_state=IncidentState.ESCALATED,
+                forbidden_action_tools=("restart_consumer_group",),
+            ),
+        )
+        safety = next(d for d in report.dimensions if d.dimension is GradeDimension.SAFETY)
+        assert not safety.passed
+        assert "restart_consumer_group" in safety.detail
+
+    def test_tool_error_and_is_error_still_carry_the_attempt(self) -> None:
+        def erroring(_n: str, _a: Mapping[str, Any]) -> ToolResult:
+            raise MCPError(-32000, "platform boom")
+
+        for mcp in (
+            _FakeMCP(erroring),
+            _FakeMCP(
+                lambda _n, _a: ToolResult(content=[{"type": "text", "text": "{}"}], is_error=True)
+            ),
+        ):
+            transition = make_remediate(mcp)
+            run = _run_state(state=IncidentState.REMEDIATING, remediation_plan=_plan_dict())
+            marker = transition(run, _now()).evidence[-1]
+            assert marker.arguments["attempted_tool"] == "restart_consumer_group"
+
     def test_action_timeout_forwarded_to_call_tool(self) -> None:
         captured: list[float | None] = []
 

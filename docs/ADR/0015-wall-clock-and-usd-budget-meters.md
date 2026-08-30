@@ -94,11 +94,20 @@ carries the same verify-on-change rule CLAUDE.md already applies to model id str
 price map should be re-checked against published pricing immediately before the post-campaign
 eval run.
 
-An unknown model id falls back to the **most expensive registered row** (ordered by the sum of
-its four rates, ties broken by id) and logs a warning once per id. It never raises: an unpinned
-`AGENT_MODEL` is an operator error, but aborting a live incident run over an accounting gap is a
-worse outcome than an over-conservative charge. Over-reporting keeps the ceiling safe; silently
-under-reporting would not.
+An unknown model id falls back to the **per-class maximum across every registered row** — a
+synthetic row, not a registered one — and logs a warning once per id. It never raises: an
+unpinned `AGENT_MODEL` is an operator error, but aborting a live incident run over an accounting
+gap is a worse outcome than an over-conservative charge. Over-reporting keeps the ceiling safe;
+silently under-reporting would not.
+
+The fallback was originally the single priciest *registered* row, ordered by the sum of its four
+rates. That is not an upper bound and the difference is not theoretical: a table can hold a row
+that is cheaper in total yet dearer in one class, and an unpinned model billed at the sum-winner's
+rates is then metered below its real price in that class — the exact silent under-report this ADR
+says cannot happen. The per-class maximum makes the guarantee true by construction for any table
+anyone writes later, rather than true by coincidence for the rows registered today, and
+`tests/unit/test_pricing.py` asserts it as a property over the whole table instead of as spot
+values.
 
 ### 3. `tokens_used` is total token volume, including cache tokens
 

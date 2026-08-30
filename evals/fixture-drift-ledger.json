@@ -4,12 +4,13 @@
   "_context": {
     "fixture-defect": "the recording is wrong \u2014 this is work",
     "post-fault": "the scenario seeds a fault and the check probes the un-faulted world; not a defect and must not be 'fixed'",
+    "post-action": "the fixture element records the world after the agent's own remediation and the check probes the world before it; unfixable by construction and must not be 'fixed'",
     "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything"
   },
   "_counts": {
     "recorded": 101,
-    "fixture-defect": 95,
-    "explained": 6
+    "fixture-defect": 92,
+    "explained": 9
   },
   "known_drift": [
     {
@@ -608,21 +609,24 @@
       "tool": "get_dag_state",
       "path": "paused",
       "kind": "value",
-      "context": "fixture-defect"
+      "context": "post-action",
+      "why": "element [1] is the post-pause_dag verify probe; the check probes the un-acted-on world, where the DAG is not paused"
     },
     {
       "scenario": "remediate_runaway_saga_success",
       "tool": "get_dag_state",
       "path": "paused_by",
       "kind": "value",
-      "context": "fixture-defect"
+      "context": "post-action",
+      "why": "same element, same pause: nothing has paused the live DAG, so it names no pauser"
     },
     {
       "scenario": "remediate_runaway_saga_success",
       "tool": "get_dag_state",
       "path": "paused_expires_in_seconds",
       "kind": "value",
-      "context": "fixture-defect"
+      "context": "post-action",
+      "why": "same element, same pause: the live DAG holds no pause, so its TTL is null rather than the fixture's remaining seconds"
     },
     {
       "scenario": "remediate_stale_cache_success",

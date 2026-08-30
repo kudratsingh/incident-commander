@@ -369,8 +369,13 @@ It finds three shapes of drift:
 | `value` | a top-level scalar disagrees — the `lag: 1200` vs live `0` class |
 | `canned_only_field` / `live_only_field` | the key sets disagree: the fixture invents a field, or fails to model one the platform returns |
 | `not_live_reachable` | a value inside a list row that appears nowhere in the live response — a `status` the platform never emits, a pinned id that exists in no row |
+| `type` | the JSON types disagree — including inside a list row, where a canned `true` against a live `1` is a contract change and not a reachable value |
 
 Rows are *not* compared positionally: a fixture legitimately models a different world state, so what must hold is that the row shape matches and that each value is one the platform can emit. Fields that move between two honest observations (clocks, latencies, memory gauges) are declared volatile per tool in `evals/fixture_drift.py` and checked for type only. `lag` is deliberately **not** volatile — its value is the whole subject of the lag scenarios.
+
+**Reachability is checked by type first, then by value.** Plain membership uses `==`, and in Python `True == 1`, so a canned boolean counted as reachable the moment the platform emitted the corresponding integer — absorbing exactly the bool-vs-number drift the grader's `FieldComparator` refuses to let pass, and letting a fixture be "reachable" here while failing there on the same value. A canned value whose type appears nowhere in the live domain for that path is reported as `type`; only same-typed values are then checked for membership. An all-null live domain says nothing about a field's type, so it stays a value question.
+
+**Sequenced fixtures are probed per element.** A tool whose `canned_tool_responses` entry is a list is a record of successive observations — element 0 is the investigation probe, element 1 is the verify probe the agent makes after acting — so each element is compared against its own live read, taken in sequence order, rather than against one snapshot shared by all of them. Answering element 1 from element 0's snapshot compared a post-action recording against the pre-action world, which no correct fixture can survive: `remediate_runaway_saga_success` records `paused: true` in its verify element because that is what a successful `pause_dag` produces, and three entries sat on the burn-down list for it that no edit could ever have discharged. `Drift` carries the element index so a report says which one it means; the ledger key deliberately does not, because the unit of work is the fixture path, not the element.
 
 **Arguments come from the scenario, not a table.** `canned_tool_responses` is keyed by tool name only, so the fixture does not record which call it answers. The scenario's canned planner does: its scripted `next_action` is exactly the call the offline run makes. Deriving from there means a scenario that changes what it probes cannot drift away from what the check probes.
 
@@ -397,6 +402,7 @@ Re-bless with `make fixture-drift-bless`, in a dedicated commit with the reason 
 |---|---|
 | `fixture-defect` | the recording is wrong — this is the burn-down list |
 | `post-fault` | the scenario seeds a fault and the check probes the un-faulted world, so the disagreement is expected and must **not** be "fixed" |
+| `post-action` | the element records the world after the agent's own remediation and the check probes the world before it — unfixable by construction, and "fixing" it would mean recording the remediation failing |
 | `canned-only` | the scenario never runs live, so its recordings are its premise rather than a recording of anything |
 
 Contexts are hand-recorded with a named mechanism, never inferred from the scenario. The obvious rule — *a scenario that seeds a fault gets a pass on value drift* — is wrong in a way that hides real defects: `create_stale_cache` writes one Redis key, so it cannot explain a fixture claiming 1.00G of memory in use against a live 1.60M. A rule would have absolved that entry; it is still work, and a test pins that it stays so.

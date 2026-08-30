@@ -38,6 +38,7 @@ DriftKey = tuple[str, str, str, str]
 # Contexts. Only the first is work.
 FIXTURE_DEFECT: Final = "fixture-defect"
 POST_FAULT: Final = "post-fault"
+POST_ACTION: Final = "post-action"
 CANNED_ONLY: Final = "canned-only"
 
 # Entries that are NOT fixture defects, each with the claim that makes it so.
@@ -66,6 +67,35 @@ _JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
         POST_FAULT,
         "poison_message adds a dead-letter row, so the canned total counts a "
         "row the un-faulted world has not produced yet",
+    ),
+    # The three below are one mechanism, not three defects. `get_dag_state`
+    # is a SEQUENCED fixture: element 0 is the investigation probe reading an
+    # unpaused DAG, element 1 is the verify probe reading the DAG back after
+    # the agent's own pause_dag call. The drift check probes a world in which
+    # no agent has acted, so element 1's three pause fields cannot match, and
+    # no edit to the fixture can make them: a verify recording that showed
+    # paused=false would be a recording of the remediation failing. They were
+    # counted as work until the comparison learned to say which element it
+    # meant — three entries on a burn-down list that could never be burnt
+    # down.
+    ("remediate_runaway_saga_success", "get_dag_state", "paused", "value"): (
+        POST_ACTION,
+        "element [1] is the post-pause_dag verify probe; the check probes the "
+        "un-acted-on world, where the DAG is not paused",
+    ),
+    ("remediate_runaway_saga_success", "get_dag_state", "paused_by", "value"): (
+        POST_ACTION,
+        "same element, same pause: nothing has paused the live DAG, so it names no pauser",
+    ),
+    (
+        "remediate_runaway_saga_success",
+        "get_dag_state",
+        "paused_expires_in_seconds",
+        "value",
+    ): (
+        POST_ACTION,
+        "same element, same pause: the live DAG holds no pause, so its TTL is "
+        "null rather than the fixture's remaining seconds",
     ),
     ("remediate_verify_fails", "get_consumer_lag", "lag", "value"): (
         CANNED_ONLY,
@@ -176,6 +206,11 @@ def dump_ledger(drifts: Iterable[Drift], path: Path | None = None) -> int:
                     POST_FAULT: (
                         "the scenario seeds a fault and the check probes the un-faulted "
                         "world; not a defect and must not be 'fixed'"
+                    ),
+                    POST_ACTION: (
+                        "the fixture element records the world after the agent's own "
+                        "remediation and the check probes the world before it; "
+                        "unfixable by construction and must not be 'fixed'"
                     ),
                     CANNED_ONLY: (
                         "the scenario never runs live, so its recordings are its premise "

@@ -8,6 +8,7 @@ a fresh HTTP client and the module-level TRANSITIONS registry stays untouched.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Callable, Iterator
@@ -16,9 +17,11 @@ from datetime import UTC, datetime
 from typing import Final, Literal
 from uuid import UUID, uuid4
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, status
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response, status
 from sqlalchemy import Engine
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from incident_commander.agent.briefing import render_briefing
 from incident_commander.agent.factory import derive_incident_id, start_run
@@ -71,6 +74,141 @@ def _is_replay(signature_hex: str, now: float, window_seconds: float) -> bool:
     return False
 
 
+class _BodyTooLargeError(Exception):
+    """Raised inside the receive wrapper when a streamed body passes the cap."""
+
+
+class BodySizeLimitMiddleware:
+    """Refuse an over-length request body ahead of every route (WO-R2-86).
+
+    ``/alerts`` cannot authenticate before it buffers: the HMAC covers the
+    body, so ``await request.body()`` necessarily runs before ``verify``. That
+    ordering is not a bug to fix in the route — it is the contract — which
+    means the only place that can stop an unauthenticated caller from choosing
+    this process's memory footprint is ahead of the route. Hence a middleware,
+    which also covers any endpoint added later for free.
+
+    Two gates, because the client picks which one applies:
+
+    * a declared ``Content-Length`` over the cap is refused without reading a
+      single body byte;
+    * an undeclared or chunked body is counted as it streams and refused the
+      moment the running total passes the cap — so lying about the length, or
+      omitting it, buys no more memory than declaring it honestly.
+
+    The refusal is a 413. The platform emitter reads any status >= 400 as a
+    delivery failure and will retry, which is the correct outcome for a
+    payload this endpoint will never accept in its current shape.
+    """
+
+    def __init__(self, app: ASGIApp, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        declared = _declared_content_length(scope)
+        if declared is not None and declared > self.max_bytes:
+            await self._refuse(scope, receive, send, declared)
+            return
+
+        received = 0
+        responding = False
+
+        async def counted_receive() -> Message:
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    raise _BodyTooLargeError
+            return message
+
+        async def watched_send(message: Message) -> None:
+            nonlocal responding
+            if message["type"] == "http.response.start":
+                responding = True
+            await send(message)
+
+        try:
+            await self.app(scope, counted_receive, watched_send)
+        except _BodyTooLargeError:
+            if responding:
+                # A status line is already on the wire; there is no honest way
+                # to turn it into a 413 from here. Surface it as the server
+                # error it is rather than sending a second response.
+                raise
+            await self._refuse(scope, receive, send, received)
+
+    async def _refuse(self, scope: Scope, receive: Receive, send: Send, size: int) -> None:
+        _log.warning(
+            "refused a %d-byte request body to %s (cap %d bytes)",
+            size,
+            scope.get("path", "?"),
+            self.max_bytes,
+        )
+        response = JSONResponse(
+            {"detail": f"request body exceeds the {self.max_bytes}-byte cap"},
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+        )
+        await response(scope, receive, send)
+
+
+def _declared_content_length(scope: Scope) -> int | None:
+    """The request's declared body size, or ``None`` if absent or unparseable.
+
+    ``None`` is the safe answer for a malformed header: it only means this
+    gate abstains, and the streaming count below still holds the line.
+    """
+    for name, value in scope.get("headers", ()):
+        if name == b"content-length":
+            try:
+                return int(value)
+            except ValueError:
+                return None
+    return None
+
+
+# An id no run will ever carry, so the probe reads and finds nothing rather
+# than depending on the contents of the store.
+_HEALTH_PROBE_INCIDENT_ID: Final[UUID] = UUID("00000000-0000-0000-0000-000000000000")
+
+
+async def _probe_datastore(checkpointer: Checkpointer, timeout_seconds: float) -> str | None:
+    """``None`` if the run store answered; a short reason if it did not.
+
+    The probe is a real ``load`` of an id that never exists. For the Postgres
+    checkpointer that is a pooled checkout plus one indexed SELECT — the same
+    work every ingress path does first, and exactly what a dead database or an
+    exhausted pool fails. A cheaper probe (or none, which is what /health did)
+    reports an agent healthy when it cannot record a single alert.
+
+    Bounded, because ``DB_POOL_TIMEOUT_SECONDS`` is not a wait a health check
+    may inherit. ``run_in_threadpool`` cannot be cancelled, so a timed-out
+    probe leaves its thread to finish in the background; that is bounded by
+    the pool timeout and is preferable to an endpoint that stops answering.
+
+    The reason string carries an exception TYPE, never its message: a DSN with
+    credentials in it routinely appears in the text of a connection error, and
+    this endpoint is unauthenticated.
+    """
+    try:
+        await asyncio.wait_for(
+            run_in_threadpool(checkpointer.load, _HEALTH_PROBE_INCIDENT_ID),
+            timeout=timeout_seconds,
+        )
+    except TimeoutError:
+        _log.warning("health probe of the run store did not answer in %ss", timeout_seconds)
+        return f"no answer within {timeout_seconds}s"
+    except Exception as err:  # noqa: BLE001 - any failure to read is a failure to serve
+        _log.warning("health probe of the run store failed: %s", type(err).__name__)
+        return f"probe failed: {type(err).__name__}"
+    return None
+
+
 def create_app(
     settings: Settings | None = None,
     checkpointer: Checkpointer | None = None,
@@ -106,10 +244,32 @@ def create_app(
     app.state.checkpointer = resolved_checkpointer
     app.state.engine = engine
     app.state.run_slots = slots
+    # Outermost of the app's own middleware, so the cap is enforced before any
+    # per-request machinery runs on a body this process has decided not to read.
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=resolved_settings.webhook_max_body_bytes)
 
     @app.get("/health", response_model=HealthResponse)
-    def health() -> HealthResponse:
-        return HealthResponse(status="ok")
+    async def health(response: Response) -> HealthResponse:
+        """Liveness AND datastore readiness.
+
+        This used to answer ``ok`` unconditionally, which made it a check that
+        the process was running — something the caller already knew, since it
+        got a reply. An agent whose run store is unreachable can neither
+        derive an incident id, nor record a TRIAGE row, nor take a lease: it
+        accepts alerts and loses them. That agent must not report healthy,
+        because /health is what the availability work is judged by.
+
+        Degraded is reported as 503, not as a 200 with a sad field: an
+        orchestrator's probe reads the status code, and a body nobody parses
+        is not a signal.
+        """
+        reason = await _probe_datastore(
+            resolved_checkpointer, resolved_settings.health_probe_timeout_seconds
+        )
+        if reason is None:
+            return HealthResponse(status="ok", details={"datastore": "ok"})
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return HealthResponse(status="degraded", details={"datastore": reason})
 
     @app.post(
         "/alerts",
@@ -139,17 +299,9 @@ def create_app(
         timestamp_header = request.headers.get("X-Alert-Timestamp")
         now = time.time()
         if timestamp_header is not None:
-            try:
-                timestamp_ms = int(timestamp_header)
-            except ValueError as err:
-                raise HTTPException(
-                    status.HTTP_401_UNAUTHORIZED, "non-numeric X-Alert-Timestamp"
-                ) from err
-            if abs(now - timestamp_ms / 1000) > resolved_settings.webhook_max_skew_seconds:
-                raise HTTPException(
-                    status.HTTP_401_UNAUTHORIZED,
-                    "X-Alert-Timestamp outside the accepted skew window",
-                )
+            _reject_unless_within_skew(
+                timestamp_header, now, resolved_settings.webhook_max_skew_seconds
+            )
 
         signature_hex = signature.removeprefix("sha256=")
         if _is_replay(signature_hex, now, float(resolved_settings.webhook_max_skew_seconds)):
@@ -253,6 +405,36 @@ def create_app(
         return IngestResponse(incident_id=run.incident_id)
 
     return app
+
+
+def _reject_unless_within_skew(header: str, now: float, max_skew_seconds: int) -> None:
+    """401 unless ``header`` (epoch MILLISECONDS) is inside the skew window.
+
+    Compared in integer milliseconds. The comparison used to be
+    ``abs(now - timestamp_ms / 1000)``, and that division is a conversion to
+    float — ``int`` is unbounded, so a header of ``10**400`` parsed fine and
+    then raised ``OverflowError`` from the arithmetic, outside the
+    ``except ValueError`` that guarded only the parse. The result was an
+    unauthenticated caller turning the ingress into a 500 with one header.
+    Integer arithmetic has no conversion left to overflow, and a magnitude
+    that large is by definition outside the window, so it is refused by the
+    ordinary stale-timestamp path.
+
+    ``OverflowError`` is caught beside ``ValueError`` all the same, and the
+    whole parse-and-compare sits inside the guard rather than the parse alone:
+    the defect was not that this arm was missing, it was that the guard did
+    not cover the line that failed.
+    """
+    try:
+        timestamp_ms = int(header)
+        outside_window = abs(int(now * 1000) - timestamp_ms) > max_skew_seconds * 1000
+    except (ValueError, OverflowError) as err:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "unusable X-Alert-Timestamp") from err
+    if outside_window:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "X-Alert-Timestamp outside the accepted skew window",
+        )
 
 
 def _write_ingress_checkpoint(checkpointer: Checkpointer, run: RunState) -> None:

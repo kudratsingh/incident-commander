@@ -215,6 +215,13 @@ Positive:
 * The pool has chosen numbers with a written rationale, so the next person changing them can see
   what the ceiling is derived from and what breaks.
 * A slow database no longer stops `/health`, so the liveness signal reports on liveness.
+
+  Amended by WO-R2-86: `/health` now *probes* the run store (one indexed read, bounded by
+  `HEALTH_PROBE_TIMEOUT_SECONDS`, default 2s) and answers `503 degraded` when that read fails or
+  does not return in time. The claim above is unchanged and is exactly what makes the probe safe:
+  the endpoint reports on the database instead of inheriting its wait, because the ingest work
+  that used to park the loop is in a worker thread and the probe has a timeout of its own. An
+  agent whose store is unreachable accepts alerts and loses them; that agent must not answer `ok`.
 * One less connection checkout per checkpoint, and the version-read race is closed.
 
 Negative:

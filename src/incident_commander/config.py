@@ -106,6 +106,19 @@ class Settings(BaseSettings):
     # time by more than this many seconds. Also bounds the window in which
     # an identical redelivery is suppressed instead of spawning a run.
     webhook_max_skew_seconds: int = Field(default=300, ge=1)
+    # Largest alert body the ingress will read (WO-R2-86). The HMAC covers the
+    # body, so authentication cannot happen until the body is in memory —
+    # which means an unauthenticated caller decides how much memory this
+    # process spends unless something ahead of the route says no. 1 MiB is two
+    # orders of magnitude above the largest alert the platform emits and small
+    # enough that a flood of them is a bandwidth problem, not an OOM.
+    webhook_max_body_bytes: int = Field(default=1_048_576, ge=1)
+    # How long /health waits for its datastore probe before calling the agent
+    # degraded. Deliberately far below DB_POOL_TIMEOUT_SECONDS: an exhausted
+    # pool makes the probe wait the full checkout timeout, and a health check
+    # that waits as long as the fault it reports is one more thing that has
+    # stopped answering.
+    health_probe_timeout_seconds: float = Field(default=2.0, gt=0)
 
     # Agent-owned Postgres.
     database_url: PostgresDsn
@@ -144,7 +157,13 @@ class Settings(BaseSettings):
     budget_max_tool_calls: int = Field(default=25, ge=1)
     budget_max_tokens: int = Field(default=500_000, ge=1)
     budget_max_seconds: int = Field(default=1_800, ge=1)
-    budget_max_usd: Decimal = Field(default=Decimal("5.00"), ge=Decimal("0"))
+    # gt=0, not ge=1 like the integer dimensions above: a run capped at fifty
+    # cents is a legitimate operator choice, but a run capped at zero is not a
+    # policy — ``is_exhausted`` compares with ``>=``, so BUDGET_MAX_USD=0 made
+    # every run born exhausted. It terminated on its first budget check having
+    # investigated nothing, and the outcome was indistinguishable from a
+    # budget ceiling working exactly as designed.
+    budget_max_usd: Decimal = Field(default=Decimal("5.00"), gt=Decimal("0"))
 
     # Operational kill switch, env var AGENT_ENABLED (docs/safety-model.md
     # #kill-switch and docs/runbook.md#kill-switch): false keeps the webhook
@@ -240,6 +259,29 @@ class Settings(BaseSettings):
                 "ceiling, or lower the bound."
             )
         return self
+
+
+def settings_env_var_names() -> tuple[str, ...]:
+    """Every environment variable ``Settings`` can read, sorted.
+
+    Derived from the model rather than written down, because it had been
+    written down three times and all three copies had drifted: the two test
+    isolation fixtures each claimed to list "every env var Settings can read"
+    and each missed a different pair, so the variables they missed were
+    silently inherited from whoever ran the tests. A hand-kept list of a
+    generated thing is a list that is wrong at some point after it is written.
+
+    Names are upper-cased because pydantic-settings resolves env lookups
+    case-insensitively and upper case is the spelling everything else uses;
+    ``env_prefix`` is honoured so the derivation stays correct if one is ever
+    set. A field carrying an explicit string alias reports that alias.
+    """
+    prefix = str(Settings.model_config.get("env_prefix", ""))
+    names: list[str] = []
+    for name, field in Settings.model_fields.items():
+        alias = field.validation_alias if isinstance(field.validation_alias, str) else field.alias
+        names.append(alias if isinstance(alias, str) else f"{prefix}{name}".upper())
+    return tuple(sorted(names))
 
 
 @lru_cache(maxsize=1)

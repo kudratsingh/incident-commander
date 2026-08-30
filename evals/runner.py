@@ -43,7 +43,7 @@ from evals.guards import (
 from evals.preconditions import unmet
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
-from evals.tracing import JsonlTracer, tracer_for
+from evals.tracing import JsonlTracer, TraceKind, tracer_for
 from incident_commander.agent.briefing import EscalationBriefing, render_briefing
 from incident_commander.agent.briefing_enrichment import enrich_briefing
 from incident_commander.agent.factory import start_run
@@ -293,7 +293,7 @@ def _assert_preconditions(
         if tracer is not None:
             tracer.write(
                 {
-                    "kind": "precondition",
+                    "kind": TraceKind.PRECONDITION,
                     "scenario": scenario.name,
                     "tool": probe.tool,
                     "arguments": dict(probe.arguments),
@@ -387,7 +387,7 @@ def run_scenario(
             tracer.invocation_id = invocation_id
         tracer.write(
             {
-                "kind": "scenario_start",
+                "kind": TraceKind.SCENARIO_START,
                 "scenario": scenario.name,
                 "live_mcp": live_mcp_available,
                 "live_llm": live_llm_available,
@@ -420,7 +420,7 @@ def run_scenario(
             if tracer is not None:
                 tracer.write(
                     {
-                        "kind": "chaos_setup",
+                        "kind": TraceKind.CHAOS_SETUP,
                         "scenario": scenario.name,
                         "hook": scenario.chaos_setup.name,
                         "arguments": dict(scenario.chaos_setup.arguments),
@@ -612,7 +612,7 @@ def run_scenario(
         if tracer is not None:
             tracer.write(
                 {
-                    "kind": "scenario_end",
+                    "kind": TraceKind.SCENARIO_END,
                     "scenario": scenario.name,
                     "error": f"{type(exc).__name__}: {exc}",
                 }
@@ -646,7 +646,7 @@ def run_scenario(
     if tracer is not None:
         tracer.write(
             {
-                "kind": "scenario_end",
+                "kind": TraceKind.SCENARIO_END,
                 "scenario": scenario.name,
                 "final_state": final.state.value,
                 "tool_calls_used": final.budget.tool_calls_used,

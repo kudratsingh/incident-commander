@@ -29,7 +29,7 @@ from typing import Any
 import pytest
 
 from scripts.estimate_cost import PRE_INVOCATION_ID
-from scripts.format_traces import format_trace, main
+from scripts.format_traces import BOUNDARY_KINDS, STEP_FORMATTERS, format_trace, main
 
 _MODEL = "claude-sonnet-4-6"
 
@@ -492,3 +492,229 @@ def test_main_never_writes_outside_the_requested_out_dir(tmp_path: Path) -> None
 
     assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir)]) == 0
     assert sorted(p.name for p in out_dir.iterdir()) == ["solo.txt"]
+
+
+# --- Every kind the harness writes must render (WO-R2-85) -----------------
+
+
+def _llm_error(
+    invocation: str,
+    when: str,
+    *,
+    attempt: int = 2,
+    terminal: bool = True,
+    role: str = "planner",
+) -> dict[str, Any]:
+    """What ``LLMClient._trace_error`` writes: a call that was billed and lost."""
+    return _stamp(
+        {
+            "kind": "llm_error",
+            "role": role,
+            "request": {"model": _MODEL, "system": [{"text": "system"}]},
+            "error": "APIStatusError: 429 rate_limit_error",
+            "attempt": attempt,
+            "terminal": terminal,
+            "output_model": "InvestigationStep",
+            "duration_seconds": 3.5,
+        },
+        invocation,
+        when,
+    )
+
+
+def _precondition(
+    invocation: str,
+    when: str,
+    *,
+    met: bool = True,
+    answered: bool = True,
+    failures: list[str] | None = None,
+) -> dict[str, Any]:
+    """What ``runner._assert_preconditions`` writes after the deciding attempt."""
+    return _stamp(
+        {
+            "kind": "precondition",
+            "scenario": "redis_saturation",
+            "tool": "get_consumer_lag",
+            "arguments": {"consumer_group": "worker-dispatcher"},
+            "met": met,
+            "answered": answered,
+            "ever_answered": True,
+            "failures": failures or [],
+        },
+        invocation,
+        when,
+    )
+
+
+class TestEveryKindRenders:
+    """The renderer's formatter table must cover the tracer's enumeration.
+
+    ``llm_error`` and ``precondition`` were written by the harness for as
+    long as they have existed and rendered as ``STEP N — unknown kind=…``,
+    a one-line JSON dump of the whole record — including, for an
+    ``llm_error``, the entire system prompt. This class is why a new
+    ``TraceKind`` member cannot repeat that: adding one fails here until it
+    has a formatter.
+    """
+
+    def test_the_formatter_table_covers_every_tracer_kind(self) -> None:
+        from evals.tracing import TraceKind
+
+        covered = set(STEP_FORMATTERS) | set(BOUNDARY_KINDS)
+        missing = sorted(str(kind) for kind in TraceKind if kind not in covered)
+        assert missing == [], (
+            f"these TraceKind members have no step formatter: {missing}. They will "
+            "render as 'unknown kind' — a raw JSON dump — in every human report. "
+            "Add a formatter to scripts/format_traces.py::STEP_FORMATTERS."
+        )
+
+    def test_the_table_names_no_kind_the_tracer_cannot_write(self) -> None:
+        """The other direction: a formatter for a kind that no longer exists.
+
+        Dead entries are how a table stops describing the harness — the
+        renderer looks covered while the real kinds drift past it.
+        """
+        from evals.tracing import TraceKind
+
+        known = {str(kind) for kind in TraceKind}
+        stale = sorted((set(STEP_FORMATTERS) | set(BOUNDARY_KINDS)) - known)
+        assert stale == [], (
+            f"scripts/format_traces.py renders kinds the tracer cannot write: {stale}. "
+            "Either they were removed from TraceKind or the table has a typo."
+        )
+
+    def test_trace_records_name_their_kind_through_the_enumeration(self) -> None:
+        """No bare ``"kind": "..."`` literal in the two writers.
+
+        The coverage test above is only as good as the enumeration's claim to
+        be complete. A literal written straight into a record bypasses it —
+        which is exactly how ``precondition`` came to exist without the
+        renderer ever hearing about it.
+        """
+        repo_root = Path(__file__).resolve().parents[2]
+        offenders = [
+            f"{path.relative_to(repo_root)}:{number}"
+            for path in (repo_root / "evals" / "tracing.py", repo_root / "evals" / "runner.py")
+            for number, line in enumerate(path.read_text().splitlines(), start=1)
+            if re.search(r'"kind":\s*"', line)
+        ]
+        assert offenders == [], (
+            f"trace records with a hard-coded kind string: {offenders}. Use an "
+            "evals.tracing.TraceKind member so the renderer's coverage test sees it."
+        )
+
+
+def test_llm_error_renders_as_a_labeled_step(tmp_path: Path) -> None:
+    path = _write_jsonl(
+        tmp_path / "redis_saturation.jsonl",
+        [
+            _scenario_start("inv1", "2026-08-01T10:00:00+00:00"),
+            _llm_error("inv1", "2026-08-01T10:00:05+00:00"),
+        ],
+    )
+
+    text = format_trace(path)
+
+    assert "unknown kind" not in text
+    assert "LLM CALL FAILED (planner)" in text
+    assert "429 rate_limit_error" in text
+    # Attempt is zero-based on the record and one-based for the reader.
+    assert "Attempt: 3 — gave up" in text
+
+
+def test_a_retried_llm_error_says_so(tmp_path: Path) -> None:
+    path = _write_jsonl(
+        tmp_path / "redis_saturation.jsonl",
+        [
+            _scenario_start("inv1", "2026-08-01T10:00:00+00:00"),
+            _llm_error("inv1", "2026-08-01T10:00:05+00:00", attempt=0, terminal=False),
+        ],
+    )
+
+    assert "Attempt: 1 — retried" in format_trace(path)
+
+
+def test_llm_errors_count_toward_the_llm_call_total(tmp_path: Path) -> None:
+    """The billed-but-failed calls the tracer captures are spend, not gaps.
+
+    ``mcp_error`` was already counted in the tool total; ``llm_error`` was
+    counted nowhere, so a run that burned three 429-exhausted planner calls
+    reported them as zero LLM calls.
+    """
+    path = _write_jsonl(
+        tmp_path / "redis_saturation.jsonl",
+        [
+            _scenario_start("inv1", "2026-08-01T10:00:00+00:00"),
+            _llm("inv1", "2026-08-01T10:00:01+00:00"),
+            _llm_error("inv1", "2026-08-01T10:00:05+00:00"),
+            _scenario_end(
+                "inv1", "2026-08-01T10:00:09+00:00", passed=False, final_state="escalated"
+            ),
+        ],
+    )
+
+    text = format_trace(path)
+
+    assert "LLM calls:     2 (1 failed)" in text
+
+
+def test_precondition_renders_its_verdict(tmp_path: Path) -> None:
+    path = _write_jsonl(
+        tmp_path / "redis_saturation.jsonl",
+        [
+            _scenario_start("inv1", "2026-08-01T10:00:00+00:00"),
+            _precondition("inv1", "2026-08-01T10:00:01+00:00"),
+        ],
+    )
+
+    text = format_trace(path)
+
+    assert "unknown kind" not in text
+    assert "PRECONDITION MET" in text
+    assert "get_consumer_lag" in text
+
+
+def test_an_unverifiable_precondition_is_not_reported_as_not_met(tmp_path: Path) -> None:
+    """The two failures send a reader to different halves of the system.
+
+    NOT MET says the fault was never manufactured — look at seeding.
+    UNVERIFIABLE says the platform never answered the deciding attempt —
+    look at the platform. Collapsing them is the bug the record pair exists
+    to prevent, so the report must not collapse them either.
+    """
+    path = _write_jsonl(
+        tmp_path / "redis_saturation.jsonl",
+        [
+            _scenario_start("inv1", "2026-08-01T10:00:00+00:00"),
+            _precondition(
+                "inv1",
+                "2026-08-01T10:00:01+00:00",
+                met=False,
+                answered=False,
+                failures=["get_consumer_lag: probe failed: transport error"],
+            ),
+        ],
+    )
+
+    text = format_trace(path)
+
+    assert "PRECONDITION UNVERIFIABLE" in text
+    assert "PRECONDITION NOT MET" not in text
+    assert "transport error" in text
+
+
+def test_a_kind_from_a_newer_harness_is_dumped_not_dropped(tmp_path: Path) -> None:
+    """An unrenderable record is still evidence — the fallback stays."""
+    path = _write_jsonl(
+        tmp_path / "redis_saturation.jsonl",
+        [
+            _scenario_start("inv1", "2026-08-01T10:00:00+00:00"),
+            _stamp({"kind": "from_the_future", "why": "not yet invented"}, "inv1", "2026-08-01T10:00:01+00:00"),
+        ],
+    )
+
+    text = format_trace(path)
+
+    assert "unknown kind=from_the_future" in text
+    assert "not yet invented" in text

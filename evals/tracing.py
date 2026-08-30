@@ -4,12 +4,10 @@ Every LLM call and every MCP tool call is captured as one JSON line in
 ``<EVAL_TRACE_DIR>/<scenario>.jsonl``. Enable by exporting ``EVAL_TRACE_DIR``
 before running ``make eval-live`` (``make eval-live`` sets it by default).
 
-Each line has ``kind`` in {``llm``, ``llm_error``, ``mcp``, ``mcp_error``,
-``scenario_start``, ``scenario_end``} plus an ``invocation_id`` that
-groups the records written by one runner invocation, and includes the
-full request +
-response payloads for the LLM/MCP variants — enough to reconstruct the
-model's reasoning end-to-end.
+Each line has a ``kind`` from ``TraceKind`` below plus an ``invocation_id``
+that groups the records written by one runner invocation, and includes the
+full request + response payloads for the LLM/MCP variants — enough to
+reconstruct the model's reasoning end-to-end.
 
 Design note: tracer callbacks are plumbed directly through ``LLMClient``
 and ``MCPClient`` (no wrapper class) so we capture the raw Anthropic
@@ -23,8 +21,47 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
+
+
+class TraceKind(StrEnum):
+    """Every ``kind`` a trace record can carry, and who writes it.
+
+    This is the enumeration the human renderer is held to: every member
+    must have a step formatter (or be one of the two scenario boundaries
+    the header and footer render), enforced by
+    ``tests/unit/test_format_traces.py::TestEveryKindRenders``. Before that
+    guard, ``llm_error`` and ``precondition`` — two kinds the harness has
+    written all along — reached the report as ``STEP N — unknown kind=…``,
+    a raw JSON dump of exactly the records a reader is looking for.
+
+    Every write goes through a member rather than a bare string, so a new
+    kind cannot be introduced without landing here first — and landing here
+    is what makes the renderer's coverage test fail until it can render it.
+
+    ``StrEnum``, so ``json.dumps`` writes the plain string and a record read
+    back from JSONL compares equal to the member.
+    """
+
+    #: One completed LLM call, request + raw response (``LLMClient``).
+    LLM = "llm"
+    #: One LLM call that was billed (or attempted) and did not return —
+    #: an exhausted 429, a dropped connection (``LLMClient._trace_error``).
+    LLM_ERROR = "llm_error"
+    #: One completed MCP tool call, arguments + result (``MCPClient``).
+    MCP = "mcp"
+    #: One MCP tool call that raised instead of returning (``MCPClient``).
+    MCP_ERROR = "mcp_error"
+    #: The world-state check that decides whether the scenario's premise
+    #: was ever manufactured (``runner._assert_preconditions``).
+    PRECONDITION = "precondition"
+    #: The chaos hook a live scenario fires to seed its fault (``runner``).
+    CHAOS_SETUP = "chaos_setup"
+    #: Scenario boundaries: the header and footer of one invocation.
+    SCENARIO_START = "scenario_start"
+    SCENARIO_END = "scenario_end"
 
 
 @dataclass
@@ -70,7 +107,7 @@ class JsonlTracer:
         """
 
         def hook(payload: dict[str, Any]) -> None:
-            kind = "llm_error" if "error" in payload else "llm"
+            kind = TraceKind.LLM_ERROR if "error" in payload else TraceKind.LLM
             self.write({"kind": kind, "role": role, **payload})
 
         return hook
@@ -79,7 +116,7 @@ class JsonlTracer:
         """Return a tracer callable to pass to ``MCPClient(tracer=...)``."""
 
         def hook(payload: dict[str, Any]) -> None:
-            kind = "mcp_error" if "error" in payload else "mcp"
+            kind = TraceKind.MCP_ERROR if "error" in payload else TraceKind.MCP
             self.write({"kind": kind, **payload})
 
         return hook

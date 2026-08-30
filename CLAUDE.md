@@ -138,7 +138,8 @@ incident-commander/
 ├── context/                        # session history across sessions — see the section below
 │   ├── INDEX.md                    # one line per session; read this first
 │   ├── README.md                   # the convention: packing, redaction, immutability
-│   ├── pack.sh                     # scrub → verify → zip a session's transcripts
+│   ├── pack.sh                     # scrub → verify (independent patterns) → zip
+│   ├── pack-selftest.sh            # proves pack.sh still scrubs, and still catches
 │   └── archives/                   # gitignored + immutable; absent from a fresh clone
 ├── demo/
 │   ├── compose.yml                 # platform image pinned by digest + its dependencies

@@ -199,11 +199,15 @@ The gate accepts **full-suite reports only** (A-03):
 
 - **Regressions** (baseline pass → latest fail) fail the gate: exit 1.
 - **Dropped scenarios** (in baseline, missing from latest) also fail it: exit 1. Coverage loss is not a pass — genuinely removing a scenario means re-blessing via `make baseline`, deliberately.
+- **Dropped dimensions** (graded in baseline, absent from latest for the same scenario) fail it: exit 1. The grader stopped scoring something it used to score.
+- **Vacated assertions** (a dimension that carried a real expectation now passes on an empty one) fail it: exit 1. Deleting `expected_action_tools` from a scenario YAML does not make the ACTION dimension disappear — it makes it pass on nothing, with the detail `no action expectation set`.
+
+  The last two exist because `GradeReport.passed` is an `all()` over the dimensions, so removing a check can only make a scenario *greener*. Against a gate that read scenario pass/fail alone, both edits printed `no changes vs baseline` and exited 0 — the gate reported success in precisely the case it exists to catch. Vacuity is recognised by the grader's own wording (`is_vacuous_detail` in `evals/graders/deterministic.py`), so a dimension that starts passing vacuously under new wording must teach the classifier at the same time.
 - **A filtered report is refused, not diffed**: a `latest.json` whose `only_patterns` is non-empty (produced under `--only`) exits 2 — it is not a comparable input, and the missing scenarios must not read as green. `make eval-reg ONLY=x` and `make baseline ONLY=x` additionally refuse at Makefile parse time, before the `eval` prerequisite could overwrite `latest.json` with a filtered report.
 - **Improvements and new scenarios** never fail the gate (noted for transparency).
 - **Provenance mismatch warns, never gates** (S-14): when `degraded_count` differs between baseline and latest — or is unknown (`None`) on either side, as with the pre-schema committed baseline — the gate prints a `PROVENANCE` line and continues. A pass/fail delta across a canned/live divergence may not be agent change; hard-gating on it is deferred until after the next baseline bless ([ADR 0013](ADR/0013-run-provenance-is-part-of-the-eval-result.md)).
 
-Gate exit codes are the regression-gate slice of the ADR 0013 contract: 0 = clean full-suite comparison; 1 = gate failed (regression or dropped scenario); 2 = not a comparable input (missing report, filtered report).
+Gate exit codes are the regression-gate slice of the ADR 0013 contract: 0 = clean full-suite comparison; 1 = gate failed (regression, dropped scenario, dropped dimension, or vacated assertion); 2 = not a comparable input (missing report, filtered report).
 
 ## When live and offline disagree
 

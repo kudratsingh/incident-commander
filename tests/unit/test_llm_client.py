@@ -545,3 +545,144 @@ class TestFailuresAreTraced:
         ).call(system_prompt="s", user_message="u", output_model=_SampleOutput, model="claude-test")
         assert len(traces) == 1
         assert "error" not in traces[0]
+
+
+class TestBilledWorkLeavesTheClient:
+    """Every non-happy path must hand the caller what it billed (ADR 0015).
+
+    The four token counters describe the attempt that returned. A logical
+    call can bill up to ``max_attempts`` times and can bill in full for a
+    response nobody could parse, and none of that used to reach the ledger:
+    ``BUDGET_MAX_USD`` and ``BUDGET_MAX_TOKENS`` were enforced against a
+    number with a hole in it, under-counting by up to 3x on the retry path.
+    The meter may over-report; it may never under-report.
+    """
+
+    def _connection_error(self) -> anthropic.APIConnectionError:
+        return anthropic.APIConnectionError(request=MagicMock())
+
+    def _status_error(self, code: int) -> anthropic.APIStatusError:
+        response = MagicMock()
+        response.status_code = code
+        return anthropic.APIStatusError(message="fail", response=response, body=None)
+
+    def _call(self, sdk: MagicMock, max_tokens: int = 4096) -> Any:
+        return _client(sdk).call(
+            system_prompt="s",
+            user_message="u",
+            output_model=_SampleOutput,
+            model="claude-sonnet-4-6",
+            max_tokens=max_tokens,
+        )
+
+    def test_two_failures_then_success_charges_three_attempts_not_one(self) -> None:
+        sdk = MagicMock()
+        sdk.messages.create.side_effect = [
+            self._connection_error(),
+            self._status_error(503),
+            _tool_use_message({"label": "ok", "confidence": 1.0}),
+        ]
+        result = self._call(sdk, max_tokens=1000)
+        assert sdk.messages.create.call_count == 3
+        # The returned attempt's own counters, unchanged...
+        assert result.output_tokens == 50
+        # ...plus a conservative charge for the two that were billed and
+        # thrown away. Before this, those two were free.
+        assert result.discarded_attempts == 2
+        assert result.discarded_output_tokens == 2000
+
+    def test_a_first_attempt_success_charges_nothing_extra(self) -> None:
+        sdk = MagicMock()
+        sdk.messages.create.return_value = _tool_use_message({"label": "ok", "confidence": 1.0})
+        result = self._call(sdk)
+        assert result.discarded_attempts == 0
+        assert result.discarded_output_tokens == 0
+
+    def test_a_billed_but_unparseable_response_carries_its_usage(self) -> None:
+        """max_tokens truncation: fully billed, nothing to parse."""
+        response = _tool_use_message({"label": "ok", "confidence": 1.0}, output_tokens=4096)
+        response.content = []
+        response.stop_reason = "max_tokens"
+        sdk = MagicMock()
+        sdk.messages.create.return_value = response
+        with pytest.raises(LLMError, match="no record_output tool_use") as caught:
+            self._call(sdk)
+        usage = caught.value.usage
+        assert usage is not None
+        assert usage.input_tokens == 100
+        assert usage.output_tokens == 4096
+
+    def test_a_schema_validation_failure_carries_its_usage(self) -> None:
+        sdk = MagicMock()
+        sdk.messages.create.return_value = _tool_use_message({"label": "ok"})
+        with pytest.raises(LLMError, match="failed schema validation") as caught:
+            self._call(sdk)
+        assert caught.value.usage is not None
+        assert caught.value.usage.output_tokens == 50
+
+    def test_an_exhausted_retry_loop_charges_every_attempt(self) -> None:
+        sdk = MagicMock()
+        sdk.messages.create.side_effect = self._status_error(503)
+        with pytest.raises(LLMError, match="transport failure after 3 attempts") as caught:
+            self._call(sdk, max_tokens=1000)
+        usage = caught.value.usage
+        assert usage is not None
+        assert usage.discarded_attempts == 3
+        assert usage.discarded_output_tokens == 3000
+
+    def test_a_client_error_charges_only_the_attempts_before_it(self) -> None:
+        """A rejected request never reached the model, so it is not billed."""
+        sdk = MagicMock()
+        sdk.messages.create.side_effect = [self._status_error(503), self._status_error(400)]
+        with pytest.raises(LLMError, match="LLM API error 400") as caught:
+            self._call(sdk, max_tokens=1000)
+        usage = caught.value.usage
+        assert usage is not None
+        assert usage.discarded_attempts == 1
+
+    def test_an_unexpected_api_error_charges_the_attempt_it_billed(self) -> None:
+        """APIResponseValidationError is a 200 the SDK could not validate."""
+        sdk = MagicMock()
+        sdk.messages.create.side_effect = anthropic.APIResponseValidationError(
+            response=httpx.Response(200, request=httpx.Request("POST", "http://x")),
+            body=None,
+        )
+        with pytest.raises(LLMError, match="APIResponseValidationError") as caught:
+            self._call(sdk, max_tokens=1000)
+        usage = caught.value.usage
+        assert usage is not None
+        assert usage.discarded_attempts == 1
+
+
+class TestPreflightWrapsEverySdkError:
+    """The point of preflight is one labeled line, never a traceback.
+
+    ``evals/runner.py`` catches ``LLMError`` and returns exit 3 with
+    "PREFLIGHT FAIL (LLM auth)". Any SDK error that escapes uncaught skips
+    that handler and crashes the runner with a stack trace — defeating the
+    one job the function exists to do.
+    """
+
+    def test_an_unexpected_api_error_becomes_an_llm_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        err = anthropic.APIResponseValidationError(
+            response=httpx.Response(200, request=httpx.Request("GET", "http://x")),
+            body=None,
+        )
+        sdk = MagicMock()
+        sdk.models.list.side_effect = err
+        monkeypatch.setattr(anthropic, "Anthropic", lambda **_kw: sdk)
+        with pytest.raises(LLMError, match="auth preflight failed.*APIResponseValidationError"):
+            preflight_auth("sk-test")
+
+    def test_a_status_error_still_reports_its_code(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        response = MagicMock()
+        response.status_code = 401
+        sdk = MagicMock()
+        sdk.models.list.side_effect = anthropic.APIStatusError(
+            message="bad key", response=response, body=None
+        )
+        monkeypatch.setattr(anthropic, "Anthropic", lambda **_kw: sdk)
+        with pytest.raises(LLMError, match="auth preflight failed: HTTP 401"):
+            preflight_auth("sk-test")

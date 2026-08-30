@@ -22,9 +22,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Final
 
-from pydantic import BaseModel
-
-from incident_commander.llm.client import LLMResult
+from incident_commander.llm.client import LLMUsage
 
 _LOG: Final = logging.getLogger(__name__)
 
@@ -116,8 +114,18 @@ def pricing_for(model: str) -> ModelPricing:
     return class_ceiling(MODEL_PRICING)
 
 
-def cost_of[T: BaseModel](model: str, result: LLMResult[T]) -> Decimal:
-    """USD cost of one LLM call, quantized to microdollars.
+def cost_of(model: str, usage: LLMUsage) -> Decimal:
+    """USD cost of one logical LLM call, quantized to microdollars.
+
+    Takes ``LLMUsage`` rather than ``LLMResult`` so the billed paths that
+    never produce a parsed output — a truncated response, an exhausted
+    retry loop — are priced by the same arithmetic as the happy path.
+    ``LLMResult`` is an ``LLMUsage``, so callers holding one still fit.
+
+    ``discarded_output_tokens`` is billed at the output rate: it is a
+    conservative stand-in for attempts that generated and were thrown
+    away, and the output rate is the dearest of the four classes, so the
+    stand-in cannot under-bill them (ADR 0015).
 
     Decimal end to end: ``BudgetLedger.usd_used`` is a ``Decimal`` and a
     float intermediate would leak binary-rounding noise into every
@@ -125,9 +133,9 @@ def cost_of[T: BaseModel](model: str, result: LLMResult[T]) -> Decimal:
     """
     row = pricing_for(model)
     raw = (
-        result.input_tokens * row.input_usd_per_mtok
-        + result.output_tokens * row.output_usd_per_mtok
-        + result.cache_creation_tokens * row.cache_write_usd_per_mtok
-        + result.cache_read_tokens * row.cache_read_usd_per_mtok
+        usage.input_tokens * row.input_usd_per_mtok
+        + (usage.output_tokens + usage.discarded_output_tokens) * row.output_usd_per_mtok
+        + usage.cache_creation_tokens * row.cache_write_usd_per_mtok
+        + usage.cache_read_tokens * row.cache_read_usd_per_mtok
     ) / _TOKENS_PER_MILLION
     return raw.quantize(_USD_QUANTUM, rounding=ROUND_HALF_UP)

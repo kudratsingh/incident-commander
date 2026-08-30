@@ -28,7 +28,7 @@ from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from incident_commander.agent.accounting import accrue_llm_usage
+from incident_commander.agent.accounting import accrue_llm_error, accrue_llm_usage
 from incident_commander.agent.hypothesis import ReadToolName
 from incident_commander.agent.state import (
     EvidenceEntry,
@@ -196,8 +196,21 @@ def make_llm_plan(
                 model=model,
             )
         except (ValueError, ValidationError, LLMError) as err:
+            run_state = run_state.model_copy(
+                update={"budget": accrue_llm_error(run_state.budget, err, model)}
+            )
             return _escalate_remediation(run_state, at, f"planner LLM invalid: {err}")
 
+        # Charge the call the moment it returns, BEFORE the plan is judged.
+        # The accrual used to sit after the six validation branches below,
+        # every one of which returns early — so a plan the agent rejected was
+        # a plan the run got for free, and the rejections are not the rare
+        # case: they are what a bad planner does repeatedly. ADR 0015 says
+        # the meter may over-report and never under-report; a billed call
+        # whose output we threw away is still a billed call.
+        run_state = run_state.model_copy(
+            update={"budget": accrue_llm_usage(run_state.budget, result, model)}
+        )
         plan = result.output
 
         if plan.action_tool not in TOOL_REGISTRY:
@@ -264,7 +277,6 @@ def make_llm_plan(
                 f"; {plan.verify_tool} must observe the same resource.",
             )
 
-        new_budget = accrue_llm_usage(run_state.budget, result, model)
         entry = EvidenceEntry(
             tool_name="_planner_plan",
             arguments={"target_hypothesis": plan.target_hypothesis},
@@ -277,7 +289,6 @@ def make_llm_plan(
         return run_state.model_copy(
             update={
                 "state": IncidentState.REMEDIATING,
-                "budget": new_budget,
                 # Stored as dict so state.py stays free of remediation-loop imports.
                 # REMEDIATING + VERIFYING re-validate via ``_load_plan``.
                 "remediation_plan": plan.model_dump(mode="json"),
@@ -713,6 +724,11 @@ def make_llm_verify(
                     model=model,
                 )
             except (ValueError, ValidationError, LLMError) as err:
+                # Same rule as the planner above: a judge call that was billed
+                # and then failed is spend, not a free escalation.
+                run_state = run_state.model_copy(
+                    update={"budget": accrue_llm_error(run_state.budget, err, model)}
+                )
                 return _escalate_remediation(
                     run_state, at_attempt, f"verify judge LLM invalid: {err}"
                 )

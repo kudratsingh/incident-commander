@@ -7,16 +7,12 @@ not depend on the model client.
 
 from __future__ import annotations
 
-from pydantic import BaseModel
-
 from incident_commander.agent.state import BudgetLedger
-from incident_commander.llm.client import LLMResult
+from incident_commander.llm.client import LLMError, LLMUsage
 from incident_commander.llm.pricing import cost_of
 
 
-def accrue_llm_usage[T: BaseModel](
-    budget: BudgetLedger, result: LLMResult[T], model: str
-) -> BudgetLedger:
+def accrue_llm_usage(budget: BudgetLedger, usage: LLMUsage, model: str) -> BudgetLedger:
     """Return ``budget`` with this call's tokens and dollars added.
 
     ``tokens_used`` is total token *volume* — input + output +
@@ -26,16 +22,37 @@ def accrue_llm_usage[T: BaseModel](
     under-enforced ``BUDGET_MAX_TOKENS`` exactly when caching worked
     well (C-06). ``usd_used`` carries the cost weighting, so the volume
     meter stays a volume meter (ADR 0015).
+
+    ``discarded_output_tokens`` joins the volume for the same reason it
+    joins the dollars: a retried attempt spent real capacity, and a
+    ceiling that cannot see it is not a ceiling.
     """
     return budget.model_copy(
         update={
             "tokens_used": (
                 budget.tokens_used
-                + result.input_tokens
-                + result.output_tokens
-                + result.cache_creation_tokens
-                + result.cache_read_tokens
+                + usage.input_tokens
+                + usage.output_tokens
+                + usage.cache_creation_tokens
+                + usage.cache_read_tokens
+                + usage.discarded_output_tokens
             ),
-            "usd_used": budget.usd_used + cost_of(model, result),
+            "usd_used": budget.usd_used + cost_of(model, usage),
         }
     )
+
+
+def accrue_llm_error(budget: BudgetLedger, err: Exception, model: str) -> BudgetLedger:
+    """Charge whatever a *failed* LLM call already billed. No-op if unknown.
+
+    The transitions turn an ``LLMError`` into a graded escalation rather
+    than a crash, which is right — but it made the failure free. A
+    truncated response and three retried 5xx are both billed work that
+    ended in an ``except`` arm, and neither reached ``tokens_used`` or
+    ``usd_used``. Callers pass the exception they caught; anything that is
+    not an ``LLMError`` carrying usage (a ``ValueError`` from the canned
+    client, a pydantic ``ValidationError``) leaves the ledger untouched.
+    """
+    if not isinstance(err, LLMError) or err.usage is None:
+        return budget
+    return accrue_llm_usage(budget, err.usage, model)

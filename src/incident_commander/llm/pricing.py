@@ -17,6 +17,7 @@ is 0.1x input.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Final
@@ -43,16 +44,6 @@ class ModelPricing:
     cache_write_usd_per_mtok: Decimal
     cache_read_usd_per_mtok: Decimal
 
-    @property
-    def rate_total(self) -> Decimal:
-        """Sum of the four rates. Orders rows for the unknown-model fallback."""
-        return (
-            self.input_usd_per_mtok
-            + self.output_usd_per_mtok
-            + self.cache_write_usd_per_mtok
-            + self.cache_read_usd_per_mtok
-        )
-
 
 MODEL_PRICING: Final[dict[str, ModelPricing]] = {
     "claude-sonnet-4-6": ModelPricing(
@@ -69,22 +60,48 @@ MODEL_PRICING: Final[dict[str, ModelPricing]] = {
     ),
 }
 
-# Ties broken by model id so the fallback row is deterministic across runs.
-_FALLBACK_MODEL: Final[str] = max(
-    MODEL_PRICING, key=lambda name: (MODEL_PRICING[name].rate_total, name)
-)
-
 _warned_models: set[str] = set()
 
 
+def class_ceiling(table: Mapping[str, ModelPricing]) -> ModelPricing:
+    """A synthetic row that is at least as expensive as every row, per class.
+
+    NOT a registered row. Selecting the priciest *registered* row — by the
+    sum of its four rates, which is how this used to work — is not an upper
+    bound: a table can hold a row that is cheaper in total yet dearer in a
+    single class, and an unpinned model billed at the sum-winner's rates is
+    then metered below its real price in that class. That breaks the one
+    guarantee this module and ADR 0015 both state outright, and it breaks it
+    silently, which is the part that matters for an unattended paid run.
+
+    Taking the maximum per class instead makes the guarantee true by
+    construction for any table anyone writes later, rather than true by
+    coincidence for the two rows that happen to be registered today.
+    """
+    rows = tuple(table.values())
+    if not rows:
+        raise ValueError("no registered price rows; cannot bound an unknown model")
+    return ModelPricing(
+        input_usd_per_mtok=max(row.input_usd_per_mtok for row in rows),
+        output_usd_per_mtok=max(row.output_usd_per_mtok for row in rows),
+        cache_write_usd_per_mtok=max(row.cache_write_usd_per_mtok for row in rows),
+        cache_read_usd_per_mtok=max(row.cache_read_usd_per_mtok for row in rows),
+    )
+
+
 def pricing_for(model: str) -> ModelPricing:
-    """Price row for ``model``, falling back to the most expensive row.
+    """Price row for ``model``, falling back to the per-class ceiling.
 
     An unpinned model id is an operator error (a changed ``AGENT_MODEL``
     without a matching price row), but raising here would abort a live
-    incident run over an accounting gap. Charging the most expensive
-    known rate keeps the USD ceiling conservative — the meter can
-    over-report, never silently under-report — and warns once per id.
+    incident run over an accounting gap. Charging the per-class maximum
+    keeps the USD ceiling conservative — the meter can over-report, never
+    silently under-report — and warns once per id.
+
+    Derived from ``MODEL_PRICING`` at call time rather than pinned at import:
+    the bound is then a fact about the table as it actually is, and a test
+    can prove the property against a table this module does not ship. The
+    cost is eight Decimal comparisons on a path that is meant to be rare.
     """
     row = MODEL_PRICING.get(model)
     if row is not None:
@@ -92,12 +109,11 @@ def pricing_for(model: str) -> ModelPricing:
     if model not in _warned_models:
         _warned_models.add(model)
         _LOG.warning(
-            "no pinned price row for model %r; billing at the most expensive "
-            "row (%r). Add it to MODEL_PRICING (see ADR 0015).",
+            "no pinned price row for model %r; billing at the per-class maximum "
+            "of every registered row. Add it to MODEL_PRICING (see ADR 0015).",
             model,
-            _FALLBACK_MODEL,
         )
-    return MODEL_PRICING[_FALLBACK_MODEL]
+    return class_ceiling(MODEL_PRICING)
 
 
 def cost_of[T: BaseModel](model: str, result: LLMResult[T]) -> Decimal:

@@ -127,7 +127,7 @@ Exhausting any dimension forces escalation with `"budget exhausted"` on evidence
 
 All four columns are live writers, not aspirations. Until [ADR 0015](ADR/0015-wall-clock-and-usd-budget-meters.md), `wall_seconds_used` and `usd_used` had no writer anywhere in `src/`: both ceilings were unreachable and every briefing reported `$0`. The token meter summed only the un-cached input, so it under-counted exactly when prompt caching worked well. Anchoring wall time on `created_at` rather than a process-local start also makes the meter survive crash-resume — a run rebuilt from a checkpoint does not get a fresh wall budget.
 
-Prices are configuration ([`src/incident_commander/llm/pricing.py`](../src/incident_commander/llm/pricing.py)), never fetched at runtime: offline evals must not need network, and a run's reported cost has to be reproducible from the checkout. An unpinned model id bills at the most expensive known row and warns — it never raises mid-incident.
+Prices are configuration ([`src/incident_commander/llm/pricing.py`](../src/incident_commander/llm/pricing.py)), never fetched at runtime: offline evals must not need network, and a run's reported cost has to be reproducible from the checkout. An unpinned model id bills at the per-class maximum of every known row — a synthetic ceiling rather than one registered row, so no token class can be metered below its real price — and warns; it never raises mid-incident.
 
 One deliberate exclusion: the briefing writer and briefing judge run *after* the terminal state, so no ceiling can gate them and they stay outside the per-incident ledger. Their cost is visible in traces.
 

@@ -104,12 +104,17 @@ def _terminal_marker(run_state: RunState) -> EvidenceEntry | None:
     terminal state, so the marker is the *last* evidence entry. A new writer
     that follows the same convention is picked up for free.
 
-    RESOLVED is excluded rather than named as an exception: its last entry is
-    ``_verify_judge``, a verdict — a real reason string, but not a reason the
-    agent escalated, and labelling it one would put "verified: lag is zero"
-    under a heading that says the handoff needs a human.
+    Two states are excluded rather than named as exceptions. RESOLVED: its
+    last entry is ``_verify_judge``, a verdict — a real reason string, but not
+    a reason the agent escalated, and labelling it one would put "verified:
+    lag is zero" under a heading that says the handoff needs a human.
+    Non-terminal: mid-run, the last marker is a handoff note like
+    ``_planner_remediate``, which reads as a reason and is not one. The run
+    has not ended, so nothing ended it.
     """
-    if run_state.state is IncidentState.RESOLVED or not run_state.evidence:
+    if not run_state.state.is_terminal or run_state.state is IncidentState.RESOLVED:
+        return None
+    if not run_state.evidence:
         return None
     last = run_state.evidence[-1]
     return last if last.tool_name.startswith("_") else None

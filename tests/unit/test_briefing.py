@@ -223,6 +223,19 @@ class TestRenderBriefing:
         )
         assert render_briefing(run).attempted_action is None
 
+    def test_mid_run_render_carries_no_escalation_reason(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # `_planner_remediate` reads like a reason and is not one — the run
+        # is still going.
+        run = run_state.model_copy(
+            update={
+                "state": IncidentState.PLANNING,
+                "evidence": (_evidence(now, "_planner_remediate", "planner handoff to PLANNING"),),
+            }
+        )
+        assert render_briefing(run).escalation_reason == ""
+
     def test_resolved_run_carries_no_escalation_reason(
         self, run_state: RunState, now: datetime
     ) -> None:

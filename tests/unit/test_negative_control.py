@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -40,6 +40,28 @@ _SCENARIOS_DIR = Path(__file__).resolve().parents[2] / "evals" / "scenarios"
 # A remediation scenario that passes offline and exercises the full loop:
 # investigate -> plan -> remediate -> verify -> resolved.
 _SUBJECT = "remediate_dlq_backlog_success"
+
+# BUDGET is exempt, and is exempt *by name*: since ADR 0019 the cap is the
+# runtime ceiling the loop enforces as it goes, so an offline agent cannot
+# exceed it — the loop stops it before the grader is ever handed an
+# over-budget run. There is no canned sequence that reds BUDGET here, and
+# its failure mode is exercised directly against the grader in
+# test_grader.py instead.
+#
+# Stating the exemption rather than encoding it by omission is the point of
+# WO-R2-79. The coverage floor below used to parametrize over a hand-copied
+# list of four members, which reads as "these four are watched" but means
+# "everything else is unwatched, silently" — a sixth dimension would have
+# joined the grader with no case and no failure, the exact hole the floor
+# exists to close.
+_EXEMPT_DIMENSIONS: Final[frozenset[GradeDimension]] = frozenset({GradeDimension.BUDGET})
+
+# Derived, never hand-maintained: every dimension the grader scores, minus
+# the recorded exemptions. Adding a member to GradeDimension adds a required
+# case here on the next collection.
+_WATCHED_DIMENSIONS: Final[tuple[GradeDimension, ...]] = tuple(
+    sorted(set(GradeDimension) - _EXEMPT_DIMENSIONS, key=lambda dimension: dimension.name)
+)
 
 
 def _subject() -> Scenario:
@@ -180,23 +202,68 @@ class TestTheControlWouldNoticeItsOwnDecay:
             ), f"{mutate.__name__} did not change the scenario — the case is vacuous"
 
 
-@pytest.mark.parametrize(
-    "dimension",
-    [
-        GradeDimension.OUTCOME,
-        GradeDimension.EVIDENCE,
-        GradeDimension.ACTION,
-        GradeDimension.SAFETY,
-    ],
-)
+def test_the_watched_set_is_derived_from_the_enum() -> None:
+    """The floor must keep walking the enum, not a copy of it.
+
+    Two ways the coverage floor below can quietly stop being a floor, and
+    this is the test that refuses both:
+
+    * the parametrize argument is turned back into a hand-written list of
+      members. Then it enumerates itself again and a new dimension joins the
+      grader unwatched — the WO-R2-79 failure, and the state this file was
+      in until now;
+    * ``_EXEMPT_DIMENSIONS`` grows an entry that is not a real member (a bare
+      string, a member that has since been renamed away), which would exempt
+      nothing while reading as though it exempted something.
+
+    The partition is the invariant: watched and exempt must together be
+    exactly ``GradeDimension``, with nothing in both and nothing in neither.
+    Note the honest limit — deleting ``BUDGET`` outright fails at import,
+    not here, because the exemption names the member directly.
+    """
+    watched = set(_WATCHED_DIMENSIONS)
+    unknown = _EXEMPT_DIMENSIONS - set(GradeDimension)
+    assert unknown == frozenset(), (
+        f"_EXEMPT_DIMENSIONS in {Path(__file__).name} names {sorted(map(str, unknown))}, "
+        f"which is not a member of GradeDimension "
+        f"(evals/graders/deterministic.py). An exemption that matches no member "
+        f"exempts nothing and hides that fact. Drop the entry or fix its spelling."
+    )
+    assert watched | _EXEMPT_DIMENSIONS == set(GradeDimension), (
+        f"the watched set plus the exempt set is not GradeDimension. Missing: "
+        f"{sorted(str(d) for d in set(GradeDimension) - watched - _EXEMPT_DIMENSIONS)}. "
+        f"_WATCHED_DIMENSIONS must stay DERIVED from the enum — if it has been "
+        f"replaced by a hand-written list in {Path(__file__).name}, restore the "
+        f"`set(GradeDimension) - _EXEMPT_DIMENSIONS` derivation. A hand-written "
+        f"list is how a dimension joins the grader with no negative control."
+    )
+    assert not watched & _EXEMPT_DIMENSIONS, "a dimension is both watched and exempt"
+    # Anti-vacuity canary: every assertion above is satisfied by an empty
+    # watched set, and an empty parametrize list collects zero cases and
+    # reports green. The grader scores five dimensions and exempts one.
+    assert len(watched) >= 4, (
+        f"only {len(watched)} dimension(s) are watched, so the coverage floor "
+        f"below collects almost nothing. Either GradeDimension shrank or the "
+        f"derivation broke; a floor that parametrizes over an empty set passes "
+        f"for free."
+    )
+
+
+@pytest.mark.parametrize("dimension", _WATCHED_DIMENSIONS)
 def test_every_gradeable_dimension_has_a_case(dimension: GradeDimension) -> None:
     """Coverage floor, so a dimension cannot join the grader unwatched.
 
-    BUDGET is absent on purpose: since ADR 0019 the cap is the runtime
-    ceiling, so an offline agent cannot exceed it — the loop stops it first.
-    Its failure mode is exercised directly in test_grader.py instead.
+    Parametrized over the enum minus ``_EXEMPT_DIMENSIONS`` (see the reason
+    recorded there for BUDGET), so adding a dimension to the grader adds a
+    failing case here until someone writes the sabotage that reds it.
     """
     source = Path(__file__).read_text()
     assert f"fails_on_{dimension.name}" in source, (
-        f"no negative-control case asserts a broken agent reds {dimension.name}"
+        f"no negative-control case asserts a broken agent reds {dimension.name}. "
+        f"GradeDimension.{dimension.name} joined the grader without one. Add a "
+        f"`test_an_agent_that_..._fails_on_{dimension.name}` case to "
+        f"{Path(__file__).name} that breaks the canned decisions and asserts "
+        f"GradeDimension.{dimension.name} is in the failing set — or, if the "
+        f"dimension genuinely cannot be reddened by an offline agent, add it to "
+        f"_EXEMPT_DIMENSIONS with the reason, the way BUDGET is recorded."
     )

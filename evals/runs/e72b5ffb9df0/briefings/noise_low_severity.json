@@ -1,0 +1,16 @@
+{
+  "incident_id": "377a0599-d247-45ff-9091-5ef52664347b",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.canary severity=low fingerprint=canary_blip group=billing-consumer",
+  "escalation_reason": "severity=low classified as escalated",
+  "attempted_action": null,
+  "investigation_trail": [],
+  "findings": "No probes were run before escalation — the incident was immediately classified for human review solely because its severity is low, which fell outside the autonomous agent's handling threshold. The raw alert (source: platform.canary, group: billing-consumer, fingerprint: canary_blip) has not been investigated.",
+  "recommendation": "Review the raw alert directly in the platform.canary source for the billing-consumer group to determine whether the canary_blip signal represents a genuine anomaly or a transient false positive before deciding on further action.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.0329,
+    "usd": "0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "incident_id": "f74744de-0600-45f4-b760-5380c6d65cd7",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.healthcheck severity=info fingerprint=health_ping group=orders-consumer",
+  "escalation_reason": "severity=info classified as escalated",
+  "attempted_action": null,
+  "investigation_trail": [],
+  "findings": "No investigation probes were run before escalation; the run ended immediately because the alert arrived with severity=info, which was classified as requiring direct human review rather than automated remediation.",
+  "recommendation": "Review the raw alert from platform.healthcheck for the orders-consumer group (fingerprint: health_ping) directly to determine whether the health check failure is transient or indicative of a deeper issue.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.028709,
+    "usd": "0"
+  }
+}

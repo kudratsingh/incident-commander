@@ -1,0 +1,16 @@
+{
+  "incident_id": "11471e86-f728-459f-9809-37ce7372eb99",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.unknown severity=unknown fingerprint=no_severity",
+  "escalation_reason": "severity=unknown classified as escalated",
+  "attempted_action": null,
+  "investigation_trail": [],
+  "findings": "No probes were run before escalation — the alert arrived with severity=unknown and source=platform.unknown, causing the system to immediately classify it as requiring human review without any automated investigation.",
+  "recommendation": "Start by examining the raw alert payload for fingerprint no_severity to determine the actual source, severity, and affected components, as no automated triage was performed.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.032523,
+    "usd": "0"
+  }
+}

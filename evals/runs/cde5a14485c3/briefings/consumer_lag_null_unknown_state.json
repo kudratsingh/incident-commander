@@ -1,0 +1,29 @@
+{
+  "incident_id": "cc35915f-7319-4b7d-8f77-d6f827c51885",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high group=ledger-consumer",
+  "escalation_reason": "planner stop: The ledger-consumer group is unrecognized by the platform (lag_known: false, source: unrecognized on two probes), meaning automated consumer_saturation remediation cannot be safely applied — we cannot confirm lag exists or its magnitude. The most notable evidence is v0.4.2 annotated 'correlated with billing failures' followed by v0.4.3, suggesting a deploy regression may have broken the ledger-consumer registration or processing. This requires human sign-off to investigate the unrecognized consumer group and decide whether to roll back. Budget is also nearly exhausted (1 tool call remaining), making further probing impractical.",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"ledger-consumer\",\"lag\":null,\"lag_known\":false,\"source\":\"unrecognized\",\"cache_key\":\"kafka:consumer_lag:ledger-consumer\"}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"ledger-consumer\",\"lag\":null,\"lag_known\":false,\"source\":\"unrecognized\",\"cache_key\":\"kafka:consumer_lag:ledger-consumer\"}"
+    },
+    {
+      "tool": "get_deploy_history",
+      "summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-31T01:47:04.930453Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-31T00:47:04.930453Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-08-30T21:47:04.930453Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-08-30T09:47:04.930453Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-08-30T05:47:04.930453Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-08-29T03:47:04.930453Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}"
+    }
+  ],
+  "findings": "The platform returned `lag_known: false` with source \"unrecognized\" on both consumer-lag probes, meaning the ledger-consumer group cannot be confirmed as registered or healthy; deploy history shows v0.4.2 was flagged \"correlated with billing failures\" and was followed by a rapid v0.4.3 push to prod at 01:47 UTC, suggesting the consumer group registration or processing may have broken across those two releases.",
+  "recommendation": "Confirm whether the ledger-consumer group is visible and registered in the Kafka cluster (e.g., via `kafka-consumer-groups.sh --list`), then check whether rolling back from v0.4.3 to the last known-good version (v0.4.1, pre-billing-failure) is warranted based on what you find.",
+  "budget_used": {
+    "tool_calls": 3,
+    "tokens": 28713,
+    "wall_seconds": 0.040341,
+    "usd": "0.079707"
+  }
+}

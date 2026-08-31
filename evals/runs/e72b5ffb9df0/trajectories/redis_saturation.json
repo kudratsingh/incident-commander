@@ -1,0 +1,264 @@
+{
+  "scenario": "redis_saturation",
+  "incident_id": "ec0c4764-e9f1-4d04-b71b-0853ba7f135e",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "ec0c4764-e9f1-4d04-b71b-0853ba7f135e",
+      "state": "triage",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:53:32.611223Z",
+      "updated_at": "2026-08-31T02:53:32.611223Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ec0c4764-e9f1-4d04-b71b-0853ba7f135e",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.033549,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "d91c96c3-8b5e-429e-9748-6e3a9e39de3d",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:53:32.644772Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:53:32.611223Z",
+      "updated_at": "2026-08-31T02:53:32.644772Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ec0c4764-e9f1-4d04-b71b-0853ba7f135e",
+      "state": "planning",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 20983,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.033593,
+        "max_usd": "1.00",
+        "usd_used": "0.055992"
+      },
+      "evidence": [
+        {
+          "evidence_id": "d91c96c3-8b5e-429e-9748-6e3a9e39de3d",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:53:32.644772Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a599184a-7354-4ca2-ba00-182eb0a88c94",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.539,\"connected_clients\":11,\"used_memory_bytes\":1711792,\"used_memory_human\":\"1.63M\",\"keyspace_hits\":119,\"keyspace_misses\":43306,\"error\":null}",
+          "timestamp": "2026-08-31T02:53:32.644816Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2e132bb2-989f-4dfe-98a1-d7ae76f2648e",
+          "tool_name": "get_cache_key_info",
+          "arguments": {
+            "key": "cache:hot"
+          },
+          "result_summary": "{\"key\":\"cache:hot\",\"exists\":false,\"type\":null,\"ttl_seconds\":null,\"size\":null}",
+          "timestamp": "2026-08-31T02:53:32.644816Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "27840cd6-1962-4c1b-8cce-6a28016e3c74",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The 'cache:hot' key does not exist in Redis and keyspace_misses (43306) vastly exceed keyspace_hits (119), confirming a stale/missing hot cache key is causing the critical cache miss spike. This is a stale_cache category with confidence 0.85, which has a Tier-1 fix (invalidate_cache_key / cache repopulation)."
+          },
+          "result_summary": "planner handoff to PLANNING: The 'cache:hot' key does not exist in Redis and keyspace_misses (43306) vastly exceed keyspace_hits (119), confirming a stale/missing hot cache key is causing the critical cache miss spike. This is a stale_cache category with confidence 0.85, which has a Tier-1 fix (invalidate_cache_key / cache repopulation).",
+          "timestamp": "2026-08-31T02:53:32.644816Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "hot-cache-key-missing-causing-miss-spike",
+          "confidence": 0.85,
+          "reasoning": "Redis is healthy (low latency, connected) but keyspace_misses (43306) vastly outnumber keyspace_hits (119), and the key 'cache:hot' does not exist — strongly indicating the primary hot cache key has expired or been evicted, causing a miss spike."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-invalidated-cache-keys",
+          "confidence": 0.25,
+          "reasoning": "A recent deploy could have changed cache key naming or TTL config, explaining why cache:hot is absent; no deploy evidence has been gathered yet."
+        },
+        {
+          "category": "unknown",
+          "name": "unknown-cache-namespace-eviction",
+          "confidence": 0.1,
+          "reasoning": "Other cache keys outside the checked namespace could be missing, but no further evidence supports this."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:53:32.611223Z",
+      "updated_at": "2026-08-31T02:53:32.644816Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ec0c4764-e9f1-4d04-b71b-0853ba7f135e",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 30293,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 24.873527,
+        "max_usd": "1.00",
+        "usd_used": "0.080449"
+      },
+      "evidence": [
+        {
+          "evidence_id": "d91c96c3-8b5e-429e-9748-6e3a9e39de3d",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:53:32.644772Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a599184a-7354-4ca2-ba00-182eb0a88c94",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.539,\"connected_clients\":11,\"used_memory_bytes\":1711792,\"used_memory_human\":\"1.63M\",\"keyspace_hits\":119,\"keyspace_misses\":43306,\"error\":null}",
+          "timestamp": "2026-08-31T02:53:32.644816Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2e132bb2-989f-4dfe-98a1-d7ae76f2648e",
+          "tool_name": "get_cache_key_info",
+          "arguments": {
+            "key": "cache:hot"
+          },
+          "result_summary": "{\"key\":\"cache:hot\",\"exists\":false,\"type\":null,\"ttl_seconds\":null,\"size\":null}",
+          "timestamp": "2026-08-31T02:53:32.644816Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "27840cd6-1962-4c1b-8cce-6a28016e3c74",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The 'cache:hot' key does not exist in Redis and keyspace_misses (43306) vastly exceed keyspace_hits (119), confirming a stale/missing hot cache key is causing the critical cache miss spike. This is a stale_cache category with confidence 0.85, which has a Tier-1 fix (invalidate_cache_key / cache repopulation)."
+          },
+          "result_summary": "planner handoff to PLANNING: The 'cache:hot' key does not exist in Redis and keyspace_misses (43306) vastly exceed keyspace_hits (119), confirming a stale/missing hot cache key is causing the critical cache miss spike. This is a stale_cache category with confidence 0.85, which has a Tier-1 fix (invalidate_cache_key / cache repopulation).",
+          "timestamp": "2026-08-31T02:53:32.644816Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c6f6815e-3571-4342-838d-f12f3c117f6a",
+          "tool_name": "_remediation_escalate",
+          "arguments": {
+            "from_state": "planning",
+            "reason": "plan rejected before execution: resource argument(s) not evidence-sourced: invalidate_cache_key.key='cache:hot'. Resource names must be copied verbatim from the alert or tool results."
+          },
+          "result_summary": "plan rejected before execution: resource argument(s) not evidence-sourced: invalidate_cache_key.key='cache:hot'. Resource names must be copied verbatim from the alert or tool results.",
+          "timestamp": "2026-08-31T02:53:57.484750Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "hot-cache-key-missing-causing-miss-spike",
+          "confidence": 0.85,
+          "reasoning": "Redis is healthy (low latency, connected) but keyspace_misses (43306) vastly outnumber keyspace_hits (119), and the key 'cache:hot' does not exist — strongly indicating the primary hot cache key has expired or been evicted, causing a miss spike."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-invalidated-cache-keys",
+          "confidence": 0.25,
+          "reasoning": "A recent deploy could have changed cache key naming or TTL config, explaining why cache:hot is absent; no deploy evidence has been gathered yet."
+        },
+        {
+          "category": "unknown",
+          "name": "unknown-cache-namespace-eviction",
+          "confidence": 0.1,
+          "reasoning": "Other cache keys outside the checked namespace could be missing, but no further evidence supports this."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:53:32.611223Z",
+      "updated_at": "2026-08-31T02:53:57.484750Z"
+    }
+  ],
+  "invocation_id": "e72b5ffb9df0"
+}

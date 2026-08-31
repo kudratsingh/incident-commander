@@ -1,0 +1,142 @@
+{
+  "scenario": "consumer_lag_healthy_zero",
+  "incident_id": "45b040a2-9994-424b-9a6f-ae51aa408193",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "45b040a2-9994-424b-9a6f-ae51aa408193",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "healthy-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T04:54:59.001795Z",
+      "updated_at": "2026-08-31T04:54:59.001795Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "45b040a2-9994-424b-9a6f-ae51aa408193",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "healthy-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000025,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "19e2dcd8-954a-4eb0-a573-68fdbef8b513",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T04:54:59.001820Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T04:54:59.001795Z",
+      "updated_at": "2026-08-31T04:54:59.001820Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "45b040a2-9994-424b-9a6f-ae51aa408193",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "healthy-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.00004,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "19e2dcd8-954a-4eb0-a573-68fdbef8b513",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T04:54:59.001820Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b89809ad-cbf2-4705-b655-61fe12ecbb87",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "healthy-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}",
+          "timestamp": "2026-08-31T04:54:59.001835Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e7299dbc-58f9-4a4d-b522-5115f2c59a55",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "Lag reading contradicts alert; human should reconcile with the alerting rule.\n"
+          },
+          "result_summary": "planner stop: Lag reading contradicts alert; human should reconcile with the alerting rule.\n",
+          "timestamp": "2026-08-31T04:54:59.001835Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "unknown",
+          "name": "alerting_false_positive",
+          "confidence": 0.75,
+          "reasoning": "Lag reading is 0; the alerting rule may be misconfigured or firing on a spike that has already recovered.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T04:54:59.001795Z",
+      "updated_at": "2026-08-31T04:54:59.001835Z"
+    }
+  ],
+  "invocation_id": "31a1335a807e"
+}

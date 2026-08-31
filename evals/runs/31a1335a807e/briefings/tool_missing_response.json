@@ -1,0 +1,16 @@
+{
+  "incident_id": "3bcddcfd-1dfe-451e-88bc-944017cc8672",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high group=payments-consumer",
+  "escalation_reason": "tool error (get_consumer_lag): MCP error -32601: no canned response for tool: get_consumer_lag",
+  "attempted_action": null,
+  "investigation_trail": [],
+  "findings": "Attempted probe against get_consumer_lag failed at the transport layer; the platform has no response configured for this tool in this scenario.\n",
+  "recommendation": "Escalate to the platform-tooling team; the tool surface is missing a response path for payments-consumer.\n",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.000028,
+    "usd": "0.000000"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "incident_id": "a58a5210-409c-4425-8a26-a94b05ede144",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.api severity=critical fingerprint=elevated_error_rate",
+  "escalation_reason": "planner stop: correlated incident cluster identified; human decision required",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "list_incidents",
+      "summary": "{\"total\":3,\"incidents\":[{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-07-28T10:00:00Z\",\"resolved_at\":null,\"is_active\":true},{\"id\":\"c6c4e180-f625-53c2-85c2-2d505fec61e5\",\"severity\":\"warning\",\"source\":\"dlq\",\"title\":\"DLQ backlog growing\",\"description\":\"3 send_email jobs dead-lettered in last hour.\",\"fired_at\":\"2026-07-28T09:53:00Z\",\"resolved_at\":null,\"is_active\":true},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-07-28T09:43:00Z\",\"resolved_at\":null,\"is_active\":true}]}"
+    }
+  ],
+  "findings": "Three active incidents are firing concurrently: an api-gateway error-rate spike, a DLQ backlog warning, and billing-consumer lag. Likely a shared upstream cause.\n",
+  "recommendation": "Investigate the shared dependency graph (auth service, database, message broker) rather than treating each incident in isolation.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.000041,
+    "usd": "0.000000"
+  }
+}

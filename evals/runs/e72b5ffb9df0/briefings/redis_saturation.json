@@ -1,0 +1,25 @@
+{
+  "incident_id": "ec0c4764-e9f1-4d04-b71b-0853ba7f135e",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.cache severity=critical fingerprint=cache_miss_spike",
+  "escalation_reason": "plan rejected before execution: resource argument(s) not evidence-sourced: invalidate_cache_key.key='cache:hot'. Resource names must be copied verbatim from the alert or tool results.",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_redis_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":0.539,\"connected_clients\":11,\"used_memory_bytes\":1711792,\"used_memory_human\":\"1.63M\",\"keyspace_hits\":119,\"keyspace_misses\":43306,\"error\":null}"
+    },
+    {
+      "tool": "get_cache_key_info",
+      "summary": "{\"key\":\"cache:hot\",\"exists\":false,\"type\":null,\"ttl_seconds\":null,\"size\":null}"
+    }
+  ],
+  "findings": "Redis is healthy (ping 0.54 ms, 11 connected clients), but the keyspace shows a severe miss-to-hit imbalance (43,306 misses vs. 119 hits), and a lookup for the suspected hot key \"cache:hot\" confirmed it does not currently exist in the cache. An attempted invalidation action was rejected before execution because the key argument could not be sourced verbatim from the alert or tool results.",
+  "recommendation": "Verify which key or key pattern is responsible for the miss spike — querying Redis keyspace stats or slowlog may reveal the actual missing key name — then confirm whether the application is failing to populate that key or if it was evicted unexpectedly.",
+  "budget_used": {
+    "tool_calls": 2,
+    "tokens": 30293,
+    "wall_seconds": 24.873527,
+    "usd": "0.080449"
+  }
+}

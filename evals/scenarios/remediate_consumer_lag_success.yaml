@@ -141,8 +141,8 @@ expected_precondition:
 - tool: get_consumer_lag
   arguments:
     consumer_group: worker-dispatcher
-  attempts: 6
+  attempts: 10
   delay_seconds: 15.0
   expect:
   - path: lag
-    at_least: 1
+    at_least: 20

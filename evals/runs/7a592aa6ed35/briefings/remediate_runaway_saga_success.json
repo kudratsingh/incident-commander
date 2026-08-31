@@ -1,0 +1,29 @@
+{
+  "incident_id": "2c123b79-fa1d-4b91-b5e3-f455cc9ddb49",
+  "final_state": "resolved",
+  "alert_summary": "source=platform.dag severity=critical fingerprint=saga_stalled",
+  "escalation_reason": "",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_dag_state",
+      "summary": "{\"seed_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"nodes\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"retry_count\":3,\"created_at\":\"2026-08-31T01:21:46.584955Z\"},{\"id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.584955Z\"},{\"id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.584955Z\"}],\"edges\":[{\"from_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"to_id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\"},{\"from_id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"to_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}"
+    },
+    {
+      "tool": "replay_dlq_by_ids",
+      "summary": "{\"requested\":1,\"replayed\":1,\"scheduled\":0,\"failed\":0,\"results\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"ok\":true,\"error\":null,\"scheduled\":false,\"execute_at\":null}]}"
+    },
+    {
+      "tool": "get_dag_state",
+      "summary": "{\"seed_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"nodes\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.584955Z\"},{\"id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.584955Z\"},{\"id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.584955Z\"}],\"edges\":[{\"from_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"to_id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\"},{\"from_id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"to_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}"
+    }
+  ],
+  "findings": "A dependency chain had stalled: its root job was dead-lettered after exhausting three retries, holding a waiting descendant behind it, while the upstream parent had completed normally. Because dead_letter is terminal and the resolver only promotes a child once every parent has completed, the chain could not drain on its own. Replaying the root returned replayed=1 with scheduled=0, and a follow-up read showed the chain fully drained.\n",
+  "recommendation": "Read the root's error_message to find why it exhausted its retries — the replay cleared the symptom, not the cause, and a chain that dead-letters again will stall the same way. If the failure is an external dependency, consider whether the job's retry budget is sized for it.\n",
+  "budget_used": {
+    "tool_calls": 3,
+    "tokens": 0,
+    "wall_seconds": 0.004604,
+    "usd": "0.000000"
+  }
+}

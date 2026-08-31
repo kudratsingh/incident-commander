@@ -1,0 +1,16 @@
+{
+  "incident_id": "13784869-5560-4aba-9ce7-75dd6f44c14d",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.healthcheck severity=info fingerprint=health_ping group=orders-consumer",
+  "escalation_reason": "severity=info classified as escalated",
+  "attempted_action": null,
+  "investigation_trail": [],
+  "findings": "No investigation probes were run before escalation; the incident was immediately escalated because the alert carried severity=info, which the autonomous agent classified as requiring human review without automated action. The alert originates from platform.healthcheck against the orders-consumer group (fingerprint: health_ping).",
+  "recommendation": "Review the raw health_ping alert from platform.healthcheck for the orders-consumer group to determine whether the health check is genuinely degraded or misconfigured, and verify that the orders-consumer service is healthy and processing as expected.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.037395,
+    "usd": "0"
+  }
+}

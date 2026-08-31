@@ -512,6 +512,12 @@ operate by:
   `INVESTIGATE_REPROBE_ATTEMPTS=1`.
 - Supervisor re-spawn after `restart_consumer_group` clears the kill
   flag: **~2.4s**. Verify polling absorbs it easily.
+- Reprobe delay must straddle the cache window: `INVESTIGATE_REPROBE_DELAY_SECONDS=75`
+  (a 20s reprobe lands inside the same ~60s cached reading and shows a
+  static value — live run 2026-08-31 collapsed a correct hypothesis on it).
+- Give traffic a head start: `--until-lag 30` BEFORE launching the runner,
+  then keep it pumping. The precondition now demands lag>=20 so a run
+  cannot start against a thin, unconvincing fault.
 - Traffic: **required, and it now exists.** "The standard 1-job/2s loop"
   described here since 2026-08-04 was never a thing you could run — no
   such script existed in either repo, so lag stayed at 0 and the scenario

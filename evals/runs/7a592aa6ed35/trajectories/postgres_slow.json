@@ -1,0 +1,143 @@
+{
+  "scenario": "postgres_slow",
+  "incident_id": "d7f96662-6c77-45d0-b416-fb015411a718",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "d7f96662-6c77-45d0-b416-fb015411a718",
+      "state": "triage",
+      "alert": {
+        "source": "platform.db",
+        "severity": "critical",
+        "fingerprint": "db_latency_high",
+        "group": null,
+        "service": "postgres"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:00.979857Z",
+      "updated_at": "2026-08-31T02:22:00.979857Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "d7f96662-6c77-45d0-b416-fb015411a718",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.db",
+        "severity": "critical",
+        "fingerprint": "db_latency_high",
+        "group": null,
+        "service": "postgres"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.000018,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "ef7277e7-942d-4422-babb-65a8ec8b053f",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "9500a4098745bb22ab4fd3543d6145bb"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:22:00.979875Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:00.979857Z",
+      "updated_at": "2026-08-31T02:22:00.979875Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "d7f96662-6c77-45d0-b416-fb015411a718",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.db",
+        "severity": "critical",
+        "fingerprint": "db_latency_high",
+        "group": null,
+        "service": "postgres"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.000029,
+        "max_usd": "1.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "ef7277e7-942d-4422-babb-65a8ec8b053f",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "9500a4098745bb22ab4fd3543d6145bb"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:22:00.979875Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "16fe89c6-8552-426f-b461-f0dccd65978a",
+          "tool_name": "get_postgres_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":420.5,\"active_connections\":95,\"dialect\":\"postgresql\",\"error\":null}",
+          "timestamp": "2026-08-31T02:22:00.979886Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0795d854-6999-4c00-aad9-ed5515a240f1",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "DB degraded; escalate to human for scaling decision"
+          },
+          "result_summary": "planner stop: DB degraded; escalate to human for scaling decision",
+          "timestamp": "2026-08-31T02:22:00.979886Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "transient_dependency",
+          "name": "db_saturation",
+          "confidence": 0.8,
+          "reasoning": "Ping is 420ms (slow) with 95 active connections — approaching pool saturation. DB is degraded but not down.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:00.979857Z",
+      "updated_at": "2026-08-31T02:22:00.979886Z"
+    }
+  ],
+  "invocation_id": "7a592aa6ed35"
+}

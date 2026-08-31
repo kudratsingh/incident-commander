@@ -1,0 +1,33 @@
+{
+  "incident_id": "745d748d-b5ca-48aa-af11-7f5faba355ce",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high group=healthy-consumer",
+  "escalation_reason": "insufficient tool-call budget for action+verify (remaining=1); escalating without executing",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}"
+    },
+    {
+      "tool": "list_active_alerts",
+      "summary": "{\"total\":2,\"alerts\":[{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-08-31T03:39:04.936974Z\",\"extra_data\":null},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-08-31T03:22:04.936974Z\",\"extra_data\":null}]}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:billing-consumer\"}"
+    }
+  ],
+  "findings": "The triggering alert named \"healthy-consumer\" but probes confirmed its lag is 0; the real issue is \"billing-consumer,\" which has a sustained lag of 15,000 messages for 20+ minutes, and a concurrent critical API 5xx rate of 3.2% over the last 10 minutes is also active. No remediation actions were attempted — the run exhausted its budget during investigation before any action could fire.",
+  "recommendation": "Start by verifying the health and throughput of the billing-consumer instances directly (consumer group status, pod/process restarts, and partition assignment), then cross-check whether the elevated API 5xx rate shares a root cause — a degraded downstream service could be blocking consumer processing.",
+  "budget_used": {
+    "tool_calls": 4,
+    "tokens": 35543,
+    "wall_seconds": 63.662291,
+    "usd": "0.094518"
+  }
+}

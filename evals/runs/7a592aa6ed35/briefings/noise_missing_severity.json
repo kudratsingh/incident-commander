@@ -1,0 +1,16 @@
+{
+  "incident_id": "7e437019-0159-4fac-bbfc-4dcd41dcacb5",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.unknown severity=unknown fingerprint=no_severity",
+  "escalation_reason": "severity=unknown classified as escalated",
+  "attempted_action": null,
+  "investigation_trail": [],
+  "findings": "Alert arrived without a severity field. Treated as unknown/noise and not investigated.\n",
+  "recommendation": "Ask the alert source to include a severity field; malformed alerts cannot be triaged safely.\n",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.000013,
+    "usd": "0"
+  }
+}

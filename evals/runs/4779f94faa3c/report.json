@@ -1,0 +1,63 @@
+{
+  "generated_at": "2026-08-31T04:53:40.796643Z",
+  "total": 1,
+  "passed": 0,
+  "failed": 1,
+  "judged_count": 1,
+  "judge_useful_count": 1,
+  "judge_mean_overall": 0.875,
+  "invocation_id": "4779f94faa3c",
+  "degraded_count": 0,
+  "only_patterns": [
+    "remediate_consumer_lag_success"
+  ],
+  "outcomes": [
+    {
+      "scenario": "remediate_consumer_lag_success",
+      "final_state": "escalated",
+      "tool_calls_used": 5,
+      "report": {
+        "scenario": "remediate_consumer_lag_success",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": false,
+            "detail": "expected resolved, got escalated"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "no ['restart_consumer_group'] evidence entry carried field 'kill_key_cleared' (expected equals True)"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 5 tool calls, cap 13"
+          },
+          {
+            "dimension": "action",
+            "passed": false,
+            "detail": "no tool from equivalence set ['restart_consumer_group'] was called; tools called: ['get_consumer_lag', 'get_deploy_history', 'list_dlq_messages']"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.8,
+        "reasoning": "All findings are directly sourced from the investigation trail: the lag progression (4 to 24), the four distinct DLQ failure categories with their specific error messages, the v0.4.2 deployment note, and the SMTP connection refusal are all present verbatim. The recommendation names specific verification targets (SMTP relay reachability, Stripe status page, v0.4.3 VPC egress) and can be executed within 15 minutes, though it omits the exact command or tool name for confirming SMTP connectivity and doesn't explicitly name which team owns the Stripe or SMTP checks."
+      },
+      "failure_class": "unclassified",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    }
+  ]
+}

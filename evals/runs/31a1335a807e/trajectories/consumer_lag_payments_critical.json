@@ -1,0 +1,142 @@
+{
+  "scenario": "consumer_lag_payments_critical",
+  "incident_id": "c9e8dc89-c2c8-4509-ad13-04cdff3238e2",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "c9e8dc89-c2c8-4509-ad13-04cdff3238e2",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "payments-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 12,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T04:54:59.032742Z",
+      "updated_at": "2026-08-31T04:54:59.032742Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "c9e8dc89-c2c8-4509-ad13-04cdff3238e2",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "payments-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 12,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000114,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "6806df01-ad0f-4422-808c-31d194ea20ba",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T04:54:59.032856Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T04:54:59.032742Z",
+      "updated_at": "2026-08-31T04:54:59.032856Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "c9e8dc89-c2c8-4509-ad13-04cdff3238e2",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "payments-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 12,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000162,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "6806df01-ad0f-4422-808c-31d194ea20ba",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T04:54:59.032856Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "3a2e320d-67e2-4fe3-adea-2f8381d1e134",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "payments-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"payments-consumer\",\"lag\":30000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:payments-consumer\"}",
+          "timestamp": "2026-08-31T04:54:59.032904Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "817d0642-db9b-44b8-b67e-44f2e30ef6f6",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "sufficient evidence for handoff"
+          },
+          "result_summary": "planner stop: sufficient evidence for handoff",
+          "timestamp": "2026-08-31T04:54:59.032904Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.9,
+          "reasoning": "Lag of 25000 confirms the payments consumer is severely backlogged.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T04:54:59.032742Z",
+      "updated_at": "2026-08-31T04:54:59.032904Z"
+    }
+  ],
+  "invocation_id": "31a1335a807e"
+}

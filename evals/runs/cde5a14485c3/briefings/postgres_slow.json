@@ -1,0 +1,33 @@
+{
+  "incident_id": "1c41d32d-b30b-42d5-aed1-3de15f9f4bd3",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.db severity=critical fingerprint=db_latency_high",
+  "escalation_reason": "insufficient tool-call budget for action+verify (remaining=1); escalating without executing",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_postgres_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":2.224,\"active_connections\":1,\"dialect\":\"postgresql\",\"error\":null}"
+    },
+    {
+      "tool": "get_deploy_history",
+      "summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-31T01:47:04.930453Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-31T00:47:04.930453Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-08-30T21:47:04.930453Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-08-30T09:47:04.930453Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-08-30T05:47:04.930453Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-08-29T03:47:04.930453Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}"
+    },
+    {
+      "tool": "list_active_alerts",
+      "summary": "{\"total\":3,\"alerts\":[{\"id\":\"6e89c71e-f296-4ab2-9d2c-28582192a889\",\"severity\":\"critical\",\"source\":\"slo:job_completion_rate\",\"title\":\"SLO fast burn: Job completion rate\",\"description\":\"Job completion rate is burning error budget at 57.1× the sustainable rate (4 failed of 7 in the last 24h, 42.9% against a 99% target). Budget remaining: -100%. Runbook: rb-slo-job-completion.\",\"fired_at\":\"2026-08-31T03:52:05.413263Z\",\"extra_data\":{\"total\":7,\"failed\":4,\"slo_id\":\"job_completion_rate\",\"target\":0.99,\"current\":0.428571,\"burn_rate\":57.143,\"threshold\":14.4,\"runbook_id\":\"rb-slo-job-completion\",\"window_hours\":24,\"budget_remaining_pct\":-100.0}},{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-08-31T03:39:04.936974Z\",\"extra_data\":null},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-08-31T03:22:04.936974Z\",\"extra_data\":null}]}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:billing-consumer\"}"
+    }
+  ],
+  "findings": "Postgres connectivity is healthy (ping 2.2 ms, 1 active connection), but three concurrent critical alerts point to an application-layer degradation: a job completion SLO burning at 57× with budget fully exhausted, an API 5xx rate of 3.2%, and a billing-consumer Kafka lag of 15,000 messages sustained for 20+ minutes — all coinciding with the prod deploy of v0.4.2 (noted \"correlated with billing failures\") followed quickly by v0.4.3 roughly two hours later.",
+  "recommendation": "Check whether v0.4.3 resolved the billing failures introduced by v0.4.2 by reviewing application logs and the job-completion runbook (rb-slo-job-completion), and verify whether the billing-consumer lag is still growing or has stabilized since the investigation ran.",
+  "budget_used": {
+    "tool_calls": 4,
+    "tokens": 37430,
+    "wall_seconds": 51.944322,
+    "usd": "0.107223"
+  }
+}

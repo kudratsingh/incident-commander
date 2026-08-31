@@ -1,0 +1,21 @@
+{
+  "incident_id": "14c47878-7ac8-4f5a-b546-2e1ecd682140",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high group=healthy-consumer",
+  "escalation_reason": "planner stop: Lag reading contradicts alert; human should reconcile with the alerting rule.\n",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}"
+    }
+  ],
+  "findings": "Alert reports consumer_lag_high on healthy-consumer, but the probed lag reading is 0 messages. Likely a false positive or a spike that recovered before probing.\n",
+  "recommendation": "Reconcile the paging rule for healthy-consumer against the current lag metric and consider tightening the recovery window before re-arming.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.000037,
+    "usd": "0.000000"
+  }
+}

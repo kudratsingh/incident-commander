@@ -1,0 +1,16 @@
+{
+  "incident_id": "350f9329-4d70-4d41-b31e-ad0afa74ace3",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.healthcheck severity=info fingerprint=health_ping group=unknown",
+  "escalation_reason": "severity=info classified as escalated",
+  "attempted_action": null,
+  "investigation_trail": [],
+  "findings": "No investigation probes were run before escalation; the incident was immediately escalated because the alert carried severity=info, which fell outside the autonomous agent's handling threshold. The alert originated from platform.healthcheck with fingerprint health_ping and no group classification.",
+  "recommendation": "Review the raw alert from platform.healthcheck directly to determine whether the health ping represents a genuine degradation or a misconfigured check, and verify that the severity=info classification is intentional and not a tagging error.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.03833,
+    "usd": "0"
+  }
+}

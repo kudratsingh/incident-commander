@@ -1,0 +1,21 @@
+{
+  "incident_id": "68a76b41-a407-41f1-97e6-4b5fb2867140",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high group=unknown-consumer",
+  "escalation_reason": "planner stop: named consumer group is unresolvable and lag is unknown; human decision required",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"unknown-consumer\",\"lag\":null,\"lag_known\":false,\"source\":\"unrecognized\",\"cache_key\":\"kafka:consumer_lag:unknown-consumer\"}"
+    }
+  ],
+  "findings": "The paging alert named consumer group \"unknown-consumer\". Probing that group returned lag: null (lag_known: false, source: unrecognized) — the platform has no offsets for it, so the probe neither confirms nor excludes saturation and carries no magnitude. A group the platform cannot resolve is usually one that was renamed or decommissioned without the alert rule following it.\n",
+  "recommendation": "Confirm with the alert-source owner whether \"unknown-consumer\" was renamed or decommissioned and update the alert rule to the live group; in the meantime, spot-check the top three lag-prone groups.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.000061,
+    "usd": "0.000000"
+  }
+}

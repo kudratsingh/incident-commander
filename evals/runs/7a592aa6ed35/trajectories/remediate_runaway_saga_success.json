@@ -1,0 +1,473 @@
+{
+  "scenario": "remediate_runaway_saga_success",
+  "incident_id": "2c123b79-fa1d-4b91-b5e3-f455cc9ddb49",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "2c123b79-fa1d-4b91-b5e3-f455cc9ddb49",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:00.995912Z",
+      "updated_at": "2026-08-31T02:22:00.995912Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "2c123b79-fa1d-4b91-b5e3-f455cc9ddb49",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.000019,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7b095cad-16b8-47cf-b606-a2e2e1a50054",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:22:00.995931Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:00.995912Z",
+      "updated_at": "2026-08-31T02:22:00.995931Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "2c123b79-fa1d-4b91-b5e3-f455cc9ddb49",
+      "state": "planning",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.00003,
+        "max_usd": "1.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7b095cad-16b8-47cf-b606-a2e2e1a50054",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:22:00.995931Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "39e9df19-4d52-4352-a8a0-d8b3f84d9a02",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+          },
+          "result_summary": "{\"seed_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"nodes\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"retry_count\":3,\"created_at\":\"2026-08-31T01:21:46.584955Z\"},{\"id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.584955Z\"},{\"id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.584955Z\"}],\"edges\":[{\"from_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"to_id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\"},{\"from_id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"to_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-08-31T02:22:00.995942Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "6e8fa6ed-950f-4652-8bd7-2573d01c895a",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "dead-lettered root is holding the chain; replaying it promotes the held descendants"
+          },
+          "result_summary": "planner handoff to PLANNING: dead-lettered root is holding the chain; replaying it promotes the held descendants",
+          "timestamp": "2026-08-31T02:22:00.995942Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "runaway_saga",
+          "name": "stuck_saga_node",
+          "confidence": 0.85,
+          "reasoning": "The root is dead_letter with retry_count=3 while its descendant waits. dead_letter is terminal and the resolver promotes a child only when every parent is completed, so replaying the root is what frees the chain.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:00.995912Z",
+      "updated_at": "2026-08-31T02:22:00.995942Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "2c123b79-fa1d-4b91-b5e3-f455cc9ddb49",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.002552,
+        "max_usd": "1.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7b095cad-16b8-47cf-b606-a2e2e1a50054",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:22:00.995931Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "39e9df19-4d52-4352-a8a0-d8b3f84d9a02",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+          },
+          "result_summary": "{\"seed_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"nodes\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"retry_count\":3,\"created_at\":\"2026-08-31T01:21:46.584955Z\"},{\"id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.584955Z\"},{\"id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.584955Z\"}],\"edges\":[{\"from_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"to_id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\"},{\"from_id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"to_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-08-31T02:22:00.995942Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "6e8fa6ed-950f-4652-8bd7-2573d01c895a",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "dead-lettered root is holding the chain; replaying it promotes the held descendants"
+          },
+          "result_summary": "planner handoff to PLANNING: dead-lettered root is holding the chain; replaying it promotes the held descendants",
+          "timestamp": "2026-08-31T02:22:00.995942Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4e5a590e-a1e4-4d05-ba46-f4da7b92672d",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "stuck_saga_node"
+          },
+          "result_summary": "plan: replay_dlq_by_ids({\"job_ids\": [\"a2412a54-65f0-5258-95ab-5c168a15df64\"], \"idempotency_key\": \"eval-runaway-saga-replay-001\"}) then verify via get_dag_state",
+          "timestamp": "2026-08-31T02:22:00.998464Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "runaway_saga",
+          "name": "stuck_saga_node",
+          "confidence": 0.85,
+          "reasoning": "The root is dead_letter with retry_count=3 while its descendant waits. dead_letter is terminal and the resolver promotes a child only when every parent is completed, so replaying the root is what frees the chain.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "stuck_saga_node",
+        "action_tool": "replay_dlq_by_ids",
+        "action_arguments": {
+          "job_ids": [
+            "a2412a54-65f0-5258-95ab-5c168a15df64"
+          ],
+          "idempotency_key": "eval-runaway-saga-replay-001"
+        },
+        "verify_tool": "get_dag_state",
+        "verify_arguments": {
+          "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+        },
+        "verify_expectation": "replay_dlq_by_ids returns replayed=1 with scheduled=0 — an immediate replay, not a deferred one. get_dag_state should then show the root out of dead_letter and the descendant that was waiting promoted, because the resolver reacts to the replayed root completing. A scheduled=1 response would mean the replay was deferred and the chain is still stuck.\n"
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:00.995912Z",
+      "updated_at": "2026-08-31T02:22:00.998464Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "2c123b79-fa1d-4b91-b5e3-f455cc9ddb49",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.004568,
+        "max_usd": "1.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7b095cad-16b8-47cf-b606-a2e2e1a50054",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:22:00.995931Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "39e9df19-4d52-4352-a8a0-d8b3f84d9a02",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+          },
+          "result_summary": "{\"seed_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"nodes\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"retry_count\":3,\"created_at\":\"2026-08-31T01:21:46.584955Z\"},{\"id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.584955Z\"},{\"id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.584955Z\"}],\"edges\":[{\"from_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"to_id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\"},{\"from_id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"to_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-08-31T02:22:00.995942Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "6e8fa6ed-950f-4652-8bd7-2573d01c895a",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "dead-lettered root is holding the chain; replaying it promotes the held descendants"
+          },
+          "result_summary": "planner handoff to PLANNING: dead-lettered root is holding the chain; replaying it promotes the held descendants",
+          "timestamp": "2026-08-31T02:22:00.995942Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4e5a590e-a1e4-4d05-ba46-f4da7b92672d",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "stuck_saga_node"
+          },
+          "result_summary": "plan: replay_dlq_by_ids({\"job_ids\": [\"a2412a54-65f0-5258-95ab-5c168a15df64\"], \"idempotency_key\": \"eval-runaway-saga-replay-001\"}) then verify via get_dag_state",
+          "timestamp": "2026-08-31T02:22:00.998464Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9a75a8a5-9fea-4668-9978-8851c3698a86",
+          "tool_name": "replay_dlq_by_ids",
+          "arguments": {
+            "job_ids": [
+              "a2412a54-65f0-5258-95ab-5c168a15df64"
+            ],
+            "idempotency_key": "65d5b40ed4044e4c7c8ad1e69c092b5c",
+            "delay_seconds": null
+          },
+          "result_summary": "{\"requested\":1,\"replayed\":1,\"scheduled\":0,\"failed\":0,\"results\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"ok\":true,\"error\":null,\"scheduled\":false,\"execute_at\":null}]}",
+          "timestamp": "2026-08-31T02:22:01.000480Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "runaway_saga",
+          "name": "stuck_saga_node",
+          "confidence": 0.85,
+          "reasoning": "The root is dead_letter with retry_count=3 while its descendant waits. dead_letter is terminal and the resolver promotes a child only when every parent is completed, so replaying the root is what frees the chain.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "stuck_saga_node",
+        "action_tool": "replay_dlq_by_ids",
+        "action_arguments": {
+          "job_ids": [
+            "a2412a54-65f0-5258-95ab-5c168a15df64"
+          ],
+          "idempotency_key": "eval-runaway-saga-replay-001"
+        },
+        "verify_tool": "get_dag_state",
+        "verify_arguments": {
+          "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+        },
+        "verify_expectation": "replay_dlq_by_ids returns replayed=1 with scheduled=0 — an immediate replay, not a deferred one. get_dag_state should then show the root out of dead_letter and the descendant that was waiting promoted, because the resolver reacts to the replayed root completing. A scheduled=1 response would mean the replay was deferred and the chain is still stuck.\n"
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-31T02:22:00.995912Z",
+      "updated_at": "2026-08-31T02:22:01.000480Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "2c123b79-fa1d-4b91-b5e3-f455cc9ddb49",
+      "state": "resolved",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.004604,
+        "max_usd": "1.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7b095cad-16b8-47cf-b606-a2e2e1a50054",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:22:00.995931Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "39e9df19-4d52-4352-a8a0-d8b3f84d9a02",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+          },
+          "result_summary": "{\"seed_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"nodes\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"retry_count\":3,\"created_at\":\"2026-08-31T01:21:46.584955Z\"},{\"id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.584955Z\"},{\"id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.584955Z\"}],\"edges\":[{\"from_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"to_id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\"},{\"from_id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"to_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-08-31T02:22:00.995942Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "6e8fa6ed-950f-4652-8bd7-2573d01c895a",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "dead-lettered root is holding the chain; replaying it promotes the held descendants"
+          },
+          "result_summary": "planner handoff to PLANNING: dead-lettered root is holding the chain; replaying it promotes the held descendants",
+          "timestamp": "2026-08-31T02:22:00.995942Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4e5a590e-a1e4-4d05-ba46-f4da7b92672d",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "stuck_saga_node"
+          },
+          "result_summary": "plan: replay_dlq_by_ids({\"job_ids\": [\"a2412a54-65f0-5258-95ab-5c168a15df64\"], \"idempotency_key\": \"eval-runaway-saga-replay-001\"}) then verify via get_dag_state",
+          "timestamp": "2026-08-31T02:22:00.998464Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9a75a8a5-9fea-4668-9978-8851c3698a86",
+          "tool_name": "replay_dlq_by_ids",
+          "arguments": {
+            "job_ids": [
+              "a2412a54-65f0-5258-95ab-5c168a15df64"
+            ],
+            "idempotency_key": "65d5b40ed4044e4c7c8ad1e69c092b5c",
+            "delay_seconds": null
+          },
+          "result_summary": "{\"requested\":1,\"replayed\":1,\"scheduled\":0,\"failed\":0,\"results\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"ok\":true,\"error\":null,\"scheduled\":false,\"execute_at\":null}]}",
+          "timestamp": "2026-08-31T02:22:01.000480Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "6a9401bb-c548-468c-b828-8fdddc2fc065",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64",
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "{\"seed_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"nodes\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.584955Z\"},{\"id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.584955Z\"},{\"id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.584955Z\"}],\"edges\":[{\"from_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"to_id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\"},{\"from_id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"to_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-08-31T02:22:01.000523Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9e9c78ff-c7aa-4d4c-a497-b386c93e01de",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "replay_dlq_by_ids returns replayed=1 with scheduled=0 — an immediate replay, not a deferred one. get_dag_state should then show the root out of dead_letter and the descendant that was waiting promoted, because the resolver reacts to the replayed root completing. A scheduled=1 response would mean the replay was deferred and the chain is still stuck.\n",
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "verified: The replay was immediate (replayed=1, scheduled=0, failed=0) and the follow-up probe shows the chain drained: the root is no longer dead_letter and the descendant that was waiting has been promoted. That is the resolver acting on the replayed root, which is the effect this remediation exists to produce.\n",
+          "timestamp": "2026-08-31T02:22:01.000523Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "runaway_saga",
+          "name": "stuck_saga_node",
+          "confidence": 0.85,
+          "reasoning": "The root is dead_letter with retry_count=3 while its descendant waits. dead_letter is terminal and the resolver promotes a child only when every parent is completed, so replaying the root is what frees the chain.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "stuck_saga_node",
+        "action_tool": "replay_dlq_by_ids",
+        "action_arguments": {
+          "job_ids": [
+            "a2412a54-65f0-5258-95ab-5c168a15df64"
+          ],
+          "idempotency_key": "eval-runaway-saga-replay-001"
+        },
+        "verify_tool": "get_dag_state",
+        "verify_arguments": {
+          "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+        },
+        "verify_expectation": "replay_dlq_by_ids returns replayed=1 with scheduled=0 — an immediate replay, not a deferred one. get_dag_state should then show the root out of dead_letter and the descendant that was waiting promoted, because the resolver reacts to the replayed root completing. A scheduled=1 response would mean the replay was deferred and the chain is still stuck.\n"
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-31T02:22:00.995912Z",
+      "updated_at": "2026-08-31T02:22:01.000523Z"
+    }
+  ],
+  "invocation_id": "7a592aa6ed35"
+}

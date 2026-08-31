@@ -1,0 +1,21 @@
+{
+  "incident_id": "76a3c142-ac6d-4a34-b92c-e440a67f710b",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.dag severity=critical fingerprint=saga_stalled",
+  "escalation_reason": "planner stop: dead-lettered root is holding the chain; a human should decide whether replaying it is safe",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_dag_state",
+      "summary": "{\"seed_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"nodes\":[{\"id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"retry_count\":3,\"created_at\":\"2026-08-31T01:21:46.540757Z\"},{\"id\":\"9b9fe94d-a2c5-59d2-b968-e9427908e9f2\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.540757Z\"},{\"id\":\"677c49dd-9901-5761-a640-f1f9bea65e04\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.540757Z\"}],\"edges\":[{\"from_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"to_id\":\"9b9fe94d-a2c5-59d2-b968-e9427908e9f2\"},{\"from_id\":\"677c49dd-9901-5761-a640-f1f9bea65e04\",\"to_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}"
+    }
+  ],
+  "findings": "The chain's root job is dead-lettered after exhausting its three retries, and the descendant behind it is still waiting. The upstream parent completed normally, so the failure is isolated to the root. Because dead_letter is terminal and the resolver only promotes a child whose parents have all completed, nothing will move this chain without intervention.\n",
+  "recommendation": "Read the root's error_message to decide whether the failure is transient. If it is, replaying the root with replay_dlq_by_ids un-sticks the whole chain — the replayed root completes and the resolver promotes the held descendants. If it is not, the waiting descendants should be cancelled rather than left pending indefinitely.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.000033,
+    "usd": "0.000000"
+  }
+}

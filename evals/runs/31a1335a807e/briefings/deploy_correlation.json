@@ -1,0 +1,21 @@
+{
+  "incident_id": "967eabda-859b-4c2b-ab10-a3a6dabf7005",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.api severity=critical fingerprint=post_deploy_error_spike",
+  "escalation_reason": "planner stop: bad-deploy hypothesis confirmed; human should decide rollback",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_deploy_history",
+      "summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-07-28T10:00:00Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-07-28T09:00:00Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-07-28T06:00:00Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-07-27T18:00:00Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-07-27T14:00:00Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-07-26T12:00:00Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}"
+    }
+  ],
+  "findings": "v0.4.2 shipped to prod shortly before the billing-api error spike; deploy history annotates it as correlated with billing failures.\n",
+  "recommendation": "Consider rolling back to v0.4.1 while the v0.4.2 change is diagnosed.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.00006,
+    "usd": "0.000000"
+  }
+}

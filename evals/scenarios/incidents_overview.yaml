@@ -49,15 +49,15 @@ canned_tool_responses:
   # to a tool the scenario never canned. Same ids, so the two readings
   # agree about which incidents are open; `alerts` carries no
   # `resolved_at`/`is_active` because every row it returns is active by
-  # construction, and no `extra_data` because the list_incidents rows beside
-  # it carry none either: a DECLARED `extra_data: null` is a field the
-  # fixture-drift walk compares, so it would report every populated key on
+  # construction. `extra_data` IS declared (null) — the live seeded rows
+  # carry the key with a null value, so omitting it reads as live_only_field
+  # drift on a clean stack; null matches what the seeder writes on
   # the live alert as live_only_field drift. Omitting it is what the
   # neighbouring fixture does, and for the same reason.
   list_active_alerts:
     content:
     - type: text
-      text: '{"total":3,"alerts":[{"id":"7c9d648f-0215-544d-a9c3-adcf74ea68ab","severity":"critical","source":"api","title":"5xx rate above threshold","description":"API 5xx rate 3.2% over last 10 minutes.","fired_at":"2026-07-28T10:00:00Z"},{"id":"c6c4e180-f625-53c2-85c2-2d505fec61e5","severity":"warning","source":"dlq","title":"DLQ backlog growing","description":"3 send_email jobs dead-lettered in last hour.","fired_at":"2026-07-28T09:53:00Z"},{"id":"e33d75bb-3769-594a-9443-57abff0f7580","severity":"critical","source":"kafka","title":"billing-consumer lag exceeds 10k","description":"Sustained lag on billing-consumer for 20+ minutes.","fired_at":"2026-07-28T09:43:00Z"}]}'
+      text: '{"total":3,"alerts":[{"id":"7c9d648f-0215-544d-a9c3-adcf74ea68ab","severity":"critical","source":"api","title":"5xx rate above threshold","description":"API 5xx rate 3.2% over last 10 minutes.","fired_at":"2026-07-28T10:00:00Z","extra_data":null},{"id":"c6c4e180-f625-53c2-85c2-2d505fec61e5","severity":"warning","source":"dlq","title":"DLQ backlog growing","description":"3 send_email jobs dead-lettered in last hour.","fired_at":"2026-07-28T09:53:00Z","extra_data":null},{"id":"e33d75bb-3769-594a-9443-57abff0f7580","severity":"critical","source":"kafka","title":"billing-consumer lag exceeds 10k","description":"Sustained lag on billing-consumer for 20+ minutes.","fired_at":"2026-07-28T09:43:00Z","extra_data":null}]}'
     is_error: false
   list_incidents:
     content:

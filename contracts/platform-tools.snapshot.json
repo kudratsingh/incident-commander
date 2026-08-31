@@ -67,7 +67,9 @@
         ],
         "title": "BadDeployOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "chaos:invoke",
+      "is_idempotent": false
     },
     {
       "name": "create_bad_data_job",
@@ -114,7 +116,9 @@
         ],
         "title": "CreateBadDataJobOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "chaos:invoke",
+      "is_idempotent": false
     },
     {
       "name": "create_stale_cache",
@@ -177,7 +181,9 @@
         ],
         "title": "CreateStaleCacheOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "chaos:invoke",
+      "is_idempotent": false
     },
     {
       "name": "create_stuck_dag",
@@ -274,7 +280,9 @@
         ],
         "title": "CreateStuckDagOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "chaos:invoke",
+      "is_idempotent": false
     },
     {
       "name": "get_cache_key_info",
@@ -352,7 +360,9 @@
         ],
         "title": "GetCacheKeyInfoOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "telemetry:read",
+      "is_idempotent": false
     },
     {
       "name": "get_consumer_lag",
@@ -418,7 +428,9 @@
         ],
         "title": "GetConsumerLagOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "telemetry:read",
+      "is_idempotent": false
     },
     {
       "name": "get_dag_state",
@@ -554,7 +566,9 @@
         ],
         "title": "GetDagStateOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "incidents:read",
+      "is_idempotent": false
     },
     {
       "name": "get_deploy_history",
@@ -678,7 +692,9 @@
         ],
         "title": "GetDeployHistoryOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "telemetry:read",
+      "is_idempotent": false
     },
     {
       "name": "get_incident",
@@ -786,7 +802,9 @@
         ],
         "title": "GetIncidentOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "incidents:read",
+      "is_idempotent": false
     },
     {
       "name": "get_postgres_health",
@@ -851,7 +869,9 @@
         ],
         "title": "PostgresHealthOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "telemetry:read",
+      "is_idempotent": false
     },
     {
       "name": "get_redis_health",
@@ -959,7 +979,9 @@
         ],
         "title": "RedisHealthOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "telemetry:read",
+      "is_idempotent": false
     },
     {
       "name": "get_trace",
@@ -1173,7 +1195,9 @@
         ],
         "title": "GetTraceOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "incidents:read",
+      "is_idempotent": false
     },
     {
       "name": "inject_latency",
@@ -1243,7 +1267,9 @@
         ],
         "title": "InjectLatencyOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "chaos:invoke",
+      "is_idempotent": false
     },
     {
       "name": "invalidate_cache_key",
@@ -1290,7 +1316,9 @@
         ],
         "title": "InvalidateCacheKeyOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "actions:execute",
+      "is_idempotent": true
     },
     {
       "name": "kill_consumer",
@@ -1348,7 +1376,9 @@
         ],
         "title": "KillConsumerOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "chaos:invoke",
+      "is_idempotent": false
     },
     {
       "name": "list_active_alerts",
@@ -1461,7 +1491,9 @@
         ],
         "title": "ListActiveAlertsOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "incidents:read",
+      "is_idempotent": false
     },
     {
       "name": "list_audit_events",
@@ -1635,7 +1667,9 @@
         ],
         "title": "ListAuditEventsOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "incidents:read",
+      "is_idempotent": false
     },
     {
       "name": "list_dlq_messages",
@@ -1888,7 +1922,9 @@
         ],
         "title": "ListDlqMessagesOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "incidents:read",
+      "is_idempotent": false
     },
     {
       "name": "list_incidents",
@@ -2025,7 +2061,9 @@
         ],
         "title": "ListIncidentsOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "incidents:read",
+      "is_idempotent": false
     },
     {
       "name": "mark_dlq_permanent",
@@ -2095,7 +2133,9 @@
         ],
         "title": "MarkDlqPermanentOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "actions:execute",
+      "is_idempotent": true
     },
     {
       "name": "pause_dag",
@@ -2158,7 +2198,9 @@
         ],
         "title": "PauseDagOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "actions:execute",
+      "is_idempotent": true
     },
     {
       "name": "poison_message",
@@ -2240,7 +2282,9 @@
         ],
         "title": "PoisonMessageOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "chaos:invoke",
+      "is_idempotent": false
     },
     {
       "name": "replay_dlq_by_category",
@@ -2354,7 +2398,9 @@
         ],
         "title": "ReplayDlqByCategoryOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "actions:execute",
+      "is_idempotent": true
     },
     {
       "name": "replay_dlq_by_ids",
@@ -2486,7 +2532,9 @@
         ],
         "title": "ReplayDlqByIdsOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "actions:execute",
+      "is_idempotent": true
     },
     {
       "name": "replay_dlq_messages",
@@ -2597,7 +2645,9 @@
         ],
         "title": "ReplayDlqMessagesOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "actions:execute",
+      "is_idempotent": true
     },
     {
       "name": "restart_consumer_group",
@@ -2660,7 +2710,9 @@
         ],
         "title": "RestartConsumerGroupOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "actions:execute",
+      "is_idempotent": true
     },
     {
       "name": "saturate_redis",
@@ -2728,7 +2780,9 @@
         ],
         "title": "SaturateRedisOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "chaos:invoke",
+      "is_idempotent": false
     },
     {
       "name": "search_traces",
@@ -2837,7 +2891,9 @@
         ],
         "title": "SearchTracesOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "incidents:read",
+      "is_idempotent": false
     },
     {
       "name": "seed_dlq_messages",
@@ -2920,7 +2976,9 @@
         ],
         "title": "SeedDlqMessagesOutput",
         "type": "object"
-      }
+      },
+      "required_scope": "chaos:invoke",
+      "is_idempotent": false
     }
   ]
 }

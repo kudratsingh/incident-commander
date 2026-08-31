@@ -31,10 +31,14 @@ Usage:
     uv run python scripts/chaos_setup.py bad-deploy
     uv run python scripts/chaos_setup.py restore-consumer --group worker-dispatcher
 
-The token needs ``chaos:invoke`` scope. If your service-account token
-was minted without it (default scopes are ``telemetry:read`` +
-``incidents:read``), regenerate with ``scripts/bootstrap_agent_token.py``
-passing ``--scope chaos:invoke``.
+The token needs ``chaos:invoke`` scope. ``bootstrap_agent_token.py`` grants
+it to the agent service account by default; if you are holding an older
+token minted before that, or one narrowed by hand, regenerate with::
+
+    uv run python scripts/bootstrap_agent_token.py --scope chaos:invoke
+
+``--scope`` widens the account rather than replacing its scopes, so the
+read scopes the rest of the eval needs survive the regeneration.
 
 Chaos hooks are only registered when the platform boots with
 ``CHAOS_ENABLED=true``. That's on by default in demo/compose.yml; if
@@ -152,7 +156,10 @@ def main() -> int:
     if not args.mcp_url or not args.token:
         parser.error(
             "PLATFORM_MCP_URL and PLATFORM_TOKEN must be set (env or --flag). "
-            "Run `make bootstrap-token` first (add --scope chaos:invoke)."
+            "Run `make bootstrap-token` first — or, for a token narrowed "
+            "without chaos scope, `uv run python "
+            "scripts/bootstrap_agent_token.py --scope chaos:invoke` (make "
+            "does not forward the flag)."
         )
 
     client = ChaosClient(args.mcp_url, args.token)

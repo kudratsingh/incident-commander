@@ -8,9 +8,9 @@
     "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything"
   },
   "_counts": {
-    "recorded": 33,
-    "fixture-defect": 24,
-    "explained": 9
+    "recorded": 28,
+    "fixture-defect": 13,
+    "explained": 15
   },
   "known_drift": [
     {
@@ -71,27 +71,6 @@
       "why": "kill_consumer makes worker-dispatcher's lag climb; the check probes the un-faulted world, so the canned backlog cannot match by design"
     },
     {
-      "scenario": "failed_traces_scan",
-      "tool": "search_traces",
-      "path": "matches[].job_id[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "failed_traces_scan",
-      "tool": "search_traces",
-      "path": "matches[].job_type[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "failed_traces_scan",
-      "tool": "search_traces",
-      "path": "matches[].trace_id[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
-    },
-    {
       "scenario": "remediate_consumer_lag_success",
       "tool": "get_consumer_lag",
       "path": "lag",
@@ -112,42 +91,48 @@
       "tool": "get_dag_state",
       "path": "edges[].from_id[]",
       "kind": "not_live_reachable",
-      "context": "fixture-defect"
+      "context": "canned-only",
+      "why": "same scenario, same premise: the chain it draws exists in no live DAG"
     },
     {
       "scenario": "remediate_runaway_saga_success",
       "tool": "get_dag_state",
       "path": "edges[].to_id[]",
       "kind": "not_live_reachable",
-      "context": "fixture-defect"
+      "context": "canned-only",
+      "why": "same scenario, same premise: the chain it draws exists in no live DAG"
     },
     {
       "scenario": "remediate_runaway_saga_success",
       "tool": "get_dag_state",
       "path": "nodes[].id[]",
       "kind": "not_live_reachable",
-      "context": "fixture-defect"
+      "context": "canned-only",
+      "why": "use_live_mcp is false \u2014 the scenario never runs live, so its recordings are its premise rather than a recording of anything"
     },
     {
       "scenario": "remediate_runaway_saga_success",
       "tool": "get_dag_state",
       "path": "nodes[].retry_count[]",
       "kind": "not_live_reachable",
-      "context": "fixture-defect"
+      "context": "canned-only",
+      "why": "same scenario, same premise: nothing live retries these nodes"
     },
     {
       "scenario": "remediate_runaway_saga_success",
       "tool": "get_dag_state",
       "path": "nodes[].status[]",
       "kind": "not_live_reachable",
-      "context": "fixture-defect"
+      "context": "canned-only",
+      "why": "same scenario, same premise: the seeded DAG auto-completes, so a runaway chain's statuses cannot be read live"
     },
     {
       "scenario": "remediate_runaway_saga_success",
       "tool": "get_dag_state",
       "path": "nodes[].type[]",
       "kind": "not_live_reachable",
-      "context": "fixture-defect"
+      "context": "canned-only",
+      "why": "same scenario, same premise: the saga node types it describes exist in no live DAG"
     },
     {
       "scenario": "remediate_runaway_saga_success",
@@ -238,20 +223,6 @@
       "kind": "value",
       "context": "canned-only",
       "why": "the scenario exists to feed the agent a malformed response; its fixture is deliberately not what the platform returns"
-    },
-    {
-      "scenario": "trace_investigation",
-      "tool": "get_trace",
-      "path": "audit_events[]",
-      "kind": "no_live_rows",
-      "context": "fixture-defect"
-    },
-    {
-      "scenario": "trace_investigation",
-      "tool": "get_trace",
-      "path": "jobs[]",
-      "kind": "no_live_rows",
-      "context": "fixture-defect"
     }
   ]
 }

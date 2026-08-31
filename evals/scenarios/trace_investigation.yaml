@@ -14,13 +14,29 @@ alert:
   source: platform.jobs
   severity: critical
   fingerprint: job_failed
-  trace_id: trace-abc-123
+  trace_id: 0e24ca29-1d47-57e9-b898-4d79bb6da981
   job_type: process_payment
 canned_tool_responses:
+  # Re-pointed at a trace that exists. The probe asked for `trace-abc-123`,
+  # which is in no seeded row, so the live tool answered with empty `jobs`
+  # and `audit_events` and the ledger recorded both as `no_live_rows`. The
+  # trace id is incidental to this scenario -- it tests that the agent pulls
+  # a trace together and escalates on it, not that one particular uuid
+  # exists -- so the probe now names the seeded report_gen OOM failure and
+  # this recording is that trace's real content: one failed job plus the one
+  # `job.failed` audit row the seeder writes alongside it, sharing the trace
+  # id through `request_id`.
+  #
+  # Note what re-pointing exposed. `no_live_rows` is deliberately ONE finding
+  # for an empty list, so while the list was empty the row SHAPE underneath
+  # was never compared. Filling it in put every leaf under scrutiny for the
+  # first time, which is why `jobs.updated_at` had to be declared volatile in
+  # the same change -- the seeder writes it as a fresh timestamp, so no
+  # recording can ever match it.
   get_trace:
     content:
     - type: text
-      text: '{"trace_id":"trace-abc-123","jobs":[{"id":"job-1","type":"process_payment","status":"failed","retry_count":3,"error_message":"stripe api timeout","created_at":"2026-07-28T10:00:00Z"}],"audit_events":[{"action":"job.retried","principal_type":"system","created_at":"2026-07-28T10:01:00Z"}]}'
+      text: '{"trace_id":"0e24ca29-1d47-57e9-b898-4d79bb6da981","jobs":[{"id":"5967d510-0290-5627-a9db-4e29e3a38e44","type":"report_gen","status":"failed","user_id":"ee7c82cb-bab6-5780-8590-55b57064cbe3","retry_count":2,"error_message":"OOM during PDF generation (200MB report)","created_at":"2026-07-28T10:00:00Z","updated_at":"2026-07-28T10:00:00Z"}],"audit_events":[{"action":"job.failed","resource_type":"job","resource_id":"5967d510-0290-5627-a9db-4e29e3a38e44","principal_type":"user","created_at":"2026-07-28T10:00:00Z","extra_data":{"error_message":"OOM during PDF generation (200MB report)"}}]}'
     is_error: false
 canned_llm_responses:
   investigation_planner:
@@ -35,7 +51,7 @@ canned_llm_responses:
       kind: probe
       tool_name: get_trace
       arguments:
-        trace_id: trace-abc-123
+        trace_id: 0e24ca29-1d47-57e9-b898-4d79bb6da981
   - hypotheses:
     - category: transient_dependency
       name: downstream_timeout
@@ -45,7 +61,7 @@ canned_llm_responses:
       kind: stop
       reason: root cause is external dependency; escalate for retry policy tuning
   briefing_writer:
-  - findings: 'Job process_payment (trace trace-abc-123) failed after 3 retries with "stripe api timeout" as the error on each attempt.
+  - findings: 'Job process_payment (trace 0e24ca29-1d47-57e9-b898-4d79bb6da981) failed after 3 retries with "stripe api timeout" as the error on each attempt.
 
       '
     recommendation: 'Confirm Stripe is healthy from the platform''s network; if so, consider widening the timeout or adding a circuit breaker on this job type.

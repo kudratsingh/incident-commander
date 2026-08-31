@@ -97,6 +97,66 @@ _JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
         "same element, same pause: the live DAG holds no pause, so its TTL is "
         "null rather than the fixture's remaining seconds",
     ),
+    # remediate_runaway_saga_success is `use_live_mcp: false`, and its own
+    # header says why: the fault is unmanufacturable live, because the seeded
+    # DAG auto-completes seconds after boot and no chaos hook builds a
+    # runaway chain (BUILD_PLAN 2.2). The runner refuses to select it under
+    # --live. So its get_dag_state recording is the scenario's PREMISE, not a
+    # recording of anything -- the same mechanism already recorded for
+    # remediate_verify_fails below, and the same one its three pause fields
+    # are already excused under as post-action.
+    #
+    # These six sat on the burn-down list as defects for the whole campaign
+    # and could never have come off it: there is no live reading for a
+    # canned-only scenario to be corrected TOWARDS. That is the exact failure
+    # the post-action note below describes ("three entries on a burn-down
+    # list that could never be burnt down"), one layer out.
+    #
+    # They stay recorded and visible with a reason rather than being deleted.
+    # If a chaos hook that seeds a genuinely stuck DAG ever lands and the
+    # scenario's flags flip back, these become real work again and this block
+    # is what has to be removed first.
+    ("remediate_runaway_saga_success", "get_dag_state", "nodes[].id[]", "not_live_reachable"): (
+        CANNED_ONLY,
+        "use_live_mcp is false — the scenario never runs live, so its "
+        "recordings are its premise rather than a recording of anything",
+    ),
+    ("remediate_runaway_saga_success", "get_dag_state", "nodes[].type[]", "not_live_reachable"): (
+        CANNED_ONLY,
+        "same scenario, same premise: the saga node types it describes exist in no live DAG",
+    ),
+    (
+        "remediate_runaway_saga_success",
+        "get_dag_state",
+        "nodes[].status[]",
+        "not_live_reachable",
+    ): (
+        CANNED_ONLY,
+        "same scenario, same premise: the seeded DAG auto-completes, so a "
+        "runaway chain's statuses cannot be read live",
+    ),
+    (
+        "remediate_runaway_saga_success",
+        "get_dag_state",
+        "nodes[].retry_count[]",
+        "not_live_reachable",
+    ): (
+        CANNED_ONLY,
+        "same scenario, same premise: nothing live retries these nodes",
+    ),
+    (
+        "remediate_runaway_saga_success",
+        "get_dag_state",
+        "edges[].from_id[]",
+        "not_live_reachable",
+    ): (
+        CANNED_ONLY,
+        "same scenario, same premise: the chain it draws exists in no live DAG",
+    ),
+    ("remediate_runaway_saga_success", "get_dag_state", "edges[].to_id[]", "not_live_reachable"): (
+        CANNED_ONLY,
+        "same scenario, same premise: the chain it draws exists in no live DAG",
+    ),
     ("remediate_verify_fails", "get_consumer_lag", "lag", "value"): (
         CANNED_ONLY,
         "use_live_mcp is false — the scenario never runs live, so its canned "

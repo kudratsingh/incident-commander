@@ -108,7 +108,16 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
     "list_audit_events": frozenset({"events.created_at", "events.request_id"}),
     "get_deploy_history": frozenset({"entries.deployed_at"}),
     "get_dag_state": frozenset({"nodes.created_at"}),
-    "get_trace": frozenset({"jobs.created_at", "audit_events.created_at"}),
+    # `jobs.updated_at` joins the two created_at clocks for the same reason
+    # they are here, and its absence was the same species of gap as
+    # used_memory_human's: `items.updated_at` is already volatile for
+    # list_dlq_messages, so the identical field was a clock through one tool
+    # and a pinned value through another. The seeder writes it as a fresh
+    # timestamp at seed time, so no recording can match it -- and until now
+    # nothing noticed, because get_trace's fixture drifted as `no_live_rows`
+    # (one finding for the whole empty list) and the row shape underneath was
+    # never actually compared.
+    "get_trace": frozenset({"jobs.created_at", "jobs.updated_at", "audit_events.created_at"}),
     "search_traces": frozenset({"matches.created_at"}),
 }
 

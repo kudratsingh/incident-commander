@@ -16,10 +16,18 @@ alert:
   severity: critical
   fingerprint: failure_rate_high
 canned_tool_responses:
+  # Re-recorded against the platform's two seeded failed traces. `trace-a` /
+  # `job-a` were placeholders belonging to no row, and `send_email` is no
+  # JobType -- the seeded failures are a report_gen OOM and a doc_analysis
+  # parse failure. `status` was already `failed` and is unchanged, which is
+  # why it never appeared in the ledger.
+  #
+  # The probe is search_traces(status=failed, since_hours=1); the two seeded
+  # rows are created 45 and 30 minutes back, so both fall inside the window.
   search_traces:
     content:
     - type: text
-      text: '{"matches":[{"trace_id":"trace-a","job_id":"job-a","job_type":"send_email","status":"failed","created_at":"2026-07-28T10:05:00Z"},{"trace_id":"trace-b","job_id":"job-b","job_type":"send_email","status":"failed","created_at":"2026-07-28T10:06:00Z"}]}'
+      text: '{"matches":[{"trace_id":"0e24ca29-1d47-57e9-b898-4d79bb6da981","job_id":"5967d510-0290-5627-a9db-4e29e3a38e44","job_type":"report_gen","status":"failed","created_at":"2026-07-28T10:05:00Z"},{"trace_id":"edeeb994-56d2-53e6-88fd-8af47e695dbc","job_id":"d034fd34-102d-5f61-8d21-a7dbda5ea895","job_type":"doc_analysis","status":"failed","created_at":"2026-07-28T10:06:00Z"}]}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

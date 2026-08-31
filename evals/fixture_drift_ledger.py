@@ -171,6 +171,22 @@ _JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
         CANNED_ONLY,
         "same scenario, same deliberate malformation",
     ),
+    # v0.6.0 added two more required fields to this tool's output, so the
+    # same deliberately-malformed fixture is now short three fields rather
+    # than one. The scenario's premise did not change and neither did the
+    # reason: a response that violates the schema is what it exists to feed
+    # the agent, so "the fixture does not match the platform" is the fixture
+    # working. Recorded, not counted as work.
+    ("tool_output_schema_mismatch", "get_consumer_lag", "lag_known", "live_only_field"): (
+        CANNED_ONLY,
+        "same scenario, same deliberate malformation — v0.6.0 made this a "
+        "third field the fixture deliberately omits",
+    ),
+    ("tool_output_schema_mismatch", "get_consumer_lag", "source", "live_only_field"): (
+        CANNED_ONLY,
+        "same scenario, same deliberate malformation — v0.6.0 made this a "
+        "third field the fixture deliberately omits",
+    ),
 }
 
 

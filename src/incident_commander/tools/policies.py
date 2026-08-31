@@ -61,6 +61,7 @@ class PolicyCoverageError(RuntimeError):
 # now "refuse to say", which is the only safe one (ADR 0003).
 _READ_TOOLS: Final[frozenset[str]] = frozenset(
     {
+        "get_cache_key_info",
         "get_consumer_lag",
         "get_dag_state",
         "get_deploy_history",
@@ -125,6 +126,10 @@ def is_cached_read(tool_name: str) -> bool:
 # resource-naming args; `tests/unit/test_policies.py` fails if a new tool
 # lands without classifying its fields here.
 RESOURCE_ARG_FIELDS: Final[dict[str, frozenset[str]]] = {
+    # `key` NAMES a resource: same copy-don't-re-type rule as
+    # `invalidate_cache_key` below. The read tool is the more likely place
+    # for a re-typed key to look harmless, since nothing is mutated.
+    "get_cache_key_info": frozenset({"key"}),
     "get_consumer_lag": frozenset({"consumer_group"}),
     "get_dag_state": frozenset({"job_id"}),
     "get_deploy_history": frozenset(),

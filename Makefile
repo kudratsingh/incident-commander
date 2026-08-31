@@ -294,10 +294,12 @@ PLATFORM_SERVICE ?= api
 # PYTHONPATH prepend below: reset_eval_state.py does
 # `from scripts import seed_eval_fixtures`, which needs /app on the path
 # while the image ships PYTHONPATH=/app/backend for the app process.
-# REQUIRED until a post-v0.4.9 image ships the sys.path fix (parked in
-# platform #92) — do not remove. The v0.4.9 image fails eval-reset
-# without this override; the fix exists on platform master but is
-# deliberately untagged until after the rerun.
+# The v0.6.0 image SHIPS the fix (platform #92): its
+# `/app/scripts/reset_eval_state.py` inserts the path itself before
+# importing. Verified in the image at the wave-9 re-pin. The override is
+# kept as a harmless belt-and-braces for now and is a wave-10 removal
+# candidate — dropping it needs one live `make eval-reset` against the
+# v0.6.0 stack to confirm, which the re-pin PR deliberately does not run.
 eval-reset:
 	@echo "eval-reset: resetting $(PLATFORM_COMPOSE) service $(PLATFORM_SERVICE)"
 	@if [ ! -f "$(PLATFORM_COMPOSE)" ]; then \

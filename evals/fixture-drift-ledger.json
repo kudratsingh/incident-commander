@@ -8,9 +8,9 @@
     "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything"
   },
   "_counts": {
-    "recorded": 28,
+    "recorded": 30,
     "fixture-defect": 13,
-    "explained": 15
+    "explained": 17
   },
   "known_drift": [
     {
@@ -223,6 +223,22 @@
       "kind": "value",
       "context": "canned-only",
       "why": "the scenario exists to feed the agent a malformed response; its fixture is deliberately not what the platform returns"
+    },
+    {
+      "scenario": "tool_output_schema_mismatch",
+      "tool": "get_consumer_lag",
+      "path": "lag_known",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "same scenario, same deliberate malformation \u2014 v0.6.0 made this a third field the fixture deliberately omits"
+    },
+    {
+      "scenario": "tool_output_schema_mismatch",
+      "tool": "get_consumer_lag",
+      "path": "source",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "same scenario, same deliberate malformation \u2014 v0.6.0 made this a third field the fixture deliberately omits"
     }
   ]
 }

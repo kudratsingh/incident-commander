@@ -125,6 +125,11 @@ class TestGetConsumerLagOutput:
         model = GetConsumerLagOutput(
             consumer_group="worker-dispatcher",
             lag=None,
+            # v0.6.0: a null lag from the LIVE group. `source` says where the
+            # number would come from, so it stays "live"; `lag_known` is what
+            # reports that there is no number.
+            lag_known=False,
+            source="live",
             cache_key="kafka:consumer_lag:worker-dispatcher",
         )
         assert model.lag is None

@@ -3,7 +3,7 @@
 Runs ``tools/list`` against the platform reachable via ``PLATFORM_MCP_URL``,
 normalizes the response, and diffs against ``contracts/platform-tools.snapshot.json``.
 Skipped cleanly when the env isn't set. In CI the ``contract`` job in
-``.github/workflows/ci.yml`` boots ``demo/compose.yml`` at the pinned v0.4.9
+``.github/workflows/ci.yml`` boots ``demo/compose.yml`` at the pinned v0.6.0
 digest, mints a service-account token with ``scripts/bootstrap_agent_token.py``
 (``--postgres-container incident-commander-demo-postgres-1``), exports
 ``PLATFORM_MCP_URL``/``PLATFORM_TOKEN``, and runs this test via

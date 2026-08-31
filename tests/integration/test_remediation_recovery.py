@@ -94,6 +94,7 @@ def _successful_action() -> ToolResult:
                         "consumer_group": "worker-dispatcher",
                         "kill_key_cleared": True,
                         "latency_key_cleared": False,
+                        "group_recognized": True,
                         "accepted": True,
                     }
                 ),

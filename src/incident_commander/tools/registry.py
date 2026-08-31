@@ -17,7 +17,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -47,9 +47,17 @@ class GetConsumerLagInput(BaseModel):
 
 
 class GetConsumerLagOutput(BaseModel):
+    # v0.6.0 (plat #166, R2-17): `lag_known` and `source` end the ambiguity
+    # that let `consumer_lag_high` assert a threshold against a null. `lag`
+    # is null for "could not determine", which is NOT zero — check
+    # `lag_known` before comparing. `source` says whether the number can
+    # move: only `live` is refreshed (~60s), `static` is a recorded
+    # constant, `unrecognized` is a group the platform does not know.
     model_config = ConfigDict(extra="ignore", frozen=True)
     consumer_group: str
     lag: int | None
+    lag_known: bool
+    source: Literal["live", "static", "unrecognized"]
     cache_key: str
 
 
@@ -227,10 +235,17 @@ class TracedAuditRow(BaseModel):
 
 
 class GetTraceOutput(BaseModel):
+    # v0.6.0 (plat #180): the response is capped, so it can be a SAMPLE of
+    # the trace rather than the trace. `truncated` says which one you got —
+    # when true, conclude nothing from what is absent. `total_audit_events`
+    # is null when `include_audit=false`: not counted, not zero.
     model_config = ConfigDict(extra="ignore", frozen=True)
     trace_id: str
     jobs: list[TracedJob]
     audit_events: list[TracedAuditRow]
+    truncated: bool
+    total_jobs: int
+    total_audit_events: int | None = None
 
 
 class SearchTracesInput(BaseModel):
@@ -288,7 +303,10 @@ class ListAuditEventsInput(BaseModel):
     model_config = _EMPTY_CONFIG
     action: str | None = None
     action_prefix: str | None = None
-    principal_type: str | None = None
+    # v0.6.0 (plat #185): closed enum. An unrecognised value is now an
+    # invalid-params error at parse time rather than a filter matching no
+    # rows — the old shape let a typo read as "nothing happened".
+    principal_type: Literal["user", "service_account"] | None = None
     limit: int = Field(default=50, ge=1, le=200)
 
 
@@ -322,6 +340,9 @@ class ListDlqMessagesInput(BaseModel):
     # Omit for all categories (including uncategorized).
     remediation_hint: str | None = None
     limit: int = Field(default=50, ge=1, le=200)
+    # v0.6.0 (plat #180, R2-53): paging. Compare against `total` to know
+    # whether more remain.
+    offset: int = Field(default=0, ge=0)
 
 
 class DlqTriageSummary(BaseModel):
@@ -348,6 +369,10 @@ class DlqEntry(BaseModel):
     # ``error_message`` + ``triage``. Values: replay_safe, wait_and_replay,
     # human_required. Drives the routing in the remediation planner prompt.
     remediation_hint: str | None = None
+    # v0.6.0 (plat #180, R2-53): when the job reached its terminal state,
+    # and the field the list is now ordered by. `created_at` is when it was
+    # SUBMITTED — the two can be days apart.
+    dead_lettered_at: datetime | None = None
     extra: dict[str, Any] | None = None
 
 
@@ -379,6 +404,10 @@ class RestartConsumerGroupOutput(BaseModel):
     consumer_group: str
     kill_key_cleared: bool
     latency_key_cleared: bool
+    # v0.6.0 (plat #166): `accepted` is true even for a name that reached no
+    # real consumer, so it never distinguished a working call from a typo.
+    # This does.
+    group_recognized: bool
     accepted: bool
 
 
@@ -401,6 +430,11 @@ class ReplayDlqMessagesInput(BaseModel):
     model_config = _EMPTY_CONFIG
     job_type: str | None = None
     limit: int = Field(default=25, ge=1, le=200)
+    # v0.6.0 (plat #172, R2-22): the bulk path now FENCES `human_required`
+    # by default — the safety premise the DLQ scenarios always asserted is
+    # finally enforced platform-side rather than trusted to the planner.
+    # Setting this true opts back in to replaying that category.
+    include_human_required: bool = False
     idempotency_key: str = Field(min_length=8, max_length=255)
 
 
@@ -425,6 +459,9 @@ class ReplayDlqMessagesOutput(BaseModel):
     replayed: int
     failed: int
     jobs: list[ReplayedJob]
+    # v0.6.0 (plat #172, R2-22): what the human_required fence held back.
+    skipped_human_required: int = 0
+    skipped_jobs: list[ReplayedJob] = []
 
 
 class ReplayResult(BaseModel):
@@ -441,6 +478,33 @@ class ReplayResult(BaseModel):
     error: str | None = None
     scheduled: bool = False
     execute_at: float | None = None
+
+
+# --- get_cache_key_info (read) -------------------------------------------
+#
+# v0.6.0 (plat #146/#182, R2-54). A READ tool, not Tier-1: it returns the
+# SHAPE of a cache entry (existence, TTL, type, size) and never the value,
+# so tenant-scoped cache contents stay unexposed. Same allowlisted prefixes
+# `invalidate_cache_key` may delete, which is the point — a suspect entry
+# can be checked before remediation and confirmed gone after, instead of
+# the agent inferring both from the deletion's own return value.
+
+
+class GetCacheKeyInfoInput(BaseModel):
+    model_config = _EMPTY_CONFIG
+    key: str = Field(min_length=1, max_length=512)
+
+
+class GetCacheKeyInfoOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    key: str
+    exists: bool
+    # All three are null when the key does not exist — check `exists` to
+    # tell "absent" from "present but unset" (a key with no expiry also
+    # reports ttl_seconds=null).
+    type: str | None = None
+    ttl_seconds: int | None = None
+    size: int | None = None
 
 
 class InvalidateCacheKeyInput(BaseModel):
@@ -630,6 +694,9 @@ TOOL_REGISTRY: Final[dict[str, ToolSpec]] = {
     "get_postgres_health": ToolSpec("get_postgres_health", _EmptyInput, PostgresHealthOutput),
     "get_redis_health": ToolSpec("get_redis_health", _EmptyInput, RedisHealthOutput),
     "get_trace": ToolSpec("get_trace", GetTraceInput, GetTraceOutput),
+    "get_cache_key_info": ToolSpec(
+        "get_cache_key_info", GetCacheKeyInfoInput, GetCacheKeyInfoOutput
+    ),
     "list_active_alerts": ToolSpec(
         "list_active_alerts", ListActiveAlertsInput, ListActiveAlertsOutput
     ),

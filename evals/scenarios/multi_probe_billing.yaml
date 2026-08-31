@@ -19,7 +19,7 @@ canned_tool_responses:
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"billing-consumer","lag":15000,"cache_key":"kafka:consumer_lag:billing-consumer"}'
+      text: '{"consumer_group":"billing-consumer","lag":15000,"lag_known":true,"source":"static","cache_key":"kafka:consumer_lag:billing-consumer"}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

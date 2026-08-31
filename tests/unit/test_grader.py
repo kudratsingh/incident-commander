@@ -228,7 +228,7 @@ class TestEvidenceFieldExpectations:
         # substring: it matched `"kill_key_cleared":false` just as happily.
         summary = (
             '{"consumer_group":"worker-dispatcher","kill_key_cleared":false,'
-            '"latency_key_cleared":false,"accepted":true}'
+            '"latency_key_cleared":false,"group_recognized":true,"accepted":true}'
         )
         result = self._graded(
             run_state,
@@ -291,8 +291,14 @@ class TestEvidenceFieldExpectations:
     ) -> None:
         # S-21's assertion, structurally: a regression coercing the platform's
         # `lag: null` to 0 must fail rather than grade as a healthy reading.
-        null_lag = '{"consumer_group":"nope","lag":null,"cache_key":"kafka:consumer_lag:nope"}'
-        coerced = '{"consumer_group":"nope","lag":0,"cache_key":"kafka:consumer_lag:nope"}'
+        null_lag = (
+            '{"consumer_group":"nope","lag":null,"lag_known":false,'
+            '"source":"unrecognized","cache_key":"kafka:consumer_lag:nope"}'
+        )
+        coerced = (
+            '{"consumer_group":"nope","lag":0,"lag_known":true,'
+            '"source":"static","cache_key":"kafka:consumer_lag:nope"}'
+        )
         expectation = EvidenceFieldExpectation(
             tools=("get_consumer_lag",), field="lag", is_null=True
         )
@@ -559,8 +565,21 @@ class TestEvidenceSubstringValidator:
     def test_value_items_stay_legal(self) -> None:
         # None of these is a substring of any field name the registry's output
         # models serialize, so each can only be matched by a *value*.
-        legal = ("human_required", "classified as escalated", "worker-dispatcher", "not_verified")
+        legal = ("classified as escalated", "worker-dispatcher", "not_verified")
         assert self._expectation(*legal).expected_evidence_contains == legal
+
+    def test_human_required_became_key_text_at_the_v0_6_0_repin(self) -> None:
+        # It was a legal VALUE item until v0.6.0: `remediation_hint` is the
+        # only place it appeared, so matching it meant the agent had observed
+        # that category. v0.6.0's `replay_dlq_messages` gained the output
+        # field `skipped_human_required` (plat #172, R2-22), whose KEY is
+        # serialized on every call to that tool whatever the value behind it.
+        # The bare substring is therefore satisfied by the tool merely having
+        # run, so the guard now rejects it — correctly. Scope it as a field
+        # assertion instead (see TestForbiddenActionTools below). No shipped
+        # scenario used the bare form; this is the tripwire, not a migration.
+        with pytest.raises(ValidationError, match="expected_evidence_fields"):
+            self._expectation("human_required")
 
 
 class TestBareFieldNameSubstrings:
@@ -1087,7 +1106,16 @@ class TestForbiddenActionTools:
             name="s",
             expected_terminal_state=IncidentState.RESOLVED,
             expected_action_tools=("mark_dlq_permanent",),
-            expected_evidence_contains=("human_required",),
+            # Scoped to the tool that observed it: the bare substring stopped
+            # being value text at the v0.6.0 re-pin (see
+            # TestEvidenceSubstringValidator above).
+            expected_evidence_fields=(
+                EvidenceFieldExpectation(
+                    tools=("mark_dlq_permanent",),
+                    field="remediation_hint",
+                    equals="human_required",
+                ),
+            ),
             max_tool_calls=25,
             forbidden_action_tools=("replay_dlq_by_category",),
         )

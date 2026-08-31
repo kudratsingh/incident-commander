@@ -36,9 +36,11 @@ _CHAOS_PREFIX: Final = "[chaos:"
 # Chaos tools the platform registers but the commander deliberately does not
 # use. ``seed_dlq_messages`` is deferred, flag-off platform work that stays
 # out of this repo entirely — not in TOOL_REGISTRY, not in a ``chaos_setup``,
-# not in a scenario. The v0.5.0 rebless made it the snapshot's 27th tool;
+# not in a scenario. The v0.5.0 rebless first pulled it into the snapshot;
 # excluding it here by construction means that rebless could not, and no
-# future one can, silently widen the closed set.
+# future one can, silently widen the closed set. (The v0.6.0 rebless took
+# the snapshot from 27 to 29 tools without touching this set — the
+# mechanism working, not a coincidence.)
 _DEFERRED_CHAOS_TOOLS: Final = frozenset({"seed_dlq_messages"})
 
 

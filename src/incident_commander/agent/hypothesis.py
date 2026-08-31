@@ -100,6 +100,7 @@ class Hypothesis(BaseModel):
 
 
 ReadToolName = Literal[
+    "get_cache_key_info",
     "get_consumer_lag",
     "get_dag_state",
     "get_deploy_history",

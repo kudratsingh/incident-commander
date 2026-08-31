@@ -69,8 +69,18 @@ from incident_commander.tools.mcp_client import ToolResult
 _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
     # Recomputed every 60s from real offsets and cached with a 90s TTL.
     # The VALUE is the whole point of the lag scenarios, so it is NOT
-    # volatile — only the reading's freshness metadata would be.
-    "get_consumer_lag": frozenset(),
+    # volatile — only the reading's freshness metadata would be. v0.6.0
+    # (plat #166, R2-17) added exactly that metadata, and `lag_known` takes
+    # the slot this note reserved for it: `worker-dispatcher` is the one
+    # continuously-refreshed group, so within roughly the first minute of a
+    # freshly booted stack it has no measurement yet and reports
+    # lag_known=false, then flips to true once the loop emits. CI's contract
+    # job reads inside that window and a developer stack reads outside it —
+    # the same fixture is "wrong" in one and right in the other, which is
+    # timing, not contract. `lag` itself stays out, so the number the lag
+    # scenarios rest on is still guarded, and so does `source`, which is a
+    # stable property of the group rather than of when you looked.
+    "get_consumer_lag": frozenset({"lag_known"}),
     "get_postgres_health": frozenset({"ping_latency_ms", "active_connections"}),
     # Every field here is a gauge of a running server, and the line that
     # decides membership is whether the fixture pack FIXES the value.
@@ -102,7 +112,17 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
             "keyspace_misses",
         }
     ),
-    "list_dlq_messages": frozenset({"items.created_at", "items.updated_at"}),
+    # `items.dead_lettered_at` arrived with the v0.6.0 re-pin (plat #180,
+    # R2-53) and is the third clock on this tool, not a new species: the
+    # seeder stamps it fresh at seed time, exactly like the two beside it,
+    # so no recording can ever match it. Declared here rather than blessed
+    # as six known-drift entries -- one per DLQ fixture -- which is the
+    # `jobs.updated_at` lesson from the batch-4 re-record applied on the
+    # way in instead of after the fact. The field's ORDERING contract (the
+    # list is now sorted by it) is asserted by the scenarios, not here.
+    "list_dlq_messages": frozenset(
+        {"items.created_at", "items.updated_at", "items.dead_lettered_at"}
+    ),
     "list_active_alerts": frozenset({"alerts.fired_at", "alerts.created_at"}),
     "list_incidents": frozenset({"incidents.fired_at", "incidents.created_at"}),
     "list_audit_events": frozenset({"events.created_at", "events.request_id"}),

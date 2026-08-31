@@ -45,7 +45,7 @@ canned_tool_responses:
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"worker-dispatcher","lag":1200,"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+      text: '{"consumer_group":"worker-dispatcher","lag":1200,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher"}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

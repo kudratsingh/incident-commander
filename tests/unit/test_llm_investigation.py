@@ -45,6 +45,8 @@ def _consumer_lag_response(group: str, lag: int) -> ToolResult:
                     {
                         "consumer_group": group,
                         "lag": lag,
+                        "lag_known": True,
+                        "source": "static",
                         "cache_key": "kafka:consumer_lag:worker-dispatcher",
                     }
                 ),

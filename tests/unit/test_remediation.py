@@ -253,6 +253,7 @@ class TestRemediating:
                                 "consumer_group": args["consumer_group"],
                                 "kill_key_cleared": True,
                                 "latency_key_cleared": False,
+                                "group_recognized": True,
                                 "accepted": True,
                             }
                         ),
@@ -387,6 +388,7 @@ class TestRemediating:
                                     "consumer_group": arguments["consumer_group"],
                                     "kill_key_cleared": True,
                                     "latency_key_cleared": False,
+                                    "group_recognized": True,
                                     "accepted": True,
                                 }
                             ),
@@ -414,6 +416,7 @@ class TestRemediating:
                                 "kill_key_cleared": True,
                                 "kill_key": "k",
                                 "latency_key_cleared": False,
+                                "group_recognized": True,
                                 "accepted": True,
                             }
                         ),
@@ -440,6 +443,8 @@ def _lag_mcp(lag: int) -> _FakeMCP:
                         {
                             "consumer_group": args.get("consumer_group", "worker-dispatcher"),
                             "lag": lag,
+                            "lag_known": lag is not None,
+                            "source": "live",
                             "cache_key": "kafka:consumer_lag:worker-dispatcher",
                         }
                     ),
@@ -574,6 +579,7 @@ class TestSingleAttemptInvariant:
                                 "kill_key_cleared": True,
                                 "kill_key": "k",
                                 "latency_key_cleared": False,
+                                "group_recognized": True,
                                 "accepted": True,
                             }
                         ),
@@ -768,7 +774,7 @@ class TestEvidenceSourcedArgs:
                     tool_name="get_consumer_lag",
                     arguments={"consumer_group": self._HALLUCINATED_GROUP},
                     result_summary=(
-                        '{"consumer_group":"worker-dispatchr","lag":null,'
+                        '{"consumer_group":"worker-dispatchr","lag":null,"lag_known":false,"source":"unrecognized",'
                         '"cache_key":"kafka:consumer_lag:worker-dispatchr"}'
                     ),
                     timestamp=_now(),
@@ -1002,6 +1008,7 @@ class TestNamedResourceArgs:
                     arguments={},
                     result_summary=(
                         f'{{"consumer_group": "{self._DEFAULT_FILLED}", "lag": 0, '
+                        f'"lag_known": true, "source": "live", '
                         f'"cache_key": "kafka:consumer_lag:{self._DEFAULT_FILLED}"}}'
                     ),
                     timestamp=_now(),

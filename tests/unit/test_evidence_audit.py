@@ -106,7 +106,7 @@ class TestRenderedCannedEvidence:
         # raw-fixture substring match would over-approximate what evidence
         # can contain; the rendered corpus must not.
         raw = (
-            '{"consumer_group":"g","lag":5,"cache_key":"kafka:consumer_lag:g",'
+            '{"consumer_group":"g","lag":5,"lag_known":true,"source":"static","cache_key":"kafka:consumer_lag:g",'
             '"internal_debug_note":"never-recorded"}'
         )
         corpus = rendered_canned_evidence([_scenario("s", {"get_consumer_lag": _text_result(raw)})])
@@ -123,7 +123,9 @@ class TestRenderedCannedEvidence:
                     "s",
                     {
                         "get_consumer_lag": _text_result(
-                            '{"consumer_group":"g","lag":1,"cache_key":"k"}', is_error=True
+                            '{"consumer_group":"g","lag":1,"lag_known":true,'
+                            '"source":"static","cache_key":"k"}',
+                            is_error=True,
                         ),
                         "search_traces": _text_result("{ not json"),
                     },

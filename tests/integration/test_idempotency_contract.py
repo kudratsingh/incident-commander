@@ -55,18 +55,22 @@ several times, and the two steps before it read that same stack.
 The ``TestRefusalShapeIsSpecific`` class below needs no live environment
 and runs everywhere, including the offline ``test`` job.
 
-**Which platform these assertions describe — 2026-08-30**
+**Which platform these assertions describe — 2026-08-30 (wave-9 re-pin)**
 
 The error codes and shapes asserted here are the ones the **currently
-pinned** image serves: ``ghcr.io/kudratsingh/incident-platform@sha256:
-8b57d0c9…``, which is platform v0.5.0. (Several comments in
-``demo/compose.yml`` still say v0.4.9; the digest moved to v0.5.0 in #120
-and those comments were not updated. The digest is the truth.)
+pinned** image serves: ``ghcr.io/kudratsingh/incident-platform:v0.6.0
+@sha256:d22c18fa…``, the v0.6.0 release index. (The ``demo/compose.yml``
+comments that still said v0.4.9 were corrected in the same PR that moved
+this pin; the digest remains the truth.)
 
-That pin predates platform #154, "put tools/call's post-execution and
-error paths inside one transaction envelope". Checked against the
-platform source rather than assumed, because the name invites the wrong
-conclusion:
+This pin is the first that INCLUDES platform #154, "put tools/call's
+post-execution and error paths inside one transaction envelope" — the
+section below was written when the pin predated it. Re-checked against
+the v0.6.0 image's own ``app/mcp/protocol.py`` and ``handlers.py`` at the
+re-pin, as the closing note asks, rather than trusting the prediction:
+``MCP_TOOL_ERROR = -32011`` is unchanged, and the assertions in this file
+still hold. The reasoning that predicted that outcome, kept because it is
+what makes the result checkable:
 
 - **#154 is a DB-transaction envelope, not a wire envelope.** It changes
   which savepoint a handler unwinds to, not the JSON on the wire.
@@ -76,11 +80,13 @@ conclusion:
   path that reaches the same refusal (a post-execution store collision
   resolved by read-back) and deliberately emits the same body.
 
-So a re-pin past #154 should not move anything this file asserts. What
-it does change, none of which these tests touch today:
+So a re-pin past #154 should not move anything this file asserts — and
+it did not. What it does change, none of which these tests touch today,
+now VERIFIED live on the v0.6.0 image rather than predicted:
 
 - Unhandled platform exceptions become HTTP 500 with a JSON-RPC body
-  (``-32603``, ``"internal server error"``) instead of escaping as
+  (``-32603``, ``"internal server error"`` — confirmed at
+  ``handlers.py:216`` and ``standalone.py:160``) instead of escaping as
   Starlette's plain-text ``Internal Server Error``. Both are non-2xx, so
   ``_call_tool``'s ``raise_for_status()`` still turns them into an
   ``httpx.HTTPStatusError`` rather than a ``PlatformToolError`` — worth
@@ -91,7 +97,7 @@ it does change, none of which these tests touch today:
 
 On the next re-pin, re-check this section against the platform's
 ``backend/app/mcp/protocol.py`` and ``handlers.py`` rather than trusting
-the date on it.
+the date on it. (Done for v0.6.0 — see the header note.)
 
 **Skipping**
 

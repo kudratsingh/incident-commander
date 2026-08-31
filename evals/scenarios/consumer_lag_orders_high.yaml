@@ -18,7 +18,7 @@ canned_tool_responses:
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"orders-consumer","lag":7500,"cache_key":"kafka:consumer_lag:orders-consumer"}'
+      text: '{"consumer_group":"orders-consumer","lag":7500,"lag_known":true,"source":"static","cache_key":"kafka:consumer_lag:orders-consumer"}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

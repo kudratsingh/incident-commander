@@ -163,7 +163,15 @@ class TestEveryCallPathRoutesThroughWireArguments:
         # This leg default-fills: a read-only probe with no group named is
         # allowed to fall back to the registry default (unlike the
         # remediation legs — ADR 0022). The bytes must still be canonical.
-        mcp = _RecordingMCP({"consumer_group": "worker-dispatcher", "lag": 5, "cache_key": "k"})
+        mcp = _RecordingMCP(
+            {
+                "consumer_group": "worker-dispatcher",
+                "lag": 5,
+                "lag_known": True,
+                "source": "live",
+                "cache_key": "k",
+            }
+        )
         run = run_state.model_copy(
             update={
                 "state": IncidentState.INVESTIGATING,
@@ -179,7 +187,15 @@ class TestEveryCallPathRoutesThroughWireArguments:
     def test_opening_probe_matches_wire_arguments_with_named_group(
         self, run_state: RunState, now: datetime
     ) -> None:
-        mcp = _RecordingMCP({"consumer_group": "billing", "lag": 5, "cache_key": "k"})
+        mcp = _RecordingMCP(
+            {
+                "consumer_group": "billing",
+                "lag": 5,
+                "lag_known": True,
+                "source": "static",
+                "cache_key": "k",
+            }
+        )
         run = run_state.model_copy(
             update={
                 "state": IncidentState.INVESTIGATING,

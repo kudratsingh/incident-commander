@@ -1,6 +1,6 @@
 # Live demo: full platform footprint sufficient for remediation eval.
 #
-# Pinned to the incident-platform v0.4.9 release by digest so the agent's
+# Pinned to the incident-platform v0.6.0 release by digest so the agent's
 # contract expectations don't shift under us. Every platform-code service
 # below uses the SAME pinned digest. Bump the digest whenever the platform
 # ships a new release and rerun `make eval-live` to catch drift.
@@ -132,7 +132,7 @@ services:
     # One-shot schema migration, mirroring the dev compose's migrate
     # service: with two app-code services (mcp + api) neither should
     # race `alembic upgrade head` at boot.
-    image: ghcr.io/kudratsingh/incident-platform@sha256:8b57d0c90fee70ea3a9099d3337c2d8d04a3d7085a6143d74c8440e20a6463cb
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.0@sha256:d22c18fa1961188c4c48bbfc8d1b1396903b4aaacfa33ab7a28f45b9959d989e
     platform: linux/amd64
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
@@ -144,15 +144,20 @@ services:
     restart: "no"
 
   platform:
-    # incident-platform v0.4.9 (digest published by the platform release).
+    # incident-platform v0.6.0 (INDEX digest published by the platform
+    # release, confirmed with `docker buildx imagetools inspect` — the
+    # top-level `Digest:`, not a per-platform child manifest).
     # Do not switch to `:latest` — the whole point of pinning by digest is
     # that a platform-side prompt or schema change can't shift agent
     # behavior without an explicit bump here.
-    image: ghcr.io/kudratsingh/incident-platform@sha256:8b57d0c90fee70ea3a9099d3337c2d8d04a3d7085a6143d74c8440e20a6463cb
-    # v0.4.9 publishes linux/amd64 only. On Apple Silicon this runs under
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.0@sha256:d22c18fa1961188c4c48bbfc8d1b1396903b4aaacfa33ab7a28f45b9959d989e
+    # v0.6.0 is an OCI index, but it still lists linux/amd64 ONLY (plus an
+    # attestation manifest) — being an index is not the same as being
+    # multi-arch, and this one is not. On Apple Silicon this runs under
     # Rosetta (slower cold start, correct output) — REQUIRED there; without
     # it `make demo` fails to resolve a runnable manifest. Drop when the
-    # platform ships arm64 (docker buildx --platform linux/amd64,linux/arm64).
+    # platform actually ships an arm64 child manifest (docker buildx
+    # --platform linux/amd64,linux/arm64), re-checked at each re-pin.
     platform: linux/amd64
     # Host port is env-configurable so a native platform (or anything else)
     # on 8001 doesn't collide. Override with DEMO_MCP_HOST_PORT and match
@@ -235,7 +240,7 @@ services:
     # Env copied deliberately from the dev compose's `app` service
     # (drift between services is platform bug #69's class); minio/jaeger
     # endpoints omitted with the services (see header note).
-    image: ghcr.io/kudratsingh/incident-platform@sha256:8b57d0c90fee70ea3a9099d3337c2d8d04a3d7085a6143d74c8440e20a6463cb
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.0@sha256:d22c18fa1961188c4c48bbfc8d1b1396903b4aaacfa33ab7a28f45b9959d989e
     platform: linux/amd64
     ports:
       - "${DEMO_API_HOST_PORT:-8000}:8000"

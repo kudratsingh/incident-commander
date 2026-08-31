@@ -47,6 +47,8 @@ class TestMakeInvestigate:
                 {
                     "consumer_group": "billing",
                     "lag": 42,
+                    "lag_known": True,
+                    "source": "static",
                     "cache_key": "kafka:consumer_lag:worker-dispatcher",
                 }
             )
@@ -71,6 +73,8 @@ class TestMakeInvestigate:
                 {
                     "consumer_group": "billing",
                     "lag": 0,
+                    "lag_known": True,
+                    "source": "static",
                     "cache_key": "kafka:consumer_lag:worker-dispatcher",
                 }
             )
@@ -89,6 +93,8 @@ class TestMakeInvestigate:
                 {
                     "consumer_group": "payments",
                     "lag": 1,
+                    "lag_known": True,
+                    "source": "static",
                     "cache_key": "kafka:consumer_lag:worker-dispatcher",
                 }
             )
@@ -107,6 +113,8 @@ class TestMakeInvestigate:
                 {
                     "consumer_group": "unknown",
                     "lag": 0,
+                    "lag_known": True,
+                    "source": "static",
                     "cache_key": "kafka:consumer_lag:worker-dispatcher",
                 }
             )
@@ -175,6 +183,8 @@ class TestMakeInvestigate:
                     {
                         "consumer_group": "billing",
                         "lag": 42,
+                        "lag_known": True,
+                        "source": "static",
                         "cache_key": "kafka:consumer_lag:billing",
                     }
                 )
@@ -245,6 +255,8 @@ class TestMakeInvestigate:
                 {
                     "consumer_group": "billing",
                     "lag": 0,
+                    "lag_known": True,
+                    "source": "static",
                     "cache_key": "kafka:consumer_lag:worker-dispatcher",
                 }
             )

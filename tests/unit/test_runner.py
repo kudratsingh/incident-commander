@@ -128,7 +128,7 @@ def _passing_scenario() -> Scenario:
                     {
                         "type": "text",
                         "text": (
-                            '{"consumer_group":"billing","lag":42,'
+                            '{"consumer_group":"billing","lag":42,"lag_known":true,"source":"static",'
                             '"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
                         ),
                     }
@@ -1989,7 +1989,13 @@ class TestPreconditions:
                 {
                     "type": "text",
                     "text": json.dumps(
-                        {"consumer_group": "billing", "lag": lag, "cache_key": "kafka:x"}
+                        {
+                            "consumer_group": "billing",
+                            "lag": lag,
+                            "lag_known": lag is not None,
+                            "source": "static",
+                            "cache_key": "kafka:x",
+                        }
                     ),
                 }
             ]

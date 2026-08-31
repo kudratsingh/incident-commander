@@ -21,7 +21,7 @@ canned_tool_responses:
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"healthy-consumer","lag":0,"cache_key":"kafka:consumer_lag:healthy-consumer"}'
+      text: '{"consumer_group":"healthy-consumer","lag":0,"lag_known":true,"source":"static","cache_key":"kafka:consumer_lag:healthy-consumer"}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

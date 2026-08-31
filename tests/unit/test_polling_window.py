@@ -240,6 +240,8 @@ def _lag_result(lag: int) -> ToolResult:
     payload = {
         "consumer_group": "worker-dispatcher",
         "lag": lag,
+        "lag_known": True,
+        "source": "live",
         "cache_key": "kafka:consumer_lag:worker-dispatcher",
     }
     return ToolResult(content=[{"type": "text", "text": json.dumps(payload)}], is_error=False)

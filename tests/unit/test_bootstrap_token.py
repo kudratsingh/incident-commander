@@ -186,7 +186,9 @@ def _fake_platform(monkeypatch: pytest.MonkeyPatch) -> _FakePlatform:
         kwargs["transport"] = httpx.MockTransport(platform.handler)
         return real_client(*args, **kwargs)
 
-    monkeypatch.setattr(bootstrap_agent_token.httpx, "Client", _factory)
+    # The script does `import httpx`, so patching the module attribute here
+    # is what its `httpx.Client(...)` call resolves through.
+    monkeypatch.setattr(httpx, "Client", _factory)
     monkeypatch.setattr(bootstrap_agent_token, "_promote", lambda _container, _email: None)
     for var in ("PLATFORM_MCP_URL", "PLATFORM_REST_URL"):
         monkeypatch.delenv(var, raising=False)

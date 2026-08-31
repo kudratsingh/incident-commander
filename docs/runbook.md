@@ -444,24 +444,38 @@ the privileged default (S-04).
 
 ### Post-stage audit: saturation and self-owned principals (A-13)
 
-After the smoke stage, the runner re-reads the platform's audit log and
+After the smoke stage, the runner grades the platform's audit log and
 fails (exit 5) if any successful Tier-1 action landed during the stage
-window. That read is **one page of at most 200 rows**:
-`list_audit_events` exposes no `offset` and no `created_after`, and the
-platform handler hardcodes `offset=0`, so the window cannot be paged from
-this repo. Two consequences operators need to know:
+window. Each individual read is still **one page of at most 200 rows** —
+`list_audit_events` exposes no `offset` and no `created_after` (the pinned
+v0.6.0 `inputSchema` declares `additionalProperties: false` over
+`action` / `action_prefix` / `principal_type` / `limit`, and sending
+`offset` anyway is refused `-32602 extra_forbidden`; `list_dlq_messages`
+is the tool in this platform that pages, not this one). But the window is
+no longer graded from that single page.
 
-* **A saturated page is inconclusive, not clean.** Rows come back newest
-  first, so the only proof the whole window was scanned is that the
-  oldest row on the page predates the stage start. If the page is at the
-  200 cap (or the platform's `total` says rows were withheld) and it
-  still does not reach back past the stage start, the guard raises and
-  the runner exits 5 — the unreachable rows could hold the very Tier-1
-  successes it is looking for. **This is by design** (inconclusive ≠
-  clean, invariant 6): it is not an agent bug. Re-run the smoke stage in
-  a quieter window, or reduce concurrent `agent.tool_invoked` traffic on
-  the tenant. Any violation already visible on the truncated page is
+* **The window is scanned forward, by checkpoint.** The runner reads a
+  page after **every scenario** and folds it into one `AuditWindowScan`;
+  the post-stage assertion contributes the final page and grades the
+  union. Rows that scroll past row 200 by the end of the stage were
+  already banked while they were still reachable, so a stage far louder
+  than 200 `agent.tool_invoked` rows now grades conclusively. A Tier-1
+  success is caught even when the final page can no longer see it.
+* **A gap between checkpoints is still inconclusive, not clean.** Two
+  pages compose only when the newer one reaches back to the older one's
+  newest row. If more than a full page landed between two checkpoints,
+  the rows in the hole are unreachable for good, coverage restarts there,
+  and the guard raises — exit 5. **This half is by design**
+  (inconclusive ≠ clean, invariant 6): it is not an agent bug. So is the
+  2000-row ceiling on one stage's retained in-window rows; a read-only
+  stage that loud is itself the finding. Any violation already visible is
   named in the same message.
+* **A single failed checkpoint is not fatal.** It prints
+  `post-stage audit checkpoint skipped (...)` and the stage continues —
+  losing one page only narrows coverage, which fails closed on its own at
+  the assertion. A run whose log is full of that line has a broken audit
+  read, and its guard has quietly degraded to the one-page behaviour
+  above; treat it as a defect rather than noise.
 * **Violations can be scoped to the principals you own.** Set both
   `PLATFORM_AGENT_PRINCIPAL_ID` and `PLATFORM_SMOKE_PRINCIPAL_ID` (both
   printed by `make bootstrap-token` alongside the tokens) and only those
@@ -474,10 +488,14 @@ this repo. Two consequences operators need to know:
   deliberately over-broad: any service account's in-window Tier-1
   success fails the stage.
 
-Real pagination is a **cross-repo follow-up**: it needs a platform PR
-adding `created_after` / `offset` / `principal_id` to `list_audit_events`,
-a platform release, a pin bump, and a snapshot regen from the pinned
-stack — never a hand edit of `contracts/platform-tools.snapshot.json`.
+Backward paging remains a **cross-repo follow-up**, and would still be
+worth having: it needs a platform PR adding `created_after` / `offset` /
+`principal_id` to `list_audit_events`, a platform release, a pin bump, and
+a snapshot regen from the pinned stack — never a hand edit of
+`contracts/platform-tools.snapshot.json`. It would collapse the whole
+checkpoint mechanism into one query and close the gap case above. Until
+then, forward checkpointing is what this repo can do without touching the
+platform, and it covers every window the runner actually produces.
 
 ### consumer_lag live notes (kill-window experiment, 2026-08-04)
 

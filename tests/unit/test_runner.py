@@ -1561,7 +1561,7 @@ class TestMainExitCodes:
         # Neither principal id is configured in this env: the post-stage
         # audit stays deliberately over-broad (any service account's
         # in-window Tier-1 success fails the stage).
-        assert audit_kwargs == [{"principal_ids": None}]
+        assert _principal_ids(audit_kwargs) == [None]
 
     def test_configured_principal_ids_reach_the_post_stage_audit(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -1588,7 +1588,7 @@ class TestMainExitCodes:
         )
         monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke", *_SMOKE_ONLY_ARGS])
         assert runner_module.main() == 0
-        assert audit_kwargs == [{"principal_ids": frozenset({"agent-sa-uuid", "smoke-sa-uuid"})}]
+        assert _principal_ids(audit_kwargs) == [frozenset({"agent-sa-uuid", "smoke-sa-uuid"})]
 
     def test_half_configured_principal_ids_fall_back_to_unfiltered(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -1612,8 +1612,20 @@ class TestMainExitCodes:
         )
         monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke", *_SMOKE_ONLY_ARGS])
         assert runner_module.main() == 0
-        assert audit_kwargs == [{"principal_ids": None}]
+        assert _principal_ids(audit_kwargs) == [None]
         assert "only one of PLATFORM_AGENT_PRINCIPAL_ID" in capsys.readouterr().out
+
+
+def _principal_ids(audit_kwargs: list[dict[str, Any]]) -> list[Any]:
+    """The `principal_ids` each post-stage audit call was given.
+
+    The call also carries `scan=` — the AuditWindowScan the runner has been
+    checkpointing since the stage started — so these assertions read the one
+    kwarg they are about instead of pinning the whole signature. `scan` gets
+    its own assertion in `TestPostStageAuditIsCheckpointed`, where it is the
+    subject rather than incidental.
+    """
+    return [kwargs["principal_ids"] for kwargs in audit_kwargs]
 
 
 class TestSmokeRefusesChaosSeeding:
@@ -2716,3 +2728,96 @@ class TestACrashedRowReportsWhatItSpent:
         assert result.outcome.tool_calls_used == 0
         assert result.outcome.final_state is IncidentState.TRIAGE
         assert result.outcome.failure_class == "transport"
+
+
+class _StubAuditClient:
+    """A client that answers the audit read with an empty, conclusive page."""
+
+    def __init__(self) -> None:
+        self.audit_reads = 0
+
+    def call_tool(
+        self, name: str, arguments: Any, *, timeout_seconds: float | None = None
+    ) -> ToolResult:
+        self.audit_reads += 1
+        return ToolResult(
+            content=[{"type": "text", "text": json.dumps({"total": 0, "events": []})}]
+        )
+
+    def close(self) -> None:
+        return None
+
+
+class TestPostStageAuditIsCheckpointed:
+    """B2: the post-stage audit reads the window while the stage runs.
+
+    ``list_audit_events`` has no offset and no created_after, so once the
+    stage ends the newest 200 rows are all there will ever be. A smoke
+    stage that emits more than that used to exit 5 "inconclusive" — a
+    false red on a paid run. The runner now banks a page after every
+    scenario and hands the accumulated scan to the assertion.
+    """
+
+    def test_a_checkpoint_is_taken_after_every_scenario(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        _stub_run_pipeline(monkeypatch, tmp_path)
+        audit_client = _StubAuditClient()
+        scans: list[Any] = []
+
+        def _run_all_firing_two_scenarios(*_args: Any, **kwargs: Any) -> Any:
+            on_result = kwargs["on_result"]
+            on_result(None)
+            on_result(None)
+            return _green_stub_report(), (), ()
+
+        monkeypatch.setattr(runner_module, "run_all", _run_all_firing_two_scenarios)
+        monkeypatch.setattr(runner_module, "archive_scenario", lambda *_a, **_kw: None)
+        monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
+        monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: audit_client)
+        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module,
+            "assert_no_tier1_successes",
+            lambda _client, _since, **kwargs: scans.append(kwargs["scan"]),
+        )
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke", *_SMOKE_ONLY_ARGS])
+        assert runner_module.main() == 0
+        # Two scenarios finished, so two pages were banked mid-stage. The
+        # third read is the assertion's own, which is stubbed out here.
+        assert audit_client.audit_reads == 2
+        assert len(scans) == 1
+        assert scans[0].checkpoints == 2
+        assert scans[0].since is not None
+
+    def test_a_failing_checkpoint_does_not_abort_the_stage(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # A checkpoint is best-effort: losing one only narrows coverage,
+        # which fails closed on its own at the assertion. Aborting a paid
+        # stage over a transient audit read would be the worse trade — but
+        # it must be said out loud, or a systematically broken checkpoint
+        # silently degrades the guard back to a single page.
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        _stub_run_pipeline(monkeypatch, tmp_path)
+
+        class _AngryClient(_StubAuditClient):
+            def call_tool(
+                self, name: str, arguments: Any, *, timeout_seconds: float | None = None
+            ) -> ToolResult:
+                raise MCPError(-32603, "audit is having a moment")
+
+        def _run_all_firing_one_scenario(*_args: Any, **kwargs: Any) -> Any:
+            kwargs["on_result"](None)
+            return _green_stub_report(), (), ()
+
+        monkeypatch.setattr(runner_module, "run_all", _run_all_firing_one_scenario)
+        monkeypatch.setattr(runner_module, "archive_scenario", lambda *_a, **_kw: None)
+        monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
+        monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: _AngryClient())
+        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(runner_module, "assert_no_tier1_successes", lambda *_a, **_kw: None)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke", *_SMOKE_ONLY_ARGS])
+        assert runner_module.main() == 0
+        assert "checkpoint skipped" in capsys.readouterr().out

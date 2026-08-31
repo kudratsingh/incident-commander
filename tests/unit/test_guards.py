@@ -13,6 +13,7 @@ from evals.guards import (
     _CHAOS_PROBE_TOOL,
     _PROBE_ARGS,
     _PROBE_TOOL,
+    AuditWindowScan,
     PrincipalGuardError,
     assert_chaos_capable_principal,
     assert_no_tier1_successes,
@@ -557,3 +558,135 @@ class TestChaosCapablePrincipal:
             assert_chaos_capable_principal(chaos_refused)
         args_refused = _Client(MCPError(-32602, "invalid arguments"))
         assert_chaos_capable_principal(args_refused)  # no raise
+
+
+class _SequenceClient:
+    """Serves a different page per call, the way a live audit log does.
+
+    ``_Client`` replays one fixed answer forever, which cannot express the
+    thing under test: the log GROWS between checkpoints, and rows that were
+    on an earlier page scroll off a later one.
+    """
+
+    def __init__(self, pages: list[ToolResult]) -> None:
+        self._pages = pages
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def call_tool(
+        self, name: str, arguments: Any, *, timeout_seconds: float | None = None
+    ) -> ToolResult:
+        self.calls.append((name, dict(arguments)))
+        # Past the end, keep serving the final page — the post-stage read
+        # sees the same log the last checkpoint did.
+        return self._pages[min(len(self.calls) - 1, len(self._pages) - 1)]
+
+
+class TestCheckpointedWindowScan:
+    """B2: one page of 200 is not a scan, and the fix is not `offset`.
+
+    The A-13 note this replaces said the window "cannot be paged", and it
+    was right about the platform: ``list_audit_events`` accepts exactly
+    ``action`` / ``action_prefix`` / ``principal_type`` / ``limit`` under
+    ``additionalProperties: false``, and the pinned stack refuses ``offset``
+    with -32602 extra_forbidden. (``list_dlq_messages`` is the tool that
+    pages; the audit log is not it.) What it got wrong is the conclusion:
+    a window that cannot be paged BACKWARDS can still be covered FORWARDS,
+    by reading it repeatedly while the stage runs and composing the pages.
+
+    Without that, a smoke stage louder than 200 `agent.tool_invoked` rows
+    exits 5 as "inconclusive" — a false red that masks the real result of
+    a paid run.
+    """
+
+    _SINCE = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
+    _BEFORE = [
+        _audit(
+            "get_consumer_lag",
+            "success",
+            datetime(2026, 8, 9, 11, 50, tzinfo=UTC) + timedelta(seconds=i),
+        )
+        for i in range(80)
+    ]
+
+    def _in_window(
+        self, first: int, count: int, *, tool: str = "get_consumer_lag"
+    ) -> list[dict[str, Any]]:
+        return [
+            _audit(tool, "success", self._SINCE + timedelta(seconds=i))
+            for i in range(first, first + count)
+        ]
+
+    def _page(self, rows: list[dict[str, Any]], total: int) -> ToolResult:
+        """Newest 200, created_at DESC — the platform's own ordering."""
+        newest = sorted(rows, key=lambda r: r["created_at"], reverse=True)[:200]
+        return _result(newest, total=total)
+
+    def test_one_post_stage_page_is_inconclusive_the_old_behaviour(self) -> None:
+        # RED-BEFORE. 250 in-window rows means the final page (newest 200)
+        # is saturated with rows that are ALL inside the window, so it
+        # cannot reach back past `since` and the guard has no choice but to
+        # refuse. This is the mask: a correct, clean stage exits 5.
+        final = self._page(self._BEFORE + self._in_window(1, 250), total=330)
+        with pytest.raises(PrincipalGuardError, match="inconclusive"):
+            assert_no_tier1_successes(_Client(final), self._SINCE)
+
+    def test_checkpoints_cover_a_window_one_page_cannot(self) -> None:
+        # GREEN-AFTER. Same 250 rows, same final page — but a checkpoint
+        # taken mid-stage saw the older half while it was still reachable,
+        # and the two pages overlap, so the union covers [since, now].
+        mid = self._page(self._BEFORE + self._in_window(1, 120), total=200)
+        final = self._page(self._BEFORE + self._in_window(1, 250), total=330)
+        client = _SequenceClient([mid, final])
+        scan = AuditWindowScan(self._SINCE)
+        scan.checkpoint(client)
+        assert assert_no_tier1_successes(client, self._SINCE, scan=scan) == []
+        assert scan.checkpoints == 2
+
+    def test_a_success_that_scrolled_off_the_last_page_is_still_caught(self) -> None:
+        # The point of covering the window at all. The Tier-1 success lands
+        # early, and by the end of the stage it is row 240-something —
+        # unreachable on the final page, and named only because a
+        # checkpoint banked it.
+        early_violation = _audit(
+            "mark_dlq_permanent", "success", self._SINCE + timedelta(seconds=5)
+        )
+        mid = self._page(self._BEFORE + [early_violation] + self._in_window(10, 110), total=200)
+        final = self._page(self._BEFORE + [early_violation] + self._in_window(10, 250), total=331)
+        # It really is off the final page: the one-page guard cannot see it.
+        with pytest.raises(PrincipalGuardError) as unpaged:
+            assert_no_tier1_successes(_Client(final), self._SINCE)
+        assert "mark_dlq_permanent" not in str(unpaged.value)
+
+        client = _SequenceClient([mid, final])
+        scan = AuditWindowScan(self._SINCE)
+        scan.checkpoint(client)
+        with pytest.raises(PrincipalGuardError, match="mark_dlq_permanent"):
+            assert_no_tier1_successes(client, self._SINCE, scan=scan)
+
+    def test_a_gap_between_checkpoints_is_not_coverage(self) -> None:
+        # Checkpoints too far apart: more than a page of rows landed
+        # between them, so the rows in the hole are gone and no union can
+        # claim them. Fail closed — the whole point of the A-13 note.
+        mid = self._page(self._BEFORE + self._in_window(1, 120), total=200)
+        final = self._page(self._in_window(151, 200), total=600)
+        client = _SequenceClient([mid, final])
+        scan = AuditWindowScan(self._SINCE)
+        scan.checkpoint(client)
+        with pytest.raises(PrincipalGuardError, match="inconclusive"):
+            assert_no_tier1_successes(client, self._SINCE, scan=scan)
+
+    def test_scan_graded_against_a_different_since_is_refused(self) -> None:
+        # A window accumulated from one stage start, asserted against
+        # another, grades the wrong interval — louder as a crash than as a
+        # quiet pass.
+        scan = AuditWindowScan(self._SINCE)
+        with pytest.raises(ValueError, match="not a graded window"):
+            assert_no_tier1_successes(
+                _Client(_result([])), self._SINCE + timedelta(hours=1), scan=scan
+            )
+
+    def test_checkpoints_ask_for_the_page_size_the_scan_checks_against(self) -> None:
+        client = _SequenceClient([_result([])])
+        AuditWindowScan(self._SINCE).checkpoint(client)
+        assert client.calls[0][0] == "list_audit_events"
+        assert client.calls[0][1]["limit"] == 200

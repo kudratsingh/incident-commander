@@ -279,3 +279,80 @@ class TestResourceArgFieldsCoverage:
             if not TOOL_REGISTRY[tool].input_model.model_fields[field].is_required()
         }
         assert optional == {("get_consumer_lag", "consumer_group")}
+
+
+class TestAlertSubjectProbes:
+    """``ALERT_SUBJECT_PROBES`` is the alert-side half of ``RESOURCE_ARG_FIELDS``.
+
+    The guard in ``investigation.py`` turns an alert into "the exact probe
+    call that would read this incident's subject". That claim is only true
+    while the map's tool/argument halves still exist on the platform's own
+    tool contract — a renamed argument or a retiered tool would leave the
+    guard demanding a call nobody can make, which fails the handoff of every
+    alert in that family. These are the cross-checks that make the map's
+    docstring enforceable rather than aspirational (architecture-principles
+    rule 2: one mapping, read from both sides, with a test asserting sync).
+    """
+
+    def test_every_probe_tool_is_a_registered_read_tool(self) -> None:
+        from incident_commander.agent.investigation import ALERT_SUBJECT_PROBES
+
+        for alert_field, (tool, _arg) in ALERT_SUBJECT_PROBES.items():
+            assert tool in TOOL_REGISTRY, f"{alert_field} maps to unknown tool {tool}"
+            assert tier_of(tool) is Tier.READ, (
+                f"{alert_field} maps to {tool}, which is tier "
+                f"{tier_of(tool).value}. The subject probe must be a read: the "
+                "guard asks the planner to CALL it before remediating."
+            )
+
+    def test_every_probe_argument_exists_on_its_input_model(self) -> None:
+        from incident_commander.agent.investigation import ALERT_SUBJECT_PROBES
+
+        for alert_field, (tool, arg) in ALERT_SUBJECT_PROBES.items():
+            assert arg in TOOL_REGISTRY[tool].input_model.model_fields, (
+                f"{alert_field} maps to {tool}.{arg}, which is not an argument "
+                f"of {tool}. The refusal reason tells the planner to call it."
+            )
+
+    def test_every_probe_argument_is_a_declared_resource_field(self) -> None:
+        """The two maps must agree on what counts as naming a resource.
+
+        ``RESOURCE_ARG_FIELDS`` already decided which arguments NAME a
+        platform resource as opposed to filtering or counting. A subject
+        probe pointed at a non-resource argument (``limit``, ``since_hours``)
+        would be asking the planner to prove something about a filter.
+        """
+        from incident_commander.agent.investigation import ALERT_SUBJECT_PROBES
+
+        for alert_field, (tool, arg) in ALERT_SUBJECT_PROBES.items():
+            assert arg in RESOURCE_ARG_FIELDS[tool], (
+                f"{alert_field} maps to {tool}.{arg}, which RESOURCE_ARG_FIELDS "
+                f"does not classify as resource-naming ({sorted(RESOURCE_ARG_FIELDS[tool])})."
+            )
+
+    def test_the_alert_fields_are_drawn_from_the_known_alert_vocabulary(self) -> None:
+        """No invented alert keys.
+
+        ``tests/unit/test_scenario_alert_premise.py`` pins the vocabulary the
+        corpus actually uses; a subject field outside it is a guess about a
+        payload shape nothing produces, and it would sit inert forever.
+        """
+        from incident_commander.agent.investigation import ALERT_SUBJECT_PROBES
+
+        known = {
+            "fingerprint",
+            "group",
+            "consumer_group",
+            "service",
+            "summary",
+            "queue",
+            "job_id",
+            "job_type",
+            "cache_key",
+            "trace_id",
+        }
+        assert set(ALERT_SUBJECT_PROBES) <= known, (
+            f"unknown alert field(s): {sorted(set(ALERT_SUBJECT_PROBES) - known)}. "
+            "Add them to _NON_WEBHOOK_ALERT_FIELDS in test_scenario_alert_premise.py "
+            "first — an alert key no scenario carries cannot be exercised."
+        )

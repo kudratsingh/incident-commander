@@ -22,12 +22,12 @@ canned_tool_responses:
   # "extreme" end of the lag scenarios, which is the whole subject. The
   # recorded 2500000 was 25x anything the platform can report.
   #
-  # Note for the reader: `expected_evidence_fields.at_least` below is 100000,
-  # which the corrected value now meets exactly rather than clearing by a
-  # wide margin. Left as-is deliberately — the assertion still passes (`>=`)
-  # and it is the honest threshold for "extreme" against this fixture pack —
-  # but any future reduction of the seeded lag breaks it, where before it had
-  # 2.4M of slack hiding that coupling.
+  # The floor below is 50000, half the seeded value. It used to be 100000 —
+  # exactly the seeded lag, zero margin — so the scenario graded on an
+  # equality dressed up as a threshold: one downward tick of the seed, or a
+  # live group reading slightly under its static value, and a correct agent
+  # goes red for a fixture change. 50000 keeps the premise (nothing else in
+  # the pack comes close to it) and restores the headroom a `>=` is for.
   get_consumer_lag:
     content:
     - type: text
@@ -75,10 +75,11 @@ expectation:
   - shipping-consumer
   # The extreme reading itself. `cache_key` was satisfied by any reading at
   # all, including a healthy zero, so the "extreme" in the name had no
-  # mechanism behind it. Floored well under the canned 2,500,000 so a live
-  # backlog that is merely enormous still grades green.
+  # mechanism behind it. Floored at half the seeded 100000 so a live backlog
+  # that is merely enormous still grades green — see the fixture note above
+  # for why the floor is not the seed.
   expected_evidence_fields:
   - tools: [get_consumer_lag]
     field: lag
-    at_least: 100000
+    at_least: 50000
   max_tool_calls: 10

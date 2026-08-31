@@ -34,6 +34,7 @@ from evals.graders.deterministic import (
 )
 from evals.graders.llm_judge import JudgeScore, judge_briefing
 from evals.guards import (
+    AuditWindowScan,
     PrincipalGuardError,
     assert_chaos_capable_principal,
     assert_no_tier1_successes,
@@ -1541,16 +1542,44 @@ def main() -> int:
     if trace_dir is not None:
         (target / "traces").mkdir(exist_ok=False)
 
-    report, trajectories, briefings = run_all(
-        scenarios,
-        settings,
-        mcp_token=mcp_token,
-        invocation_id=invocation_id,
-        only_patterns=tuple(only_patterns),
-        on_result=lambda result: archive_scenario(
-            target, result, invocation_id=invocation_id, trace_dir=trace_dir
-        ),
-    )
+    # The post-stage audit assertion below can only ever see the newest 200
+    # rows: list_audit_events has no offset and no created_after (verified
+    # against the pinned platform — `offset` is refused -32602
+    # extra_forbidden), so rows that scroll past the cap are unreachable the
+    # moment the stage ends. The one window the guard CAN cover is the one
+    # it watches while it happens, so the scan takes a page after every
+    # scenario and the assertion consumes the union. Without this a smoke
+    # stage louder than 200 `agent.tool_invoked` rows exits 5 as
+    # "inconclusive" — a false red on a paid run, masking the real result.
+    audit_scan = AuditWindowScan(stage_started_at) if guard_required else None
+    scan_client = make_client(settings, token=mcp_token) if guard_required else None
+
+    def _after_scenario(result: ScenarioResult) -> None:
+        archive_scenario(target, result, invocation_id=invocation_id, trace_dir=trace_dir)
+        if audit_scan is None or scan_client is None:
+            return
+        try:
+            audit_scan.checkpoint(scan_client)
+        except Exception as err:  # noqa: BLE001 — a checkpoint is best-effort
+            # Not fatal: the assertion is the post-stage read, and a missed
+            # checkpoint only narrows coverage, which fails closed on its
+            # own. Printed rather than swallowed so a systematically broken
+            # checkpoint is visible instead of quietly degrading the guard
+            # back to one page.
+            print(f"post-stage audit checkpoint skipped ({type(err).__name__}: {err})")
+
+    try:
+        report, trajectories, briefings = run_all(
+            scenarios,
+            settings,
+            mcp_token=mcp_token,
+            invocation_id=invocation_id,
+            only_patterns=tuple(only_patterns),
+            on_result=_after_scenario,
+        )
+    finally:
+        if scan_client is not None:
+            scan_client.close()
     ran_names = [o.scenario for o in report.outcomes]
     # The per-scenario archive writes already happened, inside run_all.
     # report.json goes down next — the completion marker, and the last write
@@ -1595,7 +1624,10 @@ def main() -> int:
             audit_client = make_client(settings, token=mcp_token)
             try:
                 assert_no_tier1_successes(
-                    audit_client, stage_started_at, principal_ids=principal_ids
+                    audit_client,
+                    stage_started_at,
+                    principal_ids=principal_ids,
+                    scan=audit_scan,
                 )
             finally:
                 audit_client.close()

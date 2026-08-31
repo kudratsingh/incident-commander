@@ -95,6 +95,12 @@ _TIER_1_TOOLS: Final[frozenset[str]] = tools_at_or_below(Tier.TIER_1) - tools_at
 # (ListAuditEventsInput.limit is le=200), not a tuning choice.
 _AUDIT_PAGE_LIMIT: Final[int] = 200
 
+# Memory ceiling on one stage's accumulated in-window rows. Not a tuning
+# knob: a read-only stage that produces 2000 audit rows is anomalous on
+# its face, so hitting this reports inconclusive rather than silently
+# grading a partial merge clean.
+_AUDIT_SCAN_ROW_CAP: Final[int] = 2000
+
 
 class PrincipalGuardError(RuntimeError):
     """The effective principal is not the one the run requires."""
@@ -282,11 +288,162 @@ def _assert_scope_carried(
     )
 
 
+class AuditWindowScan:
+    """The union of every audit page read across one stage.
+
+    ``list_audit_events`` has no ``offset`` and no ``created_after``. The
+    live v0.6.0 ``inputSchema`` declares ``additionalProperties: false``
+    over exactly four filters (``action``, ``action_prefix``,
+    ``principal_type``, ``limit``), and sending ``offset`` anyway is
+    refused ``-32602 extra_forbidden`` — verified against the pinned stack,
+    not inferred. The tool in this platform that *does* page is
+    ``list_dlq_messages`` (its description carries the ``PAGING:`` note and
+    its schema carries ``offset``); the audit log is not it. So rows older
+    than the newest 200 are unreachable **after the fact**, and no
+    post-stage loop can recover them.
+
+    What IS reachable is the same window read repeatedly *while the stage
+    runs*. Two pages compose into one contiguous scan whenever the newer
+    page reaches back to at least the read time of the older one, and far
+    fewer than 200 matching rows land between two consecutive scenarios in
+    any run this repo produces. Checkpointing per scenario therefore covers
+    a window that a single post-stage page cannot — no platform change, no
+    new scope, no hand-edited snapshot.
+
+    Coverage is tracked as the interval ``[_covered_from, _covered_upto]``,
+    extended checkpoint by checkpoint:
+
+    * A page the server did not truncate (its ``total`` equals what came
+      back **and** the page is off the cap) holds every row matching the
+      filter, so it proves coverage of all time and latches ``_complete``.
+    * A truncated page whose oldest row reaches back to ``_covered_upto``
+      extends the interval forward.
+    * A truncated page that does **not** reach back is a GAP: rows fell
+      between the two reads that neither page can return, so coverage
+      restarts at that page's oldest row rather than pretending the hole
+      was scanned.
+
+    Both bounds are read off the ROWS, never off a clock. Coverage is a
+    claim about what the audit log contains, and the only evidence for it
+    is the rows themselves; stamping ``datetime.now()`` would quietly make
+    the guard depend on the runner and the platform agreeing about the
+    time, which is a second mechanism to get wrong.
+    """
+
+    def __init__(self, since: datetime) -> None:
+        self.since = since
+        self.checkpoints = 0
+        # Only in-window rows are retained: a row older than ``since`` can
+        # never be a violation, and its timestamp has already done its one
+        # job (extending coverage) by the time it is dropped.
+        self._rows: dict[str, AuditEventEntry] = {}
+        self._covered_from: datetime | None = None
+        self._covered_upto: datetime | None = None
+        self._complete = False
+        self._overflowed = False
+        self._last_page: tuple[int, int] = (0, 0)
+
+    def checkpoint(self, client: MCPClientProtocol) -> None:
+        """Read one page and fold it into the scan. Raises what the client raises."""
+        result = client.call_tool(
+            "list_audit_events",
+            {
+                "action": "agent.tool_invoked",
+                "principal_type": "service_account",
+                "limit": _AUDIT_PAGE_LIMIT,
+            },
+        )
+        total, events = _parse_events(result)
+        self.checkpoints += 1
+        self._last_page = (len(events), total)
+        self._merge(events)
+        # The server's ``total`` is a COUNT over the same filter with no
+        # limit (platform ``repositories/audit.py:86``), so ``total >
+        # len(events)`` is the server itself saying it withheld rows —
+        # honest even if the page cap ever moves off 200.
+        if not (total > len(events) or len(events) >= _AUDIT_PAGE_LIMIT):
+            self._complete = True
+            return
+        if not events:
+            # Truncated but empty is incoherent; claim nothing.
+            return
+        page_oldest = min(e.created_at for e in events)
+        page_newest = max(e.created_at for e in events)
+        if self._covered_upto is not None and page_oldest <= self._covered_upto:
+            self._covered_upto = max(self._covered_upto, page_newest)
+        else:
+            # More than a page of rows landed since the last checkpoint, so
+            # the rows between them are gone for good. Coverage restarts
+            # here rather than spanning the hole.
+            self._covered_from = page_oldest
+            self._covered_upto = page_newest
+
+    def _merge(self, events: list[AuditEventEntry]) -> None:
+        for event in events:
+            if event.created_at < self.since:
+                continue
+            if event.id in self._rows:
+                continue
+            if len(self._rows) >= _AUDIT_SCAN_ROW_CAP:
+                self._overflowed = True
+                continue
+            self._rows[event.id] = event
+
+    @property
+    def fully_scanned(self) -> bool:
+        """Is every row in ``[since, last read]`` accounted for?"""
+        if self._overflowed:
+            return False
+        if self._complete:
+            return True
+        return self._covered_from is not None and self._covered_from < self.since
+
+    def violations(self, principal_ids: Collection[str] | None = None) -> list[AuditEventEntry]:
+        """In-window Tier-1 successes owned by ``principal_ids``, oldest first."""
+        owned = frozenset(str(p) for p in principal_ids) if principal_ids else None
+        return sorted(
+            (
+                e
+                for e in self._rows.values()
+                if _tool_of(e) in _TIER_1_TOOLS
+                and _outcome_of(e) == "success"
+                and e.created_at >= self.since
+                and (owned is None or str(e.principal_id) in owned)
+            ),
+            key=lambda e: e.created_at,
+        )
+
+    def inconclusive_reason(self) -> str:
+        returned, total = self._last_page
+        if self._overflowed:
+            return (
+                f"post-stage audit inconclusive: the scan retained the cap of "
+                f"{_AUDIT_SCAN_ROW_CAP} in-window audit rows across "
+                f"{self.checkpoints} checkpoint(s) and stopped merging, so rows "
+                "it dropped may hold Tier-1 successes. A stage this loud is "
+                "itself the finding — treating as a failure."
+            )
+        covered = (
+            "nothing" if self._covered_from is None else f"back to {self._covered_from.isoformat()}"
+        )
+        return (
+            f"post-stage audit inconclusive: the stage window since "
+            f"{self.since.isoformat()} was not fully scanned. The last page is "
+            f"saturated ({returned} of {total} matching row(s) returned, cap "
+            f"{_AUDIT_PAGE_LIMIT}) and the {self.checkpoints} checkpoint(s) taken "
+            f"across the stage cover {covered}, still inside the window. "
+            "list_audit_events exposes no offset and no created_after, so rows "
+            "the tool cannot return may hold Tier-1 successes — treating as a "
+            "failure."
+        )
+
+
 def assert_no_tier1_successes(
     client: MCPClientProtocol,
     since: datetime,
     *,
     principal_ids: Collection[str] | None = None,
+    scan: AuditWindowScan | None = None,
 ) -> list[AuditEventEntry]:
     """Fail if the platform audit records any successful Tier-1 call since ``since``.
 
@@ -304,20 +461,27 @@ def assert_no_tier1_successes(
     it must be BOTH ids: the F-001 failure mode is the stage silently
     holding the FULL token, and those rows carry the AGENT principal.
 
+    ``scan`` is an ``AuditWindowScan`` the caller has been checkpointing
+    during the stage. Pass one and this call contributes the final page to
+    a window that is already largely covered; omit it and the assertion
+    degrades to exactly what it was before — a single post-stage page,
+    which for any stage louder than 200 matching rows is inconclusive by
+    construction. The runner passes one.
+
     Returns the offending rows (empty on success) so callers can report
     them; raises ``PrincipalGuardError`` when any are found, or when the
-    page cannot prove it covered the whole window (``_window_fully_scanned``).
+    scan cannot prove it covered the whole window.
     """
-    try:
-        result = client.call_tool(
-            "list_audit_events",
-            {
-                "action": "agent.tool_invoked",
-                "principal_type": "service_account",
-                "limit": _AUDIT_PAGE_LIMIT,
-            },
+    if scan is None:
+        scan = AuditWindowScan(since)
+    elif scan.since != since:
+        raise ValueError(
+            f"scan covers {scan.since.isoformat()} but the assertion was asked "
+            f"about {since.isoformat()}; a window graded against the wrong "
+            "start is not a graded window."
         )
-        total, events = _parse_events(result)
+    try:
+        scan.checkpoint(client)
     except PrincipalGuardError:
         raise
     except Exception as err:  # noqa: BLE001 — fail closed, deliberately
@@ -328,30 +492,14 @@ def assert_no_tier1_successes(
             f"({type(err).__name__}: {err}); treating as a failure — an "
             "unverifiable stage is not a clean stage."
         ) from err
-    owned = frozenset(str(p) for p in principal_ids) if principal_ids else None
-    violations = [
-        e
-        for e in events
-        if _tool_of(e) in _TIER_1_TOOLS
-        and _outcome_of(e) == "success"
-        and e.created_at >= since
-        and (owned is None or str(e.principal_id) in owned)
-    ]
-    if not _window_fully_scanned(total, events, since):
-        # A-13: the page came back truncated, so the rows we could not
-        # fetch may hold the very successes this assertion exists to
-        # catch. Inconclusive is a failure, exactly like an unreadable
-        # audit — but anything already visible is the more actionable
-        # signal and is named here rather than swallowed.
-        raise PrincipalGuardError(
-            f"post-stage audit inconclusive: the audit page is saturated "
-            f"({len(events)} of {total} matching row(s) returned, cap "
-            f"{_AUDIT_PAGE_LIMIT}) and its oldest row is still inside the "
-            "stage window, so rows the tool cannot return may hold Tier-1 "
-            "successes. list_audit_events exposes no offset and no "
-            "created_after, so the window cannot be paged — treating as a "
-            f"failure.{_visible_suffix(violations)}"
-        )
+    violations = scan.violations(principal_ids)
+    if not scan.fully_scanned:
+        # A-13: the window is not covered, so the rows we could not fetch
+        # may hold the very successes this assertion exists to catch.
+        # Inconclusive is a failure, exactly like an unreadable audit — but
+        # anything already visible is the more actionable signal and is
+        # named here rather than swallowed.
+        raise PrincipalGuardError(scan.inconclusive_reason() + _visible_suffix(violations))
     if violations:
         raise PrincipalGuardError(
             f"read-only stage executed {len(violations)} successful Tier-1 "
@@ -359,32 +507,6 @@ def assert_no_tier1_successes(
             "Read-only means read-only."
         )
     return violations
-
-
-def _window_fully_scanned(
-    total: int,
-    events: list[AuditEventEntry],
-    since: datetime,
-) -> bool:
-    """Can this one page prove it saw every row in ``[since, now]``?
-
-    ``list_audit_events`` hardcodes ``offset=0`` and caps ``limit`` at 200
-    (platform ``mcp/tools/list_audit_events.py:95-96``), so there is no
-    second page to ask for — a "loop until older than since" would re-read
-    the same rows forever. What the guard CAN do is refuse to call a
-    truncated read clean.
-
-    Rows were withheld when the server's own ``total`` (a COUNT over the
-    same filter with no limit — ``repositories/audit.py:86``) exceeds what
-    it returned, or when the page sits at the cap. Rows come back
-    ``created_at DESC`` (``repositories/audit.py:100``), so once rows are
-    withheld the only proof the window is fully on the page is that the
-    page reaches back PAST ``since``.
-    """
-    withheld = total > len(events) or len(events) >= _AUDIT_PAGE_LIMIT
-    if not withheld:
-        return True
-    return bool(events) and min(e.created_at for e in events) < since
 
 
 def _summarize(violations: list[AuditEventEntry]) -> str:

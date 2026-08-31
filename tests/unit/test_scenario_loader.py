@@ -262,6 +262,12 @@ _STRUCTURED_EVIDENCE_SCENARIOS: frozenset[str] = frozenset(
         "redis_saturation",
         "remediate_verify_fails",
         "saga_stuck",
+        # The preflight sweep's B1.7: `expected_evidence_contains: [postgres]`
+        # was satisfied by the runner's OWN failure text for the probe, "tool
+        # error (get_postgres_health)" — the scenario graded green exactly
+        # when the reading had failed. Replaced with tool-scoped field
+        # assertions; listed here so it cannot slide back to a substring.
+        "postgres_slow",
     }
 )
 

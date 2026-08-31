@@ -8,9 +8,9 @@
     "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything"
   },
   "_counts": {
-    "recorded": 30,
-    "fixture-defect": 13,
-    "explained": 17
+    "recorded": 27,
+    "fixture-defect": 0,
+    "explained": 27
   },
   "known_drift": [
     {
@@ -18,49 +18,56 @@
       "tool": "list_active_alerts",
       "path": "alerts[].description",
       "kind": "live_only_field",
-      "context": "fixture-defect"
+      "context": "canned-only",
+      "why": "use_live_mcp is false \u2014 the platform cannot burst alerts, so the scenario never runs live and its recordings are its premise"
     },
     {
       "scenario": "alert_storm",
       "tool": "list_active_alerts",
       "path": "alerts[].extra_data",
       "kind": "live_only_field",
-      "context": "fixture-defect"
+      "context": "canned-only",
+      "why": "same scenario, same premise"
     },
     {
       "scenario": "alert_storm",
       "tool": "list_active_alerts",
       "path": "alerts[].id[]",
       "kind": "not_live_reachable",
-      "context": "fixture-defect"
+      "context": "canned-only",
+      "why": "same scenario, same premise: the fabricated a1..a5 ids name alerts the platform never fired"
     },
     {
       "scenario": "alert_storm",
       "tool": "list_active_alerts",
       "path": "alerts[].source[]",
       "kind": "not_live_reachable",
-      "context": "fixture-defect"
+      "context": "canned-only",
+      "why": "same scenario, same premise: the storm's five sources are invented"
     },
     {
       "scenario": "alert_storm",
       "tool": "list_active_alerts",
       "path": "total",
       "kind": "value",
-      "context": "fixture-defect"
+      "context": "canned-only",
+      "why": "same scenario, same premise: the live platform holds three steady active alerts, not a storm of five"
     },
     {
       "scenario": "alert_storm",
       "tool": "list_audit_events",
       "path": "events[]",
       "kind": "no_live_rows",
-      "context": "fixture-defect"
+      "context": "canned-only",
+      "why": "same scenario, same premise: the deploy.completed event the storm correlates to is part of the invented narrative"
     },
     {
       "scenario": "alert_storm",
       "tool": "list_audit_events",
       "path": "total",
       "kind": "value",
-      "context": "fixture-defect"
+      "context": "canned-only",
+      "why": "same scenario, same premise: the audit total counts events from that invented narrative"
     },
     {
       "scenario": "consumer_lag_high",
@@ -89,74 +96,50 @@
     {
       "scenario": "remediate_runaway_saga_success",
       "tool": "get_dag_state",
-      "path": "edges[].from_id[]",
-      "kind": "not_live_reachable",
-      "context": "canned-only",
-      "why": "same scenario, same premise: the chain it draws exists in no live DAG"
+      "path": "edges",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no edges at all \u2014 the dependency edges between them"
     },
     {
       "scenario": "remediate_runaway_saga_success",
       "tool": "get_dag_state",
-      "path": "edges[].to_id[]",
-      "kind": "not_live_reachable",
-      "context": "canned-only",
-      "why": "same scenario, same premise: the chain it draws exists in no live DAG"
-    },
-    {
-      "scenario": "remediate_runaway_saga_success",
-      "tool": "get_dag_state",
-      "path": "nodes[].id[]",
-      "kind": "not_live_reachable",
-      "context": "canned-only",
-      "why": "use_live_mcp is false \u2014 the scenario never runs live, so its recordings are its premise rather than a recording of anything"
-    },
-    {
-      "scenario": "remediate_runaway_saga_success",
-      "tool": "get_dag_state",
-      "path": "nodes[].retry_count[]",
-      "kind": "not_live_reachable",
-      "context": "canned-only",
-      "why": "same scenario, same premise: nothing live retries these nodes"
-    },
-    {
-      "scenario": "remediate_runaway_saga_success",
-      "tool": "get_dag_state",
-      "path": "nodes[].status[]",
-      "kind": "not_live_reachable",
-      "context": "canned-only",
-      "why": "same scenario, same premise: the seeded DAG auto-completes, so a runaway chain's statuses cannot be read live"
-    },
-    {
-      "scenario": "remediate_runaway_saga_success",
-      "tool": "get_dag_state",
-      "path": "nodes[].type[]",
-      "kind": "not_live_reachable",
-      "context": "canned-only",
-      "why": "same scenario, same premise: the saga node types it describes exist in no live DAG"
+      "path": "nodes",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no nodes at all \u2014 the completed upstream, the dead_letter root, and the waiting descendant"
     },
     {
       "scenario": "remediate_runaway_saga_success",
       "tool": "get_dag_state",
       "path": "paused",
-      "kind": "value",
-      "context": "post-action",
-      "why": "element [1] is the post-pause_dag verify probe; the check probes the un-acted-on world, where the DAG is not paused"
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused at all \u2014 the chain's pause flag"
     },
     {
       "scenario": "remediate_runaway_saga_success",
       "tool": "get_dag_state",
       "path": "paused_by",
-      "kind": "value",
-      "context": "post-action",
-      "why": "same element, same pause: nothing has paused the live DAG, so it names no pauser"
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_by at all \u2014 the pause's holder"
     },
     {
       "scenario": "remediate_runaway_saga_success",
       "tool": "get_dag_state",
       "path": "paused_expires_in_seconds",
-      "kind": "value",
-      "context": "post-action",
-      "why": "same element, same pause: the live DAG holds no pause, so its TTL is null rather than the fixture's remaining seconds"
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_expires_in_seconds at all \u2014 the pause's countdown"
+    },
+    {
+      "scenario": "remediate_runaway_saga_success",
+      "tool": "get_dag_state",
+      "path": "seed_id",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no seed_id at all \u2014 the root job id the chain is named for"
     },
     {
       "scenario": "remediate_verify_fails",
@@ -169,44 +152,50 @@
     {
       "scenario": "saga_stuck",
       "tool": "get_dag_state",
-      "path": "edges[].from_id[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
+      "path": "edges",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no edges at all \u2014 the dependency edges between them"
     },
     {
       "scenario": "saga_stuck",
       "tool": "get_dag_state",
-      "path": "edges[].to_id[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
+      "path": "nodes",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no nodes at all \u2014 the completed upstream, the dead_letter root, and the waiting descendant"
     },
     {
       "scenario": "saga_stuck",
       "tool": "get_dag_state",
-      "path": "nodes[].id[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
+      "path": "paused",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused at all \u2014 the chain's pause flag"
     },
     {
       "scenario": "saga_stuck",
       "tool": "get_dag_state",
-      "path": "nodes[].retry_count[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
+      "path": "paused_by",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_by at all \u2014 the pause's holder"
     },
     {
       "scenario": "saga_stuck",
       "tool": "get_dag_state",
-      "path": "nodes[].status[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
+      "path": "paused_expires_in_seconds",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_expires_in_seconds at all \u2014 the pause's countdown"
     },
     {
       "scenario": "saga_stuck",
       "tool": "get_dag_state",
-      "path": "nodes[].type[]",
-      "kind": "not_live_reachable",
-      "context": "fixture-defect"
+      "path": "seed_id",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no seed_id at all \u2014 the root job id the chain is named for"
     },
     {
       "scenario": "tool_output_schema_mismatch",

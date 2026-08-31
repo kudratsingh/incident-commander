@@ -1,9 +1,9 @@
 name: saga_stuck
-description: 'A multi-step saga job has not progressed. The alert carries the seed job_id. Planner probes get_dag_state to see which node is stuck.
+description: 'A dependency chain has stopped draining. The alert carries the dead-lettered root job_id. Planner probes get_dag_state, sees a `dead_letter` root with retries exhausted holding a `waiting`
+  descendant behind it, and escalates — un-sticking it is a replay decision a human should make.
 
   '
 tags:
-- read-only
 - phase-3
 - dag
 - saga
@@ -11,16 +11,57 @@ tags:
 - live-llm
 use_live_mcp: true
 use_live_llm: true
+# Rebuilt on create_stuck_dag at the v0.6.0 pin (wave-10). The old shape —
+# a node with status `running` and retry_count>=1 — was unmanufacturable:
+# no chaos hook produced it, and the boot-seeded DAG auto-drains, so the
+# assertions could only ever be met by the fixture describing itself. This
+# hook manufactures the platform's real stuck mode instead, and the
+# assertions below are read off it.
+#
+# NOTE this moves the scenario OUT of the read-only smoke pass: declaring
+# chaos_setup makes it smoke-ineligible (evals/scenarios/schema.py
+# `smoke_eligible`; the runner refuses a --smoke selection carrying chaos,
+# exit 6) because seeding fires under the full write+chaos principal. That
+# is the honest trade — it was previously a smoke row grading a DAG that
+# did not exist.
+#
+# Its own chain_name, deliberately NOT shared with
+# remediate_runaway_saga_success: that scenario replays the root to
+# `completed`, after which create_stuck_dag refuses the drifted chain
+# (409 stuck_chain_name_in_use) rather than rebuilding it.
+chaos_setup:
+  name: create_stuck_dag
+  arguments:
+    chain_name: saga-stuck-eval
+    waiting_steps: 2
 alert:
   source: platform.dag
   severity: critical
   fingerprint: saga_stalled
-  job_id: 25220882-1820-5cd3-b09b-f866ff5823c9
+  # uuid5(cccccccc-57ac-4000-8000-000000000000,
+  #       '{tenant_id}:saga-stuck-eval:root') for the default tenant
+  # d3fa17de-7a17-de7a-17de-7a17de7a17de, which is a migration constant
+  # (platform f8a1c4e23507_multi_tenancy), so this id is the same on every
+  # stack. The namespace is published for exactly this reason — plat #184:
+  # "Fixed and documented so a scenario can precompute the ids it pins."
+  # tests/unit/test_scenario_loader.py recomputes it, so a drifted id
+  # fails offline rather than as a live precondition surprise.
+  job_id: 87f50f4d-ca7e-508e-9820-63c1a24c8f52
 canned_tool_responses:
+  # Recorded verbatim from the pinned v0.6.0 image after firing
+  # create_stuck_dag(chain_name=saga-stuck-eval, waiting_steps=2).
+  # get_dag_state traverses ONE hop each direction, so the visible chain is
+  # the completed upstream parent, the dead-lettered root, and the first
+  # waiting descendant — step-2 sits behind step-1 and is out of view.
+  # Every node carries the hook's default job_type (bulk_api_sync); the
+  # previous recording's reserve_inventory / charge_card / ship_order node
+  # types described a saga this platform never builds.
+  # Edge direction is `from_id depends on to_id`, so the root points at its
+  # parent and the descendant points at the root.
   get_dag_state:
     content:
     - type: text
-      text: '{"seed_id":"25220882-1820-5cd3-b09b-f866ff5823c9","nodes":[{"id":"n1","type":"reserve_inventory","status":"succeeded","retry_count":0,"created_at":"2026-07-28T10:00:00Z"},{"id":"n2","type":"charge_card","status":"running","retry_count":2,"created_at":"2026-07-28T10:01:00Z"},{"id":"n3","type":"ship_order","status":"pending","retry_count":0,"created_at":"2026-07-28T10:01:00Z"}],"edges":[{"from_id":"n1","to_id":"n2"},{"from_id":"n2","to_id":"n3"}],"paused":false,"paused_expires_in_seconds":null,"paused_by":null}'
+      text: '{"seed_id":"87f50f4d-ca7e-508e-9820-63c1a24c8f52","nodes":[{"id":"87f50f4d-ca7e-508e-9820-63c1a24c8f52","type":"bulk_api_sync","status":"dead_letter","retry_count":3,"created_at":"2026-08-31T01:21:46.540757Z"},{"id":"9b9fe94d-a2c5-59d2-b968-e9427908e9f2","type":"bulk_api_sync","status":"completed","retry_count":0,"created_at":"2026-08-31T01:21:46.540757Z"},{"id":"677c49dd-9901-5761-a640-f1f9bea65e04","type":"bulk_api_sync","status":"waiting","retry_count":0,"created_at":"2026-08-31T01:21:46.540757Z"}],"edges":[{"from_id":"87f50f4d-ca7e-508e-9820-63c1a24c8f52","to_id":"9b9fe94d-a2c5-59d2-b968-e9427908e9f2"},{"from_id":"677c49dd-9901-5761-a640-f1f9bea65e04","to_id":"87f50f4d-ca7e-508e-9820-63c1a24c8f52"}],"paused":false,"paused_expires_in_seconds":null,"paused_by":null}'
     is_error: false
 canned_llm_responses:
   investigation_planner:
@@ -28,47 +69,72 @@ canned_llm_responses:
     - category: runaway_saga
       name: stuck_saga_node
       confidence: 0.55
-      reasoning: 'Saga stall alert names a seed job; probe get_dag_state to find which node is not making progress.
+      reasoning: 'Chain-stalled alert names a root job; probe get_dag_state to find which node stopped the chain.
 
         '
     next_action:
       kind: probe
       tool_name: get_dag_state
       arguments:
-        job_id: 25220882-1820-5cd3-b09b-f866ff5823c9
+        job_id: 87f50f4d-ca7e-508e-9820-63c1a24c8f52
   - hypotheses:
     - category: runaway_saga
       name: stuck_saga_node
       confidence: 0.85
-      reasoning: "charge_card node is running with 2 retries while downstream ship_order waits \u2014 payment dependency is failing.\n"
+      reasoning: "The root is in dead_letter with retry_count=3 — retries exhausted, and dead_letter is terminal — while its descendant sits in waiting. The resolver promotes a child only when every parent is completed, so this chain will not drain on its own.\n"
     next_action:
       kind: stop
-      reason: stuck node identified; human should decide compensation policy
+      reason: dead-lettered root is holding the chain; a human should decide whether replaying it is safe
   briefing_writer:
-  - findings: 'The saga''s charge_card node has retried twice and is holding up the downstream ship_order node. reserve_inventory succeeded first.
+  - findings: 'The chain''s root job is dead-lettered after exhausting its three retries, and the descendant behind it is still waiting. The upstream parent completed normally, so the failure is isolated
+      to the root. Because dead_letter is terminal and the resolver only promotes a child whose parents have all completed, nothing will move this chain without intervention.
 
       '
-    recommendation: 'Check payment gateway health; if the failure is external, kick off the saga''s compensation flow to release the reserved inventory.
+    recommendation: 'Read the root''s error_message to decide whether the failure is transient. If it is, replaying the root with replay_dlq_by_ids un-sticks the whole chain — the replayed root completes
+      and the resolver promotes the held descendants. If it is not, the waiting descendants should be cancelled rather than left pending indefinitely.
 
       '
   briefing_judge:
   - groundedness: 0.9
     actionability: 0.85
-    reasoning: 'Findings walk through the DAG state accurately; recommendation names both a diagnostic step and a corrective action.
+    reasoning: 'Findings state the observed statuses and the platform rule that makes them terminal; recommendation names the concrete un-stick path and the condition under which it applies.
 
       '
 expectation:
   name: saga_stuck
   expected_terminal_state: escalated
-  # `seed_id` and `nodes` are both keys get_dag_state always emits, so the
-  # pair asserted only that the DAG probe ran. The scenario is about a saga
-  # that is stuck retrying: assert a node the agent actually read is in that
-  # state. Any-row semantics, so node order does not matter.
+  # The scenario is about a chain that cannot drain. Assert the two halves
+  # of that shape the agent actually read: a dead-lettered root, and a
+  # descendant still waiting behind it. The previous pair asserted
+  # `nodes[].status == running` and `retry_count >= 1`, which no chaos hook
+  # could produce — `running` is not a status any node in a stuck chain
+  # holds. retry_count survives the redesign because create_stuck_dag
+  # stamps retry_count=3 on the root (retries exhausted), so it is now a
+  # real reading rather than a fixture describing itself.
+  # Any-row semantics, so node order does not matter.
   expected_evidence_fields:
   - tools: [get_dag_state]
     field: nodes[].status
-    equals: running
+    equals: dead_letter
+  - tools: [get_dag_state]
+    field: nodes[].status
+    equals: waiting
   - tools: [get_dag_state]
     field: nodes[].retry_count
     at_least: 1
   max_tool_calls: 11
+# The premise: the stuck chain is really there, in the shape the
+# assertions above read. Catches a chaos_setup that silently did nothing
+# and a chain left drifted (replayed, paused) by an earlier run — either
+# would otherwise grade the agent against a world nobody manufactured.
+expected_precondition:
+- tool: get_dag_state
+  arguments:
+    job_id: 87f50f4d-ca7e-508e-9820-63c1a24c8f52
+  expect:
+  - path: nodes[].status
+    equals: dead_letter
+  - path: nodes[].status
+    equals: waiting
+  - path: paused
+    equals: false

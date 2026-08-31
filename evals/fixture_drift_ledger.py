@@ -68,94 +68,154 @@ _JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
         "poison_message adds a dead-letter row, so the canned total counts a "
         "row the un-faulted world has not produced yet",
     ),
-    # The three below are one mechanism, not three defects. `get_dag_state`
-    # is a SEQUENCED fixture: element 0 is the investigation probe reading an
-    # unpaused DAG, element 1 is the verify probe reading the DAG back after
-    # the agent's own pause_dag call. The drift check probes a world in which
-    # no agent has acted, so element 1's three pause fields cannot match, and
-    # no edit to the fixture can make them: a verify recording that showed
-    # paused=false would be a recording of the remediation failing. They were
-    # counted as work until the comparison learned to say which element it
-    # meant — three entries on a burn-down list that could never be burnt
-    # down.
-    ("remediate_runaway_saga_success", "get_dag_state", "paused", "value"): (
-        POST_ACTION,
-        "element [1] is the post-pause_dag verify probe; the check probes the "
-        "un-acted-on world, where the DAG is not paused",
+    # The `get_dag_state` recordings for the two saga scenarios are one
+    # mechanism. Both scenarios now seed their own chain with the
+    # `create_stuck_dag` chaos hook (wave-10, on the v0.6.0 pin), and the
+    # chain's ids are uuid5-derived from the chain_name, so they exist ONLY
+    # after that hook has fired. The drift check probes a world in which no
+    # chaos has been seeded, where those ids do not resolve at all — the
+    # platform answers `job not found` — so the whole response is absent and
+    # each of the fixture's six top-level keys reads as `canned_only_field`.
+    # That is the same post-fault shape already recorded for kill_consumer's
+    # lag and poison_message's DLQ total: the scenario seeds a fault, the
+    # check probes the un-faulted world.
+    #
+    # These twelve replace twelve older keys (the `not_live_reachable` rows
+    # under `nodes[].*` / `edges[].*`), which were six `canned-only`
+    # (runaway_saga, whose flags were false) and six `fixture-defect`
+    # (saga_stuck, counted as work). Neither reading survives the rebuild:
+    # the scenarios DO run live now, so "its premise rather than a
+    # recording" is no longer true, and the recordings are verbatim from the
+    # seeded world, so they are not defects either. The block that said "if
+    # a chaos hook that seeds a genuinely stuck DAG ever lands and the
+    # scenario's flags flip back, these become real work again and this
+    # block is what has to be removed first" is what this replaces — the
+    # hook landed.
+    #
+    # The key SHAPE changed because the probe changed with it: a fixture
+    # whose entity does not exist yet used to be dropped from the walk as an
+    # unreachable probe error, which left its entries permanently stale and
+    # permanently undeletable (see evals/fixture_probe.py). It is now
+    # compared against an empty live response instead, which is what keeps
+    # these recorded, classified, and discharge-able.
+    ("remediate_runaway_saga_success", "get_dag_state", "seed_id", "canned_only_field"): (
+        POST_FAULT,
+        "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from "
+        "the chain_name, so the un-faulted world the check probes answers "
+        "'job not found' and carries no seed_id at all — the root job id the chain is named for",
     ),
-    ("remediate_runaway_saga_success", "get_dag_state", "paused_by", "value"): (
-        POST_ACTION,
-        "same element, same pause: nothing has paused the live DAG, so it names no pauser",
+    ("remediate_runaway_saga_success", "get_dag_state", "nodes", "canned_only_field"): (
+        POST_FAULT,
+        "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from "
+        "the chain_name, so the un-faulted world the check probes answers "
+        "'job not found' and carries no nodes at all — the completed "
+        "upstream, the dead_letter root, and the waiting descendant",
+    ),
+    ("remediate_runaway_saga_success", "get_dag_state", "edges", "canned_only_field"): (
+        POST_FAULT,
+        "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from "
+        "the chain_name, so the un-faulted world the check probes answers "
+        "'job not found' and carries no edges at all — the dependency edges between them",
+    ),
+    ("remediate_runaway_saga_success", "get_dag_state", "paused", "canned_only_field"): (
+        POST_FAULT,
+        "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from "
+        "the chain_name, so the un-faulted world the check probes answers "
+        "'job not found' and carries no paused at all — the chain's pause flag",
+    ),
+    ("remediate_runaway_saga_success", "get_dag_state", "paused_by", "canned_only_field"): (
+        POST_FAULT,
+        "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from "
+        "the chain_name, so the un-faulted world the check probes answers "
+        "'job not found' and carries no paused_by at all — the pause's holder",
     ),
     (
         "remediate_runaway_saga_success",
         "get_dag_state",
         "paused_expires_in_seconds",
-        "value",
+        "canned_only_field",
     ): (
-        POST_ACTION,
-        "same element, same pause: the live DAG holds no pause, so its TTL is "
-        "null rather than the fixture's remaining seconds",
+        POST_FAULT,
+        "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from "
+        "the chain_name, so the un-faulted world the check probes answers "
+        "'job not found' and carries no paused_expires_in_seconds at all — the pause's countdown",
     ),
-    # remediate_runaway_saga_success is `use_live_mcp: false`, and its own
-    # header says why: the fault is unmanufacturable live, because the seeded
-    # DAG auto-completes seconds after boot and no chaos hook builds a
-    # runaway chain (BUILD_PLAN 2.2). The runner refuses to select it under
-    # --live. So its get_dag_state recording is the scenario's PREMISE, not a
-    # recording of anything -- the same mechanism already recorded for
-    # remediate_verify_fails below, and the same one its three pause fields
-    # are already excused under as post-action.
-    #
-    # These six sat on the burn-down list as defects for the whole campaign
-    # and could never have come off it: there is no live reading for a
-    # canned-only scenario to be corrected TOWARDS. That is the exact failure
-    # the post-action note below describes ("three entries on a burn-down
-    # list that could never be burnt down"), one layer out.
-    #
-    # They stay recorded and visible with a reason rather than being deleted.
-    # If a chaos hook that seeds a genuinely stuck DAG ever lands and the
-    # scenario's flags flip back, these become real work again and this block
-    # is what has to be removed first.
-    ("remediate_runaway_saga_success", "get_dag_state", "nodes[].id[]", "not_live_reachable"): (
-        CANNED_ONLY,
-        "use_live_mcp is false — the scenario never runs live, so its "
-        "recordings are its premise rather than a recording of anything",
+    ("saga_stuck", "get_dag_state", "seed_id", "canned_only_field"): (
+        POST_FAULT,
+        "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from "
+        "the chain_name, so the un-faulted world the check probes answers "
+        "'job not found' and carries no seed_id at all — the root job id the chain is named for",
     ),
-    ("remediate_runaway_saga_success", "get_dag_state", "nodes[].type[]", "not_live_reachable"): (
-        CANNED_ONLY,
-        "same scenario, same premise: the saga node types it describes exist in no live DAG",
+    ("saga_stuck", "get_dag_state", "nodes", "canned_only_field"): (
+        POST_FAULT,
+        "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from "
+        "the chain_name, so the un-faulted world the check probes answers "
+        "'job not found' and carries no nodes at all — the completed "
+        "upstream, the dead_letter root, and the waiting descendant",
     ),
-    (
-        "remediate_runaway_saga_success",
-        "get_dag_state",
-        "nodes[].status[]",
-        "not_live_reachable",
-    ): (
-        CANNED_ONLY,
-        "same scenario, same premise: the seeded DAG auto-completes, so a "
-        "runaway chain's statuses cannot be read live",
+    ("saga_stuck", "get_dag_state", "edges", "canned_only_field"): (
+        POST_FAULT,
+        "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from "
+        "the chain_name, so the un-faulted world the check probes answers "
+        "'job not found' and carries no edges at all — the dependency edges between them",
     ),
-    (
-        "remediate_runaway_saga_success",
-        "get_dag_state",
-        "nodes[].retry_count[]",
-        "not_live_reachable",
-    ): (
-        CANNED_ONLY,
-        "same scenario, same premise: nothing live retries these nodes",
+    ("saga_stuck", "get_dag_state", "paused", "canned_only_field"): (
+        POST_FAULT,
+        "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from "
+        "the chain_name, so the un-faulted world the check probes answers "
+        "'job not found' and carries no paused at all — the chain's pause flag",
     ),
-    (
-        "remediate_runaway_saga_success",
-        "get_dag_state",
-        "edges[].from_id[]",
-        "not_live_reachable",
-    ): (
-        CANNED_ONLY,
-        "same scenario, same premise: the chain it draws exists in no live DAG",
+    ("saga_stuck", "get_dag_state", "paused_by", "canned_only_field"): (
+        POST_FAULT,
+        "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from "
+        "the chain_name, so the un-faulted world the check probes answers "
+        "'job not found' and carries no paused_by at all — the pause's holder",
     ),
-    ("remediate_runaway_saga_success", "get_dag_state", "edges[].to_id[]", "not_live_reachable"): (
+    ("saga_stuck", "get_dag_state", "paused_expires_in_seconds", "canned_only_field"): (
+        POST_FAULT,
+        "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from "
+        "the chain_name, so the un-faulted world the check probes answers "
+        "'job not found' and carries no paused_expires_in_seconds at all — the pause's countdown",
+    ),
+    # alert_storm went the other way at wave-10: it is `use_live_mcp: false`
+    # now, because the pinned platform cannot burst alerts. Alerts have three
+    # producers (the bad_deploy chaos hook, the SLO fast-burn loop, the boot
+    # seed) and none of them emits more than one at a time, so a storm is
+    # unmanufacturable and the scenario's five-alert recording is its premise
+    # rather than a recording of anything. These seven were counted as work
+    # for the whole campaign and could never have come off the list: there is
+    # no live reading for a canned-only scenario to be corrected towards.
+    ("alert_storm", "list_active_alerts", "alerts[].description", "live_only_field"): (
         CANNED_ONLY,
-        "same scenario, same premise: the chain it draws exists in no live DAG",
+        "use_live_mcp is false — the platform cannot burst alerts, so the "
+        "scenario never runs live and its recordings are its premise",
+    ),
+    ("alert_storm", "list_active_alerts", "alerts[].extra_data", "live_only_field"): (
+        CANNED_ONLY,
+        "same scenario, same premise",
+    ),
+    ("alert_storm", "list_active_alerts", "alerts[].id[]", "not_live_reachable"): (
+        CANNED_ONLY,
+        "same scenario, same premise: the fabricated a1..a5 ids name alerts "
+        "the platform never fired",
+    ),
+    ("alert_storm", "list_active_alerts", "alerts[].source[]", "not_live_reachable"): (
+        CANNED_ONLY,
+        "same scenario, same premise: the storm's five sources are invented",
+    ),
+    ("alert_storm", "list_active_alerts", "total", "value"): (
+        CANNED_ONLY,
+        "same scenario, same premise: the live platform holds three steady "
+        "active alerts, not a storm of five",
+    ),
+    ("alert_storm", "list_audit_events", "events[]", "no_live_rows"): (
+        CANNED_ONLY,
+        "same scenario, same premise: the deploy.completed event the storm "
+        "correlates to is part of the invented narrative",
+    ),
+    ("alert_storm", "list_audit_events", "total", "value"): (
+        CANNED_ONLY,
+        "same scenario, same premise: the audit total counts events from that invented narrative",
     ),
     ("remediate_verify_fails", "get_consumer_lag", "lag", "value"): (
         CANNED_ONLY,

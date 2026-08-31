@@ -78,7 +78,7 @@ between — the full protocol is below.
 
 Trace files land in `evals/traces/*.jsonl`; the formatter turns them into readable stepwise trajectories in `evals/reports/human/*.txt`.
 
-**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 38 (~31 live: 25 read-only, 6 remediation) is ~$1.70 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
+**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 38 (~32 live: 24 read-only, 8 remediation) is ~$1.70 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
 
 **Side effects:** remediation scenarios fire real Tier-1 mutations against the platform. Idempotent — repeat runs with the same `(incident_id, tool, args)` hash return the cached result. But the *first* run of a scenario does apply changes.
 
@@ -164,14 +164,41 @@ make eval-smoke
 make eval-live ONLY=remediate_consumer_lag_success && make eval-reset
 make eval-live ONLY=remediate_dlq_backlog_success  && make eval-reset
 
-# remediate_stale_cache_success, remediate_runaway_saga_success and
-# remediate_verify_fails are NOT in this list: they are canned-only
-# (use_live_mcp/use_live_llm false in the YAML, with the reason and the
-# unblocking platform change commented above the flags), because the live
-# platform cannot manufacture their faults — create_stale_cache writes a
-# Redis key no read tool can observe, and no chaos hook builds a runaway
-# DAG. Selecting one under --live is refused with exit 8 before any
-# spend; they run (and must stay green) in the offline suite instead.
+make eval-live ONLY=remediate_stale_cache_success   && make eval-reset
+make eval-live ONLY=remediate_runaway_saga_success && make eval-reset
+
+# The last two joined this list at the v0.6.0 pin (wave-10), because the
+# platform capability each was waiting on shipped. They self-seed like the
+# others and each aborts pre-spend if its premise is missing:
+#   * remediate_stale_cache_success — create_stale_cache writes the hot
+#     key, and get_cache_key_info (plat #146) now reads it back, which is
+#     what the precondition asserts. Verify re-reads get_redis_health.
+#   * remediate_runaway_saga_success — create_stuck_dag (plat #148) builds
+#     a genuinely stuck chain: completed upstream parent, dead-lettered
+#     root, descendants held in `waiting` behind it. The remediation is
+#     replay_dlq_by_ids on the ROOT, which is the platform's own tested
+#     un-stick path; pause_dag only stabilizes and is no longer graded as
+#     a fix by any scenario.
+# saga_stuck also became live-capable in the same change, on its own
+# chain. It is a read-only escalation scenario, but it now declares
+# chaos_setup, so it is NO LONGER part of the read-only smoke pass (a
+# --smoke selection carrying chaos is refused, exit 6) and belongs to the
+# one-at-a-time stage below with a reset after it:
+make eval-live ONLY=saga_stuck && make eval-reset
+
+# The two saga scenarios deliberately use DIFFERENT chain_names. Replaying
+# a chain's root completes it, and create_stuck_dag refuses a drifted
+# chain (409 stuck_chain_name_in_use) rather than rebuilding it, so a
+# shared name would make each run depend on the other's order.
+
+# alert_storm and remediate_verify_fails are NOT in this list: they are
+# canned-only (use_live_mcp/use_live_llm false in the YAML, with the
+# reason and the unblocking platform change commented above the flags),
+# because the live platform cannot manufacture their faults — the platform
+# has three alert producers and none of them emits a burst, and nothing
+# seeds a consumer group that stays dead. Selecting one under --live is
+# refused with exit 8 before any spend; they run (and must stay green) in
+# the offline suite instead.
 
 # After any consumer restart — the agent's restart_consumer_group or a
 # manual restore — confirm liveness with `rpk group describe
@@ -500,11 +527,11 @@ operate by:
   Forgetting it fails safely: the scenario's precondition polls for
   `lag >= 1` over 6×15s and aborts before any model call, reporting that
   the fault was never manufactured. (`remediate_stale_cache_success` is
-  not winnable live despite the v0.4.7 `create_stale_cache` hook: the
-  hook writes one Redis key that no read tool can observe, so the
-  miss-rate collapse the scenario grades never exists on the platform.
-  It is canned-only — a `--live` selection is refused with exit 8 —
-  until a platform `get_cache_key_info` read tool ships and is pinned.)
+  winnable live as of the v0.6.0 pin: `get_cache_key_info` reads the exact
+  key `create_stale_cache` writes, so the scenario's precondition can
+  confirm the seeded key is there before any spend. Before that tool
+  shipped the fault was real but unobservable and the scenario was
+  canned-only.)
 
 ## Debugging one scenario
 

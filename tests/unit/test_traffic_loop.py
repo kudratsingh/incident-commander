@@ -195,3 +195,65 @@ class TestCli:
 
     def test_a_non_positive_interval_is_refused(self) -> None:
         assert main(["--interval", "0"]) == 2
+
+
+class TestCountAlwaysTerminates:
+    """``--count`` is a stop condition, so it has to count attempts (WO-R2-99).
+
+    ``Tally.submitted`` summed created + rate-limited + backpressured and
+    left ``errors`` out. Those three are the outcomes worth reporting, but
+    as a STOP condition the omission is fatal: a run pointed at a dead
+    platform, holding a stale token, or naming a job type the platform
+    rejects errors on every request, never advances ``submitted``, and
+    never terminates. The operator started it in a second terminal
+    mid-campaign and it sat there forever, silently, submitting nothing.
+    """
+
+    @staticmethod
+    def _bounded_sleep(limit: int) -> Any:
+        """A sleep that fails the test rather than letting it hang forever."""
+        seen = {"n": 0}
+
+        def _sleep(_seconds: float) -> None:
+            seen["n"] += 1
+            if seen["n"] > limit:
+                raise AssertionError(
+                    f"--count never reached after {limit} iterations — the loop does not terminate"
+                )
+
+        return _sleep
+
+    def test_a_run_whose_every_request_errors_stops_at_count(self) -> None:
+        tally = run(
+            _client(lambda _r: httpx.Response(500, text="platform is down")),
+            "jwt",
+            job_type="bulk_api_sync",
+            interval=0.0,
+            max_submissions=3,
+            until_lag=None,
+            sleep=self._bounded_sleep(20),
+            on_tick=lambda *_a: None,
+        )
+        assert tally.created == 0
+        assert len(tally.errors) == 3, "errors must count toward --count"
+
+    def test_errors_and_successes_share_the_one_budget(self) -> None:
+        """Mixed outcomes must not let the run overshoot the count either."""
+        seen = {"n": 0}
+
+        def _handler(_request: httpx.Request) -> httpx.Response:
+            seen["n"] += 1
+            return httpx.Response(201, json={"id": "job"}) if seen["n"] % 2 else httpx.Response(500)
+
+        tally = run(
+            _client(_handler),
+            "jwt",
+            job_type="bulk_api_sync",
+            interval=0.0,
+            max_submissions=4,
+            until_lag=None,
+            sleep=self._bounded_sleep(20),
+            on_tick=lambda *_a: None,
+        )
+        assert tally.created + len(tally.errors) == 4
+        assert seen["n"] == 4, "exactly --count requests, whatever they returned"

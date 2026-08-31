@@ -130,10 +130,15 @@ def test_every_repository_resolves_to_one_ref() -> None:
 def test_redpanda_data_lives_on_a_named_volume() -> None:
     """S-01: `make demo-down` must not delete the Kafka event log."""
     mounts = _service_mounts("redpanda")
+    # Parse the mount rather than string-matching its tail. Compose short
+    # syntax is source:target[:mode], so `endswith(":/var/lib/redpanda/data")`
+    # called a perfectly valid `demo_redpandadata:/var/lib/redpanda/data:rw`
+    # unnamed — failing with a message claiming the event log was about to be
+    # destroyed by a configuration that destroys nothing (WO-R2-102).
     named = [
         mount
         for mount in mounts
-        if mount.endswith(f":{_REDPANDA_DATA_DIR}") and not mount.startswith((".", "/"))
+        if mount.split(":")[1:2] == [_REDPANDA_DATA_DIR] and not mount.startswith((".", "/"))
     ]
     assert named, (
         f"redpanda declares VOLUME {_REDPANDA_DATA_DIR}; without a named volume "

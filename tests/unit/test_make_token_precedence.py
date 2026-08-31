@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 from pydantic import AnyHttpUrl, PostgresDsn, SecretStr
@@ -23,8 +23,19 @@ from incident_commander.config import Settings
 
 _REPO = Path(__file__).resolve().parents[2]
 
+# The hermetic PATH handed to the make subprocess below, and — since
+# WO-R2-102 — the same one the skip guard searches. They disagreed: the
+# guard asked the AMBIENT PATH whether make existed while the child got
+# these three directories, so on any machine with make in /opt/homebrew/bin
+# or ~/.local/bin the guard passed and the subprocess then raised
+# FileNotFoundError. The test errored where it had promised to skip.
+_SUBPROCESS_PATH: Final[str] = "/usr/bin:/bin:/usr/local/bin"
 
-@pytest.mark.skipif(shutil.which("make") is None, reason="make not available")
+
+@pytest.mark.skipif(
+    shutil.which("make", path=_SUBPROCESS_PATH) is None,
+    reason=f"make is not on the PATH the subprocess gets ({_SUBPROCESS_PATH})",
+)
 def test_included_file_beats_recipe_exported_env(tmp_path: Path) -> None:
     # The mechanism itself, reproduced in miniature.
     (tmp_path / ".env").write_text("TOKEN=from_file\n")
@@ -32,7 +43,7 @@ def test_included_file_beats_recipe_exported_env(tmp_path: Path) -> None:
     out = subprocess.run(
         ["make", "probe"],
         cwd=tmp_path,
-        env={"PATH": "/usr/bin:/bin:/usr/local/bin", "TOKEN": "from_env"},
+        env={"PATH": _SUBPROCESS_PATH, "TOKEN": "from_env"},
         capture_output=True,
         text=True,
         check=True,

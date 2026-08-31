@@ -12,7 +12,16 @@ def _with_alert(run_state: RunState, alert: Mapping[str, object]) -> RunState:
 
 
 class TestTransitionTriage:
-    @pytest.mark.parametrize("severity", ["high", "critical", "major", "medium"])
+    # `warning` is the case that was missing, and the only one here whose
+    # routing is a judgment call: triage uses a DENYLIST, so anything not in
+    # {info, low, unknown} is actionable by default rather than by decision.
+    # It is also the only value in this list besides `critical` that the
+    # platform can actually emit (its ALLOWED_SEVERITIES are info/warning/
+    # critical) — high, major and medium are shapes the alert service
+    # rejects. So the suite exercised three impossible values and one real
+    # one, and skipped the real middle band whose default-actionable routing
+    # is exactly what a denylist could silently get wrong (WO-R2-102).
+    @pytest.mark.parametrize("severity", ["high", "critical", "major", "medium", "warning"])
     def test_actionable_severity_routes_to_investigating(
         self, run_state: RunState, now: datetime, severity: str
     ) -> None:

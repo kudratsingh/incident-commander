@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
+import pytest
 import yaml
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -29,16 +31,63 @@ _PROMPTS_DIR = _REPO / "src" / "incident_commander" / "llm" / "prompts"
 _CI = _REPO / ".github" / "workflows" / "ci.yml"
 
 
+def _translate(pattern: str) -> str:
+    """Compile one GitHub filter pattern to a regex, per GitHub's cheat sheet.
+
+    ``**`` matches any run of characters including ``/``; ``*`` matches any
+    run except ``/``; ``?`` and ``+`` are QUANTIFIERS on the preceding
+    element, not wildcards; ``[]`` is a character class. Everything else is
+    literal.
+
+    fnmatch is wrong here twice over — its ``*`` crosses ``/`` and its ``?``
+    is a single-character wildcard — so an fnmatch-based check would pass
+    vacuously. The previous hand-rolled version translated only ``*`` and
+    ``**`` and escaped the rest, which is a subtler version of the same
+    problem: ``!``, ``?``, ``+`` and ``[]`` became literal text, so a filter
+    that used any of them was silently misread. An exclusion in particular
+    failed open — ``_covered`` reported an EXCLUDED path as gated, which is
+    the exact direction that lets an ungated PR through.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(pattern):
+        char = pattern[i]
+        if pattern.startswith("**", i):
+            out.append("(?:.*)")
+            i += 2
+        elif char == "*":
+            out.append("(?:[^/]*)")
+            i += 1
+        elif char in "?+":
+            # A quantifier with nothing to quantify is not valid GitHub
+            # syntax; treat it as a literal rather than emitting bad regex.
+            out.append(char if out else re.escape(char))
+            i += 1
+        elif char == "[":
+            close = pattern.find("]", i + 1)
+            if close == -1:
+                out.append(re.escape(char))
+                i += 1
+            else:
+                out.append(f"[{pattern[i + 1 : close]}]")
+                i = close + 1
+        else:
+            out.append(re.escape(char))
+            i += 1
+    return "".join(out)
+
+
 def _github_match(pattern: str, path: str) -> bool:
     """True if a GitHub Actions path-filter pattern matches a repo-relative path.
 
-    GitHub semantics: ``**`` matches any characters including ``/``, while
-    ``*`` matches any characters except ``/``. fnmatch is wrong here — its
-    ``*`` crosses ``/``, so an fnmatch-based check would pass vacuously.
+    Positive patterns only — a leading ``!`` is an exclusion and is the
+    caller's business, so passing one here is a bug rather than a
+    never-matching pattern that quietly reads as "not covered".
     """
-    escaped = re.escape(pattern)
-    regex = escaped.replace(r"\*\*", ".*").replace(r"\*", "[^/]*")
-    return re.fullmatch(regex, path) is not None
+    assert not pattern.startswith("!"), (
+        f"{pattern!r} is an exclusion; polarity belongs to _covered, not the matcher"
+    )
+    return re.fullmatch(_translate(pattern), path) is not None
 
 
 def _gate_paths() -> list[str]:
@@ -60,8 +109,23 @@ def _gate_paths() -> list[str]:
     return paths
 
 
-def _covered(path: str) -> bool:
-    return any(_github_match(pattern, path) for pattern in _gate_paths())
+def _covered(path: str, patterns: list[str] | None = None) -> bool:
+    """Whether the eval gate fires for ``path``, honouring exclusions.
+
+    GitHub evaluates the filter list in order and the LAST match wins, so a
+    ``!`` exclusion removes a path a previous positive matched, and a later
+    positive can re-add it. Treating ``!`` as an ordinary literal — as this
+    file did — made an exclusion match nothing and left the earlier positive
+    standing, reporting an excluded path as gated.
+    """
+    covered = False
+    for pattern in patterns if patterns is not None else _gate_paths():
+        if pattern.startswith("!"):
+            if _github_match(pattern[1:], path):
+                covered = False
+        elif _github_match(pattern, path):
+            covered = True
+    return covered
 
 
 def test_matcher_mirrors_github_semantics() -> None:
@@ -70,6 +134,48 @@ def test_matcher_mirrors_github_semantics() -> None:
     assert _github_match("src/incident_commander/llm/**", "src/incident_commander/llm/prompts/x.md")
     assert not _github_match("src/*", "src/incident_commander/config.py")
     assert not _github_match("evals/runner.py", "evals/runner_py")
+
+
+class TestTheMatcherUnderstandsTheWholeFilterSyntax:
+    """The coverage tests are only as honest as the matcher (WO-R2-101).
+
+    ``_covered`` decides whether a behavior-changing file is gated by the
+    eval suite. It answered that question with a translation that knew two
+    of GitHub's six filter constructs and silently treated the other four as
+    literal text — so the moment anyone edited evals.yml to use them, the
+    coverage tests would keep reporting green while describing a filter that
+    does not exist. Exclusions are the dangerous direction: they fail OPEN.
+    """
+
+    def test_an_exclusion_removes_a_path_an_earlier_positive_matched(self) -> None:
+        patterns = ["evals/**", "!evals/reports/**"]
+        assert _covered("evals/runner.py", patterns)
+        assert not _covered("evals/reports/baseline.json", patterns), (
+            "an exclusion in evals.yml was ignored — _covered called an "
+            "EXCLUDED path gated, which is how an ungated PR merges"
+        )
+
+    def test_a_later_positive_re_adds_an_excluded_path(self) -> None:
+        """GitHub resolves the list in order, last match wins."""
+        patterns = ["evals/**", "!evals/reports/**", "evals/reports/baseline.json"]
+        assert _covered("evals/reports/baseline.json", patterns)
+
+    def test_question_mark_and_plus_are_quantifiers_not_wildcards(self) -> None:
+        # GitHub's cheat sheet: `?` is "zero or one of the preceding
+        # character" — fnmatch's single-char wildcard reading is wrong.
+        assert _github_match("evals/runner.pyc?", "evals/runner.py")
+        assert _github_match("evals/runner.pyc?", "evals/runner.pyc")
+        assert not _github_match("evals/runner.pyc?", "evals/runner.pyX")
+        assert _github_match("evals/re+ports/x.json", "evals/reeports/x.json")
+
+    def test_character_classes_are_classes(self) -> None:
+        assert _github_match("evals/scenario[0-9].yaml", "evals/scenario3.yaml")
+        assert not _github_match("evals/scenario[0-9].yaml", "evals/scenarioX.yaml")
+
+    def test_a_dot_is_still_literal(self) -> None:
+        # The regression the old escape-everything approach got right, and
+        # which the new translation must not lose.
+        assert not _github_match("evals/runner.py", "evals/runner_py")
 
 
 def test_gate_covers_every_prompt_file() -> None:
@@ -128,21 +234,90 @@ class TestContractJobRetriesItsFlakySteps:
                 return str(step.get("run", ""))
         raise AssertionError(f"no contract step named like {name_fragment!r}")
 
+    @staticmethod
+    def _commands(name_fragment: str) -> str:
+        """The step's run block with its comment lines stripped.
+
+        Every step in this job carries a long explanatory comment naming the
+        thing it does, so a bare substring search over the raw run block is
+        answered by the prose rather than by the shell. ``assert "pull" in
+        run`` was satisfied by "# Pull first, with retries" — delete the
+        actual ``docker compose pull`` and the test stayed green while its
+        message still claimed to be defending against a registry blip
+        reading as a boot failure (WO-R2-101).
+        """
+        run = TestContractJobRetriesItsFlakySteps._step(name_fragment)
+        return "\n".join(line for line in run.splitlines() if not line.lstrip().startswith("#"))
+
     def test_the_image_pull_retries(self) -> None:
-        run = self._step("Boot the pinned demo stack")
-        assert "pull" in run, (
+        commands = self._commands("Boot the pinned demo stack")
+        assert re.search(r"docker\s+compose\b[^\n]*\bpull\b", commands), (
             "the pull is implicit in `up`, so a registry blip reads as a boot failure"
         )
-        assert "attempt" in run, "no retry around the image pull"
+        assert "attempt" in commands, "no retry around the image pull"
 
     def test_the_token_bootstrap_retries(self) -> None:
-        run = self._step("Mint a platform service-account token")
-        assert "attempt" in run, "no retry around the five-step bootstrap"
+        commands = self._commands("Mint a platform service-account token")
+        assert "attempt" in commands, "no retry around the five-step bootstrap"
 
     def test_both_still_fail_hard_after_their_retries(self) -> None:
         # Retrying must not become swallowing: a genuine failure has to end
         # the job, or the drift check runs against a stack that never booted.
         for fragment in ("Boot the pinned demo stack", "Mint a platform service-account token"):
-            assert "exit 1" in self._step(fragment), (
+            assert "exit 1" in self._commands(fragment), (
                 f"{fragment}: retries with no terminal failure would hide a real break"
             )
+
+
+class TestEveryJobIsBoundedAndLeastPrivileged:
+    """Both workflows must cap their runtime and their token (WO-R2-101).
+
+    The `contract` job boots a five-service compose stack and waits on
+    healthchecks, a seeder and a REST app. Every one of those waits is a
+    place it can hang rather than fail, and with no `timeout-minutes` a hang
+    runs to GitHub's six-hour default — holding a concurrency slot for a
+    working day before anyone learns the contract diff never ran.
+
+    Neither workflow declared `permissions`, so every job received the
+    repository's default GITHUB_TOKEN scope. Nothing here writes to the
+    repo: they lint, test, and boot a stack against a PUBLIC ghcr.io
+    package (no registry secret, by design). Read is all any of it needs.
+    """
+
+    _WORKFLOWS = ("ci.yml", "evals.yml")
+
+    @staticmethod
+    def _load(name: str) -> dict[str, Any]:
+        loaded: dict[str, Any] = yaml.safe_load(
+            (_REPO / ".github" / "workflows" / name).read_text(encoding="utf-8")
+        )
+        return loaded
+
+    @pytest.mark.parametrize("workflow", _WORKFLOWS)
+    def test_every_job_has_a_timeout(self, workflow: str) -> None:
+        jobs = self._load(workflow)["jobs"]
+        unbounded = [name for name, job in jobs.items() if "timeout-minutes" not in job]
+        assert unbounded == [], (
+            f"{workflow}: {unbounded} have no timeout-minutes, so a hang burns "
+            "GitHub's 6-hour default while holding the concurrency slot"
+        )
+
+    @pytest.mark.parametrize("workflow", _WORKFLOWS)
+    def test_the_timeouts_are_actually_tight(self, workflow: str) -> None:
+        """A timeout is only a timeout if it is shorter than the default."""
+        jobs = self._load(workflow)["jobs"]
+        for name, job in jobs.items():
+            minutes = job["timeout-minutes"]
+            assert isinstance(minutes, int)
+            assert 0 < minutes <= 60, f"{workflow}:{name} timeout-minutes={minutes} is not a bound"
+
+    @pytest.mark.parametrize("workflow", _WORKFLOWS)
+    def test_the_workflow_declares_least_privilege(self, workflow: str) -> None:
+        declared = self._load(workflow).get("permissions")
+        assert declared is not None, (
+            f"{workflow} declares no top-level permissions, so every job runs "
+            "with the repository's default GITHUB_TOKEN scope"
+        )
+        assert declared == {"contents": "read"}, (
+            f"{workflow} grants {declared!r}; nothing in it writes to the repo"
+        )

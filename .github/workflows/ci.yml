@@ -10,10 +10,22 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Nothing here writes to the repository: these jobs lint, test, and boot a
+# stack from a PUBLIC ghcr.io package (deliberately no registry secret — see
+# the contract job). Declaring the floor explicitly means a future job that
+# does need to write has to ask for it in its own `permissions:` block
+# rather than inheriting whatever the repository default happens to be.
+permissions:
+  contents: read
+
 jobs:
   check:
     name: check (lint + types)
     runs-on: ubuntu-latest
+    # Every job is bounded. Without this, a hang runs to GitHub's six-hour
+    # default while holding the concurrency slot — a working day before
+    # anyone learns the check never ran. `check` is ~2 minutes warm.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -34,6 +46,9 @@ jobs:
   test:
     name: test (unit + integration)
     runs-on: ubuntu-latest
+    # Integration tests manage their own containers, so this covers image
+    # pulls as well as the suite itself.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -61,6 +76,12 @@ jobs:
   contract:
     name: contract
     runs-on: ubuntu-latest
+    # The job most in need of a bound: it boots a five-service compose stack
+    # and then WAITS — on healthchecks, on the REST app, on the eval-fixture
+    # seeder, each of which is a place it can hang rather than fail. It also
+    # gates both platform checks, so six hours of silence here is six hours
+    # of not knowing whether the contract drifted.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 

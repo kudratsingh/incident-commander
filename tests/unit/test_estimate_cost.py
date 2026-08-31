@@ -174,3 +174,64 @@ def test_docstring_describes_the_append_only_tracer() -> None:
     assert "run-ledger.md" not in doc
     assert "study/runs.jsonl" in doc
     assert "append-only" in doc.lower()
+
+
+class TestSinceAcceptsWhatAnOperatorTypes:
+    """``--since`` must survive a date-only value (WO-R2-99).
+
+    ``evals/tracing.py`` stamps every record with ``datetime.now(UTC)``, so
+    trace timestamps are always timezone-aware. ``--since 2026-08-01`` — the
+    most natural spelling of the flag, and the one the operator reaches for
+    mid-campaign — parses NAIVE, and the ``when < since`` comparison then
+    raised ``TypeError: can't compare offset-naive and offset-aware
+    datetimes``, aborting the whole cost audit.
+    """
+
+    @staticmethod
+    def _two_dated_records() -> list[dict[str, Any]]:
+        early = _llm_record({"input_tokens": 1000, "output_tokens": 1000})
+        early["timestamp"] = "2026-07-01T00:00:00+00:00"
+        late = _llm_record({"input_tokens": 1000, "output_tokens": 1000})
+        late["timestamp"] = "2026-09-01T00:00:00+00:00"
+        return [early, late]
+
+    def test_a_date_only_since_does_not_crash(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _write_jsonl(tmp_path / "run.jsonl", self._two_dated_records())
+        assert _run(monkeypatch, tmp_path, "--since", "2026-08-01") == 0
+        capsys.readouterr()
+
+    def test_a_naive_since_still_filters_on_the_date_it_names(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Not just "does not crash": the cutoff has to actually apply.
+
+        Attaching UTC must not turn the filter into a no-op — the July
+        record is before the cutoff and the September one is after, so
+        exactly one of the two may be priced.
+        """
+        _write_jsonl(tmp_path / "run.jsonl", self._two_dated_records())
+        assert _run(monkeypatch, tmp_path, "--since", "2026-08-01") == 0
+        filtered = capsys.readouterr().out
+        assert _run(monkeypatch, tmp_path) == 0
+        unfiltered = capsys.readouterr().out
+        assert filtered != unfiltered, "--since 2026-08-01 filtered nothing"
+
+    def test_an_aware_since_is_left_alone(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _write_jsonl(tmp_path / "run.jsonl", self._two_dated_records())
+        assert _run(monkeypatch, tmp_path, "--since", "2026-08-01T00:00:00Z") == 0
+        capsys.readouterr()
+
+    def test_a_naive_record_timestamp_does_not_crash_either(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The mirror image: a hand-edited trace line with a naive stamp
+        crashed the same comparison from the other side."""
+        record = _llm_record({"input_tokens": 1000, "output_tokens": 1000})
+        record["timestamp"] = "2026-09-01T00:00:00"
+        _write_jsonl(tmp_path / "run.jsonl", [record])
+        assert _run(monkeypatch, tmp_path, "--since", "2026-08-01T00:00:00Z") == 0
+        capsys.readouterr()

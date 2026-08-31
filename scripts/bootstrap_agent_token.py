@@ -10,19 +10,36 @@ Idempotent — safe to rerun.
 
 Usage:
     uv run python scripts/bootstrap_agent_token.py
+    uv run python scripts/bootstrap_agent_token.py --scope chaos:invoke
 
 Or via Makefile:
     make bootstrap-token
+
+``--scope`` WIDENS the agent service account, repeatably; it never replaces
+the defaults, because a token that could seed chaos and read no telemetry
+would fail one step into the eval it was minted for. Scope names are checked
+against the pinned platform's own contract snapshot.
+
+``PLATFORM_REST_URL`` and ``PLATFORM_MCP_URL`` are honoured when exported, so
+the ``.env`` block printed at the end always echoes the stack you are
+actually running rather than this file's localhost defaults.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 import httpx
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_SNAPSHOT_PATH = _REPO_ROOT / "contracts" / "platform-tools.snapshot.json"
+_API_VERSION_SUFFIX = "/api/v1"
 
 DEFAULT_BASE_URL = "http://localhost:8000/api/v1"
 DEFAULT_EMAIL = "agent-demo@example.com"
@@ -57,6 +74,51 @@ SMOKE_SERVICE_ACCOUNT_SCOPES = [
 ]
 
 _SAFE_EMAIL = re.compile(r"^[A-Za-z0-9._+@-]+$")
+
+
+def known_scopes() -> frozenset[str]:
+    """Every scope the pinned platform declares, per the blessed snapshot.
+
+    Read from ``contracts/platform-tools.snapshot.json`` rather than
+    hardcoded here: each tool carries its ``required_scope``, CI's
+    ``contract`` job diffs that snapshot against a live platform on every
+    PR, and WO-R2-130 put ``required_scope`` itself under that diff. So this
+    set cannot drift from the platform without CI saying so — which is what
+    makes rejecting an unknown ``--scope`` safe rather than merely
+    opinionated.
+
+    Returns an empty set if the snapshot is missing or unreadable; the
+    caller then skips validation rather than blocking a bootstrap on it.
+    """
+    try:
+        payload = json.loads(_SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return frozenset()
+    tools = payload.get("tools") if isinstance(payload, dict) else None
+    if not isinstance(tools, list):
+        return frozenset()
+    return frozenset(
+        str(tool["required_scope"])
+        for tool in tools
+        if isinstance(tool, dict) and tool.get("required_scope")
+    )
+
+
+def base_url_default() -> str:
+    """The REST base, honouring ``PLATFORM_REST_URL`` from the operator's .env.
+
+    The runbook's ``.env`` sets ``PLATFORM_REST_URL`` to the host root
+    (``http://localhost:8000``) while this script talks to the versioned API
+    beneath it, so the ``/api/v1`` suffix is appended unless the operator
+    already wrote one. Reading it at all is the point: hardcoding
+    ``localhost:8000`` meant an operator on a non-default port watched this
+    script report success against a stack they were not running.
+    """
+    raw = os.getenv("PLATFORM_REST_URL")
+    if not raw:
+        return DEFAULT_BASE_URL
+    trimmed = raw.rstrip("/")
+    return trimmed if _API_VERSION_SUFFIX in trimmed else f"{trimmed}{_API_VERSION_SUFFIX}"
 
 
 def _register(client: httpx.Client, email: str, password: str) -> None:
@@ -211,9 +273,13 @@ def _mint_token(client: httpx.Client, jwt: str, sa_id: str) -> str:
     return plaintext
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="Platform REST base")
+    parser.add_argument(
+        "--base-url",
+        default=base_url_default(),
+        help="Platform REST base. Defaults to $PLATFORM_REST_URL when exported.",
+    )
     parser.add_argument("--email", default=DEFAULT_EMAIL)
     parser.add_argument("--password", default=DEFAULT_PASSWORD)
     parser.add_argument(
@@ -223,16 +289,49 @@ def main() -> int:
     )
     parser.add_argument(
         "--mcp-url",
-        default=DEFAULT_MCP_URL,
-        help="Reported back in the printed .env snippet",
+        default=os.getenv("PLATFORM_MCP_URL") or DEFAULT_MCP_URL,
+        help=(
+            "Echoed in the printed .env snippet. Defaults to $PLATFORM_MCP_URL "
+            "when exported, so a port override is never printed back wrong."
+        ),
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--scope",
+        action="append",
+        dest="scopes",
+        metavar="SCOPE",
+        help=(
+            "Extra scope for the agent service account; repeat for more. Added "
+            "to the defaults (" + ", ".join(SERVICE_ACCOUNT_SCOPES) + ") rather "
+            "than replacing them. The read-only smoke account is never widened."
+        ),
+    )
+    args = parser.parse_args(argv)
+
+    # Deduplicated, order preserved, defaults first: `--scope chaos:invoke`
+    # is documented as the remedy for a chaos refusal, so it has to WIDEN.
+    # Replacing would mint a principal that can seed chaos and read no
+    # telemetry — failing one step later for a reason nobody would trace
+    # back to this command.
+    requested = list(dict.fromkeys(args.scopes or []))
+    declared = known_scopes()
+    unknown = [scope for scope in requested if scope not in declared] if declared else []
+    if unknown:
+        # Before any network call: a typo'd scope that reached the platform
+        # would mint a plausible-looking token that 403s at the first tool.
+        print(
+            f"unknown scope(s): {', '.join(unknown)}. The pinned platform "
+            f"declares: {', '.join(sorted(declared))}.",
+            file=sys.stderr,
+        )
+        return 2
+    agent_scopes = list(dict.fromkeys([*SERVICE_ACCOUNT_SCOPES, *requested]))
 
     with httpx.Client(base_url=args.base_url, timeout=10.0) as client:
         _register(client, args.email, args.password)
         _promote(args.postgres_container, args.email)
         jwt = _login(client, args.email, args.password)
-        sa_id = _create_or_get_sa(client, jwt, SERVICE_ACCOUNT_NAME, SERVICE_ACCOUNT_SCOPES)
+        sa_id = _create_or_get_sa(client, jwt, SERVICE_ACCOUNT_NAME, agent_scopes)
         token = _mint_token(client, jwt, sa_id)
         smoke_sa_id = _create_or_get_sa(
             client,

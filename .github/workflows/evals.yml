@@ -19,10 +19,19 @@ concurrency:
   group: evals-${{ github.ref }}
   cancel-in-progress: true
 
+# The gate reads the repo and reports a verdict; it writes nothing back.
+permissions:
+  contents: read
+
 jobs:
   eval-regression:
     name: eval regression
     runs-on: ubuntu-latest
+    # Offline suite (canned data, no live platform, no tokens spent), so it
+    # should never approach this. A bound matters anyway: an unbounded hang
+    # holds the concurrency slot and every later push to the branch queues
+    # behind it.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 

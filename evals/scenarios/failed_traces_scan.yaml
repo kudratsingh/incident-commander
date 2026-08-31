@@ -12,9 +12,29 @@ tags:
 use_live_mcp: true
 use_live_llm: true
 alert:
+  # Sharpened deliberately, and only the STEERING is sharpened — the
+  # search_traces claim below is untouched. The 2026-08-16 dress rehearsal
+  # passed this scenario live without ever scanning traces, which is a real
+  # wrong-reason green (calibration rule 6), so the claim stays. But an alert
+  # that said only "failure rate high" did not make scanning traces the
+  # obvious next move either, and grading an agent for not reading a hint
+  # that was not there is the grader's defect, not the agent's. This names
+  # the shape of the evidence (per-job failure records, spread across job
+  # types, no single culprit) without naming the tool that returns it — the
+  # agent still has to choose search_traces. Carried in `description`,
+  # which is one of the few fields the platform's webhook genuinely emits
+  # (tests/unit/test_scenario_alert_premise.py::_WEBHOOK_FIELDS), so the
+  # steering does not cost this scenario any more premise realism than it
+  # already spends.
   source: platform.jobs
   severity: critical
   fingerprint: failure_rate_high
+  service: job-runner
+  description: Job failure rate elevated over the last hour, across more than
+    one job type. No single job is implicated and the alert carries no job id —
+    the only record of WHICH recent jobs failed, and of what each one was doing,
+    is the per-job execution history. Establish which jobs failed recently
+    before escalating; an escalation that cannot name them is not actionable.
 canned_tool_responses:
   # Re-recorded against the platform's two seeded failed traces. `trace-a` /
   # `job-a` were placeholders belonging to no row, and `send_email` is no
@@ -74,6 +94,11 @@ expectation:
   # without a single search_traces call. The scenario exists to prove the
   # agent scans failed traces, so the evidence must name the tool: at least
   # one search_traces match with a trace_id, recorded by search_traces.
+  #
+  # DELIBERATELY NOT WEAKENED. The fix for this scenario's red went into the
+  # alert above (steering), not here (the claim). With the alert now pointing
+  # at per-job failure records, a red on this dimension is a finding about
+  # the agent, not about the grader — read it as one.
   expected_evidence_fields:
   - tools: [search_traces]
     field: matches[].trace_id

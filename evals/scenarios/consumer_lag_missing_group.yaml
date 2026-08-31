@@ -1,5 +1,5 @@
 name: consumer_lag_missing_group
-description: 'Actionable alert whose payload doesn''t name a group. The planner still probes something reasonable using the alert-source context; the fallback group "unknown" is one the platform cannot resolve, so it answers lag: null with the requested group''s own cache_key.
+description: 'Actionable alert naming a consumer group the platform cannot resolve. The planner probes the group the alert names; the platform has no offsets for it, so it answers lag: null, lag_known: false, source: unrecognized with the requested group''s own cache_key. The graded behaviour is that the agent carries that null through as "unknown", never as zero.
 
   '
 tags:
@@ -11,14 +11,24 @@ tags:
 use_live_mcp: true
 use_live_llm: true
 alert:
+  # The group is named, and it is one the platform cannot resolve. It used to
+  # be absent entirely, which made the expectation below unsatisfiable by a
+  # correct agent: with no group to probe, the natural move is the tool's own
+  # default (`worker-dispatcher`, the one group whose source is `live`), that
+  # returns a NUMBER, and `lag is_null: true` graded red. Worse, it graded
+  # GREEN by accident within ~60s of a cold boot, before the live group has
+  # offsets — the assertion was reading boot timing, not agent behaviour.
+  # Naming the group makes the discriminating probe the natural one and the
+  # null a property of the platform rather than of the clock.
   source: platform.kafka
   severity: critical
   fingerprint: consumer_lag_high
+  group: unknown-consumer
 canned_tool_responses:
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"unknown","lag":null,"lag_known":false,"source":"unrecognized","cache_key":"kafka:consumer_lag:unknown"}'
+      text: '{"consumer_group":"unknown-consumer","lag":null,"lag_known":false,"source":"unrecognized","cache_key":"kafka:consumer_lag:unknown-consumer"}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

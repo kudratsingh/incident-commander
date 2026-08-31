@@ -63,6 +63,27 @@ canned_llm_responses:
 expectation:
   name: postgres_slow
   expected_terminal_state: escalated
-  expected_evidence_contains:
-  - postgres
+  # Tool-scoped (evidence sweep, evals/evidence_audit.py; the #147 pattern).
+  # The bare `postgres` substring it replaces was a fake-green generator: the
+  # runner's own failure text for this tool is "tool error
+  # (get_postgres_health)", which CONTAINS "postgres" — so the scenario
+  # graded green on the evidence dimension precisely when the probe had
+  # failed and the agent had learned nothing. A substring that its own
+  # error path satisfies is not evidence.
+  #
+  # `dialect` is the discriminating field: it exists only on a parsed
+  # get_postgres_health reading, it is required by the tool's outputSchema
+  # (never null), and `postgresql` is what the pinned stack answers — a
+  # SQLite fallback would report `sqlite` and this scenario's premise would
+  # not hold anyway. `ping_latency_ms` non-null is the "slow" in the name:
+  # its VALUE is volatile (fixture_drift._VOLATILE) so nothing here pins a
+  # number, but a reading that carries no latency at all did not measure the
+  # thing the alert is about.
+  expected_evidence_fields:
+  - tools: [get_postgres_health]
+    field: dialect
+    equals: postgresql
+  - tools: [get_postgres_health]
+    field: ping_latency_ms
+    is_null: false
   max_tool_calls: 5

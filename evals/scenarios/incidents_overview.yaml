@@ -41,6 +41,20 @@ canned_tool_responses:
   #     needs to tell an active incident from a closed one.
   # The subject is unchanged and if anything sharper: concurrent active
   # incidents across separate subsystems pointing at a shared upstream cause.
+  # The cheap poll path, canned to the SAME three active rows. The tool
+  # description in the planner prompt steers explicitly to
+  # list_active_alerts as the cheap way to see what is firing, and
+  # list_incidents is documented as its superset — so an agent that takes
+  # the steering must find the incident set here rather than fall through
+  # to a tool the scenario never canned. Same ids, so the two readings
+  # agree about which incidents are open; `alerts` carries no
+  # `resolved_at`/`is_active` because every row it returns is active by
+  # construction.
+  list_active_alerts:
+    content:
+    - type: text
+      text: '{"total":3,"alerts":[{"id":"7c9d648f-0215-544d-a9c3-adcf74ea68ab","severity":"critical","source":"api","title":"5xx rate above threshold","description":"API 5xx rate 3.2% over last 10 minutes.","fired_at":"2026-07-28T10:00:00Z","extra_data":null},{"id":"c6c4e180-f625-53c2-85c2-2d505fec61e5","severity":"warning","source":"dlq","title":"DLQ backlog growing","description":"3 send_email jobs dead-lettered in last hour.","fired_at":"2026-07-28T09:53:00Z","extra_data":null},{"id":"e33d75bb-3769-594a-9443-57abff0f7580","severity":"critical","source":"kafka","title":"billing-consumer lag exceeds 10k","description":"Sustained lag on billing-consumer for 20+ minutes.","fired_at":"2026-07-28T09:43:00Z","extra_data":null}]}'
+    is_error: false
   list_incidents:
     content:
     - type: text
@@ -86,12 +100,24 @@ canned_llm_responses:
 expectation:
   name: incidents_overview
   expected_terminal_state: escalated
-  # Tool-scoped (evidence sweep, evals/evidence_audit.py): `total` is a field
-  # of five different tools' outputs — the least discriminating token in the
-  # suite. `incidents` is list_incidents' own payload, present in every
-  # successful reading.
+  # Tool-scoped (evidence sweep, evals/evidence_audit.py), across BOTH tools
+  # that answer the question this scenario asks. Scoping to list_incidents
+  # alone graded a correct agent red: the planner prompt's own tool
+  # description steers to list_active_alerts as the cheap poll path, all 4
+  # recorded runs took that steering, reached the correct terminal state at
+  # 0.95 groundedness — and failed on evidence, for reading the tool the
+  # prompt told them to read. The intent is unchanged (the agent must have
+  # seen the incident set, from the platform, non-empty); what widens is
+  # which reading counts as having seen it.
+  #
+  # `total` rather than `incidents`, because `incidents` is list_incidents'
+  # container and `alerts` is list_active_alerts' — no single path addresses
+  # both. `total` is the one field their outputSchemas share, and it is safe
+  # here precisely BECAUSE it is tool-scoped: the objection to `total` was
+  # always that a bare substring matched five tools, and this names the two
+  # it may come from.
   expected_evidence_fields:
-  - tools: [list_incidents]
-    field: incidents
-    is_null: false
+  - tools: [list_incidents, list_active_alerts]
+    field: total
+    at_least: 1
   max_tool_calls: 6

@@ -37,7 +37,7 @@ from __future__ import annotations
 import json
 import sys
 from collections import defaultdict
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
@@ -67,6 +67,19 @@ RATES: Final[dict[str, tuple[float, float, float, float]]] = {
 PRE_INVOCATION_ID: Final[str] = "pre-invocation-id"
 
 
+def _aware(raw: str) -> datetime:
+    """Parse an ISO-8601 stamp, defaulting a naive one to the tracer's UTC.
+
+    ``evals/tracing.py`` stamps records with ``datetime.now(UTC)``, so trace
+    timestamps are always timezone-aware. A date-only ``--since 2026-08-01``
+    — the spelling an operator actually types — parses naive, and comparing
+    the two raised ``TypeError`` and aborted the whole audit. Both sides go
+    through here, so a hand-edited naive record stamp is safe too.
+    """
+    parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
 def _tier(model: str) -> str:
     for name in RATES:
         if name in model:
@@ -79,7 +92,7 @@ def main() -> int:
     since = None
     if "--since" in argv:
         i = argv.index("--since")
-        since = datetime.fromisoformat(argv[i + 1].replace("Z", "+00:00"))
+        since = _aware(argv[i + 1])
         del argv[i : i + 2]
     trace_dir = Path(argv[0]) if argv else Path("evals/traces")
 
@@ -100,7 +113,7 @@ def main() -> int:
                 continue
             stamp = rec.get("timestamp")
             if since and stamp:
-                when = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+                when = _aware(str(stamp))
                 if when < since:
                     continue
             usage = (rec.get("response") or {}).get("usage") or {}

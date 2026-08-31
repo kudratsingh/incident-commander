@@ -76,7 +76,16 @@ class Tally:
 
     @property
     def submitted(self) -> int:
-        return self.created + self.rate_limited + self.backpressured
+        """Every request the loop actually sent, whatever came back.
+
+        This feeds the ``--count`` stop condition, so it counts ATTEMPTS —
+        errors included. Summing only the three reportable outcomes meant a
+        run against a dead platform, a stale token, or a rejected job type
+        errored on every request, never advanced the count, and never
+        terminated. ``describe()`` keeps errors in their own bucket, which
+        is the distinction that actually matters to the operator.
+        """
+        return self.created + self.rate_limited + self.backpressured + len(self.errors)
 
     def describe(self) -> str:
         parts = [f"{self.created} created"]

@@ -52,7 +52,7 @@ def fetch_tools(mcp_url: str, token: str) -> dict[str, object]:
     return result
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mcp-url",
@@ -69,7 +69,7 @@ def main() -> int:
         default=str(_SNAPSHOT_PATH),
         help="Output path (defaults to contracts/platform-tools.snapshot.json).",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if not args.mcp_url or not args.token:
         print(
@@ -89,7 +89,20 @@ def main() -> int:
     out_path.write_text(json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n")
 
     tool_count = len(snapshot.get("tools", []))
-    print(f"wrote {tool_count} tools to {out_path.relative_to(_REPO_ROOT)}")
+    # The file is already on disk by this line, so this print must not be
+    # able to fail. `relative_to` raises for anything outside the repo —
+    # `--out /tmp/x.json` when comparing two platform versions by hand, and
+    # equally a plain `--out out.json`, which is not under the absolute repo
+    # root until it is resolved. Either way the operator got a traceback for
+    # a run that had succeeded. Resolve first, keep the tidy repo-relative
+    # rendering when it applies, and fall back to the full path when it
+    # does not.
+    resolved = out_path.resolve()
+    try:
+        shown: Path = resolved.relative_to(_REPO_ROOT)
+    except ValueError:
+        shown = resolved
+    print(f"wrote {tool_count} tools to {shown}")
     print("git add + commit the snapshot to bless the current contract.")
     return 0
 

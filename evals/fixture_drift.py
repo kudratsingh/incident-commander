@@ -102,7 +102,17 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
             "keyspace_misses",
         }
     ),
-    "list_dlq_messages": frozenset({"items.created_at", "items.updated_at"}),
+    # `items.dead_lettered_at` arrived with the v0.6.0 re-pin (plat #180,
+    # R2-53) and is the third clock on this tool, not a new species: the
+    # seeder stamps it fresh at seed time, exactly like the two beside it,
+    # so no recording can ever match it. Declared here rather than blessed
+    # as six known-drift entries -- one per DLQ fixture -- which is the
+    # `jobs.updated_at` lesson from the batch-4 re-record applied on the
+    # way in instead of after the fact. The field's ORDERING contract (the
+    # list is now sorted by it) is asserted by the scenarios, not here.
+    "list_dlq_messages": frozenset(
+        {"items.created_at", "items.updated_at", "items.dead_lettered_at"}
+    ),
     "list_active_alerts": frozenset({"alerts.fired_at", "alerts.created_at"}),
     "list_incidents": frozenset({"incidents.fired_at", "incidents.created_at"}),
     "list_audit_events": frozenset({"events.created_at", "events.request_id"}),

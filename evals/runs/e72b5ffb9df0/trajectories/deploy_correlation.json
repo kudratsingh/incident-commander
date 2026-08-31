@@ -1,0 +1,183 @@
+{
+  "scenario": "deploy_correlation",
+  "incident_id": "a5de828d-6501-43c1-8afc-ad0a3b7e7894",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "a5de828d-6501-43c1-8afc-ad0a3b7e7894",
+      "state": "triage",
+      "alert": {
+        "source": "platform.api",
+        "severity": "critical",
+        "fingerprint": "post_deploy_error_spike",
+        "group": null,
+        "service": "billing-api"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:47:02.256452Z",
+      "updated_at": "2026-08-31T02:47:02.256452Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "a5de828d-6501-43c1-8afc-ad0a3b7e7894",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.api",
+        "severity": "critical",
+        "fingerprint": "post_deploy_error_spike",
+        "group": null,
+        "service": "billing-api"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.031059,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "82963011-87a2-49cc-a776-8ee9b0fb4f5b",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "967a9726b65f57874a306bcfe1ed253f"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:47:02.287511Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:47:02.256452Z",
+      "updated_at": "2026-08-31T02:47:02.287511Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "a5de828d-6501-43c1-8afc-ad0a3b7e7894",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.api",
+        "severity": "critical",
+        "fingerprint": "post_deploy_error_spike",
+        "group": null,
+        "service": "billing-api"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 22873,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.031095,
+        "max_usd": "1.00",
+        "usd_used": "0.067182"
+      },
+      "evidence": [
+        {
+          "evidence_id": "82963011-87a2-49cc-a776-8ee9b0fb4f5b",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "967a9726b65f57874a306bcfe1ed253f"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:47:02.287511Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "3c756ddb-0655-4154-9a2d-c0a9af3bbf1b",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 10
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-31T00:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-30T23:34:09.987174Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-08-30T20:34:09.987174Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-08-30T08:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-08-30T04:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-08-29T02:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-08-31T02:47:02.287547Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c8938523-6604-44b1-8e8b-d199f534f680",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 20,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:22:10.000259Z\",\"updated_at\":\"2026-08-31T02:22:32.000259Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-08-31T02:22:32.000259Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"process_payment call timed out after 30s: TimeoutError('stripe.api')\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:09:10.000259Z\",\"updated_at\":\"2026-08-31T02:09:44.000259Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"third_party_timeout\",\"summary\":\"Stripe API exceeded 30s deadline three consecutive attempts.\",\"suggested_fix\":\"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.\",\"is_retryable\":true,\"confidence\":0.71},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T02:09:44.000259Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-08-31T01:54:10.000259Z\",\"updated_at\":\"2026-08-31T01:54:26.000259Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Replay once the dependency recovers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T01:54:26.000259Z\",\"extra\":null}]}",
+          "timestamp": "2026-08-31T02:47:02.287547Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b5858043-8bb4-43d9-abd1-ed4021a328ec",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "The evidence points to three concurrent contributing factors — none of which has a Tier-1 auto-fix: (1) deploy_regression: v0.4.2 is explicitly annotated as 'correlated with billing failures' and a rollback requires human sign-off; (2) transient_dependency: SMTP relay (smtp.mailer.internal:587) is returning ConnectionRefused — needs infra investigation and recovery before DLQ replay; (3) poison_message with human_required hint: a malformed CSV upload (non-numeric value at row 15,382) is non-retryable and needs the uploader notified and a validation fix. A Stripe API timeout (wait_and_replay) also exists but is secondary. Human escalation is required to: review and sign off on a rollback of v0.4.2/v0.4.3, restore the SMTP relay, and handle the data-quality CSV issue."
+          },
+          "result_summary": "planner stop: The evidence points to three concurrent contributing factors — none of which has a Tier-1 auto-fix: (1) deploy_regression: v0.4.2 is explicitly annotated as 'correlated with billing failures' and a rollback requires human sign-off; (2) transient_dependency: SMTP relay (smtp.mailer.internal:587) is returning ConnectionRefused — needs infra investigation and recovery before DLQ replay; (3) poison_message with human_required hint: a malformed CSV upload (non-numeric value at row 15,382) is non-retryable and needs the uploader notified and a validation fix. A Stripe API timeout (wait_and_replay) also exists but is secondary. Human escalation is required to: review and sign off on a rollback of v0.4.2/v0.4.3, restore the SMTP relay, and handle the data-quality CSV issue.",
+          "timestamp": "2026-08-31T02:47:02.287547Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "deploy_regression",
+          "name": "v0.4.2-billing-failures-correlated-with-deploy",
+          "confidence": 0.72,
+          "reasoning": "Deploy history shows v0.4.2 is explicitly annotated 'correlated with billing failures', and the error spike alert fingerprint 'post_deploy_error_spike' directly implicates a recent deploy; v0.4.3 followed shortly after but DLQ errors persist."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "smtp-mailer-connection-refused-billing-api",
+          "confidence": 0.65,
+          "reasoning": "A DLQ entry shows smtp.mailer.internal:587 ConnectionRefusedError with wait_and_replay hint, suggesting the SMTP relay is down and contributing to error spikes in billing-api."
+        },
+        {
+          "category": "poison_message",
+          "name": "csv-upload-bad-input-human-required",
+          "confidence": 0.55,
+          "reasoning": "A DLQ entry for csv_upload has a non-retryable bad_input root cause (ValueError on row 15,382) with remediation_hint=human_required, contributing to DLQ accumulation."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "stripe-api-timeout-bulk-api-sync",
+          "confidence": 0.5,
+          "reasoning": "A DLQ entry shows Stripe API timed out after 30s three consecutive times with wait_and_replay hint, indicating a potential transient external dependency issue."
+        },
+        {
+          "category": "unknown",
+          "name": "unclassified-billing-api-error-spike",
+          "confidence": 0.15,
+          "reasoning": "Insufficient evidence to rule out other causes; the alert fingerprint is broad and may encompass additional failure modes not yet captured in DLQ or deploy history."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:47:02.256452Z",
+      "updated_at": "2026-08-31T02:47:02.287547Z"
+    }
+  ],
+  "invocation_id": "e72b5ffb9df0"
+}

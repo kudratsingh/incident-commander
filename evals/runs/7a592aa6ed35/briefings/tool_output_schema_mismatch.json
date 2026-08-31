@@ -1,0 +1,16 @@
+{
+  "incident_id": "9bb4684d-4e36-499d-9bc7-8d22b57f3a7c",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high group=billing-consumer",
+  "escalation_reason": "output parse failed (get_consumer_lag): 3 validation errors for GetConsumerLagOutput\nlag_known\n  Field required [type=missing, input_value={'consumer_group': 'billing-consumer', 'lag': 42}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\nsource\n  Field required [type=missing, input_value={'consumer_group': 'billing-consumer', 'lag': 42}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\ncache_key\n  Field required [type=missing, input_value={'consumer_group': 'billing-consumer', 'lag': 42}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing",
+  "attempted_action": null,
+  "investigation_trail": [],
+  "findings": "The get_consumer_lag response for billing-consumer violated the expected output schema (required cache_key field missing). The reading was discarded.\n",
+  "recommendation": "File a bug against the platform tool implementation returning invalid lag values, and check the raw metric from CloudWatch as a fallback.\n",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.000027,
+    "usd": "0.000000"
+  }
+}

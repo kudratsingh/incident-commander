@@ -1,0 +1,29 @@
+{
+  "incident_id": "7912a3f1-455e-4d15-b5e4-4f7f87b82536",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.jobs severity=critical fingerprint=job_failed",
+  "escalation_reason": "planner stop: Root cause is a persistent data bug: a 200MB PDF report generation job (report_gen, job 5967d510) failed with OOM after 2 retries. This is an oversized-input / resource-ceiling issue that requires human intervention — either increasing the memory limit, implementing chunked/streaming PDF generation, or rejecting reports above a size threshold. No Tier-1 automated fix is available. Note also: the alert fingerprint references job_type=process_payment but the trace contains a report_gen job — the alert routing or metadata may need review. Additionally, v0.4.2 (deployed ~6h prior) has a note 'correlated with billing failures' which may warrant human review alongside the v0.4.3 upgrade.",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_trace",
+      "summary": "{\"trace_id\":\"0e24ca29-1d47-57e9-b898-4d79bb6da981\",\"jobs\":[{\"id\":\"5967d510-0290-5627-a9db-4e29e3a38e44\",\"type\":\"report_gen\",\"status\":\"failed\",\"user_id\":\"ee7c82cb-bab6-5780-8590-55b57064cbe3\",\"retry_count\":2,\"error_message\":\"OOM during PDF generation (200MB report)\",\"created_at\":\"2026-08-31T03:02:04.954012Z\",\"updated_at\":\"2026-08-31T03:03:43.954012Z\"}],\"audit_events\":[{\"action\":\"job.failed\",\"resource_type\":\"job\",\"resource_id\":\"5967d510-0290-5627-a9db-4e29e3a38e44\",\"principal_type\":\"user\",\"created_at\":\"2026-08-31T03:47:04.664600Z\",\"extra_data\":{\"error_message\":\"OOM during PDF generation (200MB report)\"}}],\"truncated\":false,\"total_jobs\":1,\"total_audit_events\":1}"
+    },
+    {
+      "tool": "list_dlq_messages",
+      "summary": "{\"total\":0,\"items\":[]}"
+    },
+    {
+      "tool": "get_deploy_history",
+      "summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-31T01:47:04.930453Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-31T00:47:04.930453Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-08-30T21:47:04.930453Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-08-30T09:47:04.930453Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-08-30T05:47:04.930453Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}"
+    }
+  ],
+  "findings": "Job 5967d510 (type: report_gen) failed with OOM after 2 retries while generating a 200MB PDF — no Tier-1 automated fix was available and the DLQ is empty; additionally, the alert metadata references job_type=process_payment despite this being a report_gen job (possible routing misconfiguration), and v0.4.2 (deployed ~6h prior to the incident) carries a note \"correlated with billing failures\" that may be relevant alongside the current prod version v0.4.3.",
+  "recommendation": "Verify the memory limit configured for report_gen jobs and confirm whether v0.4.3 introduced any changes to PDF generation or resource caps, then review the alert routing metadata to determine why job_type=process_payment was attached to a report_gen failure.",
+  "budget_used": {
+    "tool_calls": 3,
+    "tokens": 29182,
+    "wall_seconds": 0.030504,
+    "usd": "0.079350"
+  }
+}

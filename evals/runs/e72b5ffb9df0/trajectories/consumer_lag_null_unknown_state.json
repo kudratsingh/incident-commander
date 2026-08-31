@@ -1,0 +1,302 @@
+{
+  "scenario": "consumer_lag_null_unknown_state",
+  "incident_id": "ae66e39a-0b2e-49bc-a969-1fb9a3aba658",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "ae66e39a-0b2e-49bc-a969-1fb9a3aba658",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "ledger-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:41:42.463307Z",
+      "updated_at": "2026-08-31T02:41:42.463307Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ae66e39a-0b2e-49bc-a969-1fb9a3aba658",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "ledger-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.031639,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "1f882060-38a1-4e33-b38b-c6323594fc69",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:41:42.494946Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:41:42.463307Z",
+      "updated_at": "2026-08-31T02:41:42.494946Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ae66e39a-0b2e-49bc-a969-1fb9a3aba658",
+      "state": "planning",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "ledger-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 29032,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.031679,
+        "max_usd": "1.00",
+        "usd_used": "0.080712"
+      },
+      "evidence": [
+        {
+          "evidence_id": "1f882060-38a1-4e33-b38b-c6323594fc69",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:41:42.494946Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ec0940c6-2652-4088-a340-0353ab14276f",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T02:41:42.494986Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5a4bebc9-f226-41a1-bf47-ca09873a5ced",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "billing-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:billing-consumer\"}",
+          "timestamp": "2026-08-31T02:41:42.494986Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7df8eeb9-f528-4ddb-aaf9-8e0f7ca0cbbd",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:22:10.000259Z\",\"updated_at\":\"2026-08-31T02:22:32.000259Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-08-31T02:22:32.000259Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"process_payment call timed out after 30s: TimeoutError('stripe.api')\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:09:10.000259Z\",\"updated_at\":\"2026-08-31T02:09:44.000259Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"third_party_timeout\",\"summary\":\"Stripe API exceeded 30s deadline three consecutive attempts.\",\"suggested_fix\":\"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.\",\"is_retryable\":true,\"confidence\":0.71},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T02:09:44.000259Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-08-31T01:54:10.000259Z\",\"updated_at\":\"2026-08-31T01:54:26.000259Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Replay once the dependency recovers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T01:54:26.000259Z\",\"extra\":null}]}",
+          "timestamp": "2026-08-31T02:41:42.494986Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d49474a4-8c1a-4240-963f-e4077cdfbbe5",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "billing-consumer has a confirmed lag of 15,000 messages (lag_known=true) directly triggering the critical consumer_lag_high alert. worker-dispatcher is healthy at lag=0, isolating the fault to billing-consumer. Confidence is 0.75, above the remediation threshold, and consumer_saturation has a Tier-1 fix. The DLQ entries (3 messages with mixed hints) are a secondary concern and do not block the primary consumer restart/scale-up remediation."
+          },
+          "result_summary": "planner handoff to PLANNING: billing-consumer has a confirmed lag of 15,000 messages (lag_known=true) directly triggering the critical consumer_lag_high alert. worker-dispatcher is healthy at lag=0, isolating the fault to billing-consumer. Confidence is 0.75, above the remediation threshold, and consumer_saturation has a Tier-1 fix. The DLQ entries (3 messages with mixed hints) are a secondary concern and do not block the primary consumer restart/scale-up remediation.",
+          "timestamp": "2026-08-31T02:41:42.494986Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "billing-consumer-lag-15k-sustained",
+          "confidence": 0.75,
+          "reasoning": "billing-consumer has a confirmed lag of 15,000 messages, directly matching the consumer_lag_high alert on the ledger-consumer group; worker-dispatcher is at 0 so the issue is isolated to billing-consumer."
+        },
+        {
+          "category": "poison_message",
+          "name": "dlq-mixed-hints-csv-stripe-smtp",
+          "confidence": 0.65,
+          "reasoning": "Three DLQ entries exist with different remediation hints (human_required, wait_and_replay x2), suggesting stalled processing due to unprocessable or dependency-blocked messages that could be contributing to or causing the consumer lag."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "smtp-mailer-connection-refused-billing-consumer",
+          "confidence": 0.45,
+          "reasoning": "The SMTP DLQ entry (remediation_hint=wait_and_replay) shows smtp.mailer.internal:587 is refusing connections, which could stall bulk_api_sync jobs and contribute to consumer backlog."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "billing-hotfix-v0.4.2-vpc-egress-change",
+          "confidence": 0.35,
+          "reasoning": "The DLQ triage for the SMTP failure specifically calls out billing hotfix v0.4.2 as possibly changing VPC egress rules, which could explain why the billing-consumer is struggling."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:41:42.463307Z",
+      "updated_at": "2026-08-31T02:41:42.494986Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ae66e39a-0b2e-49bc-a969-1fb9a3aba658",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "ledger-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 38568,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 38.65096,
+        "max_usd": "1.00",
+        "usd_used": "0.106135"
+      },
+      "evidence": [
+        {
+          "evidence_id": "1f882060-38a1-4e33-b38b-c6323594fc69",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:41:42.494946Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ec0940c6-2652-4088-a340-0353ab14276f",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T02:41:42.494986Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5a4bebc9-f226-41a1-bf47-ca09873a5ced",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "billing-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:billing-consumer\"}",
+          "timestamp": "2026-08-31T02:41:42.494986Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7df8eeb9-f528-4ddb-aaf9-8e0f7ca0cbbd",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:22:10.000259Z\",\"updated_at\":\"2026-08-31T02:22:32.000259Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-08-31T02:22:32.000259Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"process_payment call timed out after 30s: TimeoutError('stripe.api')\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:09:10.000259Z\",\"updated_at\":\"2026-08-31T02:09:44.000259Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"third_party_timeout\",\"summary\":\"Stripe API exceeded 30s deadline three consecutive attempts.\",\"suggested_fix\":\"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.\",\"is_retryable\":true,\"confidence\":0.71},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T02:09:44.000259Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-08-31T01:54:10.000259Z\",\"updated_at\":\"2026-08-31T01:54:26.000259Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Replay once the dependency recovers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T01:54:26.000259Z\",\"extra\":null}]}",
+          "timestamp": "2026-08-31T02:41:42.494986Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d49474a4-8c1a-4240-963f-e4077cdfbbe5",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "billing-consumer has a confirmed lag of 15,000 messages (lag_known=true) directly triggering the critical consumer_lag_high alert. worker-dispatcher is healthy at lag=0, isolating the fault to billing-consumer. Confidence is 0.75, above the remediation threshold, and consumer_saturation has a Tier-1 fix. The DLQ entries (3 messages with mixed hints) are a secondary concern and do not block the primary consumer restart/scale-up remediation."
+          },
+          "result_summary": "planner handoff to PLANNING: billing-consumer has a confirmed lag of 15,000 messages (lag_known=true) directly triggering the critical consumer_lag_high alert. worker-dispatcher is healthy at lag=0, isolating the fault to billing-consumer. Confidence is 0.75, above the remediation threshold, and consumer_saturation has a Tier-1 fix. The DLQ entries (3 messages with mixed hints) are a secondary concern and do not block the primary consumer restart/scale-up remediation.",
+          "timestamp": "2026-08-31T02:41:42.494986Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5f0f9e3e-1f04-498f-bc0e-a732d5bc8e00",
+          "tool_name": "_remediation_escalate",
+          "arguments": {
+            "from_state": "planning",
+            "reason": "plan rejected before execution: resource argument(s) not evidence-sourced: restart_consumer_group.consumer_group='billing-consumer', get_consumer_lag.consumer_group='billing-consumer'. Resource names must be copied verbatim from the alert or tool results."
+          },
+          "result_summary": "plan rejected before execution: resource argument(s) not evidence-sourced: restart_consumer_group.consumer_group='billing-consumer', get_consumer_lag.consumer_group='billing-consumer'. Resource names must be copied verbatim from the alert or tool results.",
+          "timestamp": "2026-08-31T02:42:21.114267Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "billing-consumer-lag-15k-sustained",
+          "confidence": 0.75,
+          "reasoning": "billing-consumer has a confirmed lag of 15,000 messages, directly matching the consumer_lag_high alert on the ledger-consumer group; worker-dispatcher is at 0 so the issue is isolated to billing-consumer."
+        },
+        {
+          "category": "poison_message",
+          "name": "dlq-mixed-hints-csv-stripe-smtp",
+          "confidence": 0.65,
+          "reasoning": "Three DLQ entries exist with different remediation hints (human_required, wait_and_replay x2), suggesting stalled processing due to unprocessable or dependency-blocked messages that could be contributing to or causing the consumer lag."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "smtp-mailer-connection-refused-billing-consumer",
+          "confidence": 0.45,
+          "reasoning": "The SMTP DLQ entry (remediation_hint=wait_and_replay) shows smtp.mailer.internal:587 is refusing connections, which could stall bulk_api_sync jobs and contribute to consumer backlog."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "billing-hotfix-v0.4.2-vpc-egress-change",
+          "confidence": 0.35,
+          "reasoning": "The DLQ triage for the SMTP failure specifically calls out billing hotfix v0.4.2 as possibly changing VPC egress rules, which could explain why the billing-consumer is struggling."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:41:42.463307Z",
+      "updated_at": "2026-08-31T02:42:21.114267Z"
+    }
+  ],
+  "invocation_id": "e72b5ffb9df0"
+}

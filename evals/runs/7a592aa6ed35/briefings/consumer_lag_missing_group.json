@@ -1,0 +1,21 @@
+{
+  "incident_id": "b6a86920-4d72-4f2d-82c4-94f788dcea96",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high",
+  "escalation_reason": "planner stop: alert payload incomplete; human decision required",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"unknown\",\"lag\":null,\"lag_known\":false,\"source\":\"unrecognized\",\"cache_key\":\"kafka:consumer_lag:unknown\"}"
+    }
+  ],
+  "findings": "The paging alert did not name a consumer group. A fallback probe against \"unknown\" returned lag: null — the platform has no cached reading for that group, so the probe neither confirms nor excludes saturation and carries no magnitude. The alert payload is too thin to attribute the signal.\n",
+  "recommendation": "Ask the alert-source owner to include the consumer group in future payloads; in the meantime, spot-check the top three lag-prone groups.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.000031,
+    "usd": "0.000000"
+  }
+}

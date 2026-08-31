@@ -1,0 +1,29 @@
+{
+  "incident_id": "f6117a00-8936-4bf0-93ae-bf1362202c75",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.jobs severity=critical fingerprint=failure_rate_high",
+  "escalation_reason": "planner stop: Two recently failed jobs have been identified: (1) job d034fd34 (doc_analysis) failed at 03:17Z with 'pdf extraction failed: file is corrupted' — indicating corrupted input data; (2) job 5967d510 (report_gen) failed at 03:02Z with 'OOM during PDF generation (200MB report)' — indicating an oversized input causing memory exhaustion. Both failures share the same user (ee7c82cb) and are consistent with malformed/oversized source data (persistent_data_bug). This category has no Tier-1 automated fix and requires human review to inspect the source files, validate input data pipelines, and enforce size/format guardrails.",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "search_traces",
+      "summary": "{\"matches\":[{\"trace_id\":\"edeeb994-56d2-53e6-88fd-8af47e695dbc\",\"job_id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"job_type\":\"doc_analysis\",\"status\":\"failed\",\"created_at\":\"2026-08-31T03:17:04.954012Z\"},{\"trace_id\":\"0e24ca29-1d47-57e9-b898-4d79bb6da981\",\"job_id\":\"5967d510-0290-5627-a9db-4e29e3a38e44\",\"job_type\":\"report_gen\",\"status\":\"failed\",\"created_at\":\"2026-08-31T03:02:04.954012Z\"}]}"
+    },
+    {
+      "tool": "get_trace",
+      "summary": "{\"trace_id\":\"edeeb994-56d2-53e6-88fd-8af47e695dbc\",\"jobs\":[{\"id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"type\":\"doc_analysis\",\"status\":\"failed\",\"user_id\":\"ee7c82cb-bab6-5780-8590-55b57064cbe3\",\"retry_count\":2,\"error_message\":\"pdf extraction failed: file is corrupted\",\"created_at\":\"2026-08-31T03:17:04.954012Z\",\"updated_at\":\"2026-08-31T03:17:14.954012Z\"}],\"audit_events\":[{\"action\":\"job.failed\",\"resource_type\":\"job\",\"resource_id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"principal_type\":\"user\",\"created_at\":\"2026-08-31T03:47:04.664600Z\",\"extra_data\":{\"error_message\":\"pdf extraction failed: file is corrupted\"}}],\"truncated\":false,\"total_jobs\":1,\"total_audit_events\":1}"
+    },
+    {
+      "tool": "get_trace",
+      "summary": "{\"trace_id\":\"0e24ca29-1d47-57e9-b898-4d79bb6da981\",\"jobs\":[{\"id\":\"5967d510-0290-5627-a9db-4e29e3a38e44\",\"type\":\"report_gen\",\"status\":\"failed\",\"user_id\":\"ee7c82cb-bab6-5780-8590-55b57064cbe3\",\"retry_count\":2,\"error_message\":\"OOM during PDF generation (200MB report)\",\"created_at\":\"2026-08-31T03:02:04.954012Z\",\"updated_at\":\"2026-08-31T03:03:43.954012Z\"}],\"audit_events\":[{\"action\":\"job.failed\",\"resource_type\":\"job\",\"resource_id\":\"5967d510-0290-5627-a9db-4e29e3a38e44\",\"principal_type\":\"user\",\"created_at\":\"2026-08-31T03:47:04.664600Z\",\"extra_data\":{\"error_message\":\"OOM during PDF generation (200MB report)\"}}],\"truncated\":false,\"total_jobs\":1,\"total_audit_events\":1}"
+    }
+  ],
+  "findings": "Two jobs belonging to user ee7c82cb failed with data-quality errors: job d034fd34 (doc_analysis, 03:17Z) aborted with \"pdf extraction failed: file is corrupted\" after 2 retries, and job 5967d510 (report_gen, 03:02Z) crashed with OOM while generating a 200 MB report, also after 2 retries — both failures are categorized as a persistent_data_bug with no Tier-1 automated fix available, and no remediation actions were attempted.",
+  "recommendation": "Inspect the source files submitted by user ee7c82cb — validate the PDF uploaded for doc_analysis for corruption and confirm whether the report_gen input can be split or size-capped to stay within memory limits, then enforce format and size guardrails in the input pipeline to prevent recurrence.",
+  "budget_used": {
+    "tool_calls": 3,
+    "tokens": 29773,
+    "wall_seconds": 0.041545,
+    "usd": "0.083103"
+  }
+}

@@ -1,0 +1,526 @@
+{
+  "scenario": "dlq_backlog",
+  "incident_id": "a110269b-1519-45fb-a969-72d39837b8cc",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "a110269b-1519-45fb-a969-72d39837b8cc",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "queue": "dlq"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:47:46.909520Z",
+      "updated_at": "2026-08-31T02:47:46.909520Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "a110269b-1519-45fb-a969-72d39837b8cc",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "queue": "dlq"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.032784,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c67243bd-a134-419a-9eeb-fb73dc84eae4",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:47:46.942304Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:47:46.909520Z",
+      "updated_at": "2026-08-31T02:47:46.942304Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "a110269b-1519-45fb-a969-72d39837b8cc",
+      "state": "planning",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "queue": "dlq"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 14823,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.032826,
+        "max_usd": "1.00",
+        "usd_used": "0.041283"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c67243bd-a134-419a-9eeb-fb73dc84eae4",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:47:46.942304Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "10b48b48-260c-43e7-beb4-052ab0c4c895",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:22:10.000259Z\",\"updated_at\":\"2026-08-31T02:22:32.000259Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-08-31T02:22:32.000259Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"process_payment call timed out after 30s: TimeoutError('stripe.api')\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:09:10.000259Z\",\"updated_at\":\"2026-08-31T02:09:44.000259Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"third_party_timeout\",\"summary\":\"Stripe API exceeded 30s deadline three consecutive attempts.\",\"suggested_fix\":\"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.\",\"is_retryable\":true,\"confidence\":0.71},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T02:09:44.000259Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-08-31T01:54:10.000259Z\",\"updated_at\":\"2026-08-31T01:54:26.000259Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Replay once the dependency recovers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T01:54:26.000259Z\",\"extra\":null}]}",
+          "timestamp": "2026-08-31T02:47:46.942346Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "1e5dd475-18df-4404-888e-d3603a194d3c",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "DLQ contains 3 entries with explicit remediation_hints from platform triage: one 'human_required' (csv_upload with non-retryable bad input) and two 'wait_and_replay' (bulk_api_sync jobs failing due to Stripe timeout and SMTP unavailability). The poison_message category covers all items and confidence is 0.92 — the remediation planner should route by hint: escalate the human_required entry to the uploader/data team, and schedule delayed replays for the two wait_and_replay entries once dependencies recover."
+          },
+          "result_summary": "planner handoff to PLANNING: DLQ contains 3 entries with explicit remediation_hints from platform triage: one 'human_required' (csv_upload with non-retryable bad input) and two 'wait_and_replay' (bulk_api_sync jobs failing due to Stripe timeout and SMTP unavailability). The poison_message category covers all items and confidence is 0.92 — the remediation planner should route by hint: escalate the human_required entry to the uploader/data team, and schedule delayed replays for the two wait_and_replay entries once dependencies recover.",
+          "timestamp": "2026-08-31T02:47:46.942346Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "dlq-mixed-hints-human-required-and-wait-and-replay",
+          "confidence": 0.92,
+          "reasoning": "All 3 DLQ entries have explicit remediation_hints from LLM triage: one 'human_required' (bad CSV input, non-retryable data quality issue) and two 'wait_and_replay' (Stripe timeout and SMTP connection refused), covering all items in the queue."
+        },
+        {
+          "category": "persistent_data_bug",
+          "name": "csv-upload-non-numeric-value-row-15382",
+          "confidence": 0.75,
+          "reasoning": "The csv_upload DLQ entry has a confirmed bad-input parse error (ValueError on 'not-a-number') with hint=human_required and is_retryable=false — a genuine data quality defect requiring human intervention."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "smtp-mailer-internal-connection-refused",
+          "confidence": 0.65,
+          "reasoning": "The SMTP bulk_api_sync DLQ entry shows TCP-level ConnectionRefusedError against smtp.mailer.internal, suggesting the mail relay is down — a transient external dependency failure."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:47:46.909520Z",
+      "updated_at": "2026-08-31T02:47:46.942346Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "a110269b-1519-45fb-a969-72d39837b8cc",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "queue": "dlq"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 24366,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 17.964502,
+        "max_usd": "1.00",
+        "usd_used": "0.068587"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c67243bd-a134-419a-9eeb-fb73dc84eae4",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:47:46.942304Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "10b48b48-260c-43e7-beb4-052ab0c4c895",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:22:10.000259Z\",\"updated_at\":\"2026-08-31T02:22:32.000259Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-08-31T02:22:32.000259Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"process_payment call timed out after 30s: TimeoutError('stripe.api')\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:09:10.000259Z\",\"updated_at\":\"2026-08-31T02:09:44.000259Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"third_party_timeout\",\"summary\":\"Stripe API exceeded 30s deadline three consecutive attempts.\",\"suggested_fix\":\"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.\",\"is_retryable\":true,\"confidence\":0.71},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T02:09:44.000259Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-08-31T01:54:10.000259Z\",\"updated_at\":\"2026-08-31T01:54:26.000259Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Replay once the dependency recovers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T01:54:26.000259Z\",\"extra\":null}]}",
+          "timestamp": "2026-08-31T02:47:46.942346Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "1e5dd475-18df-4404-888e-d3603a194d3c",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "DLQ contains 3 entries with explicit remediation_hints from platform triage: one 'human_required' (csv_upload with non-retryable bad input) and two 'wait_and_replay' (bulk_api_sync jobs failing due to Stripe timeout and SMTP unavailability). The poison_message category covers all items and confidence is 0.92 — the remediation planner should route by hint: escalate the human_required entry to the uploader/data team, and schedule delayed replays for the two wait_and_replay entries once dependencies recover."
+          },
+          "result_summary": "planner handoff to PLANNING: DLQ contains 3 entries with explicit remediation_hints from platform triage: one 'human_required' (csv_upload with non-retryable bad input) and two 'wait_and_replay' (bulk_api_sync jobs failing due to Stripe timeout and SMTP unavailability). The poison_message category covers all items and confidence is 0.92 — the remediation planner should route by hint: escalate the human_required entry to the uploader/data team, and schedule delayed replays for the two wait_and_replay entries once dependencies recover.",
+          "timestamp": "2026-08-31T02:47:46.942346Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8bd98542-b87f-4f39-8dba-625e226da975",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "dlq-mixed-hints-human-required-and-wait-and-replay"
+          },
+          "result_summary": "plan: mark_dlq_permanent({\"job_id\": \"f030f975-974e-5ce3-aa6b-444136507d86\", \"reason\": \"This csv_upload job failed with a non-retryable data quality error (ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382) after 3 retry attempts. The input data is malformed and replaying will reproduce the same failure. A human must correct the source CSV before this job can be reprocessed.\"}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-31T02:48:04.874022Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "dlq-mixed-hints-human-required-and-wait-and-replay",
+          "confidence": 0.92,
+          "reasoning": "All 3 DLQ entries have explicit remediation_hints from LLM triage: one 'human_required' (bad CSV input, non-retryable data quality issue) and two 'wait_and_replay' (Stripe timeout and SMTP connection refused), covering all items in the queue."
+        },
+        {
+          "category": "persistent_data_bug",
+          "name": "csv-upload-non-numeric-value-row-15382",
+          "confidence": 0.75,
+          "reasoning": "The csv_upload DLQ entry has a confirmed bad-input parse error (ValueError on 'not-a-number') with hint=human_required and is_retryable=false — a genuine data quality defect requiring human intervention."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "smtp-mailer-internal-connection-refused",
+          "confidence": 0.65,
+          "reasoning": "The SMTP bulk_api_sync DLQ entry shows TCP-level ConnectionRefusedError against smtp.mailer.internal, suggesting the mail relay is down — a transient external dependency failure."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "dlq-mixed-hints-human-required-and-wait-and-replay",
+        "action_tool": "mark_dlq_permanent",
+        "action_arguments": {
+          "job_id": "f030f975-974e-5ce3-aa6b-444136507d86",
+          "reason": "This csv_upload job failed with a non-retryable data quality error (ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382) after 3 retry attempts. The input data is malformed and replaying will reproduce the same failure. A human must correct the source CSV before this job can be reprocessed."
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "human_required"
+        },
+        "verify_expectation": "The list_dlq_messages response filtered by remediation_hint='human_required' should include the job with id 'f030f975-974e-5ce3-aa6b-444136507d86', confirming it has been marked permanent and is excluded from future auto-replay scans."
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:47:46.909520Z",
+      "updated_at": "2026-08-31T02:48:04.874022Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "a110269b-1519-45fb-a969-72d39837b8cc",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "queue": "dlq"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 24366,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 26.262487,
+        "max_usd": "1.00",
+        "usd_used": "0.068587"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c67243bd-a134-419a-9eeb-fb73dc84eae4",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:47:46.942304Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "10b48b48-260c-43e7-beb4-052ab0c4c895",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:22:10.000259Z\",\"updated_at\":\"2026-08-31T02:22:32.000259Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-08-31T02:22:32.000259Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"process_payment call timed out after 30s: TimeoutError('stripe.api')\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:09:10.000259Z\",\"updated_at\":\"2026-08-31T02:09:44.000259Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"third_party_timeout\",\"summary\":\"Stripe API exceeded 30s deadline three consecutive attempts.\",\"suggested_fix\":\"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.\",\"is_retryable\":true,\"confidence\":0.71},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T02:09:44.000259Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-08-31T01:54:10.000259Z\",\"updated_at\":\"2026-08-31T01:54:26.000259Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Replay once the dependency recovers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T01:54:26.000259Z\",\"extra\":null}]}",
+          "timestamp": "2026-08-31T02:47:46.942346Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "1e5dd475-18df-4404-888e-d3603a194d3c",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "DLQ contains 3 entries with explicit remediation_hints from platform triage: one 'human_required' (csv_upload with non-retryable bad input) and two 'wait_and_replay' (bulk_api_sync jobs failing due to Stripe timeout and SMTP unavailability). The poison_message category covers all items and confidence is 0.92 — the remediation planner should route by hint: escalate the human_required entry to the uploader/data team, and schedule delayed replays for the two wait_and_replay entries once dependencies recover."
+          },
+          "result_summary": "planner handoff to PLANNING: DLQ contains 3 entries with explicit remediation_hints from platform triage: one 'human_required' (csv_upload with non-retryable bad input) and two 'wait_and_replay' (bulk_api_sync jobs failing due to Stripe timeout and SMTP unavailability). The poison_message category covers all items and confidence is 0.92 — the remediation planner should route by hint: escalate the human_required entry to the uploader/data team, and schedule delayed replays for the two wait_and_replay entries once dependencies recover.",
+          "timestamp": "2026-08-31T02:47:46.942346Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8bd98542-b87f-4f39-8dba-625e226da975",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "dlq-mixed-hints-human-required-and-wait-and-replay"
+          },
+          "result_summary": "plan: mark_dlq_permanent({\"job_id\": \"f030f975-974e-5ce3-aa6b-444136507d86\", \"reason\": \"This csv_upload job failed with a non-retryable data quality error (ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382) after 3 retry attempts. The input data is malformed and replaying will reproduce the same failure. A human must correct the source CSV before this job can be reprocessed.\"}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-31T02:48:04.874022Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d9faa291-21e5-4bea-a6fb-5abc7ce6f9ea",
+          "tool_name": "mark_dlq_permanent",
+          "arguments": {
+            "job_id": "f030f975-974e-5ce3-aa6b-444136507d86",
+            "reason": "This csv_upload job failed with a non-retryable data quality error (ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382) after 3 retry attempts. The input data is malformed and replaying will reproduce the same failure. A human must correct the source CSV before this job can be reprocessed.",
+            "idempotency_key": "ee48df3b7712923a59cfe7b0c954a416"
+          },
+          "result_summary": "{\"job_id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"previous_hint\":\"human_required\",\"remediation_hint\":\"human_required\",\"already_marked\":true}",
+          "timestamp": "2026-08-31T02:48:13.172007Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "dlq-mixed-hints-human-required-and-wait-and-replay",
+          "confidence": 0.92,
+          "reasoning": "All 3 DLQ entries have explicit remediation_hints from LLM triage: one 'human_required' (bad CSV input, non-retryable data quality issue) and two 'wait_and_replay' (Stripe timeout and SMTP connection refused), covering all items in the queue."
+        },
+        {
+          "category": "persistent_data_bug",
+          "name": "csv-upload-non-numeric-value-row-15382",
+          "confidence": 0.75,
+          "reasoning": "The csv_upload DLQ entry has a confirmed bad-input parse error (ValueError on 'not-a-number') with hint=human_required and is_retryable=false — a genuine data quality defect requiring human intervention."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "smtp-mailer-internal-connection-refused",
+          "confidence": 0.65,
+          "reasoning": "The SMTP bulk_api_sync DLQ entry shows TCP-level ConnectionRefusedError against smtp.mailer.internal, suggesting the mail relay is down — a transient external dependency failure."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "dlq-mixed-hints-human-required-and-wait-and-replay",
+        "action_tool": "mark_dlq_permanent",
+        "action_arguments": {
+          "job_id": "f030f975-974e-5ce3-aa6b-444136507d86",
+          "reason": "This csv_upload job failed with a non-retryable data quality error (ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382) after 3 retry attempts. The input data is malformed and replaying will reproduce the same failure. A human must correct the source CSV before this job can be reprocessed."
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "human_required"
+        },
+        "verify_expectation": "The list_dlq_messages response filtered by remediation_hint='human_required' should include the job with id 'f030f975-974e-5ce3-aa6b-444136507d86', confirming it has been marked permanent and is excluded from future auto-replay scans."
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-31T02:47:46.909520Z",
+      "updated_at": "2026-08-31T02:48:13.172007Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "a110269b-1519-45fb-a969-72d39837b8cc",
+      "state": "resolved",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "queue": "dlq"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 26252,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 26.304836,
+        "max_usd": "1.00",
+        "usd_used": "0.070961"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c67243bd-a134-419a-9eeb-fb73dc84eae4",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:47:46.942304Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "10b48b48-260c-43e7-beb4-052ab0c4c895",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":3,\"items\":[{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:22:10.000259Z\",\"updated_at\":\"2026-08-31T02:22:32.000259Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-08-31T02:22:32.000259Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"process_payment call timed out after 30s: TimeoutError('stripe.api')\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:09:10.000259Z\",\"updated_at\":\"2026-08-31T02:09:44.000259Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"third_party_timeout\",\"summary\":\"Stripe API exceeded 30s deadline three consecutive attempts.\",\"suggested_fix\":\"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.\",\"is_retryable\":true,\"confidence\":0.71},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T02:09:44.000259Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-08-31T01:54:10.000259Z\",\"updated_at\":\"2026-08-31T01:54:26.000259Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Replay once the dependency recovers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T01:54:26.000259Z\",\"extra\":null}]}",
+          "timestamp": "2026-08-31T02:47:46.942346Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "1e5dd475-18df-4404-888e-d3603a194d3c",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "DLQ contains 3 entries with explicit remediation_hints from platform triage: one 'human_required' (csv_upload with non-retryable bad input) and two 'wait_and_replay' (bulk_api_sync jobs failing due to Stripe timeout and SMTP unavailability). The poison_message category covers all items and confidence is 0.92 — the remediation planner should route by hint: escalate the human_required entry to the uploader/data team, and schedule delayed replays for the two wait_and_replay entries once dependencies recover."
+          },
+          "result_summary": "planner handoff to PLANNING: DLQ contains 3 entries with explicit remediation_hints from platform triage: one 'human_required' (csv_upload with non-retryable bad input) and two 'wait_and_replay' (bulk_api_sync jobs failing due to Stripe timeout and SMTP unavailability). The poison_message category covers all items and confidence is 0.92 — the remediation planner should route by hint: escalate the human_required entry to the uploader/data team, and schedule delayed replays for the two wait_and_replay entries once dependencies recover.",
+          "timestamp": "2026-08-31T02:47:46.942346Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8bd98542-b87f-4f39-8dba-625e226da975",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "dlq-mixed-hints-human-required-and-wait-and-replay"
+          },
+          "result_summary": "plan: mark_dlq_permanent({\"job_id\": \"f030f975-974e-5ce3-aa6b-444136507d86\", \"reason\": \"This csv_upload job failed with a non-retryable data quality error (ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382) after 3 retry attempts. The input data is malformed and replaying will reproduce the same failure. A human must correct the source CSV before this job can be reprocessed.\"}) then verify via list_dlq_messages",
+          "timestamp": "2026-08-31T02:48:04.874022Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d9faa291-21e5-4bea-a6fb-5abc7ce6f9ea",
+          "tool_name": "mark_dlq_permanent",
+          "arguments": {
+            "job_id": "f030f975-974e-5ce3-aa6b-444136507d86",
+            "reason": "This csv_upload job failed with a non-retryable data quality error (ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382) after 3 retry attempts. The input data is malformed and replaying will reproduce the same failure. A human must correct the source CSV before this job can be reprocessed.",
+            "idempotency_key": "ee48df3b7712923a59cfe7b0c954a416"
+          },
+          "result_summary": "{\"job_id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"previous_hint\":\"human_required\",\"remediation_hint\":\"human_required\",\"already_marked\":true}",
+          "timestamp": "2026-08-31T02:48:13.172007Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "60085ce2-80d5-4364-94b5-f5f7c64d376a",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": "human_required",
+            "limit": 50,
+            "offset": 0,
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "{\"total\":1,\"items\":[{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:22:10.000259Z\",\"updated_at\":\"2026-08-31T02:22:32.000259Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-08-31T02:22:32.000259Z\",\"extra\":null}]}",
+          "timestamp": "2026-08-31T02:48:13.214452Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7f7b742e-902f-4ead-bab8-0c2567d8928d",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The list_dlq_messages response filtered by remediation_hint='human_required' should include the job with id 'f030f975-974e-5ce3-aa6b-444136507d86', confirming it has been marked permanent and is excluded from future auto-replay scans.",
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "verified: The remediation result shows the job f030f975-974e-5ce3-aa6b-444136507d86 was marked with remediation_hint='human_required', and the verify probe confirms it appears in the dlq_messages list filtered by remediation_hint='human_required', matching the expected post-fix behavior.",
+          "timestamp": "2026-08-31T02:48:13.214452Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "dlq-mixed-hints-human-required-and-wait-and-replay",
+          "confidence": 0.92,
+          "reasoning": "All 3 DLQ entries have explicit remediation_hints from LLM triage: one 'human_required' (bad CSV input, non-retryable data quality issue) and two 'wait_and_replay' (Stripe timeout and SMTP connection refused), covering all items in the queue."
+        },
+        {
+          "category": "persistent_data_bug",
+          "name": "csv-upload-non-numeric-value-row-15382",
+          "confidence": 0.75,
+          "reasoning": "The csv_upload DLQ entry has a confirmed bad-input parse error (ValueError on 'not-a-number') with hint=human_required and is_retryable=false — a genuine data quality defect requiring human intervention."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "smtp-mailer-internal-connection-refused",
+          "confidence": 0.65,
+          "reasoning": "The SMTP bulk_api_sync DLQ entry shows TCP-level ConnectionRefusedError against smtp.mailer.internal, suggesting the mail relay is down — a transient external dependency failure."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "dlq-mixed-hints-human-required-and-wait-and-replay",
+        "action_tool": "mark_dlq_permanent",
+        "action_arguments": {
+          "job_id": "f030f975-974e-5ce3-aa6b-444136507d86",
+          "reason": "This csv_upload job failed with a non-retryable data quality error (ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382) after 3 retry attempts. The input data is malformed and replaying will reproduce the same failure. A human must correct the source CSV before this job can be reprocessed."
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "human_required"
+        },
+        "verify_expectation": "The list_dlq_messages response filtered by remediation_hint='human_required' should include the job with id 'f030f975-974e-5ce3-aa6b-444136507d86', confirming it has been marked permanent and is excluded from future auto-replay scans."
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-31T02:47:46.909520Z",
+      "updated_at": "2026-08-31T02:48:13.214452Z"
+    }
+  ],
+  "invocation_id": "e72b5ffb9df0"
+}

@@ -1,0 +1,16 @@
+{
+  "incident_id": "108afc93-dfa8-434e-ae36-b1a03cc899d9",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.unknown severity=unknown fingerprint=no_severity",
+  "escalation_reason": "severity=unknown classified as escalated",
+  "attempted_action": null,
+  "investigation_trail": [],
+  "findings": "No investigation probes were run before escalation — the alert arrived with unknown severity and unknown source, preventing automated classification and triage.",
+  "recommendation": "Review the raw alert for incident 108afc93-dfa8-434e-ae36-b1a03cc899d9 directly in the alerting platform to determine its true source, severity, and scope before taking any action.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.036594,
+    "usd": "0"
+  }
+}

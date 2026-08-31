@@ -1,0 +1,132 @@
+{
+  "scenario": "tool_output_schema_mismatch",
+  "incident_id": "9bb4684d-4e36-499d-9bc7-8d22b57f3a7c",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "9bb4684d-4e36-499d-9bc7-8d22b57f3a7c",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "billing-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:01.016649Z",
+      "updated_at": "2026-08-31T02:22:01.016649Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "9bb4684d-4e36-499d-9bc7-8d22b57f3a7c",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "billing-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.000016,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "b78e2959-928c-40fd-9258-89084f8a89ab",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:22:01.016665Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:01.016649Z",
+      "updated_at": "2026-08-31T02:22:01.016665Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "9bb4684d-4e36-499d-9bc7-8d22b57f3a7c",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "billing-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.000027,
+        "max_usd": "1.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "b78e2959-928c-40fd-9258-89084f8a89ab",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:22:01.016665Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5e0df4ea-455a-4942-8d2f-562c03db689e",
+          "tool_name": "_planner_escalate",
+          "arguments": {
+            "reason": "output parse failed (get_consumer_lag): 3 validation errors for GetConsumerLagOutput\nlag_known\n  Field required [type=missing, input_value={'consumer_group': 'billing-consumer', 'lag': 42}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\nsource\n  Field required [type=missing, input_value={'consumer_group': 'billing-consumer', 'lag': 42}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\ncache_key\n  Field required [type=missing, input_value={'consumer_group': 'billing-consumer', 'lag': 42}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing"
+          },
+          "result_summary": "output parse failed (get_consumer_lag): 3 validation errors for GetConsumerLagOutput\nlag_known\n  Field required [type=missing, input_value={'consumer_group': 'billing-consumer', 'lag': 42}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\nsource\n  Field required [type=missing, input_value={'consumer_group': 'billing-consumer', 'lag': 42}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\ncache_key\n  Field required [type=missing, input_value={'consumer_group': 'billing-consumer', 'lag': 42}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing",
+          "timestamp": "2026-08-31T02:22:01.016676Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.5,
+          "reasoning": "Standard paging alert; probe for lag reading.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:01.016649Z",
+      "updated_at": "2026-08-31T02:22:01.016676Z"
+    }
+  ],
+  "invocation_id": "7a592aa6ed35"
+}

@@ -1,0 +1,142 @@
+{
+  "scenario": "consumer_lag_null_unknown_state",
+  "incident_id": "ceda57a8-44f8-4240-97b9-8bd78125a6ba",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "ceda57a8-44f8-4240-97b9-8bd78125a6ba",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "ledger-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:00.911113Z",
+      "updated_at": "2026-08-31T02:22:00.911113Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ceda57a8-44f8-4240-97b9-8bd78125a6ba",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "ledger-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.00002,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "31468493-0706-44f2-8d55-b043f4c922a5",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:22:00.911133Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:00.911113Z",
+      "updated_at": "2026-08-31T02:22:00.911133Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ceda57a8-44f8-4240-97b9-8bd78125a6ba",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "ledger-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.000031,
+        "max_usd": "1.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "31468493-0706-44f2-8d55-b043f4c922a5",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:22:00.911133Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "84d1e3ec-4a29-497b-87c6-254d50a35ac6",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "ledger-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"ledger-consumer\",\"lag\":null,\"lag_known\":false,\"source\":\"unrecognized\",\"cache_key\":\"kafka:consumer_lag:ledger-consumer\"}",
+          "timestamp": "2026-08-31T02:22:00.911144Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "1a57662f-5497-4b0a-8122-38ac029e2a79",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "lag undetermined for the paged group; human decision required"
+          },
+          "result_summary": "planner stop: lag undetermined for the paged group; human decision required",
+          "timestamp": "2026-08-31T02:22:00.911144Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "unknown",
+          "name": "undetermined_lag",
+          "confidence": 0.55,
+          "reasoning": "Lag came back null, not a number: the platform could not determine lag for ledger-consumer (no cached value — consumer not started, no partition assignment, or a renamed group). Null is not zero and is not healthy; it carries no magnitude, so saturation can be neither confirmed nor excluded from this reading. No remediation is justified on a null.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:00.911113Z",
+      "updated_at": "2026-08-31T02:22:00.911144Z"
+    }
+  ],
+  "invocation_id": "7a592aa6ed35"
+}

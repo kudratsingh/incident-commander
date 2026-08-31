@@ -1,0 +1,29 @@
+{
+  "incident_id": "d11472c5-76de-4169-8690-48254ee9c37b",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high group=worker-dispatcher",
+  "escalation_reason": "not_verified: The verify probe still shows lag=15000 — the restart action went through but the consumer isn't processing. Deeper issue: the consumer may be crashing on startup or a downstream dependency is blocking it.\n",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":15000,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    },
+    {
+      "tool": "restart_consumer_group",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"kill_key_cleared\":true,\"latency_key_cleared\":false,\"group_recognized\":true,\"accepted\":true}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":15000,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    }
+  ],
+  "findings": "Restarted worker-dispatcher after seeing lag=15000. Verify probe still shows lag=15000 — the restart did not clear the backlog, so the underlying cause isn't a simple consumer death.\n",
+  "recommendation": "Check the consumer pod's startup logs and downstream dependency health (Postgres, Redis, downstream API). A restart-that-didn't- help suggests the consumer is looping on a persistent error.\n",
+  "budget_used": {
+    "tool_calls": 3,
+    "tokens": 0,
+    "wall_seconds": 0.004512,
+    "usd": "0.000000"
+  }
+}

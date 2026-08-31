@@ -1,0 +1,185 @@
+{
+  "scenario": "trace_investigation",
+  "incident_id": "7912a3f1-455e-4d15-b5e4-4f7f87b82536",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "7912a3f1-455e-4d15-b5e4-4f7f87b82536",
+      "state": "triage",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "critical",
+        "fingerprint": "job_failed",
+        "group": null,
+        "trace_id": "0e24ca29-1d47-57e9-b898-4d79bb6da981",
+        "job_type": "process_payment"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T04:00:48.174581Z",
+      "updated_at": "2026-08-31T04:00:48.174581Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "7912a3f1-455e-4d15-b5e4-4f7f87b82536",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "critical",
+        "fingerprint": "job_failed",
+        "group": null,
+        "trace_id": "0e24ca29-1d47-57e9-b898-4d79bb6da981",
+        "job_type": "process_payment"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.030443,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c2796e27-edba-4c3e-858a-f394ec037caf",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "e4ac416c9e159e9d2fe620cc02696ffd"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T04:00:48.205024Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T04:00:48.174581Z",
+      "updated_at": "2026-08-31T04:00:48.205024Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "7912a3f1-455e-4d15-b5e4-4f7f87b82536",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "critical",
+        "fingerprint": "job_failed",
+        "group": null,
+        "trace_id": "0e24ca29-1d47-57e9-b898-4d79bb6da981",
+        "job_type": "process_payment"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 29182,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.030504,
+        "max_usd": "1.00",
+        "usd_used": "0.079350"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c2796e27-edba-4c3e-858a-f394ec037caf",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "e4ac416c9e159e9d2fe620cc02696ffd"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T04:00:48.205024Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f7007d2b-60cb-4830-9388-4dc1d9e594b7",
+          "tool_name": "get_trace",
+          "arguments": {
+            "trace_id": "0e24ca29-1d47-57e9-b898-4d79bb6da981",
+            "include_audit": true
+          },
+          "result_summary": "{\"trace_id\":\"0e24ca29-1d47-57e9-b898-4d79bb6da981\",\"jobs\":[{\"id\":\"5967d510-0290-5627-a9db-4e29e3a38e44\",\"type\":\"report_gen\",\"status\":\"failed\",\"user_id\":\"ee7c82cb-bab6-5780-8590-55b57064cbe3\",\"retry_count\":2,\"error_message\":\"OOM during PDF generation (200MB report)\",\"created_at\":\"2026-08-31T03:02:04.954012Z\",\"updated_at\":\"2026-08-31T03:03:43.954012Z\"}],\"audit_events\":[{\"action\":\"job.failed\",\"resource_type\":\"job\",\"resource_id\":\"5967d510-0290-5627-a9db-4e29e3a38e44\",\"principal_type\":\"user\",\"created_at\":\"2026-08-31T03:47:04.664600Z\",\"extra_data\":{\"error_message\":\"OOM during PDF generation (200MB report)\"}}],\"truncated\":false,\"total_jobs\":1,\"total_audit_events\":1}",
+          "timestamp": "2026-08-31T04:00:48.205085Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5010044d-a254-43ee-8f09-751441dccbcf",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": "report_gen",
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":0,\"items\":[]}",
+          "timestamp": "2026-08-31T04:00:48.205085Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "19cab4b7-8872-4286-83b7-e5ca354c3aad",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 5
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-31T01:47:04.930453Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-31T00:47:04.930453Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-08-30T21:47:04.930453Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-08-30T09:47:04.930453Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-08-30T05:47:04.930453Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-08-31T04:00:48.205085Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "15a43e65-ece7-4afb-9629-6cd143ab8ae7",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "Root cause is a persistent data bug: a 200MB PDF report generation job (report_gen, job 5967d510) failed with OOM after 2 retries. This is an oversized-input / resource-ceiling issue that requires human intervention — either increasing the memory limit, implementing chunked/streaming PDF generation, or rejecting reports above a size threshold. No Tier-1 automated fix is available. Note also: the alert fingerprint references job_type=process_payment but the trace contains a report_gen job — the alert routing or metadata may need review. Additionally, v0.4.2 (deployed ~6h prior) has a note 'correlated with billing failures' which may warrant human review alongside the v0.4.3 upgrade."
+          },
+          "result_summary": "planner stop: Root cause is a persistent data bug: a 200MB PDF report generation job (report_gen, job 5967d510) failed with OOM after 2 retries. This is an oversized-input / resource-ceiling issue that requires human intervention — either increasing the memory limit, implementing chunked/streaming PDF generation, or rejecting reports above a size threshold. No Tier-1 automated fix is available. Note also: the alert fingerprint references job_type=process_payment but the trace contains a report_gen job — the alert routing or metadata may need review. Additionally, v0.4.2 (deployed ~6h prior) has a note 'correlated with billing failures' which may warrant human review alongside the v0.4.3 upgrade.",
+          "timestamp": "2026-08-31T04:00:48.205085Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "persistent_data_bug",
+          "name": "oom-pdf-generation-200mb-report-oversized-input",
+          "confidence": 0.82,
+          "reasoning": "The trace shows a clear OOM error during PDF generation with a 200MB report, with 2 retries already exhausted — this is a persistent data/input size bug, not a transient failure, as retries consistently fail on the same oversized input."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "v0.4.3-deploy-1h15m-before-incident",
+          "confidence": 0.25,
+          "reasoning": "v0.4.3 was deployed to prod ~75 minutes before the incident, so a memory limit regression introduced in this version could have lowered the OOM threshold, but the 200MB report is the more direct explanation."
+        },
+        {
+          "category": "unknown",
+          "name": "process-payment-job-type-mismatch",
+          "confidence": 0.1,
+          "reasoning": "The alert says job_type=process_payment but the trace shows a report_gen job — possible alert mis-routing or metadata mismatch worth noting, but the OOM error itself is clear."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T04:00:48.174581Z",
+      "updated_at": "2026-08-31T04:00:48.205085Z"
+    }
+  ],
+  "invocation_id": "cde5a14485c3"
+}

@@ -1,0 +1,37 @@
+{
+  "incident_id": "2197be0b-d4a6-45bf-b9f4-ecad8a1a60c7",
+  "final_state": "resolved",
+  "alert_summary": "source=platform.kafka severity=warning fingerprint=consumer_lag_warning group=notifications-consumer",
+  "escalation_reason": "",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:notifications-consumer\"}"
+    },
+    {
+      "tool": "list_dlq_messages",
+      "summary": "{\"total\":3,\"items\":[{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:22:10.000259Z\",\"updated_at\":\"2026-08-31T02:22:32.000259Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-08-31T02:22:32.000259Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"process_payment call timed out after 30s: TimeoutError('stripe.api')\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:09:10.000259Z\",\"updated_at\":\"2026-08-31T02:09:44.000259Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"third_party_timeout\",\"summary\":\"Stripe API exceeded 30s deadline three consecutive attempts.\",\"suggested_fix\":\"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.\",\"is_retryable\":true,\"confidence\":0.71},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T02:09:44.000259Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-08-31T01:54:10.000259Z\",\"updated_at\":\"2026-08-31T01:54:26.000259Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Replay once the dependency recovers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T01:54:26.000259Z\",\"extra\":null}]}"
+    },
+    {
+      "tool": "get_deploy_history",
+      "summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-31T00:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-30T23:34:09.987174Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-08-30T20:34:09.987174Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-08-30T08:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-08-30T04:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-08-29T02:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}"
+    },
+    {
+      "tool": "mark_dlq_permanent",
+      "summary": "{\"job_id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"previous_hint\":\"human_required\",\"remediation_hint\":\"human_required\",\"already_marked\":true}"
+    },
+    {
+      "tool": "list_dlq_messages",
+      "summary": "{\"total\":1,\"items\":[{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-08-31T02:22:10.000259Z\",\"updated_at\":\"2026-08-31T02:22:32.000259Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-08-31T02:22:32.000259Z\",\"extra\":null}]}"
+    }
+  ],
+  "findings": "The notifications-consumer group had a lag of 500; investigation found 3 DLQ messages — one non-retryable CSV bad-input job (f030f975, already marked permanent), one Stripe API timeout job (af67d1b1, retryable), and one SMTP connection-refused job (97d91272, retryable) whose root cause may be VPC egress rule changes introduced by the v0.4.2 billing hotfix (deployed 2026-08-31T00:34 prod, noted \"correlated with billing failures\"), though v0.4.3 has since been deployed. The two retryable DLQ jobs were not replayed before the run ended.",
+  "recommendation": "Verify current health of smtp.mailer.internal and the Stripe API, then check whether v0.4.3 resolved the VPC egress issue introduced in v0.4.2 before replaying the two retryable DLQ jobs (af67d1b1 and 97d91272); also notify the uploader for the permanent bad-input CSV job (f030f975, trace 89609789).",
+  "budget_used": {
+    "tool_calls": 5,
+    "tokens": 42150,
+    "wall_seconds": 51.928353,
+    "usd": "0.118979"
+  }
+}

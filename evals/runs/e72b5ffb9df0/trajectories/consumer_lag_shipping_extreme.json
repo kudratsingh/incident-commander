@@ -1,0 +1,740 @@
+{
+  "scenario": "consumer_lag_shipping_extreme",
+  "incident_id": "216002fa-3528-4f6f-9739-c5b751a526b3",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "216002fa-3528-4f6f-9739-c5b751a526b3",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "shipping-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:44:27.536814Z",
+      "updated_at": "2026-08-31T02:44:27.536814Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "216002fa-3528-4f6f-9739-c5b751a526b3",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "shipping-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.035314,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "02f05deb-ea61-4b0f-9ff6-b0f824906f1b",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:44:27.572128Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:44:27.536814Z",
+      "updated_at": "2026-08-31T02:44:27.572128Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "216002fa-3528-4f6f-9739-c5b751a526b3",
+      "state": "planning",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "shipping-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 28293,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.035357,
+        "max_usd": "1.00",
+        "usd_used": "0.076347"
+      },
+      "evidence": [
+        {
+          "evidence_id": "02f05deb-ea61-4b0f-9ff6-b0f824906f1b",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:44:27.572128Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "cb642191-9371-49f4-8783-5ed2b9e2c0e2",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "shipping-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"shipping-consumer\",\"lag\":100000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:shipping-consumer\"}",
+          "timestamp": "2026-08-31T02:44:27.572171Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b8ec9741-f27c-46fb-8940-2483b041a36d",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": "shipping",
+            "remediation_hint": null,
+            "limit": 20,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":0,\"items\":[]}",
+          "timestamp": "2026-08-31T02:44:27.572171Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "aef57d33-8ee7-4691-b54a-faf820207516",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 5
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-31T00:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-30T23:34:09.987174Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-08-30T20:34:09.987174Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-08-30T08:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-08-30T04:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-08-31T02:44:27.572171Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f3dfedcd-5b8a-4ccd-950b-b9007c824e9b",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "shipping-consumer lag is 100,000 (critical threshold), no DLQ messages indicate it's not a poison message problem, no shipping-specific deploy regression noted, and consumer_saturation has a Tier-1 fix (restart/scale-up). Confidence is 0.80, above the 0.7 threshold."
+          },
+          "result_summary": "planner handoff to PLANNING: shipping-consumer lag is 100,000 (critical threshold), no DLQ messages indicate it's not a poison message problem, no shipping-specific deploy regression noted, and consumer_saturation has a Tier-1 fix (restart/scale-up). Confidence is 0.80, above the 0.7 threshold.",
+          "timestamp": "2026-08-31T02:44:27.572171Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "shipping-consumer-lag-100k-sustained",
+          "confidence": 0.8,
+          "reasoning": "The shipping-consumer group has a lag of 100,000 with no DLQ messages and no recent deploy correlated with shipping, making consumer saturation (stalled or under-provisioned consumer) the most likely cause."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "v0.4.3-deploy-correlated-with-lag",
+          "confidence": 0.3,
+          "reasoning": "A new version (v0.4.3) was deployed to prod ~1 hour before the alert window; however, the prior v0.4.2 was noted to correlate with billing failures, not shipping, making this a secondary consideration."
+        },
+        {
+          "category": "stale_cache",
+          "name": "kafka-consumer-lag-cache-key-stale",
+          "confidence": 0.1,
+          "reasoning": "The lag is sourced from a static cached value in Redis; a stale cache key could misrepresent true lag, but the source is expected static behavior for this group."
+        },
+        {
+          "category": "unknown",
+          "name": "unknown-shipping-consumer-fault",
+          "confidence": 0.05,
+          "reasoning": "No DLQ entries and no deploy note specifically mentioning shipping; underlying cause could be something not yet observed."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:44:27.536814Z",
+      "updated_at": "2026-08-31T02:44:27.572171Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "216002fa-3528-4f6f-9739-c5b751a526b3",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "shipping-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 37748,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 32.547331,
+        "max_usd": "1.00",
+        "usd_used": "0.101383"
+      },
+      "evidence": [
+        {
+          "evidence_id": "02f05deb-ea61-4b0f-9ff6-b0f824906f1b",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:44:27.572128Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "cb642191-9371-49f4-8783-5ed2b9e2c0e2",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "shipping-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"shipping-consumer\",\"lag\":100000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:shipping-consumer\"}",
+          "timestamp": "2026-08-31T02:44:27.572171Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b8ec9741-f27c-46fb-8940-2483b041a36d",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": "shipping",
+            "remediation_hint": null,
+            "limit": 20,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":0,\"items\":[]}",
+          "timestamp": "2026-08-31T02:44:27.572171Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "aef57d33-8ee7-4691-b54a-faf820207516",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 5
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-31T00:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-30T23:34:09.987174Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-08-30T20:34:09.987174Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-08-30T08:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-08-30T04:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-08-31T02:44:27.572171Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f3dfedcd-5b8a-4ccd-950b-b9007c824e9b",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "shipping-consumer lag is 100,000 (critical threshold), no DLQ messages indicate it's not a poison message problem, no shipping-specific deploy regression noted, and consumer_saturation has a Tier-1 fix (restart/scale-up). Confidence is 0.80, above the 0.7 threshold."
+          },
+          "result_summary": "planner handoff to PLANNING: shipping-consumer lag is 100,000 (critical threshold), no DLQ messages indicate it's not a poison message problem, no shipping-specific deploy regression noted, and consumer_saturation has a Tier-1 fix (restart/scale-up). Confidence is 0.80, above the 0.7 threshold.",
+          "timestamp": "2026-08-31T02:44:27.572171Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "18d551c0-00bf-4111-961b-a8ec31f4a370",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "shipping-consumer-lag-100k-sustained"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"shipping-consumer\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-08-31T02:45:00.084145Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "shipping-consumer-lag-100k-sustained",
+          "confidence": 0.8,
+          "reasoning": "The shipping-consumer group has a lag of 100,000 with no DLQ messages and no recent deploy correlated with shipping, making consumer saturation (stalled or under-provisioned consumer) the most likely cause."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "v0.4.3-deploy-correlated-with-lag",
+          "confidence": 0.3,
+          "reasoning": "A new version (v0.4.3) was deployed to prod ~1 hour before the alert window; however, the prior v0.4.2 was noted to correlate with billing failures, not shipping, making this a secondary consideration."
+        },
+        {
+          "category": "stale_cache",
+          "name": "kafka-consumer-lag-cache-key-stale",
+          "confidence": 0.1,
+          "reasoning": "The lag is sourced from a static cached value in Redis; a stale cache key could misrepresent true lag, but the source is expected static behavior for this group."
+        },
+        {
+          "category": "unknown",
+          "name": "unknown-shipping-consumer-fault",
+          "confidence": 0.05,
+          "reasoning": "No DLQ entries and no deploy note specifically mentioning shipping; underlying cause could be something not yet observed."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "shipping-consumer-lag-100k-sustained",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "shipping-consumer"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "shipping-consumer"
+        },
+        "verify_expectation": "Consumer lag for shipping-consumer drops significantly below 100,000, indicating the consumer has recovered and is processing messages again."
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:44:27.536814Z",
+      "updated_at": "2026-08-31T02:45:00.084145Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "216002fa-3528-4f6f-9739-c5b751a526b3",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "shipping-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 37748,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 36.854762,
+        "max_usd": "1.00",
+        "usd_used": "0.101383"
+      },
+      "evidence": [
+        {
+          "evidence_id": "02f05deb-ea61-4b0f-9ff6-b0f824906f1b",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:44:27.572128Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "cb642191-9371-49f4-8783-5ed2b9e2c0e2",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "shipping-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"shipping-consumer\",\"lag\":100000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:shipping-consumer\"}",
+          "timestamp": "2026-08-31T02:44:27.572171Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b8ec9741-f27c-46fb-8940-2483b041a36d",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": "shipping",
+            "remediation_hint": null,
+            "limit": 20,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":0,\"items\":[]}",
+          "timestamp": "2026-08-31T02:44:27.572171Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "aef57d33-8ee7-4691-b54a-faf820207516",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 5
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-31T00:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-30T23:34:09.987174Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-08-30T20:34:09.987174Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-08-30T08:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-08-30T04:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-08-31T02:44:27.572171Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f3dfedcd-5b8a-4ccd-950b-b9007c824e9b",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "shipping-consumer lag is 100,000 (critical threshold), no DLQ messages indicate it's not a poison message problem, no shipping-specific deploy regression noted, and consumer_saturation has a Tier-1 fix (restart/scale-up). Confidence is 0.80, above the 0.7 threshold."
+          },
+          "result_summary": "planner handoff to PLANNING: shipping-consumer lag is 100,000 (critical threshold), no DLQ messages indicate it's not a poison message problem, no shipping-specific deploy regression noted, and consumer_saturation has a Tier-1 fix (restart/scale-up). Confidence is 0.80, above the 0.7 threshold.",
+          "timestamp": "2026-08-31T02:44:27.572171Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "18d551c0-00bf-4111-961b-a8ec31f4a370",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "shipping-consumer-lag-100k-sustained"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"shipping-consumer\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-08-31T02:45:00.084145Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f8d1285e-dca7-4e43-9d74-7fef260ca446",
+          "tool_name": "restart_consumer_group",
+          "arguments": {
+            "consumer_group": "shipping-consumer",
+            "idempotency_key": "253801595b39022a796c7ad66339d716"
+          },
+          "result_summary": "{\"consumer_group\":\"shipping-consumer\",\"kill_key_cleared\":false,\"latency_key_cleared\":false,\"group_recognized\":true,\"accepted\":true}",
+          "timestamp": "2026-08-31T02:45:04.391576Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "shipping-consumer-lag-100k-sustained",
+          "confidence": 0.8,
+          "reasoning": "The shipping-consumer group has a lag of 100,000 with no DLQ messages and no recent deploy correlated with shipping, making consumer saturation (stalled or under-provisioned consumer) the most likely cause."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "v0.4.3-deploy-correlated-with-lag",
+          "confidence": 0.3,
+          "reasoning": "A new version (v0.4.3) was deployed to prod ~1 hour before the alert window; however, the prior v0.4.2 was noted to correlate with billing failures, not shipping, making this a secondary consideration."
+        },
+        {
+          "category": "stale_cache",
+          "name": "kafka-consumer-lag-cache-key-stale",
+          "confidence": 0.1,
+          "reasoning": "The lag is sourced from a static cached value in Redis; a stale cache key could misrepresent true lag, but the source is expected static behavior for this group."
+        },
+        {
+          "category": "unknown",
+          "name": "unknown-shipping-consumer-fault",
+          "confidence": 0.05,
+          "reasoning": "No DLQ entries and no deploy note specifically mentioning shipping; underlying cause could be something not yet observed."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "shipping-consumer-lag-100k-sustained",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "shipping-consumer"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "shipping-consumer"
+        },
+        "verify_expectation": "Consumer lag for shipping-consumer drops significantly below 100,000, indicating the consumer has recovered and is processing messages again."
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-31T02:44:27.536814Z",
+      "updated_at": "2026-08-31T02:45:04.391576Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "216002fa-3528-4f6f-9739-c5b751a526b3",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "shipping-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 10,
+        "max_tokens": 200000,
+        "tokens_used": 46428,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 36.894017,
+        "max_usd": "1.00",
+        "usd_used": "0.112239"
+      },
+      "evidence": [
+        {
+          "evidence_id": "02f05deb-ea61-4b0f-9ff6-b0f824906f1b",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:44:27.572128Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "cb642191-9371-49f4-8783-5ed2b9e2c0e2",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "shipping-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"shipping-consumer\",\"lag\":100000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:shipping-consumer\"}",
+          "timestamp": "2026-08-31T02:44:27.572171Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b8ec9741-f27c-46fb-8940-2483b041a36d",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": "shipping",
+            "remediation_hint": null,
+            "limit": 20,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":0,\"items\":[]}",
+          "timestamp": "2026-08-31T02:44:27.572171Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "aef57d33-8ee7-4691-b54a-faf820207516",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 5
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-31T00:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-08-30T23:34:09.987174Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-08-30T20:34:09.987174Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-08-30T08:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-08-30T04:34:09.987174Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-08-31T02:44:27.572171Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f3dfedcd-5b8a-4ccd-950b-b9007c824e9b",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "shipping-consumer lag is 100,000 (critical threshold), no DLQ messages indicate it's not a poison message problem, no shipping-specific deploy regression noted, and consumer_saturation has a Tier-1 fix (restart/scale-up). Confidence is 0.80, above the 0.7 threshold."
+          },
+          "result_summary": "planner handoff to PLANNING: shipping-consumer lag is 100,000 (critical threshold), no DLQ messages indicate it's not a poison message problem, no shipping-specific deploy regression noted, and consumer_saturation has a Tier-1 fix (restart/scale-up). Confidence is 0.80, above the 0.7 threshold.",
+          "timestamp": "2026-08-31T02:44:27.572171Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "18d551c0-00bf-4111-961b-a8ec31f4a370",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "shipping-consumer-lag-100k-sustained"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"shipping-consumer\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-08-31T02:45:00.084145Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f8d1285e-dca7-4e43-9d74-7fef260ca446",
+          "tool_name": "restart_consumer_group",
+          "arguments": {
+            "consumer_group": "shipping-consumer",
+            "idempotency_key": "253801595b39022a796c7ad66339d716"
+          },
+          "result_summary": "{\"consumer_group\":\"shipping-consumer\",\"kill_key_cleared\":false,\"latency_key_cleared\":false,\"group_recognized\":true,\"accepted\":true}",
+          "timestamp": "2026-08-31T02:45:04.391576Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d4521324-8f4a-4503-a251-090ee03d5038",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "shipping-consumer",
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "{\"consumer_group\":\"shipping-consumer\",\"lag\":100000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:shipping-consumer\"}",
+          "timestamp": "2026-08-31T02:45:04.430898Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0826b930-cf13-4523-af4e-57d49389e9d3",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "Consumer lag for shipping-consumer drops significantly below 100,000, indicating the consumer has recovered and is processing messages again.",
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "not_verified: Consumer lag remains at 100,000 after restart; the remediation was accepted but did not reduce lag as expected—the group remains stalled despite the attempted restart.",
+          "timestamp": "2026-08-31T02:45:04.430898Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "114a9d44-93fe-478b-8d48-a17af46b4b19",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "shipping-consumer",
+            "attempt": 2,
+            "of": 6
+          },
+          "result_summary": "{\"consumer_group\":\"shipping-consumer\",\"lag\":100000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:shipping-consumer\"}",
+          "timestamp": "2026-08-31T02:45:26.032056Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5700bf91-fe53-4465-8e4e-c4995d0f5b83",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "Consumer lag for shipping-consumer drops significantly below 100,000, indicating the consumer has recovered and is processing messages again.",
+            "attempt": 2,
+            "of": 6
+          },
+          "result_summary": "not_verified: The verify probe shows lag=100000, which matches the pre-fix alert threshold and contradicts the expected behavior of a significant drop below 100,000 after the restart.",
+          "timestamp": "2026-08-31T02:45:26.032056Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d8053c9d-d30d-434c-a6eb-46fc50e89178",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "shipping-consumer",
+            "attempt": 3,
+            "of": 6
+          },
+          "result_summary": "{\"consumer_group\":\"shipping-consumer\",\"lag\":100000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:shipping-consumer\"}",
+          "timestamp": "2026-08-31T02:45:47.478636Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "fc0918b4-8013-4ad9-9b33-fc4707b20bbb",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "Consumer lag for shipping-consumer drops significantly below 100,000, indicating the consumer has recovered and is processing messages again.",
+            "attempt": 3,
+            "of": 6
+          },
+          "result_summary": "not_verified: The consumer lag remains at 100,000 despite the restart remediation being accepted; the expected post-fix behavior was a significant drop below 100,000, but the lag_known=true and static source indicate the lag has not improved.",
+          "timestamp": "2026-08-31T02:45:47.478636Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c8b24445-e0ef-4c24-9391-5e9a17c70ac1",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "shipping-consumer",
+            "attempt": 4,
+            "of": 6
+          },
+          "result_summary": "{\"consumer_group\":\"shipping-consumer\",\"lag\":100000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:shipping-consumer\"}",
+          "timestamp": "2026-08-31T02:46:09.144709Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d0175a2f-faa3-4ff7-a68f-62c75853a81a",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "Consumer lag for shipping-consumer drops significantly below 100,000, indicating the consumer has recovered and is processing messages again.",
+            "attempt": 4,
+            "of": 6
+          },
+          "result_summary": "not_verified: Remediation reported accepted=true but lag remains at 100,000 messages, unchanged from the alert threshold; no significant drop occurred.",
+          "timestamp": "2026-08-31T02:46:09.144709Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c2f1461d-30f7-4cb0-9b03-b4f262230179",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "shipping-consumer",
+            "attempt": 5,
+            "of": 6
+          },
+          "result_summary": "{\"consumer_group\":\"shipping-consumer\",\"lag\":100000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:shipping-consumer\"}",
+          "timestamp": "2026-08-31T02:46:30.655628Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "6b3cca6f-5c73-426e-90cd-34267226fa6a",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "Consumer lag for shipping-consumer drops significantly below 100,000, indicating the consumer has recovered and is processing messages again.",
+            "attempt": 5,
+            "of": 6
+          },
+          "result_summary": "not_verified: Lag remains at 100,000 after restart; expected a significant drop below 100,000 to indicate recovery and message processing resumption.",
+          "timestamp": "2026-08-31T02:46:30.655628Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b4ae546f-b9e4-4922-8c7a-829f9ae6945d",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "shipping-consumer",
+            "attempt": 6,
+            "of": 6
+          },
+          "result_summary": "{\"consumer_group\":\"shipping-consumer\",\"lag\":100000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:shipping-consumer\"}",
+          "timestamp": "2026-08-31T02:46:52.046007Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d7d67102-5d52-4717-b27d-8b086d90fbbb",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "Consumer lag for shipping-consumer drops significantly below 100,000, indicating the consumer has recovered and is processing messages again.",
+            "attempt": 6,
+            "of": 6
+          },
+          "result_summary": "not_verified: Verify probe shows lag remains at 100,000, unchanged from the alert threshold; the remediation result shows `kill_key_cleared: false` and `latency_key_cleared: false`, indicating the restart did not clear the blocking condition and lag has not dropped significantly as expected.",
+          "timestamp": "2026-08-31T02:46:52.046007Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "shipping-consumer-lag-100k-sustained",
+          "confidence": 0.8,
+          "reasoning": "The shipping-consumer group has a lag of 100,000 with no DLQ messages and no recent deploy correlated with shipping, making consumer saturation (stalled or under-provisioned consumer) the most likely cause."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "v0.4.3-deploy-correlated-with-lag",
+          "confidence": 0.3,
+          "reasoning": "A new version (v0.4.3) was deployed to prod ~1 hour before the alert window; however, the prior v0.4.2 was noted to correlate with billing failures, not shipping, making this a secondary consideration."
+        },
+        {
+          "category": "stale_cache",
+          "name": "kafka-consumer-lag-cache-key-stale",
+          "confidence": 0.1,
+          "reasoning": "The lag is sourced from a static cached value in Redis; a stale cache key could misrepresent true lag, but the source is expected static behavior for this group."
+        },
+        {
+          "category": "unknown",
+          "name": "unknown-shipping-consumer-fault",
+          "confidence": 0.05,
+          "reasoning": "No DLQ entries and no deploy note specifically mentioning shipping; underlying cause could be something not yet observed."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "shipping-consumer-lag-100k-sustained",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "shipping-consumer"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "shipping-consumer"
+        },
+        "verify_expectation": "Consumer lag for shipping-consumer drops significantly below 100,000, indicating the consumer has recovered and is processing messages again."
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-31T02:44:27.536814Z",
+      "updated_at": "2026-08-31T02:46:52.046007Z"
+    }
+  ],
+  "invocation_id": "e72b5ffb9df0"
+}

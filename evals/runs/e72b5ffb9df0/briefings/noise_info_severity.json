@@ -1,0 +1,16 @@
+{
+  "incident_id": "fd5e1994-20f8-424a-8b07-d04dec644f42",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.healthcheck severity=info fingerprint=health_ping group=unknown",
+  "escalation_reason": "severity=info classified as escalated",
+  "attempted_action": null,
+  "investigation_trail": [],
+  "findings": "No investigation probes were run before escalation; the run ended immediately because the alert carried severity=info, which was classified directly as an escalation case without automated triage. The alert originated from platform.healthcheck with fingerprint health_ping and no group context was available.",
+  "recommendation": "Review the raw alert from platform.healthcheck (fingerprint: health_ping) directly to determine whether the health ping is failing or simply noisy, and verify that the severity=info escalation classification rule is behaving as intended for this alert source.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.032977,
+    "usd": "0"
+  }
+}

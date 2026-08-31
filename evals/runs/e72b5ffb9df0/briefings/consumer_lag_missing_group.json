@@ -1,0 +1,33 @@
+{
+  "incident_id": "22342b39-2e1e-4048-8e0c-522ca3895a94",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high",
+  "escalation_reason": "insufficient tool-call budget for action+verify (remaining=1); escalating without executing",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    },
+    {
+      "tool": "list_active_alerts",
+      "summary": "{\"total\":3,\"alerts\":[{\"id\":\"3b3b0456-31f0-43fb-a419-1285511a45ee\",\"severity\":\"critical\",\"source\":\"slo:job_completion_rate\",\"title\":\"SLO fast burn: Job completion rate\",\"description\":\"Job completion rate is burning error budget at 42.9× the sustainable rate (3 failed of 7 in the last 24h, 57.1% against a 99% target). Budget remaining: -100%. Runbook: rb-slo-job-completion.\",\"fired_at\":\"2026-08-31T02:39:10.428660Z\",\"extra_data\":{\"total\":7,\"failed\":3,\"slo_id\":\"job_completion_rate\",\"target\":0.99,\"current\":0.571429,\"burn_rate\":42.857,\"threshold\":14.4,\"runbook_id\":\"rb-slo-job-completion\",\"window_hours\":24,\"budget_remaining_pct\":-100.0}},{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-08-31T02:26:09.994642Z\",\"extra_data\":null},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-08-31T02:09:09.994642Z\",\"extra_data\":null}]}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:billing-consumer\"}"
+    }
+  ],
+  "findings": "The triggering alert for worker-dispatcher consumer lag appears resolved (live lag=0), but investigation revealed two additional critical issues: billing-consumer has a sustained lag of 15,000 messages (20+ minutes per alert), and there is a concurrent SLO fast-burn on job completion rate at 42.9× the sustainable rate with budget fully exhausted (-100%), alongside an API 5xx rate of 3.2%. No remediation actions were executed — the run exhausted its budget during investigation before any Tier-1 action could be attempted.",
+  "recommendation": "Prioritize checking billing-consumer's processing health (consumer throughput, pod status, and downstream dependencies) and cross-reference the job completion SLO failures and API 5xx errors against recent deployments or infrastructure changes, as the co-occurrence suggests a systemic fault rather than an isolated Kafka lag event.",
+  "budget_used": {
+    "tool_calls": 4,
+    "tokens": 36323,
+    "wall_seconds": 65.966242,
+    "usd": "0.101022"
+  }
+}

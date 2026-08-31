@@ -1,0 +1,63 @@
+{
+  "generated_at": "2026-08-31T04:21:08.492946Z",
+  "total": 1,
+  "passed": 0,
+  "failed": 1,
+  "judged_count": 1,
+  "judge_useful_count": 1,
+  "judge_mean_overall": 0.975,
+  "invocation_id": "adcdcadd94a3",
+  "degraded_count": 0,
+  "only_patterns": [
+    "remediate_consumer_lag_success"
+  ],
+  "outcomes": [
+    {
+      "scenario": "remediate_consumer_lag_success",
+      "final_state": "resolved",
+      "tool_calls_used": 4,
+      "report": {
+        "scenario": "remediate_consumer_lag_success",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state resolved matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "no ['restart_consumer_group'] evidence entry carried field 'kill_key_cleared' (expected equals True)"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 4 tool calls, cap 13"
+          },
+          {
+            "dimension": "action",
+            "passed": false,
+            "detail": "no tool from equivalence set ['restart_consumer_group'] was called; tools called: ['get_consumer_lag', 'list_dlq_messages', 'replay_dlq_by_category']"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 1.0,
+        "actionability": 0.95,
+        "reasoning": "Every finding and recommendation step derives directly from the investigation trail: the 17-lag figure, four DLQ items with their exact IDs and error messages, the three root-cause categories, and the v0.4.2 deploy hint all appear verbatim. The recommendation names five concrete next steps—confirm the replayed job, notify the CSV uploader, check Stripe's status page, verify the SMTP task health, and cross-reference deploy history—all executable within 15 minutes, though the SMTP verification step slightly conflates \"check health\" with \"cross-reference deploy\" rather than specifying which metric or dashboard to query."
+      },
+      "failure_class": "unclassified",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    }
+  ]
+}

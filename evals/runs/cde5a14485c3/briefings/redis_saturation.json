@@ -1,0 +1,25 @@
+{
+  "incident_id": "1b7ab87d-0d1e-4370-91fc-f5ae56de2568",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.cache severity=critical fingerprint=cache_miss_spike",
+  "escalation_reason": "plan rejected before execution: resource argument(s) not evidence-sourced: invalidate_cache_key.key='cache:hot'. Resource names must be copied verbatim from the alert or tool results.",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_redis_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":1.295,\"connected_clients\":11,\"used_memory_bytes\":1619608,\"used_memory_human\":\"1.54M\",\"keyspace_hits\":80,\"keyspace_misses\":29605,\"error\":null}"
+    },
+    {
+      "tool": "get_cache_key_info",
+      "summary": "{\"key\":\"cache:hot\",\"exists\":false,\"type\":null,\"ttl_seconds\":null,\"size\":null}"
+    }
+  ],
+  "findings": "Redis is healthy (ping latency 1.3 ms, 11 connected clients) but shows 29,605 keyspace misses against only 80 hits, and a lookup for the suspected hot key \"cache:hot\" confirmed it does not exist in the keyspace. The automated run was halted before any remediation because the planned invalidation action could not be evidence-sourced to a verified key name.",
+  "recommendation": "Verify which cache key(s) should be populated — cross-referencing application logs or the alert payload for the exact key names — then confirm whether those keys are missing or have an unexpected TTL using get_cache_key_info before taking any further action.",
+  "budget_used": {
+    "tool_calls": 2,
+    "tokens": 30354,
+    "wall_seconds": 25.349775,
+    "usd": "0.081208"
+  }
+}

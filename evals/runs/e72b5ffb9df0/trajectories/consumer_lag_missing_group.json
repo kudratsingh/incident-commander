@@ -1,0 +1,328 @@
+{
+  "scenario": "consumer_lag_missing_group",
+  "incident_id": "22342b39-2e1e-4048-8e0c-522ca3895a94",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "22342b39-2e1e-4048-8e0c-522ca3895a94",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:40:23.923070Z",
+      "updated_at": "2026-08-31T02:40:23.923070Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "22342b39-2e1e-4048-8e0c-522ca3895a94",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.033037,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "f5cace2c-43fd-4441-9366-caa87935bc40",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:40:23.956107Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:40:23.923070Z",
+      "updated_at": "2026-08-31T02:40:23.956107Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "22342b39-2e1e-4048-8e0c-522ca3895a94",
+      "state": "planning",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 36323,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.033084,
+        "max_usd": "1.00",
+        "usd_used": "0.101022"
+      },
+      "evidence": [
+        {
+          "evidence_id": "f5cace2c-43fd-4441-9366-caa87935bc40",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:40:23.956107Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f05c2538-4154-42ca-a025-7991ac30c443",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T02:40:23.956154Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ba5af0f0-883e-439d-89fe-fa922b423f4c",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 20.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'consumer_saturation' (0.70 >= 0.7); re-probing after 20s before accepting the contradiction",
+          "timestamp": "2026-08-31T02:40:23.956154Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "026812fc-e661-42fd-a809-192748d76594",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T02:40:23.956154Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e9b8a92d-f019-4755-9189-bb917fd92e97",
+          "tool_name": "list_active_alerts",
+          "arguments": {
+            "severity": "critical",
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"alerts\":[{\"id\":\"3b3b0456-31f0-43fb-a419-1285511a45ee\",\"severity\":\"critical\",\"source\":\"slo:job_completion_rate\",\"title\":\"SLO fast burn: Job completion rate\",\"description\":\"Job completion rate is burning error budget at 42.9× the sustainable rate (3 failed of 7 in the last 24h, 57.1% against a 99% target). Budget remaining: -100%. Runbook: rb-slo-job-completion.\",\"fired_at\":\"2026-08-31T02:39:10.428660Z\",\"extra_data\":{\"total\":7,\"failed\":3,\"slo_id\":\"job_completion_rate\",\"target\":0.99,\"current\":0.571429,\"burn_rate\":42.857,\"threshold\":14.4,\"runbook_id\":\"rb-slo-job-completion\",\"window_hours\":24,\"budget_remaining_pct\":-100.0}},{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-08-31T02:26:09.994642Z\",\"extra_data\":null},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-08-31T02:09:09.994642Z\",\"extra_data\":null}]}",
+          "timestamp": "2026-08-31T02:40:23.956154Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "61c63f80-16a9-4009-96c8-2c1136db9a99",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "billing-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:billing-consumer\"}",
+          "timestamp": "2026-08-31T02:40:23.956154Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ad362ed0-9a14-4766-880f-cf1e504245e4",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "billing-consumer lag is confirmed at 15,000 with a sustained alert firing for 20+ minutes. worker-dispatcher lag is 0 (healthy). The billing-consumer group has a clear consumer_saturation condition that qualifies for a Tier-1 restart/scale-up fix."
+          },
+          "result_summary": "planner handoff to PLANNING: billing-consumer lag is confirmed at 15,000 with a sustained alert firing for 20+ minutes. worker-dispatcher lag is 0 (healthy). The billing-consumer group has a clear consumer_saturation condition that qualifies for a Tier-1 restart/scale-up fix.",
+          "timestamp": "2026-08-31T02:40:23.956154Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "billing-consumer-lag-15k-sustained-20min",
+          "confidence": 0.9,
+          "reasoning": "Active alert confirms billing-consumer lag exceeds 10k sustained for 20+ minutes, and the direct probe shows lag=15000 — a clear consumer saturation signal on the billing-consumer group."
+        },
+        {
+          "category": "poison_message",
+          "name": "billing-consumer-blocked-by-poison-message",
+          "confidence": 0.3,
+          "reasoning": "Sustained lag without growth evidence could indicate the consumer is stuck on an unprocessable message; DLQ not yet checked."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-caused-billing-consumer-stall",
+          "confidence": 0.2,
+          "reasoning": "SLO burn and API 5xx errors co-occurred around the same time window, suggesting a deploy regression could be an underlying cause."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:40:23.923070Z",
+      "updated_at": "2026-08-31T02:40:23.956154Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "22342b39-2e1e-4048-8e0c-522ca3895a94",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 36323,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 65.966242,
+        "max_usd": "1.00",
+        "usd_used": "0.101022"
+      },
+      "evidence": [
+        {
+          "evidence_id": "f5cace2c-43fd-4441-9366-caa87935bc40",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:40:23.956107Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f05c2538-4154-42ca-a025-7991ac30c443",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T02:40:23.956154Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ba5af0f0-883e-439d-89fe-fa922b423f4c",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 20.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'consumer_saturation' (0.70 >= 0.7); re-probing after 20s before accepting the contradiction",
+          "timestamp": "2026-08-31T02:40:23.956154Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "026812fc-e661-42fd-a809-192748d76594",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T02:40:23.956154Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e9b8a92d-f019-4755-9189-bb917fd92e97",
+          "tool_name": "list_active_alerts",
+          "arguments": {
+            "severity": "critical",
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"alerts\":[{\"id\":\"3b3b0456-31f0-43fb-a419-1285511a45ee\",\"severity\":\"critical\",\"source\":\"slo:job_completion_rate\",\"title\":\"SLO fast burn: Job completion rate\",\"description\":\"Job completion rate is burning error budget at 42.9× the sustainable rate (3 failed of 7 in the last 24h, 57.1% against a 99% target). Budget remaining: -100%. Runbook: rb-slo-job-completion.\",\"fired_at\":\"2026-08-31T02:39:10.428660Z\",\"extra_data\":{\"total\":7,\"failed\":3,\"slo_id\":\"job_completion_rate\",\"target\":0.99,\"current\":0.571429,\"burn_rate\":42.857,\"threshold\":14.4,\"runbook_id\":\"rb-slo-job-completion\",\"window_hours\":24,\"budget_remaining_pct\":-100.0}},{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-08-31T02:26:09.994642Z\",\"extra_data\":null},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-08-31T02:09:09.994642Z\",\"extra_data\":null}]}",
+          "timestamp": "2026-08-31T02:40:23.956154Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "61c63f80-16a9-4009-96c8-2c1136db9a99",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "billing-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:billing-consumer\"}",
+          "timestamp": "2026-08-31T02:40:23.956154Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ad362ed0-9a14-4766-880f-cf1e504245e4",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "billing-consumer lag is confirmed at 15,000 with a sustained alert firing for 20+ minutes. worker-dispatcher lag is 0 (healthy). The billing-consumer group has a clear consumer_saturation condition that qualifies for a Tier-1 restart/scale-up fix."
+          },
+          "result_summary": "planner handoff to PLANNING: billing-consumer lag is confirmed at 15,000 with a sustained alert firing for 20+ minutes. worker-dispatcher lag is 0 (healthy). The billing-consumer group has a clear consumer_saturation condition that qualifies for a Tier-1 restart/scale-up fix.",
+          "timestamp": "2026-08-31T02:40:23.956154Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "6a400f50-4e2c-41d9-b0bc-eeefaee3147c",
+          "tool_name": "_remediation_escalate",
+          "arguments": {
+            "from_state": "planning",
+            "reason": "insufficient tool-call budget for action+verify (remaining=1); escalating without executing"
+          },
+          "result_summary": "insufficient tool-call budget for action+verify (remaining=1); escalating without executing",
+          "timestamp": "2026-08-31T02:41:29.889312Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "billing-consumer-lag-15k-sustained-20min",
+          "confidence": 0.9,
+          "reasoning": "Active alert confirms billing-consumer lag exceeds 10k sustained for 20+ minutes, and the direct probe shows lag=15000 — a clear consumer saturation signal on the billing-consumer group."
+        },
+        {
+          "category": "poison_message",
+          "name": "billing-consumer-blocked-by-poison-message",
+          "confidence": 0.3,
+          "reasoning": "Sustained lag without growth evidence could indicate the consumer is stuck on an unprocessable message; DLQ not yet checked."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-caused-billing-consumer-stall",
+          "confidence": 0.2,
+          "reasoning": "SLO burn and API 5xx errors co-occurred around the same time window, suggesting a deploy regression could be an underlying cause."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:40:23.923070Z",
+      "updated_at": "2026-08-31T02:41:29.889312Z"
+    }
+  ],
+  "invocation_id": "e72b5ffb9df0"
+}

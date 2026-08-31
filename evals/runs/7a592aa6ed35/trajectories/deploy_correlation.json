@@ -1,0 +1,146 @@
+{
+  "scenario": "deploy_correlation",
+  "incident_id": "29a141e8-721d-4a8d-9fa0-2cf6d4654f83",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "29a141e8-721d-4a8d-9fa0-2cf6d4654f83",
+      "state": "triage",
+      "alert": {
+        "source": "platform.api",
+        "severity": "critical",
+        "fingerprint": "post_deploy_error_spike",
+        "group": null,
+        "service": "billing-api"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:00.922321Z",
+      "updated_at": "2026-08-31T02:22:00.922321Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "29a141e8-721d-4a8d-9fa0-2cf6d4654f83",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.api",
+        "severity": "critical",
+        "fingerprint": "post_deploy_error_spike",
+        "group": null,
+        "service": "billing-api"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.000019,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c2e8239f-c8fa-42aa-b55a-4ac19ecf9cd4",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "967a9726b65f57874a306bcfe1ed253f"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:22:00.922340Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:00.922321Z",
+      "updated_at": "2026-08-31T02:22:00.922340Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "29a141e8-721d-4a8d-9fa0-2cf6d4654f83",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.api",
+        "severity": "critical",
+        "fingerprint": "post_deploy_error_spike",
+        "group": null,
+        "service": "billing-api"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.00003,
+        "max_usd": "1.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c2e8239f-c8fa-42aa-b55a-4ac19ecf9cd4",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "967a9726b65f57874a306bcfe1ed253f"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:22:00.922340Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e7873166-40ad-40b5-ba4d-720e30e68495",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 20
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-07-28T10:00:00Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-07-28T09:00:00Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-07-28T06:00:00Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-07-27T18:00:00Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-07-27T14:00:00Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-07-26T12:00:00Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-08-31T02:22:00.922351Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8ae4b9fc-b8a6-4d25-aadb-59153e4dbe99",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "bad-deploy hypothesis confirmed; human should decide rollback"
+          },
+          "result_summary": "planner stop: bad-deploy hypothesis confirmed; human should decide rollback",
+          "timestamp": "2026-08-31T02:22:00.922351Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "deploy_regression",
+          "name": "bad_deploy",
+          "confidence": 0.85,
+          "reasoning": "v0.4.2 shipped shortly before the alert fired and is the one deploy annotated with billing-failure correlation.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:00.922321Z",
+      "updated_at": "2026-08-31T02:22:00.922351Z"
+    }
+  ],
+  "invocation_id": "7a592aa6ed35"
+}

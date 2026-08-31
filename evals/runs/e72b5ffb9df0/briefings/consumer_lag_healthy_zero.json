@@ -1,0 +1,33 @@
+{
+  "incident_id": "a4046eca-1e4a-4aa7-a626-0b0a35e438fd",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high group=healthy-consumer",
+  "escalation_reason": "insufficient tool-call budget for action+verify (remaining=1); escalating without executing",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}"
+    },
+    {
+      "tool": "list_active_alerts",
+      "summary": "{\"total\":2,\"alerts\":[{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-08-31T02:26:09.994642Z\",\"extra_data\":null},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-08-31T02:09:09.994642Z\",\"extra_data\":null}]}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:billing-consumer\"}"
+    }
+  ],
+  "findings": "The triggering alert flagged healthy-consumer, but probes showed its lag is 0; a concurrent critical alert reveals billing-consumer has sustained lag of 15,000 messages for 20+ minutes, and a separate API 5xx rate alert (3.2% over 10 minutes) is also active. No remediation actions were executed because the tool-call budget was exhausted before an action-and-verify cycle could run.",
+  "recommendation": "Verify billing-consumer's current lag and partition assignment directly in the Kafka console or monitoring dashboard, as it is the likely true source of platform pressure; also check whether the elevated API 5xx rate is related to billing processing delays before deciding on next steps.",
+  "budget_used": {
+    "tool_calls": 4,
+    "tokens": 35618,
+    "wall_seconds": 63.123356,
+    "usd": "0.095643"
+  }
+}

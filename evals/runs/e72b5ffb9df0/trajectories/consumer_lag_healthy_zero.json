@@ -1,0 +1,328 @@
+{
+  "scenario": "consumer_lag_healthy_zero",
+  "incident_id": "a4046eca-1e4a-4aa7-a626-0b0a35e438fd",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "a4046eca-1e4a-4aa7-a626-0b0a35e438fd",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "healthy-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:38:08.880177Z",
+      "updated_at": "2026-08-31T02:38:08.880177Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "a4046eca-1e4a-4aa7-a626-0b0a35e438fd",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "healthy-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.031958,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "3377b903-1a57-48ee-958a-65560bb79b57",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:38:08.912135Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:38:08.880177Z",
+      "updated_at": "2026-08-31T02:38:08.912135Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "a4046eca-1e4a-4aa7-a626-0b0a35e438fd",
+      "state": "planning",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "healthy-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 35618,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.031999,
+        "max_usd": "1.00",
+        "usd_used": "0.095643"
+      },
+      "evidence": [
+        {
+          "evidence_id": "3377b903-1a57-48ee-958a-65560bb79b57",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:38:08.912135Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8bc0d840-db67-4f34-9116-3ec85b1e440e",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "healthy-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}",
+          "timestamp": "2026-08-31T02:38:08.912176Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b0e1de52-7387-4e22-ba6e-af2c13b2b720",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 20.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'consumer_saturation' (0.75 >= 0.7); re-probing after 20s before accepting the contradiction",
+          "timestamp": "2026-08-31T02:38:08.912176Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9a9a8193-cbe7-42d5-921d-b5e675d258f1",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "healthy-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}",
+          "timestamp": "2026-08-31T02:38:08.912176Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "066f941d-bffb-4f70-96bb-171bcb578d79",
+          "tool_name": "list_active_alerts",
+          "arguments": {
+            "severity": "critical",
+            "limit": 50
+          },
+          "result_summary": "{\"total\":2,\"alerts\":[{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-08-31T02:26:09.994642Z\",\"extra_data\":null},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-08-31T02:09:09.994642Z\",\"extra_data\":null}]}",
+          "timestamp": "2026-08-31T02:38:08.912176Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4b9b9136-a695-444d-bd54-14d0822e4011",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "billing-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:billing-consumer\"}",
+          "timestamp": "2026-08-31T02:38:08.912176Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "af84b2ca-9f31-498a-b98f-d0bff63dc871",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "billing-consumer has a confirmed lag of 15,000 sustained for 20+ minutes per active alert e33d75bb. The healthy-consumer that triggered the original alert fingerprint shows lag=0 (resolved). The real incident is billing-consumer saturation, which has a Tier-1 fix (restart/scale-up). Confidence is 0.92, above the 0.7 threshold."
+          },
+          "result_summary": "planner handoff to PLANNING: billing-consumer has a confirmed lag of 15,000 sustained for 20+ minutes per active alert e33d75bb. The healthy-consumer that triggered the original alert fingerprint shows lag=0 (resolved). The real incident is billing-consumer saturation, which has a Tier-1 fix (restart/scale-up). Confidence is 0.92, above the 0.7 threshold.",
+          "timestamp": "2026-08-31T02:38:08.912176Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "billing-consumer-lag-15k-sustained-20min",
+          "confidence": 0.92,
+          "reasoning": "Evidence shows billing-consumer has a confirmed lag of 15,000 with a separate active alert stating it has been sustained for 20+ minutes, making this the clear active incident despite the original alert fingerprint pointing to healthy-consumer (which is at lag 0)."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-causing-billing-consumer-stall",
+          "confidence": 0.15,
+          "reasoning": "A deploy regression could cause a consumer to stall and accumulate lag, but no deploy evidence has been collected yet."
+        },
+        {
+          "category": "poison_message",
+          "name": "poison-message-blocking-billing-consumer",
+          "confidence": 0.12,
+          "reasoning": "A poison message could block consumer processing and cause lag to accumulate, but no DLQ evidence has been checked."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:38:08.880177Z",
+      "updated_at": "2026-08-31T02:38:08.912176Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "a4046eca-1e4a-4aa7-a626-0b0a35e438fd",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "healthy-consumer"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 35618,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 63.123356,
+        "max_usd": "1.00",
+        "usd_used": "0.095643"
+      },
+      "evidence": [
+        {
+          "evidence_id": "3377b903-1a57-48ee-958a-65560bb79b57",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:38:08.912135Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8bc0d840-db67-4f34-9116-3ec85b1e440e",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "healthy-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}",
+          "timestamp": "2026-08-31T02:38:08.912176Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b0e1de52-7387-4e22-ba6e-af2c13b2b720",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 20.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'consumer_saturation' (0.75 >= 0.7); re-probing after 20s before accepting the contradiction",
+          "timestamp": "2026-08-31T02:38:08.912176Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9a9a8193-cbe7-42d5-921d-b5e675d258f1",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "healthy-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:healthy-consumer\"}",
+          "timestamp": "2026-08-31T02:38:08.912176Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "066f941d-bffb-4f70-96bb-171bcb578d79",
+          "tool_name": "list_active_alerts",
+          "arguments": {
+            "severity": "critical",
+            "limit": 50
+          },
+          "result_summary": "{\"total\":2,\"alerts\":[{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-08-31T02:26:09.994642Z\",\"extra_data\":null},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-08-31T02:09:09.994642Z\",\"extra_data\":null}]}",
+          "timestamp": "2026-08-31T02:38:08.912176Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4b9b9136-a695-444d-bd54-14d0822e4011",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "billing-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:billing-consumer\"}",
+          "timestamp": "2026-08-31T02:38:08.912176Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "af84b2ca-9f31-498a-b98f-d0bff63dc871",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "billing-consumer has a confirmed lag of 15,000 sustained for 20+ minutes per active alert e33d75bb. The healthy-consumer that triggered the original alert fingerprint shows lag=0 (resolved). The real incident is billing-consumer saturation, which has a Tier-1 fix (restart/scale-up). Confidence is 0.92, above the 0.7 threshold."
+          },
+          "result_summary": "planner handoff to PLANNING: billing-consumer has a confirmed lag of 15,000 sustained for 20+ minutes per active alert e33d75bb. The healthy-consumer that triggered the original alert fingerprint shows lag=0 (resolved). The real incident is billing-consumer saturation, which has a Tier-1 fix (restart/scale-up). Confidence is 0.92, above the 0.7 threshold.",
+          "timestamp": "2026-08-31T02:38:08.912176Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "784cf549-3e5f-4dba-a51e-e55302ee9427",
+          "tool_name": "_remediation_escalate",
+          "arguments": {
+            "from_state": "planning",
+            "reason": "insufficient tool-call budget for action+verify (remaining=1); escalating without executing"
+          },
+          "result_summary": "insufficient tool-call budget for action+verify (remaining=1); escalating without executing",
+          "timestamp": "2026-08-31T02:39:12.003533Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "billing-consumer-lag-15k-sustained-20min",
+          "confidence": 0.92,
+          "reasoning": "Evidence shows billing-consumer has a confirmed lag of 15,000 with a separate active alert stating it has been sustained for 20+ minutes, making this the clear active incident despite the original alert fingerprint pointing to healthy-consumer (which is at lag 0)."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-causing-billing-consumer-stall",
+          "confidence": 0.15,
+          "reasoning": "A deploy regression could cause a consumer to stall and accumulate lag, but no deploy evidence has been collected yet."
+        },
+        {
+          "category": "poison_message",
+          "name": "poison-message-blocking-billing-consumer",
+          "confidence": 0.12,
+          "reasoning": "A poison message could block consumer processing and cause lag to accumulate, but no DLQ evidence has been checked."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:38:08.880177Z",
+      "updated_at": "2026-08-31T02:39:12.003533Z"
+    }
+  ],
+  "invocation_id": "e72b5ffb9df0"
+}

@@ -1,0 +1,145 @@
+{
+  "scenario": "saga_stuck",
+  "incident_id": "2a28d62d-1259-4c89-9099-1362765b9da4",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "2a28d62d-1259-4c89-9099-1362765b9da4",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52"
+      },
+      "budget": {
+        "max_tool_calls": 11,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:01.012221Z",
+      "updated_at": "2026-08-31T02:22:01.012221Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "2a28d62d-1259-4c89-9099-1362765b9da4",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52"
+      },
+      "budget": {
+        "max_tool_calls": 11,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.000022,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "21f65cd5-59db-48c1-b0f3-da8df39c62e5",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:22:01.012243Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:01.012221Z",
+      "updated_at": "2026-08-31T02:22:01.012243Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "2a28d62d-1259-4c89-9099-1362765b9da4",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52"
+      },
+      "budget": {
+        "max_tool_calls": 11,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.000033,
+        "max_usd": "1.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "21f65cd5-59db-48c1-b0f3-da8df39c62e5",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T02:22:01.012243Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "80ba68f4-2b5e-4a45-b82c-606970095b72",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52"
+          },
+          "result_summary": "{\"seed_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"nodes\":[{\"id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"retry_count\":3,\"created_at\":\"2026-08-31T01:21:46.540757Z\"},{\"id\":\"9b9fe94d-a2c5-59d2-b968-e9427908e9f2\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.540757Z\"},{\"id\":\"677c49dd-9901-5761-a640-f1f9bea65e04\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-08-31T01:21:46.540757Z\"}],\"edges\":[{\"from_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"to_id\":\"9b9fe94d-a2c5-59d2-b968-e9427908e9f2\"},{\"from_id\":\"677c49dd-9901-5761-a640-f1f9bea65e04\",\"to_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-08-31T02:22:01.012254Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8cb28080-1b54-447b-a9c4-dd59cf820534",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "dead-lettered root is holding the chain; a human should decide whether replaying it is safe"
+          },
+          "result_summary": "planner stop: dead-lettered root is holding the chain; a human should decide whether replaying it is safe",
+          "timestamp": "2026-08-31T02:22:01.012254Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "runaway_saga",
+          "name": "stuck_saga_node",
+          "confidence": 0.85,
+          "reasoning": "The root is in dead_letter with retry_count=3 — retries exhausted, and dead_letter is terminal — while its descendant sits in waiting. The resolver promotes a child only when every parent is completed, so this chain will not drain on its own.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T02:22:01.012221Z",
+      "updated_at": "2026-08-31T02:22:01.012254Z"
+    }
+  ],
+  "invocation_id": "7a592aa6ed35"
+}

@@ -14,11 +14,15 @@ Compared against a fresh fetch, we surface three deltas:
 - ``added``   — tool present live but not in the committed snapshot
 - ``removed`` — tool present in the committed snapshot but not live
 - ``changed`` — tool present in both, but description / inputSchema /
-                outputSchema differs
+                outputSchema / required_scope / is_idempotent differs
 
 v0.4.4's silent output drift was the reason ``outputSchema`` was added
-to the snapshot. Regenerate with ``make snapshot`` whenever the pinned
-platform image bumps.
+to the snapshot. ``required_scope`` and ``is_idempotent`` (platform
+extensions from plat #168) were added for the same reason at wave-10
+(WO-R2-130): both were registry-only, so re-scoping a tool or dropping
+its idempotency was invisible here and the contract test could not catch
+it. Regenerate with ``make snapshot`` whenever the pinned platform image
+bumps.
 
 The functions here are pure — the caller passes the platform response
 and we read every field off the wire, so this module has no dependency
@@ -49,8 +53,9 @@ def normalize(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Return a stable, order-independent representation.
 
     Tools are sorted alphabetically by name. Fields kept are ``name``,
-    ``description``, ``inputSchema``, and ``outputSchema``. Every one
-    is read directly off the platform's ``tools/list`` response.
+    ``description``, ``inputSchema``, ``outputSchema``, ``required_scope``
+    and ``is_idempotent``. Every one is read directly off the platform's
+    ``tools/list`` response.
     """
     tools = snapshot.get("tools") or []
     normalized: list[dict[str, Any]] = []
@@ -84,10 +89,21 @@ def _index(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _tool_view(tool: dict[str, Any]) -> dict[str, Any]:
-    """Just the fields we snapshot — no volatile server-side metadata."""
+    """Just the fields we snapshot — no volatile server-side metadata.
+
+    ``required_scope`` and ``is_idempotent`` are read with ``.get`` and an
+    explicit default rather than the ``or {}`` idiom used above, because
+    both have falsy values that are REAL: ``None`` is the answer for the
+    few tools requiring no scope, and ``False`` is the answer for every
+    non-idempotent tool. ``or`` would erase the difference between "the
+    platform said False" and "the platform said nothing", which is the
+    distinction the diff exists to report.
+    """
     return {
         "name": tool["name"],
         "description": tool.get("description", ""),
         "inputSchema": tool.get("inputSchema") or {},
         "outputSchema": tool.get("outputSchema") or {},
+        "required_scope": tool.get("required_scope"),
+        "is_idempotent": tool.get("is_idempotent", False),
     }

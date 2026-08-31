@@ -64,11 +64,16 @@ class TestNormalize:
             ]
         }
         result = normalize(raw)
+        # `annotations` is dropped; the six snapshotted fields are kept.
+        # required_scope/is_idempotent joined this set at wave-10
+        # (WO-R2-130) — see TestScopeAndIdempotencyAreVisibleToTheDiff.
         assert set(result["tools"][0].keys()) == {
             "name",
             "description",
             "inputSchema",
             "outputSchema",
+            "required_scope",
+            "is_idempotent",
         }
 
     def test_empty_tools_list(self) -> None:
@@ -216,3 +221,85 @@ class TestCompare:
         diff = compare(committed, mutated)
         assert not diff.is_empty
         assert mutated["tools"][0]["name"] in diff.changed
+
+
+class TestScopeAndIdempotencyAreVisibleToTheDiff:
+    """`required_scope` and `is_idempotent` are snapshotted (WO-R2-130).
+
+    Both are platform extensions (plat #168 / WO-R2-32) advertised on every
+    `tools/list` entry, and both were invisible to this module until
+    wave-10: `_tool_view` kept only name/description/inputSchema/
+    outputSchema, so re-scoping a tool or dropping its idempotency changed
+    nothing the contract diff could see. The platform added them *for* this
+    diff — its own `ToolInfo` docstring says they "mirror `ToolDefinition`'s
+    attribute names, which is what the commander's `_tool_view` reads on
+    the other side" — so a snapshot that dropped them made the contract
+    test unable to catch the drift it exists to catch.
+
+    `is_idempotent` is the one that bites. It is what makes a Tier-1
+    recovery re-invoke return the cached response verbatim; if it is
+    silently dropped the retry actually re-runs, returns a different
+    payload, and verification reads that as a spurious escalation — a
+    failure that surfaces far from its cause.
+
+    Both are snake_case on the wire, unlike inputSchema/outputSchema: the
+    camelCase convention belongs to the MCP spec's own fields.
+    """
+
+    @staticmethod
+    def _one(**overrides: Any) -> dict[str, Any]:
+        tool: dict[str, Any] = {
+            "name": "replay_dlq_by_ids",
+            "description": "Replay by id",
+            "inputSchema": {"type": "object", "properties": {}},
+            "outputSchema": {"type": "object", "properties": {}},
+            "required_scope": "actions:execute",
+            "is_idempotent": True,
+        }
+        tool.update(overrides)
+        return {"tools": [tool]}
+
+    def test_both_fields_are_read_off_the_wire(self) -> None:
+        result = normalize(self._one())
+        assert result["tools"][0]["required_scope"] == "actions:execute"
+        assert result["tools"][0]["is_idempotent"] is True
+        assert set(result["tools"][0].keys()) == {
+            "name",
+            "description",
+            "inputSchema",
+            "outputSchema",
+            "required_scope",
+            "is_idempotent",
+        }
+
+    def test_a_rescoped_tool_is_named_by_the_diff(self) -> None:
+        """The work order's own red/green: mutate a scope, diff names it."""
+        committed = normalize(self._one())
+        live = normalize(self._one(required_scope="telemetry:read"))
+        assert compare(committed, live).changed == ("replay_dlq_by_ids",)
+
+    def test_a_dropped_idempotency_is_named_by_the_diff(self) -> None:
+        committed = normalize(self._one())
+        live = normalize(self._one(is_idempotent=False))
+        assert compare(committed, live).changed == ("replay_dlq_by_ids",)
+
+    def test_defaults_match_the_platforms_own(self) -> None:
+        """A tool that advertises neither reads as unscoped, non-idempotent.
+
+        The platform defaults `required_scope` to None (the few tools that
+        need no scope) and `is_idempotent` to False, so the snapshot has to
+        agree or every such entry would diff on the first rebless.
+        """
+        raw = {"tools": [{"name": "a", "description": "d", "inputSchema": {}}]}
+        result = normalize(raw)
+        assert result["tools"][0]["required_scope"] is None
+        assert result["tools"][0]["is_idempotent"] is False
+
+    def test_a_null_scope_is_preserved_not_coerced(self) -> None:
+        """`None` is a real value here, not a missing one.
+
+        Coercing it to "" would make an unscoped tool and a tool whose
+        scope was dropped look identical to the diff.
+        """
+        result = normalize(self._one(required_scope=None))
+        assert result["tools"][0]["required_scope"] is None

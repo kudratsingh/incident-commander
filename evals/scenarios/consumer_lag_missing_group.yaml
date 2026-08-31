@@ -34,37 +34,43 @@ canned_llm_responses:
   investigation_planner:
   - hypotheses:
     - category: unknown
-      name: undiscriminated_alert
+      name: unresolvable_consumer_group
       confidence: 0.4
-      reasoning: 'Alert lacks a group field; probing with "unknown" as a best effort.
+      reasoning: 'Alert names consumer group "unknown-consumer"; probe it directly to get a lag reading for the group actually implicated.
 
         '
     next_action:
       kind: probe
       tool_name: get_consumer_lag
       arguments:
-        consumer_group: unknown
+        # Must match the group the alert names. When this said `unknown` and
+        # the alert/fixture said `unknown-consumer`, the LIVE probe echoed
+        # back `unknown` and both `consumer_group` and `cache_key` drifted
+        # against the canned response -- the canned planner argument is what
+        # the live run actually sends, so it is part of the rename, not a
+        # comment on it.
+        consumer_group: unknown-consumer
   - hypotheses:
     - category: unknown
-      name: undiscriminated_alert
+      name: unresolvable_consumer_group
       confidence: 0.6
-      reasoning: 'Fallback probe returned lag: null — the platform could not determine lag for this group; null is unknown-not-healthy and carries no magnitude. The alert payload is still missing enough context to confirm which consumer is at fault.
+      reasoning: 'Probe of the named group returned lag: null with lag_known: false and source: unrecognized — the platform has no offsets for "unknown-consumer" at all. Null is unknown-not-healthy: it carries no magnitude and neither confirms nor excludes saturation, so there is nothing here to size a remediation against.
 
         '
     next_action:
       kind: stop
-      reason: alert payload incomplete; human decision required
+      reason: named consumer group is unresolvable and lag is unknown; human decision required
   briefing_writer:
-  - findings: 'The paging alert did not name a consumer group. A fallback probe against "unknown" returned lag: null — the platform has no cached reading for that group, so the probe neither confirms nor excludes saturation and carries no magnitude. The alert payload is too thin to attribute the signal.
+  - findings: 'The paging alert named consumer group "unknown-consumer". Probing that group returned lag: null (lag_known: false, source: unrecognized) — the platform has no offsets for it, so the probe neither confirms nor excludes saturation and carries no magnitude. A group the platform cannot resolve is usually one that was renamed or decommissioned without the alert rule following it.
 
       '
-    recommendation: 'Ask the alert-source owner to include the consumer group in future payloads; in the meantime, spot-check the top three lag-prone groups.
+    recommendation: 'Confirm with the alert-source owner whether "unknown-consumer" was renamed or decommissioned and update the alert rule to the live group; in the meantime, spot-check the top three lag-prone groups.
 
       '
   briefing_judge:
   - groundedness: 0.85
     actionability: 0.8
-    reasoning: 'Findings correctly note the missing group and read the null fallback reading as unknown rather than healthy; recommendation names two concrete steps (alert-source owner request + top-three spot check).
+    reasoning: 'Findings correctly name the unresolvable group and read the null reading as unknown rather than healthy; recommendation names two concrete steps (confirm rename/decommission with the alert-source owner + top-three spot check).
 
       '
 expectation:

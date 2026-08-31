@@ -2308,9 +2308,9 @@ class TestLiveRefusesCannedOnlySelection:
 
     ``use_live_mcp``/``use_live_llm`` false is a statement about the WORLD,
     not the env: the platform cannot manufacture (or expose) the fault —
-    remediate_runaway_saga_success's seeded DAG auto-completes and no chaos
-    hook builds a runaway one; remediate_stale_cache_success's seeded Redis
-    key is invisible to every read tool. Without this gate ``run_scenario``
+    alert_storm needs many alerts inside a short window and the platform's
+    three alert producers each emit at most one; remediate_verify_fails
+    needs a consumer group that stays dead. Without this gate ``run_scenario``
     silently serves the canned fixtures and the row lands in the live
     report's pass count as if the world had been graded. Refusal is the
     honest bucket: explicit, pre-spend, never a silent pass and never a
@@ -2318,8 +2318,7 @@ class TestLiveRefusesCannedOnlySelection:
     """
 
     _CANNED_ONLY_SHIPPED = (
-        "remediate_runaway_saga_success",
-        "remediate_stale_cache_success",
+        "alert_storm",
         "remediate_verify_fails",
     )
 
@@ -2368,9 +2367,7 @@ class TestLiveRefusesCannedOnlySelection:
         _isolate_settings_env(monkeypatch, tmp_path, _PLACEHOLDER_LIVE_ENV)
         _forbid_run_all(monkeypatch)
         self._forbid_clients_and_hooks(monkeypatch)
-        monkeypatch.setattr(
-            sys, "argv", ["evals.runner", "--live", "--only", "remediate_runaway_saga_success"]
-        )
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--only", "alert_storm"])
         assert runner_module.main() == 8
 
     def test_smoke_may_still_select_canned_only_scenarios(

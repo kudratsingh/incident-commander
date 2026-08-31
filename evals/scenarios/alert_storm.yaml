@@ -9,8 +9,25 @@ tags:
 - audit
 - live-mcp
 - live-llm
-use_live_mcp: true
-use_live_llm: true
+# Canned-only: the fault is unmanufacturable live. A storm is many alerts
+# firing in a short window, and on the pinned v0.6.0 platform nothing can
+# produce one. Alerts have exactly three producers — the `bad_deploy`
+# chaos hook, the SLO fast-burn loop, and the boot seed script — and none
+# of them bursts: `bad_deploy` writes ONE alert per invocation with
+# severity hard-coded to `critical`, and there is no alert-creation route
+# on the REST surface or in any MCP tool. The live platform therefore
+# holds a fixed three active alerts, so a "live" run would grade the agent
+# on whether it calls three steady-state rows a cascade — alert-credulity,
+# not triage. The fixture's own shape says the same thing: it describes
+# five alerts at severities `high` and `medium`, which the platform's
+# severity vocabulary does not even admit (ADR 0025 allows exactly `low`,
+# `info`, `warning`, `critical`).
+# The runner refuses to select this scenario under --live (exit 8,
+# docs/runbook.md "Runner exit codes"). Unblocked by: a burst-alert chaos
+# hook — one that seeds N alerts across several sources inside a short
+# window — released and pinned; flip both flags back in that PR.
+use_live_mcp: false
+use_live_llm: false
 alert:
   source: platform.alerts
   severity: critical

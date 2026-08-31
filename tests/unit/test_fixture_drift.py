@@ -823,7 +823,7 @@ class TestLedgerContext:
         )
 
     def test_a_reclassification_in_code_moves_the_burn_down_number(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """Absolving an entry in code must remove it from the work list.
 
@@ -831,11 +831,54 @@ class TestLedgerContext:
         an array row's from `_JUSTIFIED`, so deciding in code that an entry
         was post-fault changed nothing the burn-down number could see. The
         code is the authority on classification; the file records it.
+
+        Written against a ledger this test builds rather than the committed
+        one. It used to reclassify whichever shipped entry happened to be a
+        defect, which stopped working at wave-10 for the best possible
+        reason: the burn-down list reached zero, so `next()` had nothing to
+        pick and the test raised StopIteration. A guard that only runs while
+        the work list is non-empty is a guard that switches itself off on
+        success — the mechanism it protects (code outranks file) is exactly
+        as load-bearing at zero defects as at thirteen.
         """
-        before = defect_count()
-        victim = next(entry.key for entry in load_entries() if entry.is_defect)
-        monkeypatch.setitem(_JUSTIFIED, victim, (POST_FAULT, "hypothetical reclassification"))
-        assert defect_count() == before - 1
+        key = ("some_scenario", "some_tool", "some.path", "value")
+        path = tmp_path / "ledger.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "known_drift": [
+                        {
+                            "scenario": key[0],
+                            "tool": key[1],
+                            "path": key[2],
+                            "kind": key[3],
+                            "context": FIXTURE_DEFECT,
+                        }
+                    ]
+                }
+            )
+        )
+        assert defect_count(path) == 1
+        monkeypatch.setitem(_JUSTIFIED, key, (POST_FAULT, "hypothetical reclassification"))
+        assert defect_count(path) == 0
+
+    def test_the_committed_burn_down_list_is_empty(self) -> None:
+        """The ratchet's terminal state, pinned so a regrowth is visible.
+
+        Wave-10 took the last thirteen defects off the list: six saga_stuck
+        `get_dag_state` entries became post-fault when the scenario was
+        rebuilt on the create_stuck_dag chaos hook, and seven alert_storm
+        entries became canned-only when the platform proved unable to burst
+        alerts. A new defect is not forbidden — fixtures drift and that is
+        what the ledger is for — but it should have to be added
+        deliberately, with this line updated in the same change.
+        """
+        defects = [entry.key for entry in load_entries() if entry.is_defect]
+        assert defects == [], (
+            f"{len(defects)} fixture defect(s) are back on the burn-down list: "
+            f"{defects}. Either fix the fixture, or justify the entry in "
+            "_JUSTIFIED and update this test."
+        )
 
     def test_the_original_array_format_still_parses(self, tmp_path: Path) -> None:
         # The committed ledger predates the annotated format; a checkout

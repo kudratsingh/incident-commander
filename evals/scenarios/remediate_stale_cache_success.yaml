@@ -1,6 +1,6 @@
 name: remediate_stale_cache_success
-description: 'Cache miss rate spike alert. Agent probes get_redis_health, sees the hit rate has collapsed, emits RemediateAction. Remediation planner picks invalidate_cache_key targeting a specific stale
-  key; verify probes get_redis_health again and expects the miss trend to reverse.
+description: 'Cache miss rate spike alert. Agent probes get_redis_health, sees the hit rate has collapsed, then reads the named hot key with get_cache_key_info to confirm it is really there before
+  touching it. Remediation planner picks invalidate_cache_key targeting that key; verify probes get_redis_health again and expects the miss trend to reverse.
 
   '
 tags:
@@ -10,22 +10,23 @@ tags:
 - cache
 - live-mcp
 - live-llm
-# Canned-only: the fault is unobservable live. create_stale_cache writes
-# one Redis key that no read tool can see — get_redis_health returns
-# server-wide stats only — so the "miss-rate collapse" this scenario
-# grades cannot exist on the live platform, and with no read surface
-# there is no precondition that could abort honestly (the same gap
-# recorded in tests/unit/test_preconditions.py). The runner refuses to
-# select this scenario under --live (exit 8, docs/runbook.md "Runner
-# exit codes"). Unblocked by: a platform get_cache_key_info read tool,
-# released and pinned — flip both flags back in that PR.
-use_live_mcp: false
-use_live_llm: false
+# Live again as of the v0.6.0 pin (cmd #172). This scenario was canned-only
+# under #145 because create_stale_cache wrote one Redis key that no read
+# tool could see: get_redis_health returns server-wide stats only, so the
+# fault was real but unobservable, and no precondition could abort
+# honestly. v0.6.0 ships get_cache_key_info (plat #146, tenant-scoped by
+# plat #182), which reads exactly that key — so the premise is now
+# checkable before any spend, and the expected_precondition at the bottom
+# of this file is that check. Both flags flip back here, which is what
+# readmits the scenario to a --live selection (the exit-8 guard keys off
+# `canned_only`, i.e. neither live flag set — see evals/runner.py).
+use_live_mcp: true
+use_live_llm: true
 # v0.4.7 chaos hook — seeds cache:jobs:worker-dispatcher:hot_set with
 # obvious-fake stale content so the agent has something to observe +
 # invalidate. Compensator is invalidate_cache_key on that same key.
-# Kept for the day the read tool ships; never fired in canned runs
-# (canned get_redis_health already encodes the collapsed hit rate).
+# Ignored by canned/offline runs (the canned responses already encode the
+# collapsed hit rate and the present key).
 chaos_setup:
   name: create_stale_cache
   arguments:
@@ -36,10 +37,32 @@ alert:
   fingerprint: cache_miss_spike
   cache_key: cache:jobs:worker-dispatcher:hot_set
 canned_tool_responses:
+  # Re-recorded against the pinned v0.6.0 image (wave-10). The previous
+  # reading claimed 1.00G of used memory against a live stack that runs at
+  # ~1.6M — internally consistent but describing a server this platform
+  # never boots. These numbers are a real probe of the demo stack, and the
+  # hit rate is genuinely collapsed on it (149 hits / 7862 misses = 1.9%),
+  # so the scenario's premise no longer needs an invented one.
+  # The memory and keyspace fields are declared volatile in
+  # evals/fixture_drift.py (monotonic counters and a live gauge — no canned
+  # value can be right about them), so the drift check grades their TYPE,
+  # not these values.
   get_redis_health:
     content:
     - type: text
-      text: '{"ok":true,"ping_latency_ms":1.1,"connected_clients":3,"used_memory_bytes":1073741824,"used_memory_human":"1.00G","keyspace_hits":293,"keyspace_misses":449813,"error":null}'
+      text: '{"ok":true,"ping_latency_ms":0.286,"connected_clients":11,"used_memory_bytes":1670880,"used_memory_human":"1.59M","keyspace_hits":149,"keyspace_misses":7862,"error":null}'
+    is_error: false
+  # v0.6.0's new read surface, recorded against the SEEDED (un-faulted)
+  # world the drift check probes: seed_eval_fixtures writes this key with a
+  # 24h TTL, so a fresh stack reads exists=true / type=string / size=120.
+  # One response, not a sequence: the verify probe re-reads
+  # get_redis_health, so this fixture never has to describe the post-delete
+  # world. `ttl_seconds` is a countdown and is declared volatile alongside
+  # the redis gauges above.
+  get_cache_key_info:
+    content:
+    - type: text
+      text: '{"key":"cache:jobs:worker-dispatcher:hot_set","exists":true,"type":"string","ttl_seconds":86326,"size":120}'
     is_error: false
   invalidate_cache_key:
     content:
@@ -62,13 +85,25 @@ canned_llm_responses:
   - hypotheses:
     - category: stale_cache
       name: stale_cache_hot_key
+      confidence: 0.7
+      reasoning: 'Hit/miss ratio collapsed (149 hits vs 7862 misses = 1.9%). The alert names a specific hot key; read it directly before proposing a delete.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_cache_key_info
+      arguments:
+        key: cache:jobs:worker-dispatcher:hot_set
+  - hypotheses:
+    - category: stale_cache
+      name: stale_cache_hot_key
       confidence: 0.85
-      reasoning: 'Hit/miss ratio collapsed (293 hits vs 449813 misses = 0.065%). Alert names a specific hot key. Invalidating forces a refresh from the source of truth and should restore cache behavior.
+      reasoning: 'The named key exists as a 120-byte string with ~24h left on its TTL, so the collapsed hit rate is not a cold cache \u2014 a long-lived hot key is being missed. Invalidating forces a refresh from the source of truth.
 
         '
     next_action:
       kind: remediate
-      reason: "stale hot key identified \u2014 invalidate_cache_key applies"
+      reason: "stale hot key confirmed present \u2014 invalidate_cache_key applies"
   remediation_planner:
   - target_hypothesis: stale_cache_hot_key
     action_tool: invalidate_cache_key
@@ -85,8 +120,8 @@ canned_llm_responses:
 
       '
   briefing_writer:
-  - findings: 'Redis cache hit rate collapsed to 0.065%. Alert named a specific hot key (cache:jobs:worker-dispatcher:hot_set) as the likely culprit. Invalidating the key returned deleted=true; workers
-      will repopulate on next lookup.
+  - findings: 'Redis cache hit rate collapsed to 1.9% (149 hits vs 7862 misses). The alert named a specific hot key (cache:jobs:worker-dispatcher:hot_set); reading it back showed a 120-byte string with
+      ~24h left on its TTL, so the key was live and being missed rather than absent. Invalidating it returned deleted=true; workers will repopulate on next lookup.
 
       '
     recommendation: "Monitor hit ratio for the next 5 minutes to confirm recovery. If a similar spike recurs on the same key, investigate why it's going stale \u2014 TTL misconfiguration or an upstream\
@@ -109,10 +144,27 @@ expectation:
     field: deleted
     equals: true
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
-  # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
-  # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. Cap 13 is the
-  # maintainer's decision (A-02), keeping the >=30% margin rule. Since ADR
+  # (get_redis_health, get_cache_key_info) + 1 ADR-0009 freshness re-probe
+  # + 1 action + up to 6 ADR-0006 verify polls (VERIFY_PROBE_ATTEMPTS=6)
+  # = 10 tool calls on a correct run. Cap 13 is the maintainer's decision
+  # (A-02), keeping the >=30% margin rule. Since ADR
   # 0019 this is ALSO the run's runtime BudgetLedger ceiling (invariant 7):
   # the agent is bounded by it, told it, and escalates on exhausting it, and
   # reaching it grades BUDGET red. The margin is headroom, not an annotation.
   max_tool_calls: 13
+# The premise: the hot key this scenario invalidates is actually there.
+# This is the check #145 said could not be written — get_redis_health
+# reports server-wide stats, so before v0.6.0 nothing could tell "the
+# stale key is seeded" from "the chaos hook silently did nothing", and a
+# run against an unseeded key would have graded the agent on a fault that
+# was never manufactured. get_cache_key_info reads the exact key and
+# returns shape only (never the value), so this costs one read and no
+# tenant data. `exists` is the whole assertion: TTL and size are the
+# chaos hook's business, not the premise's.
+expected_precondition:
+- tool: get_cache_key_info
+  arguments:
+    key: cache:jobs:worker-dispatcher:hot_set
+  expect:
+  - path: exists
+    equals: true

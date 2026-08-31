@@ -146,6 +146,34 @@ def probe_live(
             if key not in cache:
                 cache[key] = _call_tool(http, mcp_url, token, call.tool, dict(call.arguments))
             payload, error = cache[key]
+            if (error is not None or payload is None) and call.chaos_seeded:
+                # A fixture whose premise a chaos hook manufactures is
+                # probed against the world BEFORE that hook fires, and some
+                # of those probes name an entity that does not exist yet —
+                # `create_stuck_dag` derives its chain ids from the
+                # chain_name, so `get_dag_state` answers "job not found"
+                # until the hook has run. That is an OBSERVATION of the
+                # un-faulted world, not a failure to observe it, and the
+                # difference matters in both directions.
+                #
+                # Treating it as a ProbeError failed
+                # test_every_fixture_was_actually_reachable and, worse, took
+                # the fixture out of the comparison entirely: its ledger
+                # entries then went unobserved, which the ratchet reads as
+                # "fixed" and the bless refuses to delete (split_for_bless
+                # carries what the run never reached). The entries would
+                # have been stuck — permanently reported stale and
+                # permanently undeletable.
+                #
+                # Comparing against an empty live payload keeps the fixture
+                # IN the walk, so its disagreement stays recorded, stays
+                # classified (post-fault, in the ledger), and stays
+                # discharge-able the day the world can answer. Scoped to
+                # chaos-declaring scenarios so a genuine 502 or a typo'd
+                # tool name anywhere else is still the loud error it was.
+                drifts.extend(compare(call, {}))
+                compared[call.scenario, call.tool] = None
+                continue
             if error is not None or payload is None:
                 errors.append(
                     ProbeError(

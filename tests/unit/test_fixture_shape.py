@@ -43,8 +43,17 @@ class TestTheShippedTierOneFixtures:
     def test_there_are_tier_one_fixtures_to_check(self) -> None:
         # Guards the check against passing because it looked at nothing —
         # the failure mode of every filter-based guard.
+        #
+        # `pause_dag` was pinned here until wave-10 and no longer is: it was
+        # the remediation of remediate_runaway_saga_success, which now
+        # replays the stuck chain's dead-lettered root instead, because a
+        # pause only STABILIZES a chain (it halts promotion and self-expires)
+        # and never un-sticks one. No shipped scenario cans a pause_dag
+        # response any more, so pinning it here would pin a fixture nobody
+        # serves. The tool is still registered and still Tier-1; it is the
+        # scenario coverage that moved, and this list follows it.
         tools = {call.tool for call in _tier_one_calls()}
-        assert {"pause_dag", "mark_dlq_permanent"} <= tools
+        assert {"replay_dlq_by_ids", "mark_dlq_permanent"} <= tools
 
     def test_the_snapshot_describes_every_tier_one_tool_a_fixture_answers(self) -> None:
         schemas = load_output_schemas()

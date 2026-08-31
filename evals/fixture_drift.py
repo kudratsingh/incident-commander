@@ -112,6 +112,14 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
             "keyspace_misses",
         }
     ),
+    # `ttl_seconds` is a countdown on a key the fixture pack seeds with a
+    # 24h expiry, so its value is a property of how long the stack has been
+    # up when you looked — the same test this file applies to the redis
+    # gauges above ("does the fixture pack FIX the value"), and the answer
+    # is no. `exists`, `type` and `size` DO stay guarded: the pack fixes all
+    # three for cache:jobs:worker-dispatcher:hot_set, so a recording can
+    # match them and must.
+    "get_cache_key_info": frozenset({"ttl_seconds"}),
     # `items.dead_lettered_at` arrived with the v0.6.0 re-pin (plat #180,
     # R2-53) and is the third clock on this tool, not a new species: the
     # seeder stamps it fresh at seed time, exactly like the two beside it,
@@ -163,6 +171,13 @@ class CannedCall:
     payload: Mapping[str, Any]
     # Index within a sequenced fixture (``get_consumer_lag: [before, after]``).
     index: int = 0
+    # True when the scenario declares a ``chaos_setup``, i.e. its fixture
+    # describes a world the hook manufactures. Load-bearing for one case
+    # only: a tool that answers "that entity does not exist" when probed
+    # against the UN-faulted world has made an observation, not failed. See
+    # ``evals/fixture_probe.py`` for why that distinction has to be drawn
+    # there rather than swallowed as a probe error.
+    chaos_seeded: bool = False
 
     @property
     def label(self) -> str:
@@ -271,6 +286,7 @@ def canned_calls(scenarios: Iterable[Scenario]) -> tuple[CannedCall, ...]:
                             arguments=arguments_by_tool.get(tool, {}),
                             payload=payload,
                             index=index,
+                            chaos_seeded=scenario.chaos_setup is not None,
                         )
                     )
     return tuple(calls)

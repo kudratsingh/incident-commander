@@ -1,5 +1,6 @@
 import json
 import re
+import uuid
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -274,15 +275,20 @@ class TestCannedOnlyMarking:
     the YAML (with the reason and the unblocking platform change commented
     right above them); the runner refuses a --live selection containing any
     of these (exit 8). Removing a name here needs the platform capability
-    it is waiting on: a stuck-DAG chaos hook for runaway_saga, a
-    get_cache_key_info read tool for stale_cache, a seedable dead consumer
-    group for verify_fails.
+    it is waiting on: a seedable dead consumer group for verify_fails, a
+    burst-alert chaos hook for alert_storm.
+
+    Two names left this set at the v0.6.0 pin, because the capability each
+    was waiting on shipped: `remediate_runaway_saga_success` (create_stuck_dag,
+    plat #148) and `remediate_stale_cache_success` (get_cache_key_info,
+    plat #146). `alert_storm` joined it in the same change — the platform
+    has three alert producers and none of them bursts, so a storm is
+    unmanufacturable.
     """
 
     _CANNED_ONLY: frozenset[str] = frozenset(
         {
-            "remediate_runaway_saga_success",
-            "remediate_stale_cache_success",
+            "alert_storm",
             "remediate_verify_fails",
         }
     )
@@ -467,3 +473,77 @@ class TestCannedConsumerLagContract:
                 f"{name}: expected the null-lag scenario to escalate, got "
                 f"{expectation.expected_terminal_state}"
             )
+
+
+class TestStuckDagChainIdsArePinnedCorrectly:
+    """The saga scenarios hard-code ids the chaos hook derives.
+
+    ``create_stuck_dag`` does not take an id: it computes every row's
+    primary key as ``uuid5(namespace, f"{tenant_id}:{chain_name}:{role}")``
+    and the platform publishes that namespace precisely so a scenario can
+    pin the ids ahead of the call (plat #184 — "Fixed and documented so a
+    scenario can precompute the ids it pins"). Both halves of the input are
+    constants: the namespace below, and the default tenant, which the
+    platform's multi-tenancy migration inserts with a literal uuid.
+
+    Recomputing them here is what makes the hard-coded ids safe. Without
+    it a typo, a renamed chain, or a platform that changed its derivation
+    would surface as an unmet precondition during a paid live run — the
+    most expensive place to learn it. This costs nothing and fails offline.
+    """
+
+    # backend/app/mcp/tools/chaos/create_stuck_dag.py::_NAMESPACE
+    _NAMESPACE = uuid.UUID("cccccccc-57ac-4000-8000-000000000000")
+    # backend/app/models/tenant.py::DEFAULT_TENANT_ID, seeded by migration
+    # f8a1c4e23507_multi_tenancy, so it is identical on every stack.
+    _DEFAULT_TENANT = "d3fa17de-7a17-de7a-17de-7a17de7a17de"
+
+    def _root_id(self, chain_name: str) -> str:
+        return str(uuid.uuid5(self._NAMESPACE, f"{self._DEFAULT_TENANT}:{chain_name}:root"))
+
+    @pytest.mark.parametrize(
+        ("scenario_name", "chain_name"),
+        [
+            ("saga_stuck", "saga-stuck-eval"),
+            ("remediate_runaway_saga_success", "runaway-saga-eval"),
+        ],
+    )
+    def test_the_pinned_root_id_is_the_hook_derivation(
+        self, scenario_name: str, chain_name: str
+    ) -> None:
+        by_name = {s.name: s for s in _shipped_scenarios()}
+        scenario = by_name[scenario_name]
+        assert scenario.chaos_setup is not None
+        assert scenario.chaos_setup.name == "create_stuck_dag"
+        assert scenario.chaos_setup.arguments["chain_name"] == chain_name
+
+        expected = self._root_id(chain_name)
+        assert scenario.alert.model_extra is not None
+        assert scenario.alert.model_extra["job_id"] == expected, (
+            f"{scenario_name}: the alert pins a job_id that create_stuck_dag "
+            f"would not produce for chain_name={chain_name!r}"
+        )
+        probed = {
+            probe.arguments.get("job_id")
+            for probe in scenario.expected_precondition
+            if probe.tool == "get_dag_state"
+        }
+        assert probed == {expected}, (
+            f"{scenario_name}: the precondition probes {probed}, not the "
+            f"chain's derived root {expected}"
+        )
+
+    def test_the_two_scenarios_do_not_share_a_chain(self) -> None:
+        """Sharing one would make each run depend on the other's order.
+
+        ``remediate_runaway_saga_success`` replays the root to `completed`.
+        ``create_stuck_dag`` refuses a chain whose rows have drifted (409
+        `stuck_chain_name_in_use`) rather than rebuilding it, so a shared
+        name would leave the second scenario unseedable until a reset.
+        """
+        by_name = {s.name: s for s in _shipped_scenarios()}
+        names = [
+            by_name[n].chaos_setup.arguments["chain_name"]  # type: ignore[union-attr]
+            for n in ("saga_stuck", "remediate_runaway_saga_success")
+        ]
+        assert len(set(names)) == len(names), f"saga scenarios share a chain_name: {names}"

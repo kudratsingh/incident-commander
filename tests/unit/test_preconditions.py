@@ -176,14 +176,6 @@ def _shipped() -> list[Scenario]:
 # got around to it. Adding a name here needs that justification; removing one
 # needs a precondition.
 _JUSTIFIED_WITHOUT_PRECONDITION: dict[str, str] = {
-    # create_stale_cache writes a Redis key. No read tool exposes cache keys —
-    # get_redis_health returns server stats only, and invalidate_cache_key is
-    # the Tier-1 write this scenario exists to test. The fault is real and
-    # unobservable, which is a gap in the platform's read surface, not here.
-    # The same gap now makes the scenario canned-only (use_live_mcp/
-    # use_live_llm false; a --live selection is refused with exit 8) until
-    # a get_cache_key_info read tool ships.
-    "remediate_stale_cache_success": "no read tool exposes a Redis key",
     # use_live_mcp: false — it never runs live, and preconditions are about
     # the live world. Its canned responses ARE its premise.
     "remediate_verify_fails": "canned-only scenario; never runs live",

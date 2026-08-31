@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime
-from typing import Any, Final
+from typing import Any, Final, NamedTuple
+from uuid import UUID
 
 from pydantic import BaseModel, ValidationError
 
@@ -57,6 +58,16 @@ _ESCALATION_MARKER: Final[str] = "_investigate_escalate"
 _DEFAULT_MAX_ITERATIONS: Final[int] = 5
 _REMEDIATE_CONFIDENCE_THRESHOLD: Final[float] = 0.7
 
+# How many times one investigation may have its remediate handoff refused
+# for never having probed the alert's subject before the run escalates
+# instead. A refusal is not a failure — it is a steer, and the planner gets
+# to act on it (the reason lands in the evidence trail the next planner
+# context renders). But a planner that re-emits `remediate` after being
+# told twice is not going to probe on the third ask, and burning the
+# remaining iterations to arrive at the generic "max iterations exceeded"
+# throws away the one diagnosis worth putting in the briefing.
+_MAX_SUBJECT_PROBE_REFUSALS: Final[int] = 2
+
 
 # Single source of truth for category → Tier-1 tool routing.
 #
@@ -77,6 +88,98 @@ FIX_MAP: Final[dict[HypothesisCategory, str]] = {
     HypothesisCategory.STALE_CACHE: "invalidate_cache_key",
     HypothesisCategory.RUNAWAY_SAGA: "pause_dag",
 }
+
+
+# Single source of truth for alert-field → subject-probe routing.
+#
+# An alert names the resource it is about in one of these payload fields.
+# The value is the resource; the pair is (the read tool that observes that
+# resource, the argument field the value belongs in). Together they answer
+# one question mechanically: "which exact probe call would read the thing
+# this alert is complaining about?"
+#
+# Keyed on the alert FIELD rather than on `fingerprint`. Fingerprints are
+# free text the platform's alert rules author — this corpus alone spells
+# one family three ways (`consumer_lag_high`, `consumer_lag_warning`,
+# `consumer_stalled`), so a fingerprint-keyed map could only match by
+# prefix or substring, which is the heuristic this guard exists to avoid.
+# Field names are the closed vocabulary: they are the commander's own
+# ingress model (`api/schemas.AlertPayload`) plus the scenario corpus's
+# `_NON_WEBHOOK_ALERT_FIELDS` (tests/unit/test_scenario_alert_premise.py),
+# and — decisively — the field is what carries the subject's VALUE, which
+# the guard needs anyway. Knowing "this is a consumer-lag alert" is not
+# enough; the 2026-08-30 live run probed `get_consumer_lag` for the
+# platform's DEFAULT group while the alert named `unknown-consumer`, and
+# only the value comparison catches that.
+#
+# Declaration order is priority order: if an alert ever names two mappable
+# resources, the first entry present wins and becomes "the subject". The
+# guard demands one verified read of the alert's primary subject, not a
+# probe of everything the alert mentions — demanding all of them would
+# turn a richer alert into a blocked investigation.
+#
+# The tool/argument halves must stay consistent with
+# `policies.RESOURCE_ARG_FIELDS` (the same fields, seen from the tool
+# side); `tests/unit/test_policies.py::TestAlertSubjectProbes` pins that.
+ALERT_SUBJECT_PROBES: Final[dict[str, tuple[str, str]]] = {
+    "consumer_group": ("get_consumer_lag", "consumer_group"),
+    "group": ("get_consumer_lag", "consumer_group"),
+    "cache_key": ("get_cache_key_info", "key"),
+    "job_id": ("get_dag_state", "job_id"),
+    "trace_id": ("get_trace", "trace_id"),
+}
+
+
+class AlertSubject(NamedTuple):
+    """The resource an alert is about, and the probe call that reads it."""
+
+    alert_field: str
+    """Which payload field named it — quoted back to the planner."""
+    tool_name: str
+    """Read tool that observes this resource."""
+    argument_field: str
+    """The tool argument the value belongs in."""
+    value: str
+    """The resource name, verbatim from the alert."""
+
+
+def alert_subject(alert: Mapping[str, Any]) -> AlertSubject | None:
+    """The alert's own subject, or ``None`` when it names nothing mappable.
+
+    ``None`` is the inert case and it is common and legitimate: a DLQ-depth
+    alert, an alert-storm meta-alert, and a `db_latency_high` alert all name
+    a *condition* rather than a resource this agent can probe by name. Every
+    caller must treat ``None`` as "no opinion" — a guard that fabricated a
+    subject for those alerts would block investigations it knows nothing
+    about, which is worse than the gap it closes.
+
+    Looks at the top level first, then one level into ``extra_data``. That
+    second lookup is not speculative: the platform's alert webhook sends
+    exactly ``{alert_id, tenant_id, severity, source, title, description,
+    fired_at, extra_data}``, so on a real alert every resource-naming field
+    in the map above arrives nested, while the scenario corpus carries them
+    at the top level (the divergence is written up in
+    ``tests/unit/test_scenario_alert_premise.py::_NON_WEBHOOK_ALERT_FIELDS``).
+    Reading only the top level would leave this guard permanently inert in
+    production while looking green offline — the exact shape of fail-open
+    that makes a guard worse than no guard.
+    """
+    for source in (alert, alert.get("extra_data")):
+        if not isinstance(source, Mapping):
+            continue
+        for field, (tool_name, argument_field) in ALERT_SUBJECT_PROBES.items():
+            raw = source.get(field)
+            # str and UUID only: an alert arriving as JSON gives strings,
+            # and a run state assembled in Python may hold a real UUID for
+            # `job_id`/`trace_id`. Numbers and booleans do not name a
+            # platform resource, and a Mapping is a nested payload, not a
+            # name.
+            if not isinstance(raw, (str, UUID)):
+                continue
+            value = str(raw).strip()
+            if value:
+                return AlertSubject(field, tool_name, argument_field, value)
+    return None
 
 
 def make_investigate(
@@ -190,6 +293,8 @@ def make_llm_investigate(
     def transition_llm_investigate(run_state: RunState, at: datetime) -> RunState:
         last_probe: ProbeAction | None = None
         reprobes_spent: dict[str, int] = {}
+        subject = alert_subject(run_state.alert)
+        refusals_spent = 0
         for _ in range(max_iterations):
             if run_state.budget.is_exhausted:
                 return _escalate_investigation(run_state, at, "budget exhausted mid-investigation")
@@ -267,6 +372,27 @@ def make_llm_investigate(
                             f"{_REMEDIATE_CONFIDENCE_THRESHOLD}; escalating"
                         ),
                     )
+                # Third structural guard: you may not remediate an incident
+                # whose own alerted signal nobody has read. Unlike the two
+                # above, this one REFUSES rather than escalates — the run is
+                # not over, the planner is simply sent back with the probe it
+                # skipped named for it (WO behaviour fix, 2026-08-30).
+                if subject is not None and not _alert_subject_probed(run_state, subject):
+                    if refusals_spent >= _MAX_SUBJECT_PROBE_REFUSALS:
+                        return _finalize(
+                            run_state,
+                            at,
+                            (
+                                f"planner emitted remediate {refusals_spent + 1} times "
+                                f"without ever probing the alert's subject "
+                                f"({subject.alert_field}={subject.value!r}); the alerted "
+                                "signal is still unread, so no remediation can be shown "
+                                "to address it; escalating"
+                            ),
+                        )
+                    refusals_spent += 1
+                    run_state = _refuse_handoff(run_state, at, subject)
+                    continue
                 return _handoff_to_planning(run_state, at, action.reason)
 
             # ProbeAction — tool_name is Literal-validated at schema time,
@@ -443,6 +569,79 @@ def _note_freshness_reprobe(
     entry = EvidenceEntry(
         tool_name="_freshness_reprobe",
         arguments={"tool": probe.tool_name, "delay_seconds": delay_seconds},
+        result_summary=reason,
+        timestamp=at,
+    )
+    return run_state.model_copy(
+        update={
+            "evidence": (*run_state.evidence, entry),
+            "updated_at": at,
+        }
+    )
+
+
+def _alert_subject_probed(run_state: RunState, subject: AlertSubject) -> bool:
+    """True when some probe in the evidence trail actually read the alert's subject.
+
+    Matching is on the tool AND the argument value, never the tool alone.
+    That distinction is the entire guard: on 2026-08-30 the agent answered a
+    ``group="unknown-consumer"`` alert by calling ``get_consumer_lag`` — the
+    right tool — with no group at all, which ``wire_arguments`` default-fills
+    to the platform's ``worker-dispatcher``. It then read a healthy number off
+    a consumer nobody had complained about, found a different critical alert
+    while it was in there, and chased that instead. "Did it call the tool" is
+    green for that run; "did it read the resource the alert named" is not.
+
+    Reading ``entry.arguments`` is what makes that check possible: evidence
+    records the WIRED arguments (post default-fill), so the default-filled
+    group is visible here as the literal ``worker-dispatcher`` it became on
+    the wire, rather than as the absence the planner emitted.
+
+    Values compare exactly after ``strip()`` — no substring, case-insensitive,
+    or prefix matching, for the reason ``remediation._unsourced_resource_args``
+    gives: the campaign's own failure values are substrings of the true ones.
+    """
+    for entry in run_state.evidence:
+        if entry.tool_name != subject.tool_name:
+            continue
+        raw = entry.arguments.get(subject.argument_field)
+        if isinstance(raw, (str, UUID)) and str(raw).strip() == subject.value:
+            return True
+    return False
+
+
+def _refuse_handoff(run_state: RunState, at: datetime, subject: AlertSubject) -> RunState:
+    """Refuse a remediate handoff and steer the planner at the probe it skipped.
+
+    Deliberately NOT a terminal transition. The state stays INVESTIGATING and
+    the loop continues, so the planner gets to fix its own omission — the
+    refusal reason is rendered into the next planner context by
+    ``_format_planner_context`` like any other evidence line. This mirrors the
+    plan-guard rejections in ``remediation.make_llm_plan``: reject the bad
+    output, say precisely what would make it good, let the model try again.
+
+    Recorded under an underscore-prefixed name per the repo-wide marker
+    convention, so the briefing's evidence trail and the grader's
+    "tools called" set both exclude it — a refusal is bookkeeping, not a
+    probe, and it spends no tool-call budget.
+    """
+    reason = (
+        f"handoff refused: this incident's alert names "
+        f"{subject.alert_field}={subject.value!r}, and no probe in the evidence "
+        f"trail has read it. Call {subject.tool_name} with "
+        f"{subject.argument_field}={subject.value!r} before remediating. Other "
+        "incidents, alerts, and DLQ entries visible in the evidence are context, "
+        "not this incident's subject — remediating one of those leaves the "
+        "alerted signal unexplained."
+    )
+    entry = EvidenceEntry(
+        tool_name="_handoff_refused",
+        arguments={
+            "alert_field": subject.alert_field,
+            "required_tool": subject.tool_name,
+            "required_argument": subject.argument_field,
+            "required_value": subject.value,
+        },
         result_summary=reason,
         timestamp=at,
     )

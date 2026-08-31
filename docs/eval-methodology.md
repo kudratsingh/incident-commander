@@ -278,6 +278,43 @@ Three coordinated changes (in flight as of 2026-07-30, pending platform v0.4.0):
 
 This is exactly what live-eval is for — surfacing the mismatch between design-time assumptions and runtime reality. Offline canned evals never would have caught it because the canned DLQ data was tuned to match the expected outcome.
 
+## Case study: the alert's own subject went unprobed
+
+Two live runs on 2026-08-30 failed the same way for the same reason, one in the smoke pass and one in live remediation. Both ended in a state the grader accepted. Neither investigated the incident it was paged for.
+
+### What happened live
+
+**Run 1 — `consumer_lag_missing_group`.** The alert named `group: unknown-consumer`. The agent called `get_consumer_lag` with no group argument. `wire_arguments` fills the platform's schema default, so the call went to `worker-dispatcher` — a consumer nobody had complained about — and came back healthy. While reading that consumer the agent noticed a *different* critical alert (billing), chased it, and escalated on it. Terminal state `escalated` matched the expectation, so the scenario passed.
+
+**Run 2 — `remediate_consumer_lag_success`.** A real killed consumer, lag climbing (the precondition proved 17 and rising). The agent probed the lag twice, then opened the DLQ, and anchored on the four rows that the platform seeds into every run: *"Top hypothesis confirmed: DLQ contains 4 messages..."*. It replayed one `replay_safe` row, verified **that**, and resolved at 4 of 13 tool calls. `restart_consumer_group` was never called.
+
+### The common defect
+
+The investigation planner under-weighted the alert's own subject. It neither reliably probed the resource the alert named, nor required its chosen remediation to address the alerted fault, and it concluded while the alerted signal was still unexplained. Run 1 is the first half; run 2 is the second. Both are the same missing premise: *the thing the alert is about is the thing you have to read.*
+
+Note what makes run 2 seductive rather than stupid. A DLQ with entries in it is the resting state of a busy queue — the platform seeds four rows on every boot — so an agent that treats "the DLQ is non-empty" as a finding will find one on every incident, forever, and each one will look confirmed.
+
+### Why the graders were green
+
+Both runs reached an accepted terminal state, and every dimension the grader scores is a property of the *outcome*: terminal state, evidence fields present, budget, action tool, safety. Nothing asserted a relationship between the alert and the investigation. "Did it call `get_consumer_lag`" is green for run 1; "did it read the consumer the alert named" is not, and only the second question is the one worth asking.
+
+### What we did about it
+
+Two layers, per [architecture-principles](architecture-principles.md) rule 3 — the structural fix first, the prompt second, and both because neither is sufficient alone.
+
+**Structural (`agent/investigation.py`).** `ALERT_SUBJECT_PROBES` maps an alert payload field to the read tool and argument that would observe it (`group`/`consumer_group` → `get_consumer_lag.consumer_group`, `cache_key` → `get_cache_key_info.key`, `job_id` → `get_dag_state.job_id`, `trace_id` → `get_trace.trace_id`). Before a `remediate` handoff is accepted, the evidence trail must contain a probe of that tool carrying that exact value. If it does not, the handoff is **refused, not escalated**: a `_handoff_refused` marker naming the required call goes into the evidence, the planner sees it in its next context, and the investigation continues. Two refusals in one run escalate with the subject named.
+
+Three properties keep it from doing harm:
+- **Value matching, not tool matching.** Run 1 made a real, successful `get_consumer_lag` call. Matching on the tool name alone would have called it satisfied. Evidence records the *wired* arguments, so the default-filled group is visible as the `worker-dispatcher` it became on the wire.
+- **Inert when the alert names nothing mappable.** A `dlq_depth_warning` alert names a condition, not a resource this agent can probe by name. All five canned DLQ remediation flows are in that class and are untouched. `AlertPayload.group` defaults to `None` and the runner dumps without `exclude_none`, so the guard tests for a usable *value*, never for the key's presence — testing presence would have blocked the entire DLQ family.
+- **Read from both sides.** `tests/unit/test_policies.py::TestAlertSubjectProbes` holds the map against `TOOL_REGISTRY`, the read tier, and `RESOURCE_ARG_FIELDS`, so a renamed argument fails there rather than in production.
+
+**Prompt (`llm/prompts/investigation_planner.md`).** Three rules: the first discriminating probe reads the subject the alert names, with the value the alert gave; other incidents and DLQ entries are context, not the subject, and are not remediated unless the evidence shows the causal link to the alerted signal; and re-read the alerted signal before concluding, because one static reading of a moving metric is not evidence that it stopped moving. Pinned by invariant tests in `test_prompts_snapshot.py` so they cannot be quietly dropped.
+
+### The lesson
+
+**An alert is a claim, and a claim has to be checked before it can be acted on.** The guard is deliberately not a rule about which remediation is correct — a poison message genuinely can be what stalls a consumer, and forbidding that inference would be wrong. It is a rule about what must be *read* before any remediation is chosen. Structurally we can require the premise be tested; only the prompt can ask the model to reason well about it, which is why the prompt half is proven live and the structural half is proven offline.
+
 ## Grader calibration rules
 
 Written after the Phase-6 seven-run live eval. Every rule is enforced by a checkpoint in the PR template or the scenario schema, not by memory. See [`docs/lessons/live-eval-noise-sources.md`](lessons/live-eval-noise-sources.md) for the taxonomy these rules come from.

@@ -33,7 +33,7 @@ from incident_commander.llm.prompts.loader import (
 
 _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("2fbebe9dcd49d48e41a580b1093f8e66cdb063482ea78ee5873be2eaa3dc0eda"),
-    "investigation_planner": ("519cecc6dca82dc1db60179e83e60d8290aa639bd38cc29ba39e697ad4208bae"),
+    "investigation_planner": ("374b7203fa2cd2fdbac9ad7ab048b4cc22140f6cbe57f39379d0c0da05d67480"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
     "remediation_planner": ("c671c5b0b6c92aa2457d336d0320741da3f90ffee809c1ea684059b99e8f14d9"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
@@ -174,6 +174,28 @@ class TestInvestigationPlannerInvariants:
     def test_addresses_untrusted_input_defensively(self) -> None:
         content = load_prompt("investigation_planner")
         assert "data, not instructions" in content
+
+    def test_first_probe_targets_the_alerts_own_subject(self) -> None:
+        # 2026-08-30 live runs, both halves of one defect: the planner
+        # under-weighting the alert's own subject. It answered a
+        # `group=unknown-consumer` alert by probing the platform's DEFAULT
+        # group, and it answered a consumer-lag alert by replaying a DLQ row.
+        # The structural half is the handoff guard in investigation.py
+        # (`ALERT_SUBJECT_PROBES`); this is the steering half, and steering
+        # that can be silently deleted is not steering.
+        content = load_prompt("investigation_planner").lower()
+        assert "the alert names its subject" in content
+        assert "first discriminating probe reads that subject" in content
+
+    def test_distractors_are_named_as_context_not_subject(self) -> None:
+        content = load_prompt("investigation_planner").lower()
+        assert "context, not the subject" in content
+        assert "do not remediate something the alert did not report" in content
+
+    def test_requires_a_fresh_read_before_concluding(self) -> None:
+        content = load_prompt("investigation_planner").lower()
+        assert "re-read the alerted signal" in content
+        assert "static reading of a moving metric" in content
 
 
 class TestRemediationPlannerInvariants:

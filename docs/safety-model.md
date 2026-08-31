@@ -104,7 +104,26 @@ All three escalate **pre-execution**, so a rejected plan costs planner tokens an
 
 The absence check exists because omission used to be the quiet case. `GetConsumerLagInput.consumer_group` carries `default="worker-dispatcher"`, mirroring the platform's published input schema — so a verify leg of `get_consumer_lag` with no arguments probed `worker-dispatcher` no matter which consumer group the action had just restarted, read a healthy lag off an untouched consumer, and resolved the incident. The default is legitimate and stays (the contract snapshot pins it); the plan layer is where the agent's own "say which resource you mean" requirement belongs. Full rationale in [ADR 0022](ADR/0022-plan-arguments-name-their-resource.md).
 
-Note the asymmetry with the read-only investigation leg, which *may* default-fill: an alert that names no consumer group opens with a probe of the platform's default group. That leg mutates nothing, so a mis-aimed read costs one wasted probe, not a false RESOLVED.
+Note the asymmetry with the read-only investigation leg, which *may* default-fill: an alert that names no consumer group opens with a probe of the platform's default group. That leg mutates nothing, so a mis-aimed read cannot itself produce a false RESOLVED — but it is not free either, and the next section is what that cost turned out to be.
+
+### The handoff must have read what the alert named
+
+A default-filled read costs more than a wasted probe when the alert *did* name a resource: it founds the whole investigation on the wrong object. On 2026-08-30 an alert naming `group: unknown-consumer` was answered with an argument-less `get_consumer_lag`, which the schema default aimed at `worker-dispatcher`. The agent read a healthy number off a consumer nobody had reported, noticed a different critical alert while it was there, and escalated on that one instead. The same day, a consumer-lag incident with a genuinely killed consumer was closed by replaying a DLQ row — the DLQ that the platform seeds with four entries on every boot — and verifying the replay. `restart_consumer_group` was never called. Both runs ended in a terminal state their scenario accepted.
+
+So the investigation loop carries a third handoff guard, beside the existing category and confidence checks:
+
+| Check | Rejects | Failure it prevents |
+|---|---|---|
+| `_alert_subject_probed` | a `remediate` handoff when no probe in the evidence read the resource the alert names, with the value the alert gave | remediating a bystander while the alerted signal sits unexplained |
+
+The subject is derived mechanically, never guessed. `ALERT_SUBJECT_PROBES` (`src/incident_commander/agent/investigation.py`) maps an alert payload field to the read tool and argument that observe it; it is keyed on the field rather than on `fingerprint` because fingerprints are free text the platform's alert rules author (this corpus alone spells one family three ways), so matching them would mean prefix-matching, and because the field is what carries the value the check needs. `tests/unit/test_policies.py::TestAlertSubjectProbes` holds the map against the registry, the read tier, and `RESOURCE_ARG_FIELDS`.
+
+Two properties matter for safety:
+
+- **It refuses; it does not escalate.** Unlike the plan guards above, a failed check here is not terminal. A `_handoff_refused` marker naming the required call is appended, the run stays INVESTIGATING, and the planner reads the refusal in its next context — reject the bad output, say exactly what would make it good, let the model try again. Only a second refusal in one run escalates, with the unread subject named in the reason. The marker spends no tool-call budget and, being underscore-prefixed, stays out of the briefing trail and the grader's called-tools set.
+- **It is inert when the alert names no mappable resource**, which is a large and legitimate class: DLQ-depth alerts, alert-storm meta-alerts, and latency alerts name a *condition*, not something this agent can probe by name. The check tests for a usable value, never for a key's presence — `AlertPayload.group` defaults to `None` and is dumped without `exclude_none`, so every alert carries the key regardless. A guard that fabricated a subject for those alerts would block investigations it knows nothing about, which is worse than the gap it closes.
+
+The guard requires that the alerted signal be *read*, not that any particular fix be chosen. A poison message genuinely can be what stalls a consumer; forbidding that inference would be wrong. Choosing well is the prompt's job, and the investigation planner prompt carries the matching rules under invariant tests.
 
 ## Evidence-driven caution is a feature
 

@@ -3,11 +3,7 @@ from datetime import datetime
 import pytest
 from pydantic import ValidationError
 
-from incident_commander.agent.briefing import (
-    EscalationBriefing,
-    ProbeSummary,
-    render_briefing,
-)
+from incident_commander.agent.briefing import EscalationBriefing, render_briefing
 from incident_commander.agent.briefing_enrichment import (
     BriefingContent,
     enrich_briefing,
@@ -182,7 +178,3 @@ class TestServiceAndEvalPathParity:
         assert briefing.attempted_action.tool == "restart_consumer_group"
         assert briefing.findings == ""
         assert briefing.recommendation == ""
-
-
-def _mock_probe(now: datetime) -> ProbeSummary:
-    return ProbeSummary(tool="get_consumer_lag", summary="lag=42")

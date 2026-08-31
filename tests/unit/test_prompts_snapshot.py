@@ -239,9 +239,14 @@ class TestVerificationJudgeInvariants:
         assert "record_output" in content
 
     def test_names_both_verdicts(self) -> None:
+        # Backticked, because "verified" is a SUBSTRING of "not_verified":
+        # the bare `assert "verified" in content` could not fail while its
+        # sibling held, so a prompt that dropped the positive verdict
+        # entirely and named only not_verified still passed (WO-R2-102).
+        # The prompt writes both as inline code, so this is what it says.
         content = load_prompt("verification_judge")
-        assert "verified" in content
-        assert "not_verified" in content
+        assert "`verified`" in content
+        assert "`not_verified`" in content
 
     def test_addresses_untrusted_input_defensively(self) -> None:
         content = load_prompt("verification_judge")

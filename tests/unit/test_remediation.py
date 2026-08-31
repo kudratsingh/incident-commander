@@ -722,7 +722,14 @@ class TestEvidenceSourcedArgs:
         assert result.state is IncidentState.ESCALATED
         reasons = " ".join(e.result_summary for e in result.evidence)
         assert invented in reasons
-        assert known not in reasons.split("not evidence-sourced")[1].split(".")[0]
+        # Cut on the message's real delimiters. Splitting on "." stopped at
+        # the dot inside "replay_dlq_by_ids.job_ids=", so the inspected slice
+        # was ": replay_dlq_by_ids" — a span that can never hold a UUID, and
+        # a negative assertion that could not fail whatever the rejection
+        # named (WO-R2-102).
+        named = reasons.split("not evidence-sourced: ", 1)[1].split(". Resource names")[0]
+        assert invented in named, "the rejection must name the id it refused"
+        assert known not in named, "the evidence-sourced id must not be blamed"
 
     def test_non_resource_fields_are_unconstrained(self) -> None:
         # category / max_replays / delay_seconds are parameters, not

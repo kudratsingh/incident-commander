@@ -357,7 +357,17 @@ class TestScenarioAlertVocabulary:
         becomes non-zero, someone fixed something and this test should be
         rewritten to say how many.
         """
-        wire_shaped = [s.name for s in _shipped() if set(_alert_of(s)) <= _WEBHOOK_FIELDS]
+        # `exclude_none=True` so this asks about the scenario's YAML rather
+        # than about AlertPayload's field list. Plain model_dump() always
+        # emits the declared `fingerprint` and `group` keys — neither of
+        # which is in _WEBHOOK_FIELDS — so the subset test was False for
+        # every scenario by construction, and the count it reports was
+        # structurally zero regardless of what the scenarios said (WO-R2-102).
+        wire_shaped = [
+            s.name
+            for s in _shipped()
+            if set(s.alert.model_dump(exclude_none=True)) <= _WEBHOOK_FIELDS
+        ]
         assert wire_shaped == [], (
             f"{len(wire_shaped)} scenario(s) now use a wire-shaped alert: {wire_shaped}. "
             "Good — update this test to record the new count."

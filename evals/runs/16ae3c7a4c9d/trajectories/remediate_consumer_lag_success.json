@@ -1,0 +1,808 @@
+{
+  "scenario": "remediate_consumer_lag_success",
+  "incident_id": "136dc123-5987-43c3-8f7c-4887bcbe7591",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "136dc123-5987-43c3-8f7c-4887bcbe7591",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T05:06:22.501770Z",
+      "updated_at": "2026-08-31T05:06:22.501770Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "136dc123-5987-43c3-8f7c-4887bcbe7591",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.061623,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "26c43b8a-60f2-4179-bbfc-2dca09028a4f",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "94d523891e9a868d3ce95ee9982f3323"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T05:06:22.563393Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T05:06:22.501770Z",
+      "updated_at": "2026-08-31T05:06:22.563393Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "136dc123-5987-43c3-8f7c-4887bcbe7591",
+      "state": "planning",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 39064,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.061725,
+        "max_usd": "1.00",
+        "usd_used": "0.105700"
+      },
+      "evidence": [
+        {
+          "evidence_id": "26c43b8a-60f2-4179-bbfc-2dca09028a4f",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "94d523891e9a868d3ce95ee9982f3323"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T05:06:22.563393Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c111a19e-6daa-4871-821f-d4556c3389b9",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":1,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "93e9e27b-8e4a-482c-a3ee-e7ec426ec393",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 75.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'consumer_saturation' (0.75 >= 0.7); re-probing after 75s before accepting the contradiction",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0581eef1-4121-4a36-b617-3639d797064b",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":21,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "958a85da-3db8-4a3f-aa4e-603c4bc7cd52",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":4,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"SchemaValidationError: payload missing required field 'user_id' (received keys: ['tenant_id', 'action', 'ts'])\",\"retry_count\":3,\"created_at\":\"2026-08-31T04:57:29.613837Z\",\"updated_at\":\"2026-08-31T04:57:35.613837Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"schema_violation\",\"summary\":\"Producer sent a payload missing user_id — schema rejected it three times.\",\"suggested_fix\":\"Fix the producer to include user_id, then replay the DLQ entry. Backwards-compatible producer fix + replay is the standard remediation.\",\"is_retryable\":true,\"confidence\":0.91},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-08-31T04:57:35.613837Z\",\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-08-31T04:53:29.613837Z\",\"updated_at\":\"2026-08-31T04:53:51.613837Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-08-31T04:53:51.613837Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"process_payment call timed out after 30s: TimeoutError('stripe.api')\",\"retry_count\":3,\"created_at\":\"2026-08-31T04:40:29.613837Z\",\"updated_at\":\"2026-08-31T04:41:03.613837Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"third_party_timeout\",\"summary\":\"Stripe API exceeded 30s deadline three consecutive attempts.\",\"suggested_fix\":\"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.\",\"is_retryable\":true,\"confidence\":0.71},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T04:41:03.613837Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-08-31T04:25:29.613837Z\",\"updated_at\":\"2026-08-31T04:25:45.613837Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Replay once the dependency recovers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T04:25:45.613837Z\",\"extra\":null}]}",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "669d4c59-7eeb-4ab4-801a-151a992c4e35",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":21,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a1a0d630-2ed4-447b-a102-c50b51c27688",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "worker-dispatcher lag is confirmed climbing (lag=21 on two consecutive live reads 75s apart, source=live), group assignment retained — consumer is stalled. This matches consumer_saturation with confidence 0.82 > 0.7, which has a Tier-1 fix (restart/scale-up)."
+          },
+          "result_summary": "planner handoff to PLANNING: worker-dispatcher lag is confirmed climbing (lag=21 on two consecutive live reads 75s apart, source=live), group assignment retained — consumer is stalled. This matches consumer_saturation with confidence 0.82 > 0.7, which has a Tier-1 fix (restart/scale-up).",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-lag-climbing-21-sustained",
+          "confidence": 0.82,
+          "reasoning": "Lag was measured at 21 on two consecutive live reads (~75s apart), confirming the consumer is stalled with growing lag rather than recovering."
+        },
+        {
+          "category": "poison_message",
+          "name": "dlq-bulk-api-sync-schema-violation-blocking-worker",
+          "confidence": 0.35,
+          "reasoning": "DLQ has 4 entries including schema violations and timeouts, but these are context for why messages died — not yet confirmed as the cause of the consumer stall."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-correlated-with-stall",
+          "confidence": 0.2,
+          "reasoning": "No deploy data has been checked yet; deploy regression remains a plausible secondary cause worth ruling out."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "smtp-stripe-external-dep-causing-worker-block",
+          "confidence": 0.15,
+          "reasoning": "DLQ shows Stripe timeouts and SMTP connection refused errors; if these are blocking the worker pipeline they could contribute to saturation."
+        },
+        {
+          "category": "unknown",
+          "name": "unknown-consumer-stall-root-cause",
+          "confidence": 0.05,
+          "reasoning": "Fallback if no other hypothesis is confirmed after further investigation."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T05:06:22.501770Z",
+      "updated_at": "2026-08-31T05:06:22.563495Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "136dc123-5987-43c3-8f7c-4887bcbe7591",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 48695,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 123.774337,
+        "max_usd": "1.00",
+        "usd_used": "0.138488"
+      },
+      "evidence": [
+        {
+          "evidence_id": "26c43b8a-60f2-4179-bbfc-2dca09028a4f",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "94d523891e9a868d3ce95ee9982f3323"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T05:06:22.563393Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c111a19e-6daa-4871-821f-d4556c3389b9",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":1,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "93e9e27b-8e4a-482c-a3ee-e7ec426ec393",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 75.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'consumer_saturation' (0.75 >= 0.7); re-probing after 75s before accepting the contradiction",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0581eef1-4121-4a36-b617-3639d797064b",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":21,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "958a85da-3db8-4a3f-aa4e-603c4bc7cd52",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":4,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"SchemaValidationError: payload missing required field 'user_id' (received keys: ['tenant_id', 'action', 'ts'])\",\"retry_count\":3,\"created_at\":\"2026-08-31T04:57:29.613837Z\",\"updated_at\":\"2026-08-31T04:57:35.613837Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"schema_violation\",\"summary\":\"Producer sent a payload missing user_id — schema rejected it three times.\",\"suggested_fix\":\"Fix the producer to include user_id, then replay the DLQ entry. Backwards-compatible producer fix + replay is the standard remediation.\",\"is_retryable\":true,\"confidence\":0.91},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-08-31T04:57:35.613837Z\",\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-08-31T04:53:29.613837Z\",\"updated_at\":\"2026-08-31T04:53:51.613837Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-08-31T04:53:51.613837Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"process_payment call timed out after 30s: TimeoutError('stripe.api')\",\"retry_count\":3,\"created_at\":\"2026-08-31T04:40:29.613837Z\",\"updated_at\":\"2026-08-31T04:41:03.613837Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"third_party_timeout\",\"summary\":\"Stripe API exceeded 30s deadline three consecutive attempts.\",\"suggested_fix\":\"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.\",\"is_retryable\":true,\"confidence\":0.71},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T04:41:03.613837Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-08-31T04:25:29.613837Z\",\"updated_at\":\"2026-08-31T04:25:45.613837Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Replay once the dependency recovers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T04:25:45.613837Z\",\"extra\":null}]}",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "669d4c59-7eeb-4ab4-801a-151a992c4e35",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":21,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a1a0d630-2ed4-447b-a102-c50b51c27688",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "worker-dispatcher lag is confirmed climbing (lag=21 on two consecutive live reads 75s apart, source=live), group assignment retained — consumer is stalled. This matches consumer_saturation with confidence 0.82 > 0.7, which has a Tier-1 fix (restart/scale-up)."
+          },
+          "result_summary": "planner handoff to PLANNING: worker-dispatcher lag is confirmed climbing (lag=21 on two consecutive live reads 75s apart, source=live), group assignment retained — consumer is stalled. This matches consumer_saturation with confidence 0.82 > 0.7, which has a Tier-1 fix (restart/scale-up).",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7364c520-6068-48b6-9d67-9c46d14632df",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "worker-dispatcher-lag-climbing-21-sustained"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"worker-dispatcher\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-08-31T05:08:26.276107Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-lag-climbing-21-sustained",
+          "confidence": 0.82,
+          "reasoning": "Lag was measured at 21 on two consecutive live reads (~75s apart), confirming the consumer is stalled with growing lag rather than recovering."
+        },
+        {
+          "category": "poison_message",
+          "name": "dlq-bulk-api-sync-schema-violation-blocking-worker",
+          "confidence": 0.35,
+          "reasoning": "DLQ has 4 entries including schema violations and timeouts, but these are context for why messages died — not yet confirmed as the cause of the consumer stall."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-correlated-with-stall",
+          "confidence": 0.2,
+          "reasoning": "No deploy data has been checked yet; deploy regression remains a plausible secondary cause worth ruling out."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "smtp-stripe-external-dep-causing-worker-block",
+          "confidence": 0.15,
+          "reasoning": "DLQ shows Stripe timeouts and SMTP connection refused errors; if these are blocking the worker pipeline they could contribute to saturation."
+        },
+        {
+          "category": "unknown",
+          "name": "unknown-consumer-stall-root-cause",
+          "confidence": 0.05,
+          "reasoning": "Fallback if no other hypothesis is confirmed after further investigation."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "worker-dispatcher-lag-climbing-21-sustained",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_expectation": "Lag for worker-dispatcher drops significantly below 21 (ideally toward 0), confirming the consumer has resumed processing after the restart."
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-08-31T05:06:22.501770Z",
+      "updated_at": "2026-08-31T05:08:26.276107Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "136dc123-5987-43c3-8f7c-4887bcbe7591",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 5,
+        "max_tokens": 200000,
+        "tokens_used": 48695,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 128.076416,
+        "max_usd": "1.00",
+        "usd_used": "0.138488"
+      },
+      "evidence": [
+        {
+          "evidence_id": "26c43b8a-60f2-4179-bbfc-2dca09028a4f",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "94d523891e9a868d3ce95ee9982f3323"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T05:06:22.563393Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c111a19e-6daa-4871-821f-d4556c3389b9",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":1,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "93e9e27b-8e4a-482c-a3ee-e7ec426ec393",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 75.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'consumer_saturation' (0.75 >= 0.7); re-probing after 75s before accepting the contradiction",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0581eef1-4121-4a36-b617-3639d797064b",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":21,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "958a85da-3db8-4a3f-aa4e-603c4bc7cd52",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":4,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"SchemaValidationError: payload missing required field 'user_id' (received keys: ['tenant_id', 'action', 'ts'])\",\"retry_count\":3,\"created_at\":\"2026-08-31T04:57:29.613837Z\",\"updated_at\":\"2026-08-31T04:57:35.613837Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"schema_violation\",\"summary\":\"Producer sent a payload missing user_id — schema rejected it three times.\",\"suggested_fix\":\"Fix the producer to include user_id, then replay the DLQ entry. Backwards-compatible producer fix + replay is the standard remediation.\",\"is_retryable\":true,\"confidence\":0.91},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-08-31T04:57:35.613837Z\",\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-08-31T04:53:29.613837Z\",\"updated_at\":\"2026-08-31T04:53:51.613837Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-08-31T04:53:51.613837Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"process_payment call timed out after 30s: TimeoutError('stripe.api')\",\"retry_count\":3,\"created_at\":\"2026-08-31T04:40:29.613837Z\",\"updated_at\":\"2026-08-31T04:41:03.613837Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"third_party_timeout\",\"summary\":\"Stripe API exceeded 30s deadline three consecutive attempts.\",\"suggested_fix\":\"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.\",\"is_retryable\":true,\"confidence\":0.71},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T04:41:03.613837Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-08-31T04:25:29.613837Z\",\"updated_at\":\"2026-08-31T04:25:45.613837Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Replay once the dependency recovers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T04:25:45.613837Z\",\"extra\":null}]}",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "669d4c59-7eeb-4ab4-801a-151a992c4e35",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":21,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a1a0d630-2ed4-447b-a102-c50b51c27688",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "worker-dispatcher lag is confirmed climbing (lag=21 on two consecutive live reads 75s apart, source=live), group assignment retained — consumer is stalled. This matches consumer_saturation with confidence 0.82 > 0.7, which has a Tier-1 fix (restart/scale-up)."
+          },
+          "result_summary": "planner handoff to PLANNING: worker-dispatcher lag is confirmed climbing (lag=21 on two consecutive live reads 75s apart, source=live), group assignment retained — consumer is stalled. This matches consumer_saturation with confidence 0.82 > 0.7, which has a Tier-1 fix (restart/scale-up).",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7364c520-6068-48b6-9d67-9c46d14632df",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "worker-dispatcher-lag-climbing-21-sustained"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"worker-dispatcher\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-08-31T05:08:26.276107Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "68124940-a69a-4f1f-b2d6-ce52b52394cc",
+          "tool_name": "restart_consumer_group",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "idempotency_key": "7f6ba55f4d8f8c60fd5644f6cfd191a2"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"kill_key_cleared\":true,\"latency_key_cleared\":false,\"group_recognized\":true,\"accepted\":true}",
+          "timestamp": "2026-08-31T05:08:30.578186Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-lag-climbing-21-sustained",
+          "confidence": 0.82,
+          "reasoning": "Lag was measured at 21 on two consecutive live reads (~75s apart), confirming the consumer is stalled with growing lag rather than recovering."
+        },
+        {
+          "category": "poison_message",
+          "name": "dlq-bulk-api-sync-schema-violation-blocking-worker",
+          "confidence": 0.35,
+          "reasoning": "DLQ has 4 entries including schema violations and timeouts, but these are context for why messages died — not yet confirmed as the cause of the consumer stall."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-correlated-with-stall",
+          "confidence": 0.2,
+          "reasoning": "No deploy data has been checked yet; deploy regression remains a plausible secondary cause worth ruling out."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "smtp-stripe-external-dep-causing-worker-block",
+          "confidence": 0.15,
+          "reasoning": "DLQ shows Stripe timeouts and SMTP connection refused errors; if these are blocking the worker pipeline they could contribute to saturation."
+        },
+        {
+          "category": "unknown",
+          "name": "unknown-consumer-stall-root-cause",
+          "confidence": 0.05,
+          "reasoning": "Fallback if no other hypothesis is confirmed after further investigation."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "worker-dispatcher-lag-climbing-21-sustained",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_expectation": "Lag for worker-dispatcher drops significantly below 21 (ideally toward 0), confirming the consumer has resumed processing after the restart."
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-31T05:06:22.501770Z",
+      "updated_at": "2026-08-31T05:08:30.578186Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "136dc123-5987-43c3-8f7c-4887bcbe7591",
+      "state": "resolved",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 9,
+        "max_tokens": 200000,
+        "tokens_used": 54491,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 128.118583,
+        "max_usd": "1.00",
+        "usd_used": "0.145692"
+      },
+      "evidence": [
+        {
+          "evidence_id": "26c43b8a-60f2-4179-bbfc-2dca09028a4f",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "94d523891e9a868d3ce95ee9982f3323"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-08-31T05:06:22.563393Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c111a19e-6daa-4871-821f-d4556c3389b9",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":1,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "93e9e27b-8e4a-482c-a3ee-e7ec426ec393",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 75.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'consumer_saturation' (0.75 >= 0.7); re-probing after 75s before accepting the contradiction",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0581eef1-4121-4a36-b617-3639d797064b",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":21,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "958a85da-3db8-4a3f-aa4e-603c4bc7cd52",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":4,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"SchemaValidationError: payload missing required field 'user_id' (received keys: ['tenant_id', 'action', 'ts'])\",\"retry_count\":3,\"created_at\":\"2026-08-31T04:57:29.613837Z\",\"updated_at\":\"2026-08-31T04:57:35.613837Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"schema_violation\",\"summary\":\"Producer sent a payload missing user_id — schema rejected it three times.\",\"suggested_fix\":\"Fix the producer to include user_id, then replay the DLQ entry. Backwards-compatible producer fix + replay is the standard remediation.\",\"is_retryable\":true,\"confidence\":0.91},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-08-31T04:57:35.613837Z\",\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-08-31T04:53:29.613837Z\",\"updated_at\":\"2026-08-31T04:53:51.613837Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-08-31T04:53:51.613837Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"process_payment call timed out after 30s: TimeoutError('stripe.api')\",\"retry_count\":3,\"created_at\":\"2026-08-31T04:40:29.613837Z\",\"updated_at\":\"2026-08-31T04:41:03.613837Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"third_party_timeout\",\"summary\":\"Stripe API exceeded 30s deadline three consecutive attempts.\",\"suggested_fix\":\"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.\",\"is_retryable\":true,\"confidence\":0.71},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T04:41:03.613837Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-08-31T04:25:29.613837Z\",\"updated_at\":\"2026-08-31T04:25:45.613837Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Replay once the dependency recovers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-08-31T04:25:45.613837Z\",\"extra\":null}]}",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "669d4c59-7eeb-4ab4-801a-151a992c4e35",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":21,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a1a0d630-2ed4-447b-a102-c50b51c27688",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "worker-dispatcher lag is confirmed climbing (lag=21 on two consecutive live reads 75s apart, source=live), group assignment retained — consumer is stalled. This matches consumer_saturation with confidence 0.82 > 0.7, which has a Tier-1 fix (restart/scale-up)."
+          },
+          "result_summary": "planner handoff to PLANNING: worker-dispatcher lag is confirmed climbing (lag=21 on two consecutive live reads 75s apart, source=live), group assignment retained — consumer is stalled. This matches consumer_saturation with confidence 0.82 > 0.7, which has a Tier-1 fix (restart/scale-up).",
+          "timestamp": "2026-08-31T05:06:22.563495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7364c520-6068-48b6-9d67-9c46d14632df",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "worker-dispatcher-lag-climbing-21-sustained"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"worker-dispatcher\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-08-31T05:08:26.276107Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "68124940-a69a-4f1f-b2d6-ce52b52394cc",
+          "tool_name": "restart_consumer_group",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "idempotency_key": "7f6ba55f4d8f8c60fd5644f6cfd191a2"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"kill_key_cleared\":true,\"latency_key_cleared\":false,\"group_recognized\":true,\"accepted\":true}",
+          "timestamp": "2026-08-31T05:08:30.578186Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e33756d5-b2fb-4b83-b503-c9a158f6effb",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":41,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T05:08:30.620432Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5ef244aa-79f9-467b-847b-24baf2080918",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "Lag for worker-dispatcher drops significantly below 21 (ideally toward 0), confirming the consumer has resumed processing after the restart.",
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "not_verified: Lag is 41, which is higher than the alert threshold of 21 and not significantly below it; the restart did not reduce the consumer lag as expected.",
+          "timestamp": "2026-08-31T05:08:30.620432Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "82cdf7f7-9953-4a59-b4a8-849f1f0d5fc4",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "attempt": 2,
+            "of": 6
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":41,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T05:08:52.074542Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "364b7921-348f-4cb6-a195-effee41deed8",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "Lag for worker-dispatcher drops significantly below 21 (ideally toward 0), confirming the consumer has resumed processing after the restart.",
+            "attempt": 2,
+            "of": 6
+          },
+          "result_summary": "not_verified: Lag is 41, which is higher than the pre-fix threshold of 21 and contradicts the expected significant drop toward 0 after restart.",
+          "timestamp": "2026-08-31T05:08:52.074542Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "84ca80db-175c-44cf-a5e6-f12ac30ffc3f",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "attempt": 3,
+            "of": 6
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":41,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T05:09:13.576163Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "25d4ca62-7b2d-4206-9a74-eda2f4009cd2",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "Lag for worker-dispatcher drops significantly below 21 (ideally toward 0), confirming the consumer has resumed processing after the restart.",
+            "attempt": 3,
+            "of": 6
+          },
+          "result_summary": "not_verified: Remediation completed successfully (accepted=true, kill_key_cleared=true), but verify probe shows lag at 41, which is significantly higher than the threshold of 21, not lower as expected post-fix.",
+          "timestamp": "2026-08-31T05:09:13.576163Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "66c0b04a-dd40-4ba2-991f-bf5a9fd15b8f",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "attempt": 4,
+            "of": 6
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-08-31T05:09:35.224192Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ee23bc34-81a0-4e77-a353-b039adf229a1",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "Lag for worker-dispatcher drops significantly below 21 (ideally toward 0), confirming the consumer has resumed processing after the restart.",
+            "attempt": 4,
+            "of": 6
+          },
+          "result_summary": "verified: The verify probe shows lag=0 for worker-dispatcher, confirming the lag has dropped from the threshold of 21 to zero, matching the expected post-fix behavior of resuming processing.",
+          "timestamp": "2026-08-31T05:09:35.224192Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-lag-climbing-21-sustained",
+          "confidence": 0.82,
+          "reasoning": "Lag was measured at 21 on two consecutive live reads (~75s apart), confirming the consumer is stalled with growing lag rather than recovering."
+        },
+        {
+          "category": "poison_message",
+          "name": "dlq-bulk-api-sync-schema-violation-blocking-worker",
+          "confidence": 0.35,
+          "reasoning": "DLQ has 4 entries including schema violations and timeouts, but these are context for why messages died — not yet confirmed as the cause of the consumer stall."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-correlated-with-stall",
+          "confidence": 0.2,
+          "reasoning": "No deploy data has been checked yet; deploy regression remains a plausible secondary cause worth ruling out."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "smtp-stripe-external-dep-causing-worker-block",
+          "confidence": 0.15,
+          "reasoning": "DLQ shows Stripe timeouts and SMTP connection refused errors; if these are blocking the worker pipeline they could contribute to saturation."
+        },
+        {
+          "category": "unknown",
+          "name": "unknown-consumer-stall-root-cause",
+          "confidence": 0.05,
+          "reasoning": "Fallback if no other hypothesis is confirmed after further investigation."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "worker-dispatcher-lag-climbing-21-sustained",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_expectation": "Lag for worker-dispatcher drops significantly below 21 (ideally toward 0), confirming the consumer has resumed processing after the restart."
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-08-31T05:06:22.501770Z",
+      "updated_at": "2026-08-31T05:09:35.224192Z"
+    }
+  ],
+  "invocation_id": "16ae3c7a4c9d"
+}

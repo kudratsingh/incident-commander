@@ -1,0 +1,63 @@
+{
+  "generated_at": "2026-08-31T05:10:02.904418Z",
+  "total": 1,
+  "passed": 1,
+  "failed": 0,
+  "judged_count": 1,
+  "judge_useful_count": 1,
+  "judge_mean_overall": 0.8999999999999999,
+  "invocation_id": "16ae3c7a4c9d",
+  "degraded_count": 0,
+  "only_patterns": [
+    "remediate_consumer_lag_success"
+  ],
+  "outcomes": [
+    {
+      "scenario": "remediate_consumer_lag_success",
+      "final_state": "resolved",
+      "tool_calls_used": 9,
+      "report": {
+        "scenario": "remediate_consumer_lag_success",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state resolved matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 evidence field assertion(s) satisfied"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 9 tool calls, cap 13"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "equivalent action fired: ['restart_consumer_group'] (1 call(s))"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.85,
+        "reasoning": "The findings faithfully recite lag progression, DLQ counts, error types, and the restart action from the investigation trail with no invented details. The recommendation names specific verification steps (check lag trend, test SMTP reachability, review the three retryable DLQ entries by error type) that an on-call engineer can execute in minutes, though it could be more explicit about which tool or dashboard to query for SMTP health and which team owns the producer fix for user_id validation."
+      },
+      "failure_class": "passed",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    }
+  ]
+}

@@ -18,11 +18,26 @@ alert:
   severity: critical
   fingerprint: dlq_depth_warning_persistent
 canned_tool_responses:
+  # Re-recorded against the platform's seeded dead-letter pack, the same four
+  # rows the other DLQ scenarios now carry. What was here was hand-written:
+  # the ids belong to no job, `send_email` is no JobType (the enum is
+  # csv_upload / report_gen / bulk_api_sync / doc_analysis -- the seeder names
+  # the intended service in the error STRING instead), and every row omitted
+  # `trace_id`, `updated_at`, `extra` and the whole `triage` block that the
+  # platform's own triage pass had already written.
+  #
+  # `total` is 4 and the rows are the full un-faulted seeded world: this
+  # scenario seeds no fault. The drift check reads this fixture through the
+  # INVESTIGATION probe's arguments, which are unfiltered, so the recording
+  # has to be the unfiltered list even though the verify probe re-reads it
+  # through a `remediation_hint` filter. The scenario still works because
+  # `items[].remediation_hint` is an any-row assertion (`resolve_path`
+  # returns every row's value), so "some row the agent listed was classified
+  # X" is satisfied by the mixed list.
   list_dlq_messages:
     content:
     - type: text
-      text: '{"total":2,"items":[{"id":"cccccccc-3333-3333-3333-000000000001","type":"csv_upload","error_message":"ValueError: invalid literal for int() with base 10: not-a-number at row 15382","retry_count":3,"created_at":"2026-07-30T10:00:00Z","remediation_hint":"human_required"},{"id":"cccccccc-3333-3333-3333-000000000002","type":"csv_upload","error_message":"ValueError:
-        could not convert string to float: NaN at row 42","retry_count":3,"created_at":"2026-07-30T10:01:00Z","remediation_hint":"human_required"}]}'
+      text: '{"total":4,"items":[{"id":"fc8d2a03-23b3-5371-9acb-46443c73baa5","type":"bulk_api_sync","error_message":"SchemaValidationError: payload missing required field ''user_id'' (received keys: [''tenant_id'', ''action'', ''ts''])","retry_count":3,"remediation_hint":"replay_safe","created_at":"2026-07-28T09:52:00Z","updated_at":"2026-07-28T09:52:00Z","trace_id":"c5ca46c1-f4dd-5021-8be4-130143553096","triage":{"root_cause_category":"schema_violation","summary":"Producer sent a payload missing user_id — schema rejected it three times.","suggested_fix":"Fix the producer to include user_id, then replay the DLQ entry. Backwards-compatible producer fix + replay is the standard remediation.","is_retryable":true,"confidence":0.91},"extra":null},{"id":"f030f975-974e-5ce3-aa6b-444136507d86","type":"csv_upload","error_message":"ValueError: invalid literal for int() with base 10: ''not-a-number'' at row 15,382","retry_count":3,"remediation_hint":"human_required","created_at":"2026-07-28T09:48:00Z","updated_at":"2026-07-28T09:48:00Z","trace_id":"89609789-fdcb-5a5a-b826-d7d5d5f9cf37","triage":{"root_cause_category":"bad_input","summary":"Non-numeric value in a supposedly-integer CSV column.","suggested_fix":"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.","is_retryable":false,"confidence":0.94},"extra":null},{"id":"af67d1b1-13f8-5a2c-8c44-66ec5564597d","type":"bulk_api_sync","error_message":"process_payment call timed out after 30s: TimeoutError(''stripe.api'')","retry_count":3,"remediation_hint":"wait_and_replay","created_at":"2026-07-28T09:35:00Z","updated_at":"2026-07-28T09:35:00Z","trace_id":"6f76e48d-72c4-5e5a-a5cf-bc29758167cb","triage":{"root_cause_category":"third_party_timeout","summary":"Stripe API exceeded 30s deadline three consecutive attempts.","suggested_fix":"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.","is_retryable":true,"confidence":0.71},"extra":null},{"id":"97d91272-9774-5b8e-980b-f0d2fa6ed619","type":"bulk_api_sync","error_message":"send_email downstream call failed: ConnectionRefusedError(''smtp.mailer.internal:587'')","retry_count":3,"remediation_hint":"wait_and_replay","created_at":"2026-07-28T09:20:00Z","updated_at":"2026-07-28T09:20:00Z","trace_id":"1bfc7482-c957-5217-beae-e8cba48a152d","triage":{"root_cause_category":"downstream_unavailable","summary":"SMTP relay unreachable — connection refused at TCP layer.","suggested_fix":"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Replay once the dependency recovers.","is_retryable":true,"confidence":0.82},"extra":null}]}'
     is_error: false
   # `already_marked` is not a free field. The platform computes it from the
   # same pre-write read it returns as `previous_hint`
@@ -38,7 +53,7 @@ canned_tool_responses:
   mark_dlq_permanent:
     content:
     - type: text
-      text: '{"job_id":"cccccccc-3333-3333-3333-000000000001","previous_hint":"human_required","remediation_hint":"human_required","already_marked":true}'
+      text: '{"job_id":"f030f975-974e-5ce3-aa6b-444136507d86","previous_hint":"human_required","remediation_hint":"human_required","already_marked":true}'
     is_error: false
 canned_llm_responses:
   investigation_planner:
@@ -66,7 +81,7 @@ canned_llm_responses:
   - target_hypothesis: persistent_data_bug
     action_tool: mark_dlq_permanent
     action_arguments:
-      job_id: cccccccc-3333-3333-3333-000000000001
+      job_id: f030f975-974e-5ce3-aa6b-444136507d86
       reason: 'CSV parse error at row 15382 is a source-data bug that will re-fail on replay. Excluding it from auto-replay for human review.
 
         '
@@ -119,8 +134,7 @@ expectation:
     field: remediation_hint
     equals: human_required
   forbidden_replay_job_ids:
-  - cccccccc-3333-3333-3333-000000000001
-  - cccccccc-3333-3333-3333-000000000002
+  - f030f975-974e-5ce3-aa6b-444136507d86
   # The id-level rule above catches a replay aimed at THESE two entries. The
   # description says "Agent must not attempt any replay" — a strictly wider
   # claim, and one nothing enforced: a bulk replay that happened to target a

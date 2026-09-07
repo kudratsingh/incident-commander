@@ -1,4 +1,4 @@
-.PHONY: traffic demo-destroy help setup check lint types test test-unit test-integration test-contract test-drift test-idempotency fixture-drift fixture-drift-bless test-e2e eval eval-live eval-smoke eval-reg eval-reset trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
+.PHONY: traffic demo-destroy help setup check lint types test test-unit test-integration test-contract test-drift test-idempotency fixture-drift fixture-drift-bless test-e2e eval eval-live eval-smoke eval-reg eval-reset world-dossier trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
 
 # Make does not read .env on its own — only the Python side does, via
 # dotenv. Without this include, a make-level var like PLATFORM_COMPOSE
@@ -36,6 +36,9 @@ help:
 	@echo "  eval-live        run named scenario(s) against live platform (needs .env);"
 	@echo "                   ONLY=<name[,name...]> REQUIRED, full scenario names (e.g. ONLY=remediate_consumer_lag_success)"
 	@echo "  eval-smoke       read-only smoke pass under the read-scoped smoke token"
+	@echo "  world-dossier    FREE (zero-LLM) pre-run reading of one scenario's fault world;"
+	@echo "                   ONLY=<name> REQUIRED, full scenario name. Seeds chaos, reads"
+	@echo "                   every probe the agent will make, lints, resets, re-audits."
 	@echo "  trace-report     render evals/traces/*.jsonl → readable txt files"
 	@echo "  chaos-help       list chaos setup subcommands (kill-consumer, etc.)"
 	@echo "  eval-reg         full offline eval + regression gate vs baseline (refuses ONLY=)"
@@ -211,6 +214,48 @@ eval-smoke:
 	echo "JSONL traces: evals/traces/*.jsonl"; \
 	echo "Human-readable trajectories: evals/reports/human/*.txt"; \
 	exit $$code
+
+# Fault-world content review, free and zero-LLM (evals/dossier.py).
+#
+# PROTOCOL step 5 made mechanical. Seeds the named scenario's chaos hook
+# through the runner's own chaos path, runs the scenario's preconditions and
+# every READ probe the agent is expected to make (derived from
+# ALERT_SUBJECT_PROBES / SOURCE_ROW_FOR_ACTION / VERIFY_PROBE_FOR_ACTION and
+# the scenario's own claims) under the READ-SCOPED smoke token, prints every
+# output in full, lints what it read for internal coherence, then
+# `make eval-reset PURGE_IDEMPOTENCY=1` and re-audits the seeded baseline.
+#
+# It exists because rem 4 run A (2026-09-07, ≈$0.15, archive efdc3b2a9864)
+# was lost to a world that contradicted itself — a `replay_safe` hint on a
+# permanent data-bug error text — and two readiness sweeps missed it because
+# both checked mechanics and neither READ the fault as the agent would.
+#
+# ONLY is REQUIRED and must be ONE full scenario name, guarded the same way
+# `eval-live` is: a parse-time `$(error)` here (make exits 2, before anything
+# runs) plus the same refusal inside evals/dossier.py, because
+# `python -m evals.dossier` never comes through make. This target SEEDS CHAOS
+# into the shared eval world, so a widened selection is not merely wasteful,
+# it interleaves two faults and makes both readings meaningless.
+#
+# No `@` on the recipe line: the whole document goes to stdout on purpose —
+# the coordinator pastes it into the readiness note. It is also written to
+# evals/reports/dossiers/<scenario>.<stamp>.<invocation_id>.md (create-only,
+# cmd #185's convention).
+ifndef ONLY
+world-dossier:
+	$(error 'make world-dossier' without ONLY= has no meaning: a dossier seeds ONE scenario's fault into the shared world and then resets it; name exactly one scenario: make world-dossier ONLY=<scenario_name>)
+else
+# PLATFORM_COMPOSE is passed EXPLICITLY rather than left to the environment.
+# Make resolves it from `-include .env` (or a command-line override) and the
+# dossier needs the same file for its `chaos:*` key scan, but make exports
+# nothing by default — so a checkout that points PLATFORM_COMPOSE at a sibling
+# stack would have reset one world through make and scanned another through
+# Python. Explicit beats ambient, the same reason `make_client` takes an
+# explicit token (mcp_client.py: threading it through make's environment lost
+# it to `-include .env`).
+world-dossier:
+	PLATFORM_COMPOSE="$(PLATFORM_COMPOSE)" uv run python -m evals.dossier --only $(ONLY)
+endif
 
 trace-report:
 	PYTHONPATH=. uv run python scripts/format_traces.py

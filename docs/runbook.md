@@ -175,20 +175,59 @@ harness artifacts — see [`docs/lessons/live-eval-sequence-2026-09.md`](lessons
    organic-alert case (WO-R2-131/132): they survive reset, they re-fire
    hourly, and on 2026-09-01 three of them aborted a run before any spend.
 
-5. **Traffic only where the scenario needs it.** `make traffic` is required
+5. **Fault-world content review.** Free, zero-LLM, and it comes *before* the
+   scenario chain check — checking that the hooks and tools line up is a
+   different question from checking what the agent will actually read.
+
+   ```bash
+   make world-dossier ONLY=<exact scenario name>
+   ```
+
+   It seeds the scenario's own `chaos_setup` through the runner's chaos path,
+   runs the scenario's preconditions, then runs **every read probe the agent
+   is expected to make** — derived from `ALERT_SUBJECT_PROBES`,
+   `SOURCE_ROW_FOR_ACTION`, `VERIFY_PROBE_FOR_ACTION` and the scenario's own
+   evidence claims — under the read-scoped smoke token, prints every output in
+   full, lints what it read, then `make eval-reset PURGE_IDEMPOTENCY=1` and
+   re-audits the baseline in step 4's table. Output goes to stdout and to
+   `evals/reports/dossiers/<scenario>.<stamp>.<invocation_id>.md`.
+
+   **Then read it.** Every field, and of each fact ask: *does this support the
+   behaviour the scenario expects, or contradict it?* Paste the dossier and
+   your answers into the readiness note.
+
+   The example, because it is the reason this step exists.
+   `remediate_runaway_saga_success` run A (2026-09-07, archive
+   `efdc3b2a9864`, ≈$0.15) seeded the stuck chain's dead-lettered root with
+   `remediation_hint: replay_safe` and the error text `SchemaValidationError:
+   payload missing required field 'user_id' … across 3 retry attempts`. The
+   agent read the row — the ADR 0027 safety check the scenario requires —
+   reasoned that a missing required field is a persistent data bug no replay
+   can fix, and escalated naming the contradiction. That is sound operator
+   judgement, and it graded red on three dimensions. **Two readiness sweeps
+   had passed on that scenario**; both verified mechanics (the chain drains,
+   the guards admit the plan) and neither read the fault's own fields. The
+   contradiction was visible in a free probe.
+
+   The lint's findings are **findings, not verdicts** — nothing here decides
+   whether to run. Exit codes: `0` clean, `2` selection refused (nothing
+   seeded), `3` preflight/stack unreachable (nothing seeded), `4` the baseline
+   re-audit failed, `5` chaos seeding failed, `6` the reset failed.
+
+6. **Traffic only where the scenario needs it.** `make traffic` is required
    for `remediate_consumer_lag_success` and for nothing else. Every other
    remediation scenario seeds its fault whole. Running traffic during an
    unrelated scenario adds load the scenario did not ask for.
 
-6. **Hold the machine awake, and run in the background.** A paid run needs
+7. **Hold the machine awake, and run in the background.** A paid run needs
    its own untimed `caffeinate -dims`; the harness's `caffeinate -i -t 300`
    is a five-minute timer, shorter than a single scenario. And a foreground
    run dies to the 10-minute command timeout, wasting the spend — long runs
    go in the background, always.
 
-7. **Reset after** the scenario, not just before it.
+8. **Reset after** the scenario, not just before it.
 
-8. **On any failure: STOP.** Investigate before running the next scenario.
+9. **On any failure: STOP.** Investigate before running the next scenario.
    A second run against a world the first one left dirty cannot be
    interpreted, and two consecutive different-looking failures almost
    always mean shared state rather than two bugs. Bucket the failure before

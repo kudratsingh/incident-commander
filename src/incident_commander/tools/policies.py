@@ -318,6 +318,57 @@ RESOURCE_ARG_FIELDS: Final[dict[str, frozenset[str]]] = {
 }
 
 
+def _derive_uuid_resource_fields() -> dict[str, frozenset[str]]:
+    """Which ``RESOURCE_ARG_FIELDS`` entries the platform types as a UUID.
+
+    DERIVED, not declared, and that is the whole point (architecture
+    principle #2). The platform's own input schema already carries the
+    answer — ``replay_dlq_by_ids.job_ids`` is ``list[UUID]`` and its JSON
+    schema says ``items.format == "uuid"``, ``pause_dag.root_job_id`` says
+    ``format == "uuid"`` — and ``tests/unit/test_registry_matches_snapshot.py``
+    holds every input model to exact equality with
+    ``contracts/platform-tools.snapshot.json``. A hand-written second copy
+    of that fact would be a list to keep in sync with a contract that moves
+    on the platform's schedule, and the first time it drifted the guard
+    reading it would either demand a UUID of a field that is not one or stop
+    demanding one of a field that is.
+
+    The distinction it buys is real and narrow: ``get_trace.trace_id`` and
+    ``invalidate_cache_key.key`` are resource names with no canonical form —
+    the platform accepts any string of the right length — so nothing may be
+    asserted about their shape. Six fields across five tools are UUIDs and
+    can be checked before the call is ever wired.
+
+    Both shapes are read because a resource field is either scalar
+    (``job_id``) or a list of them (``job_ids``); ``anyOf`` is walked so an
+    optional UUID field added tomorrow is picked up rather than silently
+    dropped.
+    """
+
+    def _is_uuid(schema: object) -> bool:
+        if not isinstance(schema, dict):
+            return False
+        if schema.get("format") == "uuid":
+            return True
+        if _is_uuid(schema.get("items")):
+            return True
+        return any(_is_uuid(branch) for branch in schema.get("anyOf", ()))
+
+    derived: dict[str, frozenset[str]] = {}
+    for name, fields in RESOURCE_ARG_FIELDS.items():
+        properties = TOOL_REGISTRY[name].input_model.model_json_schema().get("properties", {})
+        derived[name] = frozenset(f for f in fields if _is_uuid(properties.get(f)))
+    return derived
+
+
+# Resource-naming fields whose values must be canonical UUIDs, per tool.
+# Total over ``TOOL_REGISTRY`` (empty frozenset where no resource field is a
+# UUID) for the same reason its three sibling maps in ``remediation.py`` are:
+# an empty entry is a *declared* "nothing to check here", so a tool shipped
+# tomorrow cannot inherit "of course any string is a valid id" by silence.
+UUID_RESOURCE_FIELDS: Final[dict[str, frozenset[str]]] = _derive_uuid_resource_fields()
+
+
 def tier_of(tool_name: str) -> Tier:
     """Classify one tool. Anything unclassified raises, never defaults.
 

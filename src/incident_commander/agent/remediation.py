@@ -21,8 +21,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Any, Final, Literal, NamedTuple
 
@@ -40,6 +41,7 @@ from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError
 from incident_commander.tools.policies import (
     RESOURCE_ARG_FIELDS,
+    UUID_RESOURCE_FIELDS,
     PolicyCoverageError,
     Resolution,
     Tier,
@@ -115,6 +117,33 @@ _MAX_UNREAD_ROW_REFUSALS: Final[int] = 1
 # plan can spend both budgets. Neither spends tool-call budget.
 _MAX_UNLISTED_CATEGORY_REFUSALS: Final[int] = 1
 
+# And one for the argument half (ADR 0030), which is the budget this family
+# was missing. The three above all fire on a plan that named its resource
+# correctly and then reasoned about it wrongly; this one fires on a plan that
+# got the reasoning right and fumbled the *transcription*, and until 2026-09-07
+# that case had no re-ask at all — ``_unsourced_resource_args`` escalated the
+# run on the first offence.
+#
+# The live run that changed it (`5c8895771fbd`, `dlq_wait_and_replay_success`):
+# the planner listed the DLQ, filtered `wait_and_replay`, grouped the two rows
+# by dependency, derived a 300 s delay with a correct `action_rationale`, and
+# then emitted the second job id with its trailing blocks zero-filled —
+# `97d91272-0000-0000-0000-000000000000` for
+# `97d91272-9774-5b8e-980b-f0d2fa6ed619`. Its own rationale, its findings and
+# the judge's reasoning all quote the id correctly, so nothing about the model's
+# *understanding* was wrong. One planner call, then a briefing, and the scenario
+# graded red on outcome, action and evidence for a copying slip.
+#
+# One, matching its three siblings, and the repair is the narrowest of the four:
+# the planner cannot fetch anything, but it does not need to — every candidate
+# it could want is already in the evidence, and the refusal enumerates them.
+# What it must not do is correct the id FOR the model. A harness that silently
+# substituted the nearest evidence id would be choosing which job to replay on a
+# guess about intent, which is the decision this whole family of guards exists
+# to keep with the model and its evidence. The refusal offers candidates; the
+# plan that executes is one the model itself emitted.
+_MAX_ARGUMENT_REFUSALS: Final[int] = 1
+
 # Evidence marker for a refused plan. Underscore-prefixed per the repo-wide
 # convention, so the briefing's evidence trail and the grader's "tools
 # called" set both exclude it — a refusal is bookkeeping, not a probe, and
@@ -134,6 +163,12 @@ _PLAN_REFUSED_UNREAD_ROW_MARKER: Final[str] = "_plan_refused_unread_row"
 # different diagnosis from "you replayed a row nobody read", even though both
 # are the same rule seen from two sides.
 _PLAN_REFUSED_UNLISTED_CATEGORY_MARKER: Final[str] = "_plan_refused_unlisted_category"
+# Fourth marker, fourth shape (ADR 0030). Its arguments carry the rejected
+# values AND the candidates offered back, which is what makes a run archive
+# answerable after the fact: "the planner was shown these three ids and still
+# emitted a fourth" is a different finding from "the planner was shown
+# nothing", and neither is recoverable from the reason prose alone.
+_PLAN_REFUSED_ARGUMENT_MARKER: Final[str] = "_plan_refused_argument"
 
 # Every marker ``_format_plan_context`` must render whole and last. Derived
 # membership rather than a comparison against one name, because that is the
@@ -149,8 +184,63 @@ _PLAN_REFUSAL_MARKERS: Final[frozenset[str]] = frozenset(
         _PLAN_REFUSED_MARKER,
         _PLAN_REFUSED_UNREAD_ROW_MARKER,
         _PLAN_REFUSED_UNLISTED_CATEGORY_MARKER,
+        _PLAN_REFUSED_ARGUMENT_MARKER,
     }
 )
+
+# How much of a rejected value must match a candidate before the refusal is
+# willing to say "did you mean". Eight is the first block of a UUID, which is
+# also how every human and every log line in this project abbreviates one
+# (`af67d1b1…`), so it is the shortest prefix that identifies a row by
+# convention rather than by luck. Shorter would start proposing a
+# same-first-character coincidence as a correction; longer would have missed
+# the run this exists for, whose slip began at character 10.
+_MIN_DID_YOU_MEAN_PREFIX: Final[int] = 8
+
+# A canonical UUID as the platform's own input schema defines it (8-4-4-4-12
+# hex). Deliberately NOT a semantic check: `97d91272-0000-0000-0000-000000000000`
+# — the value that cost the run — matches this happily, and no regex can know
+# that a well-formed id names no job. Shape and provenance are two different
+# questions and this answers only the first, which is why it reports through
+# the same refusal path as the evidence check rather than replacing it.
+_CANONICAL_UUID: Final[re.Pattern[str]] = re.compile(
+    r"\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z"
+)
+
+
+# How the second refusal opens, per cause. Two clauses rather than one, for
+# the same reason the two checks carry different reason texts: a human reading
+# the briefing needs to know whether the planner wrote something that could
+# never be an id or something that merely is not one of THESE ids. The
+# briefing's ``escalation_reason`` is the whole of what a woken operator gets.
+_ARGUMENT_ESCALATION_CLAUSE: Final[dict[str, str]] = {
+    "malformed": "wrote a resource identifier that is not the shape the platform declares",
+    "unsourced": "named a resource that is not one this run read",
+}
+
+
+class ArgumentRefusal(NamedTuple):
+    """A plan whose resource arguments are wrong in a way one re-ask repairs.
+
+    Returned by ``_plan_once`` instead of an escalated ``RunState``, so the
+    caller's loop can spend a refusal budget on it. The reason text is built
+    at the point of detection — where the corpus, the candidates and the
+    offending values are all in hand — and the loop wraps it for whichever
+    disposition it chooses, exactly as ``_unread_row_reason`` and
+    ``_unlisted_category_reason`` are shared between their refusal and their
+    escalation.
+    """
+
+    kind: Literal["malformed", "unsourced"]
+    """Which check produced it. Selects the escalation's opening clause."""
+    action_tool: str
+    """Recorded on the marker so a reader of the trail knows what was refused."""
+    problems: tuple[str, ...]
+    """``tool.field=value`` renderings, one per offending value."""
+    candidates: tuple[str, ...]
+    """The evidence-sourced values offered back, empty when there are none."""
+    reason: str
+    """The sentence both the refusal and the escalation are built from."""
 
 
 class VerifyProbe(NamedTuple):
@@ -557,20 +647,26 @@ def make_llm_plan(
     action tool isn't Tier-1 (defense-in-depth; the prompt already
     lists only Tier-1 tools). Persists the plan on ``RunState``.
 
-    Three resource-argument guards run before anything is wired, all
-    escalating pre-execution (ADR 0024):
+    Four resource-argument guards run before anything is wired, all
+    pre-execution (ADR 0024). Two escalate:
 
     - ``_absent_resource_args`` — every resource-naming field on both
       legs must be present, or the registry default silently picks the
       resource for us.
-    - ``_unsourced_resource_args`` — its value must be one the platform
-      itself produced (copy, don't re-type).
     - ``_misdirected_verify_args`` — the verify probe must not name a
       resource the action left alone.
 
+    and two REFUSE, re-asking once with the evidence's own candidates quoted
+    back (ADR 0030):
+
+    - ``_malformed_resource_args`` — a value in a field the platform types as
+      a UUID must be one.
+    - ``_unsourced_resource_args`` — its value must be one the platform
+      itself produced (copy, don't re-type).
+
     Three further guards then REFUSE rather than escalate, each re-asking the
-    plan once with the missing piece named, because unlike the three above
-    the action they see is not aimed at the wrong object:
+    plan once with the missing piece named, because unlike the two escalating
+    ones above the action they see is not aimed at the wrong object:
 
     - ``_unread_action_rows`` — the resource this action would replay must
       have been SEEN as a row in the read that classifies it (ADR 0027).
@@ -622,8 +718,38 @@ def make_llm_plan(
         refusals_spent = 0
         unread_refusals_spent = 0
         unlisted_refusals_spent = 0
+        argument_refusals_spent = 0
         while True:
             run_state, outcome = _plan_once(run_state, at, llm_client, model, top.name)
+            if isinstance(outcome, ArgumentRefusal):
+                # ADR 0030. Checked before anything else in the loop because
+                # a mis-transcribed id fails the two read-before-act guards
+                # too — no listing carries a row for an id that does not
+                # exist — and their steer is the wrong repair for a typo. The
+                # unread-row refusal would tell the planner to DROP the id it
+                # has no row for, which on the run this was written for turns
+                # a two-job delayed replay into a one-job one and grades red
+                # for a different reason. Diagnose the transcription first.
+                if argument_refusals_spent >= _MAX_ARGUMENT_REFUSALS:
+                    return _escalate_remediation(
+                        run_state,
+                        at,
+                        f"planner {_ARGUMENT_ESCALATION_CLAUSE[outcome.kind]}, "
+                        f"{argument_refusals_spent + 1} times: {outcome.reason} The "
+                        "action was NOT executed — an identifier the evidence does "
+                        "not carry names no resource, and ADR 0008 allows one "
+                        "attempt.",
+                    )
+                argument_refusals_spent += 1
+                run_state = _refuse_arguments(run_state, at, outcome)
+                if run_state.budget.is_exhausted:
+                    return _escalate_remediation(
+                        run_state,
+                        at,
+                        "budget exhausted before the plan could be re-asked with an "
+                        "evidence-sourced resource id; nothing was executed",
+                    )
+                continue
             if isinstance(outcome, RunState):
                 return outcome
             plan = outcome
@@ -754,16 +880,23 @@ def _plan_once(
     llm_client: LLMClientProtocol,
     model: str,
     top_hypothesis_name: str,
-) -> tuple[RunState, RemediationPlan | RunState]:
-    """One planner call plus every guard that ESCALATES on failure.
+) -> tuple[RunState, RemediationPlan | RunState | ArgumentRefusal]:
+    """One planner call plus every guard that runs on its own output.
 
-    Returns ``(run_state, plan)`` when the plan survives, or
-    ``(run_state, escalated_run_state)`` when it does not — the caller
-    checks the type. Split out of ``transition_plan`` when the verify-target
-    guard made that function a loop: the seven checks below are all terminal,
-    so keeping them inline would have meant seven ``return`` statements
-    inside a ``while`` whose other exit is a ``break``, which is exactly the
-    shape that grows a bug the next time someone adds a check.
+    Three outcomes, distinguished by type:
+
+    * ``RemediationPlan`` — the plan survived every check here.
+    * ``RunState`` — a terminal guard escalated the run.
+    * ``ArgumentRefusal`` — a resource identifier is wrong in a way one
+      re-ask can repair (ADR 0030); the caller spends a refusal budget.
+
+    Split out of ``transition_plan`` when the verify-target guard made that
+    function a loop: keeping these checks inline would have meant a stack of
+    ``return`` statements inside a ``while`` whose other exit is a ``break``,
+    which is exactly the shape that grows a bug the next time someone adds a
+    check. The two argument-shape checks live here rather than in the loop
+    despite refusing, because they have to run in this position relative to
+    the misdirected-verify check — see the comment at their call site.
     """
     try:
         result = llm_client.call(
@@ -818,17 +951,28 @@ def _plan_once(
             "at wire time, so the call would target that default's "
             "resource instead of this incident's."
         )
+    # The two argument-shape checks REFUSE rather than escalate (ADR 0030) and
+    # so return rather than calling ``refuse``. They stay HERE, inside the
+    # per-call guard block, rather than moving out to the caller's loop beside
+    # the other three refusing guards, and the position is load-bearing: they
+    # must run before ``_misdirected_verify_args`` below. A mangled id on the
+    # action leg makes a correct verify id look like it names a resource the
+    # action never touched, so the misdirection check would fire on the typo
+    # first and escalate the run with a diagnosis about the verify leg — which
+    # is not wrong so much as unanswerable, since the leg it names is fine.
+    malformed = _malformed_resource_args(plan)
+    if malformed:
+        return run_state, _argument_refusal(plan, run_state, "malformed", malformed)
     unsourced = _unsourced_resource_args(plan, _evidence_value_corpus(run_state))
     if unsourced:
         # Copy, don't re-type: a resource name the platform never uttered
         # is a hallucination risk, not a plan. The live campaign watched
         # the planner drop `cache:jobs:` off an alert-provided key; only
-        # the platform's prefix allowlist stopped the call.
-        return refuse(
-            "plan rejected before execution: resource argument(s) not "
-            f"evidence-sourced: {', '.join(unsourced)}. Resource names must "
-            "be copied verbatim from the alert or tool results."
-        )
+        # the platform's prefix allowlist stopped the call. Since ADR 0030
+        # the first offence buys a re-ask carrying the candidates, because
+        # the 2026-09-07 run showed the same guard firing on a plan whose
+        # reasoning was entirely correct.
+        return run_state, _argument_refusal(plan, run_state, "unsourced", unsourced)
     misdirected = _misdirected_verify_args(plan)
     if misdirected:
         # Verify what you changed. A probe aimed at a resource the action
@@ -1446,6 +1590,207 @@ def _unsourced_resource_args(plan: RemediationPlan, corpus: set[str]) -> list[st
                 if isinstance(value, str) and value not in corpus:
                     problems.append(f"{tool}.{field}={value!r}")
     return problems
+
+
+def _malformed_resource_args(plan: RemediationPlan) -> list[str]:
+    """Resource values that cannot be the id the platform's schema declares.
+
+    The cheap half of ADR 0030, and it runs BEFORE the evidence check because
+    the two diagnoses are not equally useful. "That is not the shape of a job
+    id" points at the characters; "the platform never produced that string"
+    points at the whole value and leaves a truncated id looking like an
+    invented one. A planner told the first can see its own mistake in the
+    argument it wrote; a planner told the second has to go re-derive which of
+    the two it made.
+
+    Only fields ``policies.UUID_RESOURCE_FIELDS`` derives from the platform's
+    own input schema are checked, so a cache key and a trace id — neither of
+    which has a canonical form — are untouched. Every offender is reported,
+    not just the first: a batch replay carrying two bad ids is repaired once
+    if the refusal names both and twice if it names one.
+
+    What this does NOT catch is the case that produced it. A zero-filled
+    block is still 8-4-4-4-12 hex, so the run that motivated the rule falls
+    through to ``_unsourced_resource_args`` below and is refused there, on the
+    same budget, with the same candidates. That is the honest division: shape
+    is checkable in isolation and provenance is not, so the pair is what
+    covers the field, and neither alone would.
+    """
+    problems: list[str] = []
+    for tool, args in (
+        (plan.action_tool, plan.action_arguments),
+        (plan.verify_tool, plan.verify_arguments),
+    ):
+        for field in sorted(UUID_RESOURCE_FIELDS.get(tool, frozenset())):
+            if field not in args:
+                continue
+            raw = args[field]
+            values = raw if isinstance(raw, (list, tuple)) else [raw]
+            for value in values:
+                if isinstance(value, str) and not _CANONICAL_UUID.match(value):
+                    problems.append(f"{tool}.{field}={value!r}")
+    return problems
+
+
+def _row_candidates(run_state: RunState, tool: str) -> tuple[str, ...]:
+    """The ids the listings in this run's evidence actually carry, for one tool.
+
+    Reuses ``SOURCE_ROW_FOR_ACTION`` rather than the evidence corpus, and the
+    narrowing is the reason the offer is worth making. ``_evidence_value_corpus``
+    holds every string the platform ever uttered — trace ids, error text,
+    timestamps, host names — so an "ids you could have meant" list built from it
+    would be a wall of noise with the answer somewhere inside. The declared
+    source rows give the one set the planner is choosing from: the rows a
+    ``list_dlq_messages`` reading in evidence returned.
+
+    Empty for every tool with an inert ``SOURCE_ROW_FOR_ACTION`` entry, and
+    empty for a run that never listed anything. Both are correct and both are
+    handled by the caller — an offer with nothing in it is simply not made, and
+    the refusal falls back to naming the read that was skipped.
+    """
+    seen: set[str] = set()
+    for source in SOURCE_ROW_FOR_ACTION.get(tool, ()):
+        seen |= _rows_read_for(run_state, source)
+    return tuple(sorted(seen))
+
+
+def _did_you_mean(value: str, candidates: Sequence[str]) -> str | None:
+    """The one candidate a rejected value was probably a slip of, or ``None``.
+
+    Prefix-based and single-match-only, both deliberately. Prefix, because the
+    slip this exists for is a transcription that starts correct and goes wrong
+    partway — a zero-filled tail, a truncation, a doubled block — and every one
+    of those keeps the opening characters that make an id recognisable. Single
+    match, because "did you mean" is a claim, and offering two of them is not a
+    weaker claim but a wrong one: if the prefix cannot separate the candidates,
+    the harness does not know which row was meant, and saying so twice would
+    invite the model to pick the first rather than to go and look.
+
+    Never a correction. The return value is quoted into a refusal the planner
+    must act on itself; nothing in this module writes it into a plan.
+    """
+    matches = [
+        candidate
+        for candidate in candidates
+        if candidate != value and len(_common_prefix(value, candidate)) >= _MIN_DID_YOU_MEAN_PREFIX
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _common_prefix(left: str, right: str) -> str:
+    """The characters two strings share from the start."""
+    limit = min(len(left), len(right))
+    index = 0
+    while index < limit and left[index] == right[index]:
+        index += 1
+    return left[:index]
+
+
+def _candidate_offer(problems: Sequence[str], candidates: Sequence[str]) -> str:
+    """The half of a refusal that says what the planner could have written.
+
+    Two parts, and the second is what makes the first actionable: the ids this
+    run READ, enumerated in full, then a per-value "did you mean" wherever one
+    candidate is an unambiguous near-match. The enumeration alone is a haystack
+    when the listing was long; the near-match alone hides the fact that the
+    planner is choosing from a closed set.
+    """
+    if not candidates:
+        # Nothing to offer is itself the steer: the repair is a read, and the
+        # second refusal escalates naming it.
+        return (
+            " No listing in this run's evidence carries any id for that tool, so "
+            "there is nothing to copy from yet — read the rows first."
+        )
+    offer = (
+        f" The ids this run actually read are: {', '.join(candidates)}. "
+        "Copy one of those, character for character."
+    )
+    hints = []
+    for problem in problems:
+        _, _, rendered = problem.partition("=")
+        rejected = rendered.strip("'\"")
+        suggestion = _did_you_mean(rejected, candidates)
+        if suggestion is not None:
+            hints.append(f"for {rejected!r}, did you mean {suggestion}?")
+    if hints:
+        offer += " Nearest match — " + " ".join(hints)
+    return offer
+
+
+def _argument_refusal(
+    plan: RemediationPlan,
+    run_state: RunState,
+    kind: Literal["malformed", "unsourced"],
+    problems: Sequence[str],
+) -> ArgumentRefusal:
+    """Build the refusal for either argument guard, candidates included."""
+    candidates = _row_candidates(run_state, plan.action_tool)
+    rendered = ", ".join(problems)
+    if kind == "malformed":
+        head = (
+            f"resource argument(s) are not the id shape the platform's schema "
+            f"declares: {rendered}. A job id is 8-4-4-4-12 hexadecimal, and a "
+            "value that is not one names no job."
+        )
+    else:
+        head = (
+            f"resource argument(s) not evidence-sourced: {rendered}. Resource "
+            "names are COPIED from the row that carries them — never re-typed, "
+            "abbreviated, reconstructed or padded, and a single changed "
+            "character names a different job."
+        )
+    return ArgumentRefusal(
+        kind=kind,
+        action_tool=plan.action_tool,
+        problems=tuple(problems),
+        candidates=candidates,
+        reason=(
+            f"{head}{_candidate_offer(problems, candidates)} Keep the rest of the "
+            "plan as it is; only the identifier is wrong."
+        ),
+    )
+
+
+def _refuse_arguments(
+    run_state: RunState,
+    at: datetime,
+    refusal: ArgumentRefusal,
+) -> RunState:
+    """Refuse a plan for a mis-transcribed resource id, and offer the candidates.
+
+    Refuses rather than escalates (ADR 0030), on the same reasoning as its three
+    siblings and against the reading this module used to carry. The old comment
+    on ``_plan_once`` said the argument guards escalate "because a mis-named
+    resource means the planner is reasoning about the wrong object rather than
+    merely checking the right object the wrong way". Live run ``5c8895771fbd``
+    falsified that: the plan's `action_rationale`, the briefing it produced and
+    the judge's own reasoning every one of them quoted the right id, and the
+    only wrong object in the run was the one in the arguments dict. Reasoning
+    about the wrong object and copying the right one out wrong are two failures,
+    and only the first is unsalvageable.
+
+    Underscore-prefixed marker, so the briefing trail and the grader's
+    called-tools set both skip it and it spends no tool-call budget. Only the
+    planner tokens of the re-ask, which ``_plan_once`` charges.
+    """
+    entry = EvidenceEntry(
+        tool_name=_PLAN_REFUSED_ARGUMENT_MARKER,
+        arguments={
+            "action_tool": refusal.action_tool,
+            "kind": refusal.kind,
+            "rejected": list(refusal.problems),
+            "candidates": list(refusal.candidates),
+        },
+        result_summary=f"plan refused before execution: {refusal.reason}",
+        timestamp=at,
+    )
+    return run_state.model_copy(
+        update={
+            "evidence": (*run_state.evidence, entry),
+            "updated_at": at,
+        }
+    )
 
 
 def _load_plan(run_state: RunState) -> RemediationPlan | None:

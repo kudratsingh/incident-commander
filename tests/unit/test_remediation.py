@@ -680,12 +680,21 @@ class TestEvidenceSourcedArgs:
     def test_retyped_key_rejected_even_as_substring_of_truth(self) -> None:
         # "worker-dispatcher:hot_set" is inside the true key — containment
         # matching would fake-green this exact campaign failure.
-        llm = CannedLLMClient([self._cache_plan("worker-dispatcher:hot_set")])
+        #
+        # TWO canned plans, not one, since ADR 0030. The guard now refuses
+        # the first offence and re-asks, so a one-plan client escalates on
+        # `no more canned responses` and this assertion passes without the
+        # guard having decided anything — the vacuity the anti-vacuity check
+        # below now forbids.
+        bad = self._cache_plan("worker-dispatcher:hot_set")
+        llm = CannedLLMClient([bad, bad])
         result = make_llm_plan(llm, model=_MODEL)(self._cache_run(), _now())
         assert result.state is IncidentState.ESCALATED
         reasons = " ".join(e.result_summary for e in result.evidence)
         assert "not evidence-sourced" in reasons
         assert "worker-dispatcher:hot_set" in reasons
+        assert "no more canned responses" not in reasons
+        assert len(llm.calls) == 2
 
     def test_value_from_tool_result_json_passes(self) -> None:
         run = _run_state(
@@ -749,10 +758,13 @@ class TestEvidenceSourcedArgs:
             verify_tool="list_dlq_messages",
             verify_arguments={},
         )
-        result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(run, _now())
+        # Twice, per ADR 0030 — the first offence is a re-ask.
+        llm = CannedLLMClient([plan, plan])
+        result = make_llm_plan(llm, model=_MODEL)(run, _now())
         assert result.state is IncidentState.ESCALATED
         reasons = " ".join(e.result_summary for e in result.evidence)
         assert invented in reasons
+        assert "no more canned responses" not in reasons
         # Cut on the message's real delimiters. Splitting on "." stopped at
         # the dot inside "replay_dlq_by_ids.job_ids=", so the inspected slice
         # was ": replay_dlq_by_ids" — a span that can never hold a UUID, and
@@ -761,6 +773,10 @@ class TestEvidenceSourcedArgs:
         named = reasons.split("not evidence-sourced: ", 1)[1].split(". Resource names")[0]
         assert invented in named, "the rejection must name the id it refused"
         assert known not in named, "the evidence-sourced id must not be blamed"
+        # ...but the id that WAS read is offered back as a candidate, which is
+        # a different sentence and the whole point of ADR 0030. Blaming it and
+        # offering it are opposites; the message has to do exactly one.
+        assert known in reasons
 
     def test_non_resource_fields_are_unconstrained(self) -> None:
         # category / max_replays / delay_seconds are parameters, not
@@ -837,13 +853,18 @@ class TestEvidenceSourcedArgs:
         # Alert does NOT name the group; its only occurrences in evidence
         # are the LLM-authored probe argument and the same call's echo.
         run = self._laundering_run({"source": "platform.kafka", "severity": "high"})
-        result = make_llm_plan(CannedLLMClient([self._laundering_plan()]), model=_MODEL)(
-            run, _now()
-        )
+        # Twice, per ADR 0030 — the first offence is a re-ask.
+        plan = self._laundering_plan()
+        llm = CannedLLMClient([plan, plan])
+        result = make_llm_plan(llm, model=_MODEL)(run, _now())
         assert result.state is IncidentState.ESCALATED
         reasons = " ".join(e.result_summary for e in result.evidence)
         assert "not evidence-sourced" in reasons
         assert self._HALLUCINATED_GROUP in reasons
+        assert "no more canned responses" not in reasons
+        # A consumer group has no source-row listing, so there is nothing to
+        # offer back and the refusal says so rather than inventing options.
+        assert "nothing to copy from yet" in reasons
 
     def test_probed_group_named_by_alert_passes(self) -> None:
         # Positive control: identical probe flow, but the alert names the
@@ -1258,13 +1279,6 @@ class TestRejectedPlansAreStillBilled:
         [
             ("absent resource argument", {"action_arguments": {}}),
             (
-                "unsourced resource argument",
-                {
-                    "action_arguments": {"consumer_group": "never-mentioned"},
-                    "verify_arguments": {"consumer_group": "never-mentioned"},
-                },
-            ),
-            (
                 "misdirected verify probe",
                 {"verify_arguments": {"consumer_group": "some-other-group"}},
             ),
@@ -1278,6 +1292,51 @@ class TestRejectedPlansAreStillBilled:
         assert result.budget.tokens_used == 150, label
         # 100*3.00/1e6 + 50*15.00/1e6
         assert result.budget.usd_used == Decimal("0.001050"), label
+
+    def test_the_argument_refusal_charges_both_the_plan_and_the_re_ask(self) -> None:
+        """ADR 0030's cost, stated as a number rather than left to be inferred.
+
+        The unsourced-argument case used to sit in the parametrize above,
+        where it asserted ONE billed call. It no longer escalates on the
+        first offence, so leaving it there would have quietly asserted that
+        a re-asked plan is free — the exact under-report ADR 0015 forbids,
+        and the reason this is its own test rather than a changed number in
+        the table. Two calls, two charges.
+        """
+        bad = _plan_dict(
+            action_arguments={"consumer_group": "never-mentioned"},
+            verify_arguments={"consumer_group": "never-mentioned"},
+        )
+        llm = CannedLLMClient([bad, bad], usage=self._USAGE)
+        result = make_llm_plan(llm, model="claude-sonnet-4-6")(
+            _run_state(state=IncidentState.PLANNING, hypotheses=self._hypotheses()), _now()
+        )
+        assert result.state is IncidentState.ESCALATED
+        assert len(llm.calls) == 2
+        assert result.budget.tokens_used == 300
+        assert result.budget.usd_used == Decimal("0.002100")
+
+    def test_a_repaired_plan_charges_both_calls_and_then_proceeds(self) -> None:
+        """The success path costs the same two calls. Worth pinning separately:
+        a refusal that only billed when it ended in an escalation would make
+        the cheap-looking outcome the one the meter under-reports."""
+        llm = CannedLLMClient(
+            [
+                _plan_dict(
+                    action_arguments={"consumer_group": "never-mentioned"},
+                    verify_arguments={"consumer_group": "never-mentioned"},
+                ),
+                _plan_dict(),
+            ],
+            usage=self._USAGE,
+        )
+        result = make_llm_plan(llm, model="claude-sonnet-4-6")(
+            _run_state(state=IncidentState.PLANNING, hypotheses=self._hypotheses()), _now()
+        )
+        assert result.state is IncidentState.REMEDIATING
+        assert result.budget.tokens_used == 300
+        # No tool-call budget was spent: a refusal is bookkeeping, not a probe.
+        assert result.budget.tool_calls_used == 0
 
     def test_an_accepted_plan_is_charged_exactly_once(self) -> None:
         """Moving the accrual earlier must not double-charge the happy path."""
@@ -2394,3 +2453,365 @@ class TestBulkReplayRequiresTheListing:
         filtered = self._run((self._listing(remediation_hint="replay_safe"),))
         assert _unlisted_action_scope(plan, filtered) is not None
         assert _unlisted_action_scope(plan, self._run((self._listing(),))) is None
+
+
+class TestAMangledIdIsRePlannedWithCandidates:
+    """ADR 0030: a plan refused for a mis-transcribed resource id gets one
+    re-ask carrying the ids the run actually read.
+
+    Live exhibit, `dlq_wait_and_replay_success`, invocation `5c8895771fbd`
+    (2026-09-07, archived under `evals/runs/`). The planner did everything
+    the scenario asks: listed the DLQ, filtered `wait_and_replay`, grouped
+    the two rows by the dependency each names, derived a 300 s delay from
+    the SMTP row and wrote the derivation into `action_rationale`, and
+    picked a verify leg that expects the rows to REMAIN listed. Then it
+    emitted the second job id with its trailing blocks zero-filled:
+
+        job_ids: ["af67d1b1-13f8-5a2c-8c44-66ec5564597d",
+                  "97d91272-0000-0000-0000-000000000000"]
+
+    for a row whose real id is `97d91272-9774-5b8e-980b-f0d2fa6ed619`. The
+    run escalated after ONE planner call with
+
+        "plan rejected before execution: resource argument(s) not
+         evidence-sourced: replay_dlq_by_ids.job_ids=
+         '97d91272-0000-0000-0000-000000000000'."
+
+    and graded red on outcome, action and evidence. Nothing about the
+    model's understanding was wrong — its own `action_rationale`, the
+    briefing it wrote and the judge's reasoning all quote the id correctly.
+    It was a copying slip, and a copying slip is the one planner error that
+    a re-ask carrying the candidate list can actually repair.
+
+    What must NOT happen is the harness fixing it. Substituting the nearest
+    evidence id would be the agent choosing which job to replay from a guess
+    about intent; every test below that asserts a corrected plan asserts it
+    because the *planner* emitted the correction.
+    """
+
+    _RATE_LIMITED = "af67d1b1-13f8-5a2c-8c44-66ec5564597d"
+    _SMTP = "97d91272-9774-5b8e-980b-f0d2fa6ed619"
+    _MANGLED = "97d91272-0000-0000-0000-000000000000"
+
+    def _run(self) -> RunState:
+        """The world as the live run had it: one filtered listing, two rows."""
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.POISON_MESSAGE,
+                    name="dlq-bulk-api-sync-wait-and-replay",
+                    confidence=0.92,
+                    reasoning="two wait_and_replay rows against two different dependencies",
+                ),
+            ),
+            evidence=(
+                EvidenceEntry(
+                    tool_name="list_dlq_messages",
+                    arguments={
+                        "job_type": None,
+                        "remediation_hint": "wait_and_replay",
+                        "limit": 50,
+                        "offset": 0,
+                    },
+                    result_summary=json.dumps(
+                        {
+                            "total": 2,
+                            "items": [
+                                {
+                                    "id": self._RATE_LIMITED,
+                                    "type": "bulk_api_sync",
+                                    "error_message": (
+                                        "RateLimited: partner-api.internal answered 429 "
+                                        "(retry-after: 120s)"
+                                    ),
+                                    "remediation_hint": "wait_and_replay",
+                                },
+                                {
+                                    "id": self._SMTP,
+                                    "type": "bulk_api_sync",
+                                    "error_message": (
+                                        "send_email downstream call failed: "
+                                        "ConnectionRefusedError('smtp.mailer.internal:587')"
+                                    ),
+                                    "remediation_hint": "wait_and_replay",
+                                },
+                            ],
+                        }
+                    ),
+                    timestamp=_now(),
+                ),
+            ),
+        )
+        return run.model_copy(
+            update={
+                "alert": {
+                    "source": "platform.dlq",
+                    "severity": "critical",
+                    "fingerprint": "dlq_depth_warning_wait_replay",
+                }
+            }
+        )
+
+    def _plan(self, *job_ids: str) -> dict[str, Any]:
+        """The live plan, verbatim apart from which ids it carries."""
+        return _plan_dict(
+            target_hypothesis="dlq-bulk-api-sync-wait-and-replay",
+            action_tool="replay_dlq_by_ids",
+            action_arguments={"job_ids": list(job_ids), "delay_seconds": 300},
+            verify_tool="list_dlq_messages",
+            verify_arguments={"remediation_hint": "wait_and_replay"},
+            verify_expectation="both entries remain listed with a future execute_at",
+            action_rationale="SMTP row states no wait; dependency-down default of 300s applies.",
+        )
+
+    # -- red before --------------------------------------------------------
+
+    def test_the_live_plan_is_no_longer_a_one_call_escalation(self) -> None:
+        """THE regression. Before ADR 0030 this exact plan ended the run after
+        a single planner call; now the planner is asked again and a corrected
+        second plan is admitted."""
+        llm = CannedLLMClient(
+            [
+                self._plan(self._RATE_LIMITED, self._MANGLED),
+                self._plan(self._RATE_LIMITED, self._SMTP),
+            ]
+        )
+        result = make_llm_plan(llm, model=_MODEL)(self._run(), _now())
+
+        assert len(llm.calls) == 2
+        assert result.state is IncidentState.REMEDIATING
+        assert result.remediation_plan is not None
+        replanned = RemediationPlan.model_validate(result.remediation_plan)
+        # Both rows, which is what the scenario grades (`scheduled` sums to 2).
+        assert replanned.action_arguments["job_ids"] == [self._RATE_LIMITED, self._SMTP]
+        # And the rest of the plan the model got right is untouched.
+        assert replanned.action_arguments["delay_seconds"] == 300
+
+    def test_the_refusal_enumerates_the_ids_the_run_read(self) -> None:
+        llm = CannedLLMClient([self._plan(self._RATE_LIMITED, self._MANGLED)] * 2)
+        result = make_llm_plan(llm, model=_MODEL)(self._run(), _now())
+
+        refusals = [e for e in result.evidence if e.tool_name == "_plan_refused_argument"]
+        assert len(refusals) == 1
+        reason = refusals[0].result_summary
+        assert self._MANGLED in reason
+        assert self._SMTP in reason
+        assert self._RATE_LIMITED in reason
+        # Sorted, so the offer reads the same way on every run — and it is the
+        # rows that were READ, not the evidence corpus, so nothing else in the
+        # listing (error text, hints, the type) is offered as an id.
+        assert refusals[0].arguments["candidates"] == [self._SMTP, self._RATE_LIMITED]
+
+    def test_the_refusal_names_the_single_near_match(self) -> None:
+        """`97d91272-0000-…` shares its first block with exactly one row that
+        was read, and with neither of the ids the OTHER row carries. Saying so
+        is the difference between a list to search and an answer to check."""
+        llm = CannedLLMClient([self._plan(self._RATE_LIMITED, self._MANGLED)] * 2)
+        result = make_llm_plan(llm, model=_MODEL)(self._run(), _now())
+
+        reason = next(
+            e.result_summary for e in result.evidence if e.tool_name == "_plan_refused_argument"
+        )
+        assert f"did you mean {self._SMTP}?" in reason
+
+    def test_the_steer_reaches_the_planner_in_full(self) -> None:
+        """Evidence lines are cut at 200 characters in the planner context and
+        this refusal is far longer than that, so the marker has to be in
+        ``_PLAN_REFUSAL_MARKERS`` or the candidate list arrives truncated —
+        which is to say, absent exactly where it matters."""
+        llm = CannedLLMClient(
+            [
+                self._plan(self._RATE_LIMITED, self._MANGLED),
+                self._plan(self._RATE_LIMITED, self._SMTP),
+            ]
+        )
+        make_llm_plan(llm, model=_MODEL)(self._run(), _now())
+
+        second_context = llm.calls[1][1]
+        assert "REFUSED" in second_context
+        assert self._SMTP in second_context
+        assert f"did you mean {self._SMTP}?" in second_context
+
+    def test_a_second_mangled_plan_escalates_naming_the_mismatch(self) -> None:
+        llm = CannedLLMClient([self._plan(self._RATE_LIMITED, self._MANGLED)] * 2)
+        result = make_llm_plan(llm, model=_MODEL)(self._run(), _now())
+
+        assert result.state is IncidentState.ESCALATED
+        assert result.remediation_attempts == 0
+        assert result.remediation_plan is None
+        reason = result.evidence[-1].result_summary
+        assert self._MANGLED in reason
+        assert self._SMTP in reason
+        assert "was NOT executed" in reason
+
+    # -- the harness offers, it never corrects ------------------------------
+
+    def test_the_harness_never_substitutes_the_candidate_itself(self) -> None:
+        """The one behaviour this whole design refuses. A planner that repeats
+        the mangled id gets an escalation, not a silently repaired replay: the
+        run must not replay `97d91272-9774-…` on the strength of the harness
+        deciding that is what `97d91272-0000-…` meant."""
+        llm = CannedLLMClient([self._plan(self._RATE_LIMITED, self._MANGLED)] * 2)
+        result = make_llm_plan(llm, model=_MODEL)(self._run(), _now())
+
+        assert result.state is IncidentState.ESCALATED
+        assert result.remediation_plan is None
+        # No plan was stored at all, so nothing downstream can read a
+        # corrected id off the run state either.
+        assert not [e for e in result.evidence if e.tool_name == "_planner_plan"]
+
+    def test_no_tool_call_budget_is_spent_on_the_re_ask(self) -> None:
+        """A refusal is bookkeeping, not a probe — it costs planner tokens and
+        nothing on the tool-call ledger, so the re-ask cannot be what pushes a
+        run past the budget that pays for action+verify."""
+        llm = CannedLLMClient(
+            [
+                self._plan(self._RATE_LIMITED, self._MANGLED),
+                self._plan(self._RATE_LIMITED, self._SMTP),
+            ]
+        )
+        result = make_llm_plan(llm, model=_MODEL)(self._run(), _now())
+
+        assert result.budget.tool_calls_used == 0
+
+    def test_the_refusal_is_not_a_tool_in_the_graded_trail(self) -> None:
+        """Underscore-prefixed, so the grader's called-tools set and the
+        briefing's investigation trail both skip it. A refusal that graded as
+        a tool call would turn this fix into a new way to fail the budget and
+        evidence dimensions."""
+        llm = CannedLLMClient([self._plan(self._RATE_LIMITED, self._MANGLED)] * 2)
+        result = make_llm_plan(llm, model=_MODEL)(self._run(), _now())
+
+        called = {e.tool_name for e in result.evidence if not e.tool_name.startswith("_")}
+        assert called == {"list_dlq_messages"}
+
+    # -- the did-you-mean is a claim, and it is withheld when it cannot be made
+
+    def test_no_near_match_is_offered_when_two_candidates_share_the_prefix(self) -> None:
+        """Two rows whose ids share the rejected value's first block cannot be
+        told apart by a prefix, so the harness does not guess between them. The
+        enumeration still goes out; only the claim is withheld."""
+        twin = "97d91272-1111-5b8e-980b-f0d2fa6ed619"
+        run = self._run()
+        listing = run.evidence[0]
+        rows = json.loads(listing.result_summary)
+        rows["items"].append({"id": twin, "remediation_hint": "wait_and_replay"})
+        rows["total"] = 3
+        run = run.model_copy(
+            update={"evidence": (listing.model_copy(update={"result_summary": json.dumps(rows)}),)}
+        )
+        llm = CannedLLMClient([self._plan(self._MANGLED)] * 2)
+        result = make_llm_plan(llm, model=_MODEL)(run, _now())
+
+        reason = next(
+            e.result_summary for e in result.evidence if e.tool_name == "_plan_refused_argument"
+        )
+        assert "did you mean" not in reason
+        assert self._SMTP in reason
+        assert twin in reason
+
+    def test_a_wholly_invented_id_gets_the_list_but_no_near_match(self) -> None:
+        invented = "deadbeef-0000-0000-0000-000000000000"
+        llm = CannedLLMClient([self._plan(invented)] * 2)
+        result = make_llm_plan(llm, model=_MODEL)(self._run(), _now())
+
+        reason = next(
+            e.result_summary for e in result.evidence if e.tool_name == "_plan_refused_argument"
+        )
+        assert "did you mean" not in reason
+        assert self._SMTP in reason
+
+    # -- schema hardening (the cheap half) ---------------------------------
+
+    def test_a_truncated_id_is_refused_for_its_SHAPE_not_its_provenance(self) -> None:
+        """The targeted message ADR 0030's schema half buys. `_unsourced` would
+        have caught this too, but "the platform never produced that string"
+        leaves a truncated id looking like an invented one; "that is not the
+        shape of a job id" points at the characters that are wrong."""
+        llm = CannedLLMClient([self._plan("97d91272-9774-5b8e")] * 2)
+        result = make_llm_plan(llm, model=_MODEL)(self._run(), _now())
+
+        refusals = [e for e in result.evidence if e.tool_name == "_plan_refused_argument"]
+        assert refusals[0].arguments["kind"] == "malformed"
+        assert "8-4-4-4-12 hexadecimal" in refusals[0].result_summary
+        # Still offered the real ids to copy from.
+        assert self._SMTP in refusals[0].result_summary
+
+    def test_the_zero_filled_id_falls_through_to_the_evidence_check(self) -> None:
+        """Stated so nobody re-reads the schema half as a fix for the live run.
+        `97d91272-0000-0000-0000-000000000000` IS canonical 8-4-4-4-12 hex, so
+        no regex can reject it; provenance is what catches it. The two checks
+        cover the field between them and neither would alone."""
+        from incident_commander.agent.remediation import _malformed_resource_args
+
+        plan = RemediationPlan.model_validate(self._plan(self._RATE_LIMITED, self._MANGLED))
+        assert _malformed_resource_args(plan) == []
+
+        llm = CannedLLMClient([self._plan(self._RATE_LIMITED, self._MANGLED)] * 2)
+        result = make_llm_plan(llm, model=_MODEL)(self._run(), _now())
+        refusals = [e for e in result.evidence if e.tool_name == "_plan_refused_argument"]
+        assert refusals[0].arguments["kind"] == "unsourced"
+
+    def test_a_non_uuid_resource_field_is_never_shape_checked(self) -> None:
+        """A cache key and a trace id have no canonical form — the platform
+        accepts any string of the right length — so the shape check must be
+        inert on them or every legitimate `invalidate_cache_key` plan dies."""
+        from incident_commander.agent.remediation import _malformed_resource_args
+
+        plan = RemediationPlan.model_validate(
+            _plan_dict(
+                target_hypothesis="stale-cache",
+                action_tool="invalidate_cache_key",
+                action_arguments={"key": "cache:jobs:worker-dispatcher:hot_set"},
+                verify_tool="get_cache_key_info",
+                verify_arguments={"key": "cache:jobs:worker-dispatcher:hot_set"},
+            )
+        )
+        assert _malformed_resource_args(plan) == []
+
+    # -- positive control --------------------------------------------------
+
+    def test_the_correct_plan_is_admitted_on_the_first_call(self) -> None:
+        llm = CannedLLMClient([self._plan(self._RATE_LIMITED, self._SMTP)])
+        result = make_llm_plan(llm, model=_MODEL)(self._run(), _now())
+
+        assert result.state is IncidentState.REMEDIATING
+        assert not [e for e in result.evidence if e.tool_name == "_plan_refused_argument"]
+        # A good plan is never re-asked.
+        assert len(llm.calls) == 1
+
+    def test_the_typo_diagnosis_outranks_the_unread_row_one(self) -> None:
+        """Ordering, and it decides what the scenario grades.
+
+        A mangled id fails ``_unread_action_rows`` too — no listing carries a
+        row for an id that does not exist — and that guard's steer says to DROP
+        the ids you have no row for. Obeyed here it turns a two-row delayed
+        replay into a one-row one, which fails `scheduled equals 2` just as
+        surely as escalating did. The transcription diagnosis has to come
+        first, and this is what pins it.
+        """
+        llm = CannedLLMClient([self._plan(self._RATE_LIMITED, self._MANGLED)] * 2)
+        result = make_llm_plan(llm, model=_MODEL)(self._run(), _now())
+
+        markers = [e.tool_name for e in result.evidence if e.tool_name.startswith("_plan_refused")]
+        assert markers == ["_plan_refused_argument"]
+        assert "_plan_refused_unread_row" not in markers
+
+    def test_the_escalation_says_which_of_the_two_mistakes_it_was(self) -> None:
+        """The briefing's `escalation_reason` is the whole of what a woken
+        operator gets, so it has to distinguish "that could never be an id"
+        from "that is not one of THESE ids". One clause per cause."""
+        mangled = CannedLLMClient([self._plan(self._MANGLED)] * 2)
+        unsourced = make_llm_plan(mangled, model=_MODEL)(self._run(), _now())
+        assert (
+            "named a resource that is not one this run read"
+            in unsourced.evidence[-1].result_summary
+        )
+
+        truncated = CannedLLMClient([self._plan("97d91272-9774-5b8e")] * 2)
+        malformed = make_llm_plan(truncated, model=_MODEL)(self._run(), _now())
+        assert (
+            "wrote a resource identifier that is not the shape the platform declares"
+            in malformed.evidence[-1].result_summary
+        )

@@ -9,6 +9,7 @@ Task: produce a structured `RemediationPlan` per the JSON schema on the `record_
   **verbatim** from the alert or tool results — never re-type, trim, or
   abbreviate them. A plan whose resource argument doesn't appear exactly in
   the evidence is rejected before execution.
+  **Copy each id character for character from the row that carries it: never abbreviate, reconstruct or pad one** — a zero-filled, shortened or completed block is a different job, ids written with an ellipsis anywhere in this prompt are abbreviated for reading and must never be emitted that way, and if you cannot find an id you are certain of, replay by category rather than typing one.
 - `verify_tool`: pick one read tool from the "Read tools" list whose response will indicate whether the fix worked.
 - `verify_arguments`: arguments for the verify tool.
 - `verify_expectation`: one short sentence describing what the verify tool's response should look like if the fix succeeded (e.g. "lag drops below 1000 for that group", "the invalidated key reports exists=false", "the immediately-replayed ids leave the DLQ listing"). Write what the world will ACTUALLY look like, which is not always "the thing is gone" — for a DELAYED replay it is the opposite, and that case is spelled out under "Choosing `delay_seconds`" below.

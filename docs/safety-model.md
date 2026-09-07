@@ -103,7 +103,7 @@ A plan can be perfectly well-formed — right tier, real tools, confident hypoth
 | `_unsourced_resource_args` | a value the platform never produced (not in the alert, not in a tool result) | copy, don't re-type — a re-typed cache key that targets a different object |
 | `_misdirected_verify_args` | a verify probe naming a resource the action never touched | verifying a healthy bystander and reporting RESOLVED on a still-broken system |
 
-All three escalate **pre-execution**, so a rejected plan costs planner tokens and nothing else. A fourth check runs after them and **refuses** rather than escalating — see the next section.
+All three escalate **pre-execution**, so a rejected plan costs planner tokens and nothing else. Two further checks run after them and **refuse** rather than escalating — see the next two sections.
 
 ### The verify leg must observe the action
 
@@ -130,6 +130,31 @@ Full rationale, including why a prompt fix alone was insufficient and why "name 
 The absence check exists because omission used to be the quiet case. `GetConsumerLagInput.consumer_group` carries `default="worker-dispatcher"`, mirroring the platform's published input schema — so a verify leg of `get_consumer_lag` with no arguments probed `worker-dispatcher` no matter which consumer group the action had just restarted, read a healthy lag off an untouched consumer, and resolved the incident. The default is legitimate and stays (the contract snapshot pins it); the plan layer is where the agent's own "say which resource you mean" requirement belongs. Full rationale in [ADR 0024](ADR/0024-plan-arguments-name-their-resource.md).
 
 Note the asymmetry with the read-only investigation leg, which *may* default-fill: an alert that names no consumer group opens with a probe of the platform's default group. That leg mutates nothing, so a mis-aimed read cannot itself produce a false RESOLVED — but it is not free either, and the next section is what that cost turned out to be.
+
+### Read the row before you replay it
+
+Every check above establishes that the agent is acting on **the right object, named honestly, and can check its own work**. None of them asks whether acting on that object is a good idea.
+
+That gap has a concrete shape. `get_dag_state`'s node model is five fields — `id`, `type`, `status`, `retry_count`, `created_at`. There is no `remediation_hint` and no `error_message` among them, so a `dead_letter` root tells the agent the node **stopped** the chain and nothing at all about whether restarting it is safe. The correct trajectory for `remediate_runaway_saga_success`, as ADR 0026 left it, replayed that root on exactly that evidence — and every guard in this document admitted the plan. The one that comes closest is the near-miss worth remembering: `_unsourced_resource_args` proves the platform uttered the job id, which reads a lot like "the platform told us about this job" and means only "this string is not a hallucination". The alert carries the id, and `get_dag_state` echoes it back.
+
+The answer exists in exactly one place — the job's row in `list_dlq_messages` — and that tool's own description states the rule: "A null hint is UNKNOWN, not replay-safe: do not feed those to a categorised replay. Read the error, then replay by explicit id, or fence it with `mark_dlq_permanent`." An unread row is strictly less than a null hint.
+
+| Check | Rejects | Failure it prevents |
+|---|---|---|
+| `_unread_action_rows` | a replay of a job id no `list_dlq_messages` reading in the evidence carries a row for | re-running a poison payload, or a job the platform's classifier fenced for a human, on the strength of knowing only that it failed |
+
+`SOURCE_ROW_FOR_ACTION` (`src/incident_commander/agent/remediation.py`) is the map, and it is the third in this family: `ALERT_SUBJECT_PROBES` asks "did anyone read what the alert is about?", `VERIFY_PROBE_FOR_ACTION` asks "can anyone read what this action will change?", and this one asks "did anyone read what this resource **is**?". Each entry names the read tool, the field holding its rows, the field identifying the resource within a row, and the field the read exists to expose (`list_dlq_messages` / `items` / `id` / `remediation_hint`). **Total over the Tier-1 slice** — `tests/unit/test_policies.py::TestSourceRowForAction` fails on any Tier-1 tool with no entry, so inertness is always a decision somebody wrote down.
+
+Four properties:
+
+- **It requires the row, never a particular hint.** `wait_and_replay` warrants a deferred replay and `replay_safe` an immediate one; both are legitimate. A structural rule admitting only one value would be taking the planner's decision, and would refuse every correct `wait_and_replay` plan in the suite. Read it, then decide — the deciding lives in the prompt and in the scenario's claim.
+- **It refuses and steers, then fails closed.** Same shape as the verify-target guard, with one honest limitation: PLANNING is a single LLM call with no tool budget, so the planner **cannot fetch the row it is missing**. The repair the re-ask exists for is narrower — dropping the ids it has no row for, which is how a batch carrying one listed job and one unlisted one gets fixed. A planner with no row for any of its ids escalates, naming the read that was skipped. That escalation is the intended failure: fail closed toward the human rather than replay a job nobody classified.
+- **Keeping a correct run green is the investigation planner's job.** Because the remediation planner cannot make the read, the rule is stated in `investigation_planner.md` as well — that is what makes the guard's happy path reachable rather than merely safe.
+- **It is checked before the verify-target guard**, and the order is the priority of the two diagnoses: "you are about to replay a job whose classification nobody read" is about whether this action should happen at all; "your verify leg cannot observe it" is about how you would check an action that should. Reporting the second first sends the planner to fix the checking of a replay it must not make.
+
+Two gaps are declared rather than closed, both because the scenarios that would newly bind have money behind them: `replay_dlq_by_category` names a filter and no ids, so there is nothing to look up (WO-R2-143), and `mark_dlq_permanent` is left inert because fencing is the conservative direction — it stops auto-replay rather than re-running anything (WO-R2-144).
+
+Found by the user reading the staged trajectory before releasing the spend, not by a red run. Full rationale in [ADR 0027](ADR/0027-read-the-row-before-you-replay-it.md).
 
 ### A stabilizer is not a resolution
 

@@ -18,19 +18,37 @@ Task: produce a structured `RemediationPlan` per the JSON schema on the `record_
 For non-DLQ hypotheses:
 - `consumer_saturation` → `restart_consumer_group`
 - `stale_cache` / `hot_key` → `invalidate_cache_key`
-- `runaway_saga` / `stuck_dag` → read the chain first, then follow "Stuck dependency chains" below. The fix is a replay of the node that stopped the chain. It is not `pause_dag`.
+- `runaway_saga` / `stuck_dag` → read the chain, then read the stopped node's dead-letter row, then follow "Stuck dependency chains" below. The fix is a replay of the node that stopped the chain, and only when that node's own row says the replay is safe. It is not `pause_dag`.
 
 ## Stuck dependency chains (`runaway_saga` / `stuck_dag`)
 
 `get_dag_state(job_id)` returns the alerted node, its direct parents and its direct children — each with a `status` — plus the chain's `paused` flag.
 
-**The shape that names its own fix.** The node the alert names reads `"status": "dead_letter"`, one or more descendants read `"status": "waiting"`, and the chain reads `"paused": false`. That chain cannot drain on its own: `dead_letter` is terminal, and the platform's resolver promotes a child only once every parent is `completed`. So:
+**The shape that names its own fix.** The node the alert names reads `"status": "dead_letter"`, one or more descendants read `"status": "waiting"`, and the chain reads `"paused": false`. That chain cannot drain on its own: `dead_letter` is terminal, and the platform's resolver promotes a child only once every parent is `completed`. So the fix is a replay of that root — **once you have established the root is safe to replay.**
 
-- `action_tool`: `replay_dlq_by_ids`, with `job_ids` holding exactly the dead-lettered root's own id, copied verbatim from the alert or from the `get_dag_state` reading. An **immediate** replay — do **not** set `delay_seconds`. A deferred replay leaves the root in `dead_letter` until its `execute_at` passes, long after this run ends, so the chain is still stuck while the call reports success.
+**Read the root's dead-letter row before you replay it. The chain view does not carry the hint.** `get_dag_state`'s nodes carry five fields — `id`, `type`, `status`, `retry_count`, `created_at`. There is no `remediation_hint` and no `error_message` among them, so `"status": "dead_letter"` tells you the root **stopped** the chain and nothing whatsoever about whether restarting it is safe. The row in `list_dlq_messages` is the only place that answer exists. `dead_letter` is a reason to look it up, never a licence to replay.
+
+That read is one call and the evidence must contain it: a plan replaying a job id that no `list_dlq_messages` reading in the evidence carries a row for is refused before execution, and the refusal names the id. The listing takes no job-id filter, so reach the row either way:
+
+- filter it — `list_dlq_messages(remediation_hint="replay_safe")` — and the root appearing on that page IS the answer; or
+- read it unfiltered and find the row whose `id` equals the root. A freshly dead-lettered chain root is the newest dead-letter in the queue and sorts first, so page one is normally enough; if `total` exceeds the rows you got back, page with `offset` until the id appears.
+
+**Then decide from that row, and the decision has only two outcomes.**
+
+*Replay it* — `remediation_hint` is `replay_safe`, or the hint is `wait_and_replay` and the operator wants the deferred replay that category calls for. A transient `error_message` (timeout, connection refused, a downstream that has since recovered) supports the same reading when it agrees with the hint.
+
+- `action_tool`: `replay_dlq_by_ids`, with `job_ids` holding exactly the dead-lettered root's own id, copied verbatim from the alert, the `get_dag_state` reading, or the DLQ row. An **immediate** replay — do **not** set `delay_seconds`. A deferred replay leaves the root in `dead_letter` until its `execute_at` passes, long after this run ends, so the chain is still stuck while the call reports success.
 - `verify_tool`: `get_dag_state`, with `job_id` set to that same root id.
 - `verify_expectation`: the replay returns `replayed: 1` with `scheduled: 0`, and the follow-up read shows no node left in `dead_letter` and the descendants that were `waiting` promoted — the resolver reacting to the replayed root completing.
 
-**You do not need the DLQ listing to act here.** The hint-routing table below is written for evidence that includes `list_dlq_messages`. A stuck chain does not require it: `get_dag_state` reports the root's own `status`, and `dead_letter` on the node the alert named is the whole observation the fix turns on. Do not call `list_dlq_messages` merely to satisfy a table.
+*Do not replay it* — any of:
+
+- `remediation_hint` is `human_required`. The platform refuses to auto-replay these, and the classification is the point: a human decides.
+- the `error_message` describes bad data, a schema the producer must fix, or a poison payload, and the hint does not overrule it. Re-running the same input reproduces the same failure and burns the retry budget again.
+- **there is no hint at all.** A null `remediation_hint` is UNKNOWN, not replay-safe — the platform's own words. Nobody has classified this row, so replaying it is a guess about a job you have not read.
+- the row is not in the listing at all. You have not found it yet; page further or filter differently. An absent row is the least evidence of all.
+
+In every one of those cases the honest plan is to **escalate, naming the root job id and what its row said**. Reach for `mark_dlq_permanent` only when the operator's intent is to stop the retries — fencing the row out of auto-replay with a full-sentence `reason` — and then still escalate: the mark stops the bleeding, it does not fix the chain, and the descendants stay `waiting` either way.
 
 **Read the tool descriptions against each other, not one at a time.** Two of them steer you wrong on this incident if you read them alone:
 
@@ -45,7 +63,7 @@ For non-DLQ hypotheses:
 
 ## DLQ routing — trust the platform's `remediation_hint` field
 
-When the investigation evidence includes `list_dlq_messages` output, every entry has a `remediation_hint` field the platform's classifier populated. **Use it as your strong prior.** Only fall back to LLM classification (reading `error_message` + `triage.summary`) when `remediation_hint` is null (older entries or classifier gaps). A stuck dependency chain is the one remediation that routes without this table — see the section above.
+Every entry in `list_dlq_messages` output has a `remediation_hint` field the platform's classifier populated. **Use it as your strong prior.** Only fall back to reading `error_message` + `triage.summary` when `remediation_hint` is null (older entries or classifier gaps) — and treat a null hint as a reason for caution, not as a free choice: the platform calls it UNKNOWN, never replay-safe. This table governs a dead-lettered DAG root exactly as it governs any other row; the section above adds which id to act on and how to verify it, not an exemption from reading the hint.
 
 The three categories dictate the tool:
 

@@ -297,6 +297,40 @@ class FieldComparator(BaseModel):
         return self._matches(self.equals, value)
 
 
+class RowSelector(FieldComparator):
+    """Which ROWS of a list-valued field the outer comparator applies to.
+
+    The axis ``rows: any | all`` could not express, and the reason it had to
+    exist. ``rows`` quantifies over the values a path resolved to; it cannot
+    say *which* row a value has to come from, so a scenario asking "the DLQ
+    row for THIS job was classified replay_safe" could only be written as two
+    independent any-row assertions —
+
+    ``items[].id equals <root>`` and ``items[].remediation_hint equals replay_safe``
+
+    — which are satisfied by two DIFFERENT rows. In the world these scenarios
+    run in that is not a hypothetical: the dead-letter listing carries four
+    seeded rows, one of them genuinely ``replay_safe``, so the pair is green
+    for a listing in which the alerted job is ``human_required``. That is the
+    cross-satisfiable fake-green this suite has corrected twice already
+    (S-20, A-10), in the one place the existing quantifiers could not reach.
+
+    ``field`` is a path relative to the row, resolved by the same walker as
+    everything else. A row is selected when ANY value at that path satisfies
+    the comparator — the existential reading, because a row's own nested list
+    (``triage`` has none today, but rows are free to grow one) should not
+    have to be uniform to identify the row.
+
+    Selection is not an assertion in itself: the outer comparator is what
+    grades, and it grades only the selected rows. A selector matching nothing
+    therefore fails the outer assertion closed, with a detail that says the
+    row was never seen rather than that its field was wrong — the two are
+    different diagnoses and the failure text distinguishes them.
+    """
+
+    field: str = Field(min_length=1)
+
+
 class EvidenceFieldExpectation(FieldComparator):
     """A structured assertion about one field of one tool's recorded output.
 
@@ -368,6 +402,24 @@ class EvidenceFieldExpectation(FieldComparator):
     field: str = Field(min_length=1)
     which: Literal["any", "last", "sum"] = "any"
     rows: Literal["any", "all"] = "any"
+    # Restrict the comparator to the rows this selector picks out. See
+    # ``RowSelector`` for why the two existing quantifiers cannot express it.
+    where: RowSelector | None = None
+    # Only entries recorded BEFORE the first entry naming one of these tools
+    # are graded. The suite's only way to say *when* an observation had to
+    # happen, and it exists because ordering is sometimes the whole claim:
+    # "the agent read the job's dead-letter classification" is a different
+    # statement from "the agent read it BEFORE replaying the job", and the
+    # second is the one a read-before-act rule is about. Without it the
+    # post-action verify probe — which is `list_dlq_messages` on every DLQ
+    # scenario — satisfies the assertion just as well as the investigation
+    # probe, so act-then-read grades green.
+    #
+    # Fails closed when no entry names any of these tools: an ordering claim
+    # about an event that never happened is not satisfied, it is unanswerable,
+    # and the alternative reading ("nothing came after, so everything counts")
+    # turns the assertion off in exactly the runs where the action was skipped.
+    before_tools: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _sum_has_no_rows_to_quantify(self) -> Self:
@@ -403,6 +455,79 @@ class EvidenceFieldExpectation(FieldComparator):
                 "which: sum grades the total of the observed values, which is "
                 "always a number — is_null has nothing to ask about it. Use "
                 "equals or at_least, or drop the sum."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _where_needs_rows_to_select_from(self) -> Self:
+        """``where`` picks among rows, so ``field`` must descend into a list.
+
+        Two shapes have no rows and are refused rather than silently ignored:
+        a ``field`` with no ``[]`` segment at all (one scalar, nothing to
+        select), and one whose ``[]`` is the LAST segment (the values ARE the
+        rows, so the selector and the comparator would be asking the same
+        question of the same value and the pair could only ever be a
+        tautology or a contradiction).
+        """
+        if self.where is None:
+            return self
+        segments = self.field.split(".")
+        descends = [i for i, segment in enumerate(segments) if segment.endswith("[]")]
+        if not descends:
+            raise ValueError(
+                f"where selects among the rows of a list, but field {self.field!r} "
+                "names a single value — it has no '[]' segment to descend into. "
+                "Write the row path (e.g. 'items[].remediation_hint'), or drop where."
+            )
+        if descends[-1] == len(segments) - 1:
+            raise ValueError(
+                f"field {self.field!r} resolves to the rows themselves, so where "
+                "would select and grade the same value. Name a field INSIDE the "
+                "row (e.g. 'items[].remediation_hint' with where.field 'id')."
+            )
+        return self
+
+    @field_validator("before_tools")
+    @classmethod
+    def _before_tools_can_actually_occur(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        """The boundary must be an event an evidence entry can name.
+
+        Same closure, same reasoning as ``forbidden_action_tools``: this
+        assertion fails closed when the boundary is never found, so a
+        misspelled or bookkeeping name would red every run forever while
+        looking like an agent defect. A load error says what it is.
+        """
+        for item in value:
+            if item.startswith("_"):
+                raise ValueError(
+                    f"{item!r} is a bookkeeping marker written by the state machine, "
+                    "not a call the agent makes. An ordering boundary has to be a "
+                    "real tool call."
+                )
+            if item not in TOOL_REGISTRY:
+                raise ValueError(
+                    f"{item!r} is not a registered tool, so no evidence entry can "
+                    "name it, the boundary would never be found, and this assertion "
+                    f"would fail on every run. Name one of: {sorted(TOOL_REGISTRY)}."
+                )
+        return value
+
+    @model_validator(mode="after")
+    def _boundary_is_not_the_observation(self) -> Self:
+        """A tool cannot be its own ordering boundary.
+
+        The boundary is the FIRST entry naming a ``before_tools`` tool, and
+        only entries strictly before it are graded — so a tool in both sets
+        excludes its own first appearance and every one after it. Nothing can
+        satisfy that, and it reads like a tightened assertion rather than a
+        dead one.
+        """
+        both = sorted(set(self.tools) & set(self.before_tools))
+        if both:
+            raise ValueError(
+                f"{both} appear in both tools and before_tools. The boundary is the "
+                "first entry naming a before_tools tool and only earlier entries are "
+                "graded, so such an assertion can never be satisfied."
             )
         return self
 
@@ -884,14 +1009,84 @@ def _grade_evidence(
     )
 
 
+def _selector_clause(exp: EvidenceFieldExpectation) -> str:
+    """Name the row the selector was looking for, in a failure detail.
+
+    A ``where`` miss and a wrong value are different diagnoses — "the row is
+    not in this listing" versus "the row is here and says something else" —
+    and a detail that renders identically for both sends the reader looking
+    in the wrong place.
+    """
+    if exp.where is None:
+        return ""
+    return f" for a row whose {exp.where.field!r} {exp.where.describe()}"
+
+
+def _ordering_clause(exp: EvidenceFieldExpectation) -> str:
+    if not exp.before_tools:
+        return ""
+    return f" recorded before {sorted(exp.before_tools)}"
+
+
+def _split_row_path(field: str) -> tuple[str, str]:
+    """Split ``items[].remediation_hint`` into the rows path and the in-row path.
+
+    Cuts at the LAST ``[]`` segment, so a nested listing splits at the level
+    whose rows the selector is about. The model validator has already refused
+    every shape this cannot split.
+    """
+    segments = field.split(".")
+    last = max(i for i, segment in enumerate(segments) if segment.endswith("[]"))
+    return ".".join(segments[: last + 1]), ".".join(segments[last + 1 :])
+
+
+def _selected_values(parsed: Mapping[str, Any], exp: EvidenceFieldExpectation) -> list[Any]:
+    """Values one entry contributes, after ``where`` narrows it to some rows."""
+    if exp.where is None:
+        return resolve_path(parsed, exp.field)
+    rows_path, in_row_path = _split_row_path(exp.field)
+    values: list[Any] = []
+    for row in resolve_path(parsed, rows_path):
+        if not isinstance(row, Mapping):
+            continue
+        if any(exp.where.satisfied_by(value) for value in resolve_path(row, exp.where.field)):
+            values.extend(resolve_path(row, in_row_path))
+    return values
+
+
+def _graded_evidence(
+    run: RunState, exp: EvidenceFieldExpectation
+) -> tuple[EvidenceEntry, ...] | None:
+    """The entries this assertion may read, or ``None`` when its boundary never fired.
+
+    Without ``before_tools`` that is the whole ledger. With it, the ledger up
+    to (not including) the first entry naming one of the boundary tools —
+    which is what makes "observed BEFORE the action" expressible at all.
+    """
+    if not exp.before_tools:
+        return run.evidence
+    for index, entry in enumerate(run.evidence):
+        if entry.tool_name in exp.before_tools:
+            return run.evidence[:index]
+    return None
+
+
 def _grade_evidence_field(run: RunState, exp: EvidenceFieldExpectation) -> str | None:
     """Return a failure detail for one field assertion, or ``None`` when satisfied."""
+    considered = _graded_evidence(run, exp)
+    if considered is None:
+        return (
+            f"{sorted(exp.tools)} field {exp.field!r} was asserted to hold before "
+            f"{sorted(exp.before_tools)}, but no evidence entry names any of those "
+            "tools — the ordering boundary never occurred, so the claim is "
+            "unanswerable rather than satisfied"
+        )
     # One inner list per matching entry, in entry order: ``which: any``
     # flattens across entries, ``which: last`` grades only the final entry
     # that carried the field — an entry-level cut, so a path that reads
     # many rows from that entry still gets its any-row semantics.
     observed: list[list[object]] = []
-    for entry in run.evidence:
+    for entry in considered:
         if entry.tool_name not in exp.tools:
             continue
         # Judge verdicts and bookkeeping entries carry prose, not JSON —
@@ -901,14 +1096,15 @@ def _grade_evidence_field(run: RunState, exp: EvidenceFieldExpectation) -> str |
         except ValueError:
             continue
         if isinstance(parsed, dict):
-            values = resolve_path(parsed, exp.field)
+            values = _selected_values(parsed, exp)
             if values:
                 observed.append(values)
 
     if not observed:
         return (
-            f"no {sorted(exp.tools)} evidence entry carried field "
-            f"{exp.field!r} (expected {exp.describe()})"
+            f"no {sorted(exp.tools)} evidence entry"
+            f"{_ordering_clause(exp)} carried field {exp.field!r}"
+            f"{_selector_clause(exp)} (expected {exp.describe()})"
         )
     if exp.which == "sum":
         return _grade_summed_field(exp, [value for values in observed for value in values])
@@ -921,15 +1117,15 @@ def _grade_evidence_field(run: RunState, exp: EvidenceFieldExpectation) -> str |
         if not failing:
             return None
         return (
-            f"{sorted(exp.tools)} field {exp.field!r} expected EVERY value "
-            f"{exp.describe()}, observed ({exp.which}) {graded!r} — "
+            f"{sorted(exp.tools)} field {exp.field!r}{_selector_clause(exp)} expected "
+            f"EVERY value {exp.describe()}, observed ({exp.which}) {graded!r} — "
             f"{len(failing)} of {len(graded)} failing: {failing!r}"
         )
     if any(exp.satisfied_by(value) for value in graded):
         return None
     return (
-        f"{sorted(exp.tools)} field {exp.field!r} expected {exp.describe()}, "
-        f"observed ({exp.which}) {graded!r}"
+        f"{sorted(exp.tools)} field {exp.field!r}{_selector_clause(exp)} expected "
+        f"{exp.describe()}, observed ({exp.which}) {graded!r}"
     )
 
 

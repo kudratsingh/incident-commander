@@ -668,6 +668,49 @@ Three properties, each load-bearing:
 
 `not_equals` is the suite's only comparator that asserts what a value is *not*, and it is the tool-scoped alternative to `forbidden_evidence_contains`, an unscoped substring over the joined corpus — the exact shape rule 6 condemns. It is defined as the exact negation of `equals`, which has one consequence worth stating: **a negative assertion is satisfied by contract drift** (a status field that came back a number is indeed not `dead_letter`). Pair it with a positive assertion on the same field where the type matters; the saga scenario's precondition is that pairing.
 
+### The row selector: two any-row assertions are not one row's claim
+
+`rows: all` quantifies over values; it cannot say *which row* a value has to come from. That gap has a name — cross-satisfaction — and the suite has now corrected it three times (S-20, A-10, and this one).
+
+The claim `remediate_runaway_saga_success` needed was "the chain root's dead-letter row said `replay_safe`". Written with the quantifiers that existed, it is two assertions:
+
+```yaml
+- tools: [list_dlq_messages]
+  field: items[].id
+  equals: a2412a54-…            # some row has the root's id
+- tools: [list_dlq_messages]
+  field: items[].remediation_hint
+  equals: replay_safe            # some row says replay_safe
+```
+
+Both are satisfied by **two different rows**, and in this world they always are: the platform's seed pack contains a genuinely `replay_safe` schema-violation row that is present on every stack. So the pair is green for a listing in which the chain root itself is `human_required` — precisely the run the claim exists to fail.
+
+`where` scopes the comparator to the rows a selector picks out:
+
+```yaml
+- tools: [list_dlq_messages]
+  field: items[].remediation_hint
+  where: {field: id, equals: a2412a54-…}
+  equals: replay_safe
+  before_tools: [replay_dlq_by_ids]
+```
+
+Selection is not itself an assertion — the outer comparator grades, and it grades only the selected rows, so a selector matching nothing fails the assertion closed with a detail saying the row was never seen rather than that its field was wrong. Those are different diagnoses and the failure text distinguishes them.
+
+### Ordering: reading a classification after acting on it is filing, not checking
+
+`before_tools` restricts an assertion to entries recorded before the first call to a named tool. It is the suite's only way to say *when* an observation had to happen, and the DLQ family is exactly where that matters: `list_dlq_messages` is both the natural pre-action probe and the natural post-action verify probe, so without a boundary an act-then-read run carries byte-identical evidence to a correct one.
+
+Three properties:
+
+- **It fails closed when the boundary never fired.** An ordering claim about an event that did not happen is unanswerable, not satisfied. Read the other way — "nothing came after, so everything counts" — the assertion switches itself off in exactly the runs where the action was skipped.
+- **The boundary is the FIRST matching entry**, so a second action cannot re-open the window and launder a post-hoc read.
+- **A tool may not be its own boundary**, refused at load: it would exclude its own first appearance and could never be satisfied.
+
+Note where this is *not* used and why. `saga_stuck` forbids all seven Tier-1 tools, so there is no action for the read to precede; an ordering boundary naming a tool that must never fire would fail closed on every correct run. Ordering claims belong to scenarios that act.
+
+**The three category-replay scenarios still have this hole.** `dlq_replay_safe_success`, `dlq_mixed_partial` and `remediate_dlq_backlog_success` grade a hint reading that their post-action verify probe satisfies just as well, and closing it means changing scenarios queued for paid runs — filed as WO-R2-143 rather than improvised. Their by-id sibling `dlq_wait_and_replay_success` is covered structurally instead: [ADR 0027](ADR/0027-read-the-row-before-you-replay-it.md)'s plan guard refuses a by-id replay whose rows are unread, and it runs at PLANNING, which is necessarily before the action.
+
 ### A precondition that the fixture pack alone can satisfy is not a precondition
 
 `remediate_stale_cache_success` asserted `get_cache_key_info(key).exists == true` and called that the premise. It was not one. `seed_eval_fixtures` writes the *same key* on every boot, so `exists` is true of a world where `create_stale_cache` never ran — the precondition passed on the fixture pack, which is the one thing it exists to rule out.
@@ -688,10 +731,10 @@ What each scenario with an action leg now says, and what the laziest trajectory 
 | `dlq_wait_and_replay_success` | replay immediately instead of deferring | `scheduled sum equals 2` **and** `replayed sum equals 0` |
 | `remediate_stale_cache_success` | delete `kafka:consumer_lag:worker-dispatcher` — a different, live, allowlisted key — and resolve | `key equals cache:jobs:worker-dispatcher:hot_set` on every call; 6 tools forbidden; precondition `size equals 90`, which only the chaos write produces |
 | `remediate_consumer_lag_success` | restart the alerted group **and** `shipping-consumer` (seeded lag 100000) | `consumer_group equals worker-dispatcher` on every call; 6 tools forbidden |
-| `remediate_runaway_saga_success` | replay the root and sweep the four seeded DLQ rows with it; or pause the DAG and call it fixed | `job_ids[] equals` the root on every call; `replayed sum equals 1`; last `get_dag_state` has **no** node in `dead_letter`; `seed_id` pinned; 6 tools forbidden |
+| `remediate_runaway_saga_success` | replay the root and sweep the four seeded DLQ rows with it; or pause the DAG and call it fixed; or — the one the user caught before the spend — **replay the root having never established it was safe to replay** | `job_ids[] equals` the root on every call; `replayed sum equals 1`; last `get_dag_state` has **no** node in `dead_letter`; `seed_id` pinned; the root's own DLQ row read `replay_safe` **before** the replay; precondition finds the root on the `replay_safe` page; 6 tools forbidden |
 | `remediate_verify_fails` | escalate honestly having restarted something irrelevant — or nothing at all | `consumer_group equals worker-dispatcher`, fail-closed if no action fired; briefing must name the attempted action; 6 tools forbidden |
 | `consumer_lag_high` | restart the consumer group, then escalate when the verify budget runs out | all 7 Tier-1 tools forbidden |
-| `saga_stuck` | replay the dead-lettered root — the very decision the briefing defers to a human — then escalate | all 7 Tier-1 tools forbidden; `seed_id` pinned |
+| `saga_stuck` | replay the dead-lettered root — the very decision the briefing defers to a human — then escalate; and, more deeply, escalate on evidence that equally supported acting | all 7 Tier-1 tools forbidden; `seed_id` pinned; the root's own DLQ row read `human_required`, which its chaos hook now seeds — **the discriminator this pair never had** |
 | `dlq_human_required_escalates` | *(already exact — forbade all three replay tools outright)* | unchanged |
 
 Two of these are worth reading twice, because they are the ones where the graded behaviour and the forbidden behaviour were the same run: `consumer_lag_high` and `saga_stuck` exist to prove the agent knows when **not** to act, and both scored full marks for acting.

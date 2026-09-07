@@ -84,11 +84,46 @@ _MAX_REMEDIATION_ATTEMPTS: Final[int] = 1
 # single LLM call whose only cost is the re-ask.
 _MAX_VERIFY_TARGET_REFUSALS: Final[int] = 1
 
+# How many times one PLANNING transition may refuse a plan for replaying a
+# job whose dead-letter row nobody read, before the run escalates instead.
+#
+# One, and unlike the verify-target refusal above the re-ask has a NARROWER
+# job to do. The remediation planner cannot make a read — PLANNING is a
+# single LLM call, not a loop with a tool budget — so it cannot go and fetch
+# the row it is missing. What it CAN do, and the only repair worth an ask,
+# is drop the ids it has no row for: a plan replaying one job the listing
+# covered and one it did not is repaired by replaying the first. A planner
+# with no row for any of its ids has nothing to re-plan toward, and the
+# second refusal escalates, naming the read that was skipped. That is the
+# intended failure: fail closed toward the human rather than replay a job
+# whose classification nobody looked at.
+_MAX_UNREAD_ROW_REFUSALS: Final[int] = 1
+
 # Evidence marker for a refused plan. Underscore-prefixed per the repo-wide
 # convention, so the briefing's evidence trail and the grader's "tools
 # called" set both exclude it — a refusal is bookkeeping, not a probe, and
 # it spends no tool-call budget.
 _PLAN_REFUSED_MARKER: Final[str] = "_plan_refused"
+# The same convention for the read-before-act refusal. A separate marker
+# rather than a second shape under the one above: both are refusals, but
+# they carry different arguments and diagnose different mistakes, and a
+# reader of the trail (or of a run archive) should not have to parse the
+# reason text to tell "verified the wrong thing" from "acted on an unread
+# row".
+_PLAN_REFUSED_UNREAD_ROW_MARKER: Final[str] = "_plan_refused_unread_row"
+
+# Every marker ``_format_plan_context`` must render whole and last. Derived
+# membership rather than a comparison against one name, because that is the
+# bug the second marker would otherwise have introduced: the renderer
+# matched ``_PLAN_REFUSED_MARKER`` exactly, so a refusal written under any
+# other name landed inside the 200-character evidence truncation and the
+# planner was re-asked with its steer cut mid-sentence — the failure mode
+# ``_format_plan_context``'s own comment says the whole-rendering exists to
+# prevent. A refusal the model cannot read is a refusal that only spends
+# tokens. Adding a third refusal shape means adding it here.
+_PLAN_REFUSAL_MARKERS: Final[frozenset[str]] = frozenset(
+    {_PLAN_REFUSED_MARKER, _PLAN_REFUSED_UNREAD_ROW_MARKER}
+)
 
 
 class VerifyProbe(NamedTuple):
@@ -160,6 +195,96 @@ VERIFY_PROBE_FOR_ACTION: Final[dict[str, tuple[VerifyProbe, ...]]] = {
     # bulk-replay plans.
     "replay_dlq_by_category": (),
     "replay_dlq_messages": (),
+}
+
+
+class SourceRow(NamedTuple):
+    """The read whose ROWS carry the classification an action depends on."""
+
+    tool_name: str
+    """Read tool that lists the rows."""
+    rows_field: str
+    """Top-level key holding the rows. A plain key, not a path: the one
+    listing this map describes is one level deep, and a second copy of the
+    eval grader's ``resolve_path`` descent rules is not something ``src``
+    can share (evals imports the agent, never the reverse) nor something
+    worth duplicating before a tool needs it."""
+    id_field: str
+    """Field within a row carrying the resource id, matched against the
+    action's own resource arguments."""
+    decision_field: str
+    """The field the read exists to expose — quoted into the refusal so the
+    steer says what the planner is being sent to find out, not merely which
+    tool to call."""
+
+
+# Single source of truth for "which read must have SEEN this resource before
+# an action may touch it".
+#
+# The third map in this family and the one that asks about the past.
+# ``ALERT_SUBJECT_PROBES`` asks "did anyone read what the alert is about?",
+# ``VERIFY_PROBE_FOR_ACTION`` asks "can anyone read what this action will
+# change?" — and both are satisfied by a run that never learned whether the
+# thing it is about to change is safe to change. This one asks that:
+# **before you replay a dead-lettered job, its dead-letter row has to be in
+# the evidence**, because the row is the only place its `remediation_hint`
+# exists.
+#
+# Why the hint cannot be inferred from anywhere else, which is the whole
+# reason a structural rule was needed rather than a prompt line:
+#
+# * `get_dag_state`'s node model is five fields — `id`, `type`, `status`,
+#   `retry_count`, `created_at`. A dead-lettered DAG root reads `status:
+#   dead_letter` there and NOTHING about whether replaying it is safe.
+# * `list_dlq_messages` takes no job-id filter, so the row is reached by
+#   filtering on the hint or by paging. That cost is the reason the
+#   remediation-planner prompt used to tell the planner it did not need the
+#   listing for a stuck chain (PR #191), and the reason a run could replay
+#   a root on nothing but its status.
+# * The platform's own rule, in that tool's description: "A null hint is
+#   UNKNOWN, not replay-safe: do not feed those to a categorised replay.
+#   Read the error, then replay by explicit id, or fence it with
+#   `mark_dlq_permanent`." An unread row is strictly less than a null hint.
+#
+# The guard requires the ROW, never a particular hint VALUE. Deliberate:
+# `wait_and_replay` warrants a deferred replay and `replay_safe` an
+# immediate one, both legitimate, and a structural rule that picked between
+# them would be making the planner's decision for it. Read it, then decide
+# — the deciding is the prompt's job and the scenario's claim.
+#
+# TOTAL over ``Tier1ToolName``, for the same reason its two siblings are: an
+# empty tuple is a *declared* inert entry and
+# ``tests/unit/test_policies.py::TestSourceRowForAction`` fails on any
+# Tier-1 tool with no entry at all, so a replay tool shipped tomorrow cannot
+# inherit "of course it may act on an unread row" by silence.
+SOURCE_ROW_FOR_ACTION: Final[dict[str, tuple[SourceRow, ...]]] = {
+    "replay_dlq_by_ids": (SourceRow("list_dlq_messages", "items", "id", "remediation_hint"),),
+    # Declared inert, each for a stated reason rather than by omission.
+    #
+    # The two bulk replays name a category or a job_type and no ids, so
+    # `_resource_values` yields nothing to look for and there is no row to
+    # demand. Their equivalent rule is a statement about the CATEGORY — "a
+    # listing in evidence carried a row with this hint" — which is a
+    # different check against a different argument, and the five scenarios
+    # that would newly bind are queued for paid runs. Filed rather than
+    # improvised (WO-R2-143).
+    "replay_dlq_by_category": (),
+    "replay_dlq_messages": (),
+    # `mark_dlq_permanent` names one job_id and its row IS in
+    # `list_dlq_messages`, so this entry could be filled today and
+    # `dlq_human_required_escalates`'s canned trajectory would still be
+    # admitted (it lists the DLQ first, and the id it fences is a row in
+    # that listing). It stays inert because fencing is the conservative
+    # direction — the mark stops auto-replay, it does not re-run anything —
+    # so acting on an unread row cannot cause the harm this guard exists to
+    # prevent, and widening a guard onto a scenario with money behind it is
+    # the coordinator's call. Filed as WO-R2-144.
+    "mark_dlq_permanent": (),
+    # No listing classifies a cache key, a consumer group or a DAG root for
+    # safety; there is no row to read, so there is nothing to require.
+    "invalidate_cache_key": (),
+    "restart_consumer_group": (),
+    "pause_dag": (),
 }
 
 
@@ -251,11 +376,16 @@ def make_llm_plan(
     - ``_misdirected_verify_args`` — the verify probe must not name a
       resource the action left alone.
 
-    A fourth guard, ``_unobserved_action_resource``, then asks whether the
-    verify leg observes the acted-on resource *at all* (ADR 0025). It
-    REFUSES rather than escalates — the plan is re-asked once with the
-    required probe named — because unlike the three above, the action it
-    chose is right and only its evidence is missing.
+    Two further guards then REFUSE rather than escalate, each re-asking the
+    plan once with the missing piece named, because unlike the three above
+    the action they see is not aimed at the wrong object:
+
+    - ``_unread_action_rows`` — the resource this action would replay must
+      have been SEEN as a row in the read that classifies it (ADR 0027).
+      Checked first: whether the action should happen outranks how it would
+      be checked.
+    - ``_unobserved_action_resource`` — the verify probe must observe the
+      acted-on resource at all (ADR 0025).
     """
 
     def transition_plan(run_state: RunState, at: datetime) -> RunState:
@@ -294,11 +424,44 @@ def make_llm_plan(
 
         top = run_state.hypotheses[0]
         refusals_spent = 0
+        unread_refusals_spent = 0
         while True:
             run_state, outcome = _plan_once(run_state, at, llm_client, model, top.name)
             if isinstance(outcome, RunState):
                 return outcome
             plan = outcome
+
+            # Checked BEFORE the verify-leg guard, and the order is the
+            # priority order of the two diagnoses. "You are about to replay a
+            # job whose classification nobody read" is a statement about
+            # whether this action should happen at all; "your verify leg
+            # cannot observe it" is a statement about how you would check an
+            # action that should. Reporting the second first would send the
+            # planner to fix the checking of a replay it must not make.
+            unread = _unread_action_rows(plan, run_state)
+            if unread is not None:
+                source, unread_ids = unread
+                if unread_refusals_spent >= _MAX_UNREAD_ROW_REFUSALS:
+                    return _escalate_remediation(
+                        run_state,
+                        at,
+                        f"planner proposed replaying a dead-lettered job whose own "
+                        f"dead-letter row this run never read, "
+                        f"{unread_refusals_spent + 1} times: "
+                        f"{_unread_row_reason(source, unread_ids, plan)} The action "
+                        "was NOT executed — a replay is only safe for a row somebody "
+                        "classified, and ADR 0008 allows one attempt.",
+                    )
+                unread_refusals_spent += 1
+                run_state = _refuse_unread_rows(run_state, at, plan, source, unread_ids)
+                if run_state.budget.is_exhausted:
+                    return _escalate_remediation(
+                        run_state,
+                        at,
+                        "budget exhausted before the plan could be re-asked without "
+                        "an unread dead-letter row; nothing was executed",
+                    )
+                continue
 
             unobserved = _unobserved_action_resource(plan)
             if not unobserved:
@@ -631,6 +794,96 @@ def _unobserved_action_resource(plan: RemediationPlan) -> tuple[VerifyProbe, ...
     return probes
 
 
+def _rows_read_for(run_state: RunState, source: SourceRow) -> set[str]:
+    """Every resource id this run has actually SEEN a row for, per one source.
+
+    Reads the evidence ledger the way ``_evidence_value_corpus`` does — tool
+    results are stored as the output model's ``model_dump_json``, so the rows
+    are available as parsed JSON — but asks a much narrower question than
+    that corpus does, and the narrowing is the point. The corpus collects
+    every string the platform ever uttered, so an id echoed by the ALERT or
+    read off ``get_dag_state.nodes[].id`` is in it; that is what makes
+    ``_unsourced_resource_args`` satisfied by a job whose dead-letter row
+    nobody opened. Here only the listing's own rows count, and only the row's
+    identifying field.
+
+    Non-string ids are skipped for the same reason the sibling guards skip
+    them: plans arrive from ``record_output`` JSON, where an id is always a
+    string, and a value that is not one cannot be compared without inventing
+    a coercion rule the platform does not have.
+    """
+    seen: set[str] = set()
+    for entry in run_state.evidence:
+        if entry.tool_name != source.tool_name:
+            continue
+        try:
+            parsed = json.loads(entry.result_summary)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(parsed, Mapping):
+            continue
+        rows = parsed.get(source.rows_field)
+        if not isinstance(rows, (list, tuple)):
+            continue
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            value = row.get(source.id_field)
+            if isinstance(value, str) and value.strip():
+                seen.add(value.strip())
+    return seen
+
+
+def _unread_action_rows(
+    plan: RemediationPlan, run_state: RunState
+) -> tuple[SourceRow, tuple[str, ...]] | None:
+    """The source and the ids it has no row for, when the plan acts on one.
+
+    ``None`` means the plan is fine. Three inert cases, all deliberate and
+    all mirroring ``_unobserved_action_resource``:
+
+    * the action tool has an empty entry in ``SOURCE_ROW_FOR_ACTION`` — no
+      listing classifies the resources it names;
+    * the action names no resource value at all — that is
+      ``_absent_resource_args``' report to make, and making it twice buries
+      the actionable one;
+    * every id the action names appears as a row in some listing already in
+      evidence.
+
+    Only the FIRST declared source is reported when several would satisfy the
+    requirement, because the refusal has to name one concrete call to make;
+    an id is nonetheless considered read if ANY declared source carried it.
+    """
+    sources = SOURCE_ROW_FOR_ACTION.get(plan.action_tool, ())
+    if not sources:
+        return None
+    acted = _resource_values(plan.action_tool, plan.action_arguments)
+    if not acted:
+        return None
+    seen: set[str] = set()
+    for source in sources:
+        seen |= _rows_read_for(run_state, source)
+    unread = tuple(sorted(acted - seen))
+    if not unread:
+        return None
+    return sources[0], unread
+
+
+def _unread_row_reason(source: SourceRow, unread: tuple[str, ...], plan: RemediationPlan) -> str:
+    """The sentence both the refusal and the escalation are built from."""
+    return (
+        f"{plan.action_tool} would act on {', '.join(unread)}, and no "
+        f"{source.tool_name} reading in this run's evidence carries a row for "
+        f"{'that id' if len(unread) == 1 else 'those ids'}. The chain view does not "
+        f"carry {source.decision_field}: a dead-lettered node reads as status "
+        f"'dead_letter' in get_dag_state and nothing there says whether replaying it "
+        f"is safe. Call {source.tool_name} first — filter it by "
+        f"{source.decision_field}, or page it with offset until the id appears — and "
+        f"read that row's {source.decision_field} before replaying. A null "
+        f"{source.decision_field} is UNKNOWN, not replay-safe."
+    )
+
+
 def _probe_options(probes: tuple[VerifyProbe, ...], plan: RemediationPlan) -> str:
     """Render the required probes as calls the planner can copy.
 
@@ -701,6 +954,47 @@ def _refuse_plan(
     )
 
 
+def _refuse_unread_rows(
+    run_state: RunState,
+    at: datetime,
+    plan: RemediationPlan,
+    source: SourceRow,
+    unread: tuple[str, ...],
+) -> RunState:
+    """Refuse a plan that would act on a row nobody read, and say which read.
+
+    Refuses rather than escalates, on the same reasoning as ``_refuse_plan``
+    and ``investigation._refuse_handoff``: reject the output, say exactly
+    what would make it good, let the model try again. The repair available
+    here is narrower than either of those — see ``_MAX_UNREAD_ROW_REFUSALS``
+    — but it is real: a batch replay carrying one listed id and one unlisted
+    one is repaired by dropping the second, and that is the shape a
+    context-window-pressured planner actually produces.
+
+    Underscore-prefixed marker, so the briefing trail and the grader's
+    called-tools set both skip it and it spends no tool-call budget. Only
+    the planner tokens of the re-ask, which ``_plan_once`` charges.
+    """
+    reason = f"plan refused before execution: {_unread_row_reason(source, unread, plan)}"
+    entry = EvidenceEntry(
+        tool_name=_PLAN_REFUSED_UNREAD_ROW_MARKER,
+        arguments={
+            "action_tool": plan.action_tool,
+            "unread_ids": list(unread),
+            "required_tool": source.tool_name,
+            "required_field": source.decision_field,
+        },
+        result_summary=reason,
+        timestamp=at,
+    )
+    return run_state.model_copy(
+        update={
+            "evidence": (*run_state.evidence, entry),
+            "updated_at": at,
+        }
+    )
+
+
 def _unsourced_resource_args(plan: RemediationPlan, corpus: set[str]) -> list[str]:
     """Resource-naming plan arguments whose values the platform never produced.
 
@@ -745,11 +1039,11 @@ def _format_plan_context(run_state: RunState, top_hypothesis_name: str) -> str:
     # instruction about this planner's own last output, not a platform
     # observation to reason from; last position is where the model is most
     # likely to act on it.
-    refusals = [e for e in run_state.evidence if e.tool_name == _PLAN_REFUSED_MARKER]
+    refusals = [e for e in run_state.evidence if e.tool_name in _PLAN_REFUSAL_MARKERS]
     evidence_dump = "\n".join(
         f"  - [{e.tool_name}] {e.result_summary[:200]}"
         for e in run_state.evidence
-        if e.tool_name != _PLAN_REFUSED_MARKER
+        if e.tool_name not in _PLAN_REFUSAL_MARKERS
     )
     refusal_dump = (
         "\nYour previous plan was REFUSED. Correct it:\n"

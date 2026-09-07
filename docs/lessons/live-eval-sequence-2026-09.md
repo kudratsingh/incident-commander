@@ -6,9 +6,11 @@ history, and of everything that went wrong on the way there.
 
 Written for the operator running the *next* paid sequence. It is deliberately
 not a changelog: the PRs are linked, but what is worth your time is the shape of
-the mistakes, because five of the seven entries below were manufactured by the
+the mistakes, because six of the ten entries below were manufactured by the
 harness, the protocol, or the operator — not by the agent under test. A run that
-fails for one of those reasons costs money and teaches nothing.
+fails for one of those reasons costs money and teaches nothing. Two more (§8,
+§9) were manufactured by the agent's own steering and cost nothing, because they
+were caught by reading rather than by spending.
 
 Read [the pre-run checklist in the runbook](../runbook.md) before you spend
 anything. If you only read one thing here, read §1.
@@ -482,6 +484,14 @@ filter — the agent would have to page the DLQ or guess a category.
 **This is a scenario-design defect, not a prompt gap**, so no discriminator was
 invented for it. Nothing was changed in either scenario.
 
+> **CLOSED by §9 (same day).** The user's read-before-replay requirement made
+> the discriminator load-bearing rather than optional: once replaying a root
+> requires reading its dead-letter row, the root's hint IS the evidence that
+> separates the pair. `saga_stuck` now seeds `remediation_hint: human_required`
+> exactly as prescribed below, and both scenarios grade the row they read.
+> Everything below is the analysis that produced that fix; read it for the
+> reasoning, not for the current state.
+
 The fix, when someone takes it, is one line and the platform points at it
 already. `create_stuck_dag`'s `remediation_hint` argument says `human_required`
 "makes the chain unrecoverable through the replay guardrails — reserve it for
@@ -499,6 +509,126 @@ to choose caution on evidence that equally supports acting. Nothing structural
 holds it there — `runaway_saga` is in `FIX_MAP`, so the handoff is permitted —
 which means a green run is a green *sample*, not a green guarantee.
 
+---
+
+## 9. The fix that was never checked for safety, caught by the user before the money
+
+**`remediate_runaway_saga_success`, 2026-09-07. Still no archive: still nothing ran.**
+
+§8 left this scenario staged with a corrected trajectory — probe `get_dag_state`,
+see a `dead_letter` root holding `waiting` descendants, replay that root. Two
+readiness sweeps said GO. The user read the trajectory before releasing the
+spend and asked the question none of the sweeps had:
+
+> How does the agent know that root is safe to replay?
+
+It does not. `get_dag_state`'s node model is five fields — `id`, `type`,
+`status`, `retry_count`, `created_at`. **`remediation_hint` is not one of
+them, and neither is `error_message`.** So `"status": "dead_letter"` says the
+root *stopped* the chain and says nothing at all about whether restarting it
+is safe. The agent was about to re-run a job knowing only that it had failed
+three times.
+
+The information exists, in exactly one place: that job's row in
+`list_dlq_messages`. And the platform's own description of that tool states
+the rule out loud:
+
+> A null hint is UNKNOWN, not replay-safe: do not feed those to a categorised
+> replay. Read the error, then replay by explicit id, or fence it with
+> `mark_dlq_permanent`.
+
+An **unread** row is strictly less evidence than a null hint.
+
+### Six guards admitted it, and the near-miss is the interesting one
+
+Every structural check the campaign has built passes this plan. Tier checks;
+`_absent_resource_args`; `_misdirected_verify_args`; §7's
+`VERIFY_PROBE_FOR_ACTION` (`get_dag_state` genuinely observes a replay); §8's
+`RESOLUTION_CLASS` (`replay_dlq_by_ids` genuinely resolves). All correct.
+
+The one worth staring at is `_unsourced_resource_args`, which requires a
+resource argument to be a value the platform itself produced. The chain root's
+id **is** platform-produced: the alert carries it, and `get_dag_state` echoes
+it back as `seed_id` and as a node `id`. So the guard says "this string is not
+a hallucination" — and reads, to a tired operator, almost exactly like "the
+platform told us about this job". Those are very different claims and only the
+first was ever being made.
+
+> **Together the guard stack establishes that the agent is acting on the right
+> object, named honestly, and can check its own work. Not one of them asks
+> whether acting on that object is a good idea.**
+
+### And the prompt was steering *away* from the answer
+
+§8's own fix said so, in a line pinned by an invariant test:
+
+> **You do not need the DLQ listing to act here.** … Do not call
+> `list_dlq_messages` merely to satisfy a table.
+
+That sentence is true about the cheapest trajectory and false about the safe
+one, and it was written for a good reason: `list_dlq_messages` takes no job-id
+filter, so reaching one known row means filtering by hint or paging. §8
+measured that cost and decided against paying it, having framed the question
+as routing rather than as safety. One extra call against a cap of 13.
+
+### The rule
+
+**A fix that is only justified by the symptom is not justified.** "This node is
+dead-lettered" explains why the chain is stuck; it does not license the
+remediation. Before an action, ask what would have to be *true of the resource*
+for the action to be correct, and then ask which read establishes it. If no
+read does, that is an escalation, not an assumption.
+
+The general form, and the one to carry to the next repo: the guard family had
+grown four questions — did anyone read what the alert names, is the action
+aimed at it, can anyone see what changed, is a verified success worth anything
+— and every one of them can be satisfied by a run that never established
+whether the change should be made at all.
+
+**Fix →** [ADR 0027](../ADR/0027-read-the-row-before-you-replay-it.md):
+`SOURCE_ROW_FOR_ACTION` refuses a by-id replay whose job's dead-letter row is
+not in the evidence (refuse-and-steer, total over Tier-1, coverage-tested);
+both planner prompts carry the four readings and their outcomes; the scenario
+grades that the root's own row read `replay_safe` *before* the replay, which
+needed two new grader axes — a row selector and an ordering boundary.
+
+### The honest limitation, stated because it will bite a live run
+
+PLANNING is a single LLM call with no tool budget, so the remediation planner
+**cannot fetch the row it is missing**. The refusal's only real repair is
+dropping ids it has no row for; otherwise the run escalates naming the skipped
+read. That is fail-closed and correct, and it means a live run whose
+*investigation* skipped the read will escalate rather than resolve. Keeping a
+correct run green is the investigation planner's job, which is why the rule
+went into `investigation_planner.md` as well — the prompt is the steering half,
+and it is the half the guard cannot substitute for.
+
+### The saga pair finally has a discriminator
+
+§8 recorded that `saga_stuck` and `remediate_runaway_saga_success` expected
+**opposite** behaviour from evidence the agent could not tell apart, called it
+a scenario-design defect, and left the one-line fix as the user's call because
+it changes a scenario queued for a paid run.
+
+That call is taken here. `saga_stuck`'s chaos hook now seeds
+`remediation_hint: human_required` — the hook already supported the argument
+and its own description reserves that value "for escalation drills". The
+escalate-only twin is now escalate-only for a reason the agent can read: the
+root's row says a human decides, and the platform refuses to auto-replay it.
+Until now a green run there measured whether the planner happened to choose
+caution. It costs one extra read against a cap of 11.
+
+### What is still open
+
+`replay_dlq_by_category` names a filter and no ids, so the guard has nothing to
+look up: three category-replay scenarios can still read the hint *after* acting
+and grade green (WO-R2-143). `mark_dlq_permanent` is deliberately left inert —
+fencing stops auto-replay rather than re-running anything, so an unread row
+there cannot cause this harm (WO-R2-144). Both would newly bind scenarios
+queued for paid runs, which makes them the coordinator's call, not a builder's.
+
+---
+
 ## Summary: what each failure was actually caused by
 
 | # | Run / event | Looked like | Actually was | Fix |
@@ -512,25 +642,39 @@ which means a green run is a green *sample*, not a green guarantee.
 | 7 | PR #178 | 6-line docs PR | 342 files swept by `git add -A` | Explicit paths; work in a worktree |
 | 8 | `remediate_stale_cache_success` (`7acd2b441961`) | eventual consistency (auto-label) | **Scenario + prompt asked for a signal the world cannot produce** — hits frozen at 209 across six polls | ADR 0025; override recorded in §7 |
 | 9 | `remediate_runaway_saga_success` (not run) | a staged, ready scenario | **Prompt + `FIX_MAP` steered at the one tool the scenario forbids**; a verified pause would have graded RESOLVED on a still-stuck chain | ADR 0026; §8 |
+| 10 | `remediate_runaway_saga_success` (still not run) | a staged, *corrected*, twice-swept scenario | **The corrected fix was never checked for safety**: the agent would replay a dead-lettered root knowing only that it was dead-lettered, because `get_dag_state` carries no `remediation_hint` — and six guards admitted the plan | ADR 0027; §9 |
 
-**The through-line.** Six of these eight are failures of *procedure and
+**The through-line.** Six of these ten are failures of *procedure and
 environment*, not of the agent — only rows 2 and 3 are genuine agent defects,
 and they are the same defect. The scoreboard was reporting on the harness and
 attributing it to the model. Before you accept a red live result, establish that
 the world was clean, the invocation was the runbook's, and the knobs let the
 agent see the truth — in that order. Only then is the result about the agent.
 
+(The count said "eight" until row 10 landed; rows 9 and 10 arrived after the
+prose was written, which is the five-stale-copies problem in miniature and is
+why it is being corrected rather than left to be re-derived.)
+
+Rows 9 and 10 are a third kind, and they are the two that cost nothing:
+**steering defects, found by reading the instructions the agent would actually
+obey rather than by running it.** Both were caught between "the scenario is
+ready" and "the money is released", which is the only window in which a defect
+of that kind is free. Neither would have shown as a red run — row 9 would have
+graded RESOLVED and row 10 would probably have graded green too, since the
+world's chain root really was replay-safe. **A green run does not establish
+that the agent had grounds.**
+
 Row 8 adds a fourth question to that list, and it is the one this sequence
 kept failing to ask: **could the run have gone green at all?** Rows 4 and 8
 are both "the harness made the truth unavailable" — once by showing a stale
-number, once by asking for a number that never existed. Two of the eight
+number, once by asking for a number that never existed. Two of the ten
 turned on a *premise the lab could not satisfy* (row 8 and the 2026-08-12
 un-manufacturable fault), and both were written down in prose nobody
 executes. Before the money: read the scenario's description and its
 `verify_expectation` as instructions, and ask what in this world would move
 if the fix worked.
 
-Also note where the archive's own labels landed. **Two of the eight rows
+Also note where the archive's own labels landed. **Two of the ten rows
 have an auto-assigned `failure_class` this document overrides** (rows 2 and
 8), both in the direction of making a real finding look like noise —
 "grader-brittleness" and "eventual-consistency" are both ways of saying

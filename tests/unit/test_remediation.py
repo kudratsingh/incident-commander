@@ -1762,3 +1762,269 @@ class TestStabilizeOnlyActionsNeverResolve:
         result = transition(run, _now())
 
         assert result.state is IncidentState.RESOLVED
+
+
+class TestReplayRequiresTheJobsDeadLetterRow:
+    """ADR 0027: a dead-lettered job may not be replayed until its own
+    dead-letter row is in the evidence.
+
+    The gap this closes is narrow and was invisible to every existing
+    guard. ``_unsourced_resource_args`` requires the job id to be a string
+    the platform produced, and it is: the alert carries it, and
+    ``get_dag_state`` echoes it back as ``seed_id`` and as a node ``id``.
+    ``_unobserved_action_resource`` requires a verify probe that can observe
+    it, and ``get_dag_state`` genuinely can. So a run could read a chain,
+    see ``"status": "dead_letter"`` on its root, and replay that root having
+    learned nothing whatsoever about whether restarting it was safe —
+    because ``get_dag_state``'s node model is five fields and
+    ``remediation_hint`` is not one of them.
+
+    The platform's own rule, in ``list_dlq_messages``' description: "A null
+    hint is UNKNOWN, not replay-safe: do not feed those to a categorised
+    replay. Read the error, then replay by explicit id, or fence it with
+    ``mark_dlq_permanent``." An unread row is strictly less than a null one.
+    """
+
+    _ROOT = "a2412a54-65f0-5258-95ab-5c168a15df64"
+    _OTHER = "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+
+    def _saga_run(self, evidence: tuple[EvidenceEntry, ...]) -> RunState:
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.RUNAWAY_SAGA,
+                    name="stuck_saga_node",
+                    confidence=0.85,
+                    reasoning="dead-lettered root holding waiting descendants",
+                ),
+            ),
+            evidence=evidence,
+        )
+        return run.model_copy(
+            update={
+                "alert": {
+                    "source": "platform.dag",
+                    "severity": "critical",
+                    "job_id": self._ROOT,
+                }
+            }
+        )
+
+    def _chain_probe(self) -> EvidenceEntry:
+        """The reading that says the root STOPPED the chain and nothing more.
+
+        Five fields per node, exactly as the platform emits them — the
+        absence of ``remediation_hint`` here is the whole premise.
+        """
+        return EvidenceEntry(
+            tool_name="get_dag_state",
+            arguments={"job_id": self._ROOT},
+            result_summary=(
+                f'{{"seed_id":"{self._ROOT}","nodes":[{{"id":"{self._ROOT}",'
+                '"type":"bulk_api_sync","status":"dead_letter","retry_count":3,'
+                '"created_at":"2026-08-31T01:21:46.584955Z"}],"edges":[],'
+                '"paused":false,"paused_expires_in_seconds":null,"paused_by":null}'
+            ),
+            timestamp=_now(),
+        )
+
+    def _dlq_probe(self, *ids: str, hint: str = "replay_safe") -> EvidenceEntry:
+        items = ",".join(
+            f'{{"id":"{job_id}","type":"bulk_api_sync","retry_count":3,'
+            f'"remediation_hint":"{hint}","created_at":"2026-08-31T01:21:46.584955Z"}}'
+            for job_id in ids
+        )
+        return EvidenceEntry(
+            tool_name="list_dlq_messages",
+            arguments={},
+            result_summary=f'{{"total":{len(ids)},"items":[{items}]}}',
+            timestamp=_now(),
+        )
+
+    def _replay_plan(self, *ids: str, verify_id: str | None = None) -> dict[str, Any]:
+        return _plan_dict(
+            target_hypothesis="stuck_saga_node",
+            action_tool="replay_dlq_by_ids",
+            action_arguments={"job_ids": list(ids)},
+            verify_tool="get_dag_state",
+            verify_arguments={"job_id": verify_id or ids[0]},
+            verify_expectation="no node left in dead_letter and the descendants promoted",
+        )
+
+    # -- red before --------------------------------------------------------
+
+    def test_the_chain_probe_alone_no_longer_admits_a_replay(self) -> None:
+        # THE regression, and it is the trajectory `remediate_runaway_saga_success`
+        # graded green until 2026-09-07: probe the chain, replay the root.
+        plan = self._replay_plan(self._ROOT)
+        llm = CannedLLMClient([plan, plan])
+        result = make_llm_plan(llm, model=_MODEL)(self._saga_run((self._chain_probe(),)), _now())
+
+        assert result.state is IncidentState.ESCALATED
+        # Refused BEFORE execution — nothing was replayed.
+        assert result.remediation_attempts == 0
+        assert result.remediation_plan is None
+
+    def test_the_refusal_names_the_id_and_the_read(self) -> None:
+        plan = self._replay_plan(self._ROOT)
+        llm = CannedLLMClient([plan, plan])
+        result = make_llm_plan(llm, model=_MODEL)(self._saga_run((self._chain_probe(),)), _now())
+
+        refusals = [e for e in result.evidence if e.tool_name == "_plan_refused_unread_row"]
+        assert len(refusals) == 1
+        reason = refusals[0].result_summary
+        assert self._ROOT in reason
+        assert "list_dlq_messages" in reason
+        # The steer has to say what the read is FOR, not merely which tool.
+        assert "remediation_hint" in reason
+        assert "UNKNOWN, not replay-safe" in reason
+        assert refusals[0].arguments["unread_ids"] == [self._ROOT]
+
+    def test_the_steer_reaches_the_planner_in_full(self) -> None:
+        # Evidence lines are cut at 200 chars in the planner context; the
+        # refusal has to arrive whole or it is not a steer.
+        plan = self._replay_plan(self._ROOT)
+        llm = CannedLLMClient([plan, plan])
+        make_llm_plan(llm, model=_MODEL)(self._saga_run((self._chain_probe(),)), _now())
+
+        assert len(llm.calls) == 2
+        second_context = llm.calls[1][1]
+        assert "REFUSED" in second_context
+        assert "list_dlq_messages" in second_context
+
+    def test_second_refusal_escalates_naming_the_gap(self) -> None:
+        plan = self._replay_plan(self._ROOT)
+        llm = CannedLLMClient([plan, plan])
+        result = make_llm_plan(llm, model=_MODEL)(self._saga_run((self._chain_probe(),)), _now())
+
+        reason = result.evidence[-1].result_summary
+        assert self._ROOT in reason
+        assert "list_dlq_messages" in reason
+        assert "was NOT executed" in reason
+
+    # -- the repair the re-ask exists for ----------------------------------
+
+    def test_dropping_the_unlisted_id_is_a_repair_the_planner_can_make(self) -> None:
+        """The narrow but real case for refusing rather than escalating.
+
+        PLANNING is one LLM call with no tool budget, so the planner cannot
+        go and fetch a row it is missing — but it CAN drop the ids it has no
+        row for. A batch carrying one listed job and one unlisted one is
+        repaired by replaying the first.
+        """
+        llm = CannedLLMClient(
+            [
+                self._replay_plan(self._OTHER, self._ROOT, verify_id=self._OTHER),
+                self._replay_plan(self._OTHER),
+            ]
+        )
+        result = make_llm_plan(llm, model=_MODEL)(
+            self._saga_run((self._chain_probe(), self._dlq_probe(self._OTHER))), _now()
+        )
+
+        assert result.state is IncidentState.REMEDIATING
+        assert result.remediation_plan is not None
+        replanned = RemediationPlan.model_validate(result.remediation_plan)
+        assert replanned.action_arguments["job_ids"] == [self._OTHER]
+
+    # -- positive control --------------------------------------------------
+
+    def test_a_replay_whose_row_was_read_is_admitted(self) -> None:
+        llm = CannedLLMClient([self._replay_plan(self._ROOT)])
+        result = make_llm_plan(llm, model=_MODEL)(
+            self._saga_run((self._chain_probe(), self._dlq_probe(self._ROOT))), _now()
+        )
+
+        assert result.state is IncidentState.REMEDIATING
+        assert not [e for e in result.evidence if e.tool_name == "_plan_refused_unread_row"]
+        # A good plan is never re-asked.
+        assert len(llm.calls) == 1
+
+    def test_the_row_counts_whatever_its_hint_says(self) -> None:
+        """The guard demands the READ, never a particular verdict.
+
+        ``wait_and_replay`` warrants a deferred replay and ``replay_safe`` an
+        immediate one — both legitimate, and choosing between them is the
+        planner's job. A structural rule that only admitted one value would
+        be making that decision, and would refuse the correct plan for every
+        `wait_and_replay` scenario in the suite.
+        """
+        llm = CannedLLMClient([self._replay_plan(self._ROOT)])
+        result = make_llm_plan(llm, model=_MODEL)(
+            self._saga_run(
+                (self._chain_probe(), self._dlq_probe(self._ROOT, hint="human_required"))
+            ),
+            _now(),
+        )
+
+        assert result.state is IncidentState.REMEDIATING
+
+    def test_an_id_echoed_by_the_alert_is_not_a_row(self) -> None:
+        """The precise hole. ``_unsourced_resource_args`` is satisfied by the
+        alert's own job_id, so before this guard the evidence corpus said
+        "the platform produced this string" and nothing said "somebody read
+        this job's classification"."""
+        from incident_commander.agent.remediation import (
+            _evidence_value_corpus,
+            _unread_action_rows,
+        )
+
+        run = self._saga_run((self._chain_probe(),))
+        plan = RemediationPlan.model_validate(self._replay_plan(self._ROOT))
+        assert self._ROOT in _evidence_value_corpus(run)
+        assert _unread_action_rows(plan, run) is not None
+
+    # -- inertness ---------------------------------------------------------
+
+    def test_a_category_replay_is_inert(self) -> None:
+        """Declared inert: the tool names a filter, not ids, so there is
+        nothing to look up. `remediate_dlq_backlog_success` and the two
+        `dlq_*` category scenarios stay admitted."""
+        llm = CannedLLMClient(
+            [
+                _plan_dict(
+                    target_hypothesis="transient_dependency_failure",
+                    action_tool="replay_dlq_by_category",
+                    action_arguments={"category": "replay_safe"},
+                    verify_tool="list_dlq_messages",
+                    verify_arguments={},
+                    verify_expectation="the replay_safe rows leave the listing",
+                )
+            ]
+        )
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.POISON_MESSAGE,
+                    name="transient_dependency_failure",
+                    confidence=0.85,
+                    reasoning="retryable DLQ backlog",
+                ),
+            ),
+        )
+        result = make_llm_plan(llm, model=_MODEL)(run, _now())
+
+        assert result.state is IncidentState.REMEDIATING
+        assert len(llm.calls) == 1
+
+    def test_a_consumer_restart_is_inert(self) -> None:
+        # No listing classifies a consumer group, so the default plan — which
+        # reads no DLQ at all — must still be admitted.
+        llm = CannedLLMClient([_plan_dict()])
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.CONSUMER_SATURATION,
+                    name="consumer_saturation",
+                    confidence=0.9,
+                    reasoning="lag climbing on the alerted group",
+                ),
+            ),
+        )
+        result = make_llm_plan(llm, model=_MODEL)(run, _now())
+
+        assert result.state is IncidentState.REMEDIATING
+        assert len(llm.calls) == 1

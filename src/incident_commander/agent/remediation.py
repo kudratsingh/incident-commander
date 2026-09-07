@@ -142,7 +142,7 @@ def make_llm_plan(
     lists only Tier-1 tools). Persists the plan on ``RunState``.
 
     Three resource-argument guards run before anything is wired, all
-    escalating pre-execution (ADR 0022):
+    escalating pre-execution (ADR 0024):
 
     - ``_absent_resource_args`` — every resource-naming field on both
       legs must be present, or the registry default silently picks the
@@ -239,7 +239,7 @@ def make_llm_plan(
             # Say which resource you mean. An omitted field is not a smaller
             # sin than a mis-typed one — `wire_arguments` default-fills it
             # from the platform's input schema, so the call silently targets
-            # whatever that default names (WO-R2-15, ADR 0022).
+            # whatever that default names (WO-R2-15, ADR 0024).
             return _escalate_remediation(
                 run_state,
                 at,
@@ -266,7 +266,7 @@ def make_llm_plan(
         if misdirected:
             # Verify what you changed. A probe aimed at a resource the action
             # never touched reads a healthy number off an untouched system
-            # and calls the incident resolved (ADR 0022).
+            # and calls the incident resolved (ADR 0024).
             return _escalate_remediation(
                 run_state,
                 at,

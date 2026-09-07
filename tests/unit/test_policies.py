@@ -233,7 +233,7 @@ class TestResourceArgFieldsCoverage:
     def test_omitting_any_resource_field_is_a_planning_violation(
         self, tool: str, field: str
     ) -> None:
-        """WO-R2-15 / ADR 0022: absence is as loud as mis-sourcing.
+        """WO-R2-15 / ADR 0024: absence is as loud as mis-sourcing.
 
         The registry hole was narrow — ``get_consumer_lag.consumer_group``
         was the one resource-naming field with a default, so omitting it

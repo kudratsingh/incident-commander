@@ -110,6 +110,72 @@ failed when it didn't.
 
 Written after the Phase-6 seven-run live eval that produced the five-bucket noise-source taxonomy (see [`docs/lessons/live-eval-noise-sources.md`](lessons/live-eval-noise-sources.md)). Run one scenario at a time with an explicit reset between them.
 
+### Pre-run checklist
+
+Work through this **before spending anything**. It is ordered: each step is
+cheaper than the one after it, and every item exists because skipping it once
+cost real money. The 2026-08→09 sequence spent ~$2 on a stage whose results
+had to be thrown away, and produced seven red scenarios that were all
+harness artifacts — see [`docs/lessons/live-eval-sequence-2026-09.md`](lessons/live-eval-sequence-2026-09.md).
+
+1. **Read the gotchas ledger.** `## Gotchas ledger` in the campaign repo's
+   `docs/00-RESUME-HERE.md` (`audit-ws`, a sibling checkout — it is not in
+   this repo, so there is no relative link to follow). Read it **now**, not
+   after something breaks. This step is here because a recorded lesson that
+   the procedure does not route you to is worth nothing: the hand-rolled
+   read-only stage that cost ~$2 on 2026-08-30 had been described in that
+   ledger's own repo nineteen days earlier, and nobody read it at the moment
+   the choice was made. Also skim the lessons doc linked above.
+
+2. **Run the runbook's exact commands.** Not an equivalent, not an inlined
+   version, not "the same thing but filtered". `make eval-smoke` is the
+   read-only stage; a hand-assembled `ONLY=` list under the write token is
+   not, and the difference is invisible until the trajectories show Tier-1
+   writes. If the documented command will not do what you need, that is a
+   finding to raise with the user **before** spending, not a thing to work
+   around.
+
+3. **Start from a known world**: either a fresh stack (`make demo`) or an
+   explicit `make eval-reset`. After any `docker compose down -v`, re-mint
+   and re-paste the tokens (see the bring-up block below).
+
+4. **Audit the world against the seeded baseline.** A green reset does not
+   prove a clean world — reset only undoes what the eval seeds. Check all
+   four, and expect exactly:
+
+   | Check | Expected |
+   |---|---|
+   | DLQ total | **4** |
+   | Active alerts | **3** |
+   | Redis `chaos:*` keys | **0** |
+   | `worker-dispatcher` lag | **0**, with `lag_known: true` |
+
+   Anything else is a stop. `lag_known: false` is not "lag 0" — it means the
+   metric is unreadable, and a run started on it grades the agent for a
+   world nobody can see. Stray alerts above the baseline 3 are the known
+   organic-alert case (WO-R2-131/132): they survive reset, they re-fire
+   hourly, and on 2026-09-01 three of them aborted a run before any spend.
+
+5. **Traffic only where the scenario needs it.** `make traffic` is required
+   for `remediate_consumer_lag_success` and for nothing else. Every other
+   remediation scenario seeds its fault whole. Running traffic during an
+   unrelated scenario adds load the scenario did not ask for.
+
+6. **Hold the machine awake, and run in the background.** A paid run needs
+   its own untimed `caffeinate -dims`; the harness's `caffeinate -i -t 300`
+   is a five-minute timer, shorter than a single scenario. And a foreground
+   run dies to the 10-minute command timeout, wasting the spend — long runs
+   go in the background, always.
+
+7. **Reset after** the scenario, not just before it.
+
+8. **On any failure: STOP.** Investigate before running the next scenario.
+   A second run against a world the first one left dirty cannot be
+   interpreted, and two consecutive different-looking failures almost
+   always mean shared state rather than two bugs. Bucket the failure before
+   opening a code file, and check whether the harness, not the agent,
+   produced it.
+
 ```bash
 # Bring-up. `make demo` now stops after compose-up (no embedded eval).
 # Expect FIVE long-running healthy containers (postgres, redis, redpanda,
@@ -117,6 +183,15 @@ Written after the Phase-6 seven-run live eval that produced the five-bucket nois
 # one-shots (migrate, redpanda-init). Three healthy containers means the
 # pre-completion compose — no consumers, no consumer_lag scenarios.
 make demo
+
+# `bootstrap-token` PRINTS the tokens. It does not write .env, and nothing
+# downstream reads its stdout — YOU paste the printed values into .env.
+# Skipping the paste fails later with an auth error that reads like a
+# scope problem. And note what invalidates them: `docker compose down -v`
+# destroys the database they were minted against, so every previously
+# issued token is dead even though .env still holds a plausible-looking
+# one (symptom: `Invalid token` on the drift check, right after a
+# bring-up that looked clean). After any `down -v`, re-mint and re-paste.
 make bootstrap-token
 
 # Tracing. eval-live sets EVAL_TRACE_DIR inline, but exporting it here
@@ -161,6 +236,25 @@ make eval-smoke
 #    service it resets. Defaults are demo/compose.yml + api; a .env that
 #    overrides PLATFORM_COMPOSE at the platform's own dev stack cleans a
 #    different database and reports success.
+#    TRAFFIC PREREQUISITE — remediate_consumer_lag_success ONLY.
+#    Start `make traffic` in a second terminal and KEEP IT RUNNING for the
+#    whole scenario. Lag is arrival minus service: the runner's chaos_setup
+#    supplies the service half (kill_consumer), and `make traffic` is the
+#    only producer of the arrival half. Without it the backlog stays at 0,
+#    the precondition burns its full 10x15s and aborts, and the run reports
+#    a fault that was never manufactured.
+#
+#    Do NOT try to bank a head start first. `make traffic UNTIL_LAG=30`
+#    before launching the runner builds NOTHING: the consumer is still
+#    alive and healthy at that point, so it services every job as fast as
+#    the loop submits it and lag stays flat at 0 — the command simply never
+#    returns. Lag can only accumulate AFTER the runner seeds the kill, which
+#    happens inside the run. The raised precondition IS the head start: it
+#    waits up to 2.5 minutes for the backlog to build past 20 while traffic
+#    pumps. Start traffic, then start the run, and let the precondition wait.
+#
+#    The other scenarios below need no producer — their faults are seeded
+#    whole (DLQ rows, a hot cache key, a stuck chain) rather than accumulated.
 make eval-live ONLY=remediate_consumer_lag_success && make eval-reset
 make eval-live ONLY=remediate_dlq_backlog_success  && make eval-reset
 
@@ -216,6 +310,8 @@ A filtered run (`ONLY=...`) still overwrites `evals/reports/latest.json`, but th
 
 `make eval-reset` shells into the platform app via `docker compose -f $PLATFORM_COMPOSE exec $PLATFORM_SERVICE`. `PLATFORM_COMPOSE` defaults to `demo/compose.yml` — **this repo's own demo stack**, the one `make demo` brings up — and `PLATFORM_SERVICE` defaults to the `api` container in it (both demo services share one database, and `api` is the REST app that owns seeding). Point them at a sibling `incident-platform` checkout only if that is genuinely the stack under test, either per-invocation or once in `.env` (the Makefile `-include .env`s it, so a non-default layout is a one-time setup rather than a flag you have to remember on every call).
 
+**What `make eval-reset` does NOT clear.** Reset undoes what the eval *seeds*: `chaos:*` keys, the lag cache, the DLQ fixture pool, `hot_set`, optionally idempotency records. It has no idea about state the world produced **organically** — anything raised by a platform loop rather than by a scenario. Concretely, it does not clear **SLO / non-chaos alerts**, and it cannot: those are generated by the platform's own SLO evaluator reading the seeded fixtures as if they were real traffic (4 of the 7 seeded jobs are dead-lettered, which is a fast burn by any honest reading), so resetting the fixtures **re-arms** the alert rather than removing it. Worse, the fast-burn dedup key is bucketed by the hour, so a suppressed alert **returns hourly** instead of staying suppressed. A green `eval-reset` therefore does not mean a clean world. Audit against the seeded baseline before every paid run (see the pre-run checklist above), and treat a stray alert as a stop-and-investigate, not as background noise — on 2026-09-01 three surviving `SLO fast burn` alerts were caught this way and the run was aborted before any spend. Tracked as **WO-R2-131** (reset must sweep organic alerts) and **WO-R2-132** (the platform-side fix); the current mitigation is `SLO_EVALUATION_INTERVAL_SECONDS: "0"` on both demo services in `demo/compose.yml` (PR #180), which disables the loop in the eval world only.
+
 Getting this wrong does **not** reliably fail. The exit-2 guard only checks that `$PLATFORM_COMPOSE` is a file that exists, so a stale `PLATFORM_COMPOSE=../incident-platform/docker-compose.yml` in `.env` — the value this runbook itself used to give — passes the guard, resets the platform's dev Postgres and Redis, prints success, and leaves the stack you are actually evaluating untouched. The recipe echoes the compose file and service it is about to reset for exactly this reason: read that line, do not trust the exit code. The guard catches a missing file, nothing more. Pass `PURGE_IDEMPOTENCY=1` to also `DELETE` idempotency_records (24h TTL from platform ADR 0010 handles the common case; opt-in purge for guaranteed-fresh cache). Only the literal `1` enables it: the gate used to be make's `$(if ...)`, which asks whether the value is a non-empty string rather than whether it is true, so `PURGE_IDEMPOTENCY=0` — and `no`, and `false` — deleted the rows (WO-R2-89).
 
 Environment variable knobs for the live path (see [ADR 0006](ADR/0006-verification-is-a-polling-window.md)):
@@ -225,11 +321,27 @@ Environment variable knobs for the live path (see [ADR 0006](ADR/0006-verificati
 | `VERIFY_PROBE_ATTEMPTS` | 1 | 6 | Bounded polling window on VERIFYING. Default keeps canned runs single-probe. 6 proved out in the 2026-08-03 campaign; size scenario caps for it. |
 | `VERIFY_PROBE_DELAY_SECONDS` | 15 | 20 | Delay between polling attempts. Size to the slowest verify probe's freshness. |
 | `INVESTIGATE_REPROBE_ATTEMPTS` | 0 | 1 | Investigation-side freshness re-probe ([ADR 0009](ADR/0009-investigation-freshness-reprobe.md)): when a cached read kills a fixable hypothesis at ≥0.7, re-read it fresh before accepting. Default 0 keeps canned runs byte-identical. |
-| `INVESTIGATE_REPROBE_DELAY_SECONDS` | 20 | 20+ | Delay before the freshness re-read. Size to the cached tool's declared staleness window (lag cache: 60s). |
+| `INVESTIGATE_REPROBE_DELAY_SECONDS` | 20 | 75 | Delay before the freshness re-read. Must **straddle** the cached tool's staleness window, not merely be shorter than it (lag cache: 60s → 75). |
 
 `.env.example` now ships the live-recommended values for these knobs uncommented (canned/offline runs are unaffected — the runner forces single-probe and no-reprobe whenever the platform is a placeholder), and a `--live` run that still has them at canned-equivalent values prints a preflight warning. This table stays the source of record.
 
+**Why the reprobe delay is 75 and not 20** (live run 2026-08-31, "run B" —
+[`docs/lessons/live-eval-sequence-2026-09.md`](lessons/live-eval-sequence-2026-09.md)).
+A re-probe exists to answer "is this reading stale?", which it can only do by
+landing in a *different* cached generation than the first read. At 20s both
+probes fell inside the same ~60s cached reading of the consumer lag and
+returned the identical number. The agent read `lag=4` twice, concluded the
+metric was genuinely static, and — correctly, on the evidence it had —
+escalated instead of remediating. The graded failure was manufactured
+entirely by this knob: nothing was wrong with the agent, the platform, or the
+scenario. A delay shorter than the staleness window turns the freshness
+re-probe into a second copy of the first read, which is worse than no
+re-probe at all, because it launders a stale value into a confirmed one.
+75 > 60 guarantees the second read crosses a refresh boundary.
+
 All Tier-1 remediation scenarios now self-seed via `chaos_setup:` in their YAML — no separate `make chaos-*` step needed for the live pass.
+
+That covers **chaos, not traffic**, and the difference is easy to miss because the sentence above reads like "no manual setup at all." `chaos_setup:` breaks something; it does not generate load. One scenario, `remediate_consumer_lag_success`, needs a fault that is *accumulated* rather than seeded — consumer lag is arrival minus service, and killing the consumer only removes the service side. Nothing in the YAML produces the arrival side, so `make traffic` must be running in another terminal for the duration of that run (see the traffic prerequisite in the protocol block above). Every other remediation scenario seeds its fault whole and needs no producer.
 
 ### Commit the run archive (invariant 9)
 
@@ -515,9 +627,16 @@ operate by:
 - Reprobe delay must straddle the cache window: `INVESTIGATE_REPROBE_DELAY_SECONDS=75`
   (a 20s reprobe lands inside the same ~60s cached reading and shows a
   static value — live run 2026-08-31 collapsed a correct hypothesis on it).
-- Give traffic a head start: `--until-lag 30` BEFORE launching the runner,
-  then keep it pumping. The precondition now demands lag>=20 so a run
-  cannot start against a thin, unconvincing fault.
+- **There is no head start to give.** An earlier version of this note said
+  to run `UNTIL_LAG=30` before launching the runner and then keep it
+  pumping. The first half cannot work: before the runner seeds
+  `kill_consumer` the consumer is alive and drains the topic as fast as
+  the loop fills it, so lag never leaves 0 and `UNTIL_LAG` waits forever
+  against a healthy stack. Lag only accumulates once the run has killed the
+  consumer — which happens *inside* the run. Start `make traffic` plain,
+  start the run, and let the precondition (lag>=20 over 10×15s) do the
+  waiting; that window IS the head start, and it is why the bar could be
+  raised from 1 to 20 without making the scenario flaky.
 - Traffic: **required, and it now exists.** "The standard 1-job/2s loop"
   described here since 2026-08-04 was never a thing you could run — no
   such script existed in either repo, so lag stayed at 0 and the scenario
@@ -549,8 +668,13 @@ operate by:
   the loop keeps going and says so.
 
   Forgetting it fails safely: the scenario's precondition polls for
-  `lag >= 1` over 6×15s and aborts before any model call, reporting that
-  the fault was never manufactured. (`remediate_stale_cache_success` is
+  `lag >= 20` over 10×15s and aborts before any model call, reporting that
+  the fault was never manufactured. (It was `lag >= 1` over 6×15s until
+  PR #178. Both numbers were raised for the same reason: a backlog of 1 is
+  indistinguishable from metric jitter, and 6×15s could expire while the
+  60s lag recompute was still in flight — a run could start against a
+  fault too thin to reason about, or abort on one that was about to
+  appear. The YAML is the authority; this sentence tracks it.) (`remediate_stale_cache_success` is
   winnable live as of the v0.6.0 pin: `get_cache_key_info` reads the exact
   key `create_stale_cache` writes, so the scenario's precondition can
   confirm the seeded key is there before any spend. Before that tool

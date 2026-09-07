@@ -21,6 +21,7 @@ An archive listed as *transcript only* means the raw session data is on disk und
 | 2026-08-16 | `2026-08-16-campaign-backfill.zip` | **This convention, plus a backfill.** `context/` added to both repos; the whole campaign's transcripts packed into one archive. No product code changed. |
 | 2026-08-16 | `2026-08-16-stage-1-and-remediation-readiness.zip` | **Five shapes closed, three more found by running it.** PRs #133–#143 closed every blocker the readiness sweep named (807 → 1027 tests). Then a free dress rehearsal against the live stack found three defects invisible in source — including that `failed_traces_scan` passed the trusted 26/26 run **without ever calling `search_traces`**. Read `SUMMARY.md` §"What is still wrong" before planning the paid run. |
 | 2026-08-21 | *in progress* | **Six parallel builders + a read-only reliability sweep.** cmd #145 canned-only scenarios (exit 8, pre-spend), #146 run-archive filesystem locking (ADR 0021), #147 evidence tool-scoping — **16 cross-satisfiable evidence tokens across 15 of 38 scenarios**, not just the one known defect. plat #146 `get_cache_key_info`, #147 pins+timestamp re-baseline, #148 `create_stuck_dag`. The 14-finder reliability sweep lives at `audit-ws/sweeps/reliability-sweep.js` — see `sweeps/README.md`; run IDs change, the script is the artifact. |
+| 2026-08-30 → 09-07 | *transcript only* | **The paid live-eval sequence, and the first green remediation.** Read-only pass `cde5a14485c3` 25/26 (`degraded 0`, exit 0 — PR #176's forward checkpointing is why that exit code means something). Then four runs of `remediate_consumer_lag_success`: A wrong-target (→ #177 `ALERT_SUBJECT_PROBES` + planner rules), B honest escalation on a stale-but-static lag (→ #178 reprobe 75s, precondition lag>=20 over 10×15s), C **aborted pre-spend** on a world audit, D `16ae3c7a4c9d` **green on all five dimensions** — the project's first. Also: a ~$2 read-only stage thrown away because it was hand-rolled instead of `make eval-smoke`, and a fresh world that alerts on its own fixtures (→ #180). Full record and lessons: [`docs/lessons/live-eval-sequence-2026-09.md`](../docs/lessons/live-eval-sequence-2026-09.md). |
 
 ## Things a future session should not have to rediscover
 
@@ -66,6 +67,22 @@ Promoted out of the archives because they cost real time or money the first time
   commits, so merged branches look unmerged forever and N-commits-to-1 defeats patch-id. Check branch
   names against the merged-PR record, then compare file CONTENT. Two separate sessions concluded
   "unmerged work exists" from these; both were wrong.
+- **`git add -A` in the main checkout swept 342 files into a 6-line PR.** PR #178 changed six lines
+  of the runbook and also committed three untracked run archives (~42k lines) that happened to be
+  sitting in `evals/runs/`. That directory is deliberately NOT gitignored (invariant 9), which is
+  exactly what makes `-A` dangerous there rather than merely noisy. **Add explicit paths, never
+  `-A`.** Run archives are committed deliberately, on their own branch, with their own message —
+  never as a side effect. Doing docs work in a worktree prevents it structurally.
+- **Protocol check beats machinery check.** Before a paid run, verifying that the machinery works
+  is the *second* question; the first is whether you are running the runbook's exact command. The
+  2026-08-30 read-only stage was executed as a hand-rolled `ONLY=` list under the write token
+  instead of `make eval-smoke` — every property that made the stage read-only came from the target,
+  so all of them were absent, agents remediated during it, and ~$2 of results were discarded. A
+  substring in that list also smuggled a mutating scenario past the ADR 0020 gate (the gate counts
+  mutators, and one is allowed). **Deviations from a documented paid-run command go to the user
+  before the spend, not into a workaround.** The trap had been written down 19 days earlier and
+  nobody was routed to it — hence the runbook's pre-run checklist now opens by pointing at the
+  gotchas ledger as step 1.
 
 ## Standing rules that outlive any session
 

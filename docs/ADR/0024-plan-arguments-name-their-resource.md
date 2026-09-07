@@ -1,4 +1,4 @@
-# ADR 0022: A remediation plan must name its resource on both legs
+# ADR 0024: A remediation plan must name its resource on both legs
 
 * Status: accepted
 * Date: 2026-08-30

@@ -264,6 +264,19 @@ chaos-restore:
 # optionally purges idempotency records. Runs inside the platform
 # `app` container so it has DB/Redis credentials.
 #
+# What it does NOT clear, stated because a green exit reads like a clean
+# world: reset undoes what the eval SEEDS. Anything the world grew on its
+# own outlives it. Specifically it does NOT clear ORGANIC ALERTS — SLO and
+# other non-chaos alerts raised by the platform's own loops — and it cannot:
+# the SLO evaluator reads the seeded fixtures as real traffic (4 of 7 seeded
+# jobs are dead-lettered = a fast burn), so re-seeding the fixtures RE-ARMS
+# the alert instead of removing it. The fast-burn dedup key is bucketed by
+# the hour, so it also re-fires hourly rather than staying suppressed.
+# Audit against the seeded baseline before a paid run (docs/runbook.md,
+# "Pre-run checklist") rather than trusting this target's exit code.
+# WO-R2-131 (reset should sweep organic alerts), WO-R2-132 (platform fix);
+# current mitigation is SLO_EVALUATION_INTERVAL_SECONDS=0 in demo/compose.yml.
+#
 # PLATFORM_COMPOSE defaults to this repo's demo stack (see below) — override
 # to point at a sibling incident-platform checkout, either per-invocation or
 # once in .env (see the `-include .env` note at the top of this file).

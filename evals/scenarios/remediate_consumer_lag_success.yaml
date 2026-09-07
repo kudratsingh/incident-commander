@@ -128,8 +128,9 @@ expectation:
 # The premise: worker-dispatcher has a real backlog. This is the one
 # precondition that must WAIT: kill_consumer stops the consumer immediately,
 # but lag is recomputed on the platform's 60s metrics interval, so the
-# number is still 0 for up to a minute after seeding. Six looks at 15s
-# covers that window. A run that starts before the lag is real reads a
+# number is still 0 for up to a minute after seeding. Ten looks at 15s
+# (2.5 min) covers that recompute AND leaves the producer time to build a
+# backlog past 20. A run that starts before the lag is real reads a
 # healthy group and grades the agent for failing to find a fault that had
 # not happened yet.
 # REQUIRES `make traffic` running in another terminal. Lag is arrival minus

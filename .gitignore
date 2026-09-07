@@ -60,6 +60,9 @@ evals/briefings/*
 # decision someone makes, not one this file makes for them. The line below
 # keeps the legacy `latest.json` ignored where it still exists.
 evals/reports/latest.json
+# Versioned successors of latest.json (cmd #185): one per run, never overwritten, durable copy
+# lives in evals/runs/<id>/report.json. Ignored for the same reason latest.json was.
+evals/reports/report.*.json
 evals/reports/human/*
 !evals/reports/human/.gitkeep
 

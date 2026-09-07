@@ -215,13 +215,21 @@ def test_eval_reset_names_the_service_the_makefile_shells_into() -> None:
 
 
 def test_an_unfiltered_live_run_really_is_refused(scenarios: list[Scenario]) -> None:
-    """The premise of the rule below, derived rather than asserted.
+    """The premise of the rule below — now asserted structurally, not derived.
 
-    An unfiltered ``--live`` selection is the whole suite, and the whole suite
-    trips two pre-spend refusals: canned-only scenarios cannot run live (exit
-    8) and more than one state-mutating scenario cannot share an invocation
-    (exit 7). If the tree ever stops making that true, this fails and the doc
-    rule below should be revisited rather than silently enforced for nothing.
+    This test used to establish the premise from the tree: the whole suite
+    contains canned-only scenarios (exit 8) and more than one mutating scenario
+    (exit 7), so an unfiltered ``--live`` could not get through. Both are still
+    true, and both are still worth knowing — but neither is the reason any
+    more, and relying on them was the defect. Give every scenario a live leg
+    and exit 8 stops firing; the missing filter is refused on its own terms
+    now, by ``make eval-live``'s ``ifndef ONLY`` guard and by the runner's own
+    exit-2 backstop, both pinned in ``test_pre_spend_guards.py`` and
+    ``TestLiveRequiresAnExplicitSelection``.
+
+    Kept as a tripwire on the two incidental refusals, which still cover the
+    cases a filter cannot: a NAMED canned-only scenario, and a named pair that
+    both mutate.
     """
     assert [s for s in scenarios if s.canned_only], "no canned-only scenario — exit 8 unreachable"
     mutating = [s for s in scenarios if s.expectation.expected_action_tools or s.chaos_setup]
@@ -232,9 +240,10 @@ def test_documented_eval_live_invocations_are_filtered() -> None:
     """So the documented way to run a live eval must not be the refused one.
 
     ``make eval-live`` unfiltered was the runbook's step 2 for the entire life
-    of the two refusals above: the documented happy path always failed. Every
+    of the refusals above: the documented happy path always failed. Every
     invocation has to carry ``ONLY=``, which is also the one-fault-one-scenario
-    protocol the rest of the runbook insists on.
+    protocol the rest of the runbook insists on — and, since the ``ifndef
+    ONLY`` guard, the only form make will even expand.
     """
     unfiltered = [
         line.strip()
@@ -244,9 +253,9 @@ def test_documented_eval_live_invocations_are_filtered() -> None:
         if re.search(r"\bmake\s+eval-live\b", line) and "ONLY=" not in line
     ]
     assert unfiltered == [], (
-        "the operator docs show an unfiltered `make eval-live`, which the runner "
-        "refuses before any spend (exit 8 for canned-only scenarios, exit 7 for a "
-        "multi-mutating selection). Show the filtered form:\n" + "\n".join(unfiltered)
+        "the operator docs show an unfiltered `make eval-live`, which make refuses "
+        "at parse time (exit 2, `ifndef ONLY`) and the runner refuses again before "
+        "the settings load. Show the filtered form:\n" + "\n".join(unfiltered)
     )
 
 

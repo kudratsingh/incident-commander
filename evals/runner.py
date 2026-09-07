@@ -1193,16 +1193,21 @@ def _settings_for_mode(live: bool) -> Settings:
 
 
 def _parse_only(argv: list[str]) -> list[str]:
-    """Extract scenario name-substring filters from ``--only <pattern>``.
+    """Extract scenario filters from ``--only <pattern>``.
 
     Accepts multiple patterns via repeated ``--only`` flags or as a
-    comma-separated single value. A scenario matches if any pattern
-    appears in its name. Empty list means "no filter" (run all).
+    comma-separated single value. Empty list means "no filter".
+
+    How a pattern is matched depends on the mode, and ``main`` decides:
+    under ``--live`` without ``--smoke`` each pattern must be a scenario's
+    FULL NAME (a substring there widens the selection past the ADR 0020
+    gate); under ``--smoke`` and offline a pattern matches any scenario
+    whose name contains it. Parsing is the same either way.
 
     Examples:
-        --only remediate_               → single filter
-        --only remediate_,dlq_          → two filters (comma-separated)
-        --only remediate_ --only dlq_   → two filters (repeated flag)
+        --only remediate_dlq_backlog_success          → one live selection
+        --only consumer_lag_healthy,tool_             → two (comma-separated)
+        --only remediate_ --only dlq_                 → two (repeated flag)
     """
     patterns: list[str] = []
     for i, arg in enumerate(argv):
@@ -1239,6 +1244,32 @@ def main() -> int:
     # run's (CLAUDE.md invariant 9).
     invocation_id = uuid.uuid4().hex[:12]
     only_patterns = _parse_only(sys.argv[1:])
+    if live and not smoke and not only_patterns:
+        # A bare `--live` is the whole suite against one shared platform, with
+        # real spend and no reset between scenarios. It was already refused —
+        # but only INCIDENTALLY, by the exit-8 canned-only gate below, which
+        # fires because the tree happens to contain six scenarios with no live
+        # leg. That refusal is a fact about the scenario directory, not about
+        # the invocation: give every scenario a live leg and an unfiltered
+        # `--live` starts spending, having changed nothing in this file. The
+        # exit-8 message also misnames the problem ("these scenarios cannot run
+        # live") when the actual problem is "you named no scenario".
+        #
+        # So the missing filter is refused here, structurally, before the
+        # settings load — no env, no scenario tree, nothing to be contingent
+        # on. `--smoke` is exempt: it derives its own selection (WO-R2-123)
+        # and runs read-scoped. The Makefile's `ifndef ONLY` guard on
+        # `eval-live` says the same thing one layer out; this is the backstop
+        # for every other entry point, since `python -m evals.runner --live`
+        # never touches make.
+        print(
+            "LIVE FAIL: --live requires --only <scenario_name> (or --smoke). "
+            "An unfiltered live selection is the whole suite against one shared "
+            "platform — real spend, no reset between scenarios."
+        )
+        print("Name exactly one scenario, e.g. make eval-live ONLY=remediate_dlq_backlog_success")
+        print("no scenarios ran, nothing was spent")
+        return 2
     try:
         settings = _settings_for_mode(live)
     except ValidationError as err:
@@ -1336,7 +1367,49 @@ def main() -> int:
             )
             print("no scenarios ran, nothing was spent")
             return 2
-        scenarios = [s for s in scenarios if any(p in s.name for p in only_patterns)]
+        if live and not smoke:
+            # On the spend path a pattern must be a scenario's FULL NAME, so
+            # the selection is exactly what the operator typed and nothing
+            # adjacent. Substring matching silently widened it: `ONLY=dlq_backlog`
+            # takes `dlq_backlog` AND `remediate_dlq_backlog_success`, the
+            # read-only one drains the seeded replay_safe pool before the
+            # remediation is graded, and the report blames the agent. The ADR
+            # 0020 gate does not catch it — only ONE of the two is mutating, so
+            # `len(mutating) > 1` is False (2026-08-30: a read-only stage
+            # smuggled in a mutating scenario).
+            #
+            # Exact match FIRST, so a name that is also a prefix of another
+            # name stays runnable: `ONLY=dlq_backlog` selects the one scenario
+            # called that. Refusing it because a longer name contains it would
+            # make that scenario impossible to run live at all.
+            #
+            # `--smoke` keeps substring matching: it derives its own selection,
+            # runs read-scoped, and SMOKE_ONLY is a documented substring
+            # override (`SMOKE_ONLY=consumer_lag_`). Offline keeps it too —
+            # no spend, no shared platform, and `make eval-reg` / `make baseline`
+            # refuse ONLY outright, so nothing downstream reads a widened
+            # offline selection.
+            known = {s.name for s in scenarios}
+            widened = [p for p in only_patterns if p not in known]
+            if widened:
+                print(
+                    f"SELECTION FAIL: {len(widened)} --only pattern(s) are not "
+                    f"scenario names: {', '.join(widened)}"
+                )
+                print(
+                    "A live run selects by full scenario name — one named scenario "
+                    "per pattern — because a substring silently widens the selection "
+                    "past the ADR 0020 one-mutating-scenario gate. Did you mean:"
+                )
+                for pattern in widened:
+                    for name in matched[pattern]:
+                        print(f"  --only {pattern} → {name}")
+                print("no scenarios ran, nothing was spent")
+                return 2
+            selected = set(only_patterns)
+            scenarios = [s for s in scenarios if s.name in selected]
+        else:
+            scenarios = [s for s in scenarios if any(p in s.name for p in only_patterns)]
         print(f"filter --only={only_patterns} → {len(scenarios)} scenario(s)")
     if smoke:
         # A read-only stage does not seed chaos. run_scenario fires

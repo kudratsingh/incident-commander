@@ -70,11 +70,30 @@ uv run python scripts/bootstrap_agent_token.py --scope chaos:invoke
 make eval-live ONLY=remediate_consumer_lag_success
 ```
 
-`ONLY=` is not optional. An unfiltered `make eval-live` selects the whole
-suite and the runner refuses it before any spend, twice over: canned-only
-scenarios cannot run live (exit 8) and more than one state-mutating scenario
-cannot share an invocation (exit 7, ADR 0020). Run one at a time with a reset
-between — the full protocol is below.
+`ONLY=` is not optional, and it names scenarios by **full scenario name**.
+
+A bare `make eval-live` is refused at Makefile parse time with **exit 2**,
+before anything runs, and `python -m evals.runner --live` without `--only` is
+refused by the runner with the same exit 2 — before the settings load, so it
+depends on nothing. An unfiltered `--live` is the whole suite against one
+shared platform, with real spend and no reset between scenarios; run one at a
+time with a reset between, the full protocol is below.
+
+(Until 2026-09 neither refusal existed. A bare `make eval-live` was stopped
+only by the exit-8 canned-only gate, which fires because six scenarios declare
+no live leg — a fact about `evals/scenarios/`, not about the command, and one
+that would stop being true the moment those six gained a live leg.)
+
+A live `ONLY=` pattern must be a scenario's full name, and a pattern that is
+not one is refused with **exit 2** listing the scenarios it would have matched.
+This is load-bearing, not pedantry: `ONLY=dlq_backlog` used to select
+`dlq_backlog` *and* `remediate_dlq_backlog_success`, the read-only one drained
+the seeded `replay_safe` pool before the remediation was graded, and the ADR
+0020 gate stayed quiet because only one of the two mutates. A name that is a
+prefix of a longer name still selects itself alone — exact match wins — so
+`ONLY=dlq_backlog` runs `dlq_backlog`. Comma-separated exact names still work.
+`--smoke` and offline `make eval ONLY=` keep substring matching (`SMOKE_ONLY`
+is a documented substring override, and neither path spends or shares state).
 
 Trace files land in `evals/traces/*.jsonl`; the formatter turns them into readable stepwise trajectories in `evals/reports/human/*.txt`.
 
@@ -355,7 +374,7 @@ the degradation is now recorded in the report (`degraded_count` in
 |---|---|
 | 0 | all selected scenarios passed |
 | 1 | ≥1 scenario failed (regression gate: regression detected, or a baseline scenario dropped from latest) |
-| 2 | an `--only` pattern matched no scenario — *any* single dead pattern, not only a wholly empty selection, since a dead pattern is a renamed scenario dropping silently out of the run (regression gate: missing report, or a filtered `--only` `latest.json` — refused as gate input) |
+| 2 | the selection is not one the runner will spend on. Three cases: `--live` with no `--only` and no `--smoke` (an unfiltered live run is the whole suite against one shared platform — refused before the settings load, and `make eval-live` refuses the same thing at Makefile parse time); an `--only` pattern matched no scenario — *any* single dead pattern, not only a wholly empty selection, since a dead pattern is a renamed scenario dropping silently out of the run; or, under `--live`, an `--only` pattern that is not a full scenario name — the refusal lists the scenarios it would have substring-matched, because a widened live selection slips past the ADR 0020 gate whenever only one of the matches mutates (regression gate: missing report, or a filtered `--only` `latest.json` — refused as gate input) |
 | 3 | preflight/env failure: `--smoke` without `--live`, degraded `--live` env, invalid or missing settings, missing smoke token, LLM auth preflight failure |
 | 4 | principal guard: the token is not the one the selection needs — the smoke token holds more than read scope, or a remediation selection lacks `actions:execute`, or a chaos-seeding selection lacks `chaos:invoke` (each guard probes only the scope its half of the selection needs, and each fails closed on any probe outcome that is neither a scope refusal nor an argument-validation refusal) |
 | 5 | post-stage audit failed, was unreadable, or was inconclusive |

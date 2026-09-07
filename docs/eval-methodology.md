@@ -192,15 +192,43 @@ A scenario that declares `chaos_setup` is **never** eligible, and the choice is 
 Every live run writes three coordinated views per scenario:
 
 ```
-evals/traces/<scenario>.jsonl         ← raw LLM + MCP request/response
-evals/trajectories/<scenario>.json    ← state-machine checkpoints per transition
-evals/briefings/<scenario>.json       ← final human-facing artifact
-evals/reports/human/<scenario>.txt    ← readable stepwise render (auto-generated)
-evals/reports/latest.json             ← aggregate report
-evals/reports/baseline.json           ← last-blessed baseline (regression gate)
+evals/traces/<scenario>.jsonl                     ← raw LLM + MCP request/response (append-only)
+evals/trajectories/<scenario>.<stamp>.<inv>.json  ← state-machine checkpoints per transition
+evals/briefings/<scenario>.<stamp>.<inv>.json     ← final human-facing artifact
+evals/reports/human/<scenario>.<stamp>.<inv>.txt  ← readable stepwise render (auto-generated)
+evals/reports/report.<stamp>.<inv>.json           ← aggregate report
+evals/reports/baseline.json                       ← last-blessed baseline (regression gate)
 ```
 
 The `evals/reports/human/*.txt` files are the fastest path to understand one run — every LLM call is a labeled step with full system prompt, user message, and parsed output.
+
+### Artifacts
+
+Every output above is **versioned and never overwritten** (CLAUDE.md invariant 9). `<stamp>` is the run's UTC time as `YYYYMMDDTHHMMSSZ` and `<inv>` is its `invocation_id`, so a re-run of a scenario lands a new file beside the old one instead of replacing it. Writes are exclusive-create: a collision raises, it never overwrites.
+
+There is no `latest.json` and no symlink standing in for one. **The newest version is resolved in exactly one place** — `evals/artifacts.py`:
+
+```python
+from evals import artifacts
+artifacts.newest("trajectory", "redis_saturation")   # -> Path
+artifacts.newest("report")                           # what the gate grades
+artifacts.versions("human", "redis_saturation")      # oldest → newest
+```
+
+From a shell (the same resolution the Makefile and the gate use):
+
+```bash
+uv run python -m evals.artifacts newest report
+uv run python -m evals.artifacts versions human redis_saturation
+```
+
+Ordering is by the timestamp in the **filename**, then by `invocation_id` — deliberately **not** by mtime, which a copy, a restore, or a `touch` silently re-orders. Never glob or `ls -t` these directories; use the resolver, so every reader agrees on which file is current.
+
+This replaced four "refreshable pointer" files that each run rewrote in place. The durable copy under `evals/runs/<invocation_id>/` made that look cheap, but the flat directories are where an operator actually looks (see the runbook), and an artifact that erases its own history cannot be cited as evidence — the F-002/F-003 shape.
+
+**Migration.** Pre-versioning flat files still on disk (`<scenario>.json`, `latest.json`) are left exactly where they are — never deleted, never renamed, they are evidence — and the resolver treats them as the *oldest* version, so the first versioned write immediately outranks them.
+
+**Cost.** Disk use now grows with every run rather than staying flat: on the order of a few KB per scenario per run, so a daily 38-scenario suite adds a few MB a month across all four families. That is the price of these files being evidence, and it is the price `evals/runs/` already pays. Pruning is a deliberate, announced operation — never something a run does to itself.
 
 ## Regression gating
 

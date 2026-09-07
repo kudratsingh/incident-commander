@@ -328,7 +328,7 @@ make eval-live ONLY=saga_stuck && make eval-reset
 
 Every `make eval-live` invocation writes JSONL traces to `evals/traces/` and renders per-scenario human reports to `evals/reports/human/*.txt` (via the `format_traces.py` step chained into the target).
 
-A filtered run (`ONLY=...`) still overwrites `evals/reports/latest.json`, but the report now self-describes via `only_patterns` (ADR 0013) and **can no longer feed the gate or the baseline**: `make eval-reg` exits 2 on a filtered `latest.json`, and `make eval-reg ONLY=x` / `make baseline ONLY=x` refuse at Makefile parse time before anything runs (A-03 — `study/runs.jsonl` records a full-suite `latest.json` lost to a later filtered run). The archive under `evals/runs/<invocation_id>/` remains the durable record for filtered runs; the flat `latest.json` is only a pointer to the most recent one.
+A filtered run (`ONLY=...`) writes its own report file and **can no longer feed the gate or the baseline**: the report self-describes via `only_patterns` (ADR 0013), `make eval-reg` exits 2 when the newest report is a filtered one, and `make eval-reg ONLY=x` / `make baseline ONLY=x` refuse at Makefile parse time before anything runs (A-03 — `study/runs.jsonl` records a full-suite report lost to a later filtered run). That specific loss is now impossible: reports are versioned (`evals/reports/report.<stamp>.<invocation_id>.json`) and never overwritten, so the earlier full-suite report is still on disk. The gate resolves the **newest** one via `evals/artifacts.py` and prints which file it graded; the archive under `evals/runs/<invocation_id>/` remains the durable per-run record.
 
 `make eval-reset` shells into the platform app via `docker compose -f $PLATFORM_COMPOSE exec $PLATFORM_SERVICE`. `PLATFORM_COMPOSE` defaults to `demo/compose.yml` — **this repo's own demo stack**, the one `make demo` brings up — and `PLATFORM_SERVICE` defaults to the `api` container in it (both demo services share one database, and `api` is the REST app that owns seeding). Point them at a sibling `incident-platform` checkout only if that is genuinely the stack under test, either per-invocation or once in `.env` (the Makefile `-include .env`s it, so a non-default layout is a one-time setup rather than a flag you have to remember on every call).
 
@@ -727,11 +727,15 @@ cat evals/traces/redis_saturation.jsonl | jq 'select(.kind=="llm") | .output'
 # Just the tool calls with results
 cat evals/traces/redis_saturation.jsonl | jq 'select(.kind=="mcp") | {tool_name, arguments, result}'
 
-# Human-readable stepwise version
-open evals/reports/human/redis_saturation.txt
+# Human-readable stepwise version — reports are versioned, so ask the resolver
+# rather than guessing a filename (see docs/eval-methodology.md § Artifacts)
+open "$(uv run python -m evals.artifacts newest human redis_saturation)"
+
+# Every render of that scenario, oldest → newest
+uv run python -m evals.artifacts versions human redis_saturation
 ```
 
-For deeper introspection, `evals/trajectories/<scenario>.json` has every `RunState` checkpoint (state, evidence, hypotheses over time).
+For deeper introspection, the newest `evals/trajectories/<scenario>.<stamp>.<inv>.json` has every `RunState` checkpoint (state, evidence, hypotheses over time): `uv run python -m evals.artifacts newest trajectory redis_saturation`.
 
 ## Contract-test target (constraint in force)
 
@@ -861,9 +865,10 @@ The webhook still records incidents; the state machine never advances. Reversibl
 - `run_all` is resilient (per-scenario try/except), so the whole batch should complete even with one crash. If it doesn't, that's a runner bug — file it.
 
 **Symptom:** live eval passes but a specific scenario is doing the wrong thing.
-- Open `evals/reports/human/<scenario>.txt` — every planner iteration is timestamped, with system prompt + user message + parsed output.
-- Compare against `evals/trajectories/<scenario>.json` for state-machine transitions.
-- The briefing (`evals/briefings/<scenario>.json`) is the final human-facing artifact.
+- Open the newest human report — `open "$(uv run python -m evals.artifacts newest human <scenario>)"` — every planner iteration is timestamped, with system prompt + user message + parsed output.
+- Compare against the newest trajectory (`... newest trajectory <scenario>`) for state-machine transitions.
+- The newest briefing (`... newest briefing <scenario>`) is the final human-facing artifact.
+- These files are versioned and never overwritten, so an earlier run's copy is still there: `... versions <kind> <scenario>` lists them oldest → newest.
 
 **Symptom:** contract test fails after a platform bump.
 - The diff between `contracts/platform-tools.snapshot.json` and the live `tools/list` output tells you what moved. Add/rename registry fields to match, or revert the platform bump if the change is unexpected.
@@ -874,6 +879,6 @@ The webhook still records incidents; the state machine never advances. Reversibl
 
 ## Escalation from the agent
 
-Terminal state `ESCALATED` means the state machine reached a handoff point + a briefing was generated. Today the briefing lives in `evals/briefings/<scenario>.json` (offline) or the trajectory store (live). No paging integration ships yet — the notification rail is a planned follow-up.
+Terminal state `ESCALATED` means the state machine reached a handoff point + a briefing was generated. Today the briefing lives in `evals/briefings/<scenario>.<stamp>.<invocation_id>.json` (offline; resolve the newest with `python -m evals.artifacts newest briefing <scenario>`) or the trajectory store (live). No paging integration ships yet — the notification rail is a planned follow-up.
 
 Every escalation carries a `_planner_escalate` or `_remediation_escalate` evidence entry with the reason. Read the trajectory JSON to see why the agent handed off.

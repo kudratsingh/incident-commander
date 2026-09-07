@@ -24,6 +24,7 @@ from pydantic import (
     ValidationError,
 )
 
+from evals import artifacts
 from evals.chaos_hooks import ChaosInvocationError, invoke_chaos_hook
 from evals.fakes import CannedMCPClient
 from evals.graders.deterministic import (
@@ -77,10 +78,25 @@ _SCENARIOS_DIR = _REPO_ROOT / "evals" / "scenarios"
 _REPORTS_DIR = _REPO_ROOT / "evals" / "reports"
 _TRAJECTORIES_DIR = _REPO_ROOT / "evals" / "trajectories"
 _BRIEFINGS_DIR = _REPO_ROOT / "evals" / "briefings"
-_LATEST_REPORT = _REPORTS_DIR / "latest.json"
-# Immutable per-invocation archive. The flat files above are POINTERS to
-# the most recent run and are refreshed in place; this directory is the
-# append-only record (CLAUDE.md invariant 9). Writing the archive with
+# The three directories above hold VERSIONED files, never overwritten:
+# ``<scenario>.<YYYYMMDDTHHMMSSZ>.<invocation_id>.json``, and
+# ``report.<stamp>.<invocation_id>.json`` for the aggregate. They used to
+# be flat "refreshable pointers" that every run rewrote in place — a
+# documented exception to CLAUDE.md invariant 9, now withdrawn: nothing in
+# the eval output tree overwrites a prior file. Every write here is
+# exclusive-create, the same convention as the archive writes below.
+#
+# There is no ``latest.json`` and no symlink standing in for one. The
+# newest version is resolved in exactly one place — ``evals/artifacts.py``
+# (``artifacts.newest(kind, scenario)``), ordering by the stamp in the
+# FILENAME and then by invocation_id, never by mtime — and every reader in
+# the repo goes through it. Pre-versioning flat files still on disk are
+# left exactly where they are (they are evidence) and resolve as the
+# oldest version. Cost: a few KB per scenario per run that is never
+# reclaimed; see the ``evals/artifacts.py`` docstring.
+#
+# Immutable per-invocation archive. This directory is the append-only
+# record of a whole run (CLAUDE.md invariant 9). Writing the archive with
 # exclusive-create means a path collision fails loudly instead of
 # deleting a prior run.
 #
@@ -129,7 +145,11 @@ class ScenarioOutcome(BaseModel):
 
 
 class RunReport(BaseModel):
-    """Aggregate output written to ``evals/reports/latest.json``."""
+    """Aggregate output, written to ``evals/reports/report.<stamp>.<invocation_id>.json``.
+
+    Resolve the current one with ``evals.artifacts.newest("report")`` — never
+    by globbing or by mtime.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -153,7 +173,7 @@ class RunReport(BaseModel):
 
 
 class Trajectory(BaseModel):
-    """Per-run checkpoint log, written to ``evals/trajectories/<scenario>.json``."""
+    """Per-run checkpoint log, written to ``evals/trajectories/<scenario>.<stamp>.<inv>.json``."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -851,31 +871,80 @@ def run_all(
     return report, trajectories, briefings
 
 
-def write_report(report: RunReport, path: Path = _LATEST_REPORT) -> None:
-    """Serialize ``report`` as JSON. Creates parent directories if needed."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(report.model_dump_json(indent=2))
+def write_report(report: RunReport, *, directory: Path = _REPORTS_DIR) -> Path:
+    """Write ``report`` as ``report.<stamp>.<invocation_id>.json`` and return the path.
+
+    The run's own identity names the file: ``generated_at`` supplies the
+    stamp and ``invocation_id`` the discriminator, so the report cannot be
+    labelled as a run other than the one that produced it. Exclusive-create
+    — a second write at the same path is the same run reported twice, which
+    is a bug, not a refresh.
+    """
+    return artifacts.write_versioned(
+        "report",
+        content=report.model_dump_json(indent=2),
+        timestamp=report.generated_at,
+        invocation_id=report.invocation_id,
+        directory=directory,
+    )
 
 
 def write_trajectories(
     trajectories: Iterable[Trajectory],
     directory: Path = _TRAJECTORIES_DIR,
-) -> None:
-    """Serialize each trajectory to ``<directory>/<scenario>.json``."""
-    directory.mkdir(parents=True, exist_ok=True)
-    for trajectory in trajectories:
-        (directory / f"{trajectory.scenario}.json").write_text(trajectory.model_dump_json(indent=2))
+    *,
+    timestamp: datetime | None = None,
+) -> list[Path]:
+    """Write each trajectory to ``<directory>/<scenario>.<stamp>.<invocation_id>.json``.
+
+    Each ``Trajectory`` already carries the ``invocation_id`` that produced
+    it, so the filename is derived from the record rather than supplied
+    beside it and cannot disagree with the contents. ``timestamp`` defaults
+    to now; one run passes a single stamp so its whole suite groups
+    together.
+    """
+    when = timestamp or datetime.now(UTC)
+    return [
+        artifacts.write_versioned(
+            "trajectory",
+            trajectory.scenario,
+            content=trajectory.model_dump_json(indent=2),
+            timestamp=when,
+            invocation_id=trajectory.invocation_id,
+            directory=directory,
+        )
+        for trajectory in trajectories
+    ]
 
 
 def write_briefings(
     briefings: Iterable[EscalationBriefing],
     scenario_names: Iterable[str],
     directory: Path = _BRIEFINGS_DIR,
-) -> None:
-    """Serialize each briefing to ``<directory>/<scenario>.json``."""
-    directory.mkdir(parents=True, exist_ok=True)
-    for briefing, name in zip(briefings, scenario_names, strict=True):
-        (directory / f"{name}.json").write_text(briefing.model_dump_json(indent=2))
+    *,
+    invocation_id: str,
+    timestamp: datetime | None = None,
+) -> list[Path]:
+    """Write each briefing to ``<directory>/<scenario>.<stamp>.<invocation_id>.json``.
+
+    ``EscalationBriefing`` is a product model and carries no run identity of
+    its own, so unlike ``write_trajectories`` this one is told the
+    ``invocation_id`` explicitly. Required, not defaulted: a briefing filed
+    under an empty id is a briefing that cannot be joined back to the run
+    that paid for it.
+    """
+    when = timestamp or datetime.now(UTC)
+    return [
+        artifacts.write_versioned(
+            "briefing",
+            name,
+            content=briefing.model_dump_json(indent=2),
+            timestamp=when,
+            invocation_id=invocation_id,
+            directory=directory,
+        )
+        for briefing, name in zip(briefings, scenario_names, strict=True)
+    ]
 
 
 def _lock_path(path: Path) -> None:
@@ -1711,17 +1780,25 @@ def main() -> int:
     ran_names = [o.scenario for o in report.outcomes]
     # The per-scenario archive writes already happened, inside run_all.
     # report.json goes down next — the completion marker, and the last write
-    # into the archive — and only then are the flat pointers refreshed.
-    # Order matters: if the pointer writes ever fail, the durable record is
-    # already complete on disk. Until 2026-08-08 only the pointers existed,
-    # so a routine offline `make eval` erased Run 001's paid live
+    # into the archive — and only then are the top-level copies written.
+    # Order matters: if those writes ever fail, the durable record is
+    # already complete on disk. Until 2026-08-08 only the flat files
+    # existed, so a routine offline `make eval` erased Run 001's paid live
     # trajectories (study/findings.md F-003).
+    #
+    # One stamp for the whole run: report.generated_at. The suite's
+    # trajectories, briefings and report therefore share a filename prefix
+    # and sort together, and every one of them carries this run's
+    # invocation_id.
     archived = finalize_archive(target, report)
-    write_report(report)
-    write_trajectories(trajectories)
-    write_briefings(briefings, ran_names)
+    written_report = write_report(report)
+    write_trajectories(trajectories, timestamp=report.generated_at)
+    write_briefings(
+        briefings, ran_names, invocation_id=invocation_id, timestamp=report.generated_at
+    )
     _print_summary(report)
-    print(f"run archived: {_repo_relative(archived)} (immutable; flat paths are pointers)")
+    print(f"run archived: {_repo_relative(archived)} (immutable)")
+    print(f"report: {_repo_relative(written_report)}")
 
     # Post-stage assertion, graded from the platform audit log rather than
     # the agent's own trajectory (CLAUDE.md invariant 6). This is the exact

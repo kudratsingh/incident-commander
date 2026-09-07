@@ -2,9 +2,18 @@
 """Render eval trace JSONL files as human-readable text per scenario.
 
 Each ``evals/traces/<scenario>.jsonl`` produces one
-``evals/reports/human/<scenario>.txt`` where every LLM call, MCP tool call,
-and scenario boundary is a numbered, labeled step. Written for eyeball
-inspection of a full incident trajectory — the JSONL stays canonical.
+``evals/reports/human/<scenario>.<YYYYMMDDTHHMMSSZ>.<render_id>.txt`` where
+every LLM call, MCP tool call, and scenario boundary is a numbered, labeled
+step. Written for eyeball inspection of a full incident trajectory — the
+JSONL stays canonical.
+
+Reports are VERSIONED and never overwritten (CLAUDE.md invariant 9). Each
+run of this script is one render session with its own stamp and id, so a
+second render lands beside the first instead of replacing it, and the whole
+session's files sort together. The id names the RENDER, not the traced
+invocation: which invocation was rendered is stated inside the file, and
+``--all`` has no single one. Resolve the newest report for a scenario with
+``evals.artifacts.newest("human", scenario)`` — never by mtime.
 
 The tracer is APPEND-ONLY (``evals/tracing.py``, study/findings.md F-002):
 a re-run of a scenario adds a fresh block of records stamped with a new
@@ -33,11 +42,31 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import uuid
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+# ``python scripts/format_traces.py`` puts scripts/ on sys.path[0], not the
+# repo root, and ``evals`` is outside the installed package (src layout), so
+# ``import evals`` would fail before line one runs. The Makefile recipes
+# carry ``PYTHONPATH=.`` for this (the repo convention — see `fixture-drift`,
+# and the lint in tests/unit/test_make_script_import_path.py). This bootstrap
+# is the OTHER half: the Usage block above documents running this script
+# directly, and a human who does that has no PYTHONPATH set.
+#
+# ``evals.artifacts`` is deliberately stdlib-only, so importing it keeps this
+# script's "renders an archived slice from any checkout with only the stdlib"
+# property intact. The naming and newest-wins rules must NOT be duplicated
+# here: one resolver, one definition of "current" (three tools disagreeing
+# about that is the same failure shape as PRE_INVOCATION_ID below).
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from evals import artifacts  # noqa: E402
+
 _TRACE_DIR = _REPO_ROOT / "evals" / "traces"
 _OUT_DIR = _REPO_ROOT / "evals" / "reports" / "human"
 
@@ -518,6 +547,33 @@ def format_trace(path: Path, *, invocation: str | None = None, render_all: bool 
     return "\n".join(parts)
 
 
+def render_to(
+    path: Path,
+    out_dir: Path,
+    *,
+    timestamp: datetime,
+    render_id: str,
+    invocation: str | None = None,
+    render_all: bool = False,
+) -> Path:
+    """Render one trace file to a versioned report and return the path written.
+
+    Exclusive-create, via ``artifacts.write_versioned``: a report that
+    already exists at this path was produced by this same render session for
+    this same scenario, which cannot happen twice in one pass — so it raises
+    rather than replacing a rendered report.
+    """
+    rendered = format_trace(path, invocation=invocation, render_all=render_all)
+    return artifacts.write_versioned(
+        "human",
+        path.stem,
+        content=rendered,
+        timestamp=timestamp,
+        invocation_id=render_id,
+        directory=out_dir,
+    )
+
+
 def _display(path: Path) -> str:
     try:
         return str(path.relative_to(_REPO_ROOT))
@@ -563,6 +619,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         paths = sorted(trace_dir.glob("*.jsonl"))
 
+    # One render session, one stamp and one id, shared by every scenario in
+    # this pass: the session's reports sort together and are distinguishable
+    # from every earlier session's without reading a single file.
+    session_at = datetime.now(UTC)
+    render_id = uuid.uuid4().hex[:12]
+
     written = 0
     failed = 0
     for path in paths:
@@ -570,9 +632,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"skip {path.name} (missing or empty)")
             continue
         try:
-            rendered = format_trace(path, invocation=args.invocation, render_all=args.render_all)
-            out = out_dir / f"{path.stem}.txt"
-            out.write_text(rendered)
+            out = render_to(
+                path,
+                out_dir,
+                timestamp=session_at,
+                render_id=render_id,
+                invocation=args.invocation,
+                render_all=args.render_all,
+            )
         except Exception as exc:
             # One malformed scenario must not cost every other scenario its
             # report: before this guard, a single parse_failed record aborted

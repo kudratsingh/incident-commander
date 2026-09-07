@@ -5,10 +5,15 @@ Improvements and new scenarios are noted for transparency and never fail the
 gate. Regressions fail it (exit 1) — and so do DROPPED scenarios (baseline
 scenarios missing from ``latest``): coverage loss is a gate failure, not a
 pass, and genuinely removing a scenario requires a deliberate re-bless via
-``make baseline`` (A-03). A ``latest.json`` produced under ``--only`` is
-refused outright (exit 2) — a filtered report is not a comparable gate
-input. A baseline/latest provenance mismatch (``degraded_count``, ADR 0013)
-warns and never gates (S-14).
+``make baseline`` (A-03). A report produced under ``--only`` is refused
+outright (exit 2) — a filtered report is not a comparable gate input. A
+baseline/latest provenance mismatch (``degraded_count``, ADR 0013) warns and
+never gates (S-14).
+
+"latest" is the NEWEST versioned report under ``evals/reports/``, resolved
+by ``evals.artifacts.newest("report")``. Reports are never overwritten, so
+the file the gate read is still on disk afterwards and the verdict stays
+reproducible; the gate prints which one it used.
 
 Coverage loss also means the two shapes that keep every scenario green
 while the suite proves less (WO-R2-79): a DROPPED DIMENSION (the grader
@@ -31,12 +36,18 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from evals import artifacts
 from evals.graders.deterministic import DimensionResult, is_vacuous_detail
 from evals.runner import RunReport, ScenarioOutcome
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _BASELINE = _REPO_ROOT / "evals" / "reports" / "baseline.json"
-_LATEST = _REPO_ROOT / "evals" / "reports" / "latest.json"
+# Reports are versioned and never overwritten, so "latest" is resolved, not
+# a fixed path: ``artifacts.newest("report")`` orders by the stamp in the
+# filename and then by invocation_id. Deliberately NOT mtime — a restored or
+# copied reports directory would otherwise gate against whichever file the
+# filesystem happened to touch last.
+_REPORTS_DIR = _REPO_ROOT / "evals" / "reports"
 
 
 @dataclass(frozen=True)
@@ -193,18 +204,20 @@ def main() -> int:
     if not _BASELINE.exists():
         print(f"baseline not found at {_BASELINE}", file=sys.stderr)
         return 2
-    if not _LATEST.exists():
-        print(f"latest report not found at {_LATEST}; run make eval first", file=sys.stderr)
+    latest_path = artifacts.newest_or_none("report", directory=_REPORTS_DIR)
+    if latest_path is None:
+        print(f"no report found under {_REPORTS_DIR}; run make eval first", file=sys.stderr)
         return 2
     baseline = _load_report(_BASELINE)
-    latest = _load_report(_LATEST)
+    latest = _load_report(latest_path)
+    print(f"gating against {latest_path.name}")
     if latest.only_patterns:
         # Refused, not diffed: comparing a filtered run against the full
         # baseline would read the missing scenarios as "dropped" at best
         # and as green coverage at worst (A-03). Exit 2 = not a comparable
         # input, same class as a missing file.
         print(
-            f"latest.json is a filtered run (--only={list(latest.only_patterns)}); "
+            f"{latest_path.name} is a filtered run (--only={list(latest.only_patterns)}); "
             "the gate requires a full-suite report — re-run 'make eval' without ONLY",
             file=sys.stderr,
         )

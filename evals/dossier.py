@@ -852,7 +852,12 @@ def lint_action_targets(
                     f"expected action `{tool}`",
                     "the scenario names no resource for this action, so nothing here "
                     "can check that its target exists. cmd #187: an action claim "
-                    "without `expected_action_arguments` passes on the wrong resource.",
+                    "that pins no resource passes on the wrong resource. Note that "
+                    "an `expected_action_arguments` claim on a QUANTITY rather than "
+                    "a resource — `delay_seconds` on a deferred replay — is not a "
+                    "resource pin and does not clear this finding; where the action "
+                    "acts on a set the scenario cannot enumerate, the bound is the "
+                    "precondition's `total` plus the count claims instead.",
                 )
             )
             rows.append((tool, "—", "—", "—"))

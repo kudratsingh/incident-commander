@@ -215,8 +215,24 @@ class FieldComparator(BaseModel):
       JSON ``1`` (that is contract drift, not a pass).
     * ``not_equals`` — the exact negation of ``equals``. See below.
     * ``at_least``   — the parsed value must be a real number ``>=`` it.
+    * ``at_most``    — the parsed value must be a real number ``<=`` it.
     * ``is_null``    — ``true`` asserts the value is JSON ``null``, ``false``
       asserts it is present and non-null.
+
+    ``at_most`` is the mirror of ``at_least`` and it exists because a
+    quantity that must sit inside a RANGE could not be stated at all. The
+    suite's first such quantity is ``delay_seconds`` on a deferred DLQ
+    replay: too small and the replay lands back inside the failure window it
+    was meant to outlast, burning the attempt; too large and the work is
+    parked past the incident's own lifecycle, resolved on paper while
+    nothing has run. Neither bound alone says "appropriate" — a floor is
+    satisfied by an hour, a ceiling by a second — so the pair is written as
+    two claims on the same field, which is exactly how a conjunction is
+    spelled here (one comparator per assertion, by ``_exactly_one_comparator``).
+
+    Like ``at_least``, it is numbers only: a bool or a non-number fails
+    rather than being coerced, so contract drift on the field reads as a
+    failure instead of quietly satisfying a ceiling.
 
     ``not_equals`` is the only comparator that asserts what a value is *not*,
     and it exists because the alternatives are worse. The suite's other way
@@ -245,6 +261,7 @@ class FieldComparator(BaseModel):
     equals: bool | int | float | str | None = None
     not_equals: bool | int | float | str | None = None
     at_least: float | None = None
+    at_most: float | None = None
     is_null: bool | None = None
 
     @model_validator(mode="after")
@@ -255,6 +272,7 @@ class FieldComparator(BaseModel):
                 ("equals", self.equals),
                 ("not_equals", self.not_equals),
                 ("at_least", self.at_least),
+                ("at_most", self.at_most),
                 ("is_null", self.is_null),
             )
             if value is not None
@@ -262,7 +280,7 @@ class FieldComparator(BaseModel):
         if len(set_names) != 1:
             raise ValueError(
                 f"{type(self).__name__} needs exactly one of "
-                f"equals/not_equals/at_least/is_null, got {set_names or 'none'}"
+                f"equals/not_equals/at_least/at_most/is_null, got {set_names or 'none'}"
             )
         return self
 
@@ -272,6 +290,8 @@ class FieldComparator(BaseModel):
             return f"is_null {self.is_null}"
         if self.at_least is not None:
             return f"at_least {self.at_least}"
+        if self.at_most is not None:
+            return f"at_most {self.at_most}"
         if self.not_equals is not None:
             return f"not_equals {self.not_equals!r}"
         return f"equals {self.equals!r}"
@@ -291,6 +311,10 @@ class FieldComparator(BaseModel):
             if isinstance(value, bool) or not isinstance(value, int | float):
                 return False
             return float(value) >= self.at_least
+        if self.at_most is not None:
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                return False
+            return float(value) <= self.at_most
         if self.not_equals is not None:
             return not self._matches(self.not_equals, value)
         # ``equals`` is the only comparator left, and non-None by the validator.
@@ -347,6 +371,7 @@ class EvidenceFieldExpectation(FieldComparator):
       identically, never numerically: ``equals: true`` is not satisfied by a
       JSON ``1`` (that is contract drift, not a pass).
     * ``at_least`` — the parsed value must be a real number ``>=`` it.
+    * ``at_most``  — the parsed value must be a real number ``<=`` it.
     * ``is_null``  — ``true`` asserts the field is JSON ``null``, ``false``
       asserts it is present and non-null.
 
@@ -454,7 +479,7 @@ class EvidenceFieldExpectation(FieldComparator):
             raise ValueError(
                 "which: sum grades the total of the observed values, which is "
                 "always a number — is_null has nothing to ask about it. Use "
-                "equals or at_least, or drop the sum."
+                "equals, at_least or at_most, or drop the sum."
             )
         return self
 

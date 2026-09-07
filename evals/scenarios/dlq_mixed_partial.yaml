@@ -127,6 +127,20 @@ expectation:
     field: replayed
     which: sum
     equals: 1
+  # "Replay it NOW" stated directly, not left to arithmetic. Both sanctioned
+  # tools take `delay_seconds`, so a deferred replay is the same call with
+  # one more argument; it reports `replayed: 0, scheduled: 1` and reds the
+  # count above only because a run makes one Tier-1 call (ADR 0008, a
+  # property of the state graph rather than of this scenario — cmd #187
+  # calls that kind of reliance vacuous). This scenario is the sharpest
+  # place to say it out loud: its world HOLDS two `wait_and_replay` rows,
+  # which are exactly the rows a delay would be for, and `wait_and_replay`
+  # is already in `forbidden_replay_categories` for the same reason. Free
+  # on a correct run — `scheduled` defaults to 0 on both siblings' outputs.
+  - tools: [replay_dlq_by_category, replay_dlq_by_ids, replay_dlq_messages]
+    field: scheduled
+    which: sum
+    equals: 0
   # Tool-scoped (evidence sweep, evals/evidence_audit.py): the bare
   # `replay_safe` substring was satisfiable by replay_dlq_by_category output
   # as well, so it could not prove the agent saw the classification in the

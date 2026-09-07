@@ -9,9 +9,12 @@ name: dlq_wait_and_replay_success
 # unobservable signal became the instruction the agent followed. Success
 # here is the ACTION's own scheduled/execute_at response, and an
 # unchanged listing is the expected reading, not a failure.
-description: "DLQ has entries hinted wait_and_replay (transient downstream failures). Agent schedules a delayed replay via replay_dlq_by_ids(delay_seconds=300). Platform holds the timer \u2014 schedules\
-  \ the replays at now+5min. Verify re-reads the wait_and_replay listing and expects it UNCHANGED: the ids stay dead-lettered until execute_at, so success is scheduled=requested with future\
-  \ execute_at timestamps on the action's own response.\n"
+description: "DLQ has entries hinted wait_and_replay (two transient downstream failures on two different dependencies: partner-api.internal answering 429 with an explicit retry-after of 120s,\
+  \ and smtp.mailer.internal refusing connections with no stated wait). Agent schedules a DELAYED replay of exactly those two rows, and the delay has to be DERIVED from the rows rather than\
+  \ picked: at least the largest wait any scheduled row states (120s here), the stated dependency-down default (300s) where a row states none, never under 60s, never over the tool's maximum.\
+  \ Platform holds the timer. Verify re-reads the wait_and_replay listing and expects it UNCHANGED: the ids stay dead-lettered until execute_at, so success is scheduled=requested with future\
+  \ execute_at timestamps on the action's own response. The 120s floor also makes that expectation structurally true rather than merely likely \u2014 the live verify window is\
+  \ (VERIFY_PROBE_ATTEMPTS-1)*VERIFY_PROBE_DELAY_SECONDS = 100s, so any delay this scenario accepts outlasts the last verify poll and the rows cannot leave the listing mid-window.\n"
 tags:
 - phase-6
 - remediation
@@ -81,6 +84,10 @@ canned_llm_responses:
       - af67d1b1-13f8-5a2c-8c44-66ec5564597d
       - 97d91272-9774-5b8e-980b-f0d2fa6ed619
       delay_seconds: 300
+    action_rationale: "Two dependencies, so two waits. af67d1b1 (partner-api.internal) states its own: 'retry-after: 120s', and its triage row says an immediate re-run just spends another attempt\
+      \ against the same closed quota window. 97d91272 (smtp.mailer.internal) states none — ConnectionRefusedError is a dependency that is down — so it takes the 300s dependency-down default.\
+      \ One call carries one delay, so the SMTP row sets it at 300s and the partner-API row waits longer than its 120s window needs. Not observable from here: circuit-breaker state, per-dependency\
+      \ queue depth, worker concurrency — this is an estimate of when the dependencies will answer, not a confirmation that they have.\n"
     verify_tool: list_dlq_messages
     verify_arguments:
       remediation_hint: wait_and_replay
@@ -198,6 +205,96 @@ expectation:
     field: items[].remediation_hint
     equals: wait_and_replay
     before_tools: [replay_dlq_by_ids, replay_dlq_by_category]
+  # The delay itself. Everything above grades THAT a replay was deferred;
+  # nothing above grades whether the wait was long enough to be worth
+  # taking. `scheduled sum equals 2` is satisfied by `delay_seconds: 1` —
+  # the platform schedules it, reports `scheduled: 2` with an `execute_at`
+  # one second out, the timer fires while the agent is still polling, and
+  # the replay lands inside the same 120-second quota window that produced
+  # the 429. That is a wrong-reason green on the one decision this scenario
+  # exists to measure, and it is the shape the whole suite has been
+  # removing since cmd #147: an assertion satisfied by the mechanism rather
+  # than by the judgement.
+  #
+  # WHY 120 IS THE FLOOR, AND WHY IT IS DERIVED RATHER THAN CHOSEN.
+  # Row af67d1b1 states its own wait in its error text: "RateLimited:
+  # partner-api.internal answered 429 Too Many Requests on attempt 3/3
+  # (retry-after: 120s); the per-tenant quota window has not rolled over
+  # yet", and its triage row says the same in prose ("Let the 120s
+  # retry-after window pass before the next attempt. An immediate re-run
+  # spends another attempt against the same closed window and comes back
+  # 429."). 120 is therefore not a number the grader invented — it is the
+  # largest explicit wait any row being scheduled states, read out of the
+  # evidence the agent itself holds. The floor says: the delay must at
+  # least cover the wait the dependency asked for. An agent that schedules
+  # 5 seconds has not waited; it has queued a second 429.
+  #
+  # The other row (97d91272, ConnectionRefusedError on
+  # smtp.mailer.internal) states no wait at all, which is the "dependency
+  # down" case: the honest answer there is a stated default, not a
+  # number read off a row that has none. The planner prompt's default is
+  # 300s and the canned plan uses it, so the correct run here comes in at
+  # 300 — above this floor, which is the point. The floor is the EVIDENCE
+  # bound, deliberately looser than the prompt's steer: a grader that
+  # demanded exactly 300 would red an agent that reasoned its way to 240 or
+  # 600 from the same rows, and "appropriate" is a range, not a constant.
+  #
+  # WHY 1800 IS THE CEILING. The tool's own maximum is 3600 (both replay
+  # siblings, contract snapshot: `delay_seconds` anyOf integer
+  # minimum 1 / maximum 3600), and its description gives the reason —
+  # "Cap of 1 hour keeps scheduled work from lingering past the incident's
+  # natural lifecycle". A claim pinned at the tool's own maximum grades
+  # nothing: the platform already refuses 3601, so `at_most: 3600` is
+  # satisfied by every call the platform accepts and is the vacuous
+  # assertion this file refuses everywhere else. 1800 is half that, and it
+  # is where the agent's own reasoning stops applying: the run RESOLVES on
+  # scheduling, so past this point nobody is watching, and no row here
+  # states a wait anywhere near it (the largest is 120s, and the
+  # dependency-down default is 300s). Thirty minutes is six times the
+  # largest justified answer and fifteen times the largest stated one —
+  # far enough above every defensible delay that it cannot red a correct
+  # run, close enough that "park it for an hour and call the incident
+  # resolved" cannot pass. Smaller of (tool max 3600, 1800) = 1800.
+  #
+  # WHY ONE CLAIM NAMES BOTH TOOLS. `expected_action_tools` permits either
+  # sibling and both are correct here, so the usual per-tool argument claim
+  # would red whichever one the agent did not pick —
+  # `TestCategoryReplayScenariosPinTheSliceByExhaustion` records exactly
+  # that wrong-reason FAIL for a `category`-scoped claim, and it is why
+  # cmd #187 applied argument claims only to single-tool scenarios. That
+  # constraint does not bind here, and the reason is a property of the
+  # argument rather than of the scenario: `delay_seconds` exists on BOTH
+  # siblings with IDENTICAL bounds (1..3600), so one claim naming both is
+  # well-defined whichever tool fires. `_grade_action_arguments` matches
+  # per evidence entry, so the sibling that was never called contributes no
+  # entry and costs nothing; the fail-closed arm fires only when NEITHER
+  # fired, which is a run that scheduled nothing and is already red on
+  # OUTCOME and on `scheduled sum equals 2`. Pinned by
+  # `TestTheDelayClaimHoldsWhicheverReplaySiblingFires`, which also asserts
+  # the identical-bounds premise against the contract snapshot so the day
+  # the platform diverges them is the day this claim stops being shared.
+  #
+  # WHAT IS DELIBERATELY NOT CLAIMED. The correct derivation measures the
+  # wait from the LAST FAILURE, not from now: the dependency's window
+  # opened when the job died (`dead_lettered_at`), so the earliest safe
+  # execution is `newest dead_lettered_at + stated wait`. That is in the
+  # prompt, and it is not gradeable here. These rows are seeded fixtures
+  # whose `dead_lettered_at` is 2026-07-28 — weeks before any run — so
+  # `now + delay >= dead_lettered_at + 120` is satisfied by EVERY delay,
+  # including the 5-second one this floor exists to catch. A claim that
+  # cannot fail on the run it was written for is the vacuous shape this
+  # file refuses, and the only thing that could ever make it fail is clock
+  # skew between the platform's stamp and the runner's host, i.e. it would
+  # red a correct run for a reason that is not about the agent. Assert the
+  # floor, which fires; leave the last-failure arithmetic to the prompt,
+  # which is where a judgement the world cannot witness belongs.
+  expected_action_arguments:
+  - tools: [replay_dlq_by_ids, replay_dlq_by_category]
+    argument: delay_seconds
+    at_least: 120
+  - tools: [replay_dlq_by_ids, replay_dlq_by_category]
+    argument: delay_seconds
+    at_most: 1800
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
   # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
   # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. Cap 13 is the

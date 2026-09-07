@@ -199,6 +199,13 @@ services:
       # that need a real broken state to fix. Triple-gated on the
       # platform side — refuses to enable in prod. See docs/runbook.md.
       CHAOS_ENABLED: "true"
+      # The SLO evaluator reads the seeded fixtures as real traffic: 4 of
+      # the 7 seeded jobs are dead-lettered, so a fresh eval world is a
+      # "fast burn" by construction and raised a critical alert within 5
+      # minutes of every boot (observed 2026-09-07, WO-R2-132). 0 disables
+      # the loop; scenarios deliver their own alert payloads, so the eval
+      # world loses nothing. Mirrors the api service below.
+      SLO_EVALUATION_INTERVAL_SECONDS: "0"
     depends_on:
       postgres:
         condition: service_healthy
@@ -264,6 +271,10 @@ services:
       # startup; the kill flag is honored by the consumers in THIS
       # process).
       CHAOS_ENABLED: "true"
+      # See the platform service: the worker loops run in THIS process, so
+      # this is the setting that actually silences the fixture-driven SLO
+      # alert (WO-R2-132).
+      SLO_EVALUATION_INTERVAL_SECONDS: "0"
     depends_on:
       postgres:
         condition: service_healthy

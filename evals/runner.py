@@ -1193,16 +1193,21 @@ def _settings_for_mode(live: bool) -> Settings:
 
 
 def _parse_only(argv: list[str]) -> list[str]:
-    """Extract scenario name-substring filters from ``--only <pattern>``.
+    """Extract scenario filters from ``--only <pattern>``.
 
     Accepts multiple patterns via repeated ``--only`` flags or as a
-    comma-separated single value. A scenario matches if any pattern
-    appears in its name. Empty list means "no filter" (run all).
+    comma-separated single value. Empty list means "no filter".
+
+    How a pattern is matched depends on the mode, and ``main`` decides:
+    under ``--live`` without ``--smoke`` each pattern must be a scenario's
+    FULL NAME (a substring there widens the selection past the ADR 0020
+    gate); under ``--smoke`` and offline a pattern matches any scenario
+    whose name contains it. Parsing is the same either way.
 
     Examples:
-        --only remediate_               → single filter
-        --only remediate_,dlq_          → two filters (comma-separated)
-        --only remediate_ --only dlq_   → two filters (repeated flag)
+        --only remediate_dlq_backlog_success          → one live selection
+        --only consumer_lag_healthy,tool_             → two (comma-separated)
+        --only remediate_ --only dlq_                 → two (repeated flag)
     """
     patterns: list[str] = []
     for i, arg in enumerate(argv):
@@ -1214,6 +1219,39 @@ def _parse_only(argv: list[str]) -> list[str]:
         if raw is not None:
             patterns.extend(p.strip() for p in raw.split(",") if p.strip())
     return patterns
+
+
+def _smoke_holdback_reason(scenario: Scenario) -> str:
+    """Why the derived smoke pass does not contain ``scenario``.
+
+    The refusal has to name the reason per scenario, not just the names: the
+    three causes have three different repairs. A chaos or write scenario
+    belongs to the remediation stage under the full token; a
+    ``smoke_exclusion`` is a deliberate hold-back whose recorded reason says
+    what would have to be true to lift it.
+
+    ``chaos_setup`` and ``expected_action_tools`` can both be true, and both
+    are reported. ``smoke_exclusion`` cannot coexist with either — the schema
+    validator refuses a hold-back the predicate already covers — so it is
+    reported alone.
+    """
+    causes: list[str] = []
+    if scenario.chaos_setup is not None:
+        causes.append(
+            "declares chaos_setup (seeding fires under the full write+chaos "
+            "principal, which is the claim --smoke exists to disprove)"
+        )
+    if scenario.expectation.expected_action_tools:
+        causes.append(
+            "declares expected_action_tools (a graded Tier-1 write; the read-scoped "
+            "smoke token 403s it by design, so it is guaranteed red here)"
+        )
+    if scenario.smoke_exclusion is not None:
+        causes.append(f"smoke_exclusion: {scenario.smoke_exclusion}")
+    # Not reachable from a scenario the caller filtered on `not in_smoke_pass`,
+    # and stated rather than assumed: a silent empty reason would turn the
+    # refusal into a bare list of names.
+    return "; ".join(causes) if causes else "not in the derived smoke pass"
 
 
 def main() -> int:
@@ -1239,6 +1277,32 @@ def main() -> int:
     # run's (CLAUDE.md invariant 9).
     invocation_id = uuid.uuid4().hex[:12]
     only_patterns = _parse_only(sys.argv[1:])
+    if live and not smoke and not only_patterns:
+        # A bare `--live` is the whole suite against one shared platform, with
+        # real spend and no reset between scenarios. It was already refused —
+        # but only INCIDENTALLY, by the exit-8 canned-only gate below, which
+        # fires because the tree happens to contain six scenarios with no live
+        # leg. That refusal is a fact about the scenario directory, not about
+        # the invocation: give every scenario a live leg and an unfiltered
+        # `--live` starts spending, having changed nothing in this file. The
+        # exit-8 message also misnames the problem ("these scenarios cannot run
+        # live") when the actual problem is "you named no scenario".
+        #
+        # So the missing filter is refused here, structurally, before the
+        # settings load — no env, no scenario tree, nothing to be contingent
+        # on. `--smoke` is exempt: it derives its own selection (WO-R2-123)
+        # and runs read-scoped. The Makefile's `ifndef ONLY` guard on
+        # `eval-live` says the same thing one layer out; this is the backstop
+        # for every other entry point, since `python -m evals.runner --live`
+        # never touches make.
+        print(
+            "LIVE FAIL: --live requires --only <scenario_name> (or --smoke). "
+            "An unfiltered live selection is the whole suite against one shared "
+            "platform — real spend, no reset between scenarios."
+        )
+        print("Name exactly one scenario, e.g. make eval-live ONLY=remediate_dlq_backlog_success")
+        print("no scenarios ran, nothing was spent")
+        return 2
     try:
         settings = _settings_for_mode(live)
     except ValidationError as err:
@@ -1336,24 +1400,88 @@ def main() -> int:
             )
             print("no scenarios ran, nothing was spent")
             return 2
-        scenarios = [s for s in scenarios if any(p in s.name for p in only_patterns)]
+        if live and not smoke:
+            # On the spend path a pattern must be a scenario's FULL NAME, so
+            # the selection is exactly what the operator typed and nothing
+            # adjacent. Substring matching silently widened it: `ONLY=dlq_backlog`
+            # takes `dlq_backlog` AND `remediate_dlq_backlog_success`, the
+            # read-only one drains the seeded replay_safe pool before the
+            # remediation is graded, and the report blames the agent. The ADR
+            # 0020 gate does not catch it — only ONE of the two is mutating, so
+            # `len(mutating) > 1` is False (2026-08-30: a read-only stage
+            # smuggled in a mutating scenario).
+            #
+            # Exact match FIRST, so a name that is also a prefix of another
+            # name stays runnable: `ONLY=dlq_backlog` selects the one scenario
+            # called that. Refusing it because a longer name contains it would
+            # make that scenario impossible to run live at all.
+            #
+            # `--smoke` keeps substring matching: it derives its own selection,
+            # runs read-scoped, and SMOKE_ONLY is a documented substring
+            # override (`SMOKE_ONLY=consumer_lag_`). Offline keeps it too —
+            # no spend, no shared platform, and `make eval-reg` / `make baseline`
+            # refuse ONLY outright, so nothing downstream reads a widened
+            # offline selection.
+            known = {s.name for s in scenarios}
+            widened = [p for p in only_patterns if p not in known]
+            if widened:
+                print(
+                    f"SELECTION FAIL: {len(widened)} --only pattern(s) are not "
+                    f"scenario names: {', '.join(widened)}"
+                )
+                print(
+                    "A live run selects by full scenario name — one named scenario "
+                    "per pattern — because a substring silently widens the selection "
+                    "past the ADR 0020 one-mutating-scenario gate. Did you mean:"
+                )
+                for pattern in widened:
+                    for name in matched[pattern]:
+                        print(f"  --only {pattern} → {name}")
+                print("no scenarios ran, nothing was spent")
+                return 2
+            selected = set(only_patterns)
+            scenarios = [s for s in scenarios if s.name in selected]
+        else:
+            scenarios = [s for s in scenarios if any(p in s.name for p in only_patterns)]
         print(f"filter --only={only_patterns} → {len(scenarios)} scenario(s)")
     if smoke:
-        # A read-only stage does not seed chaos. run_scenario fires
-        # chaos_setup under settings.platform_token — the full write+chaos
-        # principal — which is exactly the claim --smoke exists to disprove.
-        # The #80 principal guard only inspects the AGENT client's token and
-        # the exit-5 post-stage audit sees the write after it lands, so the
-        # only prevention is refusing the selection outright, here: after
-        # --only (the reachable channel, since SMOKE_ONLY is .env-overridable)
-        # and before preflight, guard, and any spend. There is no opt-out
-        # flag: a scenario that seeds chaos is not a smoke scenario (S-03).
-        chaos_scenarios = [s.name for s in scenarios if s.chaos_setup is not None]
-        if chaos_scenarios:
+        # A read-only stage runs the DERIVED smoke set and nothing else.
+        # run_scenario fires chaos_setup under settings.platform_token — the
+        # full write+chaos principal — which is exactly the claim --smoke
+        # exists to disprove. The #80 principal guard only inspects the AGENT
+        # client's token and the exit-5 post-stage audit sees the write after
+        # it lands, so the only prevention is refusing the selection outright,
+        # here: after --only (the reachable channel, since SMOKE_ONLY is
+        # .env-overridable) and before preflight, guard, and any spend. There
+        # is no opt-out flag: a scenario outside the derived set is not a
+        # smoke scenario (S-03).
+        #
+        # This checked `chaos_setup` alone, and that was half the door. The
+        # derived set is `in_smoke_pass` — NOT chaos_setup, AND no
+        # expected_action_tools, AND no smoke_exclusion — but `--only`
+        # bypasses the derivation entirely (`if smoke and not only_patterns`
+        # above), so an override could re-admit anything the derivation had
+        # dropped for the other two reasons. A scenario with
+        # expected_action_tools and no chaos_setup passed every guard here: a
+        # graded Tier-1 write inside the stage whose purpose is proving the
+        # smoke token cannot write. Same shape as 2026-08-30, different door.
+        # Scenario.smoke_eligible's own docstring already claimed this
+        # refusal existed; now it does.
+        #
+        # The override may still NARROW the derived set — that is what
+        # SMOKE_ONLY is for, and substring patterns keep working for
+        # scenarios that are in it. It may not widen it.
+        held_back = [(s.name, _smoke_holdback_reason(s)) for s in scenarios if not s.in_smoke_pass]
+        if held_back:
             print(
-                f"SMOKE FAIL: scenario(s) {', '.join(chaos_scenarios)} declare "
-                "chaos_setup — a read-only stage does not seed chaos (chaos runs "
-                "under the full write+chaos principal)"
+                f"SMOKE FAIL: {len(held_back)} selected scenario(s) are not in the "
+                "read-only smoke pass:"
+            )
+            for name, reason in held_back:
+                print(f"  {name} — {reason}")
+            print(
+                "--only narrows the derived smoke selection; it cannot widen it. "
+                "Run these in the remediation stage under the full token instead."
             )
             print("no scenarios ran, nothing was spent")
             return 6

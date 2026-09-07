@@ -33,8 +33,8 @@ help:
 	@echo "  fixture-drift    the same walk, as a human-readable report"
 	@echo "  test-e2e         full compose end-to-end (spends tokens)"
 	@echo "  eval             full eval suite offline (writes report)"
-	@echo "  eval-live        run eval suite against live platform (needs .env);"
-	@echo "                   ONLY=<substr[,substr...]> to filter (e.g. ONLY=remediate_consumer_lag_success)"
+	@echo "  eval-live        run named scenario(s) against live platform (needs .env);"
+	@echo "                   ONLY=<name[,name...]> REQUIRED, full scenario names (e.g. ONLY=remediate_consumer_lag_success)"
 	@echo "  eval-smoke       read-only smoke pass under the read-scoped smoke token"
 	@echo "  trace-report     render evals/traces/*.jsonl → readable txt files"
 	@echo "  chaos-help       list chaos setup subcommands (kill-consumer, etc.)"
@@ -112,22 +112,40 @@ test-e2e:
 eval:
 	uv run python -m evals.runner $(if $(ONLY),--only $(ONLY))
 
-# ONLY=<pattern>[,<pattern>...] filters to scenarios whose name matches
-# any of the substrings. Runs the whole suite when unset. Traced by
-# construction — EVAL_TRACE_DIR is set inline so the human report is
+# ONLY=<name>[,<name>...] names the scenario(s) to run, by FULL NAME — a live
+# --only pattern is matched exactly (see the exact-match block in
+# evals/runner.py), so ONLY=dlq_backlog runs that one scenario and not
+# remediate_dlq_backlog_success alongside it.
+#
+# ONLY is REQUIRED here. Without it the recipe used to hand the runner a bare
+# --live, i.e. the whole suite against one shared platform, and the only thing
+# standing in the way was the runner's exit-8 canned-only gate — which refuses
+# for a different reason (some scenarios have no live leg) and would stop
+# refusing the moment they all gained one. Same parse-time `$(error)` shape as
+# the `ifdef ONLY` guards on eval-reg and baseline below, pointing the other
+# way: no prerequisites on the refusing rule, so it fires before anything runs,
+# and make exits 2. The runner carries the same refusal (also exit 2) because
+# `python -m evals.runner --live` never comes through here.
+#
+# Traced by construction — EVAL_TRACE_DIR is set inline so the human report is
 # always produced, matching the post-hardening one-scenario protocol
 # in docs/runbook.md.
 # The trace render runs whether or not the suite passed, then the recipe
 # exits with the runner's own code. Make aborts a recipe on the first
 # non-zero line, so a FAILING run — the one whose traces you actually need —
 # used to skip format_traces.py and leave only raw JSONL behind.
+ifndef ONLY
 eval-live:
-	@EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live $(if $(ONLY),--only $(ONLY)); \
+	$(error 'make eval-live' without ONLY= would select the whole suite for a live, paid run; name exactly one scenario: make eval-live ONLY=<scenario_name>)
+else
+eval-live:
+	@EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live --only $(ONLY); \
 	code=$$?; \
 	uv run python scripts/format_traces.py || true; \
 	echo "JSONL traces: evals/traces/*.jsonl"; \
 	echo "Human-readable trajectories: evals/reports/human/*.txt"; \
 	exit $$code
+endif
 
 # `eval-live-remediation` is gone. It selected `remediate_,dlq_` — nine
 # state-mutating scenarios in one invocation, against one shared platform,
@@ -164,10 +182,13 @@ eval-live:
 #
 # SMOKE_ONLY survives as the OPERATOR OVERRIDE, unset by default: set it on
 # the command line (`make eval-smoke SMOKE_ONLY=consumer_lag_`) or in .env to
-# run a subset, e.g. when re-checking one scenario against a new pin. It
-# reaches the runner as --only, so the dead-pattern refusal (exit 2) and the
-# chaos refusal (exit 6) both still apply to it — an override cannot smuggle
-# a chaos scenario in, and it cannot silently match nothing.
+# run a subset, e.g. when re-checking one scenario against a new pin. The
+# override can only NARROW the derived selection, never widen it: it reaches
+# the runner as --only, so the dead-pattern refusal (exit 2) and the
+# outside-the-derived-set refusal (exit 6 — chaos_setup, expected_action_tools,
+# or a declared smoke_exclusion, each named with its reason) both still apply
+# to it. An override cannot smuggle a chaos-seeding or a write-declaring
+# scenario in, and it cannot silently match nothing.
 eval-smoke:
 	@if [ -z "$(PLATFORM_SMOKE_TOKEN)" ]; then \
 		echo "ERROR: PLATFORM_SMOKE_TOKEN not set. Run 'make bootstrap-token' and add it to .env" >&2; exit 2; \

@@ -112,6 +112,13 @@ KINDS: Final[dict[str, ArtifactKind]] = {
     "report": ArtifactKind(
         ("evals", "reports"), ".json", fixed_stem="report", legacy_name="latest.json"
     ),
+    # `make world-dossier ONLY=<scenario>` (evals/dossier.py) — the free
+    # pre-run reading of the fault world. Versioned like everything else here
+    # and for the same reason: a dossier is the evidence that somebody looked
+    # at the world before the money was released, so a second reading of the
+    # same scenario must not overwrite the first. There is no legacy flat
+    # name; this family was versioned from its first write.
+    "dossier": ArtifactKind(("evals", "reports", "dossiers"), ".md"),
 }
 
 

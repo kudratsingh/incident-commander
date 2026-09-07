@@ -599,6 +599,58 @@ The asymmetry is the reason for the bar. Wrongly calling something a defect wast
 
 **The ledger is blessed against a freshly seeded stack** — CI's `contract` job. A local `make fixture-drift` run can legitimately disagree with it, because `make demo-down` preserves the postgres volume and a long-lived developer stack drifts from a fresh seed. When it does, the disagreement is a true statement about *your volume*, not about the fixtures: `failed_traces_scan` reporting `no_live_rows` locally means your stack has no seeded failed traces, where a fresh one has two. Reach for `make eval-reset` before re-blessing from a local run, and never re-bless to silence that.
 
+### 7. Read the fault world before you grade an agent against it
+
+Rules 1–6 calibrate the *claim*. This one calibrates the *world the claim is
+made about*, and it is the newest because it is the one the campaign learned
+last and most expensively.
+
+A scenario can be perfectly calibrated and still be ungradeable, because the
+world it seeds says two incompatible things and the agent believes the wrong
+half. `remediate_runaway_saga_success` run A (2026-09-07, archive
+`efdc3b2a9864`, ≈$0.15) seeded the stuck chain's dead-lettered root with
+`remediation_hint: replay_safe` and the error text `SchemaValidationError:
+payload missing required field 'user_id' … across 3 retry attempts`. The agent
+read the root's row — the ADR 0027 check the scenario exists to require —
+reasoned that a missing required field is a persistent data bug no replay can
+fix, and escalated naming the contradiction. Sound operator judgement, graded
+red on outcome, action and evidence.
+
+The lab is the one that was lying: its processors never validate payloads, so
+its error texts are decorative and only the hint is true. The agent cannot
+know that, and **the fix is never to tune the agent to trust hints over
+evidence** — that is a wrong-reason green in the other direction.
+
+Same family as the unobservable-verify-signal finding under rule 3: in both
+cases the fixture promised something false, and in both cases every mechanical
+check passed. **Two readiness sweeps had already cleared that scenario**, and
+both asked mechanical questions — does the chain drain, do the guards admit
+the plan — rather than reading the fault's own fields.
+
+**So: before a scenario's first paid run, seed its fault and read the world as
+the agent will see it.** `make world-dossier ONLY=<scenario>` (free, zero-LLM,
+`docs/runbook.md` pre-run checklist step 5) does it mechanically: it seeds the
+scenario's own `chaos_setup`, runs its preconditions, runs every read probe
+derived from `ALERT_SUBJECT_PROBES` / `SOURCE_ROW_FOR_ACTION` /
+`VERIFY_PROBE_FOR_ACTION` and the scenario's evidence claims, prints every
+output in full, lints for coherence, then resets and re-audits the baseline.
+Of every field it prints, ask: *does this fact support the behaviour the
+scenario expects, or contradict it?*
+
+Three shapes to look for, each of which has cost money once:
+
+- **a hint that disagrees with its error text** — the run above; the dossier's
+  coherence table flags these directly, and the platform-side fix is WO-R2-146;
+- **a verify signal the world cannot move** — rule 3's stale-cache finding, now
+  also refused structurally by `VERIFY_PROBE_FOR_ACTION` (ADR 0025);
+- **a resource the action must name that appears in no read output** — the
+  agent cannot reach it by reading, so the plan guards would refuse the plan
+  the scenario grades.
+
+The dossier reports **findings, not verdicts**. A lint that returned a verdict
+would become a gate somebody eventually tunes to green, which is the same
+failure this rule is about, one level up.
+
 ### Exact-count remediation claims
 
 Rule 6 is about a token that cannot say *which tool* produced it. This is its sibling one level down: a value assertion that cannot say *how much* the agent did.

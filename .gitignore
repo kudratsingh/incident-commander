@@ -65,6 +65,14 @@ evals/reports/latest.json
 evals/reports/report.*.json
 evals/reports/human/*
 !evals/reports/human/.gitkeep
+# `make world-dossier` output (cmd: evals/dossier.py). One versioned markdown
+# file per pre-run reading of the fault world. Ignored, like the other
+# per-run outputs: the dossier's job is to be READ before the spend and
+# pasted into the readiness note, so the durable copy is the readiness note
+# and the run archive, not a file that would add a few hundred lines to the
+# repo every time somebody checks a world for free.
+evals/reports/dossiers/*
+!evals/reports/dossiers/.gitkeep
 
 # Claude Code runtime artifacts (per-machine)
 .claude/

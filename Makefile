@@ -141,7 +141,7 @@ else
 eval-live:
 	@EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live --only $(ONLY); \
 	code=$$?; \
-	uv run python scripts/format_traces.py || true; \
+	PYTHONPATH=. uv run python scripts/format_traces.py || true; \
 	echo "JSONL traces: evals/traces/*.jsonl"; \
 	echo "Human-readable trajectories: evals/reports/human/*.txt"; \
 	exit $$code
@@ -207,13 +207,13 @@ eval-smoke:
 	@EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live --smoke \
 		$(if $(SMOKE_ONLY),--only "$(SMOKE_ONLY)"); \
 	code=$$?; \
-	uv run python scripts/format_traces.py || true; \
+	PYTHONPATH=. uv run python scripts/format_traces.py || true; \
 	echo "JSONL traces: evals/traces/*.jsonl"; \
 	echo "Human-readable trajectories: evals/reports/human/*.txt"; \
 	exit $$code
 
 trace-report:
-	uv run python scripts/format_traces.py
+	PYTHONPATH=. uv run python scripts/format_traces.py
 
 # --- Chaos setup helpers (live-eval prep) -------------------------------
 # All wrap scripts/chaos_setup.py. Effects self-clean on TTL. Requires
@@ -348,12 +348,15 @@ chaos-bad-data-job:
 	PYTHONPATH=. uv run python scripts/chaos_setup.py bad-data-job
 
 # ONLY= must never reach the regression gate: `eval-reg: eval` forwards
-# ONLY into the runner, so a filtered run would overwrite latest.json and
+# ONLY into the runner, so a filtered run would become the NEWEST report and
 # the gate would compare a shrunken suite (A-03; study/runs.jsonl line 4
-# records this class as real artifact loss). The guard is a parse-time
-# conditional swapping in a prerequisite-free $(error) rule — it fires
-# before the `eval` prerequisite could run, whereas a recipe-line check
-# would fire only AFTER the filtered eval already overwrote latest.json.
+# records this class as real artifact loss). Reports are versioned now, so
+# the earlier full-suite report survives — but the gate resolves newest-wins
+# and would still be pointed at the filtered one, and `make baseline` would
+# bless it. The guard is a parse-time conditional swapping in a
+# prerequisite-free $(error) rule — it fires before the `eval` prerequisite
+# could run, whereas a recipe-line check would fire only AFTER the filtered
+# eval already wrote a report that outranks the full-suite one.
 # `-include .env` above means an ONLY= line in .env trips this too —
 # deliberate: a filtered gate is wrong no matter where the filter came
 # from. regression.py's exit-2 refusal of only_patterns reports is the
@@ -408,14 +411,22 @@ snapshot:
 # Same parse-time ONLY guard as eval-reg: `make baseline ONLY=x` would
 # bless a filtered subset over the committed 37-scenario baseline (the
 # study/runs.jsonl artifact-loss pattern). Must refuse before the `eval`
-# prerequisite can overwrite latest.json; an ONLY= line in .env trips it
+# prerequisite can write a filtered report; an ONLY= line in .env trips it
 # too, deliberately.
+#
+# The source report is RESOLVED, never globbed: `python -m evals.artifacts
+# newest report` applies the same ordering (stamp, then invocation_id) that
+# evals/regression.py uses, so the blessed baseline is provably the report
+# the gate just read. `ls -t | head -1` would order by mtime and could bless
+# a restored or copied file.
 ifdef ONLY
 baseline:
 	$(error 'make baseline ONLY=...' would bless a filtered baseline over the committed full suite; run 'make baseline' without ONLY)
 else
 baseline: eval
-	cp evals/reports/latest.json evals/reports/baseline.json
+	@newest=$$(uv run python -m evals.artifacts newest report) && \
+		echo "blessing $$newest" && \
+		cp "$$newest" evals/reports/baseline.json
 	@echo "Baseline updated. git add + commit evals/reports/baseline.json to bless."
 endif
 

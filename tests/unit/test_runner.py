@@ -16,6 +16,7 @@ from uuid import UUID
 import pytest
 from pydantic import SecretStr
 
+from evals import artifacts
 from evals import guards as guards_module
 from evals import runner as runner_module
 from evals.chaos_hooks import ChaosInvocationError
@@ -58,6 +59,9 @@ from incident_commander.llm.fakes import CannedLLMClient
 from incident_commander.tools.mcp_client import MCPError, ToolResult
 
 _NOW = datetime(2026, 8, 8, tzinfo=UTC)
+# Stand-in for the path a real ``write_report`` returns, for the tests that
+# stub the writers out so ``main()`` never touches evals/ (ADR 0011 freeze).
+_STUB_REPORT_PATH = Path("evals/reports/report.20260808T000000Z.stubbed0000.json")
 
 
 def _is_write_locked(path: Path) -> bool:
@@ -493,39 +497,83 @@ class TestChaosSetupHook:
 
 
 class TestWriteReport:
+    """Filenames are versioned; every read goes through ``artifacts.newest``.
+
+    These used to assert the fixed name ``latest.json``. They now assert the
+    resolver returns what was just written — the same guarantee, expressed
+    the way every production reader expresses it.
+    """
+
     def test_round_trip_json(self, tmp_path: Path) -> None:
-        report, _, _ = run_all([_passing_scenario()], _test_settings())
-        target = tmp_path / "latest.json"
-        write_report(report, target)
-        loaded = RunReport.model_validate_json(target.read_text())
+        report, _, _ = run_all(
+            [_passing_scenario()], _test_settings(), invocation_id="inv000000001"
+        )
+        written = write_report(report, directory=tmp_path)
+        assert written == artifacts.newest("report", directory=tmp_path)
+        loaded = RunReport.model_validate_json(written.read_text())
         assert loaded == report
 
     def test_creates_parent_directory(self, tmp_path: Path) -> None:
+        report, _, _ = run_all(
+            [_passing_scenario()], _test_settings(), invocation_id="inv000000001"
+        )
+        target = tmp_path / "nested" / "reports"
+        written = write_report(report, directory=target)
+        assert written.exists()
+        assert json.loads(written.read_text())["total"] == 1
+
+    def test_the_name_carries_the_runs_own_identity(self, tmp_path: Path) -> None:
+        report, _, _ = run_all(
+            [_passing_scenario()], _test_settings(), invocation_id="inv000000001"
+        )
+        written = write_report(report, directory=tmp_path)
+        assert written.name == artifacts.version_name(
+            "report", timestamp=report.generated_at, invocation_id="inv000000001"
+        )
+
+    def test_a_run_with_no_identity_cannot_name_its_report(self, tmp_path: Path) -> None:
+        """An unidentified run is refused, not filed under a blank id.
+
+        A report named without an ``invocation_id`` cannot be joined back to
+        the run that paid for it, and two such runs would collide within the
+        same second — silently, if the write were not exclusive-create.
+        """
         report, _, _ = run_all([_passing_scenario()], _test_settings())
-        target = tmp_path / "nested" / "reports" / "latest.json"
-        write_report(report, target)
-        assert target.exists()
-        assert json.loads(target.read_text())["total"] == 1
+        assert report.invocation_id == ""
+        with pytest.raises(ValueError, match="invocation_id"):
+            write_report(report, directory=tmp_path)
 
 
 class TestWriteTrajectories:
     def test_writes_one_file_per_trajectory(self, tmp_path: Path) -> None:
-        _, trajectories, _ = run_all([_passing_scenario(), _noise_scenario()], _test_settings())
+        _, trajectories, _ = run_all(
+            [_passing_scenario(), _noise_scenario()], _test_settings(), invocation_id="inv000000001"
+        )
         write_trajectories(trajectories, directory=tmp_path)
-        files = sorted(p.name for p in tmp_path.iterdir())
-        assert files == ["consumer_lag_pass.json", "noise_alert.json"]
+        resolved = {
+            name: artifacts.newest("trajectory", name, directory=tmp_path)
+            for name in ("consumer_lag_pass", "noise_alert")
+        }
+        assert len(set(resolved.values())) == 2
+        assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
+            p.name for p in resolved.values()
+        )
 
     def test_round_trip_trajectory(self, tmp_path: Path) -> None:
-        _, trajectories, _ = run_all([_passing_scenario()], _test_settings())
+        _, trajectories, _ = run_all(
+            [_passing_scenario()], _test_settings(), invocation_id="inv000000001"
+        )
         write_trajectories(trajectories, directory=tmp_path)
-        loaded = Trajectory.model_validate_json((tmp_path / "consumer_lag_pass.json").read_text())
-        assert loaded == trajectories[0]
+        newest = artifacts.newest("trajectory", "consumer_lag_pass", directory=tmp_path)
+        assert Trajectory.model_validate_json(newest.read_text()) == trajectories[0]
 
     def test_creates_directory(self, tmp_path: Path) -> None:
-        _, trajectories, _ = run_all([_passing_scenario()], _test_settings())
+        _, trajectories, _ = run_all(
+            [_passing_scenario()], _test_settings(), invocation_id="inv000000001"
+        )
         target = tmp_path / "nested" / "trajectories"
         write_trajectories(trajectories, directory=target)
-        assert (target / "consumer_lag_pass.json").exists()
+        assert artifacts.newest("trajectory", "consumer_lag_pass", directory=target).exists()
 
 
 class TestWriteBriefings:
@@ -535,17 +583,24 @@ class TestWriteBriefings:
             briefings,
             ["consumer_lag_pass", "noise_alert"],
             directory=tmp_path,
+            invocation_id="inv000000001",
         )
-        files = sorted(p.name for p in tmp_path.iterdir())
-        assert files == ["consumer_lag_pass.json", "noise_alert.json"]
+        resolved = {
+            name: artifacts.newest("briefing", name, directory=tmp_path)
+            for name in ("consumer_lag_pass", "noise_alert")
+        }
+        assert len(set(resolved.values())) == 2
+        assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
+            p.name for p in resolved.values()
+        )
 
     def test_round_trip_briefing(self, tmp_path: Path) -> None:
         _, _, briefings = run_all([_passing_scenario()], _test_settings())
-        write_briefings(briefings, ["consumer_lag_pass"], directory=tmp_path)
-        loaded = EscalationBriefing.model_validate_json(
-            (tmp_path / "consumer_lag_pass.json").read_text()
+        write_briefings(
+            briefings, ["consumer_lag_pass"], directory=tmp_path, invocation_id="inv000000001"
         )
-        assert loaded == briefings[0]
+        newest = artifacts.newest("briefing", "consumer_lag_pass", directory=tmp_path)
+        assert EscalationBriefing.model_validate_json(newest.read_text()) == briefings[0]
 
     def test_probe_scenario_briefing_lists_the_tool_call(self) -> None:
         result = run_scenario(_passing_scenario(), _test_settings())
@@ -736,18 +791,34 @@ class TestRunArchiveIsAppendOnly:
         with pytest.raises(FileExistsError):
             archive_run("dupe", self._report("s"), [traj], [brief], ["s"], tmp_path)
 
-    def test_archive_survives_a_later_flat_write(self, tmp_path: Path) -> None:
-        # The exact Run 001 loss: a second run refreshes the flat pointer
-        # while the first run's evidence stays intact in the archive.
-        runs, flat = tmp_path / "runs", tmp_path / "trajectories"
-        first_traj = Trajectory(scenario="s", incident_id="first", checkpoints=())
-        archive_run("inv_one", self._report("s"), [first_traj], [], [], runs)
-        write_trajectories([first_traj], flat)
-        write_trajectories([Trajectory(scenario="s", incident_id="second", checkpoints=())], flat)
+    def test_a_later_top_level_write_destroys_nothing(self, tmp_path: Path) -> None:
+        """The exact Run 001 loss (F-003), now impossible in BOTH places.
 
-        assert json.loads((flat / "s.json").read_text())["incident_id"] == "second"
+        This test used to assert the loss: it wrote two runs to the flat
+        ``trajectories/s.json`` and checked only that the *archive* still
+        held the first one, because the flat file was a pointer and losing
+        it was by design. The pointer exception is withdrawn — the second
+        run must leave the first run's top-level copy readable too, and the
+        archive must still not follow either of them.
+        """
+        runs, flat = tmp_path / "runs", tmp_path / "trajectories"
+        first_traj = Trajectory(
+            scenario="s", incident_id="first", checkpoints=(), invocation_id="inv_one"
+        )
+        second_traj = Trajectory(
+            scenario="s", incident_id="second", checkpoints=(), invocation_id="inv_two"
+        )
+        archive_run("inv_one", self._report("s"), [first_traj], [], [], runs)
+        [first_flat] = write_trajectories([first_traj], flat)
+        [second_flat] = write_trajectories([second_traj], flat)
+
+        assert first_flat != second_flat
+        assert json.loads(first_flat.read_text())["incident_id"] == "first"
+        assert json.loads(second_flat.read_text())["incident_id"] == "second"
+        assert artifacts.newest("trajectory", "s", directory=flat) == second_flat
+
         archived = json.loads((runs / "inv_one" / "trajectories" / "s.json").read_text())
-        assert archived["incident_id"] == "first", "archive must not follow the pointer"
+        assert archived["incident_id"] == "first", "archive must not follow the newest"
 
 
 def _finished_result(scenario: str) -> ScenarioResult:
@@ -952,9 +1023,10 @@ class TestIncrementalArchive:
             return _stub_report("consumer_lag_pass"), (), ()
 
         monkeypatch.setattr(runner_module, "run_all", _stub_run_all)
-        monkeypatch.setattr(runner_module, "write_report", lambda *_a, **_kw: None)
-        monkeypatch.setattr(runner_module, "write_trajectories", lambda *_a, **_kw: None)
-        monkeypatch.setattr(runner_module, "write_briefings", lambda *_a, **_kw: None)
+        # write_report returns the path it wrote, which main() prints.
+        monkeypatch.setattr(runner_module, "write_report", lambda *_a, **_kw: _STUB_REPORT_PATH)
+        monkeypatch.setattr(runner_module, "write_trajectories", lambda *_a, **_kw: [])
+        monkeypatch.setattr(runner_module, "write_briefings", lambda *_a, **_kw: [])
         monkeypatch.setattr(sys, "argv", ["evals.runner"])
 
         assert runner_module.main() == 0
@@ -1106,8 +1178,9 @@ class TestRunsDirIsTracked:
     precedence git itself will apply when the archive is committed or cleaned,
     and that resolver is the thing that erased the archives.
 
-    The flat-pointer ignores (trajectories, briefings, latest.json,
-    reports/human) are refreshable by design and stay ignored. ``evals/traces``
+    The per-run output ignores (trajectories, briefings, latest.json,
+    reports/human) stay ignored, versioned filenames included — those files
+    are reproducible per-run output, not the durable record. ``evals/traces``
     is deliberately NOT among them, despite sitting next to them in the same
     .gitignore stanza: it is the append-only cross-invocation trace log, no
     ``evals/traces/*`` pattern exists, and it is tracked on purpose — for a
@@ -1123,9 +1196,19 @@ class TestRunsDirIsTracked:
     # answers from the patterns, which is what lets this run on a clean tree.
     _DURABLE_RECORD: Final[str] = "evals/runs/inv-20260101-000000/report.json"
 
-    # A pointer that must stay ignored, used only to prove the probe below can
-    # still return "yes" (.gitignore line 40).
-    _REFRESHABLE_POINTER: Final[str] = "evals/trajectories/consumer_lag_pass.json"
+    # A trajectory that must stay ignored, used to prove the probe below can
+    # still return "yes" (.gitignore `evals/trajectories/*`). Spelled in the
+    # VERSIONED form the runner writes now: versioned files under an ignored
+    # directory must stay ignored, so an ignore rule written as
+    # `evals/trajectories/*.json` — which still covers the legacy flat name —
+    # would keep this green while every per-run file it is meant to cover
+    # started showing up untracked.
+    _IGNORED_TRAJECTORY: Final[str] = (
+        "evals/trajectories/consumer_lag_pass.20260101T000000Z.abc123abc123.json"
+    )
+    # The pre-versioning flat name. Still on disk in existing checkouts as
+    # evidence (never deleted, never renamed), so its ignore must hold too.
+    _IGNORED_LEGACY_TRAJECTORY: Final[str] = "evals/trajectories/consumer_lag_pass.json"
 
     @staticmethod
     def _git_ignores(path: str) -> bool:
@@ -1188,14 +1271,15 @@ class TestRunsDirIsTracked:
         and the guard above would pass forever while the archive was being
         deleted. So ask about a path that must be ignored.
         """
-        assert self._git_ignores(self._REFRESHABLE_POINTER), (
-            f"git does NOT ignore {self._REFRESHABLE_POINTER}, which .gitignore "
-            f"holds as a refreshable per-run pointer. Either that ignore was "
-            f"deliberately dropped — in which case point this canary at another "
-            f"still-ignored path, it exists only to prove the probe discriminates "
-            f"— or `git check-ignore` is not resolving patterns here at all, "
-            f"which would make the durable-record guard above vacuous."
-        )
+        for path in (self._IGNORED_TRAJECTORY, self._IGNORED_LEGACY_TRAJECTORY):
+            assert self._git_ignores(path), (
+                f"git does NOT ignore {path}, a per-run trajectory .gitignore "
+                f"holds under `evals/trajectories/*`. Either that ignore was "
+                f"deliberately dropped — in which case point this canary at another "
+                f"still-ignored path, it exists only to prove the probe discriminates "
+                f"— or `git check-ignore` is not resolving patterns here at all, "
+                f"which would make the durable-record guard above vacuous."
+            )
 
 
 # --- Run provenance + exit-code contract (ADR 0013; findings A-01/S-09/A-04/A-15) ---
@@ -1324,9 +1408,9 @@ def _stub_run_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[
 
     monkeypatch.setattr(runner_module, "_RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(runner_module, "run_all", _stub_run_all)
-    monkeypatch.setattr(runner_module, "write_report", lambda *_a, **_kw: None)
-    monkeypatch.setattr(runner_module, "write_trajectories", lambda *_a, **_kw: None)
-    monkeypatch.setattr(runner_module, "write_briefings", lambda *_a, **_kw: None)
+    monkeypatch.setattr(runner_module, "write_report", lambda *_a, **_kw: _STUB_REPORT_PATH)
+    monkeypatch.setattr(runner_module, "write_trajectories", lambda *_a, **_kw: [])
+    monkeypatch.setattr(runner_module, "write_briefings", lambda *_a, **_kw: [])
     return run_all_calls
 
 

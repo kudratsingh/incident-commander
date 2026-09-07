@@ -49,6 +49,16 @@ evals/briefings/*
 # else. Tracked so `git clean -fdx` cannot erase paid evidence
 # (invariant 9: an artifact that can erase its own history cannot be
 # used as evidence).
+# These four families are VERSIONED, never overwritten
+# (`<scenario>.<stamp>.<invocation_id>.<ext>`; evals/artifacts.py). The
+# directory-wide patterns above and below cover the versioned names as well
+# as the legacy flat ones, which stay on disk as evidence and stay ignored.
+# `evals/reports/` itself is NOT an ignored directory — it holds the tracked
+# baseline.json — so the versioned `report.<stamp>.<invocation_id>.json`
+# files land there untracked and VISIBLE. That is deliberate and left to a
+# human: no ignore rule is added for them, so committing a report is a
+# decision someone makes, not one this file makes for them. The line below
+# keeps the legacy `latest.json` ignored where it still exists.
 evals/reports/latest.json
 evals/reports/human/*
 !evals/reports/human/.gitkeep

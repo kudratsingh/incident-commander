@@ -28,6 +28,7 @@ from typing import Any
 
 import pytest
 
+from evals import artifacts
 from scripts.estimate_cost import PRE_INVOCATION_ID
 from scripts.format_traces import BOUNDARY_KINDS, STEP_FORMATTERS, format_trace, main
 
@@ -446,8 +447,9 @@ def test_one_corrupt_file_does_not_abort_the_rest(
     code = main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir)])
 
     assert code == 0
-    assert (out_dir / "good_scenario.txt").exists()
-    assert not (out_dir / "bad_scenario.txt").exists()
+    # Names are versioned now, so ask the resolver rather than a fixed name.
+    assert artifacts.newest("human", "good_scenario", directory=out_dir).exists()
+    assert artifacts.newest_or_none("human", "bad_scenario", directory=out_dir) is None
     printed = capsys.readouterr().out
     assert "ERROR bad_scenario.jsonl" in printed
     assert "1 file(s) failed to render" in printed
@@ -476,7 +478,7 @@ def test_main_renders_a_partial_archive_trace_slice(tmp_path: Path) -> None:
 
     assert code == 0
     assert not (archive / "report.json").exists()
-    rendered = (out_dir / "redis_saturation.txt").read_text()
+    rendered = artifacts.newest("human", "redis_saturation", directory=out_dir).read_text()
     assert "PARSE FAILED" in rendered
     assert "SCENARIO DID NOT REACH scenario_end" in rendered
 
@@ -491,7 +493,8 @@ def test_main_never_writes_outside_the_requested_out_dir(tmp_path: Path) -> None
     )
 
     assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir)]) == 0
-    assert sorted(p.name for p in out_dir.iterdir()) == ["solo.txt"]
+    written = [p.name for p in out_dir.iterdir()]
+    assert written == [artifacts.newest("human", "solo", directory=out_dir).name]
 
 
 # --- Every kind the harness writes must render (WO-R2-85) -----------------

@@ -124,8 +124,8 @@ def test_empty_smoke_secret_is_unset_and_refuses_the_stage(
 
 def test_only_guard_refuses_gate_and_bless_at_parse_time() -> None:
     """A-03: `make eval-reg ONLY=x` / `make baseline ONLY=x` must refuse
-    BEFORE the `eval` prerequisite could overwrite latest.json with a
-    filtered report. That forces a parse-time conditional that swaps in a
+    BEFORE the `eval` prerequisite could write a filtered report that then
+    outranks the full-suite one as newest. That forces a parse-time conditional that swaps in a
     prerequisite-free $(error) rule — a recipe-line check would fire only
     after the filtered eval already ran (the study/runs.jsonl artifact-loss
     pattern, dressed up as a fix).
@@ -142,7 +142,8 @@ def test_only_guard_refuses_gate_and_bless_at_parse_time() -> None:
             f"the {target} target must be wrapped in a parse-time `ifdef ONLY` "
             "guard whose ONLY-branch rule has NO prerequisites and a $(error) "
             "recipe — a recipe-line echo/exit would run after the eval "
-            "prerequisite already overwrote latest.json with a filtered report"
+            "prerequisite already wrote a filtered report that outranks the "
+            "full-suite one"
         )
         assert f"else\n{target}: eval" in makefile, (
             f"the unfiltered {target} rule must keep depending on eval in the "

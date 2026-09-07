@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from evals import regression
+from evals import artifacts, regression
 from evals.graders.deterministic import (
     DimensionResult,
     GradeDimension,
@@ -61,17 +61,38 @@ def _point_gate_at(
 ) -> None:
     """Write synthetic reports under tmp_path and aim main() at them.
 
-    main() reads the module-level _BASELINE/_LATEST paths; evals/reports/
-    is append-only evidence, so tests must never point at the real files.
-    ``latest=None`` leaves the latest path nonexistent.
+    main() reads the module-level ``_BASELINE`` directly and RESOLVES the
+    report to grade — ``artifacts.newest("report")`` over ``_REPORTS_DIR``.
+    evals/reports/ is append-only evidence, so tests must never point at the
+    real directory. ``latest=None`` leaves it holding no report at all.
+
+    A DECOY older report goes down alongside the real one, carrying the
+    baseline's own outcomes. If the gate ever resolved to the wrong file —
+    oldest-first, mtime order, or "the only file it found" — every test that
+    expects a verdict about ``latest`` would instead get "no changes", so
+    the decoy is what keeps this fixture honest about newest-wins.
     """
-    baseline_path = tmp_path / "baseline.json"
+    reports = tmp_path / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    baseline_path = reports / "baseline.json"
     baseline_path.write_text(baseline.model_dump_json())
-    latest_path = tmp_path / "latest.json"
     if latest is not None:
-        latest_path.write_text(latest.model_dump_json())
+        artifacts.write_versioned(
+            "report",
+            content=baseline.model_dump_json(),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+            invocation_id="decoy0000001",
+            directory=reports,
+        )
+        artifacts.write_versioned(
+            "report",
+            content=latest.model_dump_json(),
+            timestamp=datetime(2026, 9, 6, tzinfo=UTC),
+            invocation_id="graded000002",
+            directory=reports,
+        )
     monkeypatch.setattr(regression, "_BASELINE", baseline_path)
-    monkeypatch.setattr(regression, "_LATEST", latest_path)
+    monkeypatch.setattr(regression, "_REPORTS_DIR", reports)
 
 
 class TestCompare:
@@ -206,7 +227,7 @@ class TestMainGate:
         baseline = _report((_outcome("a", True),))
         _point_gate_at(monkeypatch, tmp_path, baseline, latest=None)
         assert regression.main() == 2
-        assert "latest report not found" in capsys.readouterr().err
+        assert "no report found under" in capsys.readouterr().err
 
     def test_provenance_unknown_warns_without_gating(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]

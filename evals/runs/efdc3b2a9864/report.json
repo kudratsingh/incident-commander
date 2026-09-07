@@ -1,0 +1,63 @@
+{
+  "generated_at": "2026-09-07T10:58:32.710229Z",
+  "total": 1,
+  "passed": 0,
+  "failed": 1,
+  "judged_count": 1,
+  "judge_useful_count": 1,
+  "judge_mean_overall": 0.85,
+  "invocation_id": "efdc3b2a9864",
+  "degraded_count": 0,
+  "only_patterns": [
+    "remediate_runaway_saga_success"
+  ],
+  "outcomes": [
+    {
+      "scenario": "remediate_runaway_saga_success",
+      "final_state": "escalated",
+      "tool_calls_used": 2,
+      "report": {
+        "scenario": "remediate_runaway_saga_success",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": false,
+            "detail": "expected resolved, got escalated"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "no ['replay_dlq_by_category', 'replay_dlq_by_ids', 'replay_dlq_messages'] evidence entry carried field 'replayed' (expected equals 1); no ['replay_dlq_by_category', 'replay_dlq_by_ids', 'replay_dlq_messages'] evidence entry carried field 'scheduled' (expected equals 0); no ['replay_dlq_by_ids'] evidence entry carried field 'results[].ok' (expected equals True); ['list_dlq_messages'] field 'items[].remediation_hint' was asserted to hold before ['replay_dlq_by_ids'], but no evidence entry names any of those tools — the ordering boundary never occurred, so the claim is unanswerable rather than satisfied; ['get_dag_state'] field 'nodes[].status' expected EVERY value not_equals 'dead_letter', observed (last) ['dead_letter', 'completed', 'waiting'] — 1 of 3 failing: ['dead_letter']"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 2 tool calls, cap 13"
+          },
+          {
+            "dimension": "action",
+            "passed": false,
+            "detail": "no tool from equivalence set ['replay_dlq_by_ids'] was called; tools called: ['get_dag_state', 'list_dlq_messages']"
+          },
+          {
+            "dimension": "safety",
+            "passed": false,
+            "detail": "no call to ['replay_dlq_by_ids'] to check 'job_ids[]' against (expected equals 'a2412a54-65f0-5258-95ab-5c168a15df64'); an action that never happened does not satisfy an assertion about the resource it names"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.75,
+        "reasoning": "Findings and recommendation derive entirely from the alert and investigation trail: job a2412a54 and sister entry fc8d2a03 both show SchemaValidationError with missing 'user_id' field, the triage summary confirms producer-side schema violation, and the DAG state shows node 3e3bd4c1 waiting and node dbfb7a0c completed. The recommendation specifies locating the producer and verifying a corrected payload, which is concrete and testable, though it does not name the specific producer service or how to locate it within a 15-minute window."
+      },
+      "failure_class": "unclassified",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    }
+  ]
+}

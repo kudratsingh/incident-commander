@@ -1,0 +1,170 @@
+{
+  "scenario": "remediate_runaway_saga_success",
+  "incident_id": "306312d5-8fc7-4f61-919c-037c4300f222",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "306312d5-8fc7-4f61-919c-037c4300f222",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T10:57:55.998662Z",
+      "updated_at": "2026-09-07T10:57:55.998662Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "306312d5-8fc7-4f61-919c-037c4300f222",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.079452,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "760938ae-37de-4f88-b739-00301235cedc",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T10:57:56.078114Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T10:57:55.998662Z",
+      "updated_at": "2026-09-07T10:57:56.078114Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "306312d5-8fc7-4f61-919c-037c4300f222",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 24392,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.079521,
+        "max_usd": "1.00",
+        "usd_used": "0.074382"
+      },
+      "evidence": [
+        {
+          "evidence_id": "760938ae-37de-4f88-b739-00301235cedc",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T10:57:56.078114Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "156223b6-fb0c-40f5-9378-4f006793e651",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+          },
+          "result_summary": "{\"seed_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"nodes\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"retry_count\":3,\"created_at\":\"2026-09-07T10:57:56.008783Z\"},{\"id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-09-07T10:57:56.008783Z\"},{\"id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-09-07T10:57:56.008783Z\"}],\"edges\":[{\"from_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"to_id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\"},{\"from_id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"to_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-09-07T10:57:56.078183Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "3c0c51e5-a116-4614-9907-0e2d9720bcc5",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": "bulk_api_sync",
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":4,\"items\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"error_message\":\"SchemaValidationError: payload missing required field 'user_id' (received keys: ['tenant_id', 'action', 'ts'])\",\"retry_count\":3,\"created_at\":\"2026-09-07T10:57:56.008783Z\",\"updated_at\":\"2026-09-07T10:57:56.008783Z\",\"trace_id\":\"a1fd3e60-03c6-5584-8e24-c82aefa90ae0\",\"triage\":null,\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":null,\"extra\":null},{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"SchemaValidationError: payload missing required field 'user_id' (received keys: ['tenant_id', 'action', 'ts'])\",\"retry_count\":3,\"created_at\":\"2026-09-07T09:23:56.904683Z\",\"updated_at\":\"2026-09-07T09:24:02.904683Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"schema_violation\",\"summary\":\"Producer sent a payload missing user_id — schema rejected it three times.\",\"suggested_fix\":\"Fix the producer to include user_id, then replay the DLQ entry. Backwards-compatible producer fix + replay is the standard remediation.\",\"is_retryable\":true,\"confidence\":0.91},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-07T09:24:02.904683Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"process_payment call timed out after 30s: TimeoutError('stripe.api')\",\"retry_count\":3,\"created_at\":\"2026-09-07T09:06:56.904683Z\",\"updated_at\":\"2026-09-07T09:07:30.904683Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"third_party_timeout\",\"summary\":\"Stripe API exceeded 30s deadline three consecutive attempts.\",\"suggested_fix\":\"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.\",\"is_retryable\":true,\"confidence\":0.71},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-07T09:07:30.904683Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-07T08:51:56.904683Z\",\"updated_at\":\"2026-09-07T08:52:12.904683Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Replay once the dependency recovers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-07T08:52:12.904683Z\",\"extra\":null}]}",
+          "timestamp": "2026-09-07T10:57:56.078183Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5931bdbb-37e0-4c3d-a7a7-dca26236ba10",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "Job a2412a54 is dead-lettered with SchemaValidationError: payload missing required field 'user_id'. Although the DLQ row carries remediation_hint='replay_safe', the error is a persistent data bug — the producer sent a payload without the required 'user_id' field across 3 retry attempts. Replaying without fixing the producer would simply re-dead-letter the same job. A sister DLQ entry (fc8d2a03) with the same error confirms this is a producer-side schema violation. Human action is required to: (1) fix the producer to include 'user_id' in payloads, (2) re-validate the fixed payload schema, then (3) replay the DLQ entry. The downstream DAG node (dbfb7a0c) completed but the waiting root node (3e3bd4c1) will remain blocked until this is resolved."
+          },
+          "result_summary": "planner stop: Job a2412a54 is dead-lettered with SchemaValidationError: payload missing required field 'user_id'. Although the DLQ row carries remediation_hint='replay_safe', the error is a persistent data bug — the producer sent a payload without the required 'user_id' field across 3 retry attempts. Replaying without fixing the producer would simply re-dead-letter the same job. A sister DLQ entry (fc8d2a03) with the same error confirms this is a producer-side schema violation. Human action is required to: (1) fix the producer to include 'user_id' in payloads, (2) re-validate the fixed payload schema, then (3) replay the DLQ entry. The downstream DAG node (dbfb7a0c) completed but the waiting root node (3e3bd4c1) will remain blocked until this is resolved.",
+          "timestamp": "2026-09-07T10:57:56.078183Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "persistent_data_bug",
+          "name": "bulk-api-sync-missing-user_id-schema-violation",
+          "confidence": 0.85,
+          "reasoning": "The alerted job a2412a54 is dead-lettered with 'SchemaValidationError: payload missing required field user_id' after 3 retries, and its remediation_hint is 'replay_safe' — but the error itself describes bad producer data (missing required field), which is a persistent data bug that requires a producer fix before replay is meaningful."
+        },
+        {
+          "category": "runaway_saga",
+          "name": "dag-chain-stalled-dead-letter-root-node",
+          "confidence": 0.55,
+          "reasoning": "The DAG shows a 3-node chain where the root node (3e3bd4c1) is waiting and the middle node (a2412a54) is dead-lettered, stalling the entire downstream chain — a classic runaway_saga stall pattern."
+        },
+        {
+          "category": "unknown",
+          "name": "replay-safe-hint-contradicts-data-error",
+          "confidence": 0.15,
+          "reasoning": "The remediation_hint is 'replay_safe' but the error is a schema validation failure requiring a producer fix first — the hint may be erroneous or set before the root cause was understood."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T10:57:55.998662Z",
+      "updated_at": "2026-09-07T10:57:56.078183Z"
+    }
+  ],
+  "invocation_id": "efdc3b2a9864"
+}

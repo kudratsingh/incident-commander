@@ -82,12 +82,54 @@ _MAX_SUBJECT_PROBE_REFUSALS: Final[int] = 2
 # it may pick replay_dlq_by_ids, replay_dlq_by_category, or mark_dlq_permanent
 # depending on the DLQ's remediation_hint contents). This map only asserts
 # "a Tier-1 fix category exists" — not the exact tool.
+#
+# The VALUE is nonetheless load-bearing, and 2026-09-07 is why. Only the
+# keys are read at runtime (`top.category not in FIX_MAP`), so a stale value
+# breaks nothing a test could see — but architecture-principles rule 2 makes
+# this map the single source of truth the remediation planner prompt is
+# written FROM, and the prompt is what the live agent actually obeys.
+# RUNAWAY_SAGA read `pause_dag` here, and the prompt said the same thing,
+# for the whole period after PR #173 redesigned
+# `remediate_runaway_saga_success` around replaying the dead-lettered root
+# and put `pause_dag` in that scenario's `forbidden_action_tools`. Nothing
+# was checking the two against each other; the drift was invisible in every
+# offline run because offline runs replay canned planner output and never
+# load the prompt. `tests/unit/test_policies.py::TestFixMapMatchesTheSuite`
+# is that check now: the tool a category is steered toward may not be a tool
+# the scenarios for that category forbid.
 FIX_MAP: Final[dict[HypothesisCategory, str]] = {
     HypothesisCategory.CONSUMER_SATURATION: "restart_consumer_group",
     HypothesisCategory.POISON_MESSAGE: "replay_dlq_by_ids",
     HypothesisCategory.STALE_CACHE: "invalidate_cache_key",
-    HypothesisCategory.RUNAWAY_SAGA: "pause_dag",
+    # Replaying the dead-lettered root, NOT pausing the chain. `pause_dag`
+    # halts promotion and self-expires; it never un-sticks a chain, and the
+    # platform refuses to replay a job inside a paused DAG, so a pause
+    # actively blocks the fix. See the stuck-chain section of the
+    # remediation-planner prompt and `policies.RESOLUTION_CLASS`.
+    HypothesisCategory.RUNAWAY_SAGA: "replay_dlq_by_ids",
 }
+
+
+# Categories whose SPECIFIC tool is chosen from the platform's per-row
+# `remediation_hint`, not from FIX_MAP's value.
+#
+# For these the value above names the common case and nothing more: a DLQ
+# holding `human_required` rows routes to `mark_dlq_permanent`, one holding
+# `wait_and_replay` rows routes to a deferred `replay_dlq_by_ids`, and one
+# holding `replay_safe` rows routes to an immediate replay — all under the
+# same POISON_MESSAGE category, all correct. `dlq_human_required_escalates`
+# forbids `replay_dlq_by_ids` outright, and is right to.
+#
+# Written down as a set rather than left in prose because a cross-check now
+# reads it: without the distinction, "the steered tool must not be a tool
+# the scenario forbids" is a true statement about map-routed categories and
+# a false one about hint-routed categories. It used to live only in the
+# comment above FIX_MAP, which is the shape of thing that goes stale
+# unnoticed — the comment was accurate the whole time the value beside it
+# was not.
+HINT_ROUTED_CATEGORIES: Final[frozenset[HypothesisCategory]] = frozenset(
+    {HypothesisCategory.POISON_MESSAGE}
+)
 
 
 # Single source of truth for alert-field → subject-probe routing.

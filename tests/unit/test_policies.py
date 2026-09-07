@@ -10,21 +10,32 @@ is a schema hook, not a live path.
 from __future__ import annotations
 
 import typing
+from pathlib import Path
+from typing import Any
 
 import pytest
 
-from incident_commander.agent.hypothesis import ReadToolName
+from evals.scenarios.loader import load_scenarios
+from evals.scenarios.schema import Scenario
+from incident_commander.agent.hypothesis import HypothesisCategory, ReadToolName
+from incident_commander.agent.investigation import FIX_MAP, HINT_ROUTED_CATEGORIES
 from incident_commander.agent.remediation import (
     RemediationPlan,
     Tier1ToolName,
     _absent_resource_args,
 )
+from incident_commander.agent.state import IncidentState
+from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.tools import policies
 from incident_commander.tools.policies import (
+    RESOLUTION_CLASS,
     RESOURCE_ARG_FIELDS,
     PolicyCoverageError,
+    Resolution,
     Tier,
     ensure_covered,
+    resolution_class_of,
+    stabilize_only_tools,
     tier_of,
     tools_at_or_below,
 )
@@ -34,6 +45,30 @@ from incident_commander.tools.registry import TOOL_REGISTRY
 # what the old fall-through made it: `tier_of` returned Tier.READ, so the
 # investigation planner was free to call it and nothing failed.
 _UNCLASSIFIED = "delete_all_the_things"
+
+_SCENARIO_DIR = Path(__file__).resolve().parents[2] / "evals" / "scenarios"
+
+
+def _categories_in(scenario: Scenario) -> set[HypothesisCategory]:
+    """Every hypothesis category the scenario's canned planner emits.
+
+    Read off ``canned_llm_responses`` rather than off the expectation,
+    because the expectation records the tool and the terminal state but
+    never the category — and the category is what ``FIX_MAP`` is keyed on.
+    Live scenarios carry canned responses too (they are the offline
+    fallback), so the corpus is fully covered.
+    """
+    found: set[HypothesisCategory] = set()
+    turns: list[dict[str, Any]] = scenario.canned_llm_responses.get("investigation_planner", [])
+    for turn in turns:
+        for hypothesis in turn.get("hypotheses", []) or []:
+            raw = hypothesis.get("category")
+            try:
+                found.add(HypothesisCategory(raw))
+            except ValueError:
+                continue
+    return found
+
 
 # Every (tool, resource-naming field) pair the policy map declares. Driven
 # off RESOURCE_ARG_FIELDS rather than hand-listed so a newly classified
@@ -476,4 +511,218 @@ class TestVerifyProbeForAction:
                 f"{action} is declared inert (empty tuple) but names resources "
                 f"({sorted(RESOURCE_ARG_FIELDS[action])}). Either a read observes "
                 "that resource — map it — or explain in an ADR why none can."
+            )
+
+
+class TestResolutionClass:
+    """``RESOLUTION_CLASS`` answers "can a successful call END the incident?".
+
+    Tier answers a different question — how much damage the call can do —
+    and until 2026-09-07 nothing answered this one at all, so every Tier-1
+    tool was implicitly a resolution. ``pause_dag`` is the counter-example
+    that class exists for: it halts promotion of waiting children, self-
+    cleans on a 10-minute TTL, and changes nothing about the node that
+    stopped the chain. A pause that works reads back exactly as the
+    platform's own description says it should — ``paused=true`` with the
+    children still ``waiting`` — so a verification judge holding an
+    expectation of "children stop advancing" answers ``verified``, and the
+    run reported RESOLVED on a chain nobody had fixed.
+
+    Same coverage shape as ``TestVerifyProbeForAction`` above, for the same
+    reason (architecture-principles rule 2): the map is TOTAL over the
+    Tier-1 slice, because an absent entry is a safety decision nobody took
+    and the default it would inherit — "of course it resolves" — is the
+    exact assumption ``pause_dag`` disproved.
+    """
+
+    def test_every_tier_1_tool_is_classified(self) -> None:
+        tier_1 = tools_at_or_below(Tier.TIER_1) - tools_at_or_below(Tier.READ)
+        missing = sorted(tier_1 - set(RESOLUTION_CLASS))
+        stale = sorted(set(RESOLUTION_CLASS) - tier_1)
+        assert not missing and not stale, (
+            f"RESOLUTION_CLASS does not cover the Tier-1 slice.\n"
+            f"  Tier-1 tools with no entry: {missing}\n"
+            f"  entries that are not Tier-1: {stale}\n"
+            f"For each missing tool, decide whether a verified success "
+            f"REMOVES the incident's cause (Resolution.RESOLVES) or only "
+            f"holds it still (Resolution.STABILIZES), and write the reason "
+            f"beside it. There is no safe default: a stabilizer that "
+            f"inherits 'resolves' by silence reports a fix that fixed "
+            f"nothing."
+        )
+
+    def test_every_entry_carries_a_written_reason(self) -> None:
+        """The rationale is load-bearing, not a comment.
+
+        ``remediation._stabilized_reason`` quotes it verbatim into the
+        escalation reason, which ``briefing.py`` reads into
+        ``EscalationBriefing.escalation_reason`` — so for a stabilizer it
+        is literally the text an on-call reads at 3am. A placeholder here
+        ships as a placeholder there.
+        """
+        for name, policy in sorted(RESOLUTION_CLASS.items()):
+            assert len(policy.rationale.strip()) >= 40, (
+                f"{name} has a {len(policy.rationale.strip())}-character "
+                f"rationale. Say what a successful call does and does not "
+                f"achieve — for a stabilizer this string is what the human "
+                f"reads in the briefing."
+            )
+
+    def test_pause_dag_is_stabilize_only(self) -> None:
+        assert resolution_class_of("pause_dag").resolution is Resolution.STABILIZES
+        assert "pause_dag" in stabilize_only_tools()
+
+    def test_the_stabilize_only_set_is_not_empty(self) -> None:
+        """Anti-vacuity canary.
+
+        Every assertion about stabilize-only behaviour elsewhere in the
+        suite is written against a specific tool, but the *class* going
+        empty — someone reclassifying the one member — would leave the
+        enforcement branch in ``transition_verify`` unreachable and every
+        remaining test green. If the set is ever legitimately emptied,
+        delete the branch and this test together, deliberately.
+        """
+        assert stabilize_only_tools()
+
+    def test_a_read_tool_has_no_resolution_class(self) -> None:
+        with pytest.raises(PolicyCoverageError, match="not Tier-1"):
+            resolution_class_of("get_dag_state")
+
+    def test_an_unknown_tool_raises_key_error(self) -> None:
+        with pytest.raises(KeyError):
+            resolution_class_of(_UNCLASSIFIED)
+
+    def test_an_unclassified_tier_1_tool_raises_rather_than_defaulting(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The whole point: silence must not mean "resolves".
+
+        Simulated by removing an entry rather than by adding a tool,
+        because ``Tier1ToolName`` is a Literal frozen at import time and a
+        fake tool would fail earlier for the wrong reason.
+        """
+        patched = dict(RESOLUTION_CLASS)
+        del patched["pause_dag"]
+        monkeypatch.setattr(policies, "RESOLUTION_CLASS", patched)
+
+        with pytest.raises(PolicyCoverageError, match="no entry in RESOLUTION_CLASS"):
+            policies.resolution_class_of("pause_dag")
+
+
+class TestFixMapMatchesTheSuite:
+    """The tool a category is steered toward may not be one its scenarios forbid.
+
+    ``FIX_MAP`` is the single source of truth for hypothesis-category →
+    Tier-1 routing (architecture-principles rule 2), and the remediation
+    planner prompt is written *from* it. But only ``FIX_MAP``'s KEYS are
+    read at runtime (``top.category not in FIX_MAP`` gates the handoff), so
+    a stale VALUE breaks nothing any existing test could see — and offline
+    eval cannot see it either, because offline runs replay canned planner
+    output and never load the prompt at all.
+
+    That blind spot ran for the whole life of PR #173. That PR redesigned
+    ``remediate_runaway_saga_success`` around replaying the dead-lettered
+    chain root and put ``pause_dag`` into the scenario's
+    ``forbidden_action_tools`` — because the platform refuses to replay a
+    job inside a paused DAG, so pausing does not merely fail to fix the
+    chain, it breaks the fix. It did not touch ``FIX_MAP``, which still
+    said ``RUNAWAY_SAGA: "pause_dag"``, or the prompt, which still said
+    ``runaway_saga / stuck_dag → pause_dag``. The suite steered the live
+    agent at the one tool that scenario forbids, and 38/38 stayed green.
+
+    This is the check that closes it, and it is deliberately a statement
+    about the CORPUS rather than about one scenario: any future scenario
+    that forbids its own category's steered fix fails here.
+
+    Scoped to scenarios that expect ``resolved``. Escalate-only scenarios
+    forbid every Tier-1 tool on purpose — "when the correct behaviour is to
+    touch nothing, the forbidden set is every tool that can touch
+    something" — so including them would make the check fire on every
+    category that has a fix at all, which is no check.
+    """
+
+    @staticmethod
+    def _resolving_scenarios() -> list[Scenario]:
+        return [
+            s
+            for s in load_scenarios(_SCENARIO_DIR)
+            if s.expectation.expected_terminal_state is IncidentState.RESOLVED
+        ]
+
+    def test_the_corpus_has_resolving_scenarios_to_check(self) -> None:
+        """Anti-vacuity canary: an empty selection would report nothing, green."""
+        assert self._resolving_scenarios()
+
+    def test_no_scenario_forbids_the_fix_its_category_is_steered_to(self) -> None:
+        problems: list[str] = []
+        for scenario in self._resolving_scenarios():
+            forbidden = set(scenario.expectation.forbidden_action_tools)
+            if not forbidden:
+                continue
+            for category in _categories_in(scenario):
+                if category in HINT_ROUTED_CATEGORIES:
+                    # The map's value names the common case only; the
+                    # actual tool comes from the row's `remediation_hint`.
+                    # `dlq_human_required_escalates` forbids
+                    # `replay_dlq_by_ids` and is right to.
+                    continue
+                steered = FIX_MAP.get(category)
+                if steered is not None and steered in forbidden:
+                    problems.append(
+                        f"{scenario.name}: hypothesis category {category.value!r} "
+                        f"is steered to {steered!r} by FIX_MAP, and "
+                        f"{steered!r} is in that scenario's "
+                        f"forbidden_action_tools"
+                    )
+        assert not problems, (
+            "FIX_MAP steers the agent at a tool the scenario grades as a "
+            "safety violation:\n  " + "\n  ".join(problems) + "\n"
+            "Either the routing is stale (fix FIX_MAP *and* the "
+            "remediation-planner prompt, which is written from it) or the "
+            "scenario forbids the wrong tool. Both halves move together — "
+            "the runtime reads only FIX_MAP's keys, so a stale value is "
+            "invisible except through the prompt the live agent obeys."
+        )
+
+    def test_hint_routed_categories_are_categories_with_a_fix(self) -> None:
+        """The exemption set may only name categories the map actually routes.
+
+        A category exempted here but absent from ``FIX_MAP`` escalates
+        regardless, so the entry would describe a routing that does not
+        exist — and would quietly widen the exemption if that category
+        later gained a fix.
+        """
+        stale = sorted(c.value for c in HINT_ROUTED_CATEGORIES - set(FIX_MAP))
+        assert not stale, (
+            f"HINT_ROUTED_CATEGORIES names {stale}, which FIX_MAP does not "
+            f"route. A category with no fix auto-escalates; there is no "
+            f"tool selection to exempt."
+        )
+
+    def test_every_steered_tool_is_a_tier_1_action(self) -> None:
+        """A value that is not Tier-1 could never be planned at all."""
+        for category, tool in sorted(FIX_MAP.items()):
+            assert tool in TOOL_REGISTRY, f"{category.value} → unknown tool {tool!r}"
+            assert tier_of(tool) is Tier.TIER_1, (
+                f"{category.value} → {tool!r}, which is tier "
+                f"{tier_of(tool).value}. The remediation planner may only "
+                f"propose Tier-1 actions, so this routing is unreachable."
+            )
+
+    def test_every_steered_tool_is_named_in_the_planner_prompt(self) -> None:
+        """Rule 2's "prompt describes the mapping *from* the code", checked.
+
+        Weak on its own — both halves were stale together in the case
+        above, and this test would have passed throughout — which is why it
+        sits beside the corpus check rather than instead of it. It still
+        catches the other direction: a ``FIX_MAP`` value changed with no
+        prompt edit.
+        """
+        prompt = load_prompt("remediation_planner")
+        for category, tool in sorted(FIX_MAP.items()):
+            assert tool in prompt, (
+                f"FIX_MAP routes {category.value} to {tool!r}, which the "
+                f"remediation planner prompt never names. The prompt is "
+                f"written from this map; a tool the map steers to and the "
+                f"prompt omits is a routing the live agent never sees."
             )

@@ -21,7 +21,7 @@ must agree before any Tier-1+ call succeeds.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Final
+from typing import Final, NamedTuple
 
 from incident_commander.tools.registry import TOOL_REGISTRY
 
@@ -92,6 +92,172 @@ _TIER_1_TOOLS: Final[frozenset[str]] = frozenset(
 )
 
 _TIER_2_TOOLS: Final[frozenset[str]] = frozenset()
+
+
+class Resolution(StrEnum):
+    """Whether a Tier-1 action can END an incident, or only hold it still.
+
+    Tier says how much damage an action can do. This says what a *successful*
+    one is worth. They are independent questions and conflating them is what
+    produced the bug this class exists to close: every Tier-1 tool was
+    implicitly a resolution, so any verified action could carry a run to
+    RESOLVED — including one whose entire effect is to stop the clock.
+    """
+
+    RESOLVES = "resolves"
+    """A verified success removes the incident's cause. The run may RESOLVE."""
+
+    STABILIZES = "stabilizes"
+    """A verified success holds the incident still and leaves its cause in
+    place. The run executes the action, verifies it landed, and then
+    ESCALATES — never RESOLVES. Not a lesser action: buying a human time to
+    decide is a legitimate and sometimes the only safe move. It is simply
+    not an answer, and a system that reports it as one is reporting a fix
+    that fixed nothing."""
+
+
+class ResolutionPolicy(NamedTuple):
+    """One tool's resolution class plus the written reason for it.
+
+    The rationale is not decoration. It is the sentence a human reads in the
+    escalation briefing when a stabilizer fires (``remediation.py`` quotes it
+    verbatim), so it has to say what is still wrong and what will happen if
+    nobody acts.
+    """
+
+    resolution: Resolution
+    rationale: str
+
+
+# Single source of truth for "can this action end an incident?".
+#
+# TOTAL over the Tier-1 slice, deliberately, and for the same reason
+# ``VERIFY_PROBE_FOR_ACTION`` is: an absent entry is a safety decision
+# nobody took. ``resolution_class_of`` raises rather than defaulting, and
+# ``tests/unit/test_policies.py::TestResolutionClass`` fails on any Tier-1
+# tool with no entry — so a tool shipped tomorrow cannot inherit "of course
+# it resolves" by silence.
+#
+# What this closes. Until 2026-09-07 the remediation loop had exactly one
+# RESOLVED transition and one condition on it: the verification judge said
+# `verified`. For `pause_dag` that condition is trivially satisfiable — the
+# platform's own tool description says a successful pause "reads as
+# paused=true with children still in `waiting`", so a judge handed
+# "paused=true, children waiting" against an expectation of "children stop
+# advancing" answers `verified`, correctly, and the run reported RESOLVED on
+# a chain that was exactly as stuck as before and would be stuck again the
+# moment the 10-minute TTL lapsed. The judge was right; the question was
+# wrong. No amount of judge prompting fixes that, because the judge is being
+# asked whether the action worked, and it did.
+RESOLUTION_CLASS: Final[dict[str, ResolutionPolicy]] = {
+    "pause_dag": ResolutionPolicy(
+        Resolution.STABILIZES,
+        "pause_dag halts promotion of WAITING children under the root and "
+        "self-cleans on its TTL (default 10 minutes), after which the held "
+        "children promote again. It changes nothing about the node that "
+        "stopped the chain, so when the pause lapses the chain is as stuck "
+        "as it was. It also BLOCKS the real fix while it holds: the platform "
+        "refuses to replay any job inside a paused DAG "
+        "(`find_blocking_pause`, backend/app/utils/dag_pause.py). A pause "
+        "buys a human time to decide; it is never the decision.",
+    ),
+    "restart_consumer_group": ResolutionPolicy(
+        Resolution.RESOLVES,
+        "clears the kill/latency flags on one consumer group; the group "
+        "resumes and its lag drains. The fault is gone, not held.",
+    ),
+    "invalidate_cache_key": ResolutionPolicy(
+        Resolution.RESOLVES,
+        "deletes the stale entry. Absence is the fixed state, not a pause on the way to one.",
+    ),
+    "replay_dlq_by_ids": ResolutionPolicy(
+        Resolution.RESOLVES,
+        "re-submits the named dead-lettered jobs. An immediate replay puts "
+        "the work back on the normal path — and for a dead-lettered DAG "
+        "root it is the platform's own un-stick: the replayed root completes "
+        "and the resolver promotes the descendants that were waiting.",
+    ),
+    "replay_dlq_by_category": ResolutionPolicy(
+        Resolution.RESOLVES,
+        "re-submits every job the platform classified into one category. "
+        "Same effect as a by-id replay, chosen by filter instead of by name.",
+    ),
+    "replay_dlq_messages": ResolutionPolicy(
+        Resolution.RESOLVES,
+        "legacy bulk re-submit. Kept resolving for parity with the two "
+        "targeted replay tools it predates.",
+    ),
+    # Classified RESOLVES, and this one is genuinely arguable — recorded
+    # here rather than settled quietly.
+    #
+    # The case for STABILIZES: the platform's own description says the mark
+    # "doesn't change job.status — the entry stays in DLQ", the remediation
+    # planner prompt routes it as "mark, then `stop` (escalate)", and the
+    # scenario that exercises it is named `dlq_human_required_escalates`.
+    # Fencing a poison row stops the bleeding; a human still has to fix the
+    # source data.
+    #
+    # Why it stays RESOLVES here: `dlq_human_required_escalates.yaml`
+    # asserts `expected_terminal_state: resolved`, so reclassifying it would
+    # turn a green scenario red — and that scenario is queued for a paid
+    # live run. The disagreement between that scenario's name, its own
+    # description ("correct action is mark_dlq_permanent per job +
+    # escalate") and its expectation is a real contradiction, but it is a
+    # scenario decision with money behind it, not a side effect of this
+    # change. Filed for the coordinator; flip this entry and the scenario
+    # together or not at all.
+    "mark_dlq_permanent": ResolutionPolicy(
+        Resolution.RESOLVES,
+        "fences one dead-lettered job out of auto-replay with a reason on "
+        "the audit trail. See the note above: this classification is under "
+        "review.",
+    ),
+}
+
+
+def resolution_class_of(tool_name: str) -> ResolutionPolicy:
+    """Classify one Tier-1 action's worth. Unclassified raises, never defaults.
+
+    Mirrors ``tier_of``'s posture exactly. Three closed failure modes:
+
+    * not in ``TOOL_REGISTRY`` → ``KeyError``;
+    * in the registry but not Tier-1 → ``PolicyCoverageError``, because the
+      question is meaningless for a read tool and answering it anyway would
+      let a caller ask it of one and act on the answer;
+    * Tier-1 with no entry → ``PolicyCoverageError``. This is the case that
+      must not default: "of course a successful action resolves the
+      incident" is precisely the assumption ``pause_dag`` disproved.
+    """
+    if tool_name not in TOOL_REGISTRY:
+        raise KeyError(f"unknown tool: {tool_name}")
+    if tier_of(tool_name) is not Tier.TIER_1:
+        raise PolicyCoverageError(
+            f"{tool_name!r} is tier {tier_of(tool_name).value}, not Tier-1. "
+            "A resolution class describes what a remediation ACTION is "
+            "worth; asking it of a read tool has no answer."
+        )
+    policy = RESOLUTION_CLASS.get(tool_name)
+    if policy is None:
+        raise PolicyCoverageError(
+            f"{tool_name!r} is a Tier-1 action with no entry in "
+            "RESOLUTION_CLASS in policies.py. Decide whether a verified "
+            "success of this tool REMOVES the incident's cause "
+            "(Resolution.RESOLVES) or only holds it still "
+            "(Resolution.STABILIZES), and write the reason down beside it. "
+            "There is no default: a stabilizer that inherits 'resolves' by "
+            "silence reports a fix that fixed nothing."
+        )
+    return policy
+
+
+def stabilize_only_tools() -> frozenset[str]:
+    """Every Tier-1 tool whose verified success still escalates."""
+    return frozenset(
+        name
+        for name, policy in RESOLUTION_CLASS.items()
+        if policy.resolution is Resolution.STABILIZES
+    )
+
 
 # Read tools whose responses come from a cache rather than a live read,
 # with the platform-declared staleness window in seconds. A reading from

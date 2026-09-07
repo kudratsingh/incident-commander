@@ -35,7 +35,7 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("2fbebe9dcd49d48e41a580b1093f8e66cdb063482ea78ee5873be2eaa3dc0eda"),
     "investigation_planner": ("374b7203fa2cd2fdbac9ad7ab048b4cc22140f6cbe57f39379d0c0da05d67480"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
-    "remediation_planner": ("07e6c11bcb286ee065aaa50f6cb675291a12ac9eac88d9e8d3b01c50f511e0aa"),
+    "remediation_planner": ("7c1550bc67f905f2a96b955f4359dba59b556602dce610d0b6c719893ca421f8"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
 }
 
@@ -268,6 +268,57 @@ class TestRemediationPlannerInvariants:
         content = load_prompt("remediation_planner")
         assert "verify with `get_redis_health`" not in content
         assert "Invalidate cache → verify with `get_cache_key_info`" in content
+
+    def test_a_stuck_chain_routes_to_replaying_its_root(self) -> None:
+        # The steering half of the stabilize-only class. PR #173 redesigned
+        # `remediate_runaway_saga_success` around replaying the
+        # dead-lettered chain root and put `pause_dag` in that scenario's
+        # forbidden_action_tools — because the platform refuses to replay a
+        # job inside a paused DAG, so a pause does not merely fail to fix
+        # the chain, it breaks the fix. The prompt was not touched, and
+        # went on saying `runaway_saga` / `stuck_dag` → `pause_dag` for the
+        # whole period. Offline eval could not see it: canned runs replay
+        # recorded planner output and never load this file.
+        content = load_prompt("remediation_planner")
+        assert "`runaway_saga` / `stuck_dag` → `pause_dag`" not in content
+        assert "Stuck dependency chains" in content
+        assert "the dead-lettered root's own id" in content
+        assert "do **not** set `delay_seconds`" in content
+
+    def test_pause_is_named_as_a_stabilizer_that_never_resolves(self) -> None:
+        # The prompt half of `policies.RESOLUTION_CLASS`. Structural
+        # enforcement lives in `remediation.transition_verify`, which
+        # escalates a verified stabilizer instead of resolving; this is
+        # what stops the planner reaching for one in the first place, and
+        # steering that can be silently deleted is not steering.
+        content = load_prompt("remediation_planner")
+        assert "`pause_dag` never resolves an incident" in content
+        assert "self-cleans on its TTL" in content
+        assert "refuses to replay any job inside a paused DAG" in content
+
+    def test_counters_the_pinned_tool_descriptions(self) -> None:
+        # The two descriptions the agent is handed verbatim both steer
+        # wrong on this incident. `get_dag_state` calls itself "the
+        # verification surface for pause_dag"; `replay_dlq_by_ids` never
+        # mentions DAG roots, and the reciprocal sentence lives only in
+        # `create_stuck_dag`'s description — a chaos tool that is not in
+        # TOOL_REGISTRY, so the agent never sees it. Until the platform
+        # ships new descriptions (filed separately), the prompt has to say
+        # so out loud.
+        content = load_prompt("remediation_planner")
+        assert "the verification surface for a replayed root" in content
+        assert "never mentions DAG roots" in content
+
+    def test_the_dag_root_case_is_not_gated_on_a_dlq_listing(self) -> None:
+        # The correct trajectory never calls `list_dlq_messages`: the
+        # root's own `status` from `get_dag_state` is the whole
+        # observation. The hint-routing table below it opens with "When
+        # the investigation evidence includes `list_dlq_messages`
+        # output", so without this the only routing guidance for a
+        # dead-lettered root sits behind a probe the agent should not make.
+        content = load_prompt("remediation_planner")
+        assert "You do not need the DLQ listing to act here" in content
+        assert "merely to satisfy a table" in content
 
     def test_forbids_agent_supplied_idempotency_key(self) -> None:
         content = load_prompt("remediation_planner")

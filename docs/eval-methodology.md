@@ -393,6 +393,57 @@ Two layers again, per [architecture-principles](architecture-principles.md) rule
 
 The scenario now grades it: `get_cache_key_info.exists == false`, with `which: last`. The ordinal is load-bearing in both directions — the key is read before *and* after the deletion, so `any` would be satisfied by the investigation probe alone, i.e. by a run that never remediated at all.
 
+## Case study: the fix that fixed nothing
+
+**`remediate_runaway_saga_success`, 2026-09-07. No archive — this one was found by reading, before the money was spent.**
+
+The scenario was `READY` and held for the user's go. A read-only pre-spend sweep asked the question this document keeps recommending — *what is the laziest trajectory that passes, and what would the agent actually be steered to do?* — and found that the agent would have been steered at a tool the scenario itself forbids.
+
+The chain of steering, every link stale in the same direction:
+
+| Layer | What it said |
+|---|---|
+| planner prompt | ``runaway_saga`` / ``stuck_dag`` → ``pause_dag`` |
+| `FIX_MAP` | `HypothesisCategory.RUNAWAY_SAGA: "pause_dag"` |
+| `get_dag_state` description (pinned) | "This is the verification surface for pause_dag" |
+| `replay_dlq_by_ids` description (pinned) | no mention of DAG roots at all |
+| `create_stuck_dag` description | *"`replay_dlq_by_ids` on `root_job_id` genuinely unsticks the chain"* — a **chaos** tool, not in `TOOL_REGISTRY`, so the agent never sees this sentence |
+
+PR #173 had redesigned the scenario around replaying the dead-lettered root and put `pause_dag` into `forbidden_action_tools`, because the platform refuses to replay a job inside a paused DAG — pausing does not merely fail to fix the chain, it breaks the fix. It did not touch the prompt or `FIX_MAP`.
+
+### Why 38/38 could not see it
+
+Two independent blind spots, and they compound:
+
+* **`FIX_MAP`'s values are never read at runtime.** Only the keys are (`top.category not in FIX_MAP` gates the handoff). A wrong value breaks nothing any test observed.
+* **Offline eval never loads the prompt.** Canned scenarios replay recorded planner output. The prompt is a live-only surface, so the whole regression suite is blind to it by construction.
+
+So the steering that the *paid* run would have followed had no coverage at all, in a suite whose entire job is to gate behaviour changes. **A green offline suite is not evidence about a prompt.**
+
+### And the plan guards would have admitted it
+
+Right tier, real tools, resource named on both legs and evidence-sourced, and [ADR 0025](ADR/0025-a-verify-leg-must-observe-the-action.md)'s `VERIFY_PROBE_FOR_ACTION` maps `pause_dag` → `get_dag_state.job_id` — correctly, because `get_dag_state` really does observe what a pause changes.
+
+Then the judge. The platform's own description says a successful pause "reads as `paused=true` with children still in `waiting`". Hand that reading to a judge holding the expectation "children should stop advancing" and the answer is `verified`, honestly. **RESOLVED, on a still-stuck chain, with every dimension green.**
+
+Note the polarity, as in the case study above. The 2026-09-07 stale-cache run failed *loudly* because its signal could not move. This one would have failed *silently*: the signal moves exactly as promised, and the promise is about the wrong thing.
+
+### The rule this gives us
+
+**Ask what a verified success is worth, not only whether it can be verified.** Verification asks whether the action did what the plan expected. It is a different question from whether the incident is over, and for an action whose entire effect is to hold a system still the two answers differ. An eval that grades only the first will bless a fix that fixed nothing.
+
+The concrete test to run against a remediation scenario, alongside "what is the laziest passing trajectory": **if the expected action succeeded perfectly and then its effect expired, would the incident be back?** If yes, the action is a stabilizer and the expected terminal state is `escalated`.
+
+### What we did about it
+
+**Structural (`tools/policies.py`, `agent/remediation.py`).** `RESOLUTION_CLASS` classifies every Tier-1 action resolve-or-stabilize, total over the slice with a coverage test, and the one `RESOLVED` transition escalates a verified stabilizer instead — with the tool's own written rationale quoted into the briefing and the acted-on resource named. [ADR 0026](ADR/0026-a-stabilizer-is-not-a-resolution.md).
+
+**Steering.** `FIX_MAP[RUNAWAY_SAGA]` → `replay_dlq_by_ids`, and the prompt gained a *Stuck dependency chains* section routing a `dead_letter` root with `waiting` descendants to an immediate replay of that root, verified with `get_dag_state` on the same id — including the explicit statement that this case does **not** require a DLQ listing, since the correct trajectory never makes one. It counters the two pinned descriptions by name, because until the platform ships better text the agent is handed wording that steers it wrong.
+
+**The corpus check that would have caught it.** `tests/unit/test_policies.py::TestFixMapMatchesTheSuite`: for any scenario expecting `resolved`, the tool its hypothesis category is steered toward may not appear in that scenario's `forbidden_action_tools`. It reads the corpus, so it is not a statement about one scenario — the next scenario that forbids its own steered fix fails here. Scoped to `resolved` scenarios because escalate-only ones forbid every Tier-1 tool deliberately, and exempting the categories whose tool comes from the platform's per-row `remediation_hint` (declared in `investigation.HINT_ROUTED_CATEGORIES`, previously a comment).
+
+> **The general lesson about the corpus.** A scenario redesign changed what the suite *grades* and left what the agent is *steered by* untouched, and nothing connected the two. When a PR moves a scenario's expected action, the checklist item is: which map, and which prompt, told the agent to do the old thing?
+
 ## Grader calibration rules
 
 Written after the Phase-6 seven-run live eval. Every rule is enforced by a checkpoint in the PR template or the scenario schema, not by memory. See [`docs/lessons/live-eval-noise-sources.md`](lessons/live-eval-noise-sources.md) for the taxonomy these rules come from.

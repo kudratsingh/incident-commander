@@ -148,3 +148,92 @@ class TestBlessRefusesOnAnUnprobedFixture:
         # deletion, so it has to reach the writer.
         assert written[0][1]["checked"] == (("s", "get_consumer_lag"),)
         assert LEDGER_PATH.read_bytes() == before
+
+
+class TestNotFreshHoldsNoOpinion:
+    """``--not-fresh`` is the stale-volume twin of the probe-error refusal.
+
+    The refusal above covers a fixture the run could not read. This covers
+    one it read against a world that is not a fresh seed, where the reading
+    is a true statement about the developer's volume and a false one about
+    the fixture — the case the ledger's own ``_blessed_against`` note
+    describes and nothing enforced.
+
+    The concrete instance: `failed_traces_scan` probes
+    ``search_traces(status="failed", since_hours=1)``. A stack up for more
+    than an hour returns nothing; CI's freshly seeded contract job returns
+    the seeded rows. Blessing that reading writes an entry CI never
+    observes, and the ratchet fails on entries no longer observed — so a
+    naive bless from a stale volume turns CI red in the *opposite*
+    direction, which is the failure mode this flag exists to prevent.
+    """
+
+    @staticmethod
+    def _dump_spy(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+        written: list[Any] = []
+
+        def fake_dump(drifts: Any, path: Any = None, **kwargs: Any) -> int:
+            written.append((tuple(drifts), kwargs))
+            return len(tuple(drifts))
+
+        monkeypatch.setattr(cli, "dump_ledger", fake_dump)
+        return written
+
+    def test_a_not_fresh_fixture_is_neither_written_nor_disproved(
+        self, monkeypatch: pytest.MonkeyPatch, platform_env: None
+    ) -> None:
+        written = self._dump_spy(monkeypatch)
+        keep = Drift(scenario="keep", tool="list_dlq_messages", path="total", kind="value")
+        stale = Drift(scenario="aged", tool="search_traces", path="matches[]", kind="no_live_rows")
+        _scripted(
+            monkeypatch,
+            [
+                _result(
+                    drifts=(keep, stale),
+                    compared=(("keep", "list_dlq_messages"), ("aged", "search_traces")),
+                )
+            ],
+        )
+
+        assert cli.main(["--bless", "--not-fresh", "aged:search_traces"]) == 0
+        ((drifts, kwargs),) = written
+        # Its drift is not written...
+        assert drifts == (keep,)
+        # ...and its coverage is withdrawn, so `split_for_bless` carries any
+        # existing entry for it rather than deleting one this run cannot
+        # speak to. Withdrawing only the drift would have been worse than
+        # doing nothing: the entry would be silently disproved.
+        assert kwargs["checked"] == (("keep", "list_dlq_messages"),)
+
+    def test_naming_a_fixture_the_run_never_compared_is_refused(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        platform_env: None,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # A typo would otherwise silently bless the very row it was meant to
+        # hold back — the flag would look applied and do nothing.
+        written = self._dump_spy(monkeypatch)
+        drift = Drift(scenario="aged", tool="search_traces", path="matches[]", kind="no_live_rows")
+        _scripted(monkeypatch, [_result(drifts=(drift,), compared=(("aged", "search_traces"),))])
+
+        assert cli.main(["--bless", "--not-fresh", "aged:serch_traces"]) == 2
+        assert written == []
+        assert "did not compare" in capsys.readouterr().err
+
+    def test_a_malformed_pair_is_rejected(self) -> None:
+        with pytest.raises(SystemExit, match="SCENARIO:TOOL"):
+            cli._parse_pairs(["no-colon-here"])
+
+    def test_the_flag_does_nothing_outside_bless(
+        self, monkeypatch: pytest.MonkeyPatch, platform_env: None
+    ) -> None:
+        """Reporting is not blessing: the check must still SEE the row.
+
+        Silencing it in the report as well would hide a genuine drift on a
+        fresh stack from anyone who happened to pass the flag.
+        """
+        drift = Drift(scenario="aged", tool="search_traces", path="matches[]", kind="no_live_rows")
+        _scripted(monkeypatch, [_result(drifts=(drift,), compared=(("aged", "search_traces"),))])
+
+        assert cli.main(["--not-fresh", "aged:search_traces"]) == 1

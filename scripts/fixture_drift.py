@@ -84,6 +84,17 @@ def _await_fixtures(calls, mcp_url: str, token: str, budget_seconds: int) -> int
         time.sleep(5)
 
 
+def _parse_pairs(raw: list[str]) -> frozenset[tuple[str, str]]:
+    """``SCENARIO:TOOL`` strings to the pair form the probe reports coverage in."""
+    pairs: set[tuple[str, str]] = set()
+    for item in raw:
+        scenario, separator, tool = item.partition(":")
+        if not separator or not scenario.strip() or not tool.strip():
+            raise SystemExit(f"--not-fresh expects SCENARIO:TOOL, got {item!r}")
+        pairs.add((scenario.strip(), tool.strip()))
+    return frozenset(pairs)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -98,6 +109,19 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "poll until every call the check makes resolves, then exit. For CI, "
             "where the platform seeds its fixture pack asynchronously at boot."
+        ),
+    )
+    parser.add_argument(
+        "--not-fresh",
+        action="append",
+        default=[],
+        metavar="SCENARIO:TOOL",
+        help=(
+            "bless only: this run's volume is not a fresh seed for this fixture, "
+            "so the run holds no opinion about it — its drift is neither written "
+            "nor disproved. Repeatable. For a developer stack whose seeded data "
+            "has aged past a fixture's own time window; never for a fixture you "
+            "simply do not want reported."
         ),
     )
     args = parser.parse_args(argv)
@@ -157,11 +181,41 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
+        # A fixture this run cannot speak to is dropped from BOTH halves of
+        # the bless: its drift is not written, and its (scenario, tool) pair
+        # is removed from the coverage this run claims, so `split_for_bless`
+        # carries any existing entry rather than disproving it. Same posture
+        # as the probe-error refusal above — a run that holds no opinion may
+        # neither add nor delete — applied to a reading that came back but is
+        # about the volume rather than about the fixture.
+        #
+        # The case it exists for: `failed_traces_scan` probes
+        # `search_traces(status="failed", since_hours=1)`, and a developer
+        # stack that has been up for more than an hour returns nothing for it
+        # while a freshly seeded one (CI's contract job, which is what the
+        # ledger is `_blessed_against`) returns the seeded rows. Blessing that
+        # reading would write an entry CI never observes, and the ratchet
+        # fails on entries no longer observed — so a naive bless from a stale
+        # volume turns CI red in the opposite direction.
+        not_fresh = _parse_pairs(args.not_fresh)
+        unknown = sorted(pair for pair in not_fresh if pair not in set(result.compared))
+        if unknown:
+            print(
+                f"ERROR: --not-fresh names {unknown}, which this run did not compare. "
+                "Name a (scenario, tool) pair the check actually read.",
+                file=sys.stderr,
+            )
+            return 2
+        drifts = tuple(d for d in result.drifts if (d.scenario, d.tool) not in not_fresh)
+        compared = tuple(pair for pair in result.compared if pair not in not_fresh)
+        for scenario, tool in sorted(not_fresh):
+            print(
+                f"  NOT-FRESH {scenario}:{tool} — this run holds no opinion; "
+                "nothing written, nothing disproved"
+            )
         before = load_ledger()
-        carried, disproved = split_for_bless(
-            {drift.key for drift in result.drifts}, before, result.compared
-        )
-        count = dump_ledger(result.drifts, checked=result.compared)
+        carried, disproved = split_for_bless({drift.key for drift in drifts}, before, compared)
+        count = dump_ledger(drifts, checked=compared)
         defects = defect_count()
         print(f"wrote {count} known-drift entries to evals/fixture-drift-ledger.json")
         print(f"  {defects} are fixture defects — the burn-down number")

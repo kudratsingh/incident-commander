@@ -214,6 +214,71 @@ _JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
         "the chain_name, so the un-faulted world the check probes answers "
         "'job not found' and carries no paused_expires_in_seconds at all — the pause's countdown",
     ),
+    # The `list_dlq_messages` recordings for the same two saga scenarios, and
+    # the same mechanism one tool over. ADR 0027 made the agent read the
+    # chain root's DEAD-LETTER ROW before replaying it — `get_dag_state`
+    # carries no `remediation_hint`, so the listing is the only place that
+    # answer exists — which means both scenarios now record a listing, and
+    # both listings contain a row that `create_stuck_dag` creates.
+    #
+    # The chain root IS a dead-letter row: the hook inserts it with
+    # `status=dead_letter`, `retry_count=3` and the hint its argument names.
+    # So the faulted world holds five rows (the four boot-seeded ones plus
+    # the root) and the un-faulted world the check probes holds four. Every
+    # entry below is that one fact seen through a different field:
+    #
+    #   * `total` — five against a live four;
+    #   * `items[].id[]` — the root's uuid5-derived id is in no un-faulted
+    #     reading, exactly as its `get_dag_state.seed_id` is not;
+    #   * `items[].trace_id[]` — the hook derives the trace id from the same
+    #     namespace and chain_name, so it appears and disappears with the row.
+    #
+    # POST_FAULT, not a defect, and specifically NOT to be "fixed" by
+    # trimming the fixtures back to four rows: the root row is the evidence
+    # the replay-safety claim is made of, and a four-row recording would
+    # describe a world in which the scenario's own premise is false. Same
+    # reading as `remediate_dlq_backlog_success`'s `total` above, which is
+    # the poison row counted but not named; here the row can be named,
+    # because the hook derives its id deterministically.
+    ("remediate_runaway_saga_success", "list_dlq_messages", "total", "value"): (
+        POST_FAULT,
+        "create_stuck_dag dead-letters the runaway-saga-eval chain root, so the "
+        "faulted world holds five DLQ rows where the un-faulted world the check "
+        "probes holds the four boot-seeded ones",
+    ),
+    ("remediate_runaway_saga_success", "list_dlq_messages", "items[].id[]", "not_live_reachable"): (
+        POST_FAULT,
+        "the chain root's id is uuid5-derived from the chain_name and exists only "
+        "after create_stuck_dag has fired, so no un-faulted reading of the DLQ "
+        "contains it — the same absence already recorded for its get_dag_state.seed_id",
+    ),
+    (
+        "remediate_runaway_saga_success",
+        "list_dlq_messages",
+        "items[].trace_id[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "create_stuck_dag stamps the root's trace_id from the same namespace and "
+        "chain_name, so it appears and disappears with the row itself",
+    ),
+    ("saga_stuck", "list_dlq_messages", "total", "value"): (
+        POST_FAULT,
+        "create_stuck_dag dead-letters the saga-stuck-eval chain root, so the "
+        "faulted world holds five DLQ rows where the un-faulted world the check "
+        "probes holds the four boot-seeded ones",
+    ),
+    ("saga_stuck", "list_dlq_messages", "items[].id[]", "not_live_reachable"): (
+        POST_FAULT,
+        "the chain root's id is uuid5-derived from the chain_name and exists only "
+        "after create_stuck_dag has fired, so no un-faulted reading of the DLQ "
+        "contains it — the same absence already recorded for its get_dag_state.seed_id",
+    ),
+    ("saga_stuck", "list_dlq_messages", "items[].trace_id[]", "not_live_reachable"): (
+        POST_FAULT,
+        "create_stuck_dag stamps the root's trace_id from the same namespace and "
+        "chain_name, so it appears and disappears with the row itself",
+    ),
     # alert_storm went the other way at wave-10: it is `use_live_mcp: false`
     # now, because the pinned platform cannot burst alerts. Alerts have three
     # producers (the bad_deploy chaos hook, the SLO fast-burn loop, the boot

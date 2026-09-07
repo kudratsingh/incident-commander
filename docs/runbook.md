@@ -159,12 +159,15 @@ export EVAL_TRACE_DIR=evals/traces
 #    are its own record of what it covered. See docs/eval-methodology.md,
 #    "The read-only smoke pass".
 #    Override with SMOKE_ONLY= (command line or .env) to run a subset,
-#    e.g. re-checking one scenario against a new pin. The override goes
-#    through --only, so both refusals still apply to it: a pattern that
+#    e.g. re-checking one scenario against a new pin. The override can only
+#    NARROW the derived selection, never widen it: it goes through --only,
+#    so both refusals still apply to it: a pattern that
 #    matches no scenario refuses the whole selection (exit 2, and the
-#    per-pattern counts say which), and a selection holding a
-#    chaos-declaring scenario refuses with exit 6 — an override cannot
-#    smuggle a remediate_* scenario into the read-only stage.
+#    per-pattern counts say which), and a selection holding any scenario
+#    outside the derived set — chaos_setup, expected_action_tools, or a
+#    declared smoke_exclusion — refuses with exit 6, naming each scenario
+#    and its reason. An override cannot smuggle a chaos-seeding OR a
+#    write-declaring scenario into the read-only stage.
 make eval-smoke
 
 # 2) Remediation scenarios, one at a time, with reset between.
@@ -412,10 +415,21 @@ write+chaos principal — because chaos needs `chaos:invoke`, which the
 read-scoped smoke token does not carry. That is fine on a `--live`
 remediation run and wrong during `--smoke`, whose entire purpose is to
 prove the stage is read-only. So `--smoke` now refuses, with **exit 6**,
-before preflight or any spend, if any *selected* scenario declares
-`chaos_setup`. The check runs after `--only` filtering, so an
-`SMOKE_ONLY=` override cannot smuggle a chaos scenario in. There is no
-opt-out flag: a scenario that seeds chaos is not a smoke scenario. Since
+before preflight or any spend, if any *selected* scenario is outside the
+derived smoke set — that is, if it declares `chaos_setup`, declares
+`expected_action_tools`, or carries a `smoke_exclusion`. The refusal names
+each offending scenario and its reason, because the three have three
+different repairs. The check runs after `--only` filtering, so an
+`SMOKE_ONLY=` override can only **narrow** the derived selection, never
+widen it. There is no opt-out flag: a scenario outside the derived set is
+not a smoke scenario.
+
+(Until 2026-09 this checked `chaos_setup` alone, which was half the door.
+`--only` bypasses the derivation entirely, so an override could re-admit a
+scenario the derivation had dropped for declaring `expected_action_tools` —
+a graded Tier-1 write inside the stage whose purpose is proving the smoke
+token cannot write. Five shipped scenarios are in that shape and all are
+reachable by `SMOKE_ONLY=dlq_`.) Since
 WO-R2-123 an unfiltered `--smoke` cannot trip it either — the derived
 selection admits only chaos-free, action-free scenarios, so the three
 `remediate_*` ones are never in it. Exit 6 is now reachable exactly

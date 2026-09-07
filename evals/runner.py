@@ -1221,6 +1221,39 @@ def _parse_only(argv: list[str]) -> list[str]:
     return patterns
 
 
+def _smoke_holdback_reason(scenario: Scenario) -> str:
+    """Why the derived smoke pass does not contain ``scenario``.
+
+    The refusal has to name the reason per scenario, not just the names: the
+    three causes have three different repairs. A chaos or write scenario
+    belongs to the remediation stage under the full token; a
+    ``smoke_exclusion`` is a deliberate hold-back whose recorded reason says
+    what would have to be true to lift it.
+
+    ``chaos_setup`` and ``expected_action_tools`` can both be true, and both
+    are reported. ``smoke_exclusion`` cannot coexist with either — the schema
+    validator refuses a hold-back the predicate already covers — so it is
+    reported alone.
+    """
+    causes: list[str] = []
+    if scenario.chaos_setup is not None:
+        causes.append(
+            "declares chaos_setup (seeding fires under the full write+chaos "
+            "principal, which is the claim --smoke exists to disprove)"
+        )
+    if scenario.expectation.expected_action_tools:
+        causes.append(
+            "declares expected_action_tools (a graded Tier-1 write; the read-scoped "
+            "smoke token 403s it by design, so it is guaranteed red here)"
+        )
+    if scenario.smoke_exclusion is not None:
+        causes.append(f"smoke_exclusion: {scenario.smoke_exclusion}")
+    # Not reachable from a scenario the caller filtered on `not in_smoke_pass`,
+    # and stated rather than assumed: a silent empty reason would turn the
+    # refusal into a bare list of names.
+    return "; ".join(causes) if causes else "not in the derived smoke pass"
+
+
 def main() -> int:
     live = "--live" in sys.argv[1:]
     # Smoke mode selects the read-scoped principal from Settings directly.
@@ -1412,21 +1445,43 @@ def main() -> int:
             scenarios = [s for s in scenarios if any(p in s.name for p in only_patterns)]
         print(f"filter --only={only_patterns} → {len(scenarios)} scenario(s)")
     if smoke:
-        # A read-only stage does not seed chaos. run_scenario fires
-        # chaos_setup under settings.platform_token — the full write+chaos
-        # principal — which is exactly the claim --smoke exists to disprove.
-        # The #80 principal guard only inspects the AGENT client's token and
-        # the exit-5 post-stage audit sees the write after it lands, so the
-        # only prevention is refusing the selection outright, here: after
-        # --only (the reachable channel, since SMOKE_ONLY is .env-overridable)
-        # and before preflight, guard, and any spend. There is no opt-out
-        # flag: a scenario that seeds chaos is not a smoke scenario (S-03).
-        chaos_scenarios = [s.name for s in scenarios if s.chaos_setup is not None]
-        if chaos_scenarios:
+        # A read-only stage runs the DERIVED smoke set and nothing else.
+        # run_scenario fires chaos_setup under settings.platform_token — the
+        # full write+chaos principal — which is exactly the claim --smoke
+        # exists to disprove. The #80 principal guard only inspects the AGENT
+        # client's token and the exit-5 post-stage audit sees the write after
+        # it lands, so the only prevention is refusing the selection outright,
+        # here: after --only (the reachable channel, since SMOKE_ONLY is
+        # .env-overridable) and before preflight, guard, and any spend. There
+        # is no opt-out flag: a scenario outside the derived set is not a
+        # smoke scenario (S-03).
+        #
+        # This checked `chaos_setup` alone, and that was half the door. The
+        # derived set is `in_smoke_pass` — NOT chaos_setup, AND no
+        # expected_action_tools, AND no smoke_exclusion — but `--only`
+        # bypasses the derivation entirely (`if smoke and not only_patterns`
+        # above), so an override could re-admit anything the derivation had
+        # dropped for the other two reasons. A scenario with
+        # expected_action_tools and no chaos_setup passed every guard here: a
+        # graded Tier-1 write inside the stage whose purpose is proving the
+        # smoke token cannot write. Same shape as 2026-08-30, different door.
+        # Scenario.smoke_eligible's own docstring already claimed this
+        # refusal existed; now it does.
+        #
+        # The override may still NARROW the derived set — that is what
+        # SMOKE_ONLY is for, and substring patterns keep working for
+        # scenarios that are in it. It may not widen it.
+        held_back = [(s.name, _smoke_holdback_reason(s)) for s in scenarios if not s.in_smoke_pass]
+        if held_back:
             print(
-                f"SMOKE FAIL: scenario(s) {', '.join(chaos_scenarios)} declare "
-                "chaos_setup — a read-only stage does not seed chaos (chaos runs "
-                "under the full write+chaos principal)"
+                f"SMOKE FAIL: {len(held_back)} selected scenario(s) are not in the "
+                "read-only smoke pass:"
+            )
+            for name, reason in held_back:
+                print(f"  {name} — {reason}")
+            print(
+                "--only narrows the derived smoke selection; it cannot widen it. "
+                "Run these in the remediation stage under the full token instead."
             )
             print("no scenarios ran, nothing was spent")
             return 6

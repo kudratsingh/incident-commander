@@ -27,6 +27,7 @@ from evals.graders.deterministic import (
     ScenarioExpectation,
 )
 from evals.runner import (
+    _SCENARIOS_DIR,
     RunReport,
     ScenarioOutcome,
     ScenarioResult,
@@ -44,6 +45,7 @@ from evals.runner import (
     write_report,
     write_trajectories,
 )
+from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import ChaosHook, PreconditionField, PreconditionProbe, Scenario
 from incident_commander.agent import factory
 from incident_commander.agent.briefing import EscalationBriefing
@@ -1791,6 +1793,126 @@ class TestSmokeRefusesChaosSeeding:
         )
         assert runner_module.main() == 0
         assert len(run_all_calls) == 1
+
+
+class TestSmokeRefusesAnythingOutsideTheDerivedSet:
+    """The other half of the door above: ``--only`` could re-admit a WRITE.
+
+    The derived smoke set is ``in_smoke_pass`` — no ``chaos_setup``, no
+    ``expected_action_tools``, no ``smoke_exclusion``. But ``--only`` bypasses
+    the derivation entirely (``if smoke and not only_patterns``), and the gate
+    it then ran into checked ``chaos_setup`` alone. So a scenario declaring
+    ``expected_action_tools`` and no chaos passed every guard: a graded Tier-1
+    write inside the stage whose whole purpose is proving the smoke token
+    cannot write. Five shipped scenarios are in exactly that shape, all of
+    them live-capable and all of them reachable by ``SMOKE_ONLY=dlq_``.
+
+    ``Scenario.smoke_eligible``'s docstring already asserted this refusal
+    existed ("guaranteed red here and belongs to the remediation stage"), so
+    the derivation and the gate disagreed about what the stage admits — and
+    the gate is the one that runs.
+
+    The override may still NARROW the derived set: that is what SMOKE_ONLY is
+    for, and ``test_a_narrowing_override_still_runs`` pins it.
+    """
+
+    def _smoke_env(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        _forbid_run_all(monkeypatch)
+        monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
+        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+
+    def test_a_write_scenario_cannot_be_smuggled_in_by_only(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # RED BEFORE: exit 0 — dlq_replay_safe_success declares
+        # expected_action_tools and no chaos_setup, so the chaos-only gate
+        # waved it through and the stage graded a Tier-1 write under the
+        # read-scoped token. Real shipped scenario, real tree: the door is
+        # reachable as `make eval-smoke SMOKE_ONLY=dlq_replay_safe_success`.
+        self._smoke_env(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["evals.runner", "--live", "--smoke", "--only", "dlq_replay_safe_success"],
+        )
+        assert runner_module.main() == 6
+        out = capsys.readouterr().out
+        assert "SMOKE FAIL: 1 selected scenario(s) are not in the read-only smoke pass" in out
+        assert "dlq_replay_safe_success — declares expected_action_tools" in out
+        assert "no scenarios ran, nothing was spent" in out
+
+    def test_the_refusal_names_every_offender_and_its_reason(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # `SMOKE_ONLY=dlq_` is the realistic operator form, and it happens to
+        # cover both surviving reasons at once: four write scenarios plus
+        # dlq_backlog, which is held back by a hand-written smoke_exclusion
+        # (it COULD pass under the smoke token — the hold-back is a judgement,
+        # and its recorded reason is what says when it can be lifted).
+        # Three causes, three different repairs, so the reason is per scenario.
+        self._smoke_env(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke", "--only", "dlq_"])
+        assert runner_module.main() == 6
+        out = capsys.readouterr().out
+        assert "dlq_human_required_escalates — declares expected_action_tools" in out
+        assert "dlq_backlog — smoke_exclusion: " in out
+        assert "--only narrows the derived smoke selection; it cannot widen it." in out
+
+    def test_a_narrowing_override_still_runs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # SMOKE_ONLY keeps substring semantics for scenarios that ARE in the
+        # derived set. Narrowing is the whole point of the override; only
+        # widening is refused. All five noise_* scenarios are in_smoke_pass.
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
+        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module, "assert_no_tier1_successes", lambda _client, _since, **_kw: None
+        )
+        _stub_principal_probe(monkeypatch)
+        calls = _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke", "--only", "noise_"])
+        assert runner_module.main() == 0
+        selected = sorted(s.name for call in calls for s in call["args"][0])
+        assert len(selected) == 5, f"a narrowing override must still run: {selected}"
+        assert "SMOKE FAIL" not in capsys.readouterr().out
+
+    def test_a_bare_smoke_run_is_unaffected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The derivation and the gate now agree by construction: everything
+        # the derivation admits is in_smoke_pass, so the gate can never fire
+        # on a bare --smoke. If it ever does, the two have drifted apart and
+        # that is the bug this class exists to prevent.
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
+        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module, "assert_no_tier1_successes", lambda _client, _since, **_kw: None
+        )
+        _stub_principal_probe(monkeypatch)
+        calls = _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
+        assert runner_module.main() == 0
+        selected = [s.name for call in calls for s in call["args"][0]]
+        assert selected, "a bare --smoke must still derive a non-empty selection"
+
+    def test_the_gate_agrees_with_the_derivation(self) -> None:
+        # The gate's predicate must BE the derivation's, not a copy of it.
+        # Two hand-kept lists drifting apart is the whole defect, one level up.
+        scenarios = load_scenarios(_SCENARIOS_DIR)
+        assert [s.name for s in scenarios if not s.in_smoke_pass], (
+            "no scenario is held out of the smoke pass — this gate has no subject"
+        )
+        for scenario in scenarios:
+            expected = (
+                scenario.chaos_setup is None
+                and not scenario.expectation.expected_action_tools
+                and scenario.smoke_exclusion is None
+            )
+            assert scenario.in_smoke_pass is expected, scenario.name
 
 
 class TestCannedEquivalentKnobWarning:

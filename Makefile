@@ -182,10 +182,13 @@ endif
 #
 # SMOKE_ONLY survives as the OPERATOR OVERRIDE, unset by default: set it on
 # the command line (`make eval-smoke SMOKE_ONLY=consumer_lag_`) or in .env to
-# run a subset, e.g. when re-checking one scenario against a new pin. It
-# reaches the runner as --only, so the dead-pattern refusal (exit 2) and the
-# chaos refusal (exit 6) both still apply to it — an override cannot smuggle
-# a chaos scenario in, and it cannot silently match nothing.
+# run a subset, e.g. when re-checking one scenario against a new pin. The
+# override can only NARROW the derived selection, never widen it: it reaches
+# the runner as --only, so the dead-pattern refusal (exit 2) and the
+# outside-the-derived-set refusal (exit 6 — chaos_setup, expected_action_tools,
+# or a declared smoke_exclusion, each named with its reason) both still apply
+# to it. An override cannot smuggle a chaos-seeding or a write-declaring
+# scenario in, and it cannot silently match nothing.
 eval-smoke:
 	@if [ -z "$(PLATFORM_SMOKE_TOKEN)" ]; then \
 		echo "ERROR: PLATFORM_SMOKE_TOKEN not set. Run 'make bootstrap-token' and add it to .env" >&2; exit 2; \

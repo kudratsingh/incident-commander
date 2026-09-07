@@ -62,10 +62,28 @@ canned_tool_responses:
   # forbidden_replay_job_ids cannot inspect it: an agent that swept up the
   # human_required row with it tripped nothing at all. The scenario models
   # the correct action instead.
+  # Re-recorded. It read `matched:3, replayed:3, job_ids:[job-1, job-2,
+  # job-3]`, which no run of this scenario can produce and which the
+  # listing above already condemns in its own comment: `job-1` is no job
+  # id. Three is wrong twice over -- the world holds five dead-letter rows
+  # of which exactly TWO carry `replay_safe` (the seeded
+  # dlq-job-schema-violation, plus the row `chaos_setup: poison_message`
+  # writes -- the platform's hook sets `remediation_hint=replay_safe`
+  # explicitly, see its snapshot description and
+  # incident-platform/backend/app/mcp/tools/chaos/poison_message.py), and
+  # a category replay expands to exactly those two.
+  #
+  # `job_ids` lists the one row that can be named, on the same principle
+  # the listing uses for `total`: the poison row's id is generated per run,
+  # so recording one would pin an id no reading of the platform contains.
+  # The counts are the honest reading of the world; the id list is the
+  # honest reading of what is nameable. Nothing grades `job_ids` -- the
+  # exact-count claim below grades `replayed`, and the scope claims grade
+  # the ARGUMENTS the agent sent, not this response.
   replay_dlq_by_category:
     content:
     - type: text
-      text: '{"category":"replay_safe","matched":3,"replayed":3,"scheduled":0,"failed":0,"job_ids":["job-1","job-2","job-3"],"execute_at":null}'
+      text: '{"category":"replay_safe","matched":2,"replayed":2,"scheduled":0,"failed":0,"job_ids":["fc8d2a03-23b3-5371-9acb-46443c73baa5"],"execute_at":null}'
     is_error: false
 canned_llm_responses:
   investigation_planner:
@@ -97,11 +115,11 @@ canned_llm_responses:
     verify_expectation: "DLQ list should shrink \u2014 replayed jobs are re-submitted through the normal job path so they leave the dead-letter queue.\n"
   verification_judge:
   - verdict: verified
-    reasoning: 'Replay action reported 3 of 3 jobs successfully re-submitted; the DLQ should drain shortly.
+    reasoning: 'Replay action reported 2 of 2 replay_safe jobs successfully re-submitted; the DLQ should drain shortly.
 
       '
   briefing_writer:
-  - findings: 'DLQ held 3 send_email jobs marked retryable. Agent replayed all three; platform confirmed 3/3 accepted for re-submission.
+  - findings: 'DLQ held 2 jobs classified replay_safe (schema violations). Agent replayed those two and left the transient and human_required entries alone; platform confirmed 2/2 accepted for re-submission.
 
       '
     recommendation: "Watch DLQ depth for 10 minutes to confirm it stays low. If jobs return to DLQ, the upstream dependency is still failing \u2014 escalate to the mailer service owner.\n"
@@ -125,15 +143,60 @@ expectation:
   # Structured effect assert (S-19): the bare `replayed` substring was
   # satisfied by `"replayed":0` and the bare `verified` one by a
   # `not_verified: ...` verdict, so EVIDENCE passed on the exact failure it
-  # existed to catch. The parsed field cannot pass by coincidence. Not pinned
-  # to an exact count — live DLQ seeding varies.
+  # existed to catch. The parsed field cannot pass by coincidence.
+  #
+  # `at_least: 1` was the remaining hole and the reason this scenario is
+  # being tightened: it is satisfied by an agent that replayed ONE row and
+  # equally by one that replayed the whole dead-letter queue — the
+  # human_required row and the two transient ones included. A backlog drain
+  # graded green for having drained something.
+  #
+  # `which: sum` totals `replayed` across EVERY replay call the run made,
+  # so the claim is the volume of the remediation rather than the existence
+  # of one satisfying call. Two calls each replaying one row sum to two and
+  # are graded as two; an `equals` on a single call could not see the
+  # second call at all. The legacy `replay_dlq_messages` is in the tool set
+  # even though it is separately forbidden below, because a total that
+  # ignored one of the three ways to replay would not be a total.
+  #
+  # The number is 2, and it is 2 because the world is pinned: the
+  # precondition refuses to start unless the DLQ holds exactly five rows,
+  # of which exactly two carry `replay_safe` (the seeded schema-violation
+  # row and the one `chaos_setup: poison_message` writes). A correct
+  # `replay_dlq_by_category(replay_safe)` expands to both and replays both.
   expected_evidence_fields:
-  - tools: [replay_dlq_by_category, replay_dlq_by_ids]
+  - tools: [replay_dlq_by_category, replay_dlq_by_ids, replay_dlq_messages]
     field: replayed
-    at_least: 1
-  # The seeded human_required row must survive a backlog drain.
+    which: sum
+    equals: 2
+  # WHICH rows, now that the count says HOW MANY. The seeded human_required
+  # row must survive a backlog drain, and so must the two `wait_and_replay`
+  # rows: their dependency has not recovered, replaying them now just
+  # re-fails them, and `dlq_wait_and_replay_success` is the scenario that
+  # grades the delayed replay they actually want (calibration rule 4 — one
+  # fault, one scenario).
+  #
+  # The poison row is deliberately NOT here. It is a legitimate target:
+  # the chaos hook plants it AS a `replay_safe` row for the remediation
+  # loop to act on, and its id is minted per run so no list could name it.
+  # Rule "exactly two replayed" is what bounds it.
   forbidden_replay_job_ids:
   - f030f975-974e-5ce3-aa6b-444136507d86
+  - af67d1b1-13f8-5a2c-8c44-66ec5564597d
+  - 97d91272-9774-5b8e-980b-f0d2fa6ed619
+  # The id list above cannot see a category replay — it names a filter, not
+  # ids, and the platform does the expanding. Bulk-replaying
+  # `wait_and_replay` would touch both transient rows while naming neither.
+  forbidden_replay_categories:
+  - wait_and_replay
+  # The unfilterable bulk tool. It takes only `job_type`, carries no
+  # `job_ids` for the id rule to inspect, and per its own platform
+  # docstring replays uncategorised (null-hint) rows too — "uncategorised
+  # means triage has not classified the failure yet, not that it is
+  # fenced". An agent that fired the correct category replay AND swept the
+  # queue with this one satisfied every assertion this scenario had.
+  forbidden_action_tools:
+  - replay_dlq_messages
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
   # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
   # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. Cap 13 is the
@@ -142,12 +205,26 @@ expectation:
   # the agent is bounded by it, told it, and escalates on exhausting it, and
   # reaching it grades BUDGET red. The margin is headroom, not an annotation.
   max_tool_calls: 13
-# The premise: there is a backlog to drain. poison_message adds to it, but
-# the seeded pack already carries entries, so this asserts the honest
-# minimum — a DLQ with something in it — rather than pretending to measure
-# the chaos hook's own effect, which no read tool distinguishes.
+# The premise: a five-row DLQ, because the exact-count claim above is only
+# meaningful against a known world.
+#
+# `total at_least 1` was satisfied by the four seeded rows alone, so a run
+# whose `chaos_setup: poison_message` had silently failed started anyway and
+# was graded as if the fault it was paged for existed. `equals: 5` is the
+# claim the scenario actually depends on: four seeded rows plus the one the
+# chaos hook writes. It fails closed in both directions, and the second
+# direction is the one that earns its keep — six rows means a previous run's
+# poison row survived the reset, which makes three `replay_safe` rows and
+# turns "exactly two replayed" into a red grade on a correct agent. Catching
+# that BEFORE any model call is the Run-C lesson from the 2026-09 sequence
+# (docs/lessons/live-eval-sequence-2026-09.md §3): the world audit costs
+# nothing and an uninterpretable paid run costs money.
+#
+# Preconditions are checked after chaos seeding (evals/runner.py), so this
+# reads the post-fault world it describes. Live-only; canned runs serve the
+# premise by construction.
 expected_precondition:
 - tool: list_dlq_messages
   expect:
   - path: total
-    at_least: 1
+    equals: 5

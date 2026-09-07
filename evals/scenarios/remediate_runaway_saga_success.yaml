@@ -154,12 +154,26 @@ expectation:
   # the root in dead_letter and the chain stuck while still reporting
   # success. Without the second assert, the delayed-replay path that
   # fixes nothing grades green.
+  #
+  # Both counts are now totals over every replay call the run made
+  # (`which: sum`), not floors read one call at a time. The remediation
+  # here is ONE job: the dead-letter root of the seeded chain. `replayed
+  # at_least 1` was satisfied by that correct replay and equally by an
+  # agent that also swept the four seeded DLQ rows on its way past — this
+  # scenario shares a world with the DLQ family, so there is plenty beside
+  # the chain root to over-replay. `scheduled equals 0` had the same gap in
+  # the other direction: read one value at a time it passed as long as SOME
+  # call deferred nothing, so a correct immediate replay plus a stray
+  # delayed one graded green. See "exact-count remediation claims" in
+  # docs/eval-methodology.md.
   expected_evidence_fields:
-  - tools: [replay_dlq_by_ids]
+  - tools: [replay_dlq_by_ids, replay_dlq_by_category, replay_dlq_messages]
     field: replayed
-    at_least: 1
-  - tools: [replay_dlq_by_ids]
+    which: sum
+    equals: 1
+  - tools: [replay_dlq_by_ids, replay_dlq_by_category, replay_dlq_messages]
     field: scheduled
+    which: sum
     equals: 0
   - tools: [replay_dlq_by_ids]
     field: results[].ok
@@ -170,6 +184,14 @@ expectation:
   # so unlike the canned phantom ids this assertion is live-effective.
   forbidden_replay_job_ids:
   - f030f975-974e-5ce3-aa6b-444136507d86
+  # The unfilterable bulk tool. It takes only `job_type`, carries no
+  # `job_ids` for the rule above to inspect, and per the platform's own
+  # docstring replays uncategorised (null-hint) rows as well — so an agent
+  # that replayed the chain root AND swept the queue with it satisfied
+  # every assertion this scenario had. It is not in expected_action_tools,
+  # so forbidding it takes nothing away from the correct path.
+  forbidden_action_tools:
+  - replay_dlq_messages
   # Deliberately NOT asserted here: `get_dag_state.nodes[].status ==
   # completed`. The chain's upstream parent is already `completed` in the
   # PRE-action probe, so that assertion is satisfied by a run in which the

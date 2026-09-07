@@ -6,7 +6,7 @@ history, and of everything that went wrong on the way there.
 
 Written for the operator running the *next* paid sequence. It is deliberately
 not a changelog: the PRs are linked, but what is worth your time is the shape of
-the mistakes, because four of the seven failures below were manufactured by the
+the mistakes, because five of the seven entries below were manufactured by the
 harness, the protocol, or the operator — not by the agent under test. A run that
 fails for one of those reasons costs money and teaches nothing.
 
@@ -15,7 +15,7 @@ anything. If you only read one thing here, read §1.
 
 ---
 
-## 1. The protocol error that cost ~$2 and produced seven false failures
+## 1. The protocol error that cost ~$2 and produced a stage of false failures
 
 **Date:** 2026-08-30. **Stage:** the read-only pass.
 
@@ -39,9 +39,19 @@ therefore absent:
 
 The result: agents **remediated during a stage labelled read-only**. This is not
 inference from grades — the trajectories show real Tier-1 writes landing against
-the platform. Seven scenarios were scored against a world that earlier scenarios
-in the same pass had already mutated, and all seven reds were artifacts of the
-invocation. About $2, and a stage whose results had to be discarded entirely.
+the platform. Scenarios were scored against a world that earlier scenarios in
+the same pass had already mutated, so the reds are artifacts of the invocation
+rather than findings. About $2, and a stage whose results had to be discarded
+entirely.
+
+> **On the count.** The campaign gotchas ledger records "7 false failures". The
+> archive it refers to, `e72b5ffb9df0`, records **23 scenarios selected from a
+> hand-typed 22-pattern list, 12 pass / 11 fail**. Where the two disagree,
+> **trust the archive** — a ledger entry is a memory of a run, the archive is
+> the run. The discrepancy is itself worth noticing: a summary written from
+> recollection drifted from its own evidence inside a week, which is the same
+> failure mode as §2's wrong `failure_class` label. Numbers get re-derived from
+> archives, never quoted from prose.
 
 The substring list did the rest of the damage. `ONLY=dlq_backlog` matched
 `remediate_dlq_backlog_success` too, smuggling a mutating scenario into the
@@ -277,7 +287,7 @@ spend.
 
 | # | Run / event | Looked like | Actually was | Fix |
 |---|---|---|---|---|
-| 1 | Read-only stage, 08-30 | 7 agent failures | Protocol deviation (hand-rolled invocation, write token) | Runbook commands verbatim; pre-run checklist |
+| 1 | Read-only stage, 08-30 | 11 agent failures (archive `e72b5ffb9df0`) | Protocol deviation (hand-rolled invocation, write token) | Runbook commands verbatim; pre-run checklist |
 | 2 | `consumer_lag_missing_group` | grader brittleness (auto-label) | **Real agent defect** — alert subject never probed | PR #177; override recorded here |
 | 3 | Run A | plausible remediation | Wrong target — anchored on always-present DLQ rows | PR #177 `ALERT_SUBJECT_PROBES` + planner rules |
 | 4 | Run B | agent gave up | Harness knob — reprobe inside the cache window | PR #178 (delay 75, precondition lag>=20) |
@@ -285,8 +295,9 @@ spend.
 | 6 | Fresh boot | spurious alert | Evaluator reading seeded fixtures as traffic | PR #180; WO-R2-132 |
 | 7 | PR #178 | 6-line docs PR | 342 files swept by `git add -A` | Explicit paths; work in a worktree |
 
-**The through-line.** Six of these seven are failures of *procedure and
-environment*, not of the agent. The scoreboard was reporting on the harness and
+**The through-line.** Five of these seven are failures of *procedure and
+environment*, not of the agent — only rows 2 and 3 are genuine agent defects,
+and they are the same defect. The scoreboard was reporting on the harness and
 attributing it to the model. Before you accept a red live result, establish that
 the world was clean, the invocation was the runbook's, and the knobs let the
 agent see the truth — in that order. Only then is the result about the agent.

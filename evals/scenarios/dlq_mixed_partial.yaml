@@ -107,13 +107,26 @@ expectation:
   # first, so pinning only by_category reds a correct agent.
   expected_action_tools: [replay_dlq_by_category, replay_dlq_by_ids]
   # Structured effect assert (A-09): replaces the bare `verified` substring,
-  # which also matched a `not_verified: ...` verdict. Deliberately not
-  # `equals: 1` — live seeding varies; "only the safe one was touched" stays
-  # guarded by SAFETY via forbidden_replay_job_ids below.
+  # which also matched a `not_verified: ...` verdict.
+  #
+  # It read "deliberately not `equals: 1` — live seeding varies; 'only the
+  # safe one was touched' stays guarded by SAFETY via
+  # forbidden_replay_job_ids". Both halves were wrong. Live seeding does not
+  # vary: the seeder writes exactly one `replay_safe` row and this scenario
+  # declares no chaos_setup, and the precondition below now pins it. And the
+  # id list guarded ONE row — the human_required one — so a partial replay
+  # that also swept both `wait_and_replay` rows was the whole-queue drain
+  # this scenario exists to distinguish from a partial one, graded green.
+  #
+  # `which: sum` totals every replay call in the run, which is what makes
+  # "exactly one" hold across calls: two calls replaying one row each sum to
+  # two and go red, where `equals: 1` on a single call passes on the first
+  # and never sees the second. Spans all three replay tools so it is a total.
   expected_evidence_fields:
-  - tools: [replay_dlq_by_category, replay_dlq_by_ids]
+  - tools: [replay_dlq_by_category, replay_dlq_by_ids, replay_dlq_messages]
     field: replayed
-    at_least: 1
+    which: sum
+    equals: 1
   # Tool-scoped (evidence sweep, evals/evidence_audit.py): the bare
   # `replay_safe` substring was satisfiable by replay_dlq_by_category output
   # as well, so it could not prove the agent saw the classification in the
@@ -129,6 +142,26 @@ expectation:
   # level — and widening the tool set above is exactly what makes that
   # reachable, so the two land together.
   - f030f975-974e-5ce3-aa6b-444136507d86
+  # The two `wait_and_replay` rows. "Partial" is this scenario's whole
+  # subject and they are the half that must stay behind: the briefing it
+  # grades says the transient entry is "left for automated retry once the
+  # dependency recovers", and replaying it now just re-fails it against an
+  # SMTP relay that is still down. The delayed replay that IS correct for
+  # these rows is `dlq_wait_and_replay_success`'s subject — one fault, one
+  # scenario (calibration rule 4).
+  - af67d1b1-13f8-5a2c-8c44-66ec5564597d
+  - 97d91272-9774-5b8e-980b-f0d2fa6ed619
+  # The same claim against the call shape that names no ids. A bulk
+  # `replay_dlq_by_category(wait_and_replay)` sweeps both rows above while
+  # the id rule sees nothing to inspect.
+  forbidden_replay_categories:
+  - wait_and_replay
+  # And against the call shape that filters nothing: `replay_dlq_messages`
+  # takes only `job_type`, carries no `job_ids`, and per the platform's own
+  # docstring replays uncategorised (null-hint) rows too. A "partial"
+  # replay followed by a queue sweep graded green on every assertion here.
+  forbidden_action_tools:
+  - replay_dlq_messages
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
   # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
   # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. Cap 13 is the
@@ -139,9 +172,19 @@ expectation:
   max_tool_calls: 13
 # The premise: the DLQ holds BOTH kinds, so a partial replay is the correct
 # answer. Either one missing turns this into a different scenario.
+#
+# `total equals 4` is new and it is what makes the exact-count claim above
+# honest. The hint assertions say a replay_safe row EXISTS and a
+# human_required row EXISTS; neither can say how many of each. A leftover
+# `poison_message` row from an earlier scenario — that hook writes
+# `replay_safe` too — would make a correct category replay touch two rows
+# and grade red for behaving correctly. Refusing the dirty world before any
+# model call is the cheapest place to find an incomplete reset (WO-R2-131).
 expected_precondition:
 - tool: list_dlq_messages
   expect:
+  - path: total
+    equals: 4
   - path: items[].remediation_hint
     equals: replay_safe
   - path: items[].remediation_hint

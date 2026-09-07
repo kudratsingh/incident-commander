@@ -104,8 +104,23 @@ expectation:
   # row — and must red if it does. The id is uuid5 over "dlq-job-csv-parse"
   # (the platform seeder's derivation); the canned phantoms elsewhere exist
   # in no live world, which is why the id-level guard was inert live.
+  #
+  # The `replay_safe` row joins it. The two transient rows are this
+  # scenario's target; the schema-violation row is a different remediation
+  # (immediate replay, graded by `dlq_replay_safe_success`) and sweeping it
+  # up here is over-replay whichever way it is done.
   forbidden_replay_job_ids:
   - f030f975-974e-5ce3-aa6b-444136507d86
+  - fc8d2a03-23b3-5371-9acb-46443c73baa5
+  # The same claim against a call that names a filter instead of ids.
+  forbidden_replay_categories:
+  - replay_safe
+  # The unfilterable bulk tool: only `job_type`, no `job_ids` for the id
+  # rule to read, no `delay_seconds` at all — so it cannot express the
+  # delayed replay this scenario is about, and per the platform's own
+  # docstring it replays uncategorised (null-hint) rows as well.
+  forbidden_action_tools:
+  - replay_dlq_messages
   expected_evidence_contains:
   - wait_and_replay
   # Tool-scoped (evidence sweep, evals/evidence_audit.py): `scheduled` and
@@ -113,13 +128,33 @@ expectation:
   # substrings they were satisfied by ANY replay call — including an
   # immediate one that ignored the wait_and_replay hint, the exact behavior
   # this scenario exists to distinguish. The value assert grades the effect:
-  # the platform accepted at least one DELAYED replay. `scheduled` counts
-  # jobs holding an `execute_at` timer in both siblings, so the timestamp
-  # half of the old pair is implied by the count being non-zero.
+  # the platform accepted a DELAYED replay. `scheduled` counts jobs holding
+  # an `execute_at` timer in both siblings, so the timestamp half of the old
+  # pair is implied by the count being non-zero.
+  #
+  # `at_least: 1` was satisfied by scheduling one row and equally by
+  # scheduling every row in the queue. The seeder writes exactly two
+  # `wait_and_replay` rows (dlq-job-send-email, dlq-job-process-payment),
+  # this scenario seeds no chaos, and the precondition pins the world — so
+  # the correct delayed replay schedules exactly those two.
+  #
+  # The `replayed` pin beside it is the other half, and it is the one the
+  # old assertion could not make at all: `scheduled at_least 1` is satisfied
+  # by an agent that scheduled the two transient rows AND immediately
+  # replayed everything else. Delay is the whole subject here — the platform
+  # holds the timer so SMTP can recover — so an immediate replay of anything
+  # is the failure this scenario exists to catch, and zero is the only total
+  # that says so. `which: sum` totals across every call, and spans all three
+  # replay tools so that a total is a total.
   expected_evidence_fields:
-  - tools: [replay_dlq_by_ids, replay_dlq_by_category]
+  - tools: [replay_dlq_by_ids, replay_dlq_by_category, replay_dlq_messages]
     field: scheduled
-    at_least: 1
+    which: sum
+    equals: 2
+  - tools: [replay_dlq_by_ids, replay_dlq_by_category, replay_dlq_messages]
+    field: replayed
+    which: sum
+    equals: 0
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
   # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
   # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. Cap 13 is the
@@ -128,10 +163,19 @@ expectation:
   # the agent is bounded by it, told it, and escalates on exhausting it, and
   # reaching it grades BUDGET red. The margin is headroom, not an annotation.
   max_tool_calls: 13
-# The premise: at least one entry is a transient failure worth retrying
-# later. The seeder writes two (dlq-job-send-email, dlq-job-process-payment).
+# The premise: the four seeded rows, two of them transient failures worth
+# retrying later (dlq-job-send-email, dlq-job-process-payment).
+#
+# `total equals 4` is new and it is what makes `scheduled sum equals 2`
+# honest. The hint assertion says a `wait_and_replay` row EXISTS; it cannot
+# say two do. It also refuses a world carrying a leftover `poison_message`
+# row, which would give the agent a `replay_safe` entry to sweep up on its
+# way past — the dirty-world abort that costs nothing, rather than the paid
+# run that produces an uninterpretable red.
 expected_precondition:
 - tool: list_dlq_messages
   expect:
+  - path: total
+    equals: 4
   - path: items[].remediation_hint
     equals: wait_and_replay

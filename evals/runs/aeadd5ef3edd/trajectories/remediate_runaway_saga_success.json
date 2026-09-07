@@ -1,0 +1,570 @@
+{
+  "scenario": "remediate_runaway_saga_success",
+  "incident_id": "afb409f9-ce1d-4ccf-b966-38eb1bd27b31",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "afb409f9-ce1d-4ccf-b966-38eb1bd27b31",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T12:52:48.481987Z",
+      "updated_at": "2026-09-07T12:52:48.481987Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "afb409f9-ce1d-4ccf-b966-38eb1bd27b31",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.082448,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "675c9811-3429-4d2b-93e0-d1c26eccd5df",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T12:52:48.564435Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T12:52:48.481987Z",
+      "updated_at": "2026-09-07T12:52:48.564435Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "afb409f9-ce1d-4ccf-b966-38eb1bd27b31",
+      "state": "planning",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 25252,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.082535,
+        "max_usd": "1.00",
+        "usd_used": "0.076350"
+      },
+      "evidence": [
+        {
+          "evidence_id": "675c9811-3429-4d2b-93e0-d1c26eccd5df",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T12:52:48.564435Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "41a1e79b-a96d-489f-b9f1-1b51831183ba",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+          },
+          "result_summary": "{\"seed_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"nodes\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"retry_count\":3,\"created_at\":\"2026-09-07T12:52:48.494341Z\"},{\"id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-09-07T12:52:48.494341Z\"},{\"id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-09-07T12:52:48.494341Z\"}],\"edges\":[{\"from_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"to_id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\"},{\"from_id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"to_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-09-07T12:52:48.564522Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e25b13af-e0b6-452a-a634-64e28f7aef69",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": "bulk_api_sync",
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":4,\"items\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-07T12:52:48.494341Z\",\"updated_at\":\"2026-09-07T12:52:48.494341Z\",\"trace_id\":\"a1fd3e60-03c6-5584-8e24-c82aefa90ae0\",\"triage\":null,\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":null,\"extra\":null},{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-07T12:15:23.331322Z\",\"updated_at\":\"2026-09-07T12:15:29.331322Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-07T12:15:29.331322Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-07T11:58:23.331322Z\",\"updated_at\":\"2026-09-07T11:58:57.331322Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-07T11:58:57.331322Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-07T11:43:23.331322Z\",\"updated_at\":\"2026-09-07T11:43:39.331322Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-07T11:43:39.331322Z\",\"extra\":null}]}",
+          "timestamp": "2026-09-07T12:52:48.564522Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "373f825f-7c39-4763-b849-255e5383d5ed",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The alerted job a2412a54-65f0-5258-95ab-5c168a15df64 is confirmed in the DLQ with remediation_hint='replay_safe'. The error is a transient UpstreamTimeout (30s, 3 attempts) against partner-api.internal with no downstream write recorded, making it safe to replay. The category 'poison_message' has a Tier-1 fix and confidence is 0.9."
+          },
+          "result_summary": "planner handoff to PLANNING: The alerted job a2412a54-65f0-5258-95ab-5c168a15df64 is confirmed in the DLQ with remediation_hint='replay_safe'. The error is a transient UpstreamTimeout (30s, 3 attempts) against partner-api.internal with no downstream write recorded, making it safe to replay. The category 'poison_message' has a Tier-1 fix and confidence is 0.9.",
+          "timestamp": "2026-09-07T12:52:48.564522Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "bulk-api-sync-dead-letter-upstream-timeout-replay-safe",
+          "confidence": 0.9,
+          "reasoning": "The alerted job a2412a54 is in dead_letter status with error 'UpstreamTimeout' after 3 attempts, and its DLQ row has remediation_hint='replay_safe', indicating a transient timeout on the external partner-api.internal endpoint with no partial write committed."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "partner-api-internal-timeout-sustained",
+          "confidence": 0.6,
+          "reasoning": "Multiple DLQ entries (including fc8d2a03 from 37 min earlier) show the same UpstreamTimeout against partner-api.internal, suggesting the external dependency may be intermittently or persistently degraded."
+        },
+        {
+          "category": "runaway_saga",
+          "name": "dag-chain-stalled-dead-letter-root-blocking-waiting-child",
+          "confidence": 0.4,
+          "reasoning": "The DAG root node is dead_lettered which blocks the downstream 'waiting' node (3e3bd4c1 → a2412a54 → dbfb7a0c), but this is a consequence of the timeout rather than a saga loop."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T12:52:48.481987Z",
+      "updated_at": "2026-09-07T12:52:48.564522Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "afb409f9-ce1d-4ccf-b966-38eb1bd27b31",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 37253,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 28.683402,
+        "max_usd": "1.00",
+        "usd_used": "0.118922"
+      },
+      "evidence": [
+        {
+          "evidence_id": "675c9811-3429-4d2b-93e0-d1c26eccd5df",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T12:52:48.564435Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "41a1e79b-a96d-489f-b9f1-1b51831183ba",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+          },
+          "result_summary": "{\"seed_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"nodes\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"retry_count\":3,\"created_at\":\"2026-09-07T12:52:48.494341Z\"},{\"id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-09-07T12:52:48.494341Z\"},{\"id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-09-07T12:52:48.494341Z\"}],\"edges\":[{\"from_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"to_id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\"},{\"from_id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"to_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-09-07T12:52:48.564522Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e25b13af-e0b6-452a-a634-64e28f7aef69",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": "bulk_api_sync",
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":4,\"items\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-07T12:52:48.494341Z\",\"updated_at\":\"2026-09-07T12:52:48.494341Z\",\"trace_id\":\"a1fd3e60-03c6-5584-8e24-c82aefa90ae0\",\"triage\":null,\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":null,\"extra\":null},{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-07T12:15:23.331322Z\",\"updated_at\":\"2026-09-07T12:15:29.331322Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-07T12:15:29.331322Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-07T11:58:23.331322Z\",\"updated_at\":\"2026-09-07T11:58:57.331322Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-07T11:58:57.331322Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-07T11:43:23.331322Z\",\"updated_at\":\"2026-09-07T11:43:39.331322Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-07T11:43:39.331322Z\",\"extra\":null}]}",
+          "timestamp": "2026-09-07T12:52:48.564522Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "373f825f-7c39-4763-b849-255e5383d5ed",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The alerted job a2412a54-65f0-5258-95ab-5c168a15df64 is confirmed in the DLQ with remediation_hint='replay_safe'. The error is a transient UpstreamTimeout (30s, 3 attempts) against partner-api.internal with no downstream write recorded, making it safe to replay. The category 'poison_message' has a Tier-1 fix and confidence is 0.9."
+          },
+          "result_summary": "planner handoff to PLANNING: The alerted job a2412a54-65f0-5258-95ab-5c168a15df64 is confirmed in the DLQ with remediation_hint='replay_safe'. The error is a transient UpstreamTimeout (30s, 3 attempts) against partner-api.internal with no downstream write recorded, making it safe to replay. The category 'poison_message' has a Tier-1 fix and confidence is 0.9.",
+          "timestamp": "2026-09-07T12:52:48.564522Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8991b57d-8eb6-4536-9283-1da5584e8fed",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "bulk-api-sync-dead-letter-upstream-timeout-replay-safe"
+          },
+          "result_summary": "plan: replay_dlq_by_ids({\"job_ids\": [\"a2412a54-65f0-5258-95ab-5c168a15df64\"]}) then verify via get_dag_state",
+          "timestamp": "2026-09-07T12:53:17.165389Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "bulk-api-sync-dead-letter-upstream-timeout-replay-safe",
+          "confidence": 0.9,
+          "reasoning": "The alerted job a2412a54 is in dead_letter status with error 'UpstreamTimeout' after 3 attempts, and its DLQ row has remediation_hint='replay_safe', indicating a transient timeout on the external partner-api.internal endpoint with no partial write committed."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "partner-api-internal-timeout-sustained",
+          "confidence": 0.6,
+          "reasoning": "Multiple DLQ entries (including fc8d2a03 from 37 min earlier) show the same UpstreamTimeout against partner-api.internal, suggesting the external dependency may be intermittently or persistently degraded."
+        },
+        {
+          "category": "runaway_saga",
+          "name": "dag-chain-stalled-dead-letter-root-blocking-waiting-child",
+          "confidence": 0.4,
+          "reasoning": "The DAG root node is dead_lettered which blocks the downstream 'waiting' node (3e3bd4c1 → a2412a54 → dbfb7a0c), but this is a consequence of the timeout rather than a saga loop."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "bulk-api-sync-dead-letter-upstream-timeout-replay-safe",
+        "action_tool": "replay_dlq_by_ids",
+        "action_arguments": {
+          "job_ids": [
+            "a2412a54-65f0-5258-95ab-5c168a15df64"
+          ]
+        },
+        "verify_tool": "get_dag_state",
+        "verify_arguments": {
+          "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+        },
+        "verify_expectation": "The replay returns replayed: 1 with scheduled: 0, and get_dag_state shows no node remaining in dead_letter status — the root node a2412a54-65f0-5258-95ab-5c168a15df64 has moved out of dead_letter and any previously waiting descendants (e.g. dbfb7a0c) have been promoted."
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T12:52:48.481987Z",
+      "updated_at": "2026-09-07T12:53:17.165389Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "afb409f9-ce1d-4ccf-b966-38eb1bd27b31",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 37253,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 42.593228,
+        "max_usd": "1.00",
+        "usd_used": "0.118922"
+      },
+      "evidence": [
+        {
+          "evidence_id": "675c9811-3429-4d2b-93e0-d1c26eccd5df",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T12:52:48.564435Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "41a1e79b-a96d-489f-b9f1-1b51831183ba",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+          },
+          "result_summary": "{\"seed_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"nodes\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"retry_count\":3,\"created_at\":\"2026-09-07T12:52:48.494341Z\"},{\"id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-09-07T12:52:48.494341Z\"},{\"id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-09-07T12:52:48.494341Z\"}],\"edges\":[{\"from_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"to_id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\"},{\"from_id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"to_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-09-07T12:52:48.564522Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e25b13af-e0b6-452a-a634-64e28f7aef69",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": "bulk_api_sync",
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":4,\"items\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-07T12:52:48.494341Z\",\"updated_at\":\"2026-09-07T12:52:48.494341Z\",\"trace_id\":\"a1fd3e60-03c6-5584-8e24-c82aefa90ae0\",\"triage\":null,\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":null,\"extra\":null},{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-07T12:15:23.331322Z\",\"updated_at\":\"2026-09-07T12:15:29.331322Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-07T12:15:29.331322Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-07T11:58:23.331322Z\",\"updated_at\":\"2026-09-07T11:58:57.331322Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-07T11:58:57.331322Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-07T11:43:23.331322Z\",\"updated_at\":\"2026-09-07T11:43:39.331322Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-07T11:43:39.331322Z\",\"extra\":null}]}",
+          "timestamp": "2026-09-07T12:52:48.564522Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "373f825f-7c39-4763-b849-255e5383d5ed",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The alerted job a2412a54-65f0-5258-95ab-5c168a15df64 is confirmed in the DLQ with remediation_hint='replay_safe'. The error is a transient UpstreamTimeout (30s, 3 attempts) against partner-api.internal with no downstream write recorded, making it safe to replay. The category 'poison_message' has a Tier-1 fix and confidence is 0.9."
+          },
+          "result_summary": "planner handoff to PLANNING: The alerted job a2412a54-65f0-5258-95ab-5c168a15df64 is confirmed in the DLQ with remediation_hint='replay_safe'. The error is a transient UpstreamTimeout (30s, 3 attempts) against partner-api.internal with no downstream write recorded, making it safe to replay. The category 'poison_message' has a Tier-1 fix and confidence is 0.9.",
+          "timestamp": "2026-09-07T12:52:48.564522Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8991b57d-8eb6-4536-9283-1da5584e8fed",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "bulk-api-sync-dead-letter-upstream-timeout-replay-safe"
+          },
+          "result_summary": "plan: replay_dlq_by_ids({\"job_ids\": [\"a2412a54-65f0-5258-95ab-5c168a15df64\"]}) then verify via get_dag_state",
+          "timestamp": "2026-09-07T12:53:17.165389Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "fffeebc7-ef55-4976-b4f3-028dc49b488f",
+          "tool_name": "replay_dlq_by_ids",
+          "arguments": {
+            "job_ids": [
+              "a2412a54-65f0-5258-95ab-5c168a15df64"
+            ],
+            "idempotency_key": "0990bd7b8b7b4d166af39444cda9d9e5",
+            "delay_seconds": null
+          },
+          "result_summary": "{\"requested\":1,\"replayed\":1,\"scheduled\":0,\"failed\":0,\"results\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"ok\":true,\"error\":null,\"scheduled\":false,\"execute_at\":null}]}",
+          "timestamp": "2026-09-07T12:53:31.075215Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "bulk-api-sync-dead-letter-upstream-timeout-replay-safe",
+          "confidence": 0.9,
+          "reasoning": "The alerted job a2412a54 is in dead_letter status with error 'UpstreamTimeout' after 3 attempts, and its DLQ row has remediation_hint='replay_safe', indicating a transient timeout on the external partner-api.internal endpoint with no partial write committed."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "partner-api-internal-timeout-sustained",
+          "confidence": 0.6,
+          "reasoning": "Multiple DLQ entries (including fc8d2a03 from 37 min earlier) show the same UpstreamTimeout against partner-api.internal, suggesting the external dependency may be intermittently or persistently degraded."
+        },
+        {
+          "category": "runaway_saga",
+          "name": "dag-chain-stalled-dead-letter-root-blocking-waiting-child",
+          "confidence": 0.4,
+          "reasoning": "The DAG root node is dead_lettered which blocks the downstream 'waiting' node (3e3bd4c1 → a2412a54 → dbfb7a0c), but this is a consequence of the timeout rather than a saga loop."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "bulk-api-sync-dead-letter-upstream-timeout-replay-safe",
+        "action_tool": "replay_dlq_by_ids",
+        "action_arguments": {
+          "job_ids": [
+            "a2412a54-65f0-5258-95ab-5c168a15df64"
+          ]
+        },
+        "verify_tool": "get_dag_state",
+        "verify_arguments": {
+          "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+        },
+        "verify_expectation": "The replay returns replayed: 1 with scheduled: 0, and get_dag_state shows no node remaining in dead_letter status — the root node a2412a54-65f0-5258-95ab-5c168a15df64 has moved out of dead_letter and any previously waiting descendants (e.g. dbfb7a0c) have been promoted."
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-07T12:52:48.481987Z",
+      "updated_at": "2026-09-07T12:53:31.075215Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "afb409f9-ce1d-4ccf-b966-38eb1bd27b31",
+      "state": "resolved",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 39250,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 42.629596,
+        "max_usd": "1.00",
+        "usd_used": "0.121503"
+      },
+      "evidence": [
+        {
+          "evidence_id": "675c9811-3429-4d2b-93e0-d1c26eccd5df",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T12:52:48.564435Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "41a1e79b-a96d-489f-b9f1-1b51831183ba",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+          },
+          "result_summary": "{\"seed_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"nodes\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"retry_count\":3,\"created_at\":\"2026-09-07T12:52:48.494341Z\"},{\"id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-09-07T12:52:48.494341Z\"},{\"id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-09-07T12:52:48.494341Z\"}],\"edges\":[{\"from_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"to_id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\"},{\"from_id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"to_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-09-07T12:52:48.564522Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e25b13af-e0b6-452a-a634-64e28f7aef69",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": "bulk_api_sync",
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":4,\"items\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-07T12:52:48.494341Z\",\"updated_at\":\"2026-09-07T12:52:48.494341Z\",\"trace_id\":\"a1fd3e60-03c6-5584-8e24-c82aefa90ae0\",\"triage\":null,\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":null,\"extra\":null},{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-07T12:15:23.331322Z\",\"updated_at\":\"2026-09-07T12:15:29.331322Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-07T12:15:29.331322Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-07T11:58:23.331322Z\",\"updated_at\":\"2026-09-07T11:58:57.331322Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-07T11:58:57.331322Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-07T11:43:23.331322Z\",\"updated_at\":\"2026-09-07T11:43:39.331322Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-07T11:43:39.331322Z\",\"extra\":null}]}",
+          "timestamp": "2026-09-07T12:52:48.564522Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "373f825f-7c39-4763-b849-255e5383d5ed",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The alerted job a2412a54-65f0-5258-95ab-5c168a15df64 is confirmed in the DLQ with remediation_hint='replay_safe'. The error is a transient UpstreamTimeout (30s, 3 attempts) against partner-api.internal with no downstream write recorded, making it safe to replay. The category 'poison_message' has a Tier-1 fix and confidence is 0.9."
+          },
+          "result_summary": "planner handoff to PLANNING: The alerted job a2412a54-65f0-5258-95ab-5c168a15df64 is confirmed in the DLQ with remediation_hint='replay_safe'. The error is a transient UpstreamTimeout (30s, 3 attempts) against partner-api.internal with no downstream write recorded, making it safe to replay. The category 'poison_message' has a Tier-1 fix and confidence is 0.9.",
+          "timestamp": "2026-09-07T12:52:48.564522Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8991b57d-8eb6-4536-9283-1da5584e8fed",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "bulk-api-sync-dead-letter-upstream-timeout-replay-safe"
+          },
+          "result_summary": "plan: replay_dlq_by_ids({\"job_ids\": [\"a2412a54-65f0-5258-95ab-5c168a15df64\"]}) then verify via get_dag_state",
+          "timestamp": "2026-09-07T12:53:17.165389Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "fffeebc7-ef55-4976-b4f3-028dc49b488f",
+          "tool_name": "replay_dlq_by_ids",
+          "arguments": {
+            "job_ids": [
+              "a2412a54-65f0-5258-95ab-5c168a15df64"
+            ],
+            "idempotency_key": "0990bd7b8b7b4d166af39444cda9d9e5",
+            "delay_seconds": null
+          },
+          "result_summary": "{\"requested\":1,\"replayed\":1,\"scheduled\":0,\"failed\":0,\"results\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"ok\":true,\"error\":null,\"scheduled\":false,\"execute_at\":null}]}",
+          "timestamp": "2026-09-07T12:53:31.075215Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "be7d1956-8d3b-47c1-948e-3e881cd388ef",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64",
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "{\"seed_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"nodes\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"status\":\"pending\",\"retry_count\":0,\"created_at\":\"2026-09-07T12:52:48.494341Z\"},{\"id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-09-07T12:52:48.494341Z\"},{\"id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-09-07T12:52:48.494341Z\"}],\"edges\":[{\"from_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"to_id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\"},{\"from_id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"to_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-09-07T12:53:31.111689Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "99789810-8bbd-4ee9-b65e-ae3ebf924114",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The replay returns replayed: 1 with scheduled: 0, and get_dag_state shows no node remaining in dead_letter status — the root node a2412a54-65f0-5258-95ab-5c168a15df64 has moved out of dead_letter and any previously waiting descendants (e.g. dbfb7a0c) have been promoted.",
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "verified: Remediation replayed 1 job with ok=true and scheduled=0; verify probe shows root node a2412a54-65f0-5258-95ab-5c168a15df64 now in pending status (not dead_letter), and downstream node dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9 promoted to completed status, matching expected behavior.",
+          "timestamp": "2026-09-07T12:53:31.111689Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "bulk-api-sync-dead-letter-upstream-timeout-replay-safe",
+          "confidence": 0.9,
+          "reasoning": "The alerted job a2412a54 is in dead_letter status with error 'UpstreamTimeout' after 3 attempts, and its DLQ row has remediation_hint='replay_safe', indicating a transient timeout on the external partner-api.internal endpoint with no partial write committed."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "partner-api-internal-timeout-sustained",
+          "confidence": 0.6,
+          "reasoning": "Multiple DLQ entries (including fc8d2a03 from 37 min earlier) show the same UpstreamTimeout against partner-api.internal, suggesting the external dependency may be intermittently or persistently degraded."
+        },
+        {
+          "category": "runaway_saga",
+          "name": "dag-chain-stalled-dead-letter-root-blocking-waiting-child",
+          "confidence": 0.4,
+          "reasoning": "The DAG root node is dead_lettered which blocks the downstream 'waiting' node (3e3bd4c1 → a2412a54 → dbfb7a0c), but this is a consequence of the timeout rather than a saga loop."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "bulk-api-sync-dead-letter-upstream-timeout-replay-safe",
+        "action_tool": "replay_dlq_by_ids",
+        "action_arguments": {
+          "job_ids": [
+            "a2412a54-65f0-5258-95ab-5c168a15df64"
+          ]
+        },
+        "verify_tool": "get_dag_state",
+        "verify_arguments": {
+          "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"
+        },
+        "verify_expectation": "The replay returns replayed: 1 with scheduled: 0, and get_dag_state shows no node remaining in dead_letter status — the root node a2412a54-65f0-5258-95ab-5c168a15df64 has moved out of dead_letter and any previously waiting descendants (e.g. dbfb7a0c) have been promoted."
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-07T12:52:48.481987Z",
+      "updated_at": "2026-09-07T12:53:31.111689Z"
+    }
+  ],
+  "invocation_id": "aeadd5ef3edd"
+}

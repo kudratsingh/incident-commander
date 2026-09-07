@@ -346,6 +346,14 @@ BUDGET_MAX_USD           # per incident hard cost ceiling
 
 ## Session history — `context/`
 
+**The workspace hub comes first.** This repo lives inside `../` (the `audit-ws` workspace), whose
+`CLAUDE.md` is auto-loaded and whose `context/START-HERE.md` → `STATE.md` → `LESSONS.md` →
+`PROTOCOL.md` is the mandatory reading order for every session, before this repo's own index below.
+The hub is cross-repo (the interesting failures have been on the seam between the two repos) and it
+is where paid-run protocol, current state, and the consolidated lessons ledger live. This repo's
+`context/INDEX.md` stays the repo-scoped session log and archive index; add a row here whenever
+this repo's code changes, and a row in the hub's `SESSIONS.md` for the session as a whole.
+
 This project has run across many sessions, and each one used to re-derive what the last already
 settled. `context/` is the fix.
 

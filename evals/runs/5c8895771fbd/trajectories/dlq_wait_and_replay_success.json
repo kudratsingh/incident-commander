@@ -1,0 +1,250 @@
+{
+  "scenario": "dlq_wait_and_replay_success",
+  "incident_id": "29f3d679-0934-4464-8d2e-d5063a171941",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "29f3d679-0934-4464-8d2e-d5063a171941",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning_wait_replay",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T14:42:45.937170Z",
+      "updated_at": "2026-09-07T14:42:45.937170Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "29f3d679-0934-4464-8d2e-d5063a171941",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning_wait_replay",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.053348,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "087fb6d0-eee3-4305-937e-8f5adeaf84e3",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "4bbc77eee95bcd485b5808b5196029be"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T14:42:45.990518Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T14:42:45.937170Z",
+      "updated_at": "2026-09-07T14:42:45.990518Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "29f3d679-0934-4464-8d2e-d5063a171941",
+      "state": "planning",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning_wait_replay",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 16082,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.053422,
+        "max_usd": "1.00",
+        "usd_used": "0.051742"
+      },
+      "evidence": [
+        {
+          "evidence_id": "087fb6d0-eee3-4305-937e-8f5adeaf84e3",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "4bbc77eee95bcd485b5808b5196029be"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T14:42:45.990518Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0940b2eb-94da-4bc5-a4f2-a8d94a086edf",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": "wait_and_replay",
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":2,\"items\":[{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-07T14:13:24.100785Z\",\"updated_at\":\"2026-09-07T14:13:58.100785Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-07T14:13:58.100785Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-07T13:58:24.100785Z\",\"updated_at\":\"2026-09-07T13:58:40.100785Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-07T13:58:40.100785Z\",\"extra\":null}]}",
+          "timestamp": "2026-09-07T14:42:45.990592Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "1694398f-62d0-4b7f-8022-4d38f101be15",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "Both DLQ entries (af67d1b1 and 97d91272) are bulk_api_sync jobs with remediation_hint=wait_and_replay. The rate-limited job should be replayed after the 120s quota window passes; the SMTP job should be replayed once the dependency recovers. Both are confirmed wait_and_replay, which is a Tier-1 fixable category under poison_message."
+          },
+          "result_summary": "planner handoff to PLANNING: Both DLQ entries (af67d1b1 and 97d91272) are bulk_api_sync jobs with remediation_hint=wait_and_replay. The rate-limited job should be replayed after the 120s quota window passes; the SMTP job should be replayed once the dependency recovers. Both are confirmed wait_and_replay, which is a Tier-1 fixable category under poison_message.",
+          "timestamp": "2026-09-07T14:42:45.990592Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "dlq-bulk-api-sync-wait-and-replay-rate-limited-and-smtp-down",
+          "confidence": 0.92,
+          "reasoning": "Both DLQ entries are type bulk_api_sync with remediation_hint=wait_and_replay — one is rate-limited (429 from partner-api with a 120s retry-after) and the other is an SMTP connection refusal; both are retryable after the external dependency recovers."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "smtp-mailer-internal-connection-refused",
+          "confidence": 0.75,
+          "reasoning": "The second DLQ entry shows ConnectionRefusedError against smtp.mailer.internal:587, suggesting the SMTP relay is currently unreachable — a transient external dependency failure."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "billing-hotfix-v0.4.2-vpc-egress-change",
+          "confidence": 0.35,
+          "reasoning": "The DLQ triage for the SMTP failure explicitly calls out that billing hotfix v0.4.2 may have changed VPC egress rules, which could have broken SMTP reachability."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T14:42:45.937170Z",
+      "updated_at": "2026-09-07T14:42:45.990592Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "29f3d679-0934-4464-8d2e-d5063a171941",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning_wait_replay",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 30394,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 16.261019,
+        "max_usd": "1.00",
+        "usd_used": "0.105924"
+      },
+      "evidence": [
+        {
+          "evidence_id": "087fb6d0-eee3-4305-937e-8f5adeaf84e3",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "4bbc77eee95bcd485b5808b5196029be"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T14:42:45.990518Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0940b2eb-94da-4bc5-a4f2-a8d94a086edf",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": "wait_and_replay",
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":2,\"items\":[{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-07T14:13:24.100785Z\",\"updated_at\":\"2026-09-07T14:13:58.100785Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-07T14:13:58.100785Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-07T13:58:24.100785Z\",\"updated_at\":\"2026-09-07T13:58:40.100785Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-07T13:58:40.100785Z\",\"extra\":null}]}",
+          "timestamp": "2026-09-07T14:42:45.990592Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "1694398f-62d0-4b7f-8022-4d38f101be15",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "Both DLQ entries (af67d1b1 and 97d91272) are bulk_api_sync jobs with remediation_hint=wait_and_replay. The rate-limited job should be replayed after the 120s quota window passes; the SMTP job should be replayed once the dependency recovers. Both are confirmed wait_and_replay, which is a Tier-1 fixable category under poison_message."
+          },
+          "result_summary": "planner handoff to PLANNING: Both DLQ entries (af67d1b1 and 97d91272) are bulk_api_sync jobs with remediation_hint=wait_and_replay. The rate-limited job should be replayed after the 120s quota window passes; the SMTP job should be replayed once the dependency recovers. Both are confirmed wait_and_replay, which is a Tier-1 fixable category under poison_message.",
+          "timestamp": "2026-09-07T14:42:45.990592Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2732e85a-6ebb-42d2-8173-ed0936f8e5a0",
+          "tool_name": "_remediation_escalate",
+          "arguments": {
+            "from_state": "planning",
+            "reason": "plan rejected before execution: resource argument(s) not evidence-sourced: replay_dlq_by_ids.job_ids='97d91272-0000-0000-0000-000000000000'. Resource names must be copied verbatim from the alert or tool results."
+          },
+          "result_summary": "plan rejected before execution: resource argument(s) not evidence-sourced: replay_dlq_by_ids.job_ids='97d91272-0000-0000-0000-000000000000'. Resource names must be copied verbatim from the alert or tool results.",
+          "timestamp": "2026-09-07T14:43:02.198189Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "dlq-bulk-api-sync-wait-and-replay-rate-limited-and-smtp-down",
+          "confidence": 0.92,
+          "reasoning": "Both DLQ entries are type bulk_api_sync with remediation_hint=wait_and_replay — one is rate-limited (429 from partner-api with a 120s retry-after) and the other is an SMTP connection refusal; both are retryable after the external dependency recovers."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "smtp-mailer-internal-connection-refused",
+          "confidence": 0.75,
+          "reasoning": "The second DLQ entry shows ConnectionRefusedError against smtp.mailer.internal:587, suggesting the SMTP relay is currently unreachable — a transient external dependency failure."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "billing-hotfix-v0.4.2-vpc-egress-change",
+          "confidence": 0.35,
+          "reasoning": "The DLQ triage for the SMTP failure explicitly calls out that billing hotfix v0.4.2 may have changed VPC egress rules, which could have broken SMTP reachability."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T14:42:45.937170Z",
+      "updated_at": "2026-09-07T14:43:02.198189Z"
+    }
+  ],
+  "invocation_id": "5c8895771fbd"
+}

@@ -51,6 +51,9 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "RESOLUTION_CLASS",  # tier-1 action -> resolves-or-stabilizes, tools/policies.py
         # tier-1 action -> the read whose rows classify it, agent/remediation.py
         "SOURCE_ROW_FOR_ACTION",
+        # tier-1 action -> the read whose COVERAGE licenses it (a category
+        # replay names no row), agent/remediation.py
+        "SOURCE_LISTING_FOR_ACTION",
         "TIER_1",  # Tier enum values, tools/policies.py
         "TIER_2",
         # Environment variables / make flags consumed outside Settings.

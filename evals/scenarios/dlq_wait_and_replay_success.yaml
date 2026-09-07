@@ -132,8 +132,17 @@ expectation:
   # docstring it replays uncategorised (null-hint) rows as well.
   forbidden_action_tools:
   - replay_dlq_messages
-  expected_evidence_contains:
-  - wait_and_replay
+  # `expected_evidence_contains: [wait_and_replay]` was here and is gone.
+  # It was an unscoped substring over the joined evidence corpus — the
+  # fake-green shape this suite has been replacing since cmd #147 — and it
+  # was satisfied by a string the run supplies to itself three ways over: the
+  # DLQ listing's rows, the verify probe's own ARGUMENTS
+  # (`remediation_hint=wait_and_replay`), and the scenario's own briefing
+  # text. It could not fail on any run that reached the verify leg.
+  #
+  # The tool-scoped, ordered claim below says what it was reaching for and
+  # says it properly: a `list_dlq_messages` reading, recorded BEFORE the
+  # replay, carried a row classified `wait_and_replay`.
   # Tool-scoped (evidence sweep, evals/evidence_audit.py): `scheduled` and
   # `execute_at` are field names of BOTH replay siblings' outputs, so as
   # substrings they were satisfied by ANY replay call — including an
@@ -166,6 +175,29 @@ expectation:
     field: replayed
     which: sum
     equals: 0
+  # The read-before-act claim (WO-R2-143's audit of the two scenarios the
+  # work order did not name). This scenario had no tool-scoped listing
+  # assertion at all: `expected_evidence_contains: [wait_and_replay]` above
+  # is an unscoped substring over the joined corpus, and the VERIFY probe
+  # here is `list_dlq_messages(remediation_hint=wait_and_replay)` — so the
+  # string it was looking for is one the post-action probe supplies on its
+  # own, and an agent that scheduled a delayed replay and only afterwards
+  # read what it had scheduled satisfied it.
+  #
+  # Ordering matters more here than anywhere else in the DLQ set, because
+  # the hint is not merely a permission — it is the whole reason the replay
+  # carries `delay_seconds` at all. Choosing a 300-second timer is a
+  # decision about a row's error text, and it cannot be made after the call
+  # that carries it.
+  #
+  # Both replay tools are named as the boundary because either is legal
+  # here (`expected_action_tools`), and the assertion fails closed when
+  # neither fires — a run that scheduled nothing is already red on OUTCOME
+  # and on the `scheduled sum equals 2` claim above.
+  - tools: [list_dlq_messages]
+    field: items[].remediation_hint
+    equals: wait_and_replay
+    before_tools: [replay_dlq_by_ids, replay_dlq_by_category]
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
   # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
   # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. Cap 13 is the

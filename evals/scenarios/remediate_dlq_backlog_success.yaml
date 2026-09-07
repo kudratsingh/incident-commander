@@ -170,6 +170,25 @@ expectation:
     field: replayed
     which: sum
     equals: 2
+  # The read-before-act claim, new with WO-R2-143, and this scenario had NO
+  # `list_dlq_messages` assertion of any kind before it: the count above says
+  # two rows were replayed and nothing said the agent had ever looked at the
+  # queue it was draining. A category replay hands the platform a filter and
+  # lets it choose the rows at execution time, so "which two, and were they
+  # the right two" is a question the agent cannot answer unless it listed
+  # first — and this scenario passed live on 2026-09-07 with the read first
+  # (archive `e8404306138c`) without ever requiring it.
+  #
+  # `before_tools` is the half that makes it an ORDERING claim rather than a
+  # presence one. `list_dlq_messages` is also this run's verify probe, so an
+  # act-then-read trajectory carries the same evidence as a correct one and
+  # graded identically. Both replay tools are named because either is a legal
+  # action here; the claim fails closed when neither fires, which is correct —
+  # such a run is already red on OUTCOME. Structural half: ADR 0028.
+  - tools: [list_dlq_messages]
+    field: items[].remediation_hint
+    equals: replay_safe
+    before_tools: [replay_dlq_by_category, replay_dlq_by_ids]
   # WHICH rows, now that the count says HOW MANY. The seeded human_required
   # row must survive a backlog drain, and so must the two `wait_and_replay`
   # rows: their dependency has not recovered, replaying them now just

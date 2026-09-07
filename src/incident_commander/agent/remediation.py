@@ -99,6 +99,22 @@ _MAX_VERIFY_TARGET_REFUSALS: Final[int] = 1
 # whose classification nobody looked at.
 _MAX_UNREAD_ROW_REFUSALS: Final[int] = 1
 
+# And one for the category half (ADR 0028), for a repair that is real and
+# different from the by-id one. The planner still cannot make a read, so it
+# cannot go and fetch the listing it is missing — but when the run HAS read
+# the DLQ and the plan simply picked a different slice of it than the one it
+# read, the fix is to act on the slice that is in evidence, and the refusal
+# names which those are. That is the shape a planner reaching past its
+# evidence actually produces: it read `replay_safe` and proposed sweeping
+# `wait_and_replay`. A run with no listing at all has nothing to re-plan
+# toward and the second refusal escalates, naming the read that was skipped.
+#
+# Worst case is one extra planner call on a category-replay plan and none on
+# any other: the two read-before-act guards are non-inert over DISJOINT tool
+# sets (a tool either names rows or names a filter, never both), so no single
+# plan can spend both budgets. Neither spends tool-call budget.
+_MAX_UNLISTED_CATEGORY_REFUSALS: Final[int] = 1
+
 # Evidence marker for a refused plan. Underscore-prefixed per the repo-wide
 # convention, so the briefing's evidence trail and the grader's "tools
 # called" set both exclude it — a refusal is bookkeeping, not a probe, and
@@ -111,6 +127,13 @@ _PLAN_REFUSED_MARKER: Final[str] = "_plan_refused"
 # reason text to tell "verified the wrong thing" from "acted on an unread
 # row".
 _PLAN_REFUSED_UNREAD_ROW_MARKER: Final[str] = "_plan_refused_unread_row"
+# And the same convention again for the read-before-act refusal's other half
+# (ADR 0028): a replay that names a CATEGORY rather than rows. Third marker,
+# third shape, for the same reason the second one is separate — its arguments
+# name a filter and no ids, and "you swept a category nobody listed" is a
+# different diagnosis from "you replayed a row nobody read", even though both
+# are the same rule seen from two sides.
+_PLAN_REFUSED_UNLISTED_CATEGORY_MARKER: Final[str] = "_plan_refused_unlisted_category"
 
 # Every marker ``_format_plan_context`` must render whole and last. Derived
 # membership rather than a comparison against one name, because that is the
@@ -120,9 +143,13 @@ _PLAN_REFUSED_UNREAD_ROW_MARKER: Final[str] = "_plan_refused_unread_row"
 # planner was re-asked with its steer cut mid-sentence — the failure mode
 # ``_format_plan_context``'s own comment says the whole-rendering exists to
 # prevent. A refusal the model cannot read is a refusal that only spends
-# tokens. Adding a third refusal shape means adding it here.
+# tokens. Adding a fourth refusal shape means adding it here.
 _PLAN_REFUSAL_MARKERS: Final[frozenset[str]] = frozenset(
-    {_PLAN_REFUSED_MARKER, _PLAN_REFUSED_UNREAD_ROW_MARKER}
+    {
+        _PLAN_REFUSED_MARKER,
+        _PLAN_REFUSED_UNREAD_ROW_MARKER,
+        _PLAN_REFUSED_UNLISTED_CATEGORY_MARKER,
+    }
 )
 
 
@@ -288,6 +315,139 @@ SOURCE_ROW_FOR_ACTION: Final[dict[str, tuple[SourceRow, ...]]] = {
 }
 
 
+class ListingScope(NamedTuple):
+    """One dimension on which a listing and an action can each be narrowed."""
+
+    read_field: str
+    """Argument on the read that narrows WHICH ROWS come back."""
+    action_field: str | None
+    """Argument on the action that narrows WHICH ROWS it touches, or ``None``
+    when the action does not narrow on this dimension at all. ``None`` is the
+    strictest case, not the laxest: an action that does not narrow spans every
+    value, so only a read that did not narrow either can have covered it."""
+
+
+class SourceListing(NamedTuple):
+    """The read whose COVERAGE an action naming no rows depends on."""
+
+    tool_name: str
+    """Read tool that lists the rows the action will expand to."""
+    rows_field: str
+    """Top-level key holding the rows. Present-and-a-list is what makes an
+    evidence entry a *reading* rather than merely a call under that name — a
+    plain key for the same reason ``SourceRow.rows_field`` is one."""
+    decision_field: str
+    """The field the read exists to expose, quoted into the refusal."""
+    scopes: tuple[ListingScope, ...]
+    """Every dimension coverage is judged on. A reading covers the action when
+    it is no narrower than the action on EVERY scope; one scope where the read
+    filtered and the action did not is enough to refuse."""
+
+
+# Single source of truth for "which read must have COVERED what this action is
+# about to sweep".
+#
+# The fourth map in the probe family and the sibling of
+# ``SOURCE_ROW_FOR_ACTION``: the same rule — *read the thing before you act on
+# it* — against the call shape that names no thing. `replay_dlq_by_category`
+# names a filter; the platform expands it at execution time; so the rows that
+# get replayed are whatever the DLQ holds at that instant, and their count and
+# their contents are facts nobody in the run has necessarily seen.
+#
+# Why the by-id guard cannot cover this, which is why there are two maps:
+# ``SOURCE_ROW_FOR_ACTION`` matches the action's own resource arguments
+# (``RESOURCE_ARG_FIELDS``) against ids the listing returned. A category
+# replay has no resource arguments at all — ``_resource_values`` returns the
+# empty set for it — so that guard is inert by construction, and ADR 0027 said
+# so and filed this (WO-R2-143). The equivalent statement here is about the
+# ARGUMENT rather than a row: "a listing in this run's evidence covered the
+# slice this call will expand to".
+#
+# What counts as covering, and why coverage rather than row presence:
+#
+# * a reading that filtered on nothing covers every slice — it is the whole
+#   queue, null hints included;
+# * a reading filtered to exactly the slice the action names covers it;
+# * a reading filtered to some OTHER slice covers nothing the action names,
+#   and this is the case with a live failure behind it: reading
+#   `remediation_hint="replay_safe"` and then sweeping `wait_and_replay` is
+#   acting on rows whose error texts nobody opened.
+#
+# Deliberately NOT "the listing must have returned a row in that category".
+# A category replay of a slice that has emptied since the read is a no-op, and
+# refusing it would red a correct, cautious run for the world's timing. The
+# claim this guard makes is about what the agent LOOKED at, which is the thing
+# the agent controls.
+#
+# TOTAL over ``Tier1ToolName``, for the same reason its three siblings are:
+# ``tests/unit/test_policies.py::TestSourceListingForAction`` fails on any
+# Tier-1 tool with no entry, so a bulk tool shipped tomorrow cannot inherit
+# "of course it may sweep a queue nobody listed" by silence.
+SOURCE_LISTING_FOR_ACTION: Final[dict[str, tuple[SourceListing, ...]]] = {
+    # `category` is the slice; `job_type` narrows it further on both sides.
+    # Both scopes are needed and the second is not decoration: a reading of
+    # `list_dlq_messages(job_type="csv_upload", remediation_hint="replay_safe")`
+    # saw one type's rows, and `replay_dlq_by_category(category="replay_safe")`
+    # with no `job_type` replays every type's — the read is strictly narrower
+    # than the action and the guard has to say so.
+    #
+    # A missing `category` is treated as "spans every category" and so demands
+    # an unfiltered reading. It is an invalid call either way (the field is
+    # required on `ReplayDlqByCategoryInput`, so `wire_arguments` rejects it
+    # later), and this is the fail-closed reading of the two: an action that
+    # does not say which slice it replays is at least as broad as one that
+    # sweeps.
+    "replay_dlq_by_category": (
+        SourceListing(
+            "list_dlq_messages",
+            "items",
+            "remediation_hint",
+            (
+                ListingScope("remediation_hint", "category"),
+                ListingScope("job_type", "job_type"),
+            ),
+        ),
+    ),
+    # The unfilterable sweep. It takes `job_type` and nothing else, and per
+    # the platform's own description it replays uncategorised (null-hint) rows
+    # too — the rows for which "nobody has classified this" is the entire
+    # finding. `action_field=None` on the hint scope is what says so: no
+    # filtered reading can cover this call, only an unfiltered one.
+    #
+    # Declaring it here does NOT make it permissible. Every DLQ scenario in
+    # the suite lists it in `forbidden_action_tools` and those claims are
+    # untouched; this map says what the agent would have had to read IF it
+    # ever reaches for the tool, which is a different question from whether
+    # a scenario grades the reach as a violation. Both hold at once.
+    "replay_dlq_messages": (
+        SourceListing(
+            "list_dlq_messages",
+            "items",
+            "remediation_hint",
+            (
+                ListingScope("remediation_hint", None),
+                ListingScope("job_type", "job_type"),
+            ),
+        ),
+    ),
+    # Declared inert, each for a stated reason rather than by omission.
+    #
+    # `replay_dlq_by_ids` and `mark_dlq_permanent` name rows, so the question
+    # about them is `SOURCE_ROW_FOR_ACTION`'s ("is that row in evidence?") and
+    # asking a coverage question as well would refuse a correct by-id replay
+    # whose listing was filtered to a different hint than the row's — which is
+    # a legitimate way to have read a row, and the row IS the evidence.
+    "replay_dlq_by_ids": (),
+    "mark_dlq_permanent": (),
+    # No listing enumerates cache keys, consumer groups or DAG roots for the
+    # platform to expand a filter over; these three name one resource each and
+    # nothing here is a filter.
+    "invalidate_cache_key": (),
+    "restart_consumer_group": (),
+    "pause_dag": (),
+}
+
+
 class RemediationPlan(BaseModel):
     """One remediation plan: action + verification.
 
@@ -376,7 +536,7 @@ def make_llm_plan(
     - ``_misdirected_verify_args`` — the verify probe must not name a
       resource the action left alone.
 
-    Two further guards then REFUSE rather than escalate, each re-asking the
+    Three further guards then REFUSE rather than escalate, each re-asking the
     plan once with the missing piece named, because unlike the three above
     the action they see is not aimed at the wrong object:
 
@@ -384,6 +544,10 @@ def make_llm_plan(
       have been SEEN as a row in the read that classifies it (ADR 0027).
       Checked first: whether the action should happen outranks how it would
       be checked.
+    - ``_unlisted_action_scope`` — the same rule for a call that names a
+      category instead of rows: some listing in evidence must have covered
+      the slice the platform will expand it to (ADR 0028). Non-inert over a
+      tool set disjoint from the guard above's.
     - ``_unobserved_action_resource`` — the verify probe must observe the
       acted-on resource at all (ADR 0025).
     """
@@ -425,6 +589,7 @@ def make_llm_plan(
         top = run_state.hypotheses[0]
         refusals_spent = 0
         unread_refusals_spent = 0
+        unlisted_refusals_spent = 0
         while True:
             run_state, outcome = _plan_once(run_state, at, llm_client, model, top.name)
             if isinstance(outcome, RunState):
@@ -460,6 +625,37 @@ def make_llm_plan(
                         at,
                         "budget exhausted before the plan could be re-asked without "
                         "an unread dead-letter row; nothing was executed",
+                    )
+                continue
+
+            # The other half of the same rule (ADR 0028), in the same slot and
+            # for the same reason: a call that names a category instead of rows
+            # is still an action taken on rows nobody looked at. Non-inert over
+            # a disjoint tool set from the check above — a tool names rows or
+            # names a filter — so at most one of the two can fire on any plan
+            # and the order between them is presentation, not precedence.
+            unlisted = _unlisted_action_scope(plan, run_state)
+            if unlisted is not None:
+                listing, readings = unlisted
+                if unlisted_refusals_spent >= _MAX_UNLISTED_CATEGORY_REFUSALS:
+                    return _escalate_remediation(
+                        run_state,
+                        at,
+                        f"planner proposed a bulk replay over a slice of the "
+                        f"dead-letter queue this run never listed, "
+                        f"{unlisted_refusals_spent + 1} times: "
+                        f"{_unlisted_category_reason(listing, readings, plan)} The "
+                        "action was NOT executed — a bulk replay is only safe over "
+                        "rows somebody read, and ADR 0008 allows one attempt.",
+                    )
+                unlisted_refusals_spent += 1
+                run_state = _refuse_unlisted_category(run_state, at, plan, listing, readings)
+                if run_state.budget.is_exhausted:
+                    return _escalate_remediation(
+                        run_state,
+                        at,
+                        "budget exhausted before the plan could be re-asked without an "
+                        "unlisted replay category; nothing was executed",
                     )
                 continue
 
@@ -881,6 +1077,206 @@ def _unread_row_reason(source: SourceRow, unread: tuple[str, ...], plan: Remedia
         f"{source.decision_field}, or page it with offset until the id appears — and "
         f"read that row's {source.decision_field} before replaying. A null "
         f"{source.decision_field} is UNKNOWN, not replay-safe."
+    )
+
+
+def _scope_value(arguments: Mapping[str, Any], field: str | None) -> str | None:
+    """The narrowing value on one scope, or ``None`` for "not narrowed".
+
+    A missing key, an explicit JSON ``null`` (which is what
+    ``wire_arguments`` writes for every unset optional filter, so the wired
+    arguments the evidence ledger stores are full of them), a non-string, and
+    a whitespace-only string all read as *not narrowed*. Collapsing them is
+    correct in both directions: on the READ side they are the four ways the
+    platform was asked for everything, and on the ACTION side they are the
+    four ways the plan declined to say which slice it meant — and an action
+    that does not say spans all of them.
+    """
+    if field is None:
+        return None
+    value = arguments.get(field)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _is_reading(entry: EvidenceEntry, source: SourceListing) -> bool:
+    """Whether one evidence entry is a real reading of ``source``, not just its name.
+
+    The rows field has to be there and has to be a list. In practice the
+    investigation loop escalates on ``is_error`` before an entry is written,
+    so a failed listing never reaches the ledger under its tool name — this
+    is the belt to that braces, and it is what stops a future non-listing
+    entry recorded under a read tool's name from counting as coverage.
+    """
+    try:
+        parsed = json.loads(entry.result_summary)
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(parsed, Mapping):
+        return False
+    return isinstance(parsed.get(source.rows_field), (list, tuple))
+
+
+def _covers(entry: EvidenceEntry, plan: RemediationPlan, source: SourceListing) -> bool:
+    """Whether one reading saw at least everything this plan will touch.
+
+    Set containment, scope by scope. The reading is the intersection of its
+    filters; the action is the intersection of its own. The reading covers the
+    action when, on every declared scope, it either did not narrow at all or
+    narrowed to exactly the value the action names. One scope where the read
+    filtered and the action did not is a strictly narrower read, and it fails.
+    """
+    for scope in source.scopes:
+        read_value = _scope_value(entry.arguments, scope.read_field)
+        if read_value is None:
+            continue
+        if read_value != _scope_value(plan.action_arguments, scope.action_field):
+            return False
+    return True
+
+
+def _render_scoped_call(
+    tool_name: str, values: Mapping[str, str | None], scopes: tuple[ListingScope, ...]
+) -> str:
+    """One listing rendered as the call it is, filters only and in scope order."""
+    named = ", ".join(
+        f"{scope.read_field}={values[scope.read_field]!r}"
+        for scope in scopes
+        if values[scope.read_field] is not None
+    )
+    return f"{tool_name}({named})"
+
+
+def _readings_in_evidence(run_state: RunState, source: SourceListing) -> tuple[str, ...]:
+    """Every reading of ``source`` already in evidence, rendered as its call.
+
+    Deduplicated in first-seen order, because the same probe repeated by the
+    ADR-0009 freshness re-probe or an ADR-0006 verify poll is one fact about
+    what the run looked at, and a refusal listing it three times reads as
+    three different reads.
+    """
+    rendered: list[str] = []
+    for entry in run_state.evidence:
+        if entry.tool_name != source.tool_name or not _is_reading(entry, source):
+            continue
+        call = _render_scoped_call(
+            source.tool_name,
+            {
+                scope.read_field: _scope_value(entry.arguments, scope.read_field)
+                for scope in source.scopes
+            },
+            source.scopes,
+        )
+        if call not in rendered:
+            rendered.append(call)
+    return tuple(rendered)
+
+
+def _unlisted_action_scope(
+    plan: RemediationPlan, run_state: RunState
+) -> tuple[SourceListing, tuple[str, ...]] | None:
+    """The source and the readings that were there instead, when none covers the plan.
+
+    ``None`` means the plan is fine. Two inert cases, both deliberate:
+
+    * the action tool has an empty entry in ``SOURCE_LISTING_FOR_ACTION`` — it
+      names rows or one resource, so coverage is not the question to ask about
+      it (``_unread_action_rows`` asks the one that is);
+    * some reading already in evidence covers every scope the action narrows
+      on, which is the correct trajectory and the common case.
+
+    Only the FIRST declared source is reported when several would satisfy the
+    requirement, mirroring ``_unread_action_rows``: the refusal has to name one
+    concrete call to make. The plan is nonetheless admitted if ANY declared
+    source covers it.
+
+    Ordering is structural rather than checked: this runs at PLANNING, and
+    ``run_state.evidence`` is append-only, so every reading it can see was
+    recorded before the action executes. There is no "after" to exclude.
+    """
+    sources = SOURCE_LISTING_FOR_ACTION.get(plan.action_tool, ())
+    if not sources:
+        return None
+    for source in sources:
+        for entry in run_state.evidence:
+            if entry.tool_name != source.tool_name or not _is_reading(entry, source):
+                continue
+            if _covers(entry, plan, source):
+                return None
+    return sources[0], _readings_in_evidence(run_state, sources[0])
+
+
+def _unlisted_category_reason(
+    source: SourceListing,
+    readings: tuple[str, ...],
+    plan: RemediationPlan,
+) -> str:
+    """The sentence both the refusal and the escalation are built from."""
+    required = _render_scoped_call(
+        source.tool_name,
+        {
+            scope.read_field: _scope_value(plan.action_arguments, scope.action_field)
+            for scope in source.scopes
+        },
+        source.scopes,
+    )
+    already = (
+        f"The only {source.tool_name} reading(s) in this run's evidence are "
+        f"{', '.join(readings)}, which cover a different slice."
+        if readings
+        else f"This run has no {source.tool_name} reading at all."
+    )
+    return (
+        f"{plan.action_tool}({json.dumps(plan.action_arguments)}) names a FILTER, not "
+        f"rows: the platform expands it when the call executes, so which rows get "
+        f"replayed — and how many — is whatever the queue holds at that instant. "
+        f"{already} Call {required} first (an unfiltered {source.tool_name}() covers "
+        f"every slice), read every row it returns, and confirm each one is a row you "
+        f"mean to replay. A null {source.decision_field} is UNKNOWN, not replay-safe, "
+        f"and an unfiltered sweep carries those rows too."
+    )
+
+
+def _refuse_unlisted_category(
+    run_state: RunState,
+    at: datetime,
+    plan: RemediationPlan,
+    source: SourceListing,
+    readings: tuple[str, ...],
+) -> RunState:
+    """Refuse a plan that would sweep a slice nobody listed, and say which read.
+
+    Refuses rather than escalates, on the same reasoning as ``_refuse_plan``
+    and ``_refuse_unread_rows``, and with a repair the by-id refusal does not
+    have: the readings already in evidence are named, so a planner that read
+    one slice and reached for another can re-plan onto the slice it actually
+    looked at. When there is no reading at all the re-ask has nothing to aim
+    at and the second refusal escalates — fail closed toward the human rather
+    than sweep a queue nobody opened.
+
+    Underscore-prefixed marker, so the briefing trail and the grader's
+    called-tools set both skip it and it spends no tool-call budget. Only the
+    planner tokens of the re-ask, which ``_plan_once`` charges.
+    """
+    reason = f"plan refused before execution: {_unlisted_category_reason(source, readings, plan)}"
+    entry = EvidenceEntry(
+        tool_name=_PLAN_REFUSED_UNLISTED_CATEGORY_MARKER,
+        arguments={
+            "action_tool": plan.action_tool,
+            "action_arguments": plan.action_arguments,
+            "required_tool": source.tool_name,
+            "required_field": source.decision_field,
+            "readings_in_evidence": list(readings),
+        },
+        result_summary=reason,
+        timestamp=at,
+    )
+    return run_state.model_copy(
+        update={
+            "evidence": (*run_state.evidence, entry),
+            "updated_at": at,
+        }
     )
 
 

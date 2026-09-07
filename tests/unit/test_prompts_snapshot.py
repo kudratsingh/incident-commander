@@ -35,7 +35,7 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("2fbebe9dcd49d48e41a580b1093f8e66cdb063482ea78ee5873be2eaa3dc0eda"),
     "investigation_planner": ("f5ff4ef191b4a7581d8e41b9e5a32563c2f683ab357c0e329384922ce7c5b9d7"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
-    "remediation_planner": ("3a6269b9ea2e06e15f42f530272bf3b3f7e68d0f5846f0c262628b0ea9e6d11d"),
+    "remediation_planner": ("dd38c9b9475c061bc5cc66035615533c49e37c368dc034d5ecd19b5ed6778a68"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
 }
 
@@ -338,6 +338,24 @@ class TestRemediationPlannerInvariants:
         assert "bad data, a schema the producer must fix, or a poison payload" in content
         assert "escalate, naming the root job id and what its row said" in content
         assert "only when the operator's intent is to stop the retries" in content
+
+    def test_a_category_replay_is_planned_only_after_listing_that_category(self) -> None:
+        # ADR 0028, the steering half. The structural guard
+        # (`SOURCE_LISTING_FOR_ACTION`) refuses the plan, but PLANNING is one
+        # LLM call with no tool budget, so a planner that only learns the
+        # rule from a refusal spends a re-ask to learn it every time — and
+        # on a run whose investigation never listed the DLQ, learns it too
+        # late to do anything but escalate. The rule has to be in the prompt
+        # for the guard's common outcome to be "the plan was right the first
+        # time", and steering that can be silently deleted is not steering.
+        content = load_prompt("remediation_planner")
+        assert "Plan a category replay only after listing that category" in content
+        assert "names a filter, not rows" in content
+        # The reason, not just the instruction: a category is expanded by the
+        # PLATFORM at execution time, so one row's hint is not a fact about
+        # its neighbours.
+        assert "the platform expands it when the call executes" in content
+        assert "refused before execution" in content
 
     def test_the_hint_table_no_longer_exempts_a_stuck_chain(self) -> None:
         # The routing table used to end "A stuck dependency chain is the one

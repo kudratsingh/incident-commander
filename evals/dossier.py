@@ -75,6 +75,7 @@ from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import PreconditionProbe, Scenario
 from incident_commander.agent.investigation import ALERT_SUBJECT_PROBES
 from incident_commander.agent.remediation import (
+    SOURCE_LISTING_FOR_ACTION,
     SOURCE_ROW_FOR_ACTION,
     VERIFY_PROBE_FOR_ACTION,
 )
@@ -322,6 +323,12 @@ def derive_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
       row must be in evidence, because the row is the only place its
       ``remediation_hint`` exists. That row is where the rem-4 contradiction
       lived, so this is the derivation with the run behind it.
+    * **the source listing** — ``SOURCE_LISTING_FOR_ACTION``, per expected
+      action tool. ADR 0028: the same rule for an action that names a
+      category instead of rows. The probe is derived UNFILTERED, which is
+      what puts the rows the agent's category will sweep up in the dossier
+      next to the ones it will leave — the comparison a category replay is
+      reviewed on, and one a hint-filtered page cannot show.
     * **the verify probe** — ``VERIFY_PROBE_FOR_ACTION``, per expected action
       tool. ADR 0025: a verify leg must observe the resource the action
       changed. Reading it BEFORE the run is how the reader sees whether the
@@ -374,11 +381,17 @@ def derive_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
             )
             continue
         if not sources:
+            sibling = (
+                " Its coverage requirement is SOURCE_LISTING_FOR_ACTION's instead "
+                "(ADR 0028) — see the probe derived from it below."
+                if SOURCE_LISTING_FOR_ACTION.get(tool)
+                else ""
+            )
             notes.append(
                 f"`{tool}` is declared INERT in SOURCE_ROW_FOR_ACTION — no listing "
                 "classifies the resources it names, so no source row is required and "
                 "none is derived. Check the map's own comment for the stated reason "
-                "before reading that as 'nothing to check'."
+                f"before reading that as 'nothing to check'.{sibling}"
             )
             continue
         for source in sources:
@@ -391,6 +404,22 @@ def derive_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
                     f"the {tool} decision depends on (ADR 0027). Read UNFILTERED so "
                     "every row in the world is in the dossier, not only the page the "
                     "precondition asks for.",
+                )
+            )
+
+    for tool in action_tools:
+        for listing in SOURCE_LISTING_FOR_ACTION.get(tool, ()):
+            probes.append(
+                _probe(
+                    listing.tool_name,
+                    {},
+                    f"SOURCE_LISTING_FOR_ACTION[{tool}]: `{tool}` names a FILTER, "
+                    f"not rows — the platform expands it at execution time — so some "
+                    f"`{listing.tool_name}` reading has to have COVERED the slice it "
+                    f"will expand to before the plan is admitted (ADR 0028). Read it "
+                    "UNFILTERED: that is the reading the guard accepts for every "
+                    "slice, and it is the only way the dossier shows the rows the "
+                    "agent's category is about to sweep up beside the ones it is not.",
                 )
             )
 
@@ -1258,8 +1287,9 @@ def render(
     add("")
     add(
         f"{len(readings)} probe(s), derived mechanically from `ALERT_SUBJECT_PROBES`, "
-        "`SOURCE_ROW_FOR_ACTION`, `VERIFY_PROBE_FOR_ACTION` and the scenario's own "
-        "evidence claims. Nothing here is hand-listed."
+        "`SOURCE_ROW_FOR_ACTION`, `SOURCE_LISTING_FOR_ACTION`, "
+        "`VERIFY_PROBE_FOR_ACTION` and the scenario's own evidence claims. "
+        "Nothing here is hand-listed."
     )
     add("")
     for reading in readings:

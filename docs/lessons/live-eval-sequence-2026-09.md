@@ -629,6 +629,73 @@ queued for paid runs, which makes them the coordinator's call, not a builder's.
 
 ---
 
+## 10. The same rule, the other call shape: a category names rows nobody read
+
+**`dlq_replay_safe_success` and the DLQ set, 2026-09-07. Nothing ran; nothing
+had to.**
+
+§9's fix enforces "read the row before you replay it" by matching the plan's
+own job ids against the ids a `list_dlq_messages` reading returned. That
+enforcement has a shape, and ADR 0027 named the hole on its way past: a
+`replay_dlq_by_category` call **has no job ids**. It hands the platform a
+filter and the platform picks the rows when the call executes. So
+`RESOURCE_ARG_FIELDS` is empty for it, `_resource_values` returns nothing to
+look up, and the guard is inert by construction. Filed as WO-R2-143 rather
+than improvised, because five queued scenarios would have newly bound.
+
+The hole was not narrow. `replay_dlq_by_category` is the expected action of
+**three** of the queued paid scenarios, including `dlq_replay_safe_success` —
+the next one in the sequence. Until this landed, a run could reach
+
+```
+replay_dlq_by_category(category="replay_safe", max_replays=50)
+```
+
+having called nothing at all, and **seven structural guards admitted it**, each
+one correct about its own question. The repo's own test suite said so out loud:
+`test_a_category_replay_is_inert` asserted that a plan with `evidence=()`
+reached REMEDIATING. That test was the red-before.
+
+**Why a category is worse than an unread row, not better.** A by-id replay at
+least names what it will touch, so a reviewer reading the trajectory can see
+the blast radius. A category names a filter: *which* rows and *how many* are
+both decided by the platform at execution time, over whatever the queue holds
+at that instant — including rows dead-lettered after the alert that paged the
+agent. And a hint read on one row is not a fact about its neighbours: reading
+that job A is `replay_safe` and then sweeping `category=replay_safe` acts on B,
+C and D on the strength of a classification made about A.
+
+§7's own run is the case that makes this concrete. Remediation 4 run A failed
+on a row whose `remediation_hint` said `replay_safe` and whose `error_message`
+was a permanent schema violation. **The agent caught it because it read that
+row.** A category replay over the same queue would have swept it up and nobody
+would have seen the contradiction.
+
+**The grading half was open in the same way, and for a reason worth
+remembering.** Every DLQ scenario verifies with `list_dlq_messages`, because
+that is the only tool that observes a dead-letter row. So the natural claim —
+"some row the agent listed was classified `replay_safe`" — is satisfied by the
+**post-action** verify probe exactly as well as by the investigation probe. An
+act-then-read agent and a read-then-act agent leave byte-identical evidence.
+`remediate_dlq_backlog_success` was the worst of it: it graded an exact replay
+volume and had **no `list_dlq_messages` claim of any kind**, so nothing said
+the agent had ever looked at the queue it drained. It passed live
+(`e8404306138c`) with the read first — and the claim never required it.
+
+**The generalisation.** A guard that enforces a rule by matching *arguments* is
+only as complete as the argument shapes it knows about. When the platform
+offers two ways to say the same thing — name the rows, or name a filter over
+them — closing one is a partition, not a fix, and the open half is where the
+next run goes. ADR 0028 makes the two maps a declared partition, total over
+Tier-1 from both sides, so a bulk tool shipped next year cannot land between
+them.
+
+Fix: ADR 0028 (`SOURCE_LISTING_FOR_ACTION` — coverage, scope by scope, refuse
+and steer), `before_tools` ordering on the five DLQ scenarios' listing claims,
+one prompt rule, and a fourth derivation in `make world-dossier`. Found by
+reading a filed work order against the code rather than by a run, at zero cost.
+
+
 ## Summary: what each failure was actually caused by
 
 | # | Run / event | Looked like | Actually was | Fix |
@@ -643,6 +710,7 @@ queued for paid runs, which makes them the coordinator's call, not a builder's.
 | 8 | `remediate_stale_cache_success` (`7acd2b441961`) | eventual consistency (auto-label) | **Scenario + prompt asked for a signal the world cannot produce** — hits frozen at 209 across six polls | ADR 0025; override recorded in §7 |
 | 9 | `remediate_runaway_saga_success` (not run) | a staged, ready scenario | **Prompt + `FIX_MAP` steered at the one tool the scenario forbids**; a verified pause would have graded RESOLVED on a still-stuck chain | ADR 0026; §8 |
 | 10 | `remediate_runaway_saga_success` (still not run) | a staged, *corrected*, twice-swept scenario | **The corrected fix was never checked for safety**: the agent would replay a dead-lettered root knowing only that it was dead-lettered, because `get_dag_state` carries no `remediation_hint` — and six guards admitted the plan | ADR 0027; §9 |
+| 11 | The DLQ category scenarios (not run) | a rule already closed by ADR 0027 | **The by-id guard is inert for a call that names a filter** — a bulk `replay_dlq_by_category` by a run that had listed nothing was admitted by seven guards, and three scenarios' claims could not tell act-then-read from read-then-act | ADR 0028; §10 |
 
 **The through-line.** Six of these ten are failures of *procedure and
 environment*, not of the agent — only rows 2 and 3 are genuine agent defects,
@@ -651,18 +719,21 @@ attributing it to the model. Before you accept a red live result, establish that
 the world was clean, the invocation was the runbook's, and the knobs let the
 agent see the truth — in that order. Only then is the result about the agent.
 
-(The count said "eight" until row 10 landed; rows 9 and 10 arrived after the
-prose was written, which is the five-stale-copies problem in miniature and is
-why it is being corrected rather than left to be re-derived.)
+(The count said "eight" until row 10 landed, and row 11 came after that; each
+arrived once the prose was written, which is the five-stale-copies problem in
+miniature and is why the counts are corrected in place rather than left to be
+re-derived. Read "six of these ten" above as six of eleven.)
 
-Rows 9 and 10 are a third kind, and they are the two that cost nothing:
+Rows 9, 10 and 11 are a third kind, and they are the three that cost nothing:
 **steering defects, found by reading the instructions the agent would actually
-obey rather than by running it.** Both were caught between "the scenario is
-ready" and "the money is released", which is the only window in which a defect
-of that kind is free. Neither would have shown as a red run — row 9 would have
-graded RESOLVED and row 10 would probably have graded green too, since the
-world's chain root really was replay-safe. **A green run does not establish
-that the agent had grounds.**
+obey rather than by running it.** All three were caught between "the scenario
+is ready" and "the money is released", which is the only window in which a
+defect of that kind is free. None would have shown as a red run — row 9 would
+have graded RESOLVED, row 10 would probably have graded green too (the world's
+chain root really was replay-safe), and row 11 already HAS a green live run
+behind it: `remediate_dlq_backlog_success` passed on all five dimensions with
+the read first, and nothing in its grading required the read. **A green run
+does not establish that the agent had grounds.**
 
 Row 8 adds a fourth question to that list, and it is the one this sequence
 kept failing to ask: **could the run have gone green at all?** Rows 4 and 8

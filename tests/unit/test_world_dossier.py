@@ -123,6 +123,39 @@ class TestProbeDerivation:
         dlq_origins = " ".join(by_label["list_dlq_messages()"].origins)
         assert "SOURCE_ROW_FOR_ACTION[replay_dlq_by_ids]" in dlq_origins
 
+    def test_a_category_scenario_derives_the_listing_from_the_coverage_map(
+        self, scenarios: dict[str, Scenario]
+    ) -> None:
+        """ADR 0028's map is the fourth derivation, and on a category-replay
+        scenario it is the one that earns the probe.
+
+        `SOURCE_ROW_FOR_ACTION` is inert for `replay_dlq_by_category` — a
+        category names no row — so before this map existed the dossier's
+        reason for reading the DLQ on `dlq_replay_safe_success` came only
+        from the scenario's own evidence claim. That is a weaker footing
+        than it looks: a scenario that dropped the claim would have dropped
+        the probe with it, and the review would stop showing the rows the
+        agent is about to sweep.
+
+        The derived probe is UNFILTERED, which is the point of it — the
+        review compares the rows the category will take against the ones it
+        will leave, and a hint-filtered page shows only the first half.
+        """
+        probes, notes = dossier.derive_probes(scenarios["dlq_replay_safe_success"])
+        by_label = {probe.label: probe for probe in probes}
+
+        assert "list_dlq_messages()" in by_label
+        origins = " ".join(by_label["list_dlq_messages()"].origins)
+        assert "SOURCE_LISTING_FOR_ACTION[replay_dlq_by_category]" in origins
+        assert "names a FILTER" in origins
+
+        # And the INERT note for the by-id map points at its sibling, so a
+        # reader does not take "no source row is required" for "nothing to
+        # check about what this replays".
+        inert = [n for n in notes if "INERT in SOURCE_ROW_FOR_ACTION" in n]
+        assert inert, notes
+        assert any("SOURCE_LISTING_FOR_ACTION" in n for n in inert)
+
     def test_one_call_derived_twice_is_probed_once_and_says_why_twice(
         self, scenarios: dict[str, Scenario]
     ) -> None:

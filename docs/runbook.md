@@ -186,7 +186,8 @@ harness artifacts — see [`docs/lessons/live-eval-sequence-2026-09.md`](lessons
    It seeds the scenario's own `chaos_setup` through the runner's chaos path,
    runs the scenario's preconditions, then runs **every read probe the agent
    is expected to make** — derived from `ALERT_SUBJECT_PROBES`,
-   `SOURCE_ROW_FOR_ACTION`, `VERIFY_PROBE_FOR_ACTION` and the scenario's own
+   `SOURCE_ROW_FOR_ACTION`, `SOURCE_LISTING_FOR_ACTION`, `VERIFY_PROBE_FOR_ACTION`
+   and the scenario's own
    evidence claims — under the read-scoped smoke token, prints every output in
    full, lints what it read, then `make eval-reset PURGE_IDEMPOTENCY=1` and
    re-audits the baseline in step 4's table. Output goes to stdout and to

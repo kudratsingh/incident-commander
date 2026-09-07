@@ -35,7 +35,7 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("2fbebe9dcd49d48e41a580b1093f8e66cdb063482ea78ee5873be2eaa3dc0eda"),
     "investigation_planner": ("374b7203fa2cd2fdbac9ad7ab048b4cc22140f6cbe57f39379d0c0da05d67480"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
-    "remediation_planner": ("c671c5b0b6c92aa2457d336d0320741da3f90ffee809c1ea684059b99e8f14d9"),
+    "remediation_planner": ("07e6c11bcb286ee065aaa50f6cb675291a12ac9eac88d9e8d3b01c50f511e0aa"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
 }
 
@@ -244,6 +244,30 @@ class TestRemediationPlannerInvariants:
         content = load_prompt("remediation_planner")
         assert "gone from the active DLQ list" not in content
         assert "stays in the DLQ" in content
+
+    def test_verify_re_reads_the_acted_on_resource(self) -> None:
+        # The steering half of ADR 0025. The structural half is
+        # `remediation.VERIFY_PROBE_FOR_ACTION`, which refuses a plan whose
+        # verify leg cannot observe the acted-on resource; this is the rule
+        # that stops the planner emitting one in the first place, and
+        # steering that can be silently deleted is not steering.
+        #
+        # The 2026-09-07 live run is what this pins. The prompt itself said
+        # "Invalidate cache → verify with `get_redis_health` (miss rate
+        # should recover)", the planner did exactly that, and the miss rate
+        # could not recover because nothing in the lab reads that key —
+        # keyspace_hits sat frozen at 209 across six polls. The agent was
+        # right to escalate; the instruction was wrong.
+        content = load_prompt("remediation_planner").lower()
+        assert "verify by re-reading the resource you acted on" in content
+        assert "not evidence about one key, group or job" in content
+
+    def test_cache_verify_targets_the_key_not_the_server(self) -> None:
+        # The specific inversion that cost the run, pinned as its own case
+        # so a re-broadening of the rule above cannot quietly restore it.
+        content = load_prompt("remediation_planner")
+        assert "verify with `get_redis_health`" not in content
+        assert "Invalidate cache → verify with `get_cache_key_info`" in content
 
     def test_forbids_agent_supplied_idempotency_key(self) -> None:
         content = load_prompt("remediation_planner")

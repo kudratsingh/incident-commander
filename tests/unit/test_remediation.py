@@ -633,12 +633,20 @@ class TestEvidenceSourcedArgs:
         )
 
     def _cache_plan(self, key: str) -> dict[str, Any]:
+        # Verifies through get_cache_key_info on the same key. This class is
+        # about SOURCING — whether the key came from the platform's own
+        # words — and the verify leg is scaffolding for that question. It
+        # used to be `get_redis_health` with no arguments, which ADR 0025
+        # now refuses: server-wide keyspace counters cannot observe one key
+        # (the 2026-09-07 live run). Keeping the old leg here would have
+        # meant these sourcing assertions passing or failing for a reason
+        # that has nothing to do with sourcing.
         return _plan_dict(
             target_hypothesis="stale-cache",
             action_tool="invalidate_cache_key",
             action_arguments={"key": key},
-            verify_tool="get_redis_health",
-            verify_arguments={},
+            verify_tool="get_cache_key_info",
+            verify_arguments={"key": key},
         )
 
     def test_verbatim_key_from_alert_passes(self) -> None:
@@ -979,24 +987,23 @@ class TestNamedResourceArgs:
         assert result.state is IncidentState.REMEDIATING
 
     def test_resource_free_verify_tool_needs_no_arguments(self) -> None:
-        # `get_redis_health` names no resource, so an empty verify leg is
+        # `list_dlq_messages` names no resource, so an empty verify leg is
         # still a legal plan — the absence check reads RESOURCE_ARG_FIELDS,
         # it does not demand arguments per se.
+        #
+        # This used to be asserted with `invalidate_cache_key` verified by
+        # `get_redis_health`, which ADR 0025 now refuses: a read that names
+        # no resource is only legal when NO read observes the acted-on
+        # resource, and `get_cache_key_info` observes a cache key. The
+        # property under test here is unchanged and still true; only the
+        # example had to move to an action where it still holds. Bulk
+        # category replay is that action — it names a category, not a row.
         run = self._run()
-        run = run.model_copy(
-            update={
-                "alert": {
-                    "source": "platform.cache",
-                    "severity": "high",
-                    "cache_key": "cache:jobs:worker-dispatcher:hot_set",
-                }
-            }
-        )
         plan = _plan_dict(
             target_hypothesis="consumer_saturation",
-            action_tool="invalidate_cache_key",
-            action_arguments={"key": "cache:jobs:worker-dispatcher:hot_set"},
-            verify_tool="get_redis_health",
+            action_tool="replay_dlq_by_category",
+            action_arguments={"category": "replay_safe"},
+            verify_tool="list_dlq_messages",
             verify_arguments={},
         )
         result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(run, _now())
@@ -1269,3 +1276,258 @@ class TestRejectedPlansAreStillBilled:
         result = transition(run, _now())
         assert result.state is IncidentState.ESCALATED
         assert result.budget.tokens_used == 4196
+
+
+class TestVerifyLegObservesTheAction:
+    """ADR 0025: the verify leg must be able to OBSERVE what the action changed.
+
+    ``_misdirected_verify_args`` (ADR 0024) already refuses a verify leg
+    that names a resource the action left alone. It is inert when the
+    verify leg names no resource at all, and ADR 0024 recorded that
+    inertness as a deliberate escape hatch: "the escape hatch is a
+    resource-free verify tool". This class is the record that the escape
+    hatch was too wide.
+
+    The 2026-09-07 paid run of ``remediate_stale_cache_success`` is the
+    exhibit. Chaos planted a 90-byte stale value; the agent probed the
+    exact key, invalidated exactly that key (``deleted: true``), and then
+    verified with ``get_redis_health``, whose ``keyspace_hits`` /
+    ``keyspace_misses`` are server-wide. Nothing in the eval world reads
+    that hot set, so the counters were dominated by unrelated traffic —
+    hits frozen at 209 while misses climbed 437635 → 442480. The judge
+    honestly answered ``not_verified`` six times and the agent escalated.
+    Every other dimension was green. The agent was right; the plan asked a
+    question the world could not answer.
+    """
+
+    _KEY = "cache:jobs:worker-dispatcher:hot_set"
+
+    def _cache_run(self, **overrides: Any) -> RunState:
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.STALE_CACHE,
+                    name="stale_cache_hot_key",
+                    confidence=0.9,
+                    reasoning="hit rate collapsed; named key is present",
+                ),
+            ),
+            **overrides,
+        )
+        return run.model_copy(
+            update={
+                "alert": {
+                    "source": "platform.cache",
+                    "severity": "critical",
+                    "cache_key": self._KEY,
+                }
+            }
+        )
+
+    def _cache_plan(self, **overrides: Any) -> dict[str, Any]:
+        base: dict[str, Any] = {
+            "target_hypothesis": "stale_cache_hot_key",
+            "action_tool": "invalidate_cache_key",
+            "action_arguments": {"key": self._KEY},
+            "verify_tool": "get_cache_key_info",
+            "verify_arguments": {"key": self._KEY},
+        }
+        base.update(overrides)
+        return _plan_dict(**base)
+
+    # -- red before --------------------------------------------------------
+
+    def test_the_live_runs_plan_is_refused_then_escalated(self) -> None:
+        # THE regression. This exact plan — verbatim from the trajectory of
+        # archive 7acd2b441961 — was ADMITTED before ADR 0025 and executed
+        # to an unverifiable outcome.
+        live_plan = self._cache_plan(verify_tool="get_redis_health", verify_arguments={})
+        llm = CannedLLMClient([live_plan, live_plan])
+        result = make_llm_plan(llm, model=_MODEL)(self._cache_run(), _now())
+
+        assert result.state is IncidentState.ESCALATED
+        # Refused BEFORE execution: nothing fired, so the incident is
+        # recoverable by a human rather than half-remediated.
+        assert result.remediation_attempts == 0
+        assert result.remediation_plan is None
+        reasons = " ".join(e.result_summary for e in result.evidence)
+        assert "get_cache_key_info" in reasons
+        assert "cannot observe" in reasons
+
+    def test_first_bad_plan_is_a_steer_not_a_verdict(self) -> None:
+        # Refuse-and-steer: the planner is asked again, with the probe it
+        # should have used named for it, and a corrected second plan wins.
+        llm = CannedLLMClient(
+            [
+                self._cache_plan(verify_tool="get_redis_health", verify_arguments={}),
+                self._cache_plan(),
+            ]
+        )
+        result = make_llm_plan(llm, model=_MODEL)(self._cache_run(), _now())
+
+        assert result.state is IncidentState.REMEDIATING
+        assert result.remediation_plan is not None
+        assert result.remediation_plan["verify_tool"] == "get_cache_key_info"
+        refusals = [e for e in result.evidence if e.tool_name == "_plan_refused"]
+        assert len(refusals) == 1
+
+    def test_the_steer_reaches_the_planner_in_full(self) -> None:
+        # A steer that arrives truncated is not a steer. Evidence lines are
+        # cut at 200 chars; the refusal is rendered whole and separately, so
+        # assert the planner's SECOND context actually carries the required
+        # call — including the key, which sits past that cut.
+        llm = CannedLLMClient(
+            [
+                self._cache_plan(verify_tool="get_redis_health", verify_arguments={}),
+                self._cache_plan(),
+            ]
+        )
+        make_llm_plan(llm, model=_MODEL)(self._cache_run(), _now())
+
+        assert len(llm.calls) == 2
+        second_context = llm.calls[1][1]
+        assert "REFUSED" in second_context
+        assert f"get_cache_key_info(key='{self._KEY}')" in second_context
+
+    def test_second_refusal_escalates_naming_the_gap(self) -> None:
+        bad = self._cache_plan(verify_tool="get_redis_health", verify_arguments={})
+        llm = CannedLLMClient([bad, bad])
+        result = make_llm_plan(llm, model=_MODEL)(self._cache_run(), _now())
+
+        assert result.state is IncidentState.ESCALATED
+        reason = result.evidence[-1].result_summary
+        # The briefing a human reads must say which resource went
+        # unobserved and which probe would have observed it.
+        assert self._KEY in reason
+        assert "get_redis_health" in reason
+        assert "get_cache_key_info" in reason
+        assert "was NOT executed" in reason
+
+    # -- positive control --------------------------------------------------
+
+    def test_same_key_on_both_legs_is_admitted(self) -> None:
+        llm = CannedLLMClient([self._cache_plan()])
+        result = make_llm_plan(llm, model=_MODEL)(self._cache_run(), _now())
+
+        assert result.state is IncidentState.REMEDIATING
+        assert not [e for e in result.evidence if e.tool_name == "_plan_refused"]
+        # Exactly one planner call: a good plan is never re-asked.
+        assert len(llm.calls) == 1
+
+    def test_restart_verified_by_lag_on_the_same_group_is_admitted(self) -> None:
+        # The other value-matched pair, unchanged by this ADR.
+        llm = CannedLLMClient([_plan_dict()])
+        result = make_llm_plan(llm, model=_MODEL)(
+            _run_state(
+                state=IncidentState.PLANNING,
+                hypotheses=(
+                    Hypothesis(
+                        category=HypothesisCategory.CONSUMER_SATURATION,
+                        name="consumer_saturation",
+                        confidence=0.9,
+                        reasoning="lag climbing",
+                    ),
+                ),
+            ),
+            _now(),
+        )
+        assert result.state is IncidentState.REMEDIATING
+
+    # -- inert controls ----------------------------------------------------
+
+    def test_bulk_category_replay_names_no_resource_and_stays_legal(self) -> None:
+        # `replay_dlq_by_category` names a category, not a row, so there is
+        # no resource to demand an observation of. Declared inert in the
+        # map rather than merely absent from it.
+        llm = CannedLLMClient(
+            [
+                _plan_dict(
+                    action_tool="replay_dlq_by_category",
+                    action_arguments={"category": "replay_safe"},
+                    verify_tool="list_dlq_messages",
+                    verify_arguments={},
+                )
+            ]
+        )
+        result = make_llm_plan(llm, model=_MODEL)(
+            _run_state(
+                state=IncidentState.PLANNING,
+                hypotheses=(
+                    Hypothesis(
+                        category=HypothesisCategory.POISON_MESSAGE,
+                        name="poison",
+                        confidence=0.9,
+                        reasoning="dlq rows",
+                    ),
+                ),
+            ),
+            _now(),
+        )
+        assert result.state is IncidentState.REMEDIATING
+
+    def test_targeted_replay_verified_by_the_listing_stays_legal(self) -> None:
+        # `list_dlq_messages` observes DLQ rows without being able to name
+        # one, so picking it IS the requirement — there is no value to
+        # match, and demanding one would refuse every correct replay plan.
+        job_id = "af67d1b1-13f8-5a2c-8c44-66ec5564597d"
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.POISON_MESSAGE,
+                    name="poison",
+                    confidence=0.9,
+                    reasoning="dlq rows",
+                ),
+            ),
+            evidence=(
+                EvidenceEntry(
+                    tool_name="list_dlq_messages",
+                    arguments={},
+                    result_summary=f'{{"items": [{{"id": "{job_id}"}}]}}',
+                    timestamp=_now(),
+                ),
+            ),
+        )
+        llm = CannedLLMClient(
+            [
+                _plan_dict(
+                    action_tool="replay_dlq_by_ids",
+                    action_arguments={"job_ids": [job_id]},
+                    verify_tool="list_dlq_messages",
+                    verify_arguments={},
+                )
+            ]
+        )
+        assert make_llm_plan(llm, model=_MODEL)(run, _now()).state is IncidentState.REMEDIATING
+
+    def test_action_naming_no_resource_value_is_left_to_the_absence_guard(self) -> None:
+        # An action whose resource field is missing entirely is
+        # `_absent_resource_args`' business. This guard must not also fire
+        # and bury the actionable message under a second one.
+        llm = CannedLLMClient(
+            [
+                self._cache_plan(
+                    action_arguments={}, verify_tool="get_redis_health", verify_arguments={}
+                )
+            ]
+        )
+        result = make_llm_plan(llm, model=_MODEL)(self._cache_run(), _now())
+
+        assert result.state is IncidentState.ESCALATED
+        reason = result.evidence[-1].result_summary
+        assert "not named by the plan" in reason
+        assert "cannot observe" not in reason
+
+    def test_refusal_marker_spends_no_tool_call_budget(self) -> None:
+        llm = CannedLLMClient(
+            [
+                self._cache_plan(verify_tool="get_redis_health", verify_arguments={}),
+                self._cache_plan(),
+            ]
+        )
+        run = self._cache_run()
+        result = make_llm_plan(llm, model=_MODEL)(run, _now())
+
+        assert result.budget.tool_calls_used == run.budget.tool_calls_used

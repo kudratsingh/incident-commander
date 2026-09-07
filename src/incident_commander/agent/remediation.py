@@ -24,7 +24,7 @@ import json
 import time
 from collections.abc import Callable, Mapping
 from datetime import datetime
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -62,6 +62,98 @@ _IDEMPOTENCY_KEY_LEN: Final[int] = 32
 # One Tier-1 attempt per incident. If the first attempt didn't fix it,
 # a human should look at the escalation briefing before we try again.
 _MAX_REMEDIATION_ATTEMPTS: Final[int] = 1
+
+# How many times one PLANNING transition may refuse a plan for verifying
+# through a probe that cannot observe the resource the action changes,
+# before the run escalates instead. Same shape and same reasoning as
+# ``investigation._MAX_SUBJECT_PROBE_REFUSALS``: a refusal is a steer, not
+# a failure, and the planner gets to act on it — but a planner told once
+# and re-offering the same unobservable verify leg is not going to find a
+# better one on the third ask, and burning planner tokens to arrive at a
+# vaguer reason throws away the one diagnosis worth briefing a human with.
+#
+# One, not two. The investigation loop can afford two because its refusals
+# ride an iteration budget it was going to spend anyway; PLANNING is a
+# single LLM call whose only cost is the re-ask.
+_MAX_VERIFY_TARGET_REFUSALS: Final[int] = 1
+
+# Evidence marker for a refused plan. Underscore-prefixed per the repo-wide
+# convention, so the briefing's evidence trail and the grader's "tools
+# called" set both exclude it — a refusal is bookkeeping, not a probe, and
+# it spends no tool-call budget.
+_PLAN_REFUSED_MARKER: Final[str] = "_plan_refused"
+
+
+class VerifyProbe(NamedTuple):
+    """A read call that can observe the resource a Tier-1 action changed."""
+
+    tool_name: str
+    """Read tool that observes the resource."""
+    argument_field: str | None
+    """Argument carrying the resource name, or ``None`` when the tool
+    observes the resource without being able to name it — ``list_dlq_messages``
+    reads the DLQ as a whole and has no per-row argument. For those, tool
+    identity is the entire requirement; there is no value to match."""
+
+
+# Single source of truth for Tier-1 action → the read call that observes
+# what it changed.
+#
+# The sibling map is ``investigation.ALERT_SUBJECT_PROBES``, which answers
+# "which probe reads the thing this alert is complaining about?". This one
+# answers the same question one step later: "which probe reads the thing
+# this action just changed?" Both exist because the honest answer is
+# mechanical and the planner kept guessing.
+#
+# TOTAL over ``Tier1ToolName``, deliberately. An empty tuple is a *declared*
+# inert entry, not an omission — it says "the platform exposes no read that
+# observes this action's effect on a named resource", which is true of the
+# two bulk DLQ tools (they name a category or a job_type, not a resource).
+# ``tests/unit/test_policies.py::TestVerifyProbeForAction`` pins the
+# totality, so a Tier-1 tool shipped tomorrow cannot be silently inert:
+# somebody has to write down which read observes it, or write down that
+# none does.
+#
+# Why this is not merely "the verify leg must name the action's resource":
+# ``_misdirected_verify_args`` already says that, and it is inert exactly
+# when the verify leg names NO resource — which is the hole. On 2026-09-07
+# a live run invalidated `cache:jobs:worker-dispatcher:hot_set`
+# (`deleted: true`) and verified with `get_redis_health`, whose
+# keyspace_hits/misses are server-wide. Nothing in the lab reads that hot
+# set, so the counters were dominated by other traffic (hits frozen at 209
+# while misses climbed 437635 → 442480). The judge honestly returned
+# not_verified six times and the agent escalated. The agent was right; the
+# plan asked a question the world could not answer. The probe that WOULD
+# have answered it — `get_cache_key_info` — was already in the evidence
+# trail, having read `exists: true` before the deletion.
+VERIFY_PROBE_FOR_ACTION: Final[dict[str, tuple[VerifyProbe, ...]]] = {
+    # v0.6.0 shipped get_cache_key_info (plat #146/#182) for precisely this:
+    # its own docstring says "a suspect entry can be checked before
+    # remediation and confirmed gone after, instead of the agent inferring
+    # both from the deletion's own return value".
+    "invalidate_cache_key": (VerifyProbe("get_cache_key_info", "key"),),
+    "restart_consumer_group": (VerifyProbe("get_consumer_lag", "consumer_group"),),
+    # pause_dag names `root_job_id`; get_dag_state names `job_id`. Field
+    # names need not match across legs — the VALUE is what must line up.
+    "pause_dag": (VerifyProbe("get_dag_state", "job_id"),),
+    # The DLQ tools name rows. The platform's only observation of a row is
+    # the listing, which takes no row argument; a DAG read is the legitimate
+    # alternative when the replayed id is a DAG root (remediate_runaway_saga).
+    "mark_dlq_permanent": (
+        VerifyProbe("list_dlq_messages", None),
+        VerifyProbe("get_dag_state", "job_id"),
+    ),
+    "replay_dlq_by_ids": (
+        VerifyProbe("list_dlq_messages", None),
+        VerifyProbe("get_dag_state", "job_id"),
+    ),
+    # Declared inert: these name a category / job_type, not a resource.
+    # `_resource_values` returns nothing for them, so there is no resource
+    # to demand an observation of, and demanding one would refuse correct
+    # bulk-replay plans.
+    "replay_dlq_by_category": (),
+    "replay_dlq_messages": (),
+}
 
 
 class RemediationPlan(BaseModel):
@@ -149,8 +241,14 @@ def make_llm_plan(
       resource for us.
     - ``_unsourced_resource_args`` — its value must be one the platform
       itself produced (copy, don't re-type).
-    - ``_misdirected_verify_args`` — the verify probe must observe the
-      resource the action mutated.
+    - ``_misdirected_verify_args`` — the verify probe must not name a
+      resource the action left alone.
+
+    A fourth guard, ``_unobserved_action_resource``, then asks whether the
+    verify leg observes the acted-on resource *at all* (ADR 0025). It
+    REFUSES rather than escalates — the plan is re-asked once with the
+    required probe named — because unlike the three above, the action it
+    chose is right and only its evidence is missing.
     """
 
     def transition_plan(run_state: RunState, at: datetime) -> RunState:
@@ -188,94 +286,46 @@ def make_llm_plan(
             )
 
         top = run_state.hypotheses[0]
-        try:
-            result = llm_client.call(
-                system_prompt=load_prompt("remediation_planner"),
-                user_message=_format_plan_context(run_state, top.name),
-                output_model=RemediationPlan,
-                model=model,
-            )
-        except (ValueError, ValidationError, LLMError) as err:
-            run_state = run_state.model_copy(
-                update={"budget": accrue_llm_error(run_state.budget, err, model)}
-            )
-            return _escalate_remediation(run_state, at, f"planner LLM invalid: {err}")
+        refusals_spent = 0
+        while True:
+            run_state, outcome = _plan_once(run_state, at, llm_client, model, top.name)
+            if isinstance(outcome, RunState):
+                return outcome
+            plan = outcome
 
-        # Charge the call the moment it returns, BEFORE the plan is judged.
-        # The accrual used to sit after the six validation branches below,
-        # every one of which returns early — so a plan the agent rejected was
-        # a plan the run got for free, and the rejections are not the rare
-        # case: they are what a bad planner does repeatedly. ADR 0015 says
-        # the meter may over-report and never under-report; a billed call
-        # whose output we threw away is still a billed call.
-        run_state = run_state.model_copy(
-            update={"budget": accrue_llm_usage(run_state.budget, result, model)}
-        )
-        plan = result.output
-
-        if plan.action_tool not in TOOL_REGISTRY:
-            return _escalate_remediation(
-                run_state, at, f"planner picked unknown action tool: {plan.action_tool}"
-            )
-        if tier_of(plan.action_tool) is not Tier.TIER_1:
-            return _escalate_remediation(
-                run_state,
-                at,
-                f"planner picked non-Tier-1 action: {plan.action_tool} "
-                f"(tier={tier_of(plan.action_tool).value})",
-            )
-        if plan.verify_tool not in TOOL_REGISTRY:
-            return _escalate_remediation(
-                run_state, at, f"planner picked unknown verify tool: {plan.verify_tool}"
-            )
-        if tier_of(plan.verify_tool) is not Tier.READ:
-            return _escalate_remediation(
-                run_state,
-                at,
-                f"verify tool must be read-only, got tier={tier_of(plan.verify_tool).value}",
-            )
-        absent = _absent_resource_args(plan)
-        if absent:
-            # Say which resource you mean. An omitted field is not a smaller
-            # sin than a mis-typed one — `wire_arguments` default-fills it
-            # from the platform's input schema, so the call silently targets
-            # whatever that default names (WO-R2-15, ADR 0024).
-            return _escalate_remediation(
-                run_state,
-                at,
-                "plan rejected before execution: resource argument(s) not "
-                f"named by the plan: {', '.join(absent)}. An omitted resource "
-                "argument is filled from the platform's input-schema default "
-                "at wire time, so the call would target that default's "
-                "resource instead of this incident's.",
-            )
-        unsourced = _unsourced_resource_args(plan, _evidence_value_corpus(run_state))
-        if unsourced:
-            # Copy, don't re-type: a resource name the platform never uttered
-            # is a hallucination risk, not a plan. The live campaign watched
-            # the planner drop `cache:jobs:` off an alert-provided key; only
-            # the platform's prefix allowlist stopped the call.
-            return _escalate_remediation(
-                run_state,
-                at,
-                "plan rejected before execution: resource argument(s) not "
-                f"evidence-sourced: {', '.join(unsourced)}. Resource names must "
-                "be copied verbatim from the alert or tool results.",
-            )
-        misdirected = _misdirected_verify_args(plan)
-        if misdirected:
-            # Verify what you changed. A probe aimed at a resource the action
-            # never touched reads a healthy number off an untouched system
-            # and calls the incident resolved (ADR 0024).
-            return _escalate_remediation(
-                run_state,
-                at,
-                "plan rejected before execution: verify probe targets "
-                f"resource(s) the action does not: {', '.join(misdirected)}. "
-                f"{plan.action_tool} acts on "
-                f"{', '.join(sorted(_resource_values(plan.action_tool, plan.action_arguments)))}"
-                f"; {plan.verify_tool} must observe the same resource.",
-            )
+            unobserved = _unobserved_action_resource(plan)
+            if not unobserved:
+                break
+            # Refuse and steer, don't escalate: the run is not over, the
+            # planner is simply sent back with the probe it should have
+            # picked named for it. Same shape as the investigation loop's
+            # ALERT_SUBJECT_PROBES handoff refusal (WO-R2-15 follow-up #177),
+            # and unlike the three argument guards above, which escalate
+            # because a mis-named resource means the planner is reasoning
+            # about the wrong object rather than merely checking the right
+            # object the wrong way.
+            if refusals_spent >= _MAX_VERIFY_TARGET_REFUSALS:
+                values = _resource_values(plan.action_tool, plan.action_arguments)
+                acted = ", ".join(sorted(values))
+                return _escalate_remediation(
+                    run_state,
+                    at,
+                    f"planner proposed a verify leg that cannot observe the "
+                    f"remediated resource {refusals_spent + 1} times: "
+                    f"{plan.action_tool} changes {acted} but {plan.verify_tool} "
+                    f"does not read it. Required: {_probe_options(unobserved, plan)}. "
+                    "The action was NOT executed — an action whose effect cannot "
+                    "be observed cannot be verified, and ADR 0008 allows one attempt.",
+                )
+            refusals_spent += 1
+            run_state = _refuse_plan(run_state, at, plan, unobserved)
+            if run_state.budget.is_exhausted:
+                return _escalate_remediation(
+                    run_state,
+                    at,
+                    "budget exhausted before the plan could be re-asked with an "
+                    "observable verify leg; nothing was executed",
+                )
 
         entry = EvidenceEntry(
             tool_name="_planner_plan",
@@ -298,6 +348,102 @@ def make_llm_plan(
         )
 
     return transition_plan
+
+
+def _plan_once(
+    run_state: RunState,
+    at: datetime,
+    llm_client: LLMClientProtocol,
+    model: str,
+    top_hypothesis_name: str,
+) -> tuple[RunState, RemediationPlan | RunState]:
+    """One planner call plus every guard that ESCALATES on failure.
+
+    Returns ``(run_state, plan)`` when the plan survives, or
+    ``(run_state, escalated_run_state)`` when it does not — the caller
+    checks the type. Split out of ``transition_plan`` when the verify-target
+    guard made that function a loop: the seven checks below are all terminal,
+    so keeping them inline would have meant seven ``return`` statements
+    inside a ``while`` whose other exit is a ``break``, which is exactly the
+    shape that grows a bug the next time someone adds a check.
+    """
+    try:
+        result = llm_client.call(
+            system_prompt=load_prompt("remediation_planner"),
+            user_message=_format_plan_context(run_state, top_hypothesis_name),
+            output_model=RemediationPlan,
+            model=model,
+        )
+    except (ValueError, ValidationError, LLMError) as err:
+        run_state = run_state.model_copy(
+            update={"budget": accrue_llm_error(run_state.budget, err, model)}
+        )
+        return run_state, _escalate_remediation(run_state, at, f"planner LLM invalid: {err}")
+
+    # Charge the call the moment it returns, BEFORE the plan is judged.
+    # The accrual used to sit after the six validation branches below,
+    # every one of which returns early — so a plan the agent rejected was
+    # a plan the run got for free, and the rejections are not the rare
+    # case: they are what a bad planner does repeatedly. ADR 0015 says
+    # the meter may over-report and never under-report; a billed call
+    # whose output we threw away is still a billed call. This holds for
+    # the re-ask too: a refused plan is billed, then re-asked.
+    run_state = run_state.model_copy(
+        update={"budget": accrue_llm_usage(run_state.budget, result, model)}
+    )
+    plan = result.output
+
+    def refuse(reason: str) -> tuple[RunState, RunState]:
+        return run_state, _escalate_remediation(run_state, at, reason)
+
+    if plan.action_tool not in TOOL_REGISTRY:
+        return refuse(f"planner picked unknown action tool: {plan.action_tool}")
+    if tier_of(plan.action_tool) is not Tier.TIER_1:
+        return refuse(
+            f"planner picked non-Tier-1 action: {plan.action_tool} "
+            f"(tier={tier_of(plan.action_tool).value})"
+        )
+    if plan.verify_tool not in TOOL_REGISTRY:
+        return refuse(f"planner picked unknown verify tool: {plan.verify_tool}")
+    if tier_of(plan.verify_tool) is not Tier.READ:
+        return refuse(f"verify tool must be read-only, got tier={tier_of(plan.verify_tool).value}")
+    absent = _absent_resource_args(plan)
+    if absent:
+        # Say which resource you mean. An omitted field is not a smaller
+        # sin than a mis-typed one — `wire_arguments` default-fills it
+        # from the platform's input schema, so the call silently targets
+        # whatever that default names (WO-R2-15, ADR 0024).
+        return refuse(
+            "plan rejected before execution: resource argument(s) not "
+            f"named by the plan: {', '.join(absent)}. An omitted resource "
+            "argument is filled from the platform's input-schema default "
+            "at wire time, so the call would target that default's "
+            "resource instead of this incident's."
+        )
+    unsourced = _unsourced_resource_args(plan, _evidence_value_corpus(run_state))
+    if unsourced:
+        # Copy, don't re-type: a resource name the platform never uttered
+        # is a hallucination risk, not a plan. The live campaign watched
+        # the planner drop `cache:jobs:` off an alert-provided key; only
+        # the platform's prefix allowlist stopped the call.
+        return refuse(
+            "plan rejected before execution: resource argument(s) not "
+            f"evidence-sourced: {', '.join(unsourced)}. Resource names must "
+            "be copied verbatim from the alert or tool results."
+        )
+    misdirected = _misdirected_verify_args(plan)
+    if misdirected:
+        # Verify what you changed. A probe aimed at a resource the action
+        # never touched reads a healthy number off an untouched system
+        # and calls the incident resolved (ADR 0024).
+        return refuse(
+            "plan rejected before execution: verify probe targets "
+            f"resource(s) the action does not: {', '.join(misdirected)}. "
+            f"{plan.action_tool} acts on "
+            f"{', '.join(sorted(_resource_values(plan.action_tool, plan.action_arguments)))}"
+            f"; {plan.verify_tool} must observe the same resource."
+        )
+    return run_state, plan
 
 
 def _collect_strings(node: Any, out: set[str]) -> None:
@@ -408,18 +554,144 @@ def _misdirected_verify_args(plan: RemediationPlan) -> list[str]:
     the wrong thing: it reads a healthy number off an untouched resource
     and hands the judge evidence that the incident is over.
 
-    Only enforced when both legs name resources at all. Several correct
-    plans verify through a resource-free read — ``invalidate_cache_key``
-    then ``get_redis_health``, ``replay_dlq_by_ids`` then
-    ``list_dlq_messages`` — and those stay legal. Field names need not
-    match across legs (``pause_dag.root_job_id`` is verified by
-    ``get_dag_state.job_id``); the values are what must line up.
+    Only enforced when both legs name resources at all, so a verify leg
+    that names NO resource passes here. That gap is deliberate and is not
+    a licence: ``_unobserved_action_resource`` below is what decides
+    whether a resource-free verify is legitimate for this action, and
+    ADR 0025 records why the two checks are separate. ``list_dlq_messages``
+    after ``replay_dlq_by_ids`` is the legitimate case; ``get_redis_health``
+    after ``invalidate_cache_key`` — which this docstring used to name as
+    legitimate — is the case that cost a live run.
+
+    Field names need not match across legs (``pause_dag.root_job_id`` is
+    verified by ``get_dag_state.job_id``); the values are what must line up.
     """
     action_values = _resource_values(plan.action_tool, plan.action_arguments)
     verify_values = _resource_values(plan.verify_tool, plan.verify_arguments)
     if not action_values or not verify_values:
         return []
     return sorted(verify_values - action_values)
+
+
+def _unobserved_action_resource(plan: RemediationPlan) -> tuple[VerifyProbe, ...]:
+    """The probes that WOULD observe this action, when the plan picked none.
+
+    Empty tuple means the plan is fine — either it verifies through a probe
+    that reads the resource it changed, or the action names no resource a
+    read tool can observe. A non-empty tuple is the refusal, and its
+    contents are the steer: exactly which probe the planner should have
+    picked.
+
+    The complement of ``_misdirected_verify_args``. That one asks "does the
+    verify leg name a resource the action did NOT touch?" and is inert when
+    the verify leg names nothing at all. This one asks the question that
+    inertness leaves open: "is there a read that observes what the action
+    changed, and did the plan use it?" Together they close the loop —
+    verify the right resource, and verify it at all.
+
+    Three inert cases, all deliberate:
+
+    * the action tool has no entry, or an empty one, in
+      ``VERIFY_PROBE_FOR_ACTION`` — no read observes a named resource for
+      it (the bulk DLQ tools);
+    * the action names no resource *value* (all its resource fields are
+      absent or non-string) — absence is ``_absent_resource_args``' job,
+      and reporting it twice would bury the actionable message;
+    * the plan already picked a listed probe, either carrying the acted-on
+      value or carrying no resource argument at all.
+
+    Strings only, matching ``_resource_values`` and its two sibling guards:
+    a ``job_id`` that arrives as a ``UUID`` object rather than its JSON
+    string form is not compared. Plans reaching here come from
+    ``record_output`` JSON, where it is always a string.
+    """
+    probes = VERIFY_PROBE_FOR_ACTION.get(plan.action_tool, ())
+    if not probes:
+        return ()
+    acted = _resource_values(plan.action_tool, plan.action_arguments)
+    if not acted:
+        return ()
+    for probe in probes:
+        if plan.verify_tool != probe.tool_name:
+            continue
+        if probe.argument_field is None:
+            # The tool observes the resource without being able to name it.
+            # Picking it IS the whole requirement; there is no value to match.
+            return ()
+        observed = plan.verify_arguments.get(probe.argument_field)
+        if isinstance(observed, str) and observed in acted:
+            return ()
+    return probes
+
+
+def _probe_options(probes: tuple[VerifyProbe, ...], plan: RemediationPlan) -> str:
+    """Render the required probes as calls the planner can copy.
+
+    Values come from the action leg, so the steer is a concrete call
+    (``get_cache_key_info(key='cache:jobs:worker-dispatcher:hot_set')``)
+    rather than a shape to fill in. One resource → one rendering; several
+    (``replay_dlq_by_ids.job_ids``) → the first in sorted order, because
+    the planner needs an example, not an enumeration.
+    """
+    acted = sorted(_resource_values(plan.action_tool, plan.action_arguments))
+    rendered = []
+    for probe in probes:
+        if probe.argument_field is None:
+            rendered.append(f"{probe.tool_name}()")
+        elif acted:
+            rendered.append(f"{probe.tool_name}({probe.argument_field}={acted[0]!r})")
+        else:
+            rendered.append(f"{probe.tool_name}({probe.argument_field}=...)")
+    return " or ".join(rendered)
+
+
+def _refuse_plan(
+    run_state: RunState,
+    at: datetime,
+    plan: RemediationPlan,
+    probes: tuple[VerifyProbe, ...],
+) -> RunState:
+    """Refuse a plan for an unobservable verify leg and steer the planner.
+
+    Deliberately NOT a terminal transition, and deliberately not the path
+    the three argument guards take. Those reject a plan that names the
+    wrong resource — the planner is reasoning about the wrong object, and
+    the run has nothing to salvage. This one rejects a plan that names the
+    right resource and then asks the wrong question about it. The action is
+    correct; only the evidence for it is missing, and naming the probe is
+    usually enough to get it.
+
+    Same shape as ``investigation._refuse_handoff``: reject the bad output,
+    say exactly what would make it good, let the model try again. The
+    marker is underscore-prefixed so the briefing trail and the grader's
+    called-tools set both skip it, and it spends no tool-call budget — only
+    the planner tokens of the re-ask, which ``_plan_once`` charges.
+    """
+    reason = (
+        f"plan refused before execution: {plan.verify_tool}"
+        f"({json.dumps(plan.verify_arguments)}) cannot observe the resource "
+        f"{plan.action_tool} changes. Re-plan with verify_tool="
+        f"{_probe_options(probes, plan)}. Verify by re-reading the resource you "
+        "acted on: a server-wide health number moves with every other tenant's "
+        "traffic and is not evidence about one key, group or job. Keep the same "
+        "action; only the verify leg is wrong."
+    )
+    entry = EvidenceEntry(
+        tool_name=_PLAN_REFUSED_MARKER,
+        arguments={
+            "rejected_verify_tool": plan.verify_tool,
+            "required_verify_tools": [probe.tool_name for probe in probes],
+            "action_tool": plan.action_tool,
+        },
+        result_summary=reason,
+        timestamp=at,
+    )
+    return run_state.model_copy(
+        update={
+            "evidence": (*run_state.evidence, entry),
+            "updated_at": at,
+        }
+    )
 
 
 def _unsourced_resource_args(plan: RemediationPlan, corpus: set[str]) -> list[str]:
@@ -457,8 +729,27 @@ def _load_plan(run_state: RunState) -> RemediationPlan | None:
 
 def _format_plan_context(run_state: RunState, top_hypothesis_name: str) -> str:
     hypotheses_dump = json.dumps([h.model_dump() for h in run_state.hypotheses], indent=2)
+    # Refusals are pulled OUT of the evidence dump and rendered whole at the
+    # end. Two reasons, and the first is not stylistic: evidence lines are
+    # truncated to 200 characters, which is shorter than a refusal that names
+    # a probe, an argument and a cache key — so the one line whose entire job
+    # is to be actionable is the one line the dump would cut mid-sentence. A
+    # steer that arrives truncated is not a steer. Second, a refusal is an
+    # instruction about this planner's own last output, not a platform
+    # observation to reason from; last position is where the model is most
+    # likely to act on it.
+    refusals = [e for e in run_state.evidence if e.tool_name == _PLAN_REFUSED_MARKER]
     evidence_dump = "\n".join(
-        f"  - [{e.tool_name}] {e.result_summary[:200]}" for e in run_state.evidence
+        f"  - [{e.tool_name}] {e.result_summary[:200]}"
+        for e in run_state.evidence
+        if e.tool_name != _PLAN_REFUSED_MARKER
+    )
+    refusal_dump = (
+        "\nYour previous plan was REFUSED. Correct it:\n"
+        + "\n".join(f"  - {e.result_summary}" for e in refusals)
+        + "\n"
+        if refusals
+        else ""
     )
     # Descriptions are mirrored verbatim from the platform contract and are
     # load-bearing here: the planner authors action choices AND the verify
@@ -480,6 +771,7 @@ def _format_plan_context(run_state: RunState, top_hypothesis_name: str) -> str:
         f"Evidence collected during investigation:\n{evidence_dump}\n\n"
         f"Tier-1 remediation tools (pick exactly one):\n{tier_1_dump}\n\n"
         f"Read tools (pick one for verification):\n{read_dump}\n"
+        f"{refusal_dump}"
     )
 
 

@@ -1,6 +1,6 @@
 name: remediate_stale_cache_success
 description: 'Cache miss rate spike alert. Agent probes get_redis_health, sees the hit rate has collapsed, then reads the named hot key with get_cache_key_info to confirm it is really there before
-  touching it. Remediation planner picks invalidate_cache_key targeting that key; verify probes get_redis_health again and expects the miss trend to reverse.
+  touching it. Remediation planner picks invalidate_cache_key targeting that key; verify RE-READS THAT KEY with get_cache_key_info and expects exists=false — the stale entry is gone.
 
   '
 tags:
@@ -52,17 +52,45 @@ canned_tool_responses:
     - type: text
       text: '{"ok":true,"ping_latency_ms":0.286,"connected_clients":11,"used_memory_bytes":1670880,"used_memory_human":"1.59M","keyspace_hits":149,"keyspace_misses":7862,"error":null}'
     is_error: false
-  # v0.6.0's new read surface, recorded against the SEEDED (un-faulted)
-  # world the drift check probes: seed_eval_fixtures writes this key with a
-  # 24h TTL, so a fresh stack reads exists=true / type=string / size=120.
-  # One response, not a sequence: the verify probe re-reads
-  # get_redis_health, so this fixture never has to describe the post-delete
-  # world. `ttl_seconds` is a countdown and is declared volatile alongside
-  # the redis gauges above.
+  # v0.6.0's new read surface, and since #188 this scenario's VERIFY leg as
+  # well as its investigation probe — so it is a sequence, and each element
+  # states a different world.
+  #
+  # Element 0 is the pre-remediation read, recorded against the SEEDED
+  # (un-faulted) world the drift check probes: seed_eval_fixtures writes
+  # this key with a 24h TTL, so a fresh stack reads exists=true /
+  # type=string / size=120. `ttl_seconds` is a countdown and is declared
+  # volatile in evals/fixture_drift.py alongside the redis gauges above.
+  #
+  # Element 1 is the world AFTER invalidate_cache_key deleted the key, and
+  # it is what every verify poll reads. exists=false with all three shape
+  # fields null is what the platform actually returns for an absent key
+  # (GetCacheKeyInfoOutput: "All three are null when the key does not
+  # exist"). This element drifts against the live probe BY CONSTRUCTION —
+  # the drift walk reads the world before the agent acts, where the key is
+  # still there — which is the ledger's declared `post-action` context, not
+  # a defect to fix.
+  #
+  # Recording the post-delete world honestly is the point of #188. The
+  # alternative — one response saying exists=true forever — would have the
+  # canned verify probe report the key still present while the canned judge
+  # returned `verified`, which is the same "the fixture does not show what
+  # the expectation claims" gap this scenario was rewritten to close.
+  #
+  # NOTE ON THE LAB: nothing in the eval world repopulates this key. No
+  # service reads cache:jobs:worker-dispatcher:hot_set, so after the delete
+  # it simply stays absent until the next seed_eval_fixtures run. That is
+  # exactly why `exists: false` is the right verify signal and a recovering
+  # hit-rate is not: absence is a state this world can reach and hold,
+  # while repopulation is a state it can never enter.
   get_cache_key_info:
-    content:
+  - content:
     - type: text
       text: '{"key":"cache:jobs:worker-dispatcher:hot_set","exists":true,"type":"string","ttl_seconds":86326,"size":120}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"key":"cache:jobs:worker-dispatcher:hot_set","exists":false,"type":null,"ttl_seconds":null,"size":null}'
     is_error: false
   invalidate_cache_key:
     content:
@@ -109,23 +137,26 @@ canned_llm_responses:
     action_tool: invalidate_cache_key
     action_arguments:
       key: cache:jobs:worker-dispatcher:hot_set
-    verify_tool: get_redis_health
-    verify_arguments: {}
-    verify_expectation: 'Miss rate should stabilize as workers repopulate the key from the source of truth. deleted=true confirms the key existed and was cleared.
+    verify_tool: get_cache_key_info
+    verify_arguments:
+      key: cache:jobs:worker-dispatcher:hot_set
+    verify_expectation: 'Re-reading the exact key that was invalidated should report exists=false — the stale entry is gone from Redis. deleted=true is the action''s own claim; this read is the independent
+      confirmation of it. Do NOT expect the key to reappear: nothing in this environment repopulates it, so exists=false is the terminal success state rather than a transient one.
 
       '
   verification_judge:
   - verdict: verified
-    reasoning: 'invalidate_cache_key returned deleted=true, confirming the stale key was cleared. Follow-up read shows Redis is healthy and the hit rate will stabilize as workers repopulate.
+    reasoning: 'invalidate_cache_key returned deleted=true and the follow-up get_cache_key_info on the same key reports exists=false, so the stale entry is independently confirmed gone rather than merely
+      reported gone.
 
       '
   briefing_writer:
   - findings: 'Redis cache hit rate collapsed to 1.9% (149 hits vs 7862 misses). The alert named a specific hot key (cache:jobs:worker-dispatcher:hot_set); reading it back showed a 120-byte string with
-      ~24h left on its TTL, so the key was live and being missed rather than absent. Invalidating it returned deleted=true; workers will repopulate on next lookup.
+      ~24h left on its TTL, so the key was live and being missed rather than absent. Invalidating it returned deleted=true, and re-reading the same key confirmed exists=false.
 
       '
-    recommendation: "Monitor hit ratio for the next 5 minutes to confirm recovery. If a similar spike recurs on the same key, investigate why it's going stale \u2014 TTL misconfiguration or an upstream\
-      \ write pattern not invalidating properly.\n"
+    recommendation: "If a similar spike recurs on the same key, investigate why it's going stale \u2014 TTL misconfiguration or an upstream write pattern not invalidating properly. Server-wide hit ratio\
+      \ is not the signal to watch here: this key carries no read traffic in this environment, so keyspace counters will not move whether the fix worked or not.\n"
   briefing_judge:
   - groundedness: 0.9
     actionability: 0.85
@@ -143,6 +174,19 @@ expectation:
   - tools: [invalidate_cache_key]
     field: deleted
     equals: true
+  # The verify signal, graded. `deleted: true` above is the ACTION's own
+  # report of itself; this is the independent read of the same key, and
+  # until #188 the scenario asserted nothing about it — the verify leg was
+  # get_redis_health, whose server-wide counters say nothing about one key.
+  # `which: last` because get_cache_key_info is called twice: once during
+  # investigation (exists=true, the premise) and once per verify poll
+  # (exists=false, the outcome). The LAST read is the post-remediation one,
+  # and asserting `any` would be satisfied by the investigation probe alone
+  # — i.e. by a run that never remediated at all.
+  - tools: [get_cache_key_info]
+    field: exists
+    which: last
+    equals: false
   # WHICH key was deleted. `deleted: true` above says a key was cleared and
   # is silent about which one, and that silence is not academic here: the
   # tool accepts any key under four platform-owned prefixes

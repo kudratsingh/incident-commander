@@ -283,6 +283,101 @@ spend.
 
 ---
 
+## 7. The verification the world could not answer
+
+**Archive `7acd2b441961`, 2026-09-07. `remediate_stale_cache_success`.**
+
+**OUTCOME red. Every other dimension green. The agent was right.**
+
+Chaos planted the 90-byte stale value. The agent probed the exact key
+(`get_cache_key_info` → `exists: true, size: 90`, which is the chaos write
+and not the seeder's 120-byte one), invalidated exactly that key
+(`deleted: true`), and then verified with `get_redis_health`.
+
+Nothing in the lab reads `cache:jobs:worker-dispatcher:hot_set`. So the
+deletion could not move a server-wide counter, and the counters that did
+move belong to other traffic:
+
+```
+poll 1  keyspace_hits 209   keyspace_misses 438376
+poll 6  keyspace_hits 209   keyspace_misses 442480
+```
+
+**Hits frozen at exactly 209 for six consecutive polls.** The judge
+answered `not_verified` six times, correctly, and the agent escalated —
+with a briefing the judge scored 1.0 for groundedness.
+
+The agent did what it was told. The scenario's own description said
+*"verify probes get_redis_health again and expects the miss trend to
+reverse"*, and the planner prompt said *"Invalidate cache → verify with
+`get_redis_health` (miss rate should recover)"*. **Both instructions were
+wrong**, and the run is what it looks like when an agent follows a wrong
+instruction competently.
+
+This is §3-Run-B's shape with the polarity flipped. There the harness
+showed the agent a stale number and it reasoned correctly to a wrong
+conclusion. Here the harness asked for a number that could not exist and
+it reasoned correctly to an honest give-up. Both times the trajectory is
+indistinguishable from good reasoning **because it was good reasoning**.
+
+> The archive auto-labels it `failure_class: eventual-consistency`. **That
+> label is wrong and this is the override**, the second one this document
+> carries after §2's. Eventual consistency means the signal arrives late.
+> This signal never arrives at any horizon, because no traffic exists to
+> produce it. More polling was never the answer.
+
+### The same finding as 2026-08-12, on the other side of the loop
+
+The August finding was *"the fault could not be manufactured"* — a
+scenario asserting a premise the world could not produce. This is the
+recovery-side twin: a scenario asserting an *outcome* the world could not
+produce. Worth naming as one family, because the next instance will be
+neither a fault nor a recovery but some third thing the lab cannot show.
+
+**The rule: a verify signal must be a state the world can reach and hold,
+not a trend it would need traffic to produce.** `exists: false` is
+reachable and stable. "The miss rate recovers" needs somebody to read the
+key, and in this environment nobody does.
+
+### Note which polarity we were handed
+
+This run failed **honestly** — the counter could not move in the right
+direction, so the judge said no. The identical hole with a metric that
+drifts favourably gives the opposite: `verified`, and RESOLVED on a system
+nobody fixed. We saw the loud version first by luck, not by design.
+
+**Fix → [ADR 0025](../ADR/0025-a-verify-leg-must-observe-the-action.md):**
+`VERIFY_PROBE_FOR_ACTION` refuses a plan whose verify leg cannot observe
+the resource the action changed (refuse-and-steer, like
+`ALERT_SUBJECT_PROBES`; second refusal escalates); the scenario verifies
+`get_cache_key_info(key)` for `exists == false` and grades it; the prompt
+carries the rule under an invariant test.
+
+### The audit that came with it
+
+All nine remediation scenarios' verify legs were checked against what the
+lab can actually change. One more defect, in
+`dlq_wait_and_replay_success`: its **description** said *"Verify confirms
+the ids are out of the active DLQ"* while its own `verify_expectation`
+said the opposite and was right — the platform holds the timer, so the
+entries stay dead-lettered until `execute_at`. Fixed in the same PR.
+
+Five DLQ scenarios have a separate and lesser problem, recorded but not
+fixed here: their `verify_expectation` claims the listing shrinks, their
+canned fixture returns the same rows unchanged, and the canned judge
+returns `verified` regardless. The verify *design* is sound — live, a
+replay really does drain those rows — so this is fixture unfaithfulness
+rather than an unobservable signal, and re-recording five fixtures is its
+own PR.
+
+> **Read your scenario's description as an instruction, because that is
+> what it becomes.** Both defects this audit found were in prose that
+> nothing executes and nothing tests. The description is not commentary on
+> the scenario; via the prompt and the canned plan it is the thing the
+> agent is graded for obeying.
+
+---
+
 ## Summary: what each failure was actually caused by
 
 | # | Run / event | Looked like | Actually was | Fix |
@@ -294,10 +389,29 @@ spend.
 | 5 | Run C | dirty world | Incomplete reset; RLS refusal was **correct** | WO-R2-131 |
 | 6 | Fresh boot | spurious alert | Evaluator reading seeded fixtures as traffic | PR #180; WO-R2-132 |
 | 7 | PR #178 | 6-line docs PR | 342 files swept by `git add -A` | Explicit paths; work in a worktree |
+| 8 | `remediate_stale_cache_success` (`7acd2b441961`) | eventual consistency (auto-label) | **Scenario + prompt asked for a signal the world cannot produce** — hits frozen at 209 across six polls | ADR 0025; override recorded in §7 |
 
-**The through-line.** Five of these seven are failures of *procedure and
+**The through-line.** Six of these eight are failures of *procedure and
 environment*, not of the agent — only rows 2 and 3 are genuine agent defects,
 and they are the same defect. The scoreboard was reporting on the harness and
 attributing it to the model. Before you accept a red live result, establish that
 the world was clean, the invocation was the runbook's, and the knobs let the
 agent see the truth — in that order. Only then is the result about the agent.
+
+Row 8 adds a fourth question to that list, and it is the one this sequence
+kept failing to ask: **could the run have gone green at all?** Rows 4 and 8
+are both "the harness made the truth unavailable" — once by showing a stale
+number, once by asking for a number that never existed. Two of the eight
+turned on a *premise the lab could not satisfy* (row 8 and the 2026-08-12
+un-manufacturable fault), and both were written down in prose nobody
+executes. Before the money: read the scenario's description and its
+`verify_expectation` as instructions, and ask what in this world would move
+if the fix worked.
+
+Also note where the archive's own labels landed. **Two of the eight rows
+have an auto-assigned `failure_class` this document overrides** (rows 2 and
+8), both in the direction of making a real finding look like noise —
+"grader-brittleness" and "eventual-consistency" are both ways of saying
+*nothing to see here*. The classifier is a heuristic over the trajectory
+shape; it has no way to know whether the world could have answered. Never
+quote a `failure_class` without checking it here first.

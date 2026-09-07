@@ -350,6 +350,49 @@ Three properties keep it from doing harm:
 
 **An alert is a claim, and a claim has to be checked before it can be acted on.** The guard is deliberately not a rule about which remediation is correct — a poison message genuinely can be what stalls a consumer, and forbidding that inference would be wrong. It is a rule about what must be *read* before any remediation is chosen. Structurally we can require the premise be tested; only the prompt can ask the model to reason well about it, which is why the prompt half is proven live and the structural half is proven offline.
 
+## Case study: the verification the world could not answer
+
+**Archive `7acd2b441961`, 2026-09-07. `remediate_stale_cache_success`. OUTCOME red, every other dimension green — and the agent was right.**
+
+Chaos planted the 90-byte stale value. The agent probed `get_redis_health`, saw the collapsed hit rate, read the alert's named key with `get_cache_key_info` (`exists: true`, `size: 90` — the chaos write, not the seeder's 120-byte one), and invalidated exactly that key. `deleted: true`. ARGUMENT, SAFETY, BUDGET, ACTION, EVIDENCE: all green.
+
+Then it verified with `get_redis_health`.
+
+| verify poll | `keyspace_hits` | `keyspace_misses` |
+|---|---|---|
+| 1 | 209 | 438376 |
+| 6 | 209 | 442480 |
+
+Hits frozen at exactly **209** for six consecutive polls. Nothing in the eval world reads `cache:jobs:worker-dispatcher:hot_set`, so deleting it cannot move a server-wide counter; the misses that climbed belong to everything else on the box. The judge answered `not_verified` six times, each time correctly, and the agent escalated with a briefing the judge scored 1.0/1.0 for groundedness.
+
+### Why this is a scenario defect, not an agent defect
+
+The scenario's own description said: *"verify probes get_redis_health again and expects the miss trend to reverse."* The planner prompt said: *"Invalidate cache → verify with `get_redis_health` (miss rate should recover)."* The agent did what both told it. **The instruction was wrong.**
+
+This is the same family as the 2026-08-12 "the fault could not be manufactured" finding, one step later in the loop. There, a scenario asserted a fault the world could not produce. Here, it asserted a *recovery* the world could not produce. Both are premises the lab cannot satisfy, and in both the agent is graded on the gap.
+
+> The archive auto-labels this `failure_class: eventual-consistency`. **That label is wrong, and this section is the override.** Eventual consistency means the signal arrives late; here it never arrives, at any horizon, because no traffic exists to produce it. Six polls over a ~100s window is what a polling window looks like when the thing it polls is structurally frozen — more polling was never going to help. As with the `consumer_lag_missing_group` mislabel in [the 2026-09 lessons](lessons/live-eval-sequence-2026-09.md), check a `failure_class` against the override record before acting on it.
+
+### The rule this gives us
+
+**Design a verify leg by asking what the fix makes different, then whether the lab can show you that difference.** Both halves matter. A cache invalidation makes exactly one thing different — the key is gone — and `get_cache_key_info` reads precisely that. A server-wide hit rate is a *consequence* of the fix, mediated by traffic that in this environment does not exist.
+
+The sharper form, because it generalizes past caches: **a verify signal must be a state the world can reach and hold, not a trend it would need traffic to produce.** `exists: false` is reachable and stable. "The miss rate recovers" needs somebody to read the key, and nobody does.
+
+### What we did about it
+
+Two layers again, per [architecture-principles](architecture-principles.md) rule 3.
+
+**Structural (`agent/remediation.py`).** `VERIFY_PROBE_FOR_ACTION` maps each Tier-1 action to the read that observes what it changed, and `_unobserved_action_resource` refuses a plan whose verify leg is not one of them. It **refuses rather than escalates** — the action was right, only the evidence was missing — and a second refusal escalates naming the gap. Total over the Tier-1 slice, so a new action tool cannot be silently inert. Full reasoning in [ADR 0025](ADR/0025-a-verify-leg-must-observe-the-action.md).
+
+**Scenario + prompt.** The scenario verifies with `get_cache_key_info(key)` expecting `exists == false`, records the post-delete world in its fixture honestly, and says in the YAML that nothing in this environment repopulates the key. The prompt carries the rule under an invariant test: *verify by re-reading the resource you acted on; a server-wide health number is not evidence about one key, group or job.*
+
+### The grader half, which is the part worth internalizing
+
+**The scenario asserted nothing about its own verify leg, so the run was green on EVIDENCE.** `get_redis_health` produces nothing assertable about one key — that is the same fact that made it a bad verify tool, showing up a second time as an ungradeable dimension. A verify design you cannot write an assertion against is telling you something about the verify design.
+
+The scenario now grades it: `get_cache_key_info.exists == false`, with `which: last`. The ordinal is load-bearing in both directions — the key is read before *and* after the deletion, so `any` would be satisfied by the investigation probe alone, i.e. by a run that never remediated at all.
+
 ## Grader calibration rules
 
 Written after the Phase-6 seven-run live eval. Every rule is enforced by a checkpoint in the PR template or the scenario schema, not by memory. See [`docs/lessons/live-eval-noise-sources.md`](lessons/live-eval-noise-sources.md) for the taxonomy these rules come from.

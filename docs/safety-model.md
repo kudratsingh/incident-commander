@@ -100,7 +100,29 @@ A plan can be perfectly well-formed — right tier, real tools, confident hypoth
 | `_unsourced_resource_args` | a value the platform never produced (not in the alert, not in a tool result) | copy, don't re-type — a re-typed cache key that targets a different object |
 | `_misdirected_verify_args` | a verify probe naming a resource the action never touched | verifying a healthy bystander and reporting RESOLVED on a still-broken system |
 
-All three escalate **pre-execution**, so a rejected plan costs planner tokens and nothing else.
+All three escalate **pre-execution**, so a rejected plan costs planner tokens and nothing else. A fourth check runs after them and **refuses** rather than escalating — see the next section.
+
+### The verify leg must observe the action
+
+`_misdirected_verify_args` above stops a probe aimed at the *wrong* resource. It is inert when the verify leg names no resource at all, and [ADR 0024](ADR/0024-plan-arguments-name-their-resource.md) recorded that inertness as a deliberate escape hatch: "the escape hatch is a resource-free verify tool", with `invalidate_cache_key` verified by `get_redis_health` named as a legitimate example.
+
+The paid run of 2026-09-07 took that hatch. The agent invalidated exactly the right cache key (`deleted: true`) and verified with `get_redis_health`, whose `keyspace_hits` / `keyspace_misses` are server-wide. Nothing in that world reads the key, so the deletion could not move them: hits sat frozen at exactly **209** across all six verify polls while misses climbed 437635 → 442480 on unrelated traffic. The judge answered `not_verified` six times, correctly, and the agent escalated. Every other dimension was green. **The agent was right — the plan asked a question the world could not answer.**
+
+Note which polarity we got. This run failed *honestly*, because the counter could not move in the right direction. The same hole with a metric that drifts favourably produces the opposite result: `verified`, and RESOLVED on a system nobody fixed.
+
+| Check | Rejects | Failure it prevents |
+|---|---|---|
+| `_unobserved_action_resource` | a verify leg that is not one of the reads which can observe the resource the action changed | verifying through a signal the fix cannot move — a self-report dressed as an independent reading |
+
+`VERIFY_PROBE_FOR_ACTION` (`src/incident_commander/agent/remediation.py`) is the map: `invalidate_cache_key` → `get_cache_key_info.key`, `restart_consumer_group` → `get_consumer_lag.consumer_group`, `pause_dag` → `get_dag_state.job_id`, the targeted DLQ tools → `list_dlq_messages` (or `get_dag_state.job_id` when the id is a DAG root). It is **total over the Tier-1 slice**: the two bulk DLQ tools carry an explicit empty entry meaning "this action names a category, not a resource", and `tests/unit/test_policies.py::TestVerifyProbeForAction` fails on any Tier-1 tool with no entry at all — an absent entry would make the guard silently inert for that tool.
+
+Three properties, all shared with the handoff guard below rather than with the three plan guards above:
+
+- **It refuses; it does not escalate.** The three argument guards reject a planner reasoning about the wrong object, and there is nothing to salvage. This one rejects a plan whose action is right and whose evidence is missing, so naming the probe is usually enough. A `_plan_refused` marker goes on the evidence, the planner is asked again with the required call spelled out, and only a second refusal escalates — naming the resource that went unobserved and the probe that would have observed it. Nothing executes in either case: `remediation_attempts` is still 0.
+- **The steer is delivered whole.** Evidence lines are truncated to 200 characters in the planner context — shorter than a refusal naming a probe, an argument and a cache key — so the refusal is pulled out of that dump and rendered in full at the end of the prompt. A steer that arrives cut mid-sentence is not a steer.
+- **It is inert when the action names no resource**, which is legitimate and common: bulk category replay names a filter, not a row. The marker spends no tool-call budget; the re-ask's planner tokens are charged like any other call.
+
+Full rationale, including why a prompt fix alone was insufficient and why "name a resource on the verify leg" is not the same requirement as "observe the action's resource", in [ADR 0025](ADR/0025-a-verify-leg-must-observe-the-action.md).
 
 The absence check exists because omission used to be the quiet case. `GetConsumerLagInput.consumer_group` carries `default="worker-dispatcher"`, mirroring the platform's published input schema — so a verify leg of `get_consumer_lag` with no arguments probed `worker-dispatcher` no matter which consumer group the action had just restarted, read a healthy lag off an untouched consumer, and resolved the incident. The default is legitimate and stays (the contract snapshot pins it); the plan layer is where the agent's own "say which resource you mean" requirement belongs. Full rationale in [ADR 0024](ADR/0024-plan-arguments-name-their-resource.md).
 

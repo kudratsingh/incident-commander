@@ -68,6 +68,43 @@ _JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
         "poison_message adds a dead-letter row, so the canned total counts a "
         "row the un-faulted world has not produced yet",
     ),
+    # The first POST_ACTION rows. The constant has existed since the ledger
+    # did, describing exactly this and matching nothing — because until ADR 0025
+    # no fixture recorded the world after the agent's own remediation.
+    #
+    # `remediate_stale_cache_success` now verifies by re-reading the key it
+    # invalidated (ADR 0025), so its `get_cache_key_info` fixture is a
+    # sequence: element 0 is the key present, element 1 is the key gone.
+    # Element 1 is what every verify poll reads, and the drift walk probes
+    # the world BEFORE the agent acts, where the key is still there. The
+    # disagreement is the recording being correct about a later moment than
+    # the one the walk can observe.
+    #
+    # Distinct from POST_FAULT above, and the distinction is worth keeping:
+    # post-fault drift is the CHAOS HOOK's doing and would vanish if the
+    # walk ran after seeding; post-action drift is the AGENT's doing and
+    # would not — no probe of any un-remediated world can ever match it.
+    # Neither is work; they are unreachable for different reasons.
+    #
+    # All three shape fields move together because the platform returns
+    # them as a set: `GetCacheKeyInfoOutput` documents "All three are null
+    # when the key does not exist". `ttl_seconds` is absent from this list
+    # only because it is already declared volatile in fixture_drift.py, so
+    # its value is never compared in the first place.
+    ("remediate_stale_cache_success", "get_cache_key_info", "exists", "value"): (
+        POST_ACTION,
+        "the verify leg re-reads the invalidated key and the fixture records "
+        "exists=false; the walk probes the world before the deletion, where "
+        "the key is still present",
+    ),
+    ("remediate_stale_cache_success", "get_cache_key_info", "size", "value"): (
+        POST_ACTION,
+        "same recording, same reason: an absent key reports size=null",
+    ),
+    ("remediate_stale_cache_success", "get_cache_key_info", "type", "value"): (
+        POST_ACTION,
+        "same recording, same reason: an absent key reports type=null",
+    ),
     # The `get_dag_state` recordings for the two saga scenarios are one
     # mechanism. Both scenarios now seed their own chain with the
     # `create_stuck_dag` chaos hook (wave-10, on the v0.6.0 pin), and the

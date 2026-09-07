@@ -1,6 +1,6 @@
 # ADR 0024: A remediation plan must name its resource on both legs
 
-* Status: accepted
+* Status: accepted; **extended by [ADR 0025](0025-a-verify-leg-must-observe-the-action.md)**. Every decision below stands. What 0025 narrows is one *consequence* recorded here — that "the escape hatch is a resource-free verify tool", and the example given for it, "`invalidate_cache_key` verified by `get_redis_health`". A live run took that hatch on 2026-09-07 and produced a verification that could not succeed. A resource-free verify leg is now legal only when no read observes the acted-on resource.
 * Date: 2026-08-30
 * Decider: Kudrat Singh
 

@@ -356,3 +356,124 @@ class TestAlertSubjectProbes:
             "Add them to _NON_WEBHOOK_ALERT_FIELDS in test_scenario_alert_premise.py "
             "first — an alert key no scenario carries cannot be exercised."
         )
+
+
+class TestVerifyProbeForAction:
+    """``VERIFY_PROBE_FOR_ACTION`` is the action-side sibling of ``ALERT_SUBJECT_PROBES``.
+
+    One asks "which probe reads what this alert is about?", the other
+    "which probe reads what this action just changed?". Same cross-checks
+    apply for the same reason (architecture-principles rule 2): a map
+    naming a tool or argument the platform does not expose would have the
+    guard demanding a call nobody can make, and the failure would land on
+    every plan in that family.
+
+    The totality test is the one that matters most here — see its docstring.
+    """
+
+    def test_every_tier_1_tool_has_a_declared_entry(self) -> None:
+        """TOTAL over Tier-1, so a new action tool cannot be silently inert.
+
+        This guard is inert when the action tool has no entry. That is the
+        correct behaviour for the bulk DLQ tools, which name a category
+        rather than a resource — and it is a silent hole for any Tier-1
+        tool someone adds later and forgets. Requiring an explicit entry,
+        even an explicitly EMPTY one, converts that hole into a failing
+        test with a message saying what decision is missing.
+
+        This is the same shape as ``TestResourceArgFieldsCoverage``, and it
+        exists for the same reason ADR 0024 gave: "the narrowness is a
+        trap, not a comfort".
+        """
+        from incident_commander.agent.remediation import VERIFY_PROBE_FOR_ACTION
+
+        tier_1 = tools_at_or_below(Tier.TIER_1) - tools_at_or_below(Tier.READ)
+        missing = sorted(tier_1 - set(VERIFY_PROBE_FOR_ACTION))
+        stale = sorted(set(VERIFY_PROBE_FOR_ACTION) - tier_1)
+        assert not missing and not stale, (
+            f"VERIFY_PROBE_FOR_ACTION does not cover the Tier-1 slice.\n"
+            f"  Tier-1 tools with no entry: {missing}\n"
+            f"  entries that are not Tier-1: {stale}\n"
+            f"For each missing tool, decide which READ tool observes the "
+            f"resource it changes and add it — or add an empty tuple to say "
+            f"that no read observes it, which is what the bulk DLQ tools do. "
+            f"An absent entry makes the verify-target guard silently inert "
+            f"for that tool (ADR 0025)."
+        )
+
+    def test_every_probe_tool_is_a_registered_read_tool(self) -> None:
+        from incident_commander.agent.remediation import VERIFY_PROBE_FOR_ACTION
+
+        for action, probes in VERIFY_PROBE_FOR_ACTION.items():
+            for probe in probes:
+                assert probe.tool_name in TOOL_REGISTRY, (
+                    f"{action} maps to unknown tool {probe.tool_name}"
+                )
+                assert tier_of(probe.tool_name) is Tier.READ, (
+                    f"{action} maps to {probe.tool_name}, which is tier "
+                    f"{tier_of(probe.tool_name).value}. A verify probe must be "
+                    "a read — the plan's verify leg is tier-checked separately, "
+                    "so a non-read here would be unreachable advice."
+                )
+
+    def test_every_probe_argument_is_a_declared_resource_field(self) -> None:
+        """A named argument must be one ``RESOURCE_ARG_FIELDS`` calls a resource.
+
+        The guard compares the probe's argument VALUE against the values
+        the action's resource fields carry. Pointing it at a filter
+        (``limit``, ``remediation_hint``) would compare a resource name to
+        a filter value and refuse every correct plan.
+        """
+        from incident_commander.agent.remediation import VERIFY_PROBE_FOR_ACTION
+
+        for action, probes in VERIFY_PROBE_FOR_ACTION.items():
+            for probe in probes:
+                if probe.argument_field is None:
+                    continue
+                assert probe.argument_field in RESOURCE_ARG_FIELDS[probe.tool_name], (
+                    f"{action} maps to {probe.tool_name}.{probe.argument_field}, "
+                    f"which RESOURCE_ARG_FIELDS does not classify as "
+                    f"resource-naming ({sorted(RESOURCE_ARG_FIELDS[probe.tool_name])})."
+                )
+
+    def test_argument_free_probes_really_take_no_resource_argument(self) -> None:
+        """``argument_field=None`` is a claim about the tool, not a shortcut.
+
+        It says "this read observes the resource but cannot name it", which
+        is why picking the tool is the whole requirement. If the tool DOES
+        have a resource argument, that licence would let a plan verify the
+        wrong row while looking compliant.
+        """
+        from incident_commander.agent.remediation import VERIFY_PROBE_FOR_ACTION
+
+        for action, probes in VERIFY_PROBE_FOR_ACTION.items():
+            for probe in probes:
+                if probe.argument_field is not None:
+                    continue
+                assert not RESOURCE_ARG_FIELDS[probe.tool_name], (
+                    f"{action} maps to {probe.tool_name} with no argument, but "
+                    f"{probe.tool_name} DOES take resource arguments "
+                    f"({sorted(RESOURCE_ARG_FIELDS[probe.tool_name])}). Name one, "
+                    "or the guard cannot tell which resource was observed."
+                )
+
+    def test_an_action_with_resource_fields_has_at_least_one_probe(self) -> None:
+        """Empty entries are only honest for actions that name no resource.
+
+        ``replay_dlq_by_category`` and ``replay_dlq_messages`` earn their
+        empty tuples by having no resource-naming argument at all. An action
+        that DOES name a resource and maps to nothing would be declaring
+        that the platform cannot observe its own effect — possible in
+        principle, but it should be argued in an ADR rather than typed in
+        as an empty tuple.
+        """
+        from incident_commander.agent.remediation import VERIFY_PROBE_FOR_ACTION
+
+        for action, probes in VERIFY_PROBE_FOR_ACTION.items():
+            if probes:
+                continue
+            assert not RESOURCE_ARG_FIELDS[action], (
+                f"{action} is declared inert (empty tuple) but names resources "
+                f"({sorted(RESOURCE_ARG_FIELDS[action])}). Either a read observes "
+                "that resource — map it — or explain in an ADR why none can."
+            )

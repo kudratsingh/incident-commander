@@ -2252,6 +2252,27 @@ def _invalidate(now: datetime, key: str, *, deleted: bool = True) -> EvidenceEnt
     )
 
 
+def _cache_key_info(now: datetime, key: str, *, exists: bool) -> EvidenceEntry:
+    """A get_cache_key_info read. ``exists=False`` is the post-delete world.
+
+    The platform returns all three shape fields as null for an absent key
+    (``GetCacheKeyInfoOutput``: "All three are null when the key does not
+    exist"), so the absent form is modelled that way rather than as a
+    zero-size entry.
+    """
+    shape = (
+        '"type":"string","ttl_seconds":86326,"size":90'
+        if exists
+        else '"type":null,"ttl_seconds":null,"size":null'
+    )
+    return EvidenceEntry(
+        tool_name="get_cache_key_info",
+        arguments={"key": key},
+        result_summary=f'{{"key":"{key}","exists":{str(exists).lower()},{shape}}}',
+        timestamp=now,
+    )
+
+
 def _restart(now: datetime, group: str, *, kill_cleared: bool = True) -> EvidenceEntry:
     return EvidenceEntry(
         tool_name="restart_consumer_group",
@@ -2650,9 +2671,58 @@ class TestStaleCacheGradesWhichKeyWasDeleted:
         assert "restart_consumer_group" in dim.detail
 
     def test_the_correct_trajectory_passes(self, run_state: RunState, now: datetime) -> None:
-        run = _with_terminal(run_state, IncidentState.RESOLVED, (_invalidate(now, _HOT_KEY),))
+        # A correct run now READS THE KEY BACK. Before ADR 0025 the verify leg
+        # was get_redis_health and the scenario asserted nothing about it,
+        # so "correct" meant nothing more than "the right key was deleted".
+        run = _with_terminal(
+            run_state,
+            IncidentState.RESOLVED,
+            (
+                _cache_key_info(now, _HOT_KEY, exists=True),
+                _invalidate(now, _HOT_KEY),
+                _cache_key_info(now, _HOT_KEY, exists=False),
+            ),
+        )
         report = grade(run, self._expectation())
         assert report.passed is True, [d.detail for d in report.dimensions if not d.passed]
+
+    def test_deleting_without_reading_the_key_back_is_red(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The 2026-09-07 shape: right key deleted, effect never observed.
+
+        The live run reached exactly here — `deleted: true` on the right
+        key and not one read of it afterwards, because the verify leg was
+        `get_redis_health`. Every dimension the scenario then had was
+        green. EVIDENCE is what says the effect was never witnessed.
+        """
+        run = _with_terminal(run_state, IncidentState.RESOLVED, (_invalidate(now, _HOT_KEY),))
+        report = grade(run, self._expectation())
+        assert report.passed is False
+        evidence = _dim(report, GradeDimension.EVIDENCE)
+        assert evidence.passed is False
+        assert "get_cache_key_info" in evidence.detail
+
+    def test_a_key_still_present_after_the_delete_is_red(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """`which: last` is load-bearing, in both directions.
+
+        A run whose final read still says exists=true deleted something and
+        did not delete THIS. Asserting `any` would have been satisfied by
+        the investigation probe that found the key present in the first
+        place — i.e. by a run that never remediated at all.
+        """
+        run = _with_terminal(
+            run_state,
+            IncidentState.RESOLVED,
+            (
+                _cache_key_info(now, _HOT_KEY, exists=True),
+                _invalidate(now, _HOT_KEY),
+                _cache_key_info(now, _HOT_KEY, exists=True),
+            ),
+        )
+        assert _dim(grade(run, self._expectation()), GradeDimension.EVIDENCE).passed is False
 
 
 class TestConsumerLagRestartGradesWhichGroup:

@@ -8,9 +8,9 @@
     "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything"
   },
   "_counts": {
-    "recorded": 27,
+    "recorded": 30,
     "fixture-defect": 0,
-    "explained": 27
+    "explained": 30
   },
   "known_drift": [
     {
@@ -140,6 +140,30 @@
       "kind": "canned_only_field",
       "context": "post-fault",
       "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no seed_id at all \u2014 the root job id the chain is named for"
+    },
+    {
+      "scenario": "remediate_stale_cache_success",
+      "tool": "get_cache_key_info",
+      "path": "exists",
+      "kind": "value",
+      "context": "post-action",
+      "why": "the verify leg re-reads the invalidated key and the fixture records exists=false; the walk probes the world before the deletion, where the key is still present"
+    },
+    {
+      "scenario": "remediate_stale_cache_success",
+      "tool": "get_cache_key_info",
+      "path": "size",
+      "kind": "value",
+      "context": "post-action",
+      "why": "same recording, same reason: an absent key reports size=null"
+    },
+    {
+      "scenario": "remediate_stale_cache_success",
+      "tool": "get_cache_key_info",
+      "path": "type",
+      "kind": "value",
+      "context": "post-action",
+      "why": "same recording, same reason: an absent key reports type=null"
     },
     {
       "scenario": "remediate_verify_fails",

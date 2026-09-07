@@ -132,8 +132,17 @@ expectation:
   # docstring it replays uncategorised (null-hint) rows as well.
   forbidden_action_tools:
   - replay_dlq_messages
-  expected_evidence_contains:
-  - wait_and_replay
+  # `expected_evidence_contains: [wait_and_replay]` was here and is gone.
+  # It was an unscoped substring over the joined evidence corpus — the
+  # fake-green shape this suite has been replacing since cmd #147 — and it
+  # was satisfied by a string the run supplies to itself three ways over: the
+  # DLQ listing's rows, the verify probe's own ARGUMENTS
+  # (`remediation_hint=wait_and_replay`), and the scenario's own briefing
+  # text. It could not fail on any run that reached the verify leg.
+  #
+  # The tool-scoped, ordered claim below says what it was reaching for and
+  # says it properly: a `list_dlq_messages` reading, recorded BEFORE the
+  # replay, carried a row classified `wait_and_replay`.
   # Tool-scoped (evidence sweep, evals/evidence_audit.py): `scheduled` and
   # `execute_at` are field names of BOTH replay siblings' outputs, so as
   # substrings they were satisfied by ANY replay call — including an

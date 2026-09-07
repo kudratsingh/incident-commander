@@ -209,6 +209,14 @@ harness artifacts — see [`docs/lessons/live-eval-sequence-2026-09.md`](lessons
    the guards admit the plan) and neither read the fault's own fields. The
    contradiction was visible in a free probe.
 
+   **Fixed at the source, 2026-09-07.** Platform v0.6.1 (plat #197) gives the
+   lab one table of failure stories and a coherence rule over it, so no lab
+   writer can pair a `replay_safe` hint with a permanent-fault error text
+   again — the dossier's §5 lint now reads that same root row as *coherent*.
+   This step does not retire with it. It exists for the class of defect (a
+   fault world that contradicts what the scenario expects) and only one
+   instance of that class has been closed.
+
    The lint's findings are **findings, not verdicts** — nothing here decides
    whether to run. Exit codes: `0` clean, `2` selection refused (nothing
    seeded), `3` preflight/stack unreachable (nothing seeded), `4` the baseline
@@ -639,7 +647,7 @@ After the smoke stage, the runner grades the platform's audit log and
 fails (exit 5) if any successful Tier-1 action landed during the stage
 window. Each individual read is still **one page of at most 200 rows** —
 `list_audit_events` exposes no `offset` and no `created_after` (the pinned
-v0.6.0 `inputSchema` declares `additionalProperties: false` over
+v0.6.1 `inputSchema` declares `additionalProperties: false` over
 `action` / `action_prefix` / `principal_type` / `limit`, and sending
 `offset` anyway is refused `-32602 extra_forbidden`; `list_dlq_messages`
 is the tool in this platform that pages, not this one). But the window is
@@ -786,10 +794,11 @@ For deeper introspection, the newest `evals/trajectories/<scenario>.<stamp>.<inv
 ## Contract-test target (constraint in force)
 
 **Run contract tests ONLY against the pinned demo stack.** The pin is
-v0.6.0 by index digest and the committed snapshot carries its 29 tools,
-blessed from that stack with the full 4-scope service-account token.
+v0.6.1 by index digest (`sha256:411f8b4d…`) and the committed snapshot
+carries its 29 tools, blessed from that stack with the full 4-scope
+service-account token.
 
-The rule outlives the v0.4.9 → v0.5.0 → v0.6.0 bumps that motivated it: platform
+The rule outlives the v0.4.9 → v0.5.0 → v0.6.0 → v0.6.1 bumps that motivated it: platform
 master moves ahead of whatever tag is pinned, so a contract check against
 a master-built dev stack can fail **by design**. That is master drift, not
 drift in the pinned artifact, and it must never trigger a snapshot rebless

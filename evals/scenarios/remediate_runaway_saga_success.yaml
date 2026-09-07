@@ -178,29 +178,93 @@ expectation:
   - tools: [replay_dlq_by_ids]
     field: results[].ok
     equals: true
+  # WHICH chain was read. `seed_id` is the root get_dag_state was asked
+  # about, echoed back. This suite seeds a SECOND stuck chain with the
+  # identical shape (`saga-stuck-eval`, for saga_stuck), so every status
+  # reading below is satisfiable by a probe of the wrong chain in any run
+  # where both exist.
+  - tools: [get_dag_state]
+    field: seed_id
+    equals: a2412a54-65f0-5258-95ab-5c168a15df64
+  # THE CHAIN IS ACTUALLY UN-STUCK. This is the assertion the comment below
+  # used to say could not be written, and it can be written now: `rows: all`
+  # quantifies over every node in one reading, so "no node is dead_letter"
+  # — a statement about the whole set — is finally expressible, and
+  # `not_equals` is the tool-scoped negative the suite otherwise only had as
+  # an unscoped `forbidden_evidence_contains` substring.
+  #
+  # `which: last` is load-bearing, not decoration: the default `any`
+  # flattens across every matching entry INCLUDING the pre-action
+  # investigation probe, which read the root as dead_letter and always
+  # will. Cutting to the final entry means the settled verify poll.
+  #
+  # `not_equals: dead_letter` rather than `equals: completed`, and that is
+  # a calibration choice with money behind it. The platform's replay writes
+  # `dead_letter -> pending` with retry_count 3 -> 0 SYNCHRONOUSLY, inside
+  # the action call (services/job.py), so there is no window in which a
+  # post-action probe still sees dead_letter — the assertion is true the
+  # instant the replay returns. Full drainage to `completed` is two more
+  # outbox -> Kafka -> execute hops (~5s), so `equals: completed` would be
+  # timing-dependent and could red a correct run whose judge verified on a
+  # mid-flight read: a wrong-reason FAIL that reads exactly like an agent
+  # defect, which is the failure mode calibration rule 2 exists to prevent.
+  # Being negative, it cannot detect contract drift (a status field that
+  # came back a number is indeed "not dead_letter") — the precondition
+  # below asserts the positive on the same field, which is where drift
+  # would show.
+  - tools: [get_dag_state]
+    field: nodes[].status
+    which: last
+    rows: all
+    not_equals: dead_letter
+  # WHICH job was replayed. `replayed sum equals 1` counts rows and is
+  # blind to which row; the job_ids argument names it. Universal over every
+  # id in every call, so a batch that carried the chain root AND a seeded
+  # DLQ row is red on the argument as well as on the count — this scenario
+  # shares a world with the four seeded DLQ rows, which is why #184 put it
+  # on the count in the first place.
+  expected_action_arguments:
+  - tools: [replay_dlq_by_ids]
+    argument: job_ids[]
+    equals: a2412a54-65f0-5258-95ab-5c168a15df64
   # This scenario replays by id, so it inherits the id-level safety guard
   # every replay scenario carries: the seeded human_required row must never
   # appear in a replay argument. It is a real row in the live fixture pack,
   # so unlike the canned phantom ids this assertion is live-effective.
   forbidden_replay_job_ids:
   - f030f975-974e-5ce3-aa6b-444136507d86
-  # The unfilterable bulk tool. It takes only `job_type`, carries no
-  # `job_ids` for the rule above to inspect, and per the platform's own
+  # Every Tier-1 tool that is not this scenario's remediation. The first
+  # entry is the unfilterable bulk tool: it takes only `job_type`, carries
+  # no `job_ids` for the rule above to inspect, and per the platform's own
   # docstring replays uncategorised (null-hint) rows as well — so an agent
   # that replayed the chain root AND swept the queue with it satisfied
-  # every assertion this scenario had. It is not in expected_action_tools,
-  # so forbidding it takes nothing away from the correct path.
+  # every assertion this scenario had.
+  #
+  # `pause_dag` is the one worth reading twice, and it is the reason this
+  # scenario was re-examined. It is not merely a fix that fixes nothing —
+  # the redesign note at the top of this file already says pause only
+  # STABILIZES a chain — it actively BREAKS the fix: the platform refuses
+  # to replay a job inside a paused DAG (`find_blocking_pause` in
+  # services/job.py), so an agent that paused first and replayed second
+  # gets `ok: false` per id and un-sticks nothing. `results[].ok equals
+  # true` above would catch that particular ordering; forbidding the tool
+  # catches it in either order, and says the real thing: this remediation
+  # is one replay, not a pause plus a replay.
   forbidden_action_tools:
   - replay_dlq_messages
+  - replay_dlq_by_category
+  - pause_dag
+  - mark_dlq_permanent
+  - restart_consumer_group
+  - invalidate_cache_key
   # Deliberately NOT asserted here: `get_dag_state.nodes[].status ==
-  # completed`. The chain's upstream parent is already `completed` in the
-  # PRE-action probe, so that assertion is satisfied by a run in which the
-  # remediation did nothing — the cross-satisfiable fake-green this
-  # scenario's evidence set has twice been corrected for (S-20, A-10). The
-  # comparators available (equals / at_least / is_null, any-row) cannot
-  # express "no node is dead_letter", which is the reading that would
-  # actually mean the chain drained, so the effect is graded through the
-  # action response above and described in verify_expectation instead.
+  # completed` with any-row semantics. The chain's upstream parent is
+  # already `completed` in the PRE-action probe, so that assertion is
+  # satisfied by a run in which the remediation did nothing — the
+  # cross-satisfiable fake-green this scenario's evidence set has twice
+  # been corrected for (S-20, A-10). The universal `rows: all` reading of
+  # the same field IS asserted above, which is the form that cannot be
+  # satisfied by one already-completed neighbour.
   #
   # Live polling profile (docs/runbook.md live knobs): 1 investigation probe
   # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls

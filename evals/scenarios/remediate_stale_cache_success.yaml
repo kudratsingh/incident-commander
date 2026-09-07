@@ -143,6 +143,46 @@ expectation:
   - tools: [invalidate_cache_key]
     field: deleted
     equals: true
+  # WHICH key was deleted. `deleted: true` above says a key was cleared and
+  # is silent about which one, and that silence is not academic here: the
+  # tool accepts any key under four platform-owned prefixes
+  # (`cache:`, `jobs:cache:`, `kafka:consumer_lag:`, `read_model:`), and
+  # `kafka:consumer_lag:worker-dispatcher` — the cached metric behind
+  # get_consumer_lag — is live on every seeded stack. A live read confirmed
+  # it: exists=true, 87s of TTL left. So the laziest trajectory that passed
+  # this scenario was "delete the lag cache, report deleted=true, verify
+  # redis is healthy, resolve" — all five dimensions green, the alert's hot
+  # key untouched, and the platform's own lag metric destroyed on the way.
+  #
+  # Universal over calls and fail-closed on absence, so it cannot be
+  # satisfied by an agent that named this key once among several, nor by one
+  # that never acted. The action leg fires at most ONCE per run (ADR 0008;
+  # ALLOWED_TRANSITIONS[VERIFYING] has no PLANNING successor) and
+  # invalidate_cache_key takes one exact key with no list form, so "how
+  # many" is answered by construction here and "which" is the whole
+  # question. That is why this scenario states no count and no denylist of
+  # other keys: a universal equals on the one key already excludes every
+  # other key the tool would have accepted, including the ones nobody
+  # thought to enumerate.
+  expected_action_arguments:
+  - tools: [invalidate_cache_key]
+    argument: key
+    equals: cache:jobs:worker-dispatcher:hot_set
+  # Every Tier-1 tool that is not this scenario's remediation. The correct
+  # run deletes one cache key; nothing about a cache miss spike warrants
+  # replaying the DLQ, restarting a consumer or pausing a DAG, and the
+  # 2026-09 Run A finding is that an agent reaching for an unrelated
+  # subsystem is the common failure, not an exotic one — it anchored on the
+  # four seeded DLQ rows during a consumer-lag incident. Derived from
+  # policies.py Tier-1 minus expected_action_tools and pinned by a test, so
+  # an eighth Tier-1 tool fails CI here instead of quietly becoming legal.
+  forbidden_action_tools:
+  - restart_consumer_group
+  - pause_dag
+  - replay_dlq_messages
+  - replay_dlq_by_ids
+  - replay_dlq_by_category
+  - mark_dlq_permanent
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes
   # (get_redis_health, get_cache_key_info) + 1 ADR-0009 freshness re-probe
   # + 1 action + up to 6 ADR-0006 verify polls (VERIFY_PROBE_ATTEMPTS=6)
@@ -152,15 +192,31 @@ expectation:
   # the agent is bounded by it, told it, and escalates on exhausting it, and
   # reaching it grades BUDGET red. The margin is headroom, not an annotation.
   max_tool_calls: 13
-# The premise: the hot key this scenario invalidates is actually there.
+# The premise: the STALE key this scenario invalidates is actually there.
 # This is the check #145 said could not be written — get_redis_health
 # reports server-wide stats, so before v0.6.0 nothing could tell "the
 # stale key is seeded" from "the chaos hook silently did nothing", and a
 # run against an unseeded key would have graded the agent on a fault that
 # was never manufactured. get_cache_key_info reads the exact key and
 # returns shape only (never the value), so this costs one read and no
-# tenant data. `exists` is the whole assertion: TTL and size are the
-# chaos hook's business, not the premise's.
+# tenant data.
+#
+# `exists: true` alone did NOT establish that premise, and this is the
+# correction. seed_eval_fixtures writes this same key on every boot —
+# `_seed_hot_set` puts the first three DLQ job ids in it with a 24h TTL —
+# so `exists` is true of a world where create_stale_cache never ran. The
+# precondition passed on the fixture pack alone, which is the one thing a
+# precondition must never do: it exists to tell "the fault landed" from
+# "the chaos hook silently did nothing", and it could not.
+#
+# `size` tells them apart exactly, because both writers are deterministic.
+# The hook writes `json.dumps(["stale-fixture-<12 hex>"] * stale_count)`
+# (platform chaos/create_stale_cache.py) — 90 bytes at the default
+# stale_count of 3, and it returns that number itself as `size_bytes`. The
+# seeder writes three 36-char job uuids — 120 bytes, confirmed by a live
+# read of the un-faulted stack. So `size equals 90` is satisfiable only by
+# the chaos write, and an `at_least` here would have been satisfied by the
+# seeded 120 and told us nothing.
 expected_precondition:
 - tool: get_cache_key_info
   arguments:
@@ -168,3 +224,5 @@ expected_precondition:
   expect:
   - path: exists
     equals: true
+  - path: size
+    equals: 90

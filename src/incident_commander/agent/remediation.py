@@ -38,7 +38,14 @@ from incident_commander.agent.state import (
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError
-from incident_commander.tools.policies import RESOURCE_ARG_FIELDS, Tier, tier_of
+from incident_commander.tools.policies import (
+    RESOURCE_ARG_FIELDS,
+    PolicyCoverageError,
+    Resolution,
+    Tier,
+    resolution_class_of,
+    tier_of,
+)
 from incident_commander.tools.registry import TOOL_REGISTRY, description_of
 from incident_commander.tools.wire import wire_arguments
 
@@ -1061,6 +1068,38 @@ def make_llm_verify(
                 }
             )
             if judgment.verdict == "verified":
+                # The judge answered "did the action work?". That is not the
+                # same question as "is the incident over?", and for a
+                # STABILIZE-ONLY action the two answers differ: a pause that
+                # landed perfectly reads verified and leaves the chain as
+                # stuck as it was. The resolution class is what separates
+                # them, and it is consulted here rather than at plan time
+                # because a stabilizer is a legitimate plan — it executes,
+                # it is verified, and then it hands a human the decision it
+                # was buying time for.
+                try:
+                    policy = resolution_class_of(plan.action_tool)
+                except PolicyCoverageError as err:
+                    # Fail closed toward the human. An unclassified Tier-1
+                    # tool is a missing safety decision, and the wrong way
+                    # to resolve it is to RESOLVE the incident.
+                    return _escalate_remediation(run_state, at_attempt, str(err))
+                if policy.resolution is Resolution.STABILIZES:
+                    return _escalate_remediation(
+                        run_state,
+                        at_attempt,
+                        _stabilized_reason(plan, policy.rationale),
+                        # The action DID execute, and `make_remediate`
+                        # already charged it and wrote its own evidence
+                        # entry — so no `executed=True` here, which would
+                        # bill it twice. This carries it onto the briefing's
+                        # `attempted_action` field, which is what tells the
+                        # on-call that a stabilizer is holding right now and
+                        # stops the briefing writer recommending a repeat of
+                        # the pause instead of the fix.
+                        attempted_tool=plan.action_tool,
+                        attempted_arguments=plan.action_arguments,
+                    )
                 return run_state.with_state(IncidentState.RESOLVED, at_attempt)
 
         return run_state.with_state(IncidentState.ESCALATED, at_attempt)
@@ -1125,6 +1164,34 @@ def _summarize_output(output_model: type[BaseModel], content: list[dict[str, Any
             payload = json.loads(block["text"])
             return output_model.model_validate(payload).model_dump_json()
     raise ValueError("no text content block in tool result")
+
+
+def _stabilized_reason(plan: RemediationPlan, rationale: str) -> str:
+    """The escalation reason for a verified STABILIZE-ONLY action.
+
+    This string is the whole human-facing product of the stabilize-only
+    class: ``_escalate_remediation`` puts it on the marker's
+    ``result_summary``, which ``agent/briefing.py`` reads back into
+    ``EscalationBriefing.escalation_reason``. So it has to carry three
+    things a reader can act on — that the action worked, that the incident
+    is nevertheless not over, and which resource still needs a decision —
+    without ever reading as a failure. The agent did the right thing; it is
+    handing over deliberately.
+
+    The resource is named from the plan's own action arguments rather than
+    re-derived, so the briefing points at the exact id the run acted on.
+    """
+    resources = sorted(_resource_values(plan.action_tool, plan.action_arguments))
+    named = ", ".join(resources) if resources else "the affected resource"
+    return (
+        f"STABILIZED, NOT RESOLVED. {plan.action_tool} executed successfully "
+        f"and {plan.verify_tool} confirmed it landed on {named} — this is an "
+        f"escalation by design, not a failed remediation. "
+        f"{plan.action_tool} is a stabilize-only action: {rationale} "
+        f"The underlying fault on {named} is unchanged and still needs a "
+        f"human decision on the real fix. Treat the stabilization as a clock, "
+        f"not an outcome."
+    )
 
 
 def _escalate_remediation(

@@ -29,7 +29,7 @@ Every registered tool is classified as `READ`, `TIER_1`, or `TIER_2` — in an e
 
 The 7 Tier-1 actions today (tier map in `src/incident_commander/tools/policies.py`):
 - `restart_consumer_group` — clears a chaos kill flag on one Kafka consumer group
-- `pause_dag` — halts child promotion under one DAG root, TTL-scoped (max 60 minutes)
+- `pause_dag` — halts child promotion under one DAG root, TTL-scoped (max 60 minutes). **Stabilize-only**: a verified success escalates, never resolves — see below
 - `replay_dlq_messages` — legacy bulk re-submit of dead-lettered jobs (bounded by `limit`, default 25)
 - `invalidate_cache_key` — deletes one Redis key from an allowlisted prefix set
 - `replay_dlq_by_ids` — re-submits explicitly listed dead-lettered jobs (max 50 ids per call)
@@ -37,6 +37,8 @@ The 7 Tier-1 actions today (tier map in `src/incident_commander/tools/policies.p
 - `mark_dlq_permanent` — flags one dead-lettered job as not-replayable, with a `reason` written to the audit log
 
 All seven are idempotent (caller-supplied `idempotency_key`, see below) with a bounded, platform-enforced blast radius; every call additionally passes the platform's `actions:execute` scope check.
+
+Tier answers "how much damage can this do?". A second, independent classification answers "can a successful call END the incident?" — `RESOLUTION_CLASS` in the same module, total over the Tier-1 slice. See [A stabilizer is not a resolution](#a-stabilizer-is-not-a-resolution).
 
 No `TIER_2` tools ship today. When they land, they use the platform's propose/approve/execute flow (Wave 3 PR F on the platform side).
 
@@ -65,6 +67,7 @@ No `TIER_2` tools ship today. When they land, they use the platform's propose/ap
           │ probe verify_tool + judge LLM
           │ verdict "not_verified" ─────────────────────────► ESCALATED
           │ verdict "verified"
+          │   └─ action is STABILIZE-ONLY ───────────────► ESCALATED
           ▼
         RESOLVED
 ```
@@ -127,6 +130,31 @@ Full rationale, including why a prompt fix alone was insufficient and why "name 
 The absence check exists because omission used to be the quiet case. `GetConsumerLagInput.consumer_group` carries `default="worker-dispatcher"`, mirroring the platform's published input schema — so a verify leg of `get_consumer_lag` with no arguments probed `worker-dispatcher` no matter which consumer group the action had just restarted, read a healthy lag off an untouched consumer, and resolved the incident. The default is legitimate and stays (the contract snapshot pins it); the plan layer is where the agent's own "say which resource you mean" requirement belongs. Full rationale in [ADR 0024](ADR/0024-plan-arguments-name-their-resource.md).
 
 Note the asymmetry with the read-only investigation leg, which *may* default-fill: an alert that names no consumer group opens with a probe of the platform's default group. That leg mutates nothing, so a mis-aimed read cannot itself produce a false RESOLVED — but it is not free either, and the next section is what that cost turned out to be.
+
+### A stabilizer is not a resolution
+
+The loop has one transition to `RESOLVED` and, until 2026-09-07, one condition on it: the verification judge answered `verified`. The judge is asked *did the action do what the plan expected?* The state machine read that as an answer to *is the incident over?*
+
+For six of the seven Tier-1 tools those questions have the same answer. For `pause_dag` they come apart, and the platform's own description is what pulls them apart: "a successful pause reads as `paused=true` with children still in `waiting`". That is the reading a **working** pause produces. A judge holding the expectation "children should stop advancing" answers `verified`, correctly — and the run reported RESOLVED on a chain that was exactly as stuck as before, and that would be stuck again when the 10-minute TTL lapsed and the held children promoted back behind the same dead-lettered root.
+
+Nothing in the guard stack caught it. Right tier, real tools, resources named and evidence-sourced on both legs, and `VERIFY_PROBE_FOR_ACTION` maps `pause_dag` → `get_dag_state.job_id` — which is correct. `get_dag_state` genuinely observes what a pause changes. Observing the action was never the problem; the problem is that the action, observed and working, had not fixed anything.
+
+| Check | Rejects | Failure it prevents |
+|---|---|---|
+| `RESOLUTION_CLASS` at the `RESOLVED` transition | a run resolving on a verified action whose only effect is to hold the system still | reporting a fix that fixed nothing, and closing the incident on a timer nobody is watching |
+
+`Resolution.STABILIZES` says a verified success holds the incident still and leaves its cause in place; `Resolution.RESOLVES` says it removes the cause. `pause_dag` is the only stabilizer on the current surface.
+
+Four properties:
+
+- **It runs after execution, not at plan time.** A stabilizer is a legitimate plan — halting promotion while a human decides is sometimes the only safe move. It executes, its verify leg runs and is judged, and only then does the class decide the terminal state. Refusing it at plan time would remove the capability *and* throw away the evidence that the stabilization landed, which is the most useful thing the briefing carries.
+- **Silence is not "resolves".** `resolution_class_of` raises `PolicyCoverageError` for a Tier-1 tool with no entry, and `tests/unit/test_policies.py::TestResolutionClass` fails on any gap — the same posture ADR 0003 took for tiering, for the same reason: `pause_dag` was mis-handled precisely because nobody had written down that it was different, so it inherited the default every other tool had. At the enforcement point the error escalates rather than crashing: fail closed toward the human, because the wrong way to resolve a missing safety decision is to resolve the incident.
+- **The rationale is the briefing text.** Each entry carries a written reason, and `_stabilized_reason` quotes it verbatim into the escalation reason, which `briefing.py` reads into `EscalationBriefing.escalation_reason`. For a pause the on-call is told the action worked, the chain is unchanged, the pause self-expires on a TTL, and it blocks the replay while it holds. The marker also carries `attempted_tool`, so `attempted_action` is populated and the briefing writer — told never to recommend repeating an attempted action — cannot suggest pausing again instead of fixing.
+- **The escalation is not a failure.** The reason opens `STABILIZED, NOT RESOLVED`. A reader who cannot tell a deliberate handover from a botched remediation will discount both.
+
+`pause_dag` is worth reading twice for a second reason, which is why the saga scenario forbids it outright: the platform **refuses to replay any job inside a paused DAG** (`find_blocking_pause`). A pause does not merely fail to un-stick a chain — while it holds, it breaks the fix.
+
+Found by a read-only pre-spend sweep, not by a red run: nothing had ever executed a `pause_dag` plan live. Full rationale in [ADR 0026](ADR/0026-a-stabilizer-is-not-a-resolution.md).
 
 ### The handoff must have read what the alert named
 

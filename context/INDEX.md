@@ -22,6 +22,7 @@ An archive listed as *transcript only* means the raw session data is on disk und
 | 2026-08-16 | `2026-08-16-stage-1-and-remediation-readiness.zip` | **Five shapes closed, three more found by running it.** PRs #133–#143 closed every blocker the readiness sweep named (807 → 1027 tests). Then a free dress rehearsal against the live stack found three defects invisible in source — including that `failed_traces_scan` passed the trusted 26/26 run **without ever calling `search_traces`**. Read `SUMMARY.md` §"What is still wrong" before planning the paid run. |
 | 2026-08-21 | *in progress* | **Six parallel builders + a read-only reliability sweep.** cmd #145 canned-only scenarios (exit 8, pre-spend), #146 run-archive filesystem locking (ADR 0021), #147 evidence tool-scoping — **16 cross-satisfiable evidence tokens across 15 of 38 scenarios**, not just the one known defect. plat #146 `get_cache_key_info`, #147 pins+timestamp re-baseline, #148 `create_stuck_dag`. The 14-finder reliability sweep lives at `audit-ws/sweeps/reliability-sweep.js` — see `sweeps/README.md`; run IDs change, the script is the artifact. |
 | 2026-08-30 → 09-07 | *transcript only* | **The paid live-eval sequence, and the first green remediation.** Read-only pass `cde5a14485c3` 25/26 (`degraded 0`, exit 0 — PR #176's forward checkpointing is why that exit code means something). Then four runs of `remediate_consumer_lag_success`: A wrong-target (→ #177 `ALERT_SUBJECT_PROBES` + planner rules), B honest escalation on a stale-but-static lag (→ #178 reprobe 75s, precondition lag>=20 over 10×15s), C **aborted pre-spend** on a world audit, D `16ae3c7a4c9d` **green on all five dimensions** — the project's first. Also: a ~$2 read-only stage thrown away because it was hand-rolled instead of `make eval-smoke`, and a fresh world that alerts on its own fixtures (→ #180). Full record and lessons: [`docs/lessons/live-eval-sequence-2026-09.md`](../docs/lessons/live-eval-sequence-2026-09.md). |
+| 2026-09-07 | *transcript only* | **A stabilizer is not a resolution** (ADR 0026). Pre-spend sweep of `remediate_runaway_saga_success` found every steering layer — planner prompt, `FIX_MAP`, and the pinned `get_dag_state` / `replay_dlq_by_ids` descriptions — pointing at `pause_dag`, the one tool that scenario forbids (the platform refuses to replay a job inside a paused DAG, so pausing *breaks* the fix). A verified pause would have graded RESOLVED on a still-stuck chain, and every plan guard admitted it. Fix: `RESOLUTION_CLASS` classifies every Tier-1 action resolve-or-stabilize and a verified stabilizer now escalates; `FIX_MAP[RUNAWAY_SAGA]` → `replay_dlq_by_ids`; prompt gained a stuck-chain section countering the two pinned descriptions by name; `TestFixMapMatchesTheSuite` cross-checks the map against the corpus. **Left open on purpose:** nothing observable distinguishes `saga_stuck` from `remediate_runaway_saga_success` — see [`docs/lessons/live-eval-sequence-2026-09.md` §8](../docs/lessons/live-eval-sequence-2026-09.md). |
 
 ## Things a future session should not have to rediscover
 
@@ -83,6 +84,13 @@ Promoted out of the archives because they cost real time or money the first time
   before the spend, not into a workaround.** The trap had been written down 19 days earlier and
   nobody was routed to it — hence the runbook's pre-run checklist now opens by pointing at the
   gotchas ledger as step 1.
+
+- **Offline eval never loads a prompt, and `FIX_MAP`'s values are never read at runtime.** Canned
+  scenarios replay recorded planner output, so the prompt is a live-only surface and 38/38 says
+  nothing about it; and the handoff gate reads only `top.category not in FIX_MAP`, so a wrong value
+  in that map breaks no test. Both were stale in the same direction for the whole life of PR #173
+  (2026-09-07). Before a paid run, read the prompt the live agent will load against the scenario it
+  will be graded by — the regression suite structurally cannot do it for you.
 
 ## Standing rules that outlive any session
 

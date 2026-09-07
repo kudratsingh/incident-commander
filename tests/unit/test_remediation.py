@@ -1531,3 +1531,234 @@ class TestVerifyLegObservesTheAction:
         result = make_llm_plan(llm, model=_MODEL)(run, _now())
 
         assert result.budget.tool_calls_used == run.budget.tool_calls_used
+
+
+_STUCK_ROOT = "a2412a54-65f0-5258-95ab-5c168a15df64"
+
+
+def _dag_mcp(*, paused: bool, root_status: str, child_status: str) -> _FakeMCP:
+    """A ``get_dag_state`` probe over a three-node chain: parent → root → child."""
+
+    payload = {
+        "seed_id": _STUCK_ROOT,
+        "nodes": [
+            {
+                "id": _STUCK_ROOT,
+                "type": "bulk_api_sync",
+                "status": root_status,
+                "retry_count": 3 if root_status == "dead_letter" else 0,
+                "created_at": "2026-08-31T01:21:46.584955Z",
+            },
+            {
+                "id": "dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9",
+                "type": "bulk_api_sync",
+                "status": "completed",
+                "retry_count": 0,
+                "created_at": "2026-08-31T01:21:46.584955Z",
+            },
+            {
+                "id": "3e3bd4c1-21f6-5b84-af0c-0d921ff711ca",
+                "type": "bulk_api_sync",
+                "status": child_status,
+                "retry_count": 0,
+                "created_at": "2026-08-31T01:21:46.584955Z",
+            },
+        ],
+        "edges": [
+            {"from_id": _STUCK_ROOT, "to_id": "dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9"},
+            {"from_id": "3e3bd4c1-21f6-5b84-af0c-0d921ff711ca", "to_id": _STUCK_ROOT},
+        ],
+        "paused": paused,
+        "paused_expires_in_seconds": 600 if paused else None,
+        "paused_by": _STUCK_ROOT if paused else None,
+    }
+
+    def handler(_name: str, _args: Mapping[str, Any]) -> ToolResult:
+        return ToolResult(content=[{"type": "text", "text": json.dumps(payload)}], is_error=False)
+
+    return _FakeMCP(handler)
+
+
+class TestStabilizeOnlyActionsNeverResolve:
+    """A verified stabilizer escalates. It does not resolve.
+
+    The judge is asked "did the action work?", which is not "is the
+    incident over?". For ``pause_dag`` the two answers come apart, and the
+    platform's own tool description is what pulls them apart: it says a
+    successful pause "reads as paused=true with children still in
+    `waiting`". Hand that reading to a judge holding an expectation of
+    "children stop advancing" and the honest verdict is ``verified`` — on a
+    chain that is exactly as stuck as it was, and that will be stuck again
+    the moment the 10-minute TTL lapses. There is no judge prompt that
+    fixes this, because the judge is not wrong.
+
+    ``policies.RESOLUTION_CLASS`` is the separation, and this class is the
+    proof that it reaches the one RESOLVED transition the state machine
+    has (``remediation.transition_verify``). Before it, the same inputs
+    produced ``IncidentState.RESOLVED``.
+
+    Found by a pre-spend sweep of ``remediate_runaway_saga_success`` on
+    2026-09-07, before the scenario's first paid run. Nothing had executed
+    a ``pause_dag`` plan live; the defect was reachable and unexercised.
+    """
+
+    def _pause_plan(self, **overrides: Any) -> dict[str, Any]:
+        base = {
+            "target_hypothesis": "stuck_saga_node",
+            "action_tool": "pause_dag",
+            "action_arguments": {"root_job_id": _STUCK_ROOT},
+            "verify_tool": "get_dag_state",
+            "verify_arguments": {"job_id": _STUCK_ROOT},
+            "verify_expectation": "paused=true with the children still waiting",
+        }
+        base.update(overrides)
+        return base
+
+    def _verified(self) -> CannedLLMClient:
+        return CannedLLMClient(
+            [
+                {
+                    "verdict": "verified",
+                    "reasoning": (
+                        "paused=true with paused_expires_in_seconds set and the "
+                        "descendant still in waiting — the pause landed exactly "
+                        "as the tool documents it."
+                    ),
+                }
+            ]
+        )
+
+    def test_verified_pause_escalates_instead_of_resolving(self) -> None:
+        transition = make_llm_verify(
+            _dag_mcp(paused=True, root_status="dead_letter", child_status="waiting"),
+            self._verified(),
+            model=_MODEL,
+        )
+        run = _run_state(state=IncidentState.VERIFYING, remediation_plan=self._pause_plan())
+
+        result = transition(run, _now())
+
+        # Before `RESOLUTION_CLASS`, these exact inputs produced
+        # `IncidentState.RESOLVED`.
+        assert result.state is IncidentState.ESCALATED
+
+    def test_the_judge_still_answered_verified(self) -> None:
+        """The escalation is a policy decision, not a re-judged verdict.
+
+        Worth pinning separately: if a later change made this pass by
+        making the judge say ``not_verified``, the class would go green
+        while the actual guarantee — "a working stabilizer still
+        escalates" — had been replaced by "a stabilizer is graded as a
+        failure", which is a different and wrong claim.
+        """
+        transition = make_llm_verify(
+            _dag_mcp(paused=True, root_status="dead_letter", child_status="waiting"),
+            self._verified(),
+            model=_MODEL,
+        )
+        run = _run_state(state=IncidentState.VERIFYING, remediation_plan=self._pause_plan())
+
+        result = transition(run, _now())
+
+        judge_entries = [e for e in result.evidence if e.tool_name == "_verify_judge"]
+        assert judge_entries, "the verify judge should still have run"
+        assert judge_entries[-1].result_summary.startswith("verified:")
+
+    def test_escalation_reason_says_stabilized_and_names_the_root(self) -> None:
+        transition = make_llm_verify(
+            _dag_mcp(paused=True, root_status="dead_letter", child_status="waiting"),
+            self._verified(),
+            model=_MODEL,
+        )
+        run = _run_state(state=IncidentState.VERIFYING, remediation_plan=self._pause_plan())
+
+        result = transition(run, _now())
+
+        reason = result.evidence[-1].result_summary
+        assert "STABILIZED, NOT RESOLVED" in reason
+        # The id a human has to make a decision about, not a generic noun.
+        assert _STUCK_ROOT in reason
+        # And why: the rationale is quoted from the policy, so the briefing
+        # carries the TTL and the replay refusal rather than "escalated".
+        assert "self-cleans on its TTL" in reason
+        assert "refuses to replay any job inside a paused DAG" in reason
+
+    def test_the_executed_action_reaches_the_briefing(self) -> None:
+        """``attempted_action`` must survive a stabilize-only escalation.
+
+        ``agent/briefing.py`` reads ``attempted_tool`` off the terminal
+        marker to tell the on-call which Tier-1 action already fired, and
+        the briefing writer is told never to recommend repeating it. This
+        is the escalation where that matters most: a pause is holding
+        right now and expires on a timer, so "pause it" is the one
+        recommendation that must not come back.
+        """
+        transition = make_llm_verify(
+            _dag_mcp(paused=True, root_status="dead_letter", child_status="waiting"),
+            self._verified(),
+            model=_MODEL,
+        )
+        run = _run_state(state=IncidentState.VERIFYING, remediation_plan=self._pause_plan())
+
+        result = transition(run, _now())
+
+        marker = result.evidence[-1]
+        assert marker.tool_name == "_remediation_escalate"
+        assert marker.arguments["attempted_tool"] == "pause_dag"
+        assert marker.arguments["attempted_arguments"] == {"root_job_id": _STUCK_ROOT}
+
+    def test_the_action_is_not_billed_twice(self) -> None:
+        """``make_remediate`` already charged the action; this leg must not.
+
+        Only the verify probe is new spend here. ``_escalate_remediation``
+        takes ``executed=True`` for the one branch where the platform acted
+        and no entry was written — this is not that branch, and charging it
+        would bill a run for work it already paid for and inflate
+        ``remediation_attempts`` past the single-attempt invariant.
+        """
+        transition = make_llm_verify(
+            _dag_mcp(paused=True, root_status="dead_letter", child_status="waiting"),
+            self._verified(),
+            model=_MODEL,
+        )
+        run = _run_state(
+            state=IncidentState.VERIFYING,
+            remediation_plan=self._pause_plan(),
+            remediation_attempts=1,
+        )
+
+        result = transition(run, _now())
+
+        assert result.budget.tool_calls_used == run.budget.tool_calls_used + 1
+        assert result.remediation_attempts == 1
+
+    def test_a_resolving_action_on_the_same_probe_still_resolves(self) -> None:
+        """The control. The class is about the ACTION, not about DAG reads.
+
+        Same verify tool, same probe response shape, same judge verdict —
+        only the action differs. Without this, a regression that simply
+        stopped ``get_dag_state`` verifications from ever resolving would
+        leave every assertion above green.
+        """
+        plan = self._pause_plan(
+            action_tool="replay_dlq_by_ids",
+            action_arguments={"job_ids": [_STUCK_ROOT]},
+            verify_expectation="no node left in dead_letter and the descendant promoted",
+        )
+        transition = make_llm_verify(
+            _dag_mcp(paused=False, root_status="completed", child_status="completed"),
+            CannedLLMClient(
+                [
+                    {
+                        "verdict": "verified",
+                        "reasoning": "root out of dead_letter, held descendant promoted",
+                    }
+                ]
+            ),
+            model=_MODEL,
+        )
+        run = _run_state(state=IncidentState.VERIFYING, remediation_plan=plan)
+
+        result = transition(run, _now())
+
+        assert result.state is IncidentState.RESOLVED

@@ -378,6 +378,127 @@ own PR.
 
 ---
 
+## 8. The fix that fixed nothing, caught before the money
+
+**`remediate_runaway_saga_success`, 2026-09-07. No archive: nothing ran.**
+
+The scenario was staged and held for the user's go. A read-only pre-spend sweep
+read the steering the agent would actually follow — the prompt, `FIX_MAP`, and
+the pinned tool descriptions — rather than the machinery around it, and found
+that every one of them pointed at `pause_dag`.
+
+That scenario **forbids** `pause_dag`, and has since PR #173, for a reason
+stronger than "it does not help": the platform refuses to replay any job inside
+a paused DAG (`find_blocking_pause`). Pausing first makes the real fix return
+`ok: false` per id. #173 redesigned the scenario around replaying the
+dead-lettered root and never touched the prompt or the map.
+
+**Every guard would have admitted the pause.** Right tier, real tools, resource
+named on both legs and evidence-sourced, and §7's brand-new
+`VERIFY_PROBE_FOR_ACTION` maps `pause_dag` → `get_dag_state.job_id` — correctly,
+because `get_dag_state` genuinely observes what a pause changes.
+
+Then the judge. The platform's own description of `get_dag_state` says:
+
+> This is the verification surface for pause_dag — a successful pause reads as
+> `paused=true` with children still in `waiting`.
+
+Hand that reading to a judge holding "children should stop advancing" and the
+verdict is `verified`, honestly. **RESOLVED, on a chain as stuck as it started,
+with all five dimensions green** — and stuck again ten minutes later when the
+pause TTL lapsed and the held children promoted back behind the same dead root.
+
+### Note which polarity we were handed, again
+
+§7's run failed *loudly*, because its verify signal could not move. This one
+would have failed *silently*: the signal moves exactly as promised, and the
+promise is about the wrong thing. That is three entries in this document now
+turning on the same axis — what the harness makes observable — and this is the
+first where the observable was working perfectly and still meant nothing.
+
+### Why 38/38 could not have caught it
+
+Two blind spots that compound, and both are worth carrying to the next repo:
+
+* **`FIX_MAP`'s values are never read at runtime.** Only its keys are. A wrong
+  value is invisible to every test.
+* **Offline eval never loads a prompt.** Canned runs replay recorded planner
+  output. The prompt is a live-only surface, so the suite that exists to gate
+  behaviour changes is blind to the file that most directly causes them.
+
+> **A green regression suite is not evidence about a prompt.** Before a paid
+> run, read the prompt the live agent will actually load, against the scenario
+> it will be graded by — the suite cannot do it for you.
+
+### The rule
+
+**Ask what a verified success is worth, not only whether it can be verified.**
+Concretely, alongside "what is the laziest trajectory that passes this": *if the
+expected action succeeded perfectly and its effect then expired, would the
+incident be back?* If yes, it is a stabilizer, and the honest terminal state is
+`escalated`.
+
+**Fix →** [ADR 0026](../ADR/0026-a-stabilizer-is-not-a-resolution.md):
+`RESOLUTION_CLASS` classifies every Tier-1 action resolve-or-stabilize (total
+over the slice, coverage-tested), and the one `RESOLVED` transition escalates a
+verified stabilizer with a briefing that names the root still needing a
+decision. `FIX_MAP[RUNAWAY_SAGA]` → `replay_dlq_by_ids`; the prompt gained a
+stuck-chain section that routes to replaying the root and counters the two
+pinned descriptions by name. `TestFixMapMatchesTheSuite` is the corpus check
+that would have caught the drift.
+
+### The open one: nothing the agent can see tells the two saga scenarios apart
+
+Left unfixed deliberately, and this is the part to read before the saga pair's
+paid runs. The two scenarios expect **opposite** behaviour — escalate and touch
+nothing, versus replay the root — from evidence that is identical:
+
+| | `saga_stuck` | `remediate_runaway_saga_success` |
+|---|---|---|
+| alert `source` / `severity` / `fingerprint` | `platform.dag` / `critical` / `saga_stalled` | identical |
+| alert payload beyond that | `job_id` only | `job_id` only |
+| `get_dag_state` root | `dead_letter`, `retry_count: 3` | identical |
+| descendants | one `waiting`, one `completed` parent | identical |
+| `paused` | `false` | `false` |
+| canned hypothesis | `runaway_saga` / `stuck_saga_node` / 0.85 | identical |
+| expected terminal state | `escalated`, every Tier-1 tool forbidden | `resolved` via `replay_dlq_by_ids` |
+
+`get_dag_state`'s node model is five fields — `id`, `type`, `status`,
+`retry_count`, `created_at`. No `remediation_hint`, no `error_message`, no saga
+id (`create_stuck_dag` deliberately sets none, so the saga coordinator never
+cancels the descendants). The chain name lives only in `jobs.payload`, which no
+non-chaos tool returns.
+
+The **one** thing that differs is the root's `remediation_hint`, and it points
+the wrong way. `remediate_runaway_saga_success` seeds `replay_safe`;
+`saga_stuck` takes the hook's default, `wait_and_replay`. But `wait_and_replay`
+is not "a human should decide" — the platform's own routing, and this repo's
+planner prompt, both say it means *replay with `delay_seconds` set*. That is
+still a Tier-1 action, and `saga_stuck` forbids all of them. So the only
+observable difference justifies a different **action**, not the absence of one.
+It is also readable only through `list_dlq_messages`, which takes no job-id
+filter — the agent would have to page the DLQ or guess a category.
+
+**This is a scenario-design defect, not a prompt gap**, so no discriminator was
+invented for it. Nothing was changed in either scenario.
+
+The fix, when someone takes it, is one line and the platform points at it
+already. `create_stuck_dag`'s `remediation_hint` argument says `human_required`
+"makes the chain unrecoverable through the replay guardrails — reserve it for
+escalation drills." Seed `saga_stuck` with
+`chaos_setup.arguments.remediation_hint: human_required` and its expected
+behaviour becomes justified by something the agent can read: a `human_required`
+root is one the platform refuses to auto-replay, so escalating is the only move
+left. Then, and only then, is "replay only when the root's hint is
+`replay_safe`; a `human_required` root escalates" a rule worth putting in the
+prompt. It costs `saga_stuck` one extra read (its cap is 11) and it changes a
+scenario queued for a paid run, so it is the user's call, not a builder's.
+
+Until that lands, `saga_stuck` grades whether the investigation planner happens
+to choose caution on evidence that equally supports acting. Nothing structural
+holds it there — `runaway_saga` is in `FIX_MAP`, so the handoff is permitted —
+which means a green run is a green *sample*, not a green guarantee.
+
 ## Summary: what each failure was actually caused by
 
 | # | Run / event | Looked like | Actually was | Fix |
@@ -390,6 +511,7 @@ own PR.
 | 6 | Fresh boot | spurious alert | Evaluator reading seeded fixtures as traffic | PR #180; WO-R2-132 |
 | 7 | PR #178 | 6-line docs PR | 342 files swept by `git add -A` | Explicit paths; work in a worktree |
 | 8 | `remediate_stale_cache_success` (`7acd2b441961`) | eventual consistency (auto-label) | **Scenario + prompt asked for a signal the world cannot produce** — hits frozen at 209 across six polls | ADR 0025; override recorded in §7 |
+| 9 | `remediate_runaway_saga_success` (not run) | a staged, ready scenario | **Prompt + `FIX_MAP` steered at the one tool the scenario forbids**; a verified pause would have graded RESOLVED on a still-stuck chain | ADR 0026; §8 |
 
 **The through-line.** Six of these eight are failures of *procedure and
 environment*, not of the agent — only rows 2 and 3 are genuine agent defects,

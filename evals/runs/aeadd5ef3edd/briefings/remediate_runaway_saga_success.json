@@ -1,0 +1,33 @@
+{
+  "incident_id": "afb409f9-ce1d-4ccf-b966-38eb1bd27b31",
+  "final_state": "resolved",
+  "alert_summary": "source=platform.dag severity=critical fingerprint=saga_stalled",
+  "escalation_reason": "",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_dag_state",
+      "summary": "{\"seed_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"nodes\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"retry_count\":3,\"created_at\":\"2026-09-07T12:52:48.494341Z\"},{\"id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-09-07T12:52:48.494341Z\"},{\"id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-09-07T12:52:48.494341Z\"}],\"edges\":[{\"from_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"to_id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\"},{\"from_id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"to_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}"
+    },
+    {
+      "tool": "list_dlq_messages",
+      "summary": "{\"total\":4,\"items\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-07T12:52:48.494341Z\",\"updated_at\":\"2026-09-07T12:52:48.494341Z\",\"trace_id\":\"a1fd3e60-03c6-5584-8e24-c82aefa90ae0\",\"triage\":null,\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":null,\"extra\":null},{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-07T12:15:23.331322Z\",\"updated_at\":\"2026-09-07T12:15:29.331322Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-07T12:15:29.331322Z\",\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-07T11:58:23.331322Z\",\"updated_at\":\"2026-09-07T11:58:57.331322Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-07T11:58:57.331322Z\",\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-07T11:43:23.331322Z\",\"updated_at\":\"2026-09-07T11:43:39.331322Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-07T11:43:39.331322Z\",\"extra\":null}]}"
+    },
+    {
+      "tool": "replay_dlq_by_ids",
+      "summary": "{\"requested\":1,\"replayed\":1,\"scheduled\":0,\"failed\":0,\"results\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"ok\":true,\"error\":null,\"scheduled\":false,\"execute_at\":null}]}"
+    },
+    {
+      "tool": "get_dag_state",
+      "summary": "{\"seed_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"nodes\":[{\"id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"type\":\"bulk_api_sync\",\"status\":\"pending\",\"retry_count\":0,\"created_at\":\"2026-09-07T12:52:48.494341Z\"},{\"id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-09-07T12:52:48.494341Z\"},{\"id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-09-07T12:52:48.494341Z\"}],\"edges\":[{\"from_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\",\"to_id\":\"dbfb7a0c-cccb-5ae7-b2ac-f386f830a9e9\"},{\"from_id\":\"3e3bd4c1-21f6-5b84-af0c-0d921ff711ca\",\"to_id\":\"a2412a54-65f0-5258-95ab-5c168a15df64\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}"
+    }
+  ],
+  "findings": "The stalled saga was caused by node a2412a54 entering dead_letter status after 3 consecutive UpstreamTimeout failures against partner-api.internal/v2/sync; a DLQ replay was successfully executed (1/1 replayed, 0 failed), and a subsequent DAG state check confirmed the node transitioned from dead_letter to pending with retry_count reset to 0. Three additional unrelated DLQ messages remain (upstream timeouts, a rate-limit hit, and an SMTP connection refusal) and have not been replayed.",
+  "recommendation": "Confirm that node a2412a54 has progressed beyond pending to completed in the DAG, then assess the three remaining DLQ items — particularly the SMTP connection refusal on smtp.mailer.internal:587, which may indicate a VPC egress or service health issue independent of this incident.",
+  "budget_used": {
+    "tool_calls": 4,
+    "tokens": 39250,
+    "wall_seconds": 42.629596,
+    "usd": "0.121503"
+  }
+}

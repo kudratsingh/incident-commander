@@ -463,3 +463,104 @@ is the grader-shaped one:
 > assertion must reference that resource by value — otherwise a correct-looking
 > trajectory about an unrelated problem passes, and the suite's green is a
 > statement about activity rather than about correctness.
+
+---
+
+## F-007 — A slip and a wrong belief were given the same disposition
+
+**Where it bit.** Live paid run `5c8895771fbd`, `dlq_wait_and_replay_success`,
+2026-09-07. Red on outcome, action and evidence. ~$0.11.
+
+**What happened.** The remediation planner listed the DLQ filtered to
+`wait_and_replay`, grouped the two rows by the dependency each named rather than
+by their shared hint, derived a 300-second delay from the row that stated no
+wait, wrote the derivation into `action_rationale`, and picked a verify leg with
+the one expectation in the suite that is satisfied by nothing happening. Then it
+emitted the second job id as `97d91272-0000-0000-0000-000000000000` for a row
+whose id is `97d91272-9774-5b8e-980b-f0d2fa6ed619` — first block correct,
+remainder zero-filled. The evidence-sourcing guard refused the plan, correctly,
+and the run escalated **after one planner call**. Nothing executed.
+
+**Why it is a finding and not a bad roll.** The same run quotes the correct id in
+three other places: its own `action_rationale`, the escalation briefing it wrote
+(twice, in full, with the instruction to use "the exact IDs returned by
+`list_dlq_messages`"), and the briefing judge's reasoning, which scored
+groundedness 1.0. The model held the right value and copied it out wrong once.
+
+**The defect.** Seven guards run on a remediation plan. Three refuse and re-ask
+once; three escalate on the first offence. The code's own justification for the
+split read:
+
+> ...the three argument guards ... escalate because a mis-named resource means
+> the planner is reasoning about the wrong object rather than merely checking the
+> right object the wrong way.
+
+That is a claim about *why* an argument is wrong, inferred from the fact *that*
+it is wrong. The two causes are distinguishable — a run whose briefing and
+rationale name the right resource did not misunderstand it — and the guard did
+not distinguish them, so it applied the disposition for the worse cause to both.
+The cheap repair was available and unused: PLANNING is one LLM call with no tool
+budget, and every candidate the planner could want was already in the evidence
+it had read one call earlier.
+
+**Two traps found while fixing it, both of which would have shipped a
+correct-looking fix that was wrong.**
+
+1. *A mangled id fails more than one guard, and the other guard's advice is
+   harmful here.* The unread-row guard (ADR 0027) also refuses this plan — no
+   listing carries a row for an id that does not exist — and its steer says to
+   **drop** the ids you have no row for. Obeyed, it converts a two-row delayed
+   replay into a one-row one, failing the scenario's `scheduled equals 2` exactly
+   as escalating did. When several guards can fire on one defect, the ORDER in
+   which they are diagnosed decides what the agent does next, and only one of the
+   orders is right.
+2. *The obvious structural fix does not cover the observed case.* "Validate the
+   id as a UUID at parse time" is worth doing and catches truncation, wrong
+   length and non-hex — but `97d91272-0000-0000-0000-000000000000` is canonical
+   8-4-4-4-12 hex. Shape and provenance are different questions. A fix that reads
+   as complete because it is structural is still incomplete.
+
+**The other half: three tests that were green for the wrong reason.** Changing
+the disposition exposed them. `TestEvidenceSourcedArgs`' three rejection tests
+each built a fake LLM client with **one** canned plan and asserted the run
+ESCALATED. Under the new behaviour the plan is refused, the fake has nothing
+left, and the run escalates on `planner LLM invalid: no more canned responses` —
+so all three stayed green while the guard under test decided nothing. Verified
+empirically before fixing them, not assumed.
+
+**Seventh instance of one root, and it is the test-shaped sibling of F-001.**
+F-001 asserted a control nowhere; F-004's tests encoded the assumption rather
+than the contract; F-006's grader never named the subject. This one:
+
+> **A test that asserts a terminal state without asserting its cause passes for
+> any cause.** A one-response fake plus an assertion on the outcome is a test of
+> the fake, not of the code under test. Where a state is reachable by more than
+> one path — and an escalation always is — the assertion has to name which path,
+> or the test survives the removal of the thing it was written to protect.
+
+**And the finding-shaped half:**
+
+> **A guard that infers WHY an output is wrong from the fact THAT it is wrong
+> will mis-dispose one of the two causes.** "The argument is not evidence-sourced"
+> is compatible with a hallucination and with a copying slip; the run itself
+> carries the discriminator (does the prose agree with the arguments?). Where the
+> two causes want different dispositions and the check cannot tell them apart,
+> the safe default is the one that does not end the run — an offer costs one LLM
+> call and a wrong escalation costs the whole scenario.
+
+**Fix.** ADR 0030: the two argument-shape guards refuse and re-ask once, with the
+ids the run actually read enumerated back and a `did you mean <id>?` when the
+rejected value shares its first block with exactly one candidate (and no claim
+when it shares one with two). The harness offers candidates and never
+substitutes one — a run that repeats the mangled id escalates with no stored
+plan. `UUID_RESOURCE_FIELDS` is derived from `format: "uuid"` in each tool's own
+input schema rather than hand-listed. One prompt line, hashed and invariant-
+tested, including the clause that the ellipsis-abbreviated ids in the prompt's
+own worked example are for reading only — that example sits in the very section
+that produced the mangled plan.
+
+**Filed, not done:** evidence-row handles. The harness labels each recorded row
+(`dlq#2`), the planner selects labels, the harness resolves label → id on the
+wire, and no UUID is ever re-typed. That removes the surface rather than guarding
+it; it invalidates every canned plan fixture at once, so it wants its own PR and
+its own paid run.

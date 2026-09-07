@@ -275,6 +275,46 @@ class TestResourceArgFieldsCoverage:
             missing = fields - model_fields
             assert not missing, f"{tool}: {missing} not on input model"
 
+    def test_uuid_resource_fields_is_total_and_a_subset(self) -> None:
+        # ADR 0030. Total over the registry for the same reason
+        # RESOURCE_ARG_FIELDS is: an empty entry is a declared "no field here
+        # has a canonical shape", so a replay tool shipped tomorrow cannot
+        # inherit "any string is a valid id" by silence. Subset, because a
+        # field can only be shape-checked if it is a resource field at all.
+        from incident_commander.tools.policies import (
+            RESOURCE_ARG_FIELDS,
+            UUID_RESOURCE_FIELDS,
+        )
+        from incident_commander.tools.registry import TOOL_REGISTRY
+
+        assert set(UUID_RESOURCE_FIELDS) == set(TOOL_REGISTRY)
+        for tool, fields in UUID_RESOURCE_FIELDS.items():
+            assert fields <= RESOURCE_ARG_FIELDS[tool], tool
+
+    def test_the_uuid_map_is_derived_from_the_platform_contract(self) -> None:
+        """Anti-vacuity, and the reason this map is derived rather than typed.
+
+        Two ways for the derivation to be silently useless: it finds nothing
+        (a schema-shape assumption broke, so no plan is ever shape-checked and
+        `_malformed_resource_args` is dead code), or it finds everything (the
+        check fires on cache keys and trace ids, which have no canonical form,
+        and refuses every legitimate `invalidate_cache_key` plan). Both read as
+        green without an assertion on the contents, so name them.
+        """
+        from incident_commander.tools.policies import UUID_RESOURCE_FIELDS
+
+        assert UUID_RESOURCE_FIELDS["replay_dlq_by_ids"] == frozenset({"job_ids"})
+        assert UUID_RESOURCE_FIELDS["pause_dag"] == frozenset({"root_job_id"})
+        assert UUID_RESOURCE_FIELDS["mark_dlq_permanent"] == frozenset({"job_id"})
+        assert UUID_RESOURCE_FIELDS["get_dag_state"] == frozenset({"job_id"})
+        # Resource names with no canonical form. `get_trace.trace_id` is
+        # declared `maxLength: 255` and nothing else in the platform's own
+        # schema, and a cache key is free text — asserting a shape on either
+        # would be the agent inventing a contract the platform does not have.
+        assert UUID_RESOURCE_FIELDS["get_trace"] == frozenset()
+        assert UUID_RESOURCE_FIELDS["invalidate_cache_key"] == frozenset()
+        assert UUID_RESOURCE_FIELDS["restart_consumer_group"] == frozenset()
+
     def test_plan_scaffold_tools_name_no_resources(self) -> None:
         # The parametrized test below is only meaningful if the filler
         # leg contributes no findings of its own.

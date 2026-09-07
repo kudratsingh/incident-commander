@@ -696,6 +696,146 @@ one prompt rule, and a fourth derivation in `make world-dossier`. Found by
 reading a filed work order against the code rather than by a run, at zero cost.
 
 
+## 11. The plan that was right about everything except one character
+
+**Run:** `dlq_wait_and_replay_success`, invocation `5c8895771fbd`, 2026-09-07,
+archive under `evals/runs/`. Red on outcome, action and evidence. ~$0.11.
+
+This is the first red in the sequence that is neither a protocol error, nor a
+harness knob, nor a steering defect, nor a premise the lab could not satisfy.
+It is a **transcription slip**, and the reason it is worth a section is that
+the machinery around it treated a slip exactly as it treats a wrong belief.
+
+### What the agent did
+
+Nearly all of it right. Two calls in total:
+
+1. `list_dlq_messages(remediation_hint="wait_and_replay")` — two rows.
+2. the plan.
+
+The plan grouped the two rows **by the dependency each names** rather than by
+their shared hint, which is what §"Choosing `delay_seconds`" asks for:
+`partner-api.internal` with an explicit `retry-after: 120s`, and
+`smtp.mailer.internal` with a bare `ConnectionRefusedError` and no stated
+wait. It applied the dependency-down default of 300 s to the second, took the
+larger of the two per rule 6, and wrote the derivation into
+`action_rationale`. It chose `list_dlq_messages` to verify and wrote a
+`verify_expectation` saying the rows would **remain** listed with a future
+`execute_at` — the one expectation in this prompt satisfied by nothing
+happening, and the one the previous fix (ADR 0029) exists to get right.
+
+Then:
+
+```json
+"job_ids": ["af67d1b1-13f8-5a2c-8c44-66ec5564597d",
+            "97d91272-0000-0000-0000-000000000000"]
+```
+
+The second row's id is `97d91272-9774-5b8e-980b-f0d2fa6ed619`. First block
+correct, everything after it zero-filled.
+
+`_unsourced_resource_args` (ADR 0024) refused the plan — correctly, no
+listing carries that string — and the run escalated:
+
+> plan rejected before execution: resource argument(s) not evidence-sourced:
+> `replay_dlq_by_ids.job_ids='97d91272-0000-0000-0000-000000000000'`.
+> Resource names must be copied verbatim from the alert or tool results.
+
+**Nothing executed.** That part is the system working.
+
+### The thing that makes it a finding rather than a bad roll
+
+The model held the right id in three other places in the same run:
+
+* its own `action_rationale` names `97d91272` as the SMTP row;
+* the escalation briefing it wrote quotes
+  `97d91272-9774-5b8e-980b-f0d2fa6ed619` in full, twice, and tells the
+  operator to replay "using the exact IDs returned by `list_dlq_messages`";
+* the briefing judge scored groundedness **1.0** and quoted both correct ids
+  back in its reasoning.
+
+So this was not a wrong belief about which job to replay. The agent knew. It
+copied wrong into one field. And the run ended after **one** planner call.
+
+### Why the harness had no second chance to give
+
+Seven guards run on a plan. Three of them — verify-target (ADR 0025), unread
+row (ADR 0027), unlisted category (ADR 0028) — refuse and re-ask once. Three
+escalate on the first offence, and `make_llm_plan`'s own docstring said why:
+
+> ...the three argument guards above ... escalate because a mis-named
+> resource means the planner is reasoning about the wrong object rather than
+> merely checking the right object the wrong way.
+
+That sentence is the defect. **Reasoning about the wrong object and copying
+the right one out wrongly are two failures, and the guard could not tell them
+apart, so it gave both the harsher disposition.** The re-ask costs one LLM
+call and no tool budget, and everything the repair needs — the two ids — was
+already in the evidence one call earlier.
+
+### The trap in the re-ask that nearly made the fix wrong
+
+A mangled id **also** fails the unread-row guard: no listing carries a row for
+an id that does not exist. That guard's steer says *drop the ids you have no
+row for*. Followed here, it turns a two-row delayed replay into a one-row one
+— which fails the scenario's `scheduled equals 2` just as surely as
+escalating did. A correct-looking fix that produces a differently-wrong plan.
+So the ordering is load-bearing: the transcription diagnosis has to be
+reported first, and there is now a test whose only job is to pin that.
+
+### What the shape check can and cannot do
+
+The obvious structural reflex is "validate the id's shape at parse time", and
+it is worth doing — it catches truncation, wrong length, non-hex, and gives a
+message about the characters rather than about the whole value. But it does
+**not** catch this run:
+`97d91272-0000-0000-0000-000000000000` is canonical 8-4-4-4-12 hex. No regex
+can reject it. Shape and provenance are two different questions; the pair
+covers the field and neither does alone. Written down here because "add a UUID
+type" reads like a complete fix and is not one.
+
+### Three tests that were green for the wrong reason
+
+Changing the disposition exposed them. `TestEvidenceSourcedArgs`' three
+rejection tests each fed **one** canned plan and asserted ESCALATED. Under the
+new behaviour the first plan is refused, the client has nothing left, and the
+run escalates on `planner LLM invalid: no more canned responses` — so all
+three stayed green with the guard under test having decided nothing. They now
+feed two plans and assert that message is absent.
+
+The general shape, which is the fourth instance of it in this document: **a
+test that asserts a terminal state without asserting its cause passes for any
+cause.** A one-response fake plus an assertion on the outcome is a test of the
+fake.
+
+### Fix
+
+* **ADR 0030.** The two argument-shape guards refuse and re-ask once, with the
+  ids the run actually read enumerated back, plus a `did you mean <id>?` when
+  the rejected value shares its first block with exactly one candidate and no
+  claim at all when it shares one with two. Second offence escalates as
+  before, naming the mismatch.
+* **The harness never substitutes the id.** It offers; the model must emit the
+  correction itself. Pinned by its own test — a run that repeats the mangled
+  id escalates with no stored plan, so nothing downstream can read a
+  "corrected" id off the run state.
+* **`UUID_RESOURCE_FIELDS`,** derived from `format: "uuid"` in each tool's own
+  input schema rather than hand-listed, so it cannot drift from the contract
+  snapshot.
+* **One prompt line** (hash + invariant test): copy each id character for
+  character, never abbreviate/reconstruct/pad, ids written with an ellipsis in
+  the prompt are for reading only, and when in doubt replay by category. That
+  last clause matters because **this prompt's own worked example writes the
+  two ids as `af67d1b1…` and `97d91272…`, in the very section that produced
+  the mangled plan.** Spelling them out in full would risk the model copying
+  prompt ids into an unrelated incident, so the examples stay abbreviated and
+  the rule now says they are.
+* **Out of scope, filed:** evidence-row handles — the harness labels recorded
+  rows (`dlq#2`), the planner selects labels, the harness resolves them on the
+  wire, and no UUID is ever re-typed. That removes the surface instead of
+  guarding it.
+
+
 ## Summary: what each failure was actually caused by
 
 | # | Run / event | Looked like | Actually was | Fix |
@@ -711,6 +851,7 @@ reading a filed work order against the code rather than by a run, at zero cost.
 | 9 | `remediate_runaway_saga_success` (not run) | a staged, ready scenario | **Prompt + `FIX_MAP` steered at the one tool the scenario forbids**; a verified pause would have graded RESOLVED on a still-stuck chain | ADR 0026; §8 |
 | 10 | `remediate_runaway_saga_success` (still not run) | a staged, *corrected*, twice-swept scenario | **The corrected fix was never checked for safety**: the agent would replay a dead-lettered root knowing only that it was dead-lettered, because `get_dag_state` carries no `remediation_hint` — and six guards admitted the plan | ADR 0027; §9 |
 | 11 | The DLQ category scenarios (not run) | a rule already closed by ADR 0027 | **The by-id guard is inert for a call that names a filter** — a bulk `replay_dlq_by_category` by a run that had listed nothing was admitted by seven guards, and three scenarios' claims could not tell act-then-read from read-then-act | ADR 0028; §10 |
+| 12 | `dlq_wait_and_replay_success` (`5c8895771fbd`) | a red remediation run | **A transcription slip, escalated like a judgement error**: the plan derived the right delay from the right rows and then zero-filled one job id's trailing blocks; the argument guard had no re-ask to give, so one planner call ended the run | ADR 0030; §11 |
 
 **The through-line.** Six of these ten are failures of *procedure and
 environment*, not of the agent — only rows 2 and 3 are genuine agent defects,
@@ -719,10 +860,22 @@ attributing it to the model. Before you accept a red live result, establish that
 the world was clean, the invocation was the runbook's, and the knobs let the
 agent see the truth — in that order. Only then is the result about the agent.
 
-(The count said "eight" until row 10 landed, and row 11 came after that; each
-arrived once the prose was written, which is the five-stale-copies problem in
-miniature and is why the counts are corrected in place rather than left to be
-re-derived. Read "six of these ten" above as six of eleven.)
+(The count said "eight" until row 10 landed, row 11 came after that, and row 12
+after that; each arrived once the prose was written, which is the
+five-stale-copies problem in miniature and is why the counts are corrected in
+place rather than left to be re-derived. Read "six of these ten" above as six of
+twelve.)
+
+**Row 12 is a third genuine agent defect, and it is not the same kind as rows 2
+and 3.** Those two are reasoning failures — the agent believed the wrong thing
+about which resource mattered. Row 12's agent believed everything correctly and
+mis-copied a single field, which is a failure of *execution*, and it needs a
+different remedy: rows 2 and 3 were fixed by making the agent establish a
+premise it had skipped, row 12 by giving it a second chance it had never been
+offered. Keep the two apart when reading a red run. The question "was the model
+wrong, or did the model fumble?" is answerable from the archive — check whether
+the briefing and the `action_rationale` agree with the arguments — and the two
+answers point at opposite fixes.
 
 Rows 9, 10 and 11 are a third kind, and they are the three that cost nothing:
 **steering defects, found by reading the instructions the agent would actually

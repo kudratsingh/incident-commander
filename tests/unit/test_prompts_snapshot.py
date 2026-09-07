@@ -36,7 +36,7 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("2fbebe9dcd49d48e41a580b1093f8e66cdb063482ea78ee5873be2eaa3dc0eda"),
     "investigation_planner": ("f5ff4ef191b4a7581d8e41b9e5a32563c2f683ab357c0e329384922ce7c5b9d7"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
-    "remediation_planner": ("7bb6c2a93c409830e5be5498b1b7bdf9717bb786486fc71b5ba53dfd90110d4d"),
+    "remediation_planner": ("ac6769f16d046572d8d8e9b079025b4b38152abda5524a334af93c070b65c564"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
 }
 
@@ -377,6 +377,32 @@ class TestRemediationPlannerInvariants:
         content = load_prompt("investigation_planner")
         assert "not remediable until you have read its dead-letter row" in content
         assert "A null hint is UNKNOWN, not replay-safe" in content
+
+    def test_ids_are_copied_character_for_character(self) -> None:
+        # The steering half of ADR 0030. The structural half is
+        # `remediation._malformed_resource_args` +
+        # `_unsourced_resource_args`, which now refuse and re-ask with the
+        # evidence's own ids quoted back; this is the rule meant to stop the
+        # planner emitting a mangled id in the first place.
+        #
+        # Live run `5c8895771fbd` is what this pins. The prompt already said
+        # "never re-type, trim, or abbreviate", and the planner still emitted
+        # `97d91272-0000-0000-0000-000000000000` for a row whose id is
+        # `97d91272-9774-5b8e-980b-f0d2fa6ed619` — the first block right and
+        # the rest zero-filled. "Do not abbreviate" does not cover padding a
+        # value out to the right shape, which is what makes the added clause
+        # a different instruction rather than a louder one.
+        #
+        # The ellipsis clause is not decoration: this prompt's own worked
+        # example writes those two ids as `af67d1b1…` and `97d91272…`, in the
+        # very section that produced the mangled plan. Abbreviating them in
+        # full would risk the model copying prompt ids into an unrelated
+        # incident, so the examples stay short and the rule says so.
+        content = load_prompt("remediation_planner")
+        assert "Copy each id character for character from the row that carries it" in content
+        assert "never abbreviate, reconstruct or pad one" in content
+        assert "must never be emitted that way" in content
+        assert "replay by category rather than typing one" in content
 
     def test_forbids_agent_supplied_idempotency_key(self) -> None:
         content = load_prompt("remediation_planner")

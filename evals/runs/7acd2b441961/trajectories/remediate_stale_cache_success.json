@@ -1,0 +1,794 @@
+{
+  "scenario": "remediate_stale_cache_success",
+  "incident_id": "f77829ab-dfff-4ff4-b7d3-265aec3aa7bd",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "f77829ab-dfff-4ff4-b7d3-265aec3aa7bd",
+      "state": "triage",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T07:21:13.339830Z",
+      "updated_at": "2026-09-07T07:21:13.339830Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "f77829ab-dfff-4ff4-b7d3-265aec3aa7bd",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.072528,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "0df1d639-f2d3-4205-82f4-4449d9ad77ea",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T07:21:13.412358Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T07:21:13.339830Z",
+      "updated_at": "2026-09-07T07:21:13.412358Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "f77829ab-dfff-4ff4-b7d3-265aec3aa7bd",
+      "state": "planning",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 36655,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.072644,
+        "max_usd": "1.00",
+        "usd_used": "0.105124"
+      },
+      "evidence": [
+        {
+          "evidence_id": "0df1d639-f2d3-4205-82f4-4449d9ad77ea",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T07:21:13.412358Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "88e72d59-8959-4352-ac01-0f351a791143",
+          "tool_name": "get_cache_key_info",
+          "arguments": {
+            "key": "cache:jobs:worker-dispatcher:hot_set"
+          },
+          "result_summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"exists\":true,\"type\":\"string\",\"ttl_seconds\":594,\"size\":90}",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "93b9a6e2-4d88-4366-bac3-5cc2b0602d06",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c21f0fc6-d87f-4d0a-82fd-1ae99162ae87",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 75.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'stale_cache' (0.72 >= 0.7); re-probing after 75s before accepting the contradiction",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dae8aded-abbe-4979-be3a-318f35ade883",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "adc84b67-c324-47d1-a0a6-5c3d32c415da",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.466,\"connected_clients\":12,\"used_memory_bytes\":1740104,\"used_memory_human\":\"1.66M\",\"keyspace_hits\":209,\"keyspace_misses\":437635,\"error\":null}",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "11a051b7-29fa-4140-b375-474e3020e6bb",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "Redis keyspace data confirms an extreme cache miss ratio (437,635 misses vs 209 hits) and the alerted key 'cache:jobs:worker-dispatcher:hot_set' exists with a very small value (90 bytes), pointing to a stale/cold cache hit-rate collapse on this specific hot key. Consumer lag is confirmed at 0 (live, double-checked). The stale_cache hypothesis is above the 0.7 confidence threshold and has a Tier-1 fix (cache key invalidation/warm-up)."
+          },
+          "result_summary": "planner handoff to PLANNING: Redis keyspace data confirms an extreme cache miss ratio (437,635 misses vs 209 hits) and the alerted key 'cache:jobs:worker-dispatcher:hot_set' exists with a very small value (90 bytes), pointing to a stale/cold cache hit-rate collapse on this specific hot key. Consumer lag is confirmed at 0 (live, double-checked). The stale_cache hypothesis is above the 0.7 confidence threshold and has a Tier-1 fix (cache key invalidation/warm-up).",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "cache-miss-spike-hot-set-key-worker-dispatcher",
+          "confidence": 0.72,
+          "reasoning": "The alert is a cache_miss_spike on the worker-dispatcher hot_set key; Redis health shows 437,635 misses vs 209 hits — an extreme miss ratio confirming a cache hit-rate collapse, and the key exists with a small 90-byte value and ~10 min TTL, suggesting it may have been recently written after a cold period."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-caused-cache-invalidation",
+          "confidence": 0.2,
+          "reasoning": "A deploy could have invalidated or changed the hot_set key, causing the miss spike; not yet checked."
+        },
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-consumer-lag",
+          "confidence": 0.05,
+          "reasoning": "Consumer lag is confirmed at 0 on two consecutive live reads, making this an unlikely root cause."
+        },
+        {
+          "category": "unknown",
+          "name": "unknown-cache-miss-source",
+          "confidence": 0.03,
+          "reasoning": "No other clear signal yet; keeping as a fallback."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T07:21:13.339830Z",
+      "updated_at": "2026-09-07T07:21:13.412474Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "f77829ab-dfff-4ff4-b7d3-265aec3aa7bd",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 46224,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 124.992989,
+        "max_usd": "1.00",
+        "usd_used": "0.137738"
+      },
+      "evidence": [
+        {
+          "evidence_id": "0df1d639-f2d3-4205-82f4-4449d9ad77ea",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T07:21:13.412358Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "88e72d59-8959-4352-ac01-0f351a791143",
+          "tool_name": "get_cache_key_info",
+          "arguments": {
+            "key": "cache:jobs:worker-dispatcher:hot_set"
+          },
+          "result_summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"exists\":true,\"type\":\"string\",\"ttl_seconds\":594,\"size\":90}",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "93b9a6e2-4d88-4366-bac3-5cc2b0602d06",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c21f0fc6-d87f-4d0a-82fd-1ae99162ae87",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 75.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'stale_cache' (0.72 >= 0.7); re-probing after 75s before accepting the contradiction",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dae8aded-abbe-4979-be3a-318f35ade883",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "adc84b67-c324-47d1-a0a6-5c3d32c415da",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.466,\"connected_clients\":12,\"used_memory_bytes\":1740104,\"used_memory_human\":\"1.66M\",\"keyspace_hits\":209,\"keyspace_misses\":437635,\"error\":null}",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "11a051b7-29fa-4140-b375-474e3020e6bb",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "Redis keyspace data confirms an extreme cache miss ratio (437,635 misses vs 209 hits) and the alerted key 'cache:jobs:worker-dispatcher:hot_set' exists with a very small value (90 bytes), pointing to a stale/cold cache hit-rate collapse on this specific hot key. Consumer lag is confirmed at 0 (live, double-checked). The stale_cache hypothesis is above the 0.7 confidence threshold and has a Tier-1 fix (cache key invalidation/warm-up)."
+          },
+          "result_summary": "planner handoff to PLANNING: Redis keyspace data confirms an extreme cache miss ratio (437,635 misses vs 209 hits) and the alerted key 'cache:jobs:worker-dispatcher:hot_set' exists with a very small value (90 bytes), pointing to a stale/cold cache hit-rate collapse on this specific hot key. Consumer lag is confirmed at 0 (live, double-checked). The stale_cache hypothesis is above the 0.7 confidence threshold and has a Tier-1 fix (cache key invalidation/warm-up).",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2c0e6c7e-6f78-4faa-9c6d-0402e97eb148",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "cache-miss-spike-hot-set-key-worker-dispatcher"
+          },
+          "result_summary": "plan: invalidate_cache_key({\"key\": \"cache:jobs:worker-dispatcher:hot_set\"}) then verify via get_redis_health",
+          "timestamp": "2026-09-07T07:23:18.332819Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "cache-miss-spike-hot-set-key-worker-dispatcher",
+          "confidence": 0.72,
+          "reasoning": "The alert is a cache_miss_spike on the worker-dispatcher hot_set key; Redis health shows 437,635 misses vs 209 hits — an extreme miss ratio confirming a cache hit-rate collapse, and the key exists with a small 90-byte value and ~10 min TTL, suggesting it may have been recently written after a cold period."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-caused-cache-invalidation",
+          "confidence": 0.2,
+          "reasoning": "A deploy could have invalidated or changed the hot_set key, causing the miss spike; not yet checked."
+        },
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-consumer-lag",
+          "confidence": 0.05,
+          "reasoning": "Consumer lag is confirmed at 0 on two consecutive live reads, making this an unlikely root cause."
+        },
+        {
+          "category": "unknown",
+          "name": "unknown-cache-miss-source",
+          "confidence": 0.03,
+          "reasoning": "No other clear signal yet; keeping as a fallback."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "cache-miss-spike-hot-set-key-worker-dispatcher",
+        "action_tool": "invalidate_cache_key",
+        "action_arguments": {
+          "key": "cache:jobs:worker-dispatcher:hot_set"
+        },
+        "verify_tool": "get_redis_health",
+        "verify_arguments": {},
+        "verify_expectation": "The keyspace miss count stops climbing and the hit-to-miss ratio recovers significantly from the extreme 209:437635 baseline — hits should increase relative to misses as the key is repopulated and served from cache."
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T07:21:13.339830Z",
+      "updated_at": "2026-09-07T07:23:18.332819Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "f77829ab-dfff-4ff4-b7d3-265aec3aa7bd",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 5,
+        "max_tokens": 200000,
+        "tokens_used": 46224,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 130.149415,
+        "max_usd": "1.00",
+        "usd_used": "0.137738"
+      },
+      "evidence": [
+        {
+          "evidence_id": "0df1d639-f2d3-4205-82f4-4449d9ad77ea",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T07:21:13.412358Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "88e72d59-8959-4352-ac01-0f351a791143",
+          "tool_name": "get_cache_key_info",
+          "arguments": {
+            "key": "cache:jobs:worker-dispatcher:hot_set"
+          },
+          "result_summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"exists\":true,\"type\":\"string\",\"ttl_seconds\":594,\"size\":90}",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "93b9a6e2-4d88-4366-bac3-5cc2b0602d06",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c21f0fc6-d87f-4d0a-82fd-1ae99162ae87",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 75.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'stale_cache' (0.72 >= 0.7); re-probing after 75s before accepting the contradiction",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dae8aded-abbe-4979-be3a-318f35ade883",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "adc84b67-c324-47d1-a0a6-5c3d32c415da",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.466,\"connected_clients\":12,\"used_memory_bytes\":1740104,\"used_memory_human\":\"1.66M\",\"keyspace_hits\":209,\"keyspace_misses\":437635,\"error\":null}",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "11a051b7-29fa-4140-b375-474e3020e6bb",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "Redis keyspace data confirms an extreme cache miss ratio (437,635 misses vs 209 hits) and the alerted key 'cache:jobs:worker-dispatcher:hot_set' exists with a very small value (90 bytes), pointing to a stale/cold cache hit-rate collapse on this specific hot key. Consumer lag is confirmed at 0 (live, double-checked). The stale_cache hypothesis is above the 0.7 confidence threshold and has a Tier-1 fix (cache key invalidation/warm-up)."
+          },
+          "result_summary": "planner handoff to PLANNING: Redis keyspace data confirms an extreme cache miss ratio (437,635 misses vs 209 hits) and the alerted key 'cache:jobs:worker-dispatcher:hot_set' exists with a very small value (90 bytes), pointing to a stale/cold cache hit-rate collapse on this specific hot key. Consumer lag is confirmed at 0 (live, double-checked). The stale_cache hypothesis is above the 0.7 confidence threshold and has a Tier-1 fix (cache key invalidation/warm-up).",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2c0e6c7e-6f78-4faa-9c6d-0402e97eb148",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "cache-miss-spike-hot-set-key-worker-dispatcher"
+          },
+          "result_summary": "plan: invalidate_cache_key({\"key\": \"cache:jobs:worker-dispatcher:hot_set\"}) then verify via get_redis_health",
+          "timestamp": "2026-09-07T07:23:18.332819Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "1b949992-63d2-4646-b943-02a4fbd5b501",
+          "tool_name": "invalidate_cache_key",
+          "arguments": {
+            "key": "cache:jobs:worker-dispatcher:hot_set",
+            "idempotency_key": "7afe69a714fb336a41aa818679d4f1fd"
+          },
+          "result_summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"deleted\":true}",
+          "timestamp": "2026-09-07T07:23:23.489245Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "cache-miss-spike-hot-set-key-worker-dispatcher",
+          "confidence": 0.72,
+          "reasoning": "The alert is a cache_miss_spike on the worker-dispatcher hot_set key; Redis health shows 437,635 misses vs 209 hits — an extreme miss ratio confirming a cache hit-rate collapse, and the key exists with a small 90-byte value and ~10 min TTL, suggesting it may have been recently written after a cold period."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-caused-cache-invalidation",
+          "confidence": 0.2,
+          "reasoning": "A deploy could have invalidated or changed the hot_set key, causing the miss spike; not yet checked."
+        },
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-consumer-lag",
+          "confidence": 0.05,
+          "reasoning": "Consumer lag is confirmed at 0 on two consecutive live reads, making this an unlikely root cause."
+        },
+        {
+          "category": "unknown",
+          "name": "unknown-cache-miss-source",
+          "confidence": 0.03,
+          "reasoning": "No other clear signal yet; keeping as a fallback."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "cache-miss-spike-hot-set-key-worker-dispatcher",
+        "action_tool": "invalidate_cache_key",
+        "action_arguments": {
+          "key": "cache:jobs:worker-dispatcher:hot_set"
+        },
+        "verify_tool": "get_redis_health",
+        "verify_arguments": {},
+        "verify_expectation": "The keyspace miss count stops climbing and the hit-to-miss ratio recovers significantly from the extreme 209:437635 baseline — hits should increase relative to misses as the key is repopulated and served from cache."
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-07T07:21:13.339830Z",
+      "updated_at": "2026-09-07T07:23:23.489245Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "f77829ab-dfff-4ff4-b7d3-265aec3aa7bd",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 11,
+        "max_tokens": 200000,
+        "tokens_used": 55309,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 130.185075,
+        "max_usd": "1.00",
+        "usd_used": "0.149827"
+      },
+      "evidence": [
+        {
+          "evidence_id": "0df1d639-f2d3-4205-82f4-4449d9ad77ea",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T07:21:13.412358Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "88e72d59-8959-4352-ac01-0f351a791143",
+          "tool_name": "get_cache_key_info",
+          "arguments": {
+            "key": "cache:jobs:worker-dispatcher:hot_set"
+          },
+          "result_summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"exists\":true,\"type\":\"string\",\"ttl_seconds\":594,\"size\":90}",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "93b9a6e2-4d88-4366-bac3-5cc2b0602d06",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c21f0fc6-d87f-4d0a-82fd-1ae99162ae87",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 75.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'stale_cache' (0.72 >= 0.7); re-probing after 75s before accepting the contradiction",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dae8aded-abbe-4979-be3a-318f35ade883",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "adc84b67-c324-47d1-a0a6-5c3d32c415da",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.466,\"connected_clients\":12,\"used_memory_bytes\":1740104,\"used_memory_human\":\"1.66M\",\"keyspace_hits\":209,\"keyspace_misses\":437635,\"error\":null}",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "11a051b7-29fa-4140-b375-474e3020e6bb",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "Redis keyspace data confirms an extreme cache miss ratio (437,635 misses vs 209 hits) and the alerted key 'cache:jobs:worker-dispatcher:hot_set' exists with a very small value (90 bytes), pointing to a stale/cold cache hit-rate collapse on this specific hot key. Consumer lag is confirmed at 0 (live, double-checked). The stale_cache hypothesis is above the 0.7 confidence threshold and has a Tier-1 fix (cache key invalidation/warm-up)."
+          },
+          "result_summary": "planner handoff to PLANNING: Redis keyspace data confirms an extreme cache miss ratio (437,635 misses vs 209 hits) and the alerted key 'cache:jobs:worker-dispatcher:hot_set' exists with a very small value (90 bytes), pointing to a stale/cold cache hit-rate collapse on this specific hot key. Consumer lag is confirmed at 0 (live, double-checked). The stale_cache hypothesis is above the 0.7 confidence threshold and has a Tier-1 fix (cache key invalidation/warm-up).",
+          "timestamp": "2026-09-07T07:21:13.412474Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2c0e6c7e-6f78-4faa-9c6d-0402e97eb148",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "cache-miss-spike-hot-set-key-worker-dispatcher"
+          },
+          "result_summary": "plan: invalidate_cache_key({\"key\": \"cache:jobs:worker-dispatcher:hot_set\"}) then verify via get_redis_health",
+          "timestamp": "2026-09-07T07:23:18.332819Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "1b949992-63d2-4646-b943-02a4fbd5b501",
+          "tool_name": "invalidate_cache_key",
+          "arguments": {
+            "key": "cache:jobs:worker-dispatcher:hot_set",
+            "idempotency_key": "7afe69a714fb336a41aa818679d4f1fd"
+          },
+          "result_summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"deleted\":true}",
+          "timestamp": "2026-09-07T07:23:23.489245Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8117c8f0-3f79-466d-b56b-d485d733fd5e",
+          "tool_name": "get_redis_health",
+          "arguments": {
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.321,\"connected_clients\":12,\"used_memory_bytes\":1669640,\"used_memory_human\":\"1.59M\",\"keyspace_hits\":209,\"keyspace_misses\":438376,\"error\":null}",
+          "timestamp": "2026-09-07T07:23:23.524987Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d538d9d3-1087-4074-8dff-52009378c119",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The keyspace miss count stops climbing and the hit-to-miss ratio recovers significantly from the extreme 209:437635 baseline — hits should increase relative to misses as the key is repopulated and served from cache.",
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "not_verified: The cache invalidation reported `deleted: true`, but the verify probe shows keyspace_misses (438376) remains extremely high relative to keyspace_hits (209), yielding a ratio of ~0.00048, which is not significantly recovered from the baseline 209:437635 and indicates the miss spike has not ceased or cache repopulation has not begun.",
+          "timestamp": "2026-09-07T07:23:23.524987Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4e623f5e-90f4-4e47-b440-4162e81da5b1",
+          "tool_name": "get_redis_health",
+          "arguments": {
+            "attempt": 2,
+            "of": 6
+          },
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.293,\"connected_clients\":12,\"used_memory_bytes\":1664760,\"used_memory_human\":\"1.59M\",\"keyspace_hits\":209,\"keyspace_misses\":439202,\"error\":null}",
+          "timestamp": "2026-09-07T07:23:45.573750Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0e411e61-11b7-4c9c-aab4-fdf29e7fd50e",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The keyspace miss count stops climbing and the hit-to-miss ratio recovers significantly from the extreme 209:437635 baseline — hits should increase relative to misses as the key is repopulated and served from cache.",
+            "attempt": 2,
+            "of": 6
+          },
+          "result_summary": "not_verified: The cache invalidation reported deleted:true, but the verify probe shows keyspace_misses at 439202 vs keyspace_hits at 209—a 2102:1 miss-to-hit ratio that is even worse than the baseline 437635:209, indicating the key has not been repopulated and cache performance has not recovered.",
+          "timestamp": "2026-09-07T07:23:45.573750Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5c96d40f-4bd2-4fc1-9ab3-14924aa4e6db",
+          "tool_name": "get_redis_health",
+          "arguments": {
+            "attempt": 3,
+            "of": 6
+          },
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.508,\"connected_clients\":12,\"used_memory_bytes\":1679368,\"used_memory_human\":\"1.60M\",\"keyspace_hits\":209,\"keyspace_misses\":440022,\"error\":null}",
+          "timestamp": "2026-09-07T07:24:07.567170Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "10b50478-5e09-4ba4-9e94-376b6443094a",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The keyspace miss count stops climbing and the hit-to-miss ratio recovers significantly from the extreme 209:437635 baseline — hits should increase relative to misses as the key is repopulated and served from cache.",
+            "attempt": 3,
+            "of": 6
+          },
+          "result_summary": "not_verified: Remediation deleted the cache key (deleted:true), but the verify probe shows keyspace_misses at 440022 versus keyspace_hits at 209, a ratio of 1:2105, which is worse than the baseline 1:2093 (209:437635), indicating the hit-to-miss ratio has not recovered and misses continue climbing rather than stabilizing.",
+          "timestamp": "2026-09-07T07:24:07.567170Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "37a57b92-c7d9-4050-b4e4-254ae3c437c5",
+          "tool_name": "get_redis_health",
+          "arguments": {
+            "attempt": 4,
+            "of": 6
+          },
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.564,\"connected_clients\":12,\"used_memory_bytes\":1756448,\"used_memory_human\":\"1.68M\",\"keyspace_hits\":209,\"keyspace_misses\":440858,\"error\":null}",
+          "timestamp": "2026-09-07T07:24:30.093648Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7168dc85-2237-48ae-8292-06b94ddb48f6",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The keyspace miss count stops climbing and the hit-to-miss ratio recovers significantly from the extreme 209:437635 baseline — hits should increase relative to misses as the key is repopulated and served from cache.",
+            "attempt": 4,
+            "of": 6
+          },
+          "result_summary": "not_verified: The cache invalidation reported deleted:true, but the verify probe shows keyspace_misses (440858) has climbed further since the baseline (437635), and the hit-to-miss ratio (209:440858) has worsened, not recovered as expected after cache repopulation.",
+          "timestamp": "2026-09-07T07:24:30.093648Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "1100e739-e01a-413f-95d5-35ec946242fc",
+          "tool_name": "get_redis_health",
+          "arguments": {
+            "attempt": 5,
+            "of": 6
+          },
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.55,\"connected_clients\":12,\"used_memory_bytes\":1730384,\"used_memory_human\":\"1.65M\",\"keyspace_hits\":209,\"keyspace_misses\":441659,\"error\":null}",
+          "timestamp": "2026-09-07T07:24:51.942239Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "72cbc60b-ac26-41dc-b02b-6fefd5d0fa76",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The keyspace miss count stops climbing and the hit-to-miss ratio recovers significantly from the extreme 209:437635 baseline — hits should increase relative to misses as the key is repopulated and served from cache.",
+            "attempt": 5,
+            "of": 6
+          },
+          "result_summary": "not_verified: The cache invalidation reported `deleted: true`, but the verify probe shows keyspace_misses (441659) far exceeding keyspace_hits (209), indicating the hit-to-miss ratio has not recovered—the ratio remains severely skewed at approximately 1:2100, not the significant improvement expected after cache repopulation.",
+          "timestamp": "2026-09-07T07:24:51.942239Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2eeb9f6e-ed01-4a6f-abe1-a8dd06946777",
+          "tool_name": "get_redis_health",
+          "arguments": {
+            "attempt": 6,
+            "of": 6
+          },
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.55,\"connected_clients\":12,\"used_memory_bytes\":1684432,\"used_memory_human\":\"1.61M\",\"keyspace_hits\":209,\"keyspace_misses\":442480,\"error\":null}",
+          "timestamp": "2026-09-07T07:25:13.989583Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "46affcee-d731-44f1-a3db-a975a4aa0825",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The keyspace miss count stops climbing and the hit-to-miss ratio recovers significantly from the extreme 209:437635 baseline — hits should increase relative to misses as the key is repopulated and served from cache.",
+            "attempt": 6,
+            "of": 6
+          },
+          "result_summary": "not_verified: The cache invalidation reported `deleted: true`, but the verify probe shows keyspace_misses (442480) remaining nearly identical to the baseline (437635), with no material improvement in the hit-to-miss ratio (209:442480 vs. the expected 209:437635), indicating the key has not been repopulated and served from cache as required for recovery.",
+          "timestamp": "2026-09-07T07:25:13.989583Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "cache-miss-spike-hot-set-key-worker-dispatcher",
+          "confidence": 0.72,
+          "reasoning": "The alert is a cache_miss_spike on the worker-dispatcher hot_set key; Redis health shows 437,635 misses vs 209 hits — an extreme miss ratio confirming a cache hit-rate collapse, and the key exists with a small 90-byte value and ~10 min TTL, suggesting it may have been recently written after a cold period."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-caused-cache-invalidation",
+          "confidence": 0.2,
+          "reasoning": "A deploy could have invalidated or changed the hot_set key, causing the miss spike; not yet checked."
+        },
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-consumer-lag",
+          "confidence": 0.05,
+          "reasoning": "Consumer lag is confirmed at 0 on two consecutive live reads, making this an unlikely root cause."
+        },
+        {
+          "category": "unknown",
+          "name": "unknown-cache-miss-source",
+          "confidence": 0.03,
+          "reasoning": "No other clear signal yet; keeping as a fallback."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "cache-miss-spike-hot-set-key-worker-dispatcher",
+        "action_tool": "invalidate_cache_key",
+        "action_arguments": {
+          "key": "cache:jobs:worker-dispatcher:hot_set"
+        },
+        "verify_tool": "get_redis_health",
+        "verify_arguments": {},
+        "verify_expectation": "The keyspace miss count stops climbing and the hit-to-miss ratio recovers significantly from the extreme 209:437635 baseline — hits should increase relative to misses as the key is repopulated and served from cache."
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-07T07:21:13.339830Z",
+      "updated_at": "2026-09-07T07:25:13.989583Z"
+    }
+  ],
+  "invocation_id": "7acd2b441961"
+}

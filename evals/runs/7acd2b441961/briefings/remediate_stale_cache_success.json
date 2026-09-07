@@ -1,0 +1,61 @@
+{
+  "incident_id": "f77829ab-dfff-4ff4-b7d3-265aec3aa7bd",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.cache severity=critical fingerprint=cache_miss_spike",
+  "escalation_reason": "not_verified: The cache invalidation reported `deleted: true`, but the verify probe shows keyspace_misses (442480) remaining nearly identical to the baseline (437635), with no material improvement in the hit-to-miss ratio (209:442480 vs. the expected 209:437635), indicating the key has not been repopulated and served from cache as required for recovery.",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_cache_key_info",
+      "summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"exists\":true,\"type\":\"string\",\"ttl_seconds\":594,\"size\":90}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}"
+    },
+    {
+      "tool": "get_redis_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":0.466,\"connected_clients\":12,\"used_memory_bytes\":1740104,\"used_memory_human\":\"1.66M\",\"keyspace_hits\":209,\"keyspace_misses\":437635,\"error\":null}"
+    },
+    {
+      "tool": "invalidate_cache_key",
+      "summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"deleted\":true}"
+    },
+    {
+      "tool": "get_redis_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":0.321,\"connected_clients\":12,\"used_memory_bytes\":1669640,\"used_memory_human\":\"1.59M\",\"keyspace_hits\":209,\"keyspace_misses\":438376,\"error\":null}"
+    },
+    {
+      "tool": "get_redis_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":0.293,\"connected_clients\":12,\"used_memory_bytes\":1664760,\"used_memory_human\":\"1.59M\",\"keyspace_hits\":209,\"keyspace_misses\":439202,\"error\":null}"
+    },
+    {
+      "tool": "get_redis_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":0.508,\"connected_clients\":12,\"used_memory_bytes\":1679368,\"used_memory_human\":\"1.60M\",\"keyspace_hits\":209,\"keyspace_misses\":440022,\"error\":null}"
+    },
+    {
+      "tool": "get_redis_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":0.564,\"connected_clients\":12,\"used_memory_bytes\":1756448,\"used_memory_human\":\"1.68M\",\"keyspace_hits\":209,\"keyspace_misses\":440858,\"error\":null}"
+    },
+    {
+      "tool": "get_redis_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":0.55,\"connected_clients\":12,\"used_memory_bytes\":1730384,\"used_memory_human\":\"1.65M\",\"keyspace_hits\":209,\"keyspace_misses\":441659,\"error\":null}"
+    },
+    {
+      "tool": "get_redis_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":0.55,\"connected_clients\":12,\"used_memory_bytes\":1684432,\"used_memory_human\":\"1.61M\",\"keyspace_hits\":209,\"keyspace_misses\":442480,\"error\":null}"
+    }
+  ],
+  "findings": "The cache key `cache:jobs:worker-dispatcher:hot_set` was successfully invalidated (Tier-1 action already attempted, `deleted: true`), but across six subsequent Redis health probes keyspace misses continued climbing steadily (437,635 → 442,480) with hits frozen at 209, confirming the key has not been repopulated and the cache miss spike is unresolved.",
+  "recommendation": "Verify whether the worker-dispatcher service is actually writing back to the hot_set key after invalidation — check the application logs or cache-write metrics for that service to determine why repopulation is not occurring.",
+  "budget_used": {
+    "tool_calls": 11,
+    "tokens": 55309,
+    "wall_seconds": 130.185075,
+    "usd": "0.149827"
+  }
+}

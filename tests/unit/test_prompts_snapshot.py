@@ -25,6 +25,7 @@ from typing import Final
 
 import pytest
 
+from incident_commander.agent.remediation import RemediationPlan
 from incident_commander.llm.prompts.loader import (
     PromptNotFoundError,
     available_prompts,
@@ -35,7 +36,7 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("2fbebe9dcd49d48e41a580b1093f8e66cdb063482ea78ee5873be2eaa3dc0eda"),
     "investigation_planner": ("f5ff4ef191b4a7581d8e41b9e5a32563c2f683ab357c0e329384922ce7c5b9d7"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
-    "remediation_planner": ("dd38c9b9475c061bc5cc66035615533c49e37c368dc034d5ecd19b5ed6778a68"),
+    "remediation_planner": ("7bb6c2a93c409830e5be5498b1b7bdf9717bb786486fc71b5ba53dfd90110d4d"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
 }
 
@@ -438,3 +439,115 @@ class TestLoader:
     def test_trailing_newline_normalized(self) -> None:
         content = load_prompt("briefing_writer")
         assert content.endswith("\n")
+
+
+class TestRemediationPlannerDelayDerivation:
+    """The `wait_and_replay` delay is a judgement, so the prompt has to teach
+    one — and the parts a "harmless" edit would drop are pinned here.
+
+    `dlq_wait_and_replay_success` grades the number
+    (`expected_action_arguments` on `delay_seconds`: at_least 120, at_most
+    1800). Grading a number the prompt never explains how to reach is how a
+    scenario becomes a coin flip the agent is blamed for, so the two land
+    together and neither is allowed to drift alone.
+    """
+
+    @staticmethod
+    def _content() -> str:
+        return load_prompt("remediation_planner")
+
+    def test_the_delay_is_derived_not_guessed(self) -> None:
+        content = self._content()
+        assert "Choosing `delay_seconds`" in content
+        assert "derive the number, never guess it" in content
+
+    def test_the_evidence_floor_comes_from_the_rows(self) -> None:
+        """Step 2 — the largest wait the rows state beats any default."""
+        content = self._content()
+        assert "take the largest explicit wait its rows state" in content
+        assert "retry-after: 120s" in content
+
+    def test_the_wait_is_measured_from_the_last_failure(self) -> None:
+        """Step 3 — `dead_lettered_at`, not now, and not `created_at`.
+
+        The window the dependency named opened when the job died. Measuring
+        from now silently shortens every wait by however long the row sat in
+        the queue before the agent looked at it.
+        """
+        content = self._content()
+        assert "Measure that wait from the last failure, not from now" in content
+        assert "dead_lettered_at" in content
+        assert "NOT `created_at`" in content
+
+    def test_rows_are_grouped_by_the_dependency_they_name(self) -> None:
+        """Step 1 — a shared hint is not a shared wait.
+
+        A rate-limited quota window and a refused TCP connection are two
+        different kinds of "later", and the hint cannot tell them apart.
+        """
+        content = self._content()
+        assert "Group the rows by the dependency they name, not by their hint" in content
+        assert "partner-api.internal" in content
+        assert "smtp.mailer.internal" in content
+
+    def test_a_dependency_that_is_down_has_a_stated_default(self) -> None:
+        """Step 4 — and the default is justified, not just asserted, so the
+        agent can depart from it on evidence rather than on vibes."""
+        content = self._content()
+        assert "dependency that is DOWN, and its default is 300 seconds" in content
+        assert "ConnectionRefusedError" in content
+
+    def test_the_floor_and_the_ceiling_are_both_stated(self) -> None:
+        content = self._content()
+        assert "Never below 60" in content
+        assert "maximum of 3600" in content
+        assert "1800" in content
+
+    def test_one_call_one_delay_takes_the_largest(self) -> None:
+        """Step 6 — the platform cannot stagger per id, so the honest single
+        call over-waits the shorter group rather than under-waiting the
+        longer one. Under-waiting costs an attempt; over-waiting costs time.
+        """
+        content = self._content()
+        assert "One call, one delay" in content
+        assert "take the LARGEST and say so" in content
+
+    def test_the_agent_must_say_what_it_could_not_see(self) -> None:
+        """Step 7 — the blind spots bound what the number is worth, and they
+        are platform gaps rather than agent failings."""
+        content = self._content()
+        assert "circuit-breaker state, per-dependency queue depth, or worker concurrency" in content
+
+    def test_the_rationale_has_somewhere_to_go(self) -> None:
+        """Step 8 — and the plan schema must actually carry it.
+
+        `RemediationPlan` forbids extra keys, so an instruction to state a
+        rationale with no field for it does not produce a rationale, it
+        produces a ValidationError and an escalated run. The prompt rule and
+        the optional field are one change.
+        """
+        assert "action_rationale" in self._content()
+        assert "action_rationale" in RemediationPlan.model_fields
+
+    def test_a_delayed_replay_expects_the_rows_to_still_be_there(self) -> None:
+        """The verify half, and the one expectation in this prompt satisfied
+        by nothing happening.
+
+        This is the `remediate_stale_cache_success` failure shape on the
+        other side: a plan that writes "the ids leave the listing" for a
+        delayed replay has told the judge to read a correct fix as
+        `not_verified`. The prompt used to say exactly that — the DLQ verify
+        bullet read "list should be shorter or hint-filtered subset gone"
+        with no delayed case at all.
+        """
+        content = self._content()
+        assert "A scheduled replay has not run yet, so expect the rows to still be there" in content
+        assert "the rows REMAIN listed with the delay pending" in content
+        assert 'Do not write "the ids leave the listing" for a delayed replay' in content
+
+    def test_the_immediate_and_delayed_verify_legs_are_distinguished(self) -> None:
+        """The old unconditional sentence must not come back."""
+        content = self._content()
+        assert "Replay DLQ → verify with `list_dlq_messages` (list should be shorter" not in content
+        assert "Replay DLQ **immediately** (no `delay_seconds`)" in content
+        assert "Replay DLQ **with a delay**" in content

@@ -170,6 +170,17 @@ expectation:
     field: replayed
     which: sum
     equals: 2
+  # And nothing was merely SCHEDULED. Same reasoning as the sibling
+  # replay-now scenarios: `delay_seconds` turns either sanctioned tool into
+  # a deferred replay reporting `replayed: 0, scheduled: N`, and the count
+  # above catches that today only because the state graph allows one Tier-1
+  # call (ADR 0008). This scenario's alert is a DLQ backlog the operator
+  # wants drained now, so a timer is the wrong answer whatever the graph
+  # permits later. Free on a correct run: `scheduled` defaults to 0.
+  - tools: [replay_dlq_by_category, replay_dlq_by_ids, replay_dlq_messages]
+    field: scheduled
+    which: sum
+    equals: 0
   # The read-before-act claim, new with WO-R2-143, and this scenario had NO
   # `list_dlq_messages` assertion of any kind before it: the count above says
   # two rows were replayed and nothing said the agent had ever looked at the

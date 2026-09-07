@@ -120,6 +120,31 @@ expectation:
     field: replayed
     which: sum
     equals: 1
+  # The other half of "replay it NOW", written down instead of inferred.
+  #
+  # Both sanctioned tools take `delay_seconds`, so "replay this row" and
+  # "schedule this row for later" are the same call with one extra argument,
+  # and only the count above separated them: a delayed replay reports
+  # `replayed: 0, scheduled: 1`, which reds the claim above — so the hole
+  # was closed, but by arithmetic and only for the single-call case. The
+  # single-call case is a property of the state graph (ADR 0008: PLANNING is
+  # reachable only from INVESTIGATING and VERIFYING has no PLANNING
+  # successor), not of this scenario, and cmd #187 already recorded that
+  # relying on it makes an assertion "currently vacuous" rather than true.
+  # If that graph ever grows a second remediation attempt, "replayed 1
+  # immediately AND scheduled the rest for later" satisfies the count above
+  # exactly, and this scenario — whose whole subject is an IMMEDIATE replay
+  # of one row — would grade it green.
+  #
+  # Free on a correct run: `scheduled` is a required-with-default field on
+  # both siblings' output models, so a correct immediate replay emits
+  # `scheduled: 0` and satisfies this without doing anything extra. It
+  # matches the shape `remediate_runaway_saga_success` has carried since
+  # cmd #192, where a deferred replay leaves the chain stuck.
+  - tools: [replay_dlq_by_category, replay_dlq_by_ids, replay_dlq_messages]
+    field: scheduled
+    which: sum
+    equals: 0
   # Tool-scoped (evidence sweep, evals/evidence_audit.py): the bare
   # `replay_safe` substring was satisfiable by replay_dlq_by_category output
   # as well, so it could not prove the agent SAW the classification before

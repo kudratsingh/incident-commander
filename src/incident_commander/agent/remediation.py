@@ -481,6 +481,38 @@ class RemediationPlan(BaseModel):
         min_length=1,
         description="What the verify tool's response should look like if the fix worked.",
     )
+    # Optional, and it exists so that a prompt rule asking the planner to
+    # SHOW ITS WORK has somewhere to write the answer.
+    #
+    # ``model_config`` forbids extra keys, which is the right default for a
+    # structured output — but it means an instruction like "state which row
+    # set your delay" with no field to hold it does not produce a rationale,
+    # it produces a ValidationError, the plan fails to parse, and the run
+    # escalates. An instruction the schema cannot carry is worse than no
+    # instruction. So the field is added in the same change as the rule that
+    # needs it (the ``wait_and_replay`` delay derivation in
+    # ``prompts/remediation_planner.md``).
+    #
+    # Optional rather than required, deliberately: every other plan shape in
+    # the corpus is a one-resource action whose argument IS its own
+    # justification (`invalidate_cache_key(key=…)` has nothing to explain),
+    # and making it required would invalidate every canned plan fixture in
+    # the suite to buy a sentence nobody reads. It is free text and nothing
+    # grades it — a graded rationale would be a claim about prose, which is
+    # the shape this codebase refuses. What IS graded is the number the
+    # rationale is about (``expected_action_arguments`` on
+    # ``delay_seconds``); this field is how a human reading the trajectory
+    # afterwards learns WHY that number, which is the part no assertion can
+    # recover.
+    action_rationale: str | None = Field(
+        default=None,
+        description=(
+            "Optional. Why these action arguments and not others — required by the "
+            "system prompt for a delayed DLQ replay, where the delay is a judgement "
+            "derived from the rows rather than a value read off one. Name the row "
+            "and the wait it stated. Free text; not graded."
+        ),
+    )
 
 
 class VerificationJudgment(BaseModel):

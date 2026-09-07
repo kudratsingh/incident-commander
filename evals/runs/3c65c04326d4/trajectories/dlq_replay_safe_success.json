@@ -1,0 +1,547 @@
+{
+  "scenario": "dlq_replay_safe_success",
+  "incident_id": "37188e02-fa6c-47d3-b03d-1e3cfd315ff4",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "37188e02-fa6c-47d3-b03d-1e3cfd315ff4",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning_replay_safe",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T14:05:41.093714Z",
+      "updated_at": "2026-09-07T14:05:41.093714Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "37188e02-fa6c-47d3-b03d-1e3cfd315ff4",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning_replay_safe",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.054283,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e30e4b1b-3d2f-463d-9fc0-089e44457b20",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "ae87594c536b8c3069e6f2d6c7e486bb"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T14:05:41.147997Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T14:05:41.093714Z",
+      "updated_at": "2026-09-07T14:05:41.147997Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "37188e02-fa6c-47d3-b03d-1e3cfd315ff4",
+      "state": "planning",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning_replay_safe",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 23930,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.054355,
+        "max_usd": "1.00",
+        "usd_used": "0.069372"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e30e4b1b-3d2f-463d-9fc0-089e44457b20",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "ae87594c536b8c3069e6f2d6c7e486bb"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T14:05:41.147997Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "26491614-f6d5-49fc-8544-6061f662f9a6",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": "replay_safe",
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":1,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-07T13:23:12.383586Z\",\"updated_at\":\"2026-09-07T13:23:18.383586Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-07T13:23:18.383586Z\",\"extra\":null}]}",
+          "timestamp": "2026-09-07T14:05:41.148069Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a386d498-c89b-438e-adff-6fa94ba4bdde",
+          "tool_name": "get_trace",
+          "arguments": {
+            "trace_id": "c5ca46c1-f4dd-5021-8be4-130143553096",
+            "include_audit": true
+          },
+          "result_summary": "{\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"jobs\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"user_id\":\"ee7c82cb-bab6-5780-8590-55b57064cbe3\",\"retry_count\":3,\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"created_at\":\"2026-09-07T13:23:12.383586Z\",\"updated_at\":\"2026-09-07T13:23:18.383586Z\"}],\"audit_events\":[],\"truncated\":false,\"total_jobs\":1,\"total_audit_events\":0}",
+          "timestamp": "2026-09-07T14:05:41.148069Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "61648177-b880-41ec-96a3-b9b865407a7a",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "DLQ job fc8d2a03-23b3-5371-9acb-46443c73baa5 (bulk_api_sync) has remediation_hint='replay_safe' with triage confidence 0.88. The payload was validated, no partial write survived the upstream timeout, the call is idempotent, and a replay is the complete remedy. No human sign-off is required."
+          },
+          "result_summary": "planner handoff to PLANNING: DLQ job fc8d2a03-23b3-5371-9acb-46443c73baa5 (bulk_api_sync) has remediation_hint='replay_safe' with triage confidence 0.88. The payload was validated, no partial write survived the upstream timeout, the call is idempotent, and a replay is the complete remedy. No human sign-off is required.",
+          "timestamp": "2026-09-07T14:05:41.148069Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "bulk-api-sync-dlq-upstream-timeout-replay-safe",
+          "confidence": 0.92,
+          "reasoning": "DLQ entry fc8d2a03 has remediation_hint='replay_safe', triage confidence=0.88, no downstream write survived, and the call is idempotent — a straight replay is the entire remedy."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "partner-api-internal-timeout-30s-3-attempts",
+          "confidence": 0.55,
+          "reasoning": "The upstream partner-api.internal timed out on all 3 attempts, which may indicate a broader transient dependency outage still in progress."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T14:05:41.093714Z",
+      "updated_at": "2026-09-07T14:05:41.148069Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "37188e02-fa6c-47d3-b03d-1e3cfd315ff4",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning_replay_safe",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 35874,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 27.42721,
+        "max_usd": "1.00",
+        "usd_used": "0.111372"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e30e4b1b-3d2f-463d-9fc0-089e44457b20",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "ae87594c536b8c3069e6f2d6c7e486bb"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T14:05:41.147997Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "26491614-f6d5-49fc-8544-6061f662f9a6",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": "replay_safe",
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":1,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-07T13:23:12.383586Z\",\"updated_at\":\"2026-09-07T13:23:18.383586Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-07T13:23:18.383586Z\",\"extra\":null}]}",
+          "timestamp": "2026-09-07T14:05:41.148069Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a386d498-c89b-438e-adff-6fa94ba4bdde",
+          "tool_name": "get_trace",
+          "arguments": {
+            "trace_id": "c5ca46c1-f4dd-5021-8be4-130143553096",
+            "include_audit": true
+          },
+          "result_summary": "{\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"jobs\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"user_id\":\"ee7c82cb-bab6-5780-8590-55b57064cbe3\",\"retry_count\":3,\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"created_at\":\"2026-09-07T13:23:12.383586Z\",\"updated_at\":\"2026-09-07T13:23:18.383586Z\"}],\"audit_events\":[],\"truncated\":false,\"total_jobs\":1,\"total_audit_events\":0}",
+          "timestamp": "2026-09-07T14:05:41.148069Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "61648177-b880-41ec-96a3-b9b865407a7a",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "DLQ job fc8d2a03-23b3-5371-9acb-46443c73baa5 (bulk_api_sync) has remediation_hint='replay_safe' with triage confidence 0.88. The payload was validated, no partial write survived the upstream timeout, the call is idempotent, and a replay is the complete remedy. No human sign-off is required."
+          },
+          "result_summary": "planner handoff to PLANNING: DLQ job fc8d2a03-23b3-5371-9acb-46443c73baa5 (bulk_api_sync) has remediation_hint='replay_safe' with triage confidence 0.88. The payload was validated, no partial write survived the upstream timeout, the call is idempotent, and a replay is the complete remedy. No human sign-off is required.",
+          "timestamp": "2026-09-07T14:05:41.148069Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "193e0f31-28bd-49d6-8892-1b98b86bce16",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "bulk-api-sync-dlq-upstream-timeout-replay-safe"
+          },
+          "result_summary": "plan: replay_dlq_by_ids({\"job_ids\": [\"fc8d2a03-23b3-5371-9acb-46443c73baa5\"]}) then verify via list_dlq_messages",
+          "timestamp": "2026-09-07T14:06:08.520924Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "bulk-api-sync-dlq-upstream-timeout-replay-safe",
+          "confidence": 0.92,
+          "reasoning": "DLQ entry fc8d2a03 has remediation_hint='replay_safe', triage confidence=0.88, no downstream write survived, and the call is idempotent — a straight replay is the entire remedy."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "partner-api-internal-timeout-30s-3-attempts",
+          "confidence": 0.55,
+          "reasoning": "The upstream partner-api.internal timed out on all 3 attempts, which may indicate a broader transient dependency outage still in progress."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "bulk-api-sync-dlq-upstream-timeout-replay-safe",
+        "action_tool": "replay_dlq_by_ids",
+        "action_arguments": {
+          "job_ids": [
+            "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+          ]
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "replay_safe"
+        },
+        "verify_expectation": "The DLQ listing filtered to replay_safe should return no entry with id fc8d2a03-23b3-5371-9acb-46443c73baa5, indicating the job has been successfully replayed and is no longer in the dead-letter queue."
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-09-07T14:05:41.093714Z",
+      "updated_at": "2026-09-07T14:06:08.520924Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "37188e02-fa6c-47d3-b03d-1e3cfd315ff4",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning_replay_safe",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 35874,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 35.031885,
+        "max_usd": "1.00",
+        "usd_used": "0.111372"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e30e4b1b-3d2f-463d-9fc0-089e44457b20",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "ae87594c536b8c3069e6f2d6c7e486bb"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T14:05:41.147997Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "26491614-f6d5-49fc-8544-6061f662f9a6",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": "replay_safe",
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":1,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-07T13:23:12.383586Z\",\"updated_at\":\"2026-09-07T13:23:18.383586Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-07T13:23:18.383586Z\",\"extra\":null}]}",
+          "timestamp": "2026-09-07T14:05:41.148069Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a386d498-c89b-438e-adff-6fa94ba4bdde",
+          "tool_name": "get_trace",
+          "arguments": {
+            "trace_id": "c5ca46c1-f4dd-5021-8be4-130143553096",
+            "include_audit": true
+          },
+          "result_summary": "{\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"jobs\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"user_id\":\"ee7c82cb-bab6-5780-8590-55b57064cbe3\",\"retry_count\":3,\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"created_at\":\"2026-09-07T13:23:12.383586Z\",\"updated_at\":\"2026-09-07T13:23:18.383586Z\"}],\"audit_events\":[],\"truncated\":false,\"total_jobs\":1,\"total_audit_events\":0}",
+          "timestamp": "2026-09-07T14:05:41.148069Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "61648177-b880-41ec-96a3-b9b865407a7a",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "DLQ job fc8d2a03-23b3-5371-9acb-46443c73baa5 (bulk_api_sync) has remediation_hint='replay_safe' with triage confidence 0.88. The payload was validated, no partial write survived the upstream timeout, the call is idempotent, and a replay is the complete remedy. No human sign-off is required."
+          },
+          "result_summary": "planner handoff to PLANNING: DLQ job fc8d2a03-23b3-5371-9acb-46443c73baa5 (bulk_api_sync) has remediation_hint='replay_safe' with triage confidence 0.88. The payload was validated, no partial write survived the upstream timeout, the call is idempotent, and a replay is the complete remedy. No human sign-off is required.",
+          "timestamp": "2026-09-07T14:05:41.148069Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "193e0f31-28bd-49d6-8892-1b98b86bce16",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "bulk-api-sync-dlq-upstream-timeout-replay-safe"
+          },
+          "result_summary": "plan: replay_dlq_by_ids({\"job_ids\": [\"fc8d2a03-23b3-5371-9acb-46443c73baa5\"]}) then verify via list_dlq_messages",
+          "timestamp": "2026-09-07T14:06:08.520924Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "638e08fb-2f6c-4c74-b0d8-a2fa5eb205ff",
+          "tool_name": "replay_dlq_by_ids",
+          "arguments": {
+            "job_ids": [
+              "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+            ],
+            "idempotency_key": "2fc3247557185eb9fcccd619d7e74d02",
+            "delay_seconds": null
+          },
+          "result_summary": "{\"requested\":1,\"replayed\":1,\"scheduled\":0,\"failed\":0,\"results\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"ok\":true,\"error\":null,\"scheduled\":false,\"execute_at\":null}]}",
+          "timestamp": "2026-09-07T14:06:16.125599Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "bulk-api-sync-dlq-upstream-timeout-replay-safe",
+          "confidence": 0.92,
+          "reasoning": "DLQ entry fc8d2a03 has remediation_hint='replay_safe', triage confidence=0.88, no downstream write survived, and the call is idempotent — a straight replay is the entire remedy."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "partner-api-internal-timeout-30s-3-attempts",
+          "confidence": 0.55,
+          "reasoning": "The upstream partner-api.internal timed out on all 3 attempts, which may indicate a broader transient dependency outage still in progress."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "bulk-api-sync-dlq-upstream-timeout-replay-safe",
+        "action_tool": "replay_dlq_by_ids",
+        "action_arguments": {
+          "job_ids": [
+            "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+          ]
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "replay_safe"
+        },
+        "verify_expectation": "The DLQ listing filtered to replay_safe should return no entry with id fc8d2a03-23b3-5371-9acb-46443c73baa5, indicating the job has been successfully replayed and is no longer in the dead-letter queue."
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-07T14:05:41.093714Z",
+      "updated_at": "2026-09-07T14:06:16.125599Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "37188e02-fa6c-47d3-b03d-1e3cfd315ff4",
+      "state": "resolved",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning_replay_safe",
+        "group": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 37431,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 35.066976,
+        "max_usd": "1.00",
+        "usd_used": "0.113441"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e30e4b1b-3d2f-463d-9fc0-089e44457b20",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "ae87594c536b8c3069e6f2d6c7e486bb"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-07T14:05:41.147997Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "26491614-f6d5-49fc-8544-6061f662f9a6",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": "replay_safe",
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":1,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-07T13:23:12.383586Z\",\"updated_at\":\"2026-09-07T13:23:18.383586Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-07T13:23:18.383586Z\",\"extra\":null}]}",
+          "timestamp": "2026-09-07T14:05:41.148069Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a386d498-c89b-438e-adff-6fa94ba4bdde",
+          "tool_name": "get_trace",
+          "arguments": {
+            "trace_id": "c5ca46c1-f4dd-5021-8be4-130143553096",
+            "include_audit": true
+          },
+          "result_summary": "{\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"jobs\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"user_id\":\"ee7c82cb-bab6-5780-8590-55b57064cbe3\",\"retry_count\":3,\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"created_at\":\"2026-09-07T13:23:12.383586Z\",\"updated_at\":\"2026-09-07T13:23:18.383586Z\"}],\"audit_events\":[],\"truncated\":false,\"total_jobs\":1,\"total_audit_events\":0}",
+          "timestamp": "2026-09-07T14:05:41.148069Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "61648177-b880-41ec-96a3-b9b865407a7a",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "DLQ job fc8d2a03-23b3-5371-9acb-46443c73baa5 (bulk_api_sync) has remediation_hint='replay_safe' with triage confidence 0.88. The payload was validated, no partial write survived the upstream timeout, the call is idempotent, and a replay is the complete remedy. No human sign-off is required."
+          },
+          "result_summary": "planner handoff to PLANNING: DLQ job fc8d2a03-23b3-5371-9acb-46443c73baa5 (bulk_api_sync) has remediation_hint='replay_safe' with triage confidence 0.88. The payload was validated, no partial write survived the upstream timeout, the call is idempotent, and a replay is the complete remedy. No human sign-off is required.",
+          "timestamp": "2026-09-07T14:05:41.148069Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "193e0f31-28bd-49d6-8892-1b98b86bce16",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "bulk-api-sync-dlq-upstream-timeout-replay-safe"
+          },
+          "result_summary": "plan: replay_dlq_by_ids({\"job_ids\": [\"fc8d2a03-23b3-5371-9acb-46443c73baa5\"]}) then verify via list_dlq_messages",
+          "timestamp": "2026-09-07T14:06:08.520924Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "638e08fb-2f6c-4c74-b0d8-a2fa5eb205ff",
+          "tool_name": "replay_dlq_by_ids",
+          "arguments": {
+            "job_ids": [
+              "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+            ],
+            "idempotency_key": "2fc3247557185eb9fcccd619d7e74d02",
+            "delay_seconds": null
+          },
+          "result_summary": "{\"requested\":1,\"replayed\":1,\"scheduled\":0,\"failed\":0,\"results\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"ok\":true,\"error\":null,\"scheduled\":false,\"execute_at\":null}]}",
+          "timestamp": "2026-09-07T14:06:16.125599Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "040b3bcd-de5f-45f8-9554-839f03cf37a3",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": "replay_safe",
+            "limit": 50,
+            "offset": 0,
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "{\"total\":0,\"items\":[]}",
+          "timestamp": "2026-09-07T14:06:16.160737Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "486d1f51-cea8-40d9-99a1-42e04f817057",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The DLQ listing filtered to replay_safe should return no entry with id fc8d2a03-23b3-5371-9acb-46443c73baa5, indicating the job has been successfully replayed and is no longer in the dead-letter queue.",
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "verified: The remediation replayed 1 job (id fc8d2a03-23b3-5371-9acb-46443c73baa5) with ok=true and no errors, and the verify probe confirms the DLQ now contains 0 messages matching the replay_safe filter, indicating the job was successfully removed from the dead-letter queue.",
+          "timestamp": "2026-09-07T14:06:16.160737Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "bulk-api-sync-dlq-upstream-timeout-replay-safe",
+          "confidence": 0.92,
+          "reasoning": "DLQ entry fc8d2a03 has remediation_hint='replay_safe', triage confidence=0.88, no downstream write survived, and the call is idempotent — a straight replay is the entire remedy."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "partner-api-internal-timeout-30s-3-attempts",
+          "confidence": 0.55,
+          "reasoning": "The upstream partner-api.internal timed out on all 3 attempts, which may indicate a broader transient dependency outage still in progress."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "bulk-api-sync-dlq-upstream-timeout-replay-safe",
+        "action_tool": "replay_dlq_by_ids",
+        "action_arguments": {
+          "job_ids": [
+            "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+          ]
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "replay_safe"
+        },
+        "verify_expectation": "The DLQ listing filtered to replay_safe should return no entry with id fc8d2a03-23b3-5371-9acb-46443c73baa5, indicating the job has been successfully replayed and is no longer in the dead-letter queue."
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-07T14:05:41.093714Z",
+      "updated_at": "2026-09-07T14:06:16.160737Z"
+    }
+  ],
+  "invocation_id": "3c65c04326d4"
+}

@@ -15,6 +15,7 @@ from evals.graders.deterministic import (
     FieldComparator,
     GradeDimension,
     GradeReport,
+    RowSelector,
     ScenarioExpectation,
     grade,
     is_vacuous_detail,
@@ -2184,23 +2185,42 @@ class TestShippedDlqScenariosStateAnExactCount:
     def test_each_pins_the_world_its_count_is_true_of(self) -> None:
         """An exact count against an unpinned world is a wrong-reason FAIL waiting.
 
-        Scoped to the scenarios whose replay volume is counted over DLQ rows
-        — the ones that probe `list_dlq_messages` as their premise. Derived
-        rather than hand-listed: if the count is over dead-letter rows, the
-        dead-letter total is the thing that has to be pinned.
-        `remediate_runaway_saga_success` counts over one seeded DAG chain
-        instead and pins that chain's shape in its own precondition, so a
-        DLQ total would say nothing about it.
+        A scenario whose replay volume is decided BY THE QUEUE — a category
+        replay, or a by-id replay whose ids the scenario does not name — is
+        only as exact as the queue is pinned: one leftover chaos row and a
+        correct agent replays one row too many and grades red for it. Those
+        need `total equals` in the precondition.
+
+        The derivation is "what bounds the count", not "does the scenario
+        read the DLQ", and the distinction had to be drawn once the saga
+        scenario began probing `list_dlq_messages` for a reason that has
+        nothing to do with queue depth: it reads ONE row to learn whether
+        the chain root is safe to replay. Reading the DLQ is no longer
+        evidence that a scenario counts over it.
+
+        The alternative bound is `expected_action_arguments` on the replay's
+        `job_ids[]`, which is universal over every call and every id in every
+        call — so the volume cannot exceed the ids named however many rows
+        the world grows. That is a strictly tighter statement than `total`:
+        it pins WHICH rows, not merely how many there were to choose from.
         """
-        counted_over_dlq = [
-            s
+        id_pinned = {
+            s.name
             for s in self._replay_scenarios()
-            if any(probe.tool == "list_dlq_messages" for probe in s.expected_precondition)
-        ]
-        assert counted_over_dlq, "no replay scenario probes list_dlq_messages"
+            if any(
+                "replay_dlq_by_ids" in claim.tools and claim.argument.startswith("job_ids")
+                for claim in s.expectation.expected_action_arguments
+            )
+        }
+        counted_over_the_queue = [s for s in self._replay_scenarios() if s.name not in id_pinned]
+        assert counted_over_the_queue, "no replay scenario lets the queue decide its volume"
+        assert id_pinned, (
+            "no replay scenario pins the ids it replays — this test's exemption arm is "
+            "unexercised, so the derivation above is untested prose"
+        )
         missing = [
             s.name
-            for s in counted_over_dlq
+            for s in counted_over_the_queue
             if not any(
                 field.path == "total" and field.equals is not None
                 for probe in s.expected_precondition
@@ -2208,9 +2228,10 @@ class TestShippedDlqScenariosStateAnExactCount:
             )
         ]
         assert missing == [], (
-            f"these grade an exact replay count over DLQ rows but do not pin `total` "
+            f"these let the queue decide their replay volume but do not pin `total` "
             f"with an equals precondition: {missing}. A leftover chaos row makes a "
-            "correct agent replay one row too many and grade red."
+            "correct agent replay one row too many and grade red. Either pin the "
+            "world's dead-letter total, or pin the ids with expected_action_arguments."
         )
 
 
@@ -2309,6 +2330,30 @@ def _stuck_chain(now: datetime, root: str) -> EvidenceEntry:
         now,
         root,
         {root: "dead_letter", _SAGA_UPSTREAM: "completed", _SAGA_DESCENDANT: "waiting"},
+    )
+
+
+def _dlq_listing(now: datetime, rows: tuple[tuple[str, str | None], ...]) -> EvidenceEntry:
+    """One list_dlq_messages reading. ``rows`` is (job id, remediation_hint).
+
+    Always carries the seeded ``replay_safe`` row alongside whatever the
+    caller asked for, because that row is in every world this suite runs in
+    and it is what makes an UNSCOPED hint assertion pass for the wrong
+    reason. A helper that emitted only the row under test would let a
+    scenario's row-scoped claim look equivalent to the unscoped one.
+    """
+    items = ",".join(
+        f'{{"id":"{job_id}","type":"bulk_api_sync","retry_count":3,'
+        f'"remediation_hint":{"null" if hint is None else f'"{hint}"'},'
+        '"created_at":"2026-08-31T01:21:46.584955Z","dead_lettered_at":null,'
+        '"trace_id":null,"triage":null,"extra":null}'
+        for job_id, hint in (*rows, (_SEEDED_REPLAY_SAFE, "replay_safe"))
+    )
+    return EvidenceEntry(
+        tool_name="list_dlq_messages",
+        arguments={},
+        result_summary=f'{{"total":{len(rows) + 1},"items":[{items}]}}',
+        timestamp=now,
     )
 
 
@@ -2873,9 +2918,51 @@ class TestEscalateScenariosForbidActingAtAll:
     def test_saga_stuck_reading_and_escalating_passes(
         self, run_state: RunState, now: datetime
     ) -> None:
-        run = _with_terminal(run_state, IncidentState.ESCALATED, (_stuck_chain(now, _STUCK_ROOT),))
+        run = _with_terminal(
+            run_state,
+            IncidentState.ESCALATED,
+            (
+                _stuck_chain(now, _STUCK_ROOT),
+                _dlq_listing(now, ((_STUCK_ROOT, "human_required"),)),
+            ),
+        )
         report = grade(run, _shipped_expectation("saga_stuck"))
         assert report.passed is True, [d.detail for d in report.dimensions if not d.passed]
+
+    def test_saga_stuck_escalating_without_reading_the_row_is_red(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The defect the `human_required` discriminator closes.
+
+        Before it, this scenario and `remediate_runaway_saga_success` expected
+        OPPOSITE behaviour from byte-identical evidence, so escalating here
+        graded the planner's temperament rather than its reasoning. The chain
+        probe alone is now insufficient: the run has to show it read the
+        classification that makes escalation the only correct move.
+        """
+        run = _with_terminal(run_state, IncidentState.ESCALATED, (_stuck_chain(now, _STUCK_ROOT),))
+        dim = _dim(grade(run, _shipped_expectation("saga_stuck")), GradeDimension.EVIDENCE)
+        assert dim.passed is False
+        assert "list_dlq_messages" in dim.detail
+
+    def test_saga_stuck_reading_only_the_seeded_human_required_row_is_red(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The seeded bad-CSV row is `human_required` in every world, so an
+        unscoped hint assertion is satisfied by furniture the agent would have
+        seen whether or not it ever located the chain root."""
+        run = _with_terminal(
+            run_state,
+            IncidentState.ESCALATED,
+            (
+                _stuck_chain(now, _STUCK_ROOT),
+                _dlq_listing(now, ((_SEEDED_HUMAN_REQUIRED, "human_required"),)),
+            ),
+        )
+        assert (
+            _dim(grade(run, _shipped_expectation("saga_stuck")), GradeDimension.EVIDENCE).passed
+            is False
+        )
 
 
 class TestVerifyFailsGradesTheAttemptItself:
@@ -3007,11 +3094,99 @@ class TestRunawaySagaGradesWhichJobAndWhetherItRecovered:
         return _shipped_expectation("remediate_runaway_saga_success")
 
     def _correct(self, now: datetime) -> tuple[EvidenceEntry, ...]:
+        # The DLQ read sits between the chain probe and the replay, which is
+        # the whole shape this scenario now grades: the chain says the root
+        # stopped things, the listing says restarting it is sanctioned, and
+        # only then does the replay happen.
         return (
             _stuck_chain(now, _SAGA_ROOT),
+            _dlq_listing(now, ((_SAGA_ROOT, "replay_safe"),)),
             _replay_root(now, [_SAGA_ROOT]),
             _drained_chain(now, _SAGA_ROOT),
         )
+
+    def test_replaying_a_root_nobody_classified_is_red(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The trajectory this scenario graded green until 2026-09-07.
+
+        Probe the chain, see `dead_letter`, replay. Every other assertion
+        still holds — right id, right count, chain drained — and the run is
+        red on the one thing that was missing: nothing ever established the
+        root was safe to restart.
+        """
+        run = _with_terminal(
+            run_state,
+            IncidentState.RESOLVED,
+            (
+                _stuck_chain(now, _SAGA_ROOT),
+                _replay_root(now, [_SAGA_ROOT]),
+                _drained_chain(now, _SAGA_ROOT),
+            ),
+        )
+        dim = _dim(grade(run, self._expectation()), GradeDimension.EVIDENCE)
+        assert dim.passed is False
+        assert "list_dlq_messages" in dim.detail
+
+    def test_reading_the_classification_after_replaying_is_red(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Act, then read. `list_dlq_messages` is also a legitimate verify
+        probe for a replay, so without the ordering boundary this run carries
+        exactly the evidence a correct one does — in the order that makes it
+        worthless."""
+        run = _with_terminal(
+            run_state,
+            IncidentState.RESOLVED,
+            (
+                _stuck_chain(now, _SAGA_ROOT),
+                _replay_root(now, [_SAGA_ROOT]),
+                _dlq_listing(now, ((_SAGA_ROOT, "replay_safe"),)),
+                _drained_chain(now, _SAGA_ROOT),
+            ),
+        )
+        dim = _dim(grade(run, self._expectation()), GradeDimension.EVIDENCE)
+        assert dim.passed is False
+        assert "recorded before ['replay_dlq_by_ids']" in dim.detail
+
+    def test_a_replay_safe_row_that_is_not_the_root_is_red(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The cross-satisfaction the row selector exists to stop.
+
+        The listing carries a genuinely `replay_safe` row — the seeded
+        schema-violation job, present in every world — while the chain root
+        beside it is `human_required`. Unscoped, "some row says replay_safe"
+        and "some row has the root's id" are both true and the run grades
+        green on a replay the platform itself would refuse.
+        """
+        run = _with_terminal(
+            run_state,
+            IncidentState.RESOLVED,
+            (
+                _stuck_chain(now, _SAGA_ROOT),
+                _dlq_listing(now, ((_SAGA_ROOT, "human_required"),)),
+                _replay_root(now, [_SAGA_ROOT]),
+                _drained_chain(now, _SAGA_ROOT),
+            ),
+        )
+        dim = _dim(grade(run, self._expectation()), GradeDimension.EVIDENCE)
+        assert dim.passed is False
+        assert "human_required" in dim.detail
+
+    def test_a_root_with_no_hint_at_all_is_red(self, run_state: RunState, now: datetime) -> None:
+        """A null hint is UNKNOWN, not replay-safe — the platform's own rule."""
+        run = _with_terminal(
+            run_state,
+            IncidentState.RESOLVED,
+            (
+                _stuck_chain(now, _SAGA_ROOT),
+                _dlq_listing(now, ((_SAGA_ROOT, None),)),
+                _replay_root(now, [_SAGA_ROOT]),
+                _drained_chain(now, _SAGA_ROOT),
+            ),
+        )
+        assert _dim(grade(run, self._expectation()), GradeDimension.EVIDENCE).passed is False
 
     def test_sweeping_a_seeded_dlq_row_into_the_batch_is_red_twice(
         self, run_state: RunState, now: datetime
@@ -3106,7 +3281,12 @@ class TestRunawaySagaGradesWhichJobAndWhetherItRecovered:
         run = _with_terminal(
             run_state,
             IncidentState.RESOLVED,
-            (_stuck_chain(now, _SAGA_ROOT), _replay_root(now, [_SAGA_ROOT]), settled),
+            (
+                _stuck_chain(now, _SAGA_ROOT),
+                _dlq_listing(now, ((_SAGA_ROOT, "replay_safe"),)),
+                _replay_root(now, [_SAGA_ROOT]),
+                settled,
+            ),
         )
         assert grade(run, self._expectation()).passed is True
 
@@ -3253,3 +3433,115 @@ class TestTheOneActionClaimIsStructuralNotGraded:
             f"PLANNING is now reachable from {sources}; the single-action invariant "
             "these scenarios lean on no longer follows from the graph alone."
         )
+
+
+class TestRowSelectorLoadTimeRefusals:
+    """``where`` picks among rows, so shapes with no rows are refused at load.
+
+    Every one of these would otherwise be an assertion that reads as
+    tightened and grades as broken — the failure mode this module's other
+    validators exist for, applied to the new axis.
+    """
+
+    def test_a_scalar_field_has_no_rows_to_select_from(self) -> None:
+        with pytest.raises(ValidationError, match="no '\\[\\]' segment"):
+            EvidenceFieldExpectation(
+                tools=("list_dlq_messages",),
+                field="total",
+                where=RowSelector(field="id", equals="x"),
+                equals=5,
+            )
+
+    def test_a_field_resolving_to_the_rows_themselves_is_refused(self) -> None:
+        # `items[]` IS the rows, so the selector and the comparator would be
+        # asking the same question of the same value.
+        with pytest.raises(ValidationError, match="resolves to the rows themselves"):
+            EvidenceFieldExpectation(
+                tools=("list_dlq_messages",),
+                field="items[]",
+                where=RowSelector(field="id", equals="x"),
+                equals="y",
+            )
+
+    def test_the_selector_needs_exactly_one_comparator(self) -> None:
+        with pytest.raises(ValidationError, match="exactly one"):
+            RowSelector(field="id")
+
+
+class TestOrderingBoundaryLoadTimeRefusals:
+    def test_an_unregistered_boundary_tool_is_refused(self) -> None:
+        # It would never be found, so the assertion would fail on every run
+        # and read as an agent defect rather than as a typo.
+        with pytest.raises(ValidationError, match="not a registered tool"):
+            EvidenceFieldExpectation(
+                tools=("list_dlq_messages",),
+                field="items[].remediation_hint",
+                equals="replay_safe",
+                before_tools=("replay_dlq_by_idz",),
+            )
+
+    def test_a_bookkeeping_marker_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="bookkeeping marker"):
+            EvidenceFieldExpectation(
+                tools=("list_dlq_messages",),
+                field="items[].remediation_hint",
+                equals="replay_safe",
+                before_tools=("_planner_plan",),
+            )
+
+    def test_a_tool_cannot_be_its_own_boundary(self) -> None:
+        with pytest.raises(ValidationError, match="both tools and before_tools"):
+            EvidenceFieldExpectation(
+                tools=("list_dlq_messages",),
+                field="items[].remediation_hint",
+                equals="replay_safe",
+                before_tools=("list_dlq_messages",),
+            )
+
+
+class TestOrderingBoundaryGrading:
+    _EXP = ScenarioExpectation(
+        name="ordering",
+        expected_terminal_state=IncidentState.RESOLVED,
+        expected_evidence_fields=(
+            EvidenceFieldExpectation(
+                tools=("list_dlq_messages",),
+                field="items[].remediation_hint",
+                equals="replay_safe",
+                before_tools=("replay_dlq_by_ids",),
+            ),
+        ),
+    )
+
+    def test_a_boundary_that_never_fired_fails_closed(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """An ordering claim about an event that did not happen is
+        unanswerable, not satisfied. Read the other way — "nothing came
+        after, so everything counts" — the assertion switches itself off in
+        exactly the runs where the action was skipped.
+        """
+        run = _with_terminal(
+            run_state,
+            IncidentState.RESOLVED,
+            (_dlq_listing(now, ((_SEEDED_REPLAY_SAFE, "replay_safe"),)),),
+        )
+        dim = _dim(grade(run, self._EXP), GradeDimension.EVIDENCE)
+        assert dim.passed is False
+        assert "ordering boundary never occurred" in dim.detail
+
+    def test_only_the_first_boundary_entry_cuts(self, run_state: RunState, now: datetime) -> None:
+        """A second replay must not re-open the window. The boundary is the
+        FIRST matching entry, so a run that replayed, then read, then
+        replayed again is still red — otherwise a repeat action would launder
+        a post-hoc read into a pre-action one."""
+        run = _with_terminal(
+            run_state,
+            IncidentState.RESOLVED,
+            (
+                _replay_root(now, [_SAGA_ROOT]),
+                _dlq_listing(now, ((_SAGA_ROOT, "replay_safe"),)),
+                _replay_root(now, [_SAGA_ROOT]),
+            ),
+        )
+        assert _dim(grade(run, self._EXP), GradeDimension.EVIDENCE).passed is False

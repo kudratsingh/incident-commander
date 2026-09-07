@@ -33,9 +33,9 @@ from incident_commander.llm.prompts.loader import (
 
 _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("2fbebe9dcd49d48e41a580b1093f8e66cdb063482ea78ee5873be2eaa3dc0eda"),
-    "investigation_planner": ("374b7203fa2cd2fdbac9ad7ab048b4cc22140f6cbe57f39379d0c0da05d67480"),
+    "investigation_planner": ("f5ff4ef191b4a7581d8e41b9e5a32563c2f683ab357c0e329384922ce7c5b9d7"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
-    "remediation_planner": ("7c1550bc67f905f2a96b955f4359dba59b556602dce610d0b6c719893ca421f8"),
+    "remediation_planner": ("3a6269b9ea2e06e15f42f530272bf3b3f7e68d0f5846f0c262628b0ea9e6d11d"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
 }
 
@@ -309,16 +309,55 @@ class TestRemediationPlannerInvariants:
         assert "the verification surface for a replayed root" in content
         assert "never mentions DAG roots" in content
 
-    def test_the_dag_root_case_is_not_gated_on_a_dlq_listing(self) -> None:
-        # The correct trajectory never calls `list_dlq_messages`: the
-        # root's own `status` from `get_dag_state` is the whole
-        # observation. The hint-routing table below it opens with "When
-        # the investigation evidence includes `list_dlq_messages`
-        # output", so without this the only routing guidance for a
-        # dead-lettered root sits behind a probe the agent should not make.
+    def test_a_dag_root_is_replayed_only_after_its_dlq_row_is_read(self) -> None:
+        # REPLACES `test_the_dag_root_case_is_not_gated_on_a_dlq_listing`,
+        # and the reversal is the point of this change. That test pinned
+        # "You do not need the DLQ listing to act here" — true about the
+        # cheapest trajectory and false about the safe one. `get_dag_state`
+        # returns five fields per node and `remediation_hint` is not among
+        # them, so a run steered by that sentence replayed a dead-lettered
+        # root knowing only that it had stopped, never whether restarting it
+        # was safe. The structural half is `SOURCE_ROW_FOR_ACTION` (ADR
+        # 0027); this is the steering half, and steering that can be
+        # silently deleted is not steering.
         content = load_prompt("remediation_planner")
-        assert "You do not need the DLQ listing to act here" in content
-        assert "merely to satisfy a table" in content
+        assert "You do not need the DLQ listing to act here" not in content
+        assert "Read the root's dead-letter row before you replay it" in content
+        assert "The chain view does not carry the hint" in content
+
+    def test_the_stuck_chain_case_names_the_four_readings_and_their_outcomes(self) -> None:
+        # The decision the read exists to inform, pinned value by value. A
+        # prompt that says "read the row" and stops has moved the cost
+        # without moving the behaviour: every one of these four readings has
+        # a different correct answer, and three of the four forbid the
+        # replay the agent is otherwise steered toward.
+        content = load_prompt("remediation_planner")
+        assert "`remediation_hint` is `replay_safe`" in content
+        assert "`remediation_hint` is `human_required`" in content
+        assert "A null `remediation_hint` is UNKNOWN, not replay-safe" in content
+        assert "bad data, a schema the producer must fix, or a poison payload" in content
+        assert "escalate, naming the root job id and what its row said" in content
+        assert "only when the operator's intent is to stop the retries" in content
+
+    def test_the_hint_table_no_longer_exempts_a_stuck_chain(self) -> None:
+        # The routing table used to end "A stuck dependency chain is the one
+        # remediation that routes without this table". With the exemption in
+        # place, a planner that DID read the row had no rule telling it what
+        # the row meant for a DAG root — the sentence pointed away from the
+        # only guidance there was.
+        content = load_prompt("remediation_planner")
+        assert "the one remediation that routes without this table" not in content
+        assert "not an exemption from reading the hint" in content
+
+    def test_the_investigation_planner_makes_the_read(self) -> None:
+        # The plan guard refuses at PLANNING, which is a single LLM call
+        # with no tool budget — the remediation planner cannot go and fetch
+        # the row it is missing. Only the investigation loop can, so the
+        # rule has to reach the planner that owns the probes or the guard's
+        # only reachable outcome is an escalation.
+        content = load_prompt("investigation_planner")
+        assert "not remediable until you have read its dead-letter row" in content
+        assert "A null hint is UNKNOWN, not replay-safe" in content
 
     def test_forbids_agent_supplied_idempotency_key(self) -> None:
         content = load_prompt("remediation_planner")

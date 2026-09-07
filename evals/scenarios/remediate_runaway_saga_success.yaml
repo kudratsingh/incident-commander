@@ -1,6 +1,8 @@
 name: remediate_runaway_saga_success
-description: 'Stuck dependency chain alert. Agent probes get_dag_state, sees a dead-lettered root holding waiting descendants behind it, and emits RemediateAction. Remediation planner replays the root
-  with replay_dlq_by_ids; the replayed root completes and the resolver promotes the held descendants, so verify re-probes get_dag_state and expects the chain to have drained.
+description: 'Stuck dependency chain alert. Agent probes get_dag_state, sees a dead-lettered root holding waiting descendants behind it, then reads that root''s dead-letter row with list_dlq_messages
+  to learn whether replaying it is safe — the chain view carries no remediation_hint, so the DLQ listing is the only place that answer exists. The row reads replay_safe, so the agent emits RemediateAction
+  and the remediation planner replays the root with replay_dlq_by_ids; the replayed root completes and the resolver promotes the held descendants, so verify re-probes get_dag_state and expects the chain
+  to have drained.
 
   '
 tags:
@@ -88,6 +90,56 @@ canned_tool_responses:
     - type: text
       text: '{"requested":1,"replayed":1,"scheduled":0,"failed":0,"results":[{"id":"a2412a54-65f0-5258-95ab-5c168a15df64","ok":true,"error":null,"scheduled":false,"execute_at":null}]}'
     is_error: false
+  # The dead-letter listing the agent must read BEFORE replaying the root.
+  # Five rows: the chain root this run manufactures, then the platform's four
+  # boot-seeded rows, which is what the world holds while the chain is stuck
+  # (verified read-only against the running stack: DLQ total 4 un-faulted,
+  # those exact four ids, that exact key set).
+  #
+  # The ROOT ROW IS WHY THIS '{"total":5,"items":[{"id":"a2412a54-65f0-5258-95ab-5c168a15df64","type":"bulk_api_sync","error_message":"SchemaValidationError: payload missing required field ''user_id'' (received keys: [''tenant_id'', ''action'', ''ts''])","retry_count":3,"remediation_hint":"replay_safe","created_at":"2026-08-31T01:21:46.584955Z","updated_at":"2026-08-31T01:21:46.584955Z","dead_lettered_at":null,"trace_id":"a1fd3e60-03c6-5584-8e24-c82aefa90ae0","triage":null,"extra":null},{"id":"fc8d2a03-23b3-5371-9acb-46443c73baa5","type":"bulk_api_sync","error_message":"SchemaValidationError: payload missing required field ''user_id'' (received keys: [''tenant_id'', ''action'', ''ts''])","retry_count":3,"remediation_hint":"replay_safe","created_at":"2026-07-28T09:52:00Z","updated_at":"2026-07-28T09:52:00Z","dead_lettered_at":"2026-07-28T09:55:00Z","trace_id":"c5ca46c1-f4dd-5021-8be4-130143553096","triage":{"root_cause_category":"schema_violation","summary":"Producer sent a payload missing user_id \u2014 schema rejected it three times.","suggested_fix":"Fix the producer to include user_id, then replay the DLQ entry. Backwards-compatible producer fix + replay is the standard remediation.","is_retryable":true,"confidence":0.91},"extra":null},{"id":"f030f975-974e-5ce3-aa6b-444136507d86","type":"csv_upload","error_message":"ValueError: invalid literal for int() with base 10: ''not-a-number'' at row 15,382","retry_count":3,"remediation_hint":"human_required","created_at":"2026-07-28T09:48:00Z","updated_at":"2026-07-28T09:48:00Z","dead_lettered_at":"2026-07-28T09:51:00Z","trace_id":"89609789-fdcb-5a5a-b826-d7d5d5f9cf37","triage":{"root_cause_category":"bad_input","summary":"Non-numeric value in a supposedly-integer CSV column.","suggested_fix":"Not retryable \u2014 data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.","is_retryable":false,"confidence":0.94},"extra":null},{"id":"af67d1b1-13f8-5a2c-8c44-66ec5564597d","type":"bulk_api_sync","error_message":"process_payment call timed out after 30s: TimeoutError(''stripe.api'')","retry_count":3,"remediation_hint":"wait_and_replay","created_at":"2026-07-28T09:35:00Z","updated_at":"2026-07-28T09:35:00Z","dead_lettered_at":"2026-07-28T09:38:00Z","trace_id":"6f76e48d-72c4-5e5a-a5cf-bc29758167cb","triage":{"root_cause_category":"third_party_timeout","summary":"Stripe API exceeded 30s deadline three consecutive attempts.","suggested_fix":"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.","is_retryable":true,"confidence":0.71},"extra":null},{"id":"97d91272-9774-5b8e-980b-f0d2fa6ed619","type":"bulk_api_sync","error_message":"send_email downstream call failed: ConnectionRefusedError(''smtp.mailer.internal:587'')","retry_count":3,"remediation_hint":"wait_and_replay","created_at":"2026-07-28T09:20:00Z","updated_at":"2026-07-28T09:20:00Z","dead_lettered_at":"2026-07-28T09:23:00Z","trace_id":"1bfc7482-c957-5217-beae-e8cba48a152d","triage":{"root_cause_category":"downstream_unavailable","summary":"SMTP relay unreachable \u2014 connection refused at TCP layer.","suggested_fix":"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules \u2014 cross-reference `get_deploy_history`. Replay once the dependency recovers.","is_retryable":true,"confidence":0.82},"extra":null}]}' EXISTS. `get_dag_state` reads the same
+  # node as `status: dead_letter` and carries no `remediation_hint` — its
+  # node model is five fields — so this listing is the only place the agent
+  # can learn that replaying the root is safe. Derived from the platform's
+  # own hook rather than invented: `create_stuck_dag` stamps `retry_count=3`,
+  # `remediation_hint` from its argument (this scenario passes `replay_safe`),
+  # `error_message` from `_DEFAULT_ERRORS[hint]` — the same schema-violation
+  # string the seeded replay_safe row carries — and
+  # `trace_id = uuid5(ns, '{tenant}:{chain}:trace:{root_id}')`, which
+  # `tests/unit/test_scenario_loader.py` recomputes offline.
+  #
+  # Three details that are recordings, not guesses:
+  #
+  # * `dead_lettered_at` is NULL on the root and only on the root. The field
+  #   is `jobs.completed_at`, which `update_status` stamps on a terminal
+  #   TRANSITION; the hook INSERTS the terminal row (deliberately — that is
+  #   how it dodges the ADR-0022 cascade that would drain the chain), so
+  #   nothing ever stamps it.
+  # * The root sorts FIRST anyway. The listing orders by
+  #   `coalesce(completed_at, created_at) DESC`, so the root falls back to
+  #   its own `created_at` — the moment chaos seeded it, later than the seed
+  #   pack's rows. The agent finds it on page one with no filter, which is
+  #   what keeps this read one call rather than a paging loop.
+  # * `triage` is null: LLM triage is off on this platform, so only rows the
+  #   seeder classified explicitly carry a triage block.
+  #
+  # `total` is 5, matching the rows, because every row in this world is
+  # nameable — unlike `remediate_dlq_backlog_success`, whose fifth row is a
+  # per-run poison id no recording can pin. The un-faulted world holds 4, so
+  # `total` and the root's `id` are the two post-fault ledger entries this
+  # fixture adds (the three clocks are already declared volatile for this
+  # tool, and `error_message` is unbounded text).
+  #
+  # The four seeded rows are re-recorded from the live stack rather than
+  # copied from the sibling fixture: that one carries DOUBLED single quotes
+  # in `error_message` ('''user_id''' where the platform emits 'user_id'), a
+  # YAML round-trip artifact nothing caught because the field is declared
+  # unbounded text. Not fixed there in this PR — that scenario has a paid run
+  # behind it and the field is ungraded — but not reproduced here either.
+  list_dlq_messages:
+    content:
+    - type: text
+      text: '{"total":5,"items":[{"id":"a2412a54-65f0-5258-95ab-5c168a15df64","type":"bulk_api_sync","error_message":"SchemaValidationError: payload missing required field ''user_id'' (received keys: [''tenant_id'', ''action'', ''ts''])","retry_count":3,"remediation_hint":"replay_safe","created_at":"2026-08-31T01:21:46.584955Z","updated_at":"2026-08-31T01:21:46.584955Z","dead_lettered_at":null,"trace_id":"a1fd3e60-03c6-5584-8e24-c82aefa90ae0","triage":null,"extra":null},{"id":"fc8d2a03-23b3-5371-9acb-46443c73baa5","type":"bulk_api_sync","error_message":"SchemaValidationError: payload missing required field ''user_id'' (received keys: [''tenant_id'', ''action'', ''ts''])","retry_count":3,"remediation_hint":"replay_safe","created_at":"2026-07-28T09:52:00Z","updated_at":"2026-07-28T09:52:00Z","dead_lettered_at":"2026-07-28T09:55:00Z","trace_id":"c5ca46c1-f4dd-5021-8be4-130143553096","triage":{"root_cause_category":"schema_violation","summary":"Producer sent a payload missing user_id \u2014 schema rejected it three times.","suggested_fix":"Fix the producer to include user_id, then replay the DLQ entry. Backwards-compatible producer fix + replay is the standard remediation.","is_retryable":true,"confidence":0.91},"extra":null},{"id":"f030f975-974e-5ce3-aa6b-444136507d86","type":"csv_upload","error_message":"ValueError: invalid literal for int() with base 10: ''not-a-number'' at row 15,382","retry_count":3,"remediation_hint":"human_required","created_at":"2026-07-28T09:48:00Z","updated_at":"2026-07-28T09:48:00Z","dead_lettered_at":"2026-07-28T09:51:00Z","trace_id":"89609789-fdcb-5a5a-b826-d7d5d5f9cf37","triage":{"root_cause_category":"bad_input","summary":"Non-numeric value in a supposedly-integer CSV column.","suggested_fix":"Not retryable \u2014 data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.","is_retryable":false,"confidence":0.94},"extra":null},{"id":"af67d1b1-13f8-5a2c-8c44-66ec5564597d","type":"bulk_api_sync","error_message":"process_payment call timed out after 30s: TimeoutError(''stripe.api'')","retry_count":3,"remediation_hint":"wait_and_replay","created_at":"2026-07-28T09:35:00Z","updated_at":"2026-07-28T09:35:00Z","dead_lettered_at":"2026-07-28T09:38:00Z","trace_id":"6f76e48d-72c4-5e5a-a5cf-bc29758167cb","triage":{"root_cause_category":"third_party_timeout","summary":"Stripe API exceeded 30s deadline three consecutive attempts.","suggested_fix":"Verify Stripe status page; if green, raise the per-call timeout via the retry policy for payment-type jobs and replay the DLQ batch.","is_retryable":true,"confidence":0.71},"extra":null},{"id":"97d91272-9774-5b8e-980b-f0d2fa6ed619","type":"bulk_api_sync","error_message":"send_email downstream call failed: ConnectionRefusedError(''smtp.mailer.internal:587'')","retry_count":3,"remediation_hint":"wait_and_replay","created_at":"2026-07-28T09:20:00Z","updated_at":"2026-07-28T09:20:00Z","dead_lettered_at":"2026-07-28T09:23:00Z","trace_id":"1bfc7482-c957-5217-beae-e8cba48a152d","triage":{"root_cause_category":"downstream_unavailable","summary":"SMTP relay unreachable \u2014 connection refused at TCP layer.","suggested_fix":"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules \u2014 cross-reference `get_deploy_history`. Replay once the dependency recovers.","is_retryable":true,"confidence":0.82},"extra":null}]}'
+    is_error: false
 canned_llm_responses:
   investigation_planner:
   - hypotheses:
@@ -102,14 +154,28 @@ canned_llm_responses:
       tool_name: get_dag_state
       arguments:
         job_id: a2412a54-65f0-5258-95ab-5c168a15df64
+  # Second probe: the chain view says the root STOPPED the chain; it does not
+  # say whether restarting it is safe. That answer lives in one place — the
+  # root's own dead-letter row — so the planner reads the listing before it
+  # asks for a replay. No filter and no offset: the root is the newest
+  # dead-letter in this world, so it is on page one.
+  - hypotheses:
+    - category: runaway_saga
+      name: stuck_saga_node
+      confidence: 0.7
+      reasoning: "The root is dead_letter with retry_count=3 while its descendant waits, so the chain cannot drain on its own. Before replaying it, read its dead-letter row: get_dag_state carries no remediation_hint, and a root the platform classified human_required — or left unclassified — must not be replayed.\n"
+    next_action:
+      kind: probe
+      tool_name: list_dlq_messages
+      arguments: {}
   - hypotheses:
     - category: runaway_saga
       name: stuck_saga_node
       confidence: 0.85
-      reasoning: "The root is dead_letter with retry_count=3 while its descendant waits. dead_letter is terminal and the resolver promotes a child only when every parent is completed, so replaying the root is what frees the chain.\n"
+      reasoning: "The root is dead_letter with retry_count=3 while its descendant waits. dead_letter is terminal and the resolver promotes a child only when every parent is completed, so replaying the root is what frees the chain. Its dead-letter row reads remediation_hint=replay_safe on a schema-violation error, so an immediate replay by id is the sanctioned fix rather than a fence or an escalation.\n"
     next_action:
       kind: remediate
-      reason: dead-lettered root is holding the chain; replaying it promotes the held descendants
+      reason: dead-lettered root is classified replay_safe in the DLQ listing; replaying it promotes the held descendants
   remediation_planner:
   - target_hypothesis: stuck_saga_node
     action_tool: replay_dlq_by_ids
@@ -128,8 +194,8 @@ canned_llm_responses:
       '
   briefing_writer:
   - findings: 'A dependency chain had stalled: its root job was dead-lettered after exhausting three retries, holding a waiting descendant behind it, while the upstream parent had completed normally. Because
-      dead_letter is terminal and the resolver only promotes a child once every parent has completed, the chain could not drain on its own. Replaying the root returned replayed=1 with scheduled=0, and a
-      follow-up read showed the chain fully drained.
+      dead_letter is terminal and the resolver only promotes a child once every parent has completed, the chain could not drain on its own. The root''s dead-letter row classified it replay_safe on a schema-validation
+      error, so replaying it was the sanctioned fix rather than a case for a human. Replaying the root returned replayed=1 with scheduled=0, and a follow-up read showed the chain fully drained.
 
       '
     recommendation: 'Read the root''s error_message to find why it exhausted its retries — the replay cleared the symptom, not the cause, and a chain that dead-letters again will stall the same way. If the
@@ -186,6 +252,42 @@ expectation:
   - tools: [get_dag_state]
     field: seed_id
     equals: a2412a54-65f0-5258-95ab-5c168a15df64
+  # THE ROOT WAS CHECKED BEFORE IT WAS REPLAYED. The claim this scenario was
+  # missing, and the one the user asked for before any money is spent on it:
+  # not "the agent replayed the right job" but "the agent established the
+  # right job was safe to replay, first".
+  #
+  # Every clause is load-bearing:
+  #
+  # * `where` scopes the reading to the CHAIN ROOT'S row. Without it this is
+  #   two independent any-row assertions — some row has this id, some row
+  #   says replay_safe — which the seeded listing satisfies with two
+  #   DIFFERENT rows (fc8d2a03 is genuinely replay_safe and always present).
+  #   The pair would stay green for a world in which the root itself is
+  #   human_required, i.e. for exactly the run this claim exists to fail.
+  # * `before_tools` makes it an ORDERING claim. `list_dlq_messages` is also
+  #   the natural post-replay verify probe for the DLQ family, so without
+  #   the boundary a run that replayed first and read afterwards satisfies
+  #   the assertion just as well — and reading a classification after acting
+  #   on it is not checking, it is filing.
+  # * `equals: replay_safe` rather than `is_null: false`, because the
+  #   platform's own rule is that a hint is not merely a value to have read:
+  #   `human_required` forbids the replay outright and a NULL hint is
+  #   UNKNOWN, "not replay-safe" (list_dlq_messages description). Only one
+  #   of the four possible readings sanctions what this scenario grades.
+  #
+  # The structural guard (`SOURCE_ROW_FOR_ACTION`, ADR 0027) refuses the plan
+  # when the row is unread, so in a correct run this assertion is redundant
+  # with it — deliberately. The guard is a thing under test; a scenario whose
+  # claim rests on the guard being present cannot detect the guard going
+  # missing.
+  - tools: [list_dlq_messages]
+    field: items[].remediation_hint
+    where:
+      field: id
+      equals: a2412a54-65f0-5258-95ab-5c168a15df64
+    equals: replay_safe
+    before_tools: [replay_dlq_by_ids]
   # THE CHAIN IS ACTUALLY UN-STUCK. This is the assertion the comment below
   # used to say could not be written, and it can be written now: `rows: all`
   # quantifies over every node in one reading, so "no node is dead_letter"
@@ -266,9 +368,12 @@ expectation:
   # the same field IS asserted above, which is the form that cannot be
   # satisfied by one already-completed neighbour.
   #
-  # Live polling profile (docs/runbook.md live knobs): 1 investigation probe
-  # + 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls
-  # (VERIFY_PROBE_ATTEMPTS=6) = 9 tool calls on a correct run. Cap 13 is the
+  # Live polling profile (docs/runbook.md live knobs): 1 chain probe
+  # + 1 dead-letter row read + 1 ADR-0009 freshness re-probe + 1 action + up
+  # to 6 ADR-0006 verify polls
+  # (VERIFY_PROBE_ATTEMPTS=6) = 10 tool calls on a correct run. The read this
+  # PR adds is the tenth; the margin absorbs it without the cap moving, which
+  # is what the margin is for. Cap 13 is the
   # maintainer's decision (A-02), keeping the >=30% margin rule. Since ADR
   # 0019 this is ALSO the run's runtime BudgetLedger ceiling (invariant 7):
   # the agent is bounded by it, told it, and escalates on exhausting it, and
@@ -291,3 +396,22 @@ expected_precondition:
     equals: waiting
   - path: paused
     equals: false
+# The second half of the premise, and it is new: the chain is stuck AND its
+# root really is classified replay_safe. The scenario grades an agent for
+# reading that classification and acting on it, so a run must not start
+# against a world where the hook's `remediation_hint` argument silently did
+# not land — the agent would then correctly decline to replay and grade red
+# for behaving well, which is the wrong-reason FAIL calibration rule 2 exists
+# to prevent.
+#
+# The filter does the scoping the precondition language cannot: `expect` has
+# no row selector, so `items[].id equals <root>` on an UNFILTERED listing
+# would only say the root is somewhere in the DLQ. Asking the platform for
+# the `replay_safe` page and finding the root on it is the same statement as
+# "the root's hint is replay_safe", made with the tool's own filter.
+- tool: list_dlq_messages
+  arguments:
+    remediation_hint: replay_safe
+  expect:
+  - path: items[].id
+    equals: a2412a54-65f0-5258-95ab-5c168a15df64

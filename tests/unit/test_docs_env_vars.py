@@ -49,6 +49,8 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "ALERT_SUBJECT_PROBES",  # alert field -> subject probe, agent/investigation.py
         "VERIFY_PROBE_FOR_ACTION",  # tier-1 action -> observing read, agent/remediation.py
         "RESOLUTION_CLASS",  # tier-1 action -> resolves-or-stabilizes, tools/policies.py
+        # tier-1 action -> the read whose rows classify it, agent/remediation.py
+        "SOURCE_ROW_FOR_ACTION",
         "TIER_1",  # Tier enum values, tools/policies.py
         "TIER_2",
         # Environment variables / make flags consumed outside Settings.

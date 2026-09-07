@@ -23,6 +23,7 @@ An archive listed as *transcript only* means the raw session data is on disk und
 | 2026-08-21 | *in progress* | **Six parallel builders + a read-only reliability sweep.** cmd #145 canned-only scenarios (exit 8, pre-spend), #146 run-archive filesystem locking (ADR 0021), #147 evidence tool-scoping — **16 cross-satisfiable evidence tokens across 15 of 38 scenarios**, not just the one known defect. plat #146 `get_cache_key_info`, #147 pins+timestamp re-baseline, #148 `create_stuck_dag`. The 14-finder reliability sweep lives at `audit-ws/sweeps/reliability-sweep.js` — see `sweeps/README.md`; run IDs change, the script is the artifact. |
 | 2026-08-30 → 09-07 | *transcript only* | **The paid live-eval sequence, and the first green remediation.** Read-only pass `cde5a14485c3` 25/26 (`degraded 0`, exit 0 — PR #176's forward checkpointing is why that exit code means something). Then four runs of `remediate_consumer_lag_success`: A wrong-target (→ #177 `ALERT_SUBJECT_PROBES` + planner rules), B honest escalation on a stale-but-static lag (→ #178 reprobe 75s, precondition lag>=20 over 10×15s), C **aborted pre-spend** on a world audit, D `16ae3c7a4c9d` **green on all five dimensions** — the project's first. Also: a ~$2 read-only stage thrown away because it was hand-rolled instead of `make eval-smoke`, and a fresh world that alerts on its own fixtures (→ #180). Full record and lessons: [`docs/lessons/live-eval-sequence-2026-09.md`](../docs/lessons/live-eval-sequence-2026-09.md). |
 | 2026-09-07 | *transcript only* | **A stabilizer is not a resolution** (ADR 0026). Pre-spend sweep of `remediate_runaway_saga_success` found every steering layer — planner prompt, `FIX_MAP`, and the pinned `get_dag_state` / `replay_dlq_by_ids` descriptions — pointing at `pause_dag`, the one tool that scenario forbids (the platform refuses to replay a job inside a paused DAG, so pausing *breaks* the fix). A verified pause would have graded RESOLVED on a still-stuck chain, and every plan guard admitted it. Fix: `RESOLUTION_CLASS` classifies every Tier-1 action resolve-or-stabilize and a verified stabilizer now escalates; `FIX_MAP[RUNAWAY_SAGA]` → `replay_dlq_by_ids`; prompt gained a stuck-chain section countering the two pinned descriptions by name; `TestFixMapMatchesTheSuite` cross-checks the map against the corpus. **Left open on purpose:** nothing observable distinguishes `saga_stuck` from `remediate_runaway_saga_success` — see [`docs/lessons/live-eval-sequence-2026-09.md` §8](../docs/lessons/live-eval-sequence-2026-09.md). |
+| 2026-09-07 | *transcript only* | **Read the row before you replay it** (ADR 0027). The user read the staged `remediate_runaway_saga_success` trajectory before releasing the spend and asked how the agent knows the dead-lettered root is safe to replay. It does not: `get_dag_state`'s node model is five fields and `remediation_hint` is not one of them, so a `dead_letter` status says the node stopped the chain and nothing about whether restarting it is safe. **Six structural guards admitted the plan**, including `_unsourced_resource_args` — the id IS platform-produced (the alert carries it), which proves it is not a hallucination and reads like something stronger. Fix: `SOURCE_ROW_FOR_ACTION` refuses a by-id replay whose job's `list_dlq_messages` row is not in the evidence (refuse-and-steer, total over Tier-1); both planner prompts carry the four hint readings and their outcomes; two new grader axes (`where` row selector, `before_tools` ordering boundary) let the scenario claim the root's row read `replay_safe` *before* the replay. **`saga_stuck` finally has its discriminator** — chaos now seeds `remediation_hint: human_required`, closing §8's open question. Full record: [`docs/lessons/live-eval-sequence-2026-09.md` §9](../docs/lessons/live-eval-sequence-2026-09.md). |
 
 ## Things a future session should not have to rediscover
 
@@ -91,6 +92,22 @@ Promoted out of the archives because they cost real time or money the first time
   in that map breaks no test. Both were stale in the same direction for the whole life of PR #173
   (2026-09-07). Before a paid run, read the prompt the live agent will load against the scenario it
   will be graded by — the regression suite structurally cannot do it for you.
+
+- **A guard stack can be complete about the object and silent about the decision.** By 2026-09-07
+  five plan guards established that a remediation named the right resource, sourced it from the
+  platform, verified it on the same resource, could observe what it changed, and was worth something
+  when verified. All five admitted a plan to replay a dead-lettered job on no evidence beyond the
+  fact that it had failed. **When adding a guard, ask which of two questions it answers — "is this
+  aimed correctly?" or "should this happen at all?" — because the first kind accumulates and looks
+  like the second.**
+- **`_unsourced_resource_args` is a hallucination check, not a provenance check.** It proves the
+  platform emitted a string. An id from the alert payload passes it, which is why "evidence-sourced"
+  must never be read as "somebody looked this resource up".
+- **A refusal written under a new marker name is invisible to the planner.** `_format_plan_context`
+  matched `_PLAN_REFUSED_MARKER` exactly, so a second refusal shape landed inside the 200-character
+  evidence truncation — cut mid-sentence, which is the one thing that function's own comment says
+  the whole-rendering exists to prevent. Refusal markers are a derived set now
+  (`_PLAN_REFUSAL_MARKERS`); a third shape must join it.
 
 ## Standing rules that outlive any session
 

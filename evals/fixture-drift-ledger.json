@@ -8,9 +8,9 @@
     "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything"
   },
   "_counts": {
-    "recorded": 30,
+    "recorded": 36,
     "fixture-defect": 0,
-    "explained": 30
+    "explained": 36
   },
   "known_drift": [
     {
@@ -142,6 +142,30 @@
       "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no seed_id at all \u2014 the root job id the chain is named for"
     },
     {
+      "scenario": "remediate_runaway_saga_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the chain root's id is uuid5-derived from the chain_name and exists only after create_stuck_dag has fired, so no un-faulted reading of the DLQ contains it \u2014 the same absence already recorded for its get_dag_state.seed_id"
+    },
+    {
+      "scenario": "remediate_runaway_saga_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].trace_id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "create_stuck_dag stamps the root's trace_id from the same namespace and chain_name, so it appears and disappears with the row itself"
+    },
+    {
+      "scenario": "remediate_runaway_saga_success",
+      "tool": "list_dlq_messages",
+      "path": "total",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "create_stuck_dag dead-letters the runaway-saga-eval chain root, so the faulted world holds five DLQ rows where the un-faulted world the check probes holds the four boot-seeded ones"
+    },
+    {
       "scenario": "remediate_stale_cache_success",
       "tool": "get_cache_key_info",
       "path": "exists",
@@ -220,6 +244,30 @@
       "kind": "canned_only_field",
       "context": "post-fault",
       "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no seed_id at all \u2014 the root job id the chain is named for"
+    },
+    {
+      "scenario": "saga_stuck",
+      "tool": "list_dlq_messages",
+      "path": "items[].id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the chain root's id is uuid5-derived from the chain_name and exists only after create_stuck_dag has fired, so no un-faulted reading of the DLQ contains it \u2014 the same absence already recorded for its get_dag_state.seed_id"
+    },
+    {
+      "scenario": "saga_stuck",
+      "tool": "list_dlq_messages",
+      "path": "items[].trace_id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "create_stuck_dag stamps the root's trace_id from the same namespace and chain_name, so it appears and disappears with the row itself"
+    },
+    {
+      "scenario": "saga_stuck",
+      "tool": "list_dlq_messages",
+      "path": "total",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "create_stuck_dag dead-letters the saga-stuck-eval chain root, so the faulted world holds five DLQ rows where the un-faulted world the check probes holds the four boot-seeded ones"
     },
     {
       "scenario": "tool_output_schema_mismatch",

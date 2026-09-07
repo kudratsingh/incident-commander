@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
@@ -47,6 +48,22 @@ from incident_commander.tools.registry import TOOL_REGISTRY
 _UNCLASSIFIED = "delete_all_the_things"
 
 _SCENARIO_DIR = Path(__file__).resolve().parents[2] / "evals" / "scenarios"
+
+
+def _row_model(output_model: type[BaseModel], rows_field: str) -> type[BaseModel] | None:
+    """The model of one row of a list-valued output field, if it has one.
+
+    Walks the annotation the way the grader's ``_nested_models`` does, but
+    from one named field rather than the whole tree: this asks "what shape
+    are ``list_dlq_messages.items``' elements", so a map claiming those rows
+    carry ``remediation_hint`` can be checked against the platform's own
+    contract instead of against a recording.
+    """
+    annotation = output_model.model_fields[rows_field].annotation
+    for arg in typing.get_args(annotation):
+        if isinstance(arg, type) and issubclass(arg, BaseModel):
+            return arg
+    return None
 
 
 def _categories_in(scenario: Scenario) -> set[HypothesisCategory]:
@@ -511,6 +528,111 @@ class TestVerifyProbeForAction:
                 f"{action} is declared inert (empty tuple) but names resources "
                 f"({sorted(RESOURCE_ARG_FIELDS[action])}). Either a read observes "
                 "that resource — map it — or explain in an ADR why none can."
+            )
+
+
+class TestSourceRowForAction:
+    """``SOURCE_ROW_FOR_ACTION`` is the third map in the probe family.
+
+    ``ALERT_SUBJECT_PROBES`` asks "did anyone read what this alert is
+    about?"; ``VERIFY_PROBE_FOR_ACTION`` asks "can anyone read what this
+    action will change?". Both are satisfied by a run that never established
+    whether the thing it is about to change is safe to change, and this one
+    asks that: before a dead-lettered job is replayed, its dead-letter row
+    has to be in the evidence, because the row is the only place its
+    ``remediation_hint`` exists.
+
+    Same cross-checks as its siblings and for the same reason
+    (architecture-principles rule 2): a map naming a tool, a rows field or
+    an id field the platform does not emit would refuse every plan in that
+    family, with the failure landing on correct agents.
+    """
+
+    def test_every_tier_1_tool_has_a_declared_entry(self) -> None:
+        """TOTAL over Tier-1: inertness is declared, never inherited.
+
+        The guard is inert for a tool with no entry, which is right for the
+        five actions no listing classifies and a silent hole for a replay
+        tool someone adds next year. An explicitly empty tuple says a human
+        decided; an absent key says nobody looked.
+        """
+        from incident_commander.agent.remediation import SOURCE_ROW_FOR_ACTION
+
+        tier_1 = tools_at_or_below(Tier.TIER_1) - tools_at_or_below(Tier.READ)
+        missing = sorted(tier_1 - set(SOURCE_ROW_FOR_ACTION))
+        stale = sorted(set(SOURCE_ROW_FOR_ACTION) - tier_1)
+        assert not missing and not stale, (
+            f"SOURCE_ROW_FOR_ACTION does not cover the Tier-1 slice.\n"
+            f"  Tier-1 tools with no entry: {missing}\n"
+            f"  entries that are not Tier-1: {stale}\n"
+            f"For each missing tool, decide whether a read classifies the "
+            f"resources it acts on — map it — or add an empty tuple to say "
+            f"none does. An absent entry makes the read-before-act guard "
+            f"silently inert for that tool (ADR 0027)."
+        )
+
+    def test_every_source_is_a_registered_read_tool(self) -> None:
+        from incident_commander.agent.remediation import SOURCE_ROW_FOR_ACTION
+
+        for action, sources in SOURCE_ROW_FOR_ACTION.items():
+            for source in sources:
+                assert source.tool_name in TOOL_REGISTRY, (
+                    f"{action} maps to unknown tool {source.tool_name}"
+                )
+                assert tier_of(source.tool_name) is Tier.READ, (
+                    f"{action} maps to {source.tool_name}, which is tier "
+                    f"{tier_of(source.tool_name).value}. Establishing that an "
+                    "action is safe must not itself mutate anything."
+                )
+
+    def test_every_declared_field_is_one_the_platform_emits(self) -> None:
+        """The rows path, the id field and the decision field must exist.
+
+        Checked against the tool's own output model rather than against a
+        recording: a typo in ``rows_field`` makes ``_rows_read_for`` find no
+        rows in any listing, so the guard refuses every replay while looking
+        exactly like an agent that never read the DLQ. That failure is
+        indistinguishable from the thing the guard exists to catch, which is
+        the worst possible shape for a typo to take.
+        """
+        from incident_commander.agent.remediation import SOURCE_ROW_FOR_ACTION
+
+        for action, sources in SOURCE_ROW_FOR_ACTION.items():
+            for source in sources:
+                output = TOOL_REGISTRY[source.tool_name].output_model
+                assert source.rows_field in output.model_fields, (
+                    f"{action} reads rows from {source.tool_name}.{source.rows_field}, "
+                    f"which that tool does not return ({sorted(output.model_fields)})."
+                )
+                row_model = _row_model(output, source.rows_field)
+                assert row_model is not None, (
+                    f"{source.tool_name}.{source.rows_field} does not hold typed rows, "
+                    "so there is no row model to look an id up in."
+                )
+                for field in (source.id_field, source.decision_field):
+                    assert field in row_model.model_fields, (
+                        f"{action} expects {source.tool_name} rows to carry "
+                        f"{field!r}; the row model has "
+                        f"{sorted(row_model.model_fields)}."
+                    )
+
+    def test_the_acting_tool_names_the_resources_the_rows_identify(self) -> None:
+        """A non-empty entry is only meaningful for an action that names ids.
+
+        The guard compares the action's own resource arguments against the
+        ids it found in rows. An action that names no resource yields nothing
+        to compare, so a source mapped to it would be inert while reading as
+        enforcement — the same trap ``VERIFY_PROBE_FOR_ACTION``'s empty-entry
+        test closes from the other direction.
+        """
+        from incident_commander.agent.remediation import SOURCE_ROW_FOR_ACTION
+
+        for action, sources in SOURCE_ROW_FOR_ACTION.items():
+            if not sources:
+                continue
+            assert RESOURCE_ARG_FIELDS[action], (
+                f"{action} declares a source row but names no resource arguments, "
+                "so the guard has nothing to look up and would never fire."
             )
 
 

@@ -63,6 +63,17 @@ pinned** image serves: ``ghcr.io/kudratsingh/incident-platform:v0.6.0
 comments that still said v0.4.9 were corrected in the same PR that moved
 this pin; the digest remains the truth.)
 
+**Updated 2026-09-07 (v0.6.1 re-pin).** The pin is now
+``ghcr.io/kudratsingh/incident-platform:v0.6.1@sha256:411f8b4d…``. That
+release moved six description strings and nothing else — the reblessed
+snapshot diff carries zero schema, scope, field or tool-count change — so
+every error code and envelope asserted below still describes the pinned
+image. These assertions are re-run against it by CI's ``contract`` job,
+which is where this test belongs: it MUTATES the world it reads
+(``kill_consumer``, repeated consumer-group restarts), so it was
+deliberately not run against the shared eval stack at the re-pin, which has
+to be left seeded and idle for the paid sequence.
+
 This pin is the first that INCLUDES platform #154, "put tools/call's
 post-execution and error paths inside one transaction envelope" — the
 section below was written when the pin predated it. Re-checked against

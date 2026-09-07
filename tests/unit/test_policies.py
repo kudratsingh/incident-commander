@@ -636,6 +636,139 @@ class TestSourceRowForAction:
             )
 
 
+class TestSourceListingForAction:
+    """``SOURCE_LISTING_FOR_ACTION`` is the fourth map in the probe family.
+
+    Same rule as ``SOURCE_ROW_FOR_ACTION`` — read the thing before you act
+    on it — against the call shape that names no thing. A category replay
+    hands the platform a filter and lets it choose the rows at execution
+    time, so ``RESOURCE_ARG_FIELDS`` is empty for it, the by-id guard is
+    inert by construction, and until ADR 0028 a bulk replay by a run that
+    had listed nothing at all was admitted (WO-R2-143).
+
+    Same cross-checks as its siblings and for the same reason
+    (architecture-principles rule 2): a map naming a tool, a rows field or a
+    filter argument the platform does not have would refuse every plan in
+    that family, with the failure landing on correct agents.
+    """
+
+    def test_every_tier_1_tool_has_a_declared_entry(self) -> None:
+        """TOTAL over Tier-1: inertness is declared, never inherited.
+
+        The trap this closes is the one the map itself was born from. A
+        bulk tool with no entry is silently exempt, and "silently exempt"
+        is precisely what ``replay_dlq_by_category`` was for the whole life
+        of ADR 0027.
+        """
+        from incident_commander.agent.remediation import SOURCE_LISTING_FOR_ACTION
+
+        tier_1 = tools_at_or_below(Tier.TIER_1) - tools_at_or_below(Tier.READ)
+        missing = sorted(tier_1 - set(SOURCE_LISTING_FOR_ACTION))
+        stale = sorted(set(SOURCE_LISTING_FOR_ACTION) - tier_1)
+        assert not missing and not stale, (
+            f"SOURCE_LISTING_FOR_ACTION does not cover the Tier-1 slice.\n"
+            f"  Tier-1 tools with no entry: {missing}\n"
+            f"  entries that are not Tier-1: {stale}\n"
+            f"For each missing tool, decide whether it expands a FILTER over "
+            f"rows the agent should have listed — map it — or add an empty "
+            f"tuple to say it names its rows outright. An absent entry makes "
+            f"the coverage guard silently inert for that tool (ADR 0028)."
+        )
+
+    def test_every_source_is_a_registered_read_tool(self) -> None:
+        from incident_commander.agent.remediation import SOURCE_LISTING_FOR_ACTION
+
+        for action, sources in SOURCE_LISTING_FOR_ACTION.items():
+            for source in sources:
+                assert source.tool_name in TOOL_REGISTRY, (
+                    f"{action} maps to unknown tool {source.tool_name}"
+                )
+                assert tier_of(source.tool_name) is Tier.READ, (
+                    f"{action} maps to {source.tool_name}, which is tier "
+                    f"{tier_of(source.tool_name).value}. Establishing that an "
+                    "action is safe must not itself mutate anything."
+                )
+
+    def test_every_declared_field_is_one_the_platform_emits(self) -> None:
+        """Rows field, decision field, and BOTH ends of every scope.
+
+        The scope fields are the ones worth checking and the reason is the
+        asymmetry: ``read_field`` is an argument on the listing's INPUT
+        model, ``action_field`` an argument on the action's. A typo in
+        either silently changes the guard's meaning rather than breaking it
+        — a misspelled ``read_field`` reads as "this listing never narrowed"
+        and admits everything; a misspelled ``action_field`` reads as "this
+        action narrows on nothing" and refuses every filtered read. Both
+        failures look like agent behaviour.
+        """
+        from incident_commander.agent.remediation import SOURCE_LISTING_FOR_ACTION
+
+        for action, sources in SOURCE_LISTING_FOR_ACTION.items():
+            action_input = TOOL_REGISTRY[action].input_model
+            for source in sources:
+                spec = TOOL_REGISTRY[source.tool_name]
+                output = spec.output_model
+                assert source.rows_field in output.model_fields, (
+                    f"{action} reads rows from {source.tool_name}.{source.rows_field}, "
+                    f"which that tool does not return ({sorted(output.model_fields)})."
+                )
+                row_model = _row_model(output, source.rows_field)
+                assert row_model is not None, (
+                    f"{source.tool_name}.{source.rows_field} does not hold typed rows."
+                )
+                assert source.decision_field in row_model.model_fields, (
+                    f"{action} expects {source.tool_name} rows to carry "
+                    f"{source.decision_field!r}; the row model has "
+                    f"{sorted(row_model.model_fields)}."
+                )
+                assert source.scopes, (
+                    f"{action} declares a source listing with no scopes, so "
+                    "coverage would be satisfied by any reading at all."
+                )
+                for scope in source.scopes:
+                    assert scope.read_field in spec.input_model.model_fields, (
+                        f"{action} narrows {source.tool_name} on "
+                        f"{scope.read_field!r}, which is not an argument it takes "
+                        f"({sorted(spec.input_model.model_fields)})."
+                    )
+                    if scope.action_field is None:
+                        continue
+                    assert scope.action_field in action_input.model_fields, (
+                        f"{action} is said to narrow on {scope.action_field!r}, "
+                        f"which is not one of its arguments "
+                        f"({sorted(action_input.model_fields)})."
+                    )
+
+    def test_the_acting_tool_names_no_resources_of_its_own(self) -> None:
+        """A non-empty entry is only meaningful for an action that names NO ids.
+
+        The exact mirror of ``TestSourceRowForAction``'s last case, and
+        together the two say the family is a partition rather than an
+        overlap: an action either names its rows (and the by-id guard asks
+        whether they were read) or names a filter (and this one asks whether
+        the slice was listed). A tool in both maps would be asked to satisfy
+        two rules for one act, and the stricter one would refuse correct
+        plans nobody could diagnose.
+        """
+        from incident_commander.agent.remediation import (
+            SOURCE_LISTING_FOR_ACTION,
+            SOURCE_ROW_FOR_ACTION,
+        )
+
+        for action, sources in SOURCE_LISTING_FOR_ACTION.items():
+            if not sources:
+                continue
+            assert not RESOURCE_ARG_FIELDS[action], (
+                f"{action} declares a source listing but names resource arguments "
+                f"({sorted(RESOURCE_ARG_FIELDS[action])}), so the by-id guard "
+                "already covers it and this one would double-charge the same act."
+            )
+            assert not SOURCE_ROW_FOR_ACTION[action], (
+                f"{action} is non-inert in BOTH read-before-act maps. The two are "
+                "meant to partition the Tier-1 slice: rows or a filter, never both."
+            )
+
+
 class TestResolutionClass:
     """``RESOLUTION_CLASS`` answers "can a successful call END the incident?".
 

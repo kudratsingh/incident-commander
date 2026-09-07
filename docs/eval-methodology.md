@@ -632,7 +632,8 @@ the agent will see it.** `make world-dossier ONLY=<scenario>` (free, zero-LLM,
 `docs/runbook.md` pre-run checklist step 5) does it mechanically: it seeds the
 scenario's own `chaos_setup`, runs its preconditions, runs every read probe
 derived from `ALERT_SUBJECT_PROBES` / `SOURCE_ROW_FOR_ACTION` /
-`VERIFY_PROBE_FOR_ACTION` and the scenario's evidence claims, prints every
+`SOURCE_LISTING_FOR_ACTION` / `VERIFY_PROBE_FOR_ACTION` and the scenario's evidence
+claims, prints every
 output in full, lints for coherence, then resets and re-audits the baseline.
 Of every field it prints, ask: *does this fact support the behaviour the
 scenario expects, or contradict it?*

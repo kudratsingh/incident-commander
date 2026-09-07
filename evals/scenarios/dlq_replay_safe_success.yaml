@@ -125,9 +125,26 @@ expectation:
   # as well, so it could not prove the agent SAW the classification before
   # acting. This is the observation the description opens with: some DLQ row
   # the agent listed carries the replay_safe hint.
+  #
+  # `before_tools` is what makes it prove that (WO-R2-143). Without a
+  # boundary this claim was equally satisfied by the VERIFY probe, which on
+  # this scenario is `list_dlq_messages(remediation_hint=replay_safe)` fired
+  # AFTER the replay — so an agent that swept the category first and read the
+  # classification afterwards carried byte-identical evidence to one that
+  # looked before it acted, and graded green. The structural half is ADR
+  # 0028; this is the graded half, and it exists because a claim resting on a
+  # guard cannot notice the guard going missing.
+  #
+  # BOTH replay tools, matching `expected_action_tools`: whichever one the
+  # agent legitimately picks has to be the boundary, or the claim fails
+  # closed on a correct run that chose the other. It fails closed when
+  # neither fires, which is right — a run that replayed nothing has already
+  # gone red on OUTCOME, and "nothing came after, so everything counts" would
+  # switch this assertion off in exactly those runs.
   - tools: [list_dlq_messages]
     field: items[].remediation_hint
     equals: replay_safe
+    before_tools: [replay_dlq_by_category, replay_dlq_by_ids]
   # Landed WITH the widening above, never after it. Widening alone converts
   # today's wrong-reason FAIL for a by-ids replay of the human_required row
   # into a wrong-agent GREEN: the id-level guard below is what still reds it.

@@ -2061,11 +2061,21 @@ class TestTheCorrectTrajectoryStillPasses:
     def test_the_sanctioned_category_replay_passes_the_backlog_scenario(
         self, run_state: RunState, now: datetime
     ) -> None:
-        """Two rows, because the poison hook writes a second `replay_safe` one."""
+        """Two rows, because the poison hook writes a second `replay_safe` one.
+
+        The listing leads, and until WO-R2-143 it was not here at all: this
+        "correct trajectory" drained a queue it had never read, and the
+        scenario's claims had nothing to say about that. It is the first
+        move on the real canned flow and on the passing live run (archive
+        `e8404306138c`); only the grading was silent on it.
+        """
         run = _with_terminal(
             run_state,
             IncidentState.RESOLVED,
-            (_by_category(now, "replay_safe", 2),),
+            (
+                _dlq_listing(now, ((_SEEDED_WAIT_A, "wait_and_replay"),)),
+                _by_category(now, "replay_safe", 2),
+            ),
         )
         report = grade(run, _dlq_scenario("remediate_dlq_backlog_success"))
         assert _dim(report, GradeDimension.EVIDENCE).passed is True
@@ -2084,6 +2094,7 @@ class TestTheCorrectTrajectoryStillPasses:
             run_state,
             IncidentState.RESOLVED,
             (
+                _dlq_listing(now, ((_SEEDED_WAIT_A, "wait_and_replay"),)),
                 _by_category(now, "replay_safe", 2),
                 _evidence(
                     now,
@@ -3545,3 +3556,184 @@ class TestOrderingBoundaryGrading:
             ),
         )
         assert _dim(grade(run, self._EXP), GradeDimension.EVIDENCE).passed is False
+
+
+class TestShippedDlqScenariosRequireTheReadFirst:
+    """The corpus lint for WO-R2-143: acting on a DLQ row is a claim about
+    a read that happened BEFORE it.
+
+    Every DLQ scenario in this suite verifies with `list_dlq_messages` —
+    that is the only tool that observes a dead-letter row, so it has to be
+    the verify probe — which means an unordered claim on its output is
+    satisfied just as well by the probe that runs AFTER the action. An
+    act-then-read agent and a read-then-act agent leave byte-identical
+    evidence, and until this landed the whole DLQ set graded them the same.
+
+    `remediate_dlq_backlog_success` was the worst of it: it asserted an
+    exact replay volume and nothing at all about the agent having looked at
+    the queue it drained.
+
+    Derived from the corpus rather than hand-listed, so a DLQ scenario added
+    next year is covered the day it lands.
+    """
+
+    _DLQ_ACTIONS = frozenset(
+        {
+            "replay_dlq_by_ids",
+            "replay_dlq_by_category",
+            "replay_dlq_messages",
+            "mark_dlq_permanent",
+        }
+    )
+
+    @classmethod
+    def _acting_scenarios(cls) -> list[Scenario]:
+        return [
+            s for s in _shipped() if cls._DLQ_ACTIONS & set(s.expectation.expected_action_tools)
+        ]
+
+    def test_the_set_is_not_empty(self) -> None:
+        assert self._acting_scenarios(), "no scenario declares a DLQ action"
+
+    def test_each_claims_a_listing_read_before_its_action(self) -> None:
+        missing: list[str] = []
+        for scenario in self._acting_scenarios():
+            ordered = [
+                f
+                for f in scenario.expectation.expected_evidence_fields
+                if "list_dlq_messages" in f.tools and f.before_tools
+            ]
+            if not ordered:
+                missing.append(scenario.name)
+        assert missing == [], (
+            f"these act on the DLQ but grade no read before acting: {missing}. "
+            "`list_dlq_messages` is also the verify probe on every one of them, "
+            "so an unordered claim on its output is satisfied by the post-action "
+            "read and act-then-read grades green (WO-R2-143, ADR 0028)."
+        )
+
+    def test_the_boundary_covers_every_action_the_scenario_permits(self) -> None:
+        """A boundary naming only one of two legal actions is a hole.
+
+        `before_tools` cuts at the FIRST entry naming a boundary tool. If a
+        scenario permits `replay_dlq_by_category` OR `replay_dlq_by_ids` and
+        names only the first, an agent that legitimately chose the second
+        has no boundary at all — and the claim fails closed on a correct
+        run, which is the wrong-reason FAIL this suite keeps producing when
+        an equivalence set and an assertion disagree.
+        """
+        gaps: list[str] = []
+        for scenario in self._acting_scenarios():
+            permitted = set(scenario.expectation.expected_action_tools) & self._DLQ_ACTIONS
+            for field in scenario.expectation.expected_evidence_fields:
+                if "list_dlq_messages" not in field.tools or not field.before_tools:
+                    continue
+                uncovered = sorted(permitted - set(field.before_tools))
+                if uncovered:
+                    gaps.append(f"{scenario.name}: {uncovered}")
+        assert gaps == [], (
+            f"these name an ordering boundary that misses a permitted action: "
+            f"{gaps}. The boundary is the first entry naming a before_tools tool, "
+            "so an action outside the set never opens one and the claim fails "
+            "closed on a correct run."
+        )
+
+
+class TestActThenReadIsGradedRed:
+    """The red-before, at the grader level, on the real shipped claims.
+
+    Each case runs the SAME trajectory twice in different orders. Nothing
+    else moves: same tool calls, same outputs, same terminal state. Before
+    `before_tools` landed on these scenarios both orders graded green, which
+    is the whole finding — the suite could not tell "the agent checked what
+    it was about to replay" from "the agent looked at what it had replayed".
+    """
+
+    def _rows(self, now: datetime) -> EvidenceEntry:
+        return _dlq_listing(now, ((_SEEDED_WAIT_A, "wait_and_replay"),))
+
+    def test_backlog_drain_reading_after_the_replay_is_red(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        run = _with_terminal(
+            run_state,
+            IncidentState.RESOLVED,
+            (_by_category(now, "replay_safe", 2), self._rows(now)),
+        )
+        dim = _dim(
+            grade(run, _dlq_scenario("remediate_dlq_backlog_success")), GradeDimension.EVIDENCE
+        )
+        assert dim.passed is False
+        assert "recorded before" in dim.detail
+
+    def test_backlog_drain_reading_before_the_replay_is_green(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        run = _with_terminal(
+            run_state,
+            IncidentState.RESOLVED,
+            (self._rows(now), _by_category(now, "replay_safe", 2)),
+        )
+        dim = _dim(
+            grade(run, _dlq_scenario("remediate_dlq_backlog_success")), GradeDimension.EVIDENCE
+        )
+        assert dim.passed is True, dim.detail
+
+    def test_replay_safe_reading_after_the_replay_is_red(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        run = _with_terminal(
+            run_state,
+            IncidentState.RESOLVED,
+            (_by_category(now, "replay_safe", 1), self._rows(now)),
+        )
+        dim = _dim(grade(run, _dlq_scenario("dlq_replay_safe_success")), GradeDimension.EVIDENCE)
+        assert dim.passed is False
+        assert "recorded before" in dim.detail
+
+    def test_mixed_partial_reading_after_the_replay_is_red(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        run = _with_terminal(
+            run_state,
+            IncidentState.RESOLVED,
+            (_by_category(now, "replay_safe", 1), self._rows(now)),
+        )
+        dim = _dim(grade(run, _dlq_scenario("dlq_mixed_partial")), GradeDimension.EVIDENCE)
+        assert dim.passed is False
+        assert "recorded before" in dim.detail
+
+    def test_wait_and_replay_reading_after_the_scheduling_is_red(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        run = _with_terminal(
+            run_state,
+            IncidentState.RESOLVED,
+            (
+                _by_ids(now, [_SEEDED_WAIT_A, _SEEDED_WAIT_B], delayed=True),
+                self._rows(now),
+            ),
+        )
+        dim = _dim(
+            grade(run, _dlq_scenario("dlq_wait_and_replay_success")), GradeDimension.EVIDENCE
+        )
+        assert dim.passed is False
+        assert "recorded before" in dim.detail
+
+    def test_the_boundary_is_the_action_not_the_planner(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The read has to precede the CALL, not merely the plan.
+
+        A bookkeeping marker is refused as a boundary at load, and this is
+        why: `_planner_plan` is written before the tool call, so a boundary
+        there would admit a read made between planning and execution — which
+        is not a read the planner could have used.
+        """
+        with pytest.raises(ValidationError, match="bookkeeping marker"):
+            EvidenceFieldExpectation(
+                tools=("list_dlq_messages",),
+                field="items[].remediation_hint",
+                equals="replay_safe",
+                before_tools=("_planner_plan",),
+            )

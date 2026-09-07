@@ -152,9 +152,30 @@ Four properties:
 - **Keeping a correct run green is the investigation planner's job.** Because the remediation planner cannot make the read, the rule is stated in `investigation_planner.md` as well — that is what makes the guard's happy path reachable rather than merely safe.
 - **It is checked before the verify-target guard**, and the order is the priority of the two diagnoses: "you are about to replay a job whose classification nobody read" is about whether this action should happen at all; "your verify leg cannot observe it" is about how you would check an action that should. Reporting the second first sends the planner to fix the checking of a replay it must not make.
 
-Two gaps are declared rather than closed, both because the scenarios that would newly bind have money behind them: `replay_dlq_by_category` names a filter and no ids, so there is nothing to look up (WO-R2-143), and `mark_dlq_permanent` is left inert because fencing is the conservative direction — it stops auto-replay rather than re-running anything (WO-R2-144).
+One gap is declared rather than closed: `mark_dlq_permanent` is left inert because fencing is the conservative direction — it stops auto-replay rather than re-running anything (WO-R2-144). The other, `replay_dlq_by_category`, is closed below.
 
 Found by the user reading the staged trajectory before releasing the spend, not by a red run. Full rationale in [ADR 0027](ADR/0027-read-the-row-before-you-replay-it.md).
+
+### Read what you are about to replay, when it is a category (ADR 0028)
+
+The guard above matches the action's own resource arguments against ids a listing returned. `replay_dlq_by_category` has no resource arguments — it hands the platform a filter and the platform picks the rows when the call executes — so `_unread_action_rows` was inert for it by construction, and ADR 0027 declared that gap and filed it (WO-R2-143). The consequence was concrete: a run could reach `replay_dlq_by_category(category='replay_safe')` having listed nothing at all, and both the guard family and three scenarios' claims admitted it.
+
+The rule the user stated: **the agent must check what it is about to replay before replaying.** A category names rows the agent has not seen; how many, and which, is whatever the queue holds at that instant.
+
+| Check | Rejects | Failure it prevents |
+|---|---|---|
+| `_unlisted_action_scope` | a category replay (or a bulk sweep) no `list_dlq_messages` reading in the evidence COVERED | re-enqueueing a slice of the dead-letter queue nobody opened — including rows added since the alert, and rows whose error text contradicts their hint |
+
+`SOURCE_LISTING_FOR_ACTION` (`src/incident_commander/agent/remediation.py`) is the map, the fourth in the family, and it asks "did anyone read what this *set* holds?". Each entry names the read tool, the field holding its rows, the field the read exists to expose, and the **scopes** — the dimensions on which a listing and an action can each be narrowed (`remediation_hint` ↔ `category`, and `job_type` ↔ `job_type`). **Total over the Tier-1 slice** — `tests/unit/test_policies.py::TestSourceListingForAction` fails on any Tier-1 tool with no entry.
+
+Four properties:
+
+- **Coverage, not presence.** A reading covers the plan when, on every scope, it either did not narrow at all or narrowed to exactly the value the action names. So an unfiltered listing covers every slice; a listing filtered to the same category covers it; a listing filtered to a *different* category covers nothing — which is the case with the real failure behind it, reading `replay_safe` and then sweeping `wait_and_replay`.
+- **It does not require the category to be non-empty.** A slice that emptied between the read and the call makes the replay a no-op, and refusing that would red a correct, cautious run for the world's timing. The claim is about what the agent looked at, which is what the agent controls.
+- **The two read-before-act guards partition the Tier-1 slice.** A tool either names its rows (ADR 0027 asks whether they were read) or names a filter (this asks whether the slice was listed), never both — pinned in both directions by the two maps' coverage tests, so no plan can be charged twice for one act and no bulk tool can fall between them.
+- **`replay_dlq_messages` is declared here and still forbidden everywhere.** The unfilterable sweep replays uncategorised (null-hint) rows too, so only an unfiltered reading can cover it. Declaring what it would require is not permission to use it: every DLQ scenario keeps it in `forbidden_action_tools`.
+
+Graded as well as guarded: the `list_dlq_messages` claim in the five DLQ scenarios carries `before_tools`, so the read has to be recorded before the action. Without it the post-action verify probe — which is `list_dlq_messages` on every one of them — satisfied the claim just as well as the investigation probe, and act-then-read graded green. Full rationale in [ADR 0028](ADR/0028-read-the-category-before-you-replay-it.md).
 
 ### A stabilizer is not a resolution
 

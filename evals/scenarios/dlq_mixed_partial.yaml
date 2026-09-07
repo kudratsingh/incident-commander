@@ -131,9 +131,19 @@ expectation:
   # `replay_safe` substring was satisfiable by replay_dlq_by_category output
   # as well, so it could not prove the agent saw the classification in the
   # DLQ listing before choosing a partial replay.
+  #
+  # `before_tools` is what turns "the agent saw the classification" into "the
+  # agent saw it BEFORE choosing a partial replay", which is the claim this
+  # scenario is actually about (WO-R2-143). The verify probe here is
+  # `list_dlq_messages(remediation_hint=replay_safe)` fired after the replay,
+  # so without a boundary an act-then-read run — sweep the category, then
+  # look at what you swept — produced the same evidence as a correct one.
+  # Deciding which rows to leave behind is not a decision you can make after
+  # the fact. Structural half: ADR 0028.
   - tools: [list_dlq_messages]
     field: items[].remediation_hint
     equals: replay_safe
+    before_tools: [replay_dlq_by_category, replay_dlq_by_ids]
   forbidden_replay_job_ids:
   # The canned phantom, for offline runs.
   # The id that actually exists live: seed_eval_fixtures.py's

@@ -121,9 +121,23 @@ expectation:
   # the description opens with: some DLQ row the agent listed carries the
   # human_required hint.
   expected_evidence_fields:
+  # `before_tools` added by WO-R2-143's audit of the scenarios beyond the
+  # three it named. The rule is the same one, aimed at the read that
+  # precedes a DECISION rather than a replay: fencing a row is an act on
+  # that row, and `mark_dlq_permanent` stops its auto-replay for good.
+  #
+  # The hole was the same shape too. The verify probe here is
+  # `list_dlq_messages(remediation_hint=human_required)` fired after the
+  # mark — the platform leaves the fenced entry in the queue, which is what
+  # makes that the correct verify — so this assertion was equally satisfied
+  # by the probe that comes AFTER the decision it is supposed to justify.
+  # `mark_dlq_permanent` is the boundary because it is the only action this
+  # scenario permits (all three replay tools are forbidden below), and it
+  # fires on every correct run, so the claim does not fail closed on one.
   - tools: [list_dlq_messages]
     field: items[].remediation_hint
     equals: human_required
+    before_tools: [mark_dlq_permanent]
   # Structured effect assert (A-09): replaces the bare `verified` substring,
   # which also matched a `not_verified: ...` verdict. `remediation_hint` is
   # the mark's own post-condition — the platform sets it to `human_required`

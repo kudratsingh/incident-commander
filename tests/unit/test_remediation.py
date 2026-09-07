@@ -91,6 +91,29 @@ def _run_state(
     )
 
 
+def _dlq_listing() -> EvidenceEntry:
+    """One unfiltered ``list_dlq_messages`` reading, as the loop records it.
+
+    Several inertness controls below use ``replay_dlq_by_category`` as their
+    "an action that names no resource" example, which is exactly right for
+    the guards they test and, since ADR 0028, no longer a plan that any run
+    may make on empty evidence. Arguments are the WIRED ones —
+    ``wire_arguments`` fills every unset optional with an explicit ``null``,
+    so an unfiltered read reaches the ledger with ``remediation_hint: None``
+    rather than with the key absent.
+    """
+    return EvidenceEntry(
+        tool_name="list_dlq_messages",
+        arguments={"job_type": None, "remediation_hint": None, "limit": 50, "offset": 0},
+        result_summary=(
+            '{"total":1,"items":[{"id":"fc8d2a03-23b3-5371-9acb-46443c73baa5",'
+            '"type":"bulk_api_sync","retry_count":3,"remediation_hint":"replay_safe",'
+            '"created_at":"2026-08-31T01:21:46.584955Z"}]}'
+        ),
+        timestamp=_now(),
+    )
+
+
 def _plan_dict(**overrides: Any) -> dict[str, Any]:
     base = {
         "target_hypothesis": "consumer_saturation",
@@ -742,6 +765,11 @@ class TestEvidenceSourcedArgs:
     def test_non_resource_fields_are_unconstrained(self) -> None:
         # category / max_replays / delay_seconds are parameters, not
         # resource names — the planner may choose them freely.
+        #
+        # The listing is ADR 0028's requirement, not this guard's: a bulk
+        # replay needs some reading that covered the slice it will expand
+        # to. Without it the plan is refused before this check is reached
+        # and the test would pass for the wrong reason.
         run = _run_state(
             state=IncidentState.PLANNING,
             hypotheses=(
@@ -752,6 +780,7 @@ class TestEvidenceSourcedArgs:
                     reasoning="r",
                 ),
             ),
+            evidence=(_dlq_listing(),),
         )
         plan = _plan_dict(
             target_hypothesis="poison",
@@ -998,7 +1027,9 @@ class TestNamedResourceArgs:
         # property under test here is unchanged and still true; only the
         # example had to move to an action where it still holds. Bulk
         # category replay is that action — it names a category, not a row.
-        run = self._run()
+        # The listing is ADR 0028's requirement on a bulk replay, not this
+        # guard's; without it the refusal would land before this check.
+        run = self._run(evidence=(_dlq_listing(),))
         plan = _plan_dict(
             target_hypothesis="consumer_saturation",
             action_tool="replay_dlq_by_category",
@@ -1440,6 +1471,10 @@ class TestVerifyLegObservesTheAction:
         # `replay_dlq_by_category` names a category, not a row, so there is
         # no resource to demand an observation of. Declared inert in the
         # map rather than merely absent from it.
+        #
+        # The listing is ADR 0028's requirement on a bulk replay, not this
+        # guard's; without it the refusal lands before the verify-target
+        # check and the control would prove nothing about VERIFY_PROBE.
         llm = CannedLLMClient(
             [
                 _plan_dict(
@@ -1461,6 +1496,7 @@ class TestVerifyLegObservesTheAction:
                         reasoning="dlq rows",
                     ),
                 ),
+                evidence=(_dlq_listing(),),
             ),
             _now(),
         )
@@ -1978,9 +2014,18 @@ class TestReplayRequiresTheJobsDeadLetterRow:
     # -- inertness ---------------------------------------------------------
 
     def test_a_category_replay_is_inert(self) -> None:
-        """Declared inert: the tool names a filter, not ids, so there is
-        nothing to look up. `remediate_dlq_backlog_success` and the two
-        `dlq_*` category scenarios stay admitted."""
+        """Declared inert HERE: the tool names a filter, not ids, so there is
+        no row for THIS guard to look up.
+
+        Until 2026-09-07 this test also passed with ``evidence=()``, and that
+        was the whole of WO-R2-143: "no row to look up" was being read as "no
+        read required", so a category replay by a run that had listed nothing
+        at all reached REMEDIATING. The listing below is what the sibling
+        guard (``SOURCE_LISTING_FOR_ACTION``, ADR 0028) now requires, and
+        ``TestBulkReplayRequiresTheListing`` is where its absence is graded.
+        This test's claim is unchanged and narrower than it looks: the by-id
+        marker must not appear.
+        """
         llm = CannedLLMClient(
             [
                 _plan_dict(
@@ -2003,10 +2048,12 @@ class TestReplayRequiresTheJobsDeadLetterRow:
                     reasoning="retryable DLQ backlog",
                 ),
             ),
+            evidence=(self._dlq_probe(self._OTHER),),
         )
         result = make_llm_plan(llm, model=_MODEL)(run, _now())
 
         assert result.state is IncidentState.REMEDIATING
+        assert not [e for e in result.evidence if e.tool_name == "_plan_refused_unread_row"]
         assert len(llm.calls) == 1
 
     def test_a_consumer_restart_is_inert(self) -> None:
@@ -2028,3 +2075,322 @@ class TestReplayRequiresTheJobsDeadLetterRow:
 
         assert result.state is IncidentState.REMEDIATING
         assert len(llm.calls) == 1
+
+
+class TestBulkReplayRequiresTheListing:
+    """ADR 0028: a replay that names a CATEGORY may not run until some
+    listing in evidence covered the slice the platform will expand it to.
+
+    The other half of ADR 0027's rule, against the other call shape. That
+    guard matches the action's own resource arguments against ids a listing
+    returned; ``replay_dlq_by_category`` has no resource arguments at all
+    (``RESOURCE_ARG_FIELDS`` is empty for it), so it was inert by
+    construction and the ADR said so and filed WO-R2-143. The rows a
+    category replay touches are chosen by the PLATFORM, at execution time,
+    from whatever the queue holds at that instant — so "which rows did I
+    just replay, and how many" is a question the agent cannot answer unless
+    it looked first.
+
+    The user's rule, stated once: the agent must check what it is about to
+    replay before replaying.
+    """
+
+    _SAFE = "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+
+    def _run(self, evidence: tuple[EvidenceEntry, ...]) -> RunState:
+        return _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.POISON_MESSAGE,
+                    name="transient_dependency_failure",
+                    confidence=0.85,
+                    reasoning="retryable DLQ backlog",
+                ),
+            ),
+            evidence=evidence,
+        )
+
+    def _listing(self, **arguments: Any) -> EvidenceEntry:
+        """One `list_dlq_messages` reading, recorded as the loop records it.
+
+        ``arguments`` are the WIRED arguments — ``wire_arguments`` fills
+        every unset optional with an explicit ``null``, which is why an
+        unfiltered read reaches the ledger as ``remediation_hint: None``
+        rather than as a missing key, and why the guard has to treat the two
+        the same.
+        """
+        wired: dict[str, Any] = {
+            "job_type": None,
+            "remediation_hint": None,
+            "limit": 50,
+            "offset": 0,
+        }
+        wired.update(arguments)
+        return EvidenceEntry(
+            tool_name="list_dlq_messages",
+            arguments=wired,
+            result_summary=(
+                f'{{"total":1,"items":[{{"id":"{self._SAFE}","type":"bulk_api_sync",'
+                '"retry_count":3,"remediation_hint":"replay_safe",'
+                '"created_at":"2026-08-31T01:21:46.584955Z"}]}'
+            ),
+            timestamp=_now(),
+        )
+
+    def _category_plan(self, **action_arguments: Any) -> dict[str, Any]:
+        return _plan_dict(
+            target_hypothesis="transient_dependency_failure",
+            action_tool="replay_dlq_by_category",
+            action_arguments=action_arguments or {"category": "replay_safe"},
+            verify_tool="list_dlq_messages",
+            verify_arguments={},
+            verify_expectation="the replayed rows leave the listing",
+        )
+
+    # -- red before --------------------------------------------------------
+
+    def test_a_category_replay_with_no_listing_is_refused(self) -> None:
+        """THE regression. Until ADR 0028 this exact plan — a bulk replay by
+        a run that had read nothing — reached REMEDIATING, and
+        ``TestReplayRequiresTheJobsDeadLetterRow::
+        test_a_category_replay_is_inert`` asserted that it did."""
+        plan = self._category_plan()
+        llm = CannedLLMClient([plan, plan])
+        result = make_llm_plan(llm, model=_MODEL)(self._run(()), _now())
+
+        assert result.state is IncidentState.ESCALATED
+        # Refused BEFORE execution — nothing was replayed.
+        assert result.remediation_attempts == 0
+        assert result.remediation_plan is None
+
+    def test_the_refusal_names_the_read_and_why_a_filter_is_not_rows(self) -> None:
+        plan = self._category_plan()
+        llm = CannedLLMClient([plan, plan])
+        result = make_llm_plan(llm, model=_MODEL)(self._run(()), _now())
+
+        refusals = [e for e in result.evidence if e.tool_name == "_plan_refused_unlisted_category"]
+        assert len(refusals) == 1
+        reason = refusals[0].result_summary
+        # The steer is a call the planner can copy, not a shape to fill in.
+        assert "list_dlq_messages(remediation_hint='replay_safe')" in reason
+        assert "names a FILTER, not rows" in reason
+        assert "no list_dlq_messages reading at all" in reason
+        # And it says what the read is FOR.
+        assert "confirm each one is a row you mean to replay" in reason
+        assert "UNKNOWN, not replay-safe" in reason
+        assert refusals[0].arguments["readings_in_evidence"] == []
+        assert refusals[0].arguments["required_tool"] == "list_dlq_messages"
+
+    def test_reading_one_slice_does_not_licence_sweeping_another(self) -> None:
+        """The case with a real failure mode behind it, and the reason
+        coverage is judged per scope rather than "some listing happened".
+
+        A run that filtered to `replay_safe` has read nothing about the
+        `wait_and_replay` rows — not their error texts, not how many there
+        are — and those rows are precisely the ones whose dependency has not
+        recovered. `dlq_replay_safe_success` and `dlq_mixed_partial` both
+        forbid that category outright; this refuses it one layer earlier and
+        for every scenario, graded or not.
+        """
+        plan = self._category_plan(category="wait_and_replay")
+        llm = CannedLLMClient([plan, plan])
+        result = make_llm_plan(llm, model=_MODEL)(
+            self._run((self._listing(remediation_hint="replay_safe"),)), _now()
+        )
+
+        assert result.state is IncidentState.ESCALATED
+        reason = result.evidence[-1].result_summary
+        assert "list_dlq_messages(remediation_hint='replay_safe')" in reason
+        assert "cover a different slice" in reason
+        assert "was NOT executed" in reason
+
+    def test_a_listing_narrower_by_job_type_does_not_cover_a_wider_replay(self) -> None:
+        """The second scope, and it is not decoration. A reading of one job
+        type's rows says nothing about the other three types the same
+        category holds, and the action names no `job_type` at all — so the
+        read is strictly narrower than the sweep."""
+        plan = self._category_plan(category="replay_safe")
+        llm = CannedLLMClient([plan, plan])
+        result = make_llm_plan(llm, model=_MODEL)(
+            self._run((self._listing(remediation_hint="replay_safe", job_type="csv_upload"),)),
+            _now(),
+        )
+
+        assert result.state is IncidentState.ESCALATED
+
+    def test_a_category_replay_missing_its_category_demands_an_unfiltered_read(
+        self,
+    ) -> None:
+        """Fail-closed on the invalid call. `category` is required by
+        `ReplayDlqByCategoryInput`, so `wire_arguments` would reject this
+        later anyway — but of the two readings available here, "spans every
+        category" is the safe one and "narrows to nothing in particular" is
+        not."""
+        plan = self._category_plan(max_replays=50)
+        llm = CannedLLMClient([plan, plan])
+        result = make_llm_plan(llm, model=_MODEL)(
+            self._run((self._listing(remediation_hint="replay_safe"),)), _now()
+        )
+
+        assert result.state is IncidentState.ESCALATED
+
+    def test_the_steer_reaches_the_planner_in_full(self) -> None:
+        # Evidence lines are cut at 200 chars in the planner context; a
+        # refusal under a marker missing from _PLAN_REFUSAL_MARKERS lands
+        # inside that truncation and arrives cut mid-sentence.
+        plan = self._category_plan()
+        llm = CannedLLMClient([plan, plan])
+        make_llm_plan(llm, model=_MODEL)(self._run(()), _now())
+
+        assert len(llm.calls) == 2
+        second_context = llm.calls[1][1]
+        assert "REFUSED" in second_context
+        assert "confirm each one is a row you mean to replay" in second_context
+
+    # -- the repair the re-ask exists for ----------------------------------
+
+    def test_re_planning_onto_the_slice_that_was_read_is_admitted(self) -> None:
+        """Why this refuses rather than escalating outright. PLANNING is one
+        LLM call with no tool budget, so the planner cannot fetch a listing
+        it is missing — but when the run HAS listed a slice and the plan
+        reached for a different one, the refusal names the slices in evidence
+        and the planner can aim at one of them."""
+        llm = CannedLLMClient(
+            [
+                self._category_plan(category="wait_and_replay"),
+                self._category_plan(category="replay_safe"),
+            ]
+        )
+        result = make_llm_plan(llm, model=_MODEL)(
+            self._run((self._listing(remediation_hint="replay_safe"),)), _now()
+        )
+
+        assert result.state is IncidentState.REMEDIATING
+        assert result.remediation_plan is not None
+        replanned = RemediationPlan.model_validate(result.remediation_plan)
+        assert replanned.action_arguments["category"] == "replay_safe"
+
+    # -- positive controls -------------------------------------------------
+
+    def test_an_unfiltered_listing_covers_every_slice(self) -> None:
+        """The trajectory every canned DLQ flow in the suite already runs:
+        the investigation planner probes `list_dlq_messages` unfiltered, then
+        the remediation planner picks a category."""
+        llm = CannedLLMClient([self._category_plan()])
+        result = make_llm_plan(llm, model=_MODEL)(self._run((self._listing(),)), _now())
+
+        assert result.state is IncidentState.REMEDIATING
+        assert not [e for e in result.evidence if e.tool_name == "_plan_refused_unlisted_category"]
+        # A good plan is never re-asked.
+        assert len(llm.calls) == 1
+
+    def test_a_listing_filtered_to_the_same_slice_covers_it(self) -> None:
+        """The other legitimate way to have looked: filter the page to the
+        category you intend to act on. Refusing this would make the guard a
+        rule about HOW to read rather than about having read."""
+        llm = CannedLLMClient([self._category_plan()])
+        result = make_llm_plan(llm, model=_MODEL)(
+            self._run((self._listing(remediation_hint="replay_safe"),)), _now()
+        )
+
+        assert result.state is IncidentState.REMEDIATING
+        assert len(llm.calls) == 1
+
+    def test_an_empty_listing_still_covers_the_slice_it_read(self) -> None:
+        """Deliberately NOT "the listing must have returned a row in that
+        category". A category that emptied between the read and the plan
+        makes the replay a no-op, and refusing it would red a correct,
+        cautious run for the world's timing. The claim is about what the
+        agent looked at."""
+        empty = EvidenceEntry(
+            tool_name="list_dlq_messages",
+            arguments={"job_type": None, "remediation_hint": None, "limit": 50, "offset": 0},
+            result_summary='{"total":0,"items":[]}',
+            timestamp=_now(),
+        )
+        llm = CannedLLMClient([self._category_plan()])
+        result = make_llm_plan(llm, model=_MODEL)(self._run((empty,)), _now())
+
+        assert result.state is IncidentState.REMEDIATING
+
+    def test_an_entry_that_is_not_a_reading_does_not_count(self) -> None:
+        """Coverage needs a reading, not a name. The rows field has to be
+        there and be a list — belt to the braces of the investigation loop,
+        which escalates on `is_error` before an entry is ever written."""
+        not_a_reading = EvidenceEntry(
+            tool_name="list_dlq_messages",
+            arguments={"job_type": None, "remediation_hint": None, "limit": 50, "offset": 0},
+            result_summary="tool reported is_error=True",
+            timestamp=_now(),
+        )
+        plan = self._category_plan()
+        llm = CannedLLMClient([plan, plan])
+        result = make_llm_plan(llm, model=_MODEL)(self._run((not_a_reading,)), _now())
+
+        assert result.state is IncidentState.ESCALATED
+
+    # -- inertness ---------------------------------------------------------
+
+    def test_a_by_id_replay_is_inert_here(self) -> None:
+        """The two read-before-act guards are non-inert over DISJOINT tool
+        sets. A by-id replay's question is "is that row in evidence?", and
+        asking a coverage question of it as well would refuse a correct
+        replay whose listing was filtered to a different hint than the row's
+        — which is a legitimate way to have read a row, and the row IS the
+        evidence.
+        """
+        from incident_commander.agent.remediation import _unlisted_action_scope
+
+        plan = RemediationPlan.model_validate(
+            _plan_dict(
+                target_hypothesis="transient_dependency_failure",
+                action_tool="replay_dlq_by_ids",
+                action_arguments={"job_ids": [self._SAFE]},
+                verify_tool="list_dlq_messages",
+                verify_arguments={},
+                verify_expectation="the row leaves the listing",
+            )
+        )
+        assert _unlisted_action_scope(plan, self._run(())) is None
+
+    def test_a_consumer_restart_is_inert(self) -> None:
+        # No listing enumerates consumer groups, so the default plan — which
+        # reads no DLQ at all — must still be admitted, unchanged.
+        llm = CannedLLMClient([_plan_dict()])
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.CONSUMER_SATURATION,
+                    name="consumer_saturation",
+                    confidence=0.9,
+                    reasoning="lag climbing on the alerted group",
+                ),
+            ),
+        )
+        result = make_llm_plan(llm, model=_MODEL)(run, _now())
+
+        assert result.state is IncidentState.REMEDIATING
+        assert len(llm.calls) == 1
+
+    def test_the_bulk_sweep_is_covered_only_by_an_unfiltered_read(self) -> None:
+        """`replay_dlq_messages` replays uncategorised (null-hint) rows too,
+        so no filtered reading can have covered it. Declaring it here does
+        not make it permissible — every DLQ scenario still forbids it — it
+        says what the agent would have had to read if it reached for one."""
+        from incident_commander.agent.remediation import _unlisted_action_scope
+
+        plan = RemediationPlan.model_validate(
+            _plan_dict(
+                target_hypothesis="transient_dependency_failure",
+                action_tool="replay_dlq_messages",
+                action_arguments={},
+                verify_tool="list_dlq_messages",
+                verify_arguments={},
+                verify_expectation="the queue drains",
+            )
+        )
+        filtered = self._run((self._listing(remediation_hint="replay_safe"),))
+        assert _unlisted_action_scope(plan, filtered) is not None
+        assert _unlisted_action_scope(plan, self._run((self._listing(),))) is None

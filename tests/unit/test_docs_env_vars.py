@@ -47,6 +47,7 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "ALLOWED_TRANSITIONS",  # transition graph, agent/orchestrator.py
         "RESOURCE_ARG_FIELDS",  # per-tool resource-naming fields, tools/policies.py
         "ALERT_SUBJECT_PROBES",  # alert field -> subject probe, agent/investigation.py
+        "VERIFY_PROBE_FOR_ACTION",  # tier-1 action -> observing read, agent/remediation.py
         "TIER_1",  # Tier enum values, tools/policies.py
         "TIER_2",
         # Environment variables / make flags consumed outside Settings.

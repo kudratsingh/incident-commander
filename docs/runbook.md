@@ -288,7 +288,14 @@ make eval-live ONLY=remediate_runaway_saga_success && make eval-reset
 # others and each aborts pre-spend if its premise is missing:
 #   * remediate_stale_cache_success — create_stale_cache writes the hot
 #     key, and get_cache_key_info (plat #146) now reads it back, which is
-#     what the precondition asserts. Verify re-reads get_redis_health.
+#     what the precondition asserts. Verify RE-READS THAT KEY with
+#     get_cache_key_info and expects exists=false. It used to re-read
+#     get_redis_health, and the 2026-09-07 paid run is why it no longer
+#     does: nothing in this world reads that key, so the server-wide
+#     keyspace counters cannot move when it is deleted (hits frozen at
+#     209 across six polls). The verification was unpassable by
+#     construction and the agent escalated, correctly. ADR 0025 now
+#     refuses such a plan before it executes.
 #   * remediate_runaway_saga_success — create_stuck_dag (plat #148) builds
 #     a genuinely stuck chain: completed upstream parent, dead-lettered
 #     root, descendants held in `waiting` behind it. The remediation is

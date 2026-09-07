@@ -1,6 +1,17 @@
 name: dlq_wait_and_replay_success
+# The description used to end "Verify confirms the ids are out of the
+# active DLQ", which is the opposite of what this scenario's own
+# verify_expectation says and of what the platform does: the entries stay
+# dead-lettered until the timer fires, long after the verify window
+# closes. Found by the ADR-0025 audit of every remediation scenario's
+# verify leg against what the world can actually change \u2014 the same class
+# as remediate_stale_cache_success, where a description promising an
+# unobservable signal became the instruction the agent followed. Success
+# here is the ACTION's own scheduled/execute_at response, and an
+# unchanged listing is the expected reading, not a failure.
 description: "DLQ has entries hinted wait_and_replay (transient downstream failures). Agent schedules a delayed replay via replay_dlq_by_ids(delay_seconds=300). Platform holds the timer \u2014 schedules\
-  \ the replays at now+5min. Verify confirms the ids are out of the active DLQ.\n"
+  \ the replays at now+5min. Verify re-reads the wait_and_replay listing and expects it UNCHANGED: the ids stay dead-lettered until execute_at, so success is scheduled=requested with future\
+  \ execute_at timestamps on the action's own response.\n"
 tags:
 - phase-6
 - remediation

@@ -52,7 +52,7 @@ canned_tool_responses:
     - type: text
       text: '{"ok":true,"ping_latency_ms":0.286,"connected_clients":11,"used_memory_bytes":1670880,"used_memory_human":"1.59M","keyspace_hits":149,"keyspace_misses":7862,"error":null}'
     is_error: false
-  # v0.6.0's new read surface, and since #188 this scenario's VERIFY leg as
+  # v0.6.0's new read surface, and since ADR 0025 this scenario's VERIFY leg as
   # well as its investigation probe — so it is a sequence, and each element
   # states a different world.
   #
@@ -71,7 +71,7 @@ canned_tool_responses:
   # still there — which is the ledger's declared `post-action` context, not
   # a defect to fix.
   #
-  # Recording the post-delete world honestly is the point of #188. The
+  # Recording the post-delete world honestly is the point of ADR 0025. The
   # alternative — one response saying exists=true forever — would have the
   # canned verify probe report the key still present while the canned judge
   # returned `verified`, which is the same "the fixture does not show what
@@ -176,7 +176,7 @@ expectation:
     equals: true
   # The verify signal, graded. `deleted: true` above is the ACTION's own
   # report of itself; this is the independent read of the same key, and
-  # until #188 the scenario asserted nothing about it — the verify leg was
+  # until ADR 0025 the scenario asserted nothing about it — the verify leg was
   # get_redis_health, whose server-wide counters say nothing about one key.
   # `which: last` because get_cache_key_info is called twice: once during
   # investigation (exists=true, the premise) and once per verify poll

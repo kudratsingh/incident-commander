@@ -2671,7 +2671,7 @@ class TestStaleCacheGradesWhichKeyWasDeleted:
         assert "restart_consumer_group" in dim.detail
 
     def test_the_correct_trajectory_passes(self, run_state: RunState, now: datetime) -> None:
-        # A correct run now READS THE KEY BACK. Before #188 the verify leg
+        # A correct run now READS THE KEY BACK. Before ADR 0025 the verify leg
         # was get_redis_health and the scenario asserted nothing about it,
         # so "correct" meant nothing more than "the right key was deleted".
         run = _with_terminal(

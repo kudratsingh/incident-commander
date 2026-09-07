@@ -69,7 +69,7 @@ _JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
         "row the un-faulted world has not produced yet",
     ),
     # The first POST_ACTION rows. The constant has existed since the ledger
-    # did, describing exactly this and matching nothing — because until #188
+    # did, describing exactly this and matching nothing — because until ADR 0025
     # no fixture recorded the world after the agent's own remediation.
     #
     # `remediate_stale_cache_success` now verifies by re-reading the key it

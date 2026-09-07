@@ -162,7 +162,7 @@ class TestEveryCallPathRoutesThroughWireArguments:
     ) -> None:
         # This leg default-fills: a read-only probe with no group named is
         # allowed to fall back to the registry default (unlike the
-        # remediation legs — ADR 0022). The bytes must still be canonical.
+        # remediation legs — ADR 0024). The bytes must still be canonical.
         mcp = _RecordingMCP(
             {
                 "consumer_group": "worker-dispatcher",

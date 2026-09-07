@@ -865,7 +865,7 @@ class TestEvidenceSourcedArgs:
 
 
 class TestNamedResourceArgs:
-    """WO-R2-15 / ADR 0022: a plan must NAME the resource on both legs.
+    """WO-R2-15 / ADR 0024: a plan must NAME the resource on both legs.
 
     The hole this closes: ``GetConsumerLagInput.consumer_group`` carries
     ``default="worker-dispatcher"`` (mirroring the platform's published

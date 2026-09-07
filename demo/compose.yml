@@ -205,6 +205,15 @@ services:
       # minutes of every boot (observed 2026-09-07, WO-R2-132). 0 disables
       # the loop; scenarios deliver their own alert payloads, so the eval
       # world loses nothing. Mirrors the api service below.
+      #
+      # Why the loop had to be disabled rather than cleaned up after:
+      # `make eval-reset` does NOT clear organic alerts. Reset undoes what
+      # the eval seeds, and this alert is raised by a platform loop reading
+      # data that reset itself puts BACK — so resetting re-arms it. The
+      # fast-burn dedup key (_fast_burn_dedup_key) is bucketed by the hour,
+      # so it re-fires hourly instead of staying suppressed. This setting is
+      # a workaround in the eval world only; WO-R2-131 tracks making reset
+      # sweep organic alerts, WO-R2-132 the platform-side fix.
       SLO_EVALUATION_INTERVAL_SECONDS: "0"
     depends_on:
       postgres:
@@ -273,7 +282,10 @@ services:
       CHAOS_ENABLED: "true"
       # See the platform service: the worker loops run in THIS process, so
       # this is the setting that actually silences the fixture-driven SLO
-      # alert (WO-R2-132).
+      # alert (WO-R2-132). Both services must carry it. Note the negative
+      # recorded there: `make eval-reset` cannot clear an alert like this
+      # one — resetting the fixtures re-arms it, and its dedup key is
+      # hour-bucketed, so it returns hourly (WO-R2-131).
       SLO_EVALUATION_INTERVAL_SECONDS: "0"
     depends_on:
       postgres:

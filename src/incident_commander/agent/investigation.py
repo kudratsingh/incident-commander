@@ -197,7 +197,7 @@ def make_investigate(
         # guards). This leg is read-only and its default-fill is
         # deliberate — an alert with no group named probes the platform's
         # default group. The remediation legs may NOT default-fill; that
-        # asymmetry is the subject of ADR 0022.
+        # asymmetry is the subject of ADR 0024.
         arguments = wire_arguments(spec, {"consumer_group": str(raw)} if raw else {})
 
         try:

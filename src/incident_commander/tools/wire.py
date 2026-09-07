@@ -28,7 +28,7 @@ Note what ``wire_arguments`` does NOT do: refuse an omitted argument. It
 default-fills from ``tool.input_model``, because that is the platform's
 contract. Whether a caller is *allowed* to omit a resource-naming
 argument is a caller-layer question — the remediation planner is not
-(``remediation._absent_resource_args``, ADR 0022), the read-only
+(``remediation._absent_resource_args``, ADR 0024), the read-only
 investigation leg is.
 """
 

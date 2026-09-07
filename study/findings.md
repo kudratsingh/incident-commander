@@ -340,3 +340,126 @@ consumer version of this; F-004 adds the test-shaped one:
 > response — never from what the code under test expects to see. And a
 > guard must be exercised on the case where it should FAIL before it is
 > trusted on the case where it should pass.
+
+## F-005 — An archive's auto-assigned failure_class is a guess, not a verdict
+
+**Date:** 2026-09-02 (read-only pass, archive `cde5a14485c3`)
+
+**Scope.** This entry is the **override record** for one label. It does not
+change the archive, and it must not: run archives are append-only and
+immutable (invariant 9, ADR 0017). A corrected archive is a destroyed one —
+the value of the record is that it says what the run said at the time.
+
+**What happened.** `make eval-smoke` finished 25/26 green, `degraded_count: 0`,
+exit 0. The single red, `consumer_lag_missing_group`, was auto-labelled by the
+archive writer:
+
+```
+failure_class: grader-brittleness
+```
+
+**The label is wrong.** "Grader brittleness" is the bucket for *correct
+behavior failed by an over-tight assertion* — the taxonomy's fifth bucket
+(`docs/lessons/live-eval-noise-sources.md`). It carries an implicit
+instruction: relax the assert. Applied here that instruction would have
+deleted a real finding.
+
+The behavior was not correct. The alert named a specific consumer group; the
+agent called `get_consumer_lag` with no group argument, so the schema default
+sent the probe to `worker-dispatcher` — a consumer nobody had complained
+about — which returned healthy. It then noticed an unrelated critical billing
+alert, chased that, and escalated on it. **It never probed the resource the
+alert was about.** The correct classification is an agent defect (see F-006).
+
+**Root cause of the mislabel.** The classifier assigns `failure_class` from
+the *shape* of the failing dimension — an EVIDENCE-family failure on a run
+that reached an accepted terminal state looks exactly like grader brittleness
+from the outside. It has no way to ask whether the terminal state was reached
+for the right reason, which is the only question that separates the two
+buckets. The heuristic is not defective; it is being read as an authority it
+was never able to be.
+
+**Why it matters more than one label.** A wrong `failure_class` is
+self-erasing. It routes the reader to "loosen the assertion", and loosening
+the assertion makes the red disappear, which then confirms the label. Two of
+the five buckets (grader-brittleness, LLM-variance) have this property: acting
+on them destroys the evidence that would have refuted them.
+
+**The lesson.** *A generated label is an input to triage, not the output of
+it.* Any `failure_class` read off an archive is a hypothesis about a run, and
+it must be checked against the trajectory before it is acted on — especially
+when it recommends weakening a check.
+
+**Fix.**
+- This entry is the durable override; `docs/lessons/live-eval-sequence-2026-09.md`
+  §2 carries the operator-facing version, and `docs/eval-methodology.md`
+  reconciles the "so the scenario passed" narrative with the later red.
+- The reds that matter are re-read against their trajectories before any
+  assertion is relaxed. No archive was edited.
+
+
+## F-006 — The alert's own subject was never required to be probed
+
+**Date:** 2026-08-30 (two live runs), fix landed 2026-09-03
+
+**What happened.** Two runs, in different stages, failed the same way and both
+reached a terminal state the grader accepted.
+
+- `consumer_lag_missing_group` (read-only): probed the schema-default consumer
+  instead of the one the alert named, found it healthy, and escalated on an
+  unrelated billing alert it noticed along the way.
+- `remediate_consumer_lag_success` (run A, `4779f94faa3c`): a real killed
+  consumer with climbing lag. The agent anchored on the **four DLQ rows the
+  platform seeds into every world** — *"Top hypothesis confirmed: DLQ contains
+  4 messages"* — replayed one `replay_safe` row, verified that replay, and
+  resolved at 4 of 13 calls. `restart_consumer_group` was never called.
+
+**The common defect.** The investigation planner under-weighted the alert's
+own subject. It neither reliably probed the resource the alert named, nor
+required its chosen remediation to address the alerted fault, and it concluded
+while the alerted signal was still unexplained. One run is the first half, the
+other the second. Both are the same missing premise: *the thing the alert is
+about is the thing you have to read.*
+
+**Why run A is seductive rather than stupid.** A non-empty DLQ is the resting
+state of a busy queue. An agent that treats "the DLQ has entries" as a finding
+will find one on every incident, forever, and each one will look confirmed.
+The seeded baseline of 4 rows guarantees it.
+
+**Why the graders were green.** Every dimension the grader scored was a
+property of the *outcome*: terminal state, evidence fields present, budget,
+action tool, safety. Nothing asserted a **relationship** between the alert and
+the investigation. "Did it call `get_consumer_lag`" is green for the first run;
+"did it read the consumer the alert named" is not — and only the second
+question is worth asking. The suite measured that the agent did things, not
+that it did them about the right resource.
+
+**The lesson.** *An outcome-shaped grader cannot detect a correct answer
+reached about the wrong subject.* At least one assertion must bind the
+investigation to the incident's own referent, or every scenario is passable by
+finding some other real problem.
+
+**Fix (PR #177).**
+- `ALERT_SUBJECT_PROBES` maps alert fields to the probe that must read them.
+  Deliberately **value-matched** — the probe must carry the value the alert
+  named, not merely call the right tool, since calling the tool with a default
+  argument is the exact defect. **Refuse-not-escalate** — a missed subject is a
+  planner error to correct before execution, not an incident outcome to grade.
+  **Inert on subjectless alerts**, so it cannot punish scenarios with no
+  resource to name.
+- Three planner prompt rules binding the chosen remediation to the alerted
+  fault.
+- Consequence, recorded so it is not misread as a regression:
+  `consumer_lag_missing_group` now grades **red** (F-005). The behavior did not
+  change; the assertion did.
+
+**Fifth instance of one root.** F-001 asserted a control nowhere; F-002
+reconciled a measurement against nothing; F-003's verification consumed its own
+evidence; F-004's tests encoded the assumption rather than the contract. F-006
+is the grader-shaped one:
+
+> **A check that never names the subject verifies only that something
+> happened.** If the artifact under test is *about* a particular resource, the
+> assertion must reference that resource by value — otherwise a correct-looking
+> trajectory about an unrelated problem passes, and the suite's green is a
+> statement about activity rather than about correctness.

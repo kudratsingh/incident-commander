@@ -27,6 +27,7 @@ from evals.graders.deterministic import (
     ScenarioExpectation,
 )
 from evals.runner import (
+    _SCENARIOS_DIR,
     RunReport,
     ScenarioOutcome,
     ScenarioResult,
@@ -44,6 +45,7 @@ from evals.runner import (
     write_report,
     write_trajectories,
 )
+from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import ChaosHook, PreconditionField, PreconditionProbe, Scenario
 from incident_commander.agent import factory
 from incident_commander.agent.briefing import EscalationBriefing
@@ -1497,7 +1499,10 @@ class TestMainExitCodes:
         # interpreter exits 1 — the code reserved for "scenario failed".
         _isolate_settings_env(monkeypatch, tmp_path)
         _forbid_run_all(monkeypatch)
-        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        # --only is mandatory under --live since the missing-filter backstop,
+        # and that refusal (exit 2) runs BEFORE the settings load — so the
+        # broken-env claim needs a selection to reach the code it is about.
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--only", "consumer_lag_pass"])
         assert runner_module.main() == 3
 
     def test_live_smoke_placeholder_platform_with_canned_only_selection_exits_3(
@@ -1783,9 +1788,131 @@ class TestSmokeRefusesChaosSeeding:
         # A chaos-seeding selection now clears the chaos:invoke guard before it
         # is allowed to run — see TestLiveChaosSeedingGuardsTheChaosScope.
         _stub_principal_probe(monkeypatch)
-        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        monkeypatch.setattr(
+            sys, "argv", ["evals.runner", "--live", "--only", "remediate_consumer_lag_success"]
+        )
         assert runner_module.main() == 0
         assert len(run_all_calls) == 1
+
+
+class TestSmokeRefusesAnythingOutsideTheDerivedSet:
+    """The other half of the door above: ``--only`` could re-admit a WRITE.
+
+    The derived smoke set is ``in_smoke_pass`` — no ``chaos_setup``, no
+    ``expected_action_tools``, no ``smoke_exclusion``. But ``--only`` bypasses
+    the derivation entirely (``if smoke and not only_patterns``), and the gate
+    it then ran into checked ``chaos_setup`` alone. So a scenario declaring
+    ``expected_action_tools`` and no chaos passed every guard: a graded Tier-1
+    write inside the stage whose whole purpose is proving the smoke token
+    cannot write. Five shipped scenarios are in exactly that shape, all of
+    them live-capable and all of them reachable by ``SMOKE_ONLY=dlq_``.
+
+    ``Scenario.smoke_eligible``'s docstring already asserted this refusal
+    existed ("guaranteed red here and belongs to the remediation stage"), so
+    the derivation and the gate disagreed about what the stage admits — and
+    the gate is the one that runs.
+
+    The override may still NARROW the derived set: that is what SMOKE_ONLY is
+    for, and ``test_a_narrowing_override_still_runs`` pins it.
+    """
+
+    def _smoke_env(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        _forbid_run_all(monkeypatch)
+        monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
+        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+
+    def test_a_write_scenario_cannot_be_smuggled_in_by_only(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # RED BEFORE: exit 0 — dlq_replay_safe_success declares
+        # expected_action_tools and no chaos_setup, so the chaos-only gate
+        # waved it through and the stage graded a Tier-1 write under the
+        # read-scoped token. Real shipped scenario, real tree: the door is
+        # reachable as `make eval-smoke SMOKE_ONLY=dlq_replay_safe_success`.
+        self._smoke_env(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["evals.runner", "--live", "--smoke", "--only", "dlq_replay_safe_success"],
+        )
+        assert runner_module.main() == 6
+        out = capsys.readouterr().out
+        assert "SMOKE FAIL: 1 selected scenario(s) are not in the read-only smoke pass" in out
+        assert "dlq_replay_safe_success — declares expected_action_tools" in out
+        assert "no scenarios ran, nothing was spent" in out
+
+    def test_the_refusal_names_every_offender_and_its_reason(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # `SMOKE_ONLY=dlq_` is the realistic operator form, and it happens to
+        # cover both surviving reasons at once: four write scenarios plus
+        # dlq_backlog, which is held back by a hand-written smoke_exclusion
+        # (it COULD pass under the smoke token — the hold-back is a judgement,
+        # and its recorded reason is what says when it can be lifted).
+        # Three causes, three different repairs, so the reason is per scenario.
+        self._smoke_env(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke", "--only", "dlq_"])
+        assert runner_module.main() == 6
+        out = capsys.readouterr().out
+        assert "dlq_human_required_escalates — declares expected_action_tools" in out
+        assert "dlq_backlog — smoke_exclusion: " in out
+        assert "--only narrows the derived smoke selection; it cannot widen it." in out
+
+    def test_a_narrowing_override_still_runs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # SMOKE_ONLY keeps substring semantics for scenarios that ARE in the
+        # derived set. Narrowing is the whole point of the override; only
+        # widening is refused. All five noise_* scenarios are in_smoke_pass.
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
+        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module, "assert_no_tier1_successes", lambda _client, _since, **_kw: None
+        )
+        _stub_principal_probe(monkeypatch)
+        calls = _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke", "--only", "noise_"])
+        assert runner_module.main() == 0
+        selected = sorted(s.name for call in calls for s in call["args"][0])
+        assert len(selected) == 5, f"a narrowing override must still run: {selected}"
+        assert "SMOKE FAIL" not in capsys.readouterr().out
+
+    def test_a_bare_smoke_run_is_unaffected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The derivation and the gate now agree by construction: everything
+        # the derivation admits is in_smoke_pass, so the gate can never fire
+        # on a bare --smoke. If it ever does, the two have drifted apart and
+        # that is the bug this class exists to prevent.
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
+        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module, "assert_no_tier1_successes", lambda _client, _since, **_kw: None
+        )
+        _stub_principal_probe(monkeypatch)
+        calls = _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
+        assert runner_module.main() == 0
+        selected = [s.name for call in calls for s in call["args"][0]]
+        assert selected, "a bare --smoke must still derive a non-empty selection"
+
+    def test_the_gate_agrees_with_the_derivation(self) -> None:
+        # The gate's predicate must BE the derivation's, not a copy of it.
+        # Two hand-kept lists drifting apart is the whole defect, one level up.
+        scenarios = load_scenarios(_SCENARIOS_DIR)
+        assert [s.name for s in scenarios if not s.in_smoke_pass], (
+            "no scenario is held out of the smoke pass — this gate has no subject"
+        )
+        for scenario in scenarios:
+            expected = (
+                scenario.chaos_setup is None
+                and not scenario.expectation.expected_action_tools
+                and scenario.smoke_exclusion is None
+            )
+            assert scenario.in_smoke_pass is expected, scenario.name
 
 
 class TestCannedEquivalentKnobWarning:
@@ -2192,6 +2319,207 @@ class TestPreconditions:
             self._run_live(monkeypatch, self._live_scenario_with_precondition(), client)
 
 
+class TestLiveRequiresAnExplicitSelection:
+    """A bare ``--live`` is the whole suite, and must be refused as such.
+
+    It always looked refused: the exit-8 canned-only gate catches it because
+    six scenarios in the tree declare no live leg. But that is a property of
+    ``evals/scenarios/``, not of the invocation — give those six a live leg and
+    the identical command starts spending with nothing here changed — and the
+    message it refuses with names the wrong problem. The Makefile's `ifndef
+    ONLY` guard says the same thing one layer out; this is the backstop, since
+    `python -m evals.runner --live` never comes through make.
+    """
+
+    def test_live_without_only_is_refused_before_the_scenario_tree_is_read(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # Both stubs explode. Passing this proves the refusal is structural:
+        # it precedes the settings load AND the scenario load, so it cannot be
+        # contingent on an .env or on what is in the scenario directory — the
+        # two things the old incidental refusal depended on.
+        def _boom(*_a: Any, **_k: Any) -> Any:
+            raise AssertionError("the missing-filter refusal must precede this")
+
+        monkeypatch.setattr(runner_module, "_settings_for_mode", _boom)
+        monkeypatch.setattr(runner_module, "load_scenarios", _boom)
+        _forbid_run_all(monkeypatch)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        assert runner_module.main() == 2
+        out = capsys.readouterr().out
+        assert "LIVE FAIL: --live requires --only" in out
+        assert "no scenarios ran, nothing was spent" in out
+        # A refusal that does not hand over the runnable form gets worked around.
+        assert "make eval-live ONLY=" in out
+
+    def test_smoke_is_exempt(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # `--live --smoke` derives its own selection (WO-R2-123), so a bare one
+        # is not an unfiltered run — it is the read-only pass under the
+        # read-scoped token. It must fail on its own terms (exit 3, no smoke
+        # token in an isolated env), not be refused for a missing --only.
+        _isolate_settings_env(monkeypatch, tmp_path, _PLACEHOLDER_LIVE_ENV)
+        _forbid_run_all(monkeypatch)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
+        assert runner_module.main() == 3
+        assert "LIVE FAIL: --live requires --only" not in capsys.readouterr().out
+
+    def test_an_offline_run_still_needs_no_only(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The guard is about spend, and an offline run has none. Refusing here
+        # would take out `make eval-reg` and `make baseline`, which forbid ONLY
+        # precisely so that they gate on the full suite.
+        _isolate_settings_env(monkeypatch, tmp_path)
+        seen: list[Path] = []
+
+        def _record(directory: Path) -> list[Scenario]:
+            seen.append(directory)
+            return [_passing_scenario()]
+
+        monkeypatch.setattr(runner_module, "load_scenarios", _record)
+        _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["evals.runner"])
+        assert runner_module.main() == 0
+        assert seen, "an offline run with no --only must still reach the scenario load"
+
+
+class TestLiveOnlyMatchesByFullScenarioName:
+    """``--only`` was an unanchored substring, and silently widened selections.
+
+    ``ONLY=dlq_backlog`` took ``dlq_backlog`` AND
+    ``remediate_dlq_backlog_success``. The read-only one runs first and drains
+    the seeded replay_safe pool the remediation is graded on, so a correct
+    agent reds. ADR 0020 cannot catch it — only one of the two mutates, so
+    ``len(mutating) > 1`` is False (2026-08-30).
+
+    Scoped to the spend path. ``--smoke`` keeps substring matching: it runs
+    read-scoped, refuses chaos seeding on its own (exit 6), and SMOKE_ONLY is
+    a documented substring override. Offline keeps it for the same reason the
+    guard above does not fire there — no spend, no shared platform.
+    """
+
+    def _select(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *args: str
+    ) -> tuple[int, list[str]]:
+        """Run main() over the REAL scenario tree and report what it selected.
+
+        The real tree is the subject: the widening is a property of the actual
+        names, so a synthetic pair would only test the matcher against itself.
+        """
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
+        _stub_principal_probe(monkeypatch)
+        calls = _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", *args])
+        code = runner_module.main()
+        selected = [s.name for call in calls for s in call["args"][0]]
+        return code, sorted(selected)
+
+    def test_a_name_that_is_a_prefix_of_another_selects_only_itself(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # RED BEFORE: this selected both dlq_backlog and
+        # remediate_dlq_backlog_success. Exact match comes FIRST for exactly
+        # this case — refusing `dlq_backlog` as ambiguous because a longer name
+        # contains it would make that scenario unrunnable live forever.
+        code, selected = self._select(monkeypatch, tmp_path, "--live", "--only", "dlq_backlog")
+        assert code == 0
+        assert selected == ["dlq_backlog"]
+
+    def test_a_substring_pattern_is_refused_and_names_what_it_would_have_taken(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # `dlq_` is not a scenario, so there is no exact match to prefer and no
+        # honest narrowing to guess at. Never silently widen — and never merely
+        # refuse either: name the candidates, or the operator retries blind.
+        code, selected = self._select(monkeypatch, tmp_path, "--live", "--only", "dlq_")
+        assert code == 2
+        assert selected == [], "refusal must precede the run boundary"
+        out = capsys.readouterr().out
+        assert "SELECTION FAIL: 1 --only pattern(s) are not scenario names: dlq_" in out
+        assert "Did you mean:" in out
+        for name in ("dlq_backlog", "dlq_mixed_partial", "remediate_dlq_backlog_success"):
+            assert f"--only dlq_ → {name}" in out
+        assert "no scenarios ran, nothing was spent" in out
+
+    def test_the_positive_control_selects_exactly_one(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The runbook's own form for every live remediation step.
+        code, selected = self._select(
+            monkeypatch, tmp_path, "--live", "--only", "remediate_dlq_backlog_success"
+        )
+        assert code == 0
+        assert selected == ["remediate_dlq_backlog_success"]
+
+    def test_a_comma_list_of_exact_names_still_selects_all_of_them(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Exact-match is per pattern, not a one-scenario cap: ADR 0020 is what
+        # limits a live selection to one MUTATING scenario, and it has to stay
+        # the thing that says so. Both of these are read-only and live-capable.
+        code, selected = self._select(
+            monkeypatch, tmp_path, "--live", "--only", "dlq_backlog,noise_info_orders"
+        )
+        assert code == 0
+        assert selected == ["dlq_backlog", "noise_info_orders"]
+
+    def test_a_dead_pattern_keeps_its_own_refusal(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # #151's message must survive. A pattern matching nothing at all is a
+        # renamed or deleted scenario, which is a different repair from a
+        # pattern that matches too much — so it must not be swallowed by the
+        # new "not a scenario name" message, even though both exit 2 and a
+        # dead pattern is trivially also not a scenario name.
+        code, _ = self._select(
+            monkeypatch, tmp_path, "--live", "--only", "dlq_backlog,scenario_renamed_away"
+        )
+        assert code == 2
+        out = capsys.readouterr().out
+        assert (
+            "SELECTION FAIL: 1 --only pattern(s) matched no scenario: scenario_renamed_away" in out
+        )
+        assert "renamed" in out
+
+    def test_smoke_keeps_substring_matching(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # SMOKE_ONLY is a documented substring override (`SMOKE_ONLY=noise_`)
+        # and reaches the runner as --only. Applying the exact-name rule here
+        # would break an operator control for no gain: the read-only stage
+        # neither spends on Tier-1 actions nor shares mutable state.
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
+        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module, "assert_no_tier1_successes", lambda _client, _since, **_kw: None
+        )
+        _stub_principal_probe(monkeypatch)
+        calls = _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke", "--only", "noise_"])
+        assert runner_module.main() == 0
+        selected = [s.name for call in calls for s in call["args"][0]]
+        assert len(selected) > 1, "--smoke must keep substring matching; SMOKE_ONLY needs it"
+        assert "SELECTION FAIL" not in capsys.readouterr().out
+
+    def test_an_offline_run_keeps_substring_matching(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        _isolate_settings_env(monkeypatch, tmp_path)
+        calls = _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--only", "dlq_backlog"])
+        assert runner_module.main() == 0
+        selected = [s.name for call in calls for s in call["args"][0]]
+        assert sorted(selected) == ["dlq_backlog", "remediate_dlq_backlog_success"], (
+            "offline --only keeps substring matching — no spend, no shared platform, "
+            "and eval-reg/baseline refuse ONLY outright so nothing downstream reads "
+            "a widened offline selection"
+        )
+
+
 class TestLiveRefusesABatchOfMutatingScenarios:
     """ADR 0020: one state-mutating scenario per live invocation, enforced.
 
@@ -2249,7 +2577,14 @@ class TestLiveRefusesABatchOfMutatingScenarios:
             # http://real.host:8001/mcp from the unit suite (WO-R2-35).
             _stub_principal_probe(monkeypatch)
             _stub_run_pipeline(monkeypatch, tmp_path)
-        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        # Every scenario named exactly: --live selects by full name now, and a
+        # comma list of exact names is how a multi-scenario selection is even
+        # expressible — which is what the ADR 0020 gate below is graded on.
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["evals.runner", "--live", "--only", ",".join(s.name for s in scenarios)],
+        )
         return runner_module.main()
 
     def test_two_mutating_scenarios_are_refused_before_any_spend(
@@ -2410,7 +2745,7 @@ class TestLiveRefusesCannedOnlySelection:
         _stub_run_pipeline(monkeypatch, tmp_path)
         monkeypatch.setattr(runner_module, "load_scenarios", lambda _d: [live_scenario])
         monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: _StubGuardClient())
-        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--only", "consumer_lag_pass"])
         assert runner_module.main() == 0
 
     def test_canned_only_is_the_absence_of_every_live_leg(self) -> None:
@@ -2471,7 +2806,7 @@ class TestLiveRemediationGuardsTheWriteScope:
         monkeypatch.setattr(runner_module, "load_scenarios", lambda _d: [self._remediation()])
         monkeypatch.setattr(runner_module, "make_client", lambda *a, **k: probe)
         _stub_run_pipeline(monkeypatch, tmp_path)
-        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--only", "remediate_a"])
         return runner_module.main()
 
     def test_a_read_scoped_token_is_refused_before_any_spend(
@@ -2515,7 +2850,7 @@ class TestLiveRemediationGuardsTheWriteScope:
 
         monkeypatch.setattr(runner_module, "assert_write_capable_principal", _never)
         _stub_run_pipeline(monkeypatch, tmp_path)
-        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--only", "read_only"])
         assert runner_module.main() != 4
 
 
@@ -2560,7 +2895,11 @@ class TestLiveChaosSeedingGuardsTheChaosScope:
         monkeypatch.setattr(runner_module, "load_scenarios", lambda _d: scenarios)
         probed = _stub_principal_probe(monkeypatch, probe_error)
         _stub_run_pipeline(monkeypatch, tmp_path)
-        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live"])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["evals.runner", "--live", "--only", ",".join(s.name for s in scenarios)],
+        )
         return runner_module.main(), probed
 
     def test_a_chaos_only_selection_without_chaos_scope_is_refused_before_spend(

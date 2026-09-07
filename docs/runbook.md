@@ -70,11 +70,30 @@ uv run python scripts/bootstrap_agent_token.py --scope chaos:invoke
 make eval-live ONLY=remediate_consumer_lag_success
 ```
 
-`ONLY=` is not optional. An unfiltered `make eval-live` selects the whole
-suite and the runner refuses it before any spend, twice over: canned-only
-scenarios cannot run live (exit 8) and more than one state-mutating scenario
-cannot share an invocation (exit 7, ADR 0020). Run one at a time with a reset
-between — the full protocol is below.
+`ONLY=` is not optional, and it names scenarios by **full scenario name**.
+
+A bare `make eval-live` is refused at Makefile parse time with **exit 2**,
+before anything runs, and `python -m evals.runner --live` without `--only` is
+refused by the runner with the same exit 2 — before the settings load, so it
+depends on nothing. An unfiltered `--live` is the whole suite against one
+shared platform, with real spend and no reset between scenarios; run one at a
+time with a reset between, the full protocol is below.
+
+(Until 2026-09 neither refusal existed. A bare `make eval-live` was stopped
+only by the exit-8 canned-only gate, which fires because six scenarios declare
+no live leg — a fact about `evals/scenarios/`, not about the command, and one
+that would stop being true the moment those six gained a live leg.)
+
+A live `ONLY=` pattern must be a scenario's full name, and a pattern that is
+not one is refused with **exit 2** listing the scenarios it would have matched.
+This is load-bearing, not pedantry: `ONLY=dlq_backlog` used to select
+`dlq_backlog` *and* `remediate_dlq_backlog_success`, the read-only one drained
+the seeded `replay_safe` pool before the remediation was graded, and the ADR
+0020 gate stayed quiet because only one of the two mutates. A name that is a
+prefix of a longer name still selects itself alone — exact match wins — so
+`ONLY=dlq_backlog` runs `dlq_backlog`. Comma-separated exact names still work.
+`--smoke` and offline `make eval ONLY=` keep substring matching (`SMOKE_ONLY`
+is a documented substring override, and neither path spends or shares state).
 
 Trace files land in `evals/traces/*.jsonl`; the formatter turns them into readable stepwise trajectories in `evals/reports/human/*.txt`.
 
@@ -215,12 +234,15 @@ export EVAL_TRACE_DIR=evals/traces
 #    are its own record of what it covered. See docs/eval-methodology.md,
 #    "The read-only smoke pass".
 #    Override with SMOKE_ONLY= (command line or .env) to run a subset,
-#    e.g. re-checking one scenario against a new pin. The override goes
-#    through --only, so both refusals still apply to it: a pattern that
+#    e.g. re-checking one scenario against a new pin. The override can only
+#    NARROW the derived selection, never widen it: it goes through --only,
+#    so both refusals still apply to it: a pattern that
 #    matches no scenario refuses the whole selection (exit 2, and the
-#    per-pattern counts say which), and a selection holding a
-#    chaos-declaring scenario refuses with exit 6 — an override cannot
-#    smuggle a remediate_* scenario into the read-only stage.
+#    per-pattern counts say which), and a selection holding any scenario
+#    outside the derived set — chaos_setup, expected_action_tools, or a
+#    declared smoke_exclusion — refuses with exit 6, naming each scenario
+#    and its reason. An override cannot smuggle a chaos-seeding OR a
+#    write-declaring scenario into the read-only stage.
 make eval-smoke
 
 # 2) Remediation scenarios, one at a time, with reset between.
@@ -467,7 +489,7 @@ the degradation is now recorded in the report (`degraded_count` in
 |---|---|
 | 0 | all selected scenarios passed |
 | 1 | ≥1 scenario failed (regression gate: regression detected, or a baseline scenario dropped from latest) |
-| 2 | an `--only` pattern matched no scenario — *any* single dead pattern, not only a wholly empty selection, since a dead pattern is a renamed scenario dropping silently out of the run (regression gate: missing report, or a filtered `--only` `latest.json` — refused as gate input) |
+| 2 | the selection is not one the runner will spend on. Three cases: `--live` with no `--only` and no `--smoke` (an unfiltered live run is the whole suite against one shared platform — refused before the settings load, and `make eval-live` refuses the same thing at Makefile parse time); an `--only` pattern matched no scenario — *any* single dead pattern, not only a wholly empty selection, since a dead pattern is a renamed scenario dropping silently out of the run; or, under `--live`, an `--only` pattern that is not a full scenario name — the refusal lists the scenarios it would have substring-matched, because a widened live selection slips past the ADR 0020 gate whenever only one of the matches mutates (regression gate: missing report, or a filtered `--only` `latest.json` — refused as gate input) |
 | 3 | preflight/env failure: `--smoke` without `--live`, degraded `--live` env, invalid or missing settings, missing smoke token, LLM auth preflight failure |
 | 4 | principal guard: the token is not the one the selection needs — the smoke token holds more than read scope, or a remediation selection lacks `actions:execute`, or a chaos-seeding selection lacks `chaos:invoke` (each guard probes only the scope its half of the selection needs, and each fails closed on any probe outcome that is neither a scope refusal nor an argument-validation refusal) |
 | 5 | post-stage audit failed, was unreadable, or was inconclusive |
@@ -505,10 +527,21 @@ write+chaos principal — because chaos needs `chaos:invoke`, which the
 read-scoped smoke token does not carry. That is fine on a `--live`
 remediation run and wrong during `--smoke`, whose entire purpose is to
 prove the stage is read-only. So `--smoke` now refuses, with **exit 6**,
-before preflight or any spend, if any *selected* scenario declares
-`chaos_setup`. The check runs after `--only` filtering, so an
-`SMOKE_ONLY=` override cannot smuggle a chaos scenario in. There is no
-opt-out flag: a scenario that seeds chaos is not a smoke scenario. Since
+before preflight or any spend, if any *selected* scenario is outside the
+derived smoke set — that is, if it declares `chaos_setup`, declares
+`expected_action_tools`, or carries a `smoke_exclusion`. The refusal names
+each offending scenario and its reason, because the three have three
+different repairs. The check runs after `--only` filtering, so an
+`SMOKE_ONLY=` override can only **narrow** the derived selection, never
+widen it. There is no opt-out flag: a scenario outside the derived set is
+not a smoke scenario.
+
+(Until 2026-09 this checked `chaos_setup` alone, which was half the door.
+`--only` bypasses the derivation entirely, so an override could re-admit a
+scenario the derivation had dropped for declaring `expected_action_tools` —
+a graded Tier-1 write inside the stage whose purpose is proving the smoke
+token cannot write. Five shipped scenarios are in that shape and all are
+reachable by `SMOKE_ONLY=dlq_`.) Since
 WO-R2-123 an unfiltered `--smoke` cannot trip it either — the derived
 selection admits only chaos-free, action-free scenarios, so the three
 `remediate_*` ones are never in it. Exit 6 is now reachable exactly

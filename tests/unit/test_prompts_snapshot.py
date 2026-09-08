@@ -34,9 +34,9 @@ from incident_commander.llm.prompts.loader import (
 
 _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("2fbebe9dcd49d48e41a580b1093f8e66cdb063482ea78ee5873be2eaa3dc0eda"),
-    "investigation_planner": ("fa05aad86042c4f91403dcc85c65b87c4873699d69f36f179ccf995d5cfb1544"),
+    "investigation_planner": ("7fb96c352bf963e46149da8020d6b4d080760daa73bfe60bf8afefc68c90886d"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
-    "remediation_planner": ("c470a27c849aeb4e079ab69c2d54a8e5ddda2d2e007157fa43cb440b00388704"),
+    "remediation_planner": ("1ee8b6640ae937acf28faa4048ddba7d1e9f04ea7bc53954cab5d35cbbf0b0bc"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
 }
 
@@ -453,31 +453,82 @@ class TestRemediationPlannerInvariants:
         # The sentence that stops "permanent" being read as "fixed".
         assert 'The word "permanent" describes the fence, not the incident' in content
 
-    def test_the_fence_is_not_the_default_for_a_stuck_chain_root(self) -> None:
-        """The boundary between this rule and `saga_stuck`, stated in the prompt.
+    def test_the_fence_is_the_default_for_a_stuck_chain_root_too(self) -> None:
+        """WO-R2-160, decided by the user on 2026-09-08, in both prompts.
 
-        Both prompts now route a `human_required` row to the fence, and
-        `saga_stuck` — whose seeded chain root is `human_required` since cmd
-        #192 — forbids every Tier-1 tool including `mark_dlq_permanent`, on
-        the grounds that replaying that root is the human's decision and the
-        fence records the opposite disposition against it. Without this
-        paragraph the two disagree, and the disagreement is invisible: the
-        corpus check in ``test_policies.py::TestFixMapMatchesTheSuite`` is
-        scoped to scenarios expecting ``resolved``, so an escalate-only
-        scenario forbidding its own steered tool fires nothing there.
+        This test is the REVERSAL of ``test_the_fence_is_not_the_default_
+        for_a_stuck_chain_root``, and the reversal is the point. That test
+        pinned an exception: a `human_required` row is fenced then escalated
+        everywhere *except* when it is a stuck chain's root, where
+        `saga_stuck` forbade every Tier-1 tool on the grounds that replaying
+        the root is the human's decision and a fence records the opposite
+        disposition against it.
 
-        The exception is not a special case for one scenario. It is the
-        alert's subject — the oldest rule in this codebase: a DLQ alert
-        makes the row the incident, a `platform.dag` alert makes the chain
-        the incident, and you act on the subject.
+        The premise of the exception was wrong about the platform. A fenced
+        row is still replayable BY EXPLICIT ID — only category scans and the
+        default bulk sweep skip fenced rows — so the fence forecloses nothing
+        the human is being asked to decide, while leaving the root unfenced
+        exposes a payload that cannot succeed to the next
+        `replay_dlq_by_category` sweep. So the rule is uniform now: a
+        `human_required` row is fenced first and escalated second, wherever
+        it sits.
+
+        Both prompts are checked because both carried the exception, and the
+        negative assertions are what stop it drifting back in: the two
+        sentences below are the exact strings the old rule was written as.
+        The chain-root case is still NAMED in both — the boundary did not
+        disappear, it stopped being a different action and became a different
+        briefing.
         """
         for prompt in ("remediation_planner", "investigation_planner"):
             content = load_prompt(prompt)
             assert "root of a stuck chain" in content.lower(), prompt
+        remediation = load_prompt("remediation_planner")
         assert (
             "A `human_required` chain root is the one place the fence is not the default"
-            in load_prompt("remediation_planner")
+            not in remediation
         )
+        assert "Fencing the root takes nothing away from the human's decision" in remediation
+        assert "still permits a replay of a fenced row **by explicit id**" in remediation
+        # The investigation planner must emit `remediate` there, not `stop` —
+        # the fence is only reachable through PLANNING.
+        investigation = load_prompt("investigation_planner")
+        assert "`stop` is right there" not in investigation
+        assert "ROOT OF A STUCK CHAIN too" in investigation
+
+    def test_the_stuck_chain_fence_is_named_as_a_stabilizer(self) -> None:
+        """The fence drains nothing, said where the planner reads it.
+
+        Without this the flip above becomes a licence to report the chain
+        fixed: `mark_dlq_permanent` is `Resolution.STABILIZES`, the root
+        stays `dead_letter` and the descendants stay `waiting`. Measured
+        rather than asserted — a live read of the chain before and after a
+        fence came back byte-identical (2026-09-08, v0.6.2) — and
+        `saga_stuck` grades the briefing for saying so.
+        """
+        content = load_prompt("remediation_planner")
+        assert "comes back byte-identical" in content
+        assert "the run escalates rather than resolving" in content
+        assert "a fence drains nothing" in load_prompt("investigation_planner")
+
+    def test_a_fence_is_verified_on_fenced_at_not_on_the_category_page(self) -> None:
+        """The verify surface, corrected for an already-classified row.
+
+        The prompt told the planner to verify a fence by filtering to
+        `remediation_hint="human_required"` and finding the row there. That
+        is evidence only when the row was NOT in the category beforehand.
+        `saga_stuck`'s root is seeded `human_required`, so that page returns
+        it whether or not anything was fenced — the same no-observable
+        problem cmd #205 hit, which plat #198 fixed by adding `fenced_at`.
+        Pinned in both places the prompt gives verify guidance, because the
+        summary line and the DLQ section drifted apart once already.
+        """
+        content = load_prompt("remediation_planner")
+        assert "verify on `fenced_at`, not on membership of the `human_required` page" in content
+        assert "Mark permanent → verify with `list_dlq_messages` and read `fenced_at`" in content
+        # The inversion this replaces, pinned negatively.
+        assert "APPEARING in that human_required-filtered list" not in content
+        assert "APPEARING in that filtered list" not in content
 
     def test_counters_the_pinned_tool_descriptions(self) -> None:
         # The two descriptions the agent is handed verbatim both steer
@@ -514,13 +565,27 @@ class TestRemediationPlannerInvariants:
         # without moving the behaviour: every one of these four readings has
         # a different correct answer, and three of the four forbid the
         # replay the agent is otherwise steered toward.
+        #
+        # Since WO-R2-160 the four readings map to THREE outcomes, not two:
+        # replay it, fence it and escalate, or escalate having done nothing.
+        # `human_required` moved from the third to the second, which is what
+        # the two headings below pin; the bare-escalate heading is what stops
+        # the fence widening onto the other three, and the null-hint sentence
+        # says why an UNCLASSIFIED root is not fenced — nothing has called it
+        # unreplayable, so recording that it is would be a classification the
+        # agent has no evidence for.
         content = load_prompt("remediation_planner")
         assert "`remediation_hint` is `replay_safe`" in content
         assert "`remediation_hint` is `human_required`" in content
         assert "A null `remediation_hint` is UNKNOWN, not replay-safe" in content
         assert "bad data, a schema the producer must fix, or a poison payload" in content
         assert "escalate, naming the root job id and what its row said" in content
-        assert "only when the operator's intent is to stop the retries" in content
+        assert "*Fence it, then escalate*" in content
+        assert "*Escalate without acting*" in content
+        assert "The fence is not the answer to an UNCLASSIFIED root" in content
+        # The old routing, pinned negatively so it cannot drift back: the
+        # fence used to be conditional on an operator's stated intent.
+        assert "only when the operator's intent is to stop the retries" not in content
 
     def test_a_category_replay_is_planned_only_after_listing_that_category(self) -> None:
         # ADR 0028, the steering half. The structural guard

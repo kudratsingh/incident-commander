@@ -174,10 +174,25 @@ HINT_ROUTED_CATEGORIES: Final[frozenset[HypothesisCategory]] = frozenset(
 # every Tier-1 tool on purpose. `dlq_human_required_escalates` is now an
 # escalated scenario that nevertheless REQUIRES an action, so it fell in the
 # gap — the prompt could route `human_required` at a tool that scenario
-# forbids and no test would have seen it. Keyed on the alert's hint rather
-# than on the hypothesis category so the check stays silent on scenarios
-# whose subject is not a DLQ row at all: `saga_stuck`'s alert names a
-# `job_id`, its incident is the chain, and it forbids the fence deliberately.
+# forbids and no test would have seen it.
+#
+# The vocabulary is a DLQ slice, so the check that reads this map was keyed on
+# the alert's own hint, and the note here used to end: "so the check stays
+# silent on scenarios whose subject is not a DLQ row at all: `saga_stuck`'s
+# alert names a `job_id`, its incident is the chain, and it forbids the fence
+# deliberately." WO-R2-160 (user decision, 2026-09-08) reversed the second
+# half — `saga_stuck` now FENCES its human_required root and then escalates —
+# and silence on it is therefore no longer the right answer.
+#
+# The map did not have to move; the routing it already records
+# (`human_required` → `mark_dlq_permanent`) is exactly what that scenario
+# expects. What moved is the check's reach: `TestHintRoutedToolsMatchTheSuite`
+# now also selects a scenario whose alert names a RESOURCE and whose own graded
+# evidence pins THAT resource's row hint, narrowed to the routed tools that can
+# name a resource at all (ADR 0032's rule, reused rather than restated — a
+# category replay cannot address one named row). The alert deliberately does
+# NOT carry the hint: putting it there would hand the agent the discriminator
+# the scenario exists to make it read.
 HINT_ROUTED_TOOLS: Final[dict[str, frozenset[str]]] = {
     "replay_safe": frozenset({"replay_dlq_by_ids", "replay_dlq_by_category"}),
     "wait_and_replay": frozenset({"replay_dlq_by_ids", "replay_dlq_by_category"}),

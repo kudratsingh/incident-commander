@@ -1100,6 +1100,109 @@ will be applied wherever it fits.**
 > a live run on the second being filed as the first — with the reasoning written
 > out, reviewed, and shipped inside a re-pin.
 
+## 15. The exception that kept the lazy run green
+
+**WO-R2-160, decided by the user on 2026-09-08. No run, no spend — this one was
+found by reading, and it is the second time this scenario has been repaired for
+the same underlying reason.**
+
+§13 settled `human_required` DLQ rows as **fence, then escalate** and carved out
+one exception in the same change: a `human_required` row that is the **root of a
+stuck chain** was to be escalated with nothing touched. The reasoning was
+ADR 0032's — act on the alert's subject — and it looked airtight:
+
+> A DLQ alert makes the poisoned row the incident, so the row is fenced. A
+> `platform.dag` alert makes the *chain* the incident: replaying that root by id
+> is how the chain drains, the platform permits it, and it is the exact question
+> being escalated — so fencing the root records "never auto-replay this" against
+> a decision the human has been handed.
+
+It was written down, pinned by a prompt test in both planners, stated in
+ADR 0026's consequences, and left to the user as a work order rather than taken
+quietly. All of that was right. The reasoning still had a false premise.
+
+### The premise: a fence and a replay are not alternatives
+
+The platform permits a replay of a fenced row **by explicit id** — only category
+scans and the default bulk sweep skip fenced rows. ADR 0026 quotes that sentence
+in the carve-out and draws the opposite conclusion from it.
+
+So the fence forecloses nothing the human is being asked to decide. What it
+forecloses is the next operator's `replay_dlq_by_category` sweep re-running a
+payload that is missing a required field — which is not a decision anyone was
+making. Two different questions, collapsed into one by the exception:
+
+| question | whose | what the fence does to it |
+|---|---|---|
+| should this chain be replayed? | the human's, and it is what we escalate | nothing — a fenced row is still replayable by id |
+| should a bulk sweep be free to replay it meanwhile? | nobody's, it just happens | forecloses it, which is the whole value |
+
+### What the exception cost, and the rule it produced
+
+With every Tier-1 tool forbidden, `saga_stuck`'s correct-behaviour claim was
+"touch nothing" — so the **laziest trajectory was the passing one**: probe the
+chain, read the row, escalate. This scenario had already been repaired once for
+grading temperament rather than reasoning (§9 gave it the `human_required`
+discriminator so the escalation rests on something the agent READS). The
+carve-out left the other half of that defect standing, one layer up: the
+evidence claim asked the agent to have read the row, and nothing asked it to
+have *done* anything with what it read.
+
+**The rule, now in `docs/eval-methodology.md`: derive the forbidden set from the
+sanctioned action, never from the terminal state.** An escalating scenario
+forbids all seven Tier-1 tools when its correct action count is zero, and six
+when it is one. `consumer_lag_high` is the corpus's remaining witness for the
+first shape; `saga_stuck` and `dlq_human_required_escalates` are the second.
+
+### The measurement, taken before the claims were written
+
+`get_dag_state` on the chain root, read against the pinned v0.6.2 stack
+immediately before and immediately after a real `mark_dlq_permanent`, came back
+**byte-identical**: root `dead_letter` at `retry_count: 3`, descendant `waiting`,
+`paused: false`. The fence stamps the DLQ row and touches the chain not at all.
+
+That is the difference between asserting a stabilizer repairs nothing and
+knowing it. It is why the run ends `escalated`, why the briefing must carry
+`STABILIZED, NOT RESOLVED`, and why `pause_dag` stays forbidden — it is
+stabilize-only *and* it blocks the by-id replay the briefing recommends.
+
+### Two things the fix deliberately did not do
+
+**It did not put the hint in the alert.** Adding
+`remediation_hint: human_required` to the `platform.dag` alert was the cheap way
+to make the corpus check reach this scenario — `TestHintRoutedToolsMatchTheSuite`
+is keyed on the alert's own hint, and `job_id` outranks a hint in
+`ALERT_SUBJECT_PROBES`, so nothing about the required first probe would have
+moved. It would also have handed the agent the discriminator §9 created so the
+escalation would rest on a read. The check was widened instead: it now also
+selects a scenario whose alert names a RESOURCE and whose graded evidence pins
+that resource's row hint, narrowed to the routed tools that can name a resource
+(ADR 0032's rule reused, not a second hand-written list).
+
+**It did not assert a post-fence chain read.** The chain staying stuck is the
+scenario's point and it is still not gradeable: a plan has one verify tool,
+`fenced_at` lives only in the DLQ listing, and any `get_dag_state` claim would be
+read off the pre-action probe under every `which` — a statement about the world
+before the fence dressed as one about the world after it. Said in the YAML
+rather than papered over; the briefing carries the claim instead.
+
+### The verify surface, corrected on the way past
+
+The prompt told the planner to verify a fence by filtering to
+`remediation_hint="human_required"` and finding the row there. That is evidence
+only when the row was NOT in the category beforehand. This root is seeded
+`human_required`, so that page returns it whether or not anything was fenced —
+the same no-observable problem §13 hit from the other side, which plat #198
+fixed by adding `fenced_at`. Both places the prompt gave verify guidance now say
+`fenced_at`, and the scenario's precondition pins the root's stamp as null so a
+non-null read is necessarily post-fence.
+
+**Dossier before the claims were trusted:** both preconditions MET, all five DLQ
+rows COHERENT (the root reads `human_required` against a `SchemaValidationError`
+on a missing required field), the action's target present in the world, baseline
+re-audit PASS. `make eval-reg` 38/38, `saga_stuck` green on all five dimensions
+at 4 of 13 calls.
+
 ## Summary: what each failure was actually caused by
 
 | # | Run / event | Looked like | Actually was | Fix |

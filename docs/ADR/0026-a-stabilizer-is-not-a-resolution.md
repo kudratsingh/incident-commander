@@ -1,8 +1,17 @@
 # ADR 0026: A stabilizer is not a resolution
 
-* Status: accepted
+* Status: accepted; one consequence superseded 2026-09-08 by [ADR 0033](0033-a-human-required-chain-root-is-fenced-then-escalated.md)
 * Date: 2026-09-07
 * Decider: Kudrat Singh
+
+> **Superseded in part.** The consequence below headed "What was deliberately NOT changed:
+> `saga_stuck`" no longer holds. The user decided WO-R2-160 on 2026-09-08: a `human_required` chain
+> root is fenced and then escalated, like any other `human_required` row. The paragraph is left
+> exactly as written — including its now-invalid reasoning and its reference to a prompt test that
+> has been reversed — because an ADR records what was decided when, and
+> [ADR 0033](0033-a-human-required-chain-root-is-fenced-then-escalated.md) says why the premise was
+> wrong. Nothing else in this ADR moved: `mark_dlq_permanent` is still a stabilizer, and a verified
+> fence still escalates.
 
 ## Context and problem statement
 

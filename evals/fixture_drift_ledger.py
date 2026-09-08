@@ -393,6 +393,43 @@ _JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
         "fired — the same absence already recorded for the two chain roots and the "
         "bad-data row",
     ),
+    # `create_mislabeled_dlq_job` is the fifth hook in this family (WO-R2-167),
+    # and its two entries are the same mechanism as the four blocks above: the
+    # scenario seeds a row, the drift walk probes the un-faulted world, and the
+    # row is in one and not the other.
+    #
+    # What is worth writing down is what is NOT here. The post-fence element
+    # records this row as `human_required`, and that produces no value drift on
+    # `items[].remediation_hint[]` at all — `human_required` is in the live
+    # domain because the seeded furniture row `f030f975` carries it. So a
+    # recording that moved this row into a category NOTHING in the un-faulted
+    # world holds would have shown up as drift, which is the check working: the
+    # walk compares against the live DOMAIN of a field, not against a row.
+    # `fenced_at` / `fenced_by` are leaf-exempt (`_VOLATILE`), so the fence
+    # itself is silent here and is a scenario claim instead.
+    #
+    # POST_FAULT, not a defect, and specifically NOT to be "fixed" by trimming
+    # the recordings to four rows: the mislabelled row IS the incident, and a
+    # four-row recording would describe a world where this scenario's premise —
+    # a contradiction sitting in the alerted slice — is false.
+    ("dlq_mislabeled_replay_safe", "list_dlq_messages", "total", "value"): (
+        POST_FAULT,
+        "create_mislabeled_dlq_job injects the deliberately mislabelled row this "
+        "scenario exists to fence, so the faulted world holds five DLQ rows where "
+        "the un-faulted world the check probes holds the four boot-seeded ones",
+    ),
+    (
+        "dlq_mislabeled_replay_safe",
+        "list_dlq_messages",
+        "items[].id[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "the mislabelled row's id is uuid5(ffffffff-11ed-4000-8000-000000000000, "
+        "'{tenant_id}:mislabeled-dlq-job') and exists only after "
+        "create_mislabeled_dlq_job has fired — the same absence already recorded for "
+        "the two chain roots, the bad-data row and the poisoned row",
+    ),
     # alert_storm went the other way at wave-10: it is `use_live_mcp: false`
     # now, because the pinned platform cannot burst alerts. Alerts have three
     # producers (the bad_deploy chaos hook, the SLO fast-burn loop, the boot

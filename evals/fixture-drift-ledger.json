@@ -8,9 +8,9 @@
     "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything"
   },
   "_counts": {
-    "recorded": 41,
+    "recorded": 43,
     "fixture-defect": 0,
-    "explained": 41
+    "explained": 43
   },
   "known_drift": [
     {
@@ -92,6 +92,22 @@
       "kind": "value",
       "context": "post-fault",
       "why": "create_bad_data_job injects the unclassified bad-data row this scenario exists to fence, so the faulted world holds five DLQ rows where the un-faulted world the check probes holds the four boot-seeded ones"
+    },
+    {
+      "scenario": "dlq_mislabeled_replay_safe",
+      "tool": "list_dlq_messages",
+      "path": "items[].id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the mislabelled row's id is uuid5(ffffffff-11ed-4000-8000-000000000000, '{tenant_id}:mislabeled-dlq-job') and exists only after create_mislabeled_dlq_job has fired \u2014 the same absence already recorded for the two chain roots, the bad-data row and the poisoned row"
+    },
+    {
+      "scenario": "dlq_mislabeled_replay_safe",
+      "tool": "list_dlq_messages",
+      "path": "total",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "create_mislabeled_dlq_job injects the deliberately mislabelled row this scenario exists to fence, so the faulted world holds five DLQ rows where the un-faulted world the check probes holds the four boot-seeded ones"
     },
     {
       "scenario": "dlq_poison_unclassified",

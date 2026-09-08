@@ -97,7 +97,7 @@ is a documented substring override, and neither path spends or shares state).
 
 Trace files land in `evals/traces/*.jsonl`; the formatter turns them into readable stepwise trajectories in `evals/reports/human/*.txt`.
 
-**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 39 (~33 live: 23 read-only, 10 remediation) is ~$1.70 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
+**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 40 (~34 live: 23 read-only, 11 remediation) is ~$1.70 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
 
 **Side effects:** remediation scenarios fire real Tier-1 mutations against the platform. Idempotent — repeat runs with the same `(incident_id, tool, args)` hash return the cached result. But the *first* run of a scenario does apply changes.
 
@@ -387,24 +387,29 @@ make eval-live ONLY=saga_stuck && make eval-reset
 #      the SUBJECT: read it, fence it, escalate. This is the positive half
 #      of 1, and between them an agent that treats a poisoned message as
 #      replayable is red either way round.
-#   3. saga_stuck                     — READY since cmd #211, held.
-#   4. dlq_mixed_partial              — READY since cmd #212, held.
+#   3. dlq_mislabeled_replay_safe     — NEW (WO-R2-167). The classifier
+#      LIES: the row carries `replay_safe` and its error is a permanent CSV
+#      data fault. The error wins, nothing is replayed, ONE fence on the
+#      mislabelled row, and the contradiction goes in the briefing. Run it
+#      after 2, because 2 establishes that the agent fences a row it can SEE
+#      is unclassified; 3 asks whether it will do so against a label that
+#      says otherwise. This is the only scenario in the suite where the
+#      hint-routing table is the wrong answer.
+#   4. saga_stuck                     — READY since cmd #211, held.
+#   5. dlq_mixed_partial              — READY since cmd #212, held.
 #
-# A fifth, `dlq_mislabeled_replay_safe` (WO-R2-167 — the classifier lies:
-# the row says replay_safe and its error says permanent bad data), slots in
-# between 2 and 3 and is NOT listed as a command below because it does not
-# exist on this branch yet. It lands in the PR stacked on this one, which
-# adds its line here rather than leaving the runbook naming a scenario the
-# tree does not hold.
-#
-# All of them seed their own fault and abort pre-spend if the premise is
-# missing. Runs 1 and 2 poison a DLQ row, so `make eval-reset
+# All five seed their own fault and abort pre-spend if the premise is
+# missing. Runs 1-3 poison or mislabel a DLQ row, so `make eval-reset
 # PURGE_IDEMPOTENCY=1` after each is not optional: the row is deleted by the
 # reset, and a survivor makes the NEXT run's precondition read six rows
-# where it wants five. Runs 2 and 3 also stamp `fenced_at` on one row, which
-# the same reset clears.
+# where it wants five — and because both hooks derive their ids, a survivor
+# is refused with a 409 (`poison_fixture_name_in_use` /
+# `mislabeled_fixture_name_in_use`) rather than duplicated, which reads as a
+# failed seed. Runs 2, 3 and 4 also stamp `fenced_at` on one row, which the
+# same reset clears.
 make eval-live ONLY=remediate_dlq_backlog_success && make eval-reset PURGE_IDEMPOTENCY=1
 make eval-live ONLY=dlq_poison_unclassified       && make eval-reset PURGE_IDEMPOTENCY=1
+make eval-live ONLY=dlq_mislabeled_replay_safe    && make eval-reset PURGE_IDEMPOTENCY=1
 make eval-live ONLY=saga_stuck                    && make eval-reset PURGE_IDEMPOTENCY=1
 make eval-live ONLY=dlq_mixed_partial             && make eval-reset PURGE_IDEMPOTENCY=1
 

@@ -670,6 +670,68 @@ The dossier reports **findings, not verdicts**. A lint that returned a verdict
 would become a gate somebody eventually tunes to green, which is the same
 failure this rule is about, one level up.
 
+### 8. "The classifier lied" is a scenario class, and fixing the lab does not cover it
+
+Rule 7 is about a fault world that contradicts itself by accident, and its
+prescription is to find the contradiction before the run and remove it. This
+rule is about the case where the contradiction is the **subject**, and removing
+it would delete the test.
+
+A `remediation_hint` is not a property of a dead-letter row. It is a
+CLASSIFICATION — triage wrote it, and an operator or a backfill can write it
+too — and nothing downstream re-derives it from the error text. So a wrong
+category is not a lab defect; it is an ordinary production event, and it stays
+wrong until a person notices.
+
+The campaign learned this from the expensive side. `poison_message` labelled its
+schema-invalid row `replay_safe` for four releases, and
+`remediate_dlq_backlog_success` passed live **twice** (`e72b5ffb9df0`,
+`e8404306138c`) by replaying it — the prompt believed the label, and the grader
+counted the replay (F-013). Platform v0.6.3 fixed the hook. That closes the
+instance and **none of the class**: the agent that trusted the column is
+unchanged, and the next mislabelled row will not come from a chaos hook.
+
+So the corpus needs a scenario whose fixture is deliberately incoherent, and
+that is a real cost worth naming: it means one row in the lab breaks the
+coherence rule every other writer is held to. Three properties make it a
+sanctioned exception rather than a loophole, and any scenario of this class
+needs all three:
+
+- **The lab's own screen still flags it.** The platform reports the row as
+  incoherent and a test there asserts it keeps doing so; the exception is in
+  who is allowed to ask for the row (`create_mislabeled_dlq_job`, behind an
+  explicit `mislabel: true` with no default), never in what the screen sees.
+- **The eval's pre-run lint still reports it, in its own words.** The dossier
+  prints "sanctioned incoherent fixture" rather than the rem-4 finding, keyed on
+  the id the sanctioned hook returned during that dossier's own seeding — so
+  another scenario cannot borrow the exemption, a second row in the same
+  scenario cannot, and a DIFFERENT contradiction on the same row is still red.
+  Silencing it would have been worse than flagging it: a dossier showing the
+  lab's one mislabelled row as coherent is the untrue-but-green shape rule 7
+  exists to prevent.
+- **The correct behaviour is graded positively, and the lazy one fails loudly.**
+  `dlq_mislabeled_replay_safe` is the only scenario in the suite where the
+  hint-routing table is the wrong answer: reading only the label lands on a
+  replay, which is red on outcome, action, evidence and safety. In every other
+  DLQ scenario the label and the evidence agree, so an agent that reads only the
+  label still lands on the right action and nothing distinguishes the two
+  readings.
+
+Two design notes that generalise beyond this scenario:
+
+- **The rule is asymmetric.** "The error wins" applies to a hint that says
+  REPLAY over an error that says PERMANENT. The reverse — a `human_required` row
+  whose error reads transient — is still not replayed, because the rule is about
+  refusing to act on a label's authority, not about acting against one. A
+  symmetric rule would license exactly the replay this class exists to forbid.
+- **It is enforced by prompt plus grading, not by a plan-time refusal**, and
+  that is a decision rather than an omission: a guard keyed on substrings of
+  `error_message` derives a control from untrusted tool output (CLAUDE.md
+  invariant 4) and fails open silently on any wording outside its vocabulary.
+  [ADR 0034](ADR/0034-when-the-hint-and-the-error-disagree-the-error-wins.md)
+  carries the full argument and the revisit trigger: a structured
+  contradiction signal from the platform would change the answer.
+
 ### Exact-count remediation claims
 
 Rule 6 is about a token that cannot say *which tool* produced it. This is its sibling one level down: a value assertion that cannot say *how much* the agent did.

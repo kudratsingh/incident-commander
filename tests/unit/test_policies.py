@@ -16,10 +16,12 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
+from evals.dossier import HINT_COHERENT_FAMILIES, error_families
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
 from incident_commander.agent.hypothesis import HypothesisCategory, ReadToolName
 from incident_commander.agent.investigation import (
+    CONTRADICTED_HINT_TOOLS,
     FIX_MAP,
     HINT_ROUTED_CATEGORIES,
     HINT_ROUTED_TOOLS,
@@ -1272,11 +1274,76 @@ class TestHintRoutedToolsMatchTheSuite:
                     break
         return pairs
 
+    @staticmethod
+    def _mislabelled_subject_scenarios() -> dict[str, str]:
+        """Scenarios whose SUBJECT ROW's own hint and error text contradict.
+
+        The third selection (WO-R2-167), and it exists because for such a row
+        `HINT_ROUTED_TOOLS` is the WRONG answer by design: the user's ruling is
+        that when the two disagree the error wins, the row is not replayed, and
+        it is fenced. `CONTRADICTED_HINT_TOOLS` is that routing, and a scenario
+        grading it would otherwise collide with both assertions below —
+        expecting a tool the hint does not route to, and forbidding the two it
+        does.
+
+        DERIVED, never declared. A scenario cannot flag itself as an exception;
+        it is selected only when its own PRECONDITION pins, for one row selected
+        by id, both a `remediation_hint` and an `error_message` whose family the
+        coherence table says that hint does not sanction. Those are the same two
+        tables `make world-dossier`'s §5.1 lint reads, so "mislabelled" means
+        one thing in this repo and is spelled once.
+
+        Two consequences worth stating. A scenario that stopped pinning the
+        error text would drop out of this selection and back into the ordinary
+        routing, where it would fail loudly — the exemption cannot outlive the
+        premise that justifies it. And a scenario whose row is coherent can
+        never enter it, whatever it declares, so this is not an opt-out any
+        future scenario can reach for to silence a real steer-vs-forbid
+        collision.
+
+        Returns scenario name -> the hint the mislabelled row carries.
+        """
+        found: dict[str, str] = {}
+        for scenario in load_scenarios(_SCENARIO_DIR):
+            by_row: dict[str, dict[str, str]] = {}
+            for probe in scenario.expected_precondition:
+                for field in probe.expect:
+                    if field.where is None or field.where.field != DLQ_ROW_SOURCE.id_field:
+                        continue
+                    if not isinstance(field.where.equals, str):
+                        continue
+                    if not isinstance(field.equals, str):
+                        continue
+                    leaf = field.path.rsplit(".", 1)[-1]
+                    if leaf in (DLQ_ROW_SOURCE.decision_field, "error_message"):
+                        by_row.setdefault(field.where.equals, {})[leaf] = field.equals
+            for pinned in by_row.values():
+                hint = pinned.get(DLQ_ROW_SOURCE.decision_field)
+                error = pinned.get("error_message")
+                if hint is None or error is None or hint not in HINT_COHERENT_FAMILIES:
+                    continue
+                families = error_families(error)
+                if families and not (families & HINT_COHERENT_FAMILIES[hint]):
+                    found[scenario.name] = hint
+                    break
+        return found
+
     @classmethod
     def _checked(cls) -> list[tuple[Scenario, str, frozenset[str], str]]:
         """Every (scenario, hint, admissible tools, why) pair this class grades."""
         rows: list[tuple[Scenario, str, frozenset[str], str]] = []
+        mislabelled = cls._mislabelled_subject_scenarios()
         for scenario, hint in cls._hint_alerting_scenarios():
+            if scenario.name in mislabelled:
+                rows.append(
+                    (
+                        scenario,
+                        hint,
+                        CONTRADICTED_HINT_TOOLS,
+                        "its alert, on a row whose error contradicts that hint",
+                    )
+                )
+                continue
             rows.append((scenario, hint, HINT_ROUTED_TOOLS.get(hint, frozenset()), "its alert"))
         for scenario, hint in cls._hint_graded_scenarios():
             routed = frozenset(
@@ -1303,6 +1370,90 @@ class TestHintRoutedToolsMatchTheSuite:
         assert {"saga_stuck", "remediate_runaway_saga_success"} <= covered, (
             f"the saga pair is not covered by the resource-subject selection: {sorted(covered)}"
         )
+
+    def test_the_mislabelled_selection_covers_exactly_the_sanctioned_scenario(self) -> None:
+        """Anti-vacuity, and a ceiling: exactly one scenario may be in it.
+
+        Empty means the third routing is being applied to nothing and
+        `CONTRADICTED_HINT_TOOLS` is decoration. More than one means the lab's
+        ONE sanctioned incoherent row has been reproduced somewhere else, which
+        is the thing plat #199's three guardrails exist to prevent and is worth
+        a failing test on this side too.
+        """
+        assert self._mislabelled_subject_scenarios() == {
+            "dlq_mislabeled_replay_safe": "replay_safe"
+        }
+
+    def test_that_scenario_would_collide_under_the_ordinary_routing(self) -> None:
+        """RED-BEFORE. The exemption is load-bearing, not cosmetic.
+
+        Without the third selection this scenario expects a tool `replay_safe`
+        does not route to AND forbids both tools it does — which is what the
+        two assertions below exist to catch, and what they must NOT catch here.
+        """
+        scenario = next(
+            s for s in load_scenarios(_SCENARIO_DIR) if s.name == "dlq_mislabeled_replay_safe"
+        )
+        ordinary = HINT_ROUTED_TOOLS["replay_safe"]
+        assert ordinary & set(scenario.expectation.forbidden_action_tools) == ordinary
+        assert set(scenario.expectation.expected_action_tools) - ordinary == {"mark_dlq_permanent"}
+        assert set(scenario.expectation.expected_action_tools) <= CONTRADICTED_HINT_TOOLS
+
+    def test_the_selection_is_derived_from_the_premise_not_declared(self) -> None:
+        """Drop the error-text pin and the exemption goes with it.
+
+        The property that stops this from being an opt-out: a scenario is in the
+        third selection only while its own precondition still proves the
+        contradiction. Nothing in the YAML says "exempt me".
+        """
+        scenario = next(
+            s for s in load_scenarios(_SCENARIO_DIR) if s.name == "dlq_mislabeled_replay_safe"
+        )
+        pinned = [
+            field
+            for probe in scenario.expected_precondition
+            for field in probe.expect
+            if field.where is not None and field.path.endswith("error_message")
+        ]
+        assert pinned, (
+            "dlq_mislabeled_replay_safe no longer pins its row's error text by id, so "
+            "nothing derives that its hint is contradicted — the routing exemption it "
+            "rests on would silently become an unchecked claim"
+        )
+        assert error_families(str(pinned[0].equals)) & {"bad_data"}
+
+    def test_a_coherent_row_is_never_in_the_mislabelled_selection(self) -> None:
+        """The siblings pin a hint and an error text too, and agree with them.
+
+        `dlq_poison_unclassified` pins a null hint (which sanctions every
+        family) and `dlq_human_required_escalates` pins `human_required` with a
+        bad-data text. Both are coherent, so neither can reach the exemption.
+        """
+        selected = self._mislabelled_subject_scenarios()
+        for name in ("dlq_poison_unclassified", "dlq_human_required_escalates"):
+            assert name not in selected
+
+    def test_contradicted_routing_is_a_tier_1_action_named_in_the_prompt(self) -> None:
+        """Same two floors every other routing in this module carries."""
+        prompt = load_prompt("remediation_planner")
+        assert CONTRADICTED_HINT_TOOLS, "a routing with no action does not belong here"
+        for tool in sorted(CONTRADICTED_HINT_TOOLS):
+            assert tool in TOOL_REGISTRY
+            assert tier_of(tool) is Tier.TIER_1
+            assert tool in prompt
+
+    def test_both_prompts_carry_the_error_wins_rule(self) -> None:
+        """The map is the source; the prompt is the only thing that obeys it.
+
+        `HINT_ROUTED_TOOLS`'s own comment says so, and the failure mode it
+        guards against is PR #173's: a mapping changed and the prose that steers
+        the agent stayed where it was, with the offline suite green because a
+        canned trajectory hardcodes the answer.
+        """
+        for name in ("remediation_planner", "investigation_planner"):
+            prompt = load_prompt(name)
+            assert "the error wins" in prompt, f"{name} does not carry the WO-R2-167 rule"
+            assert "mark_dlq_permanent" in prompt
 
     def test_every_alerted_hint_is_a_routing_this_map_knows(self) -> None:
         """A scenario may not rest on a category the routing has no entry for.

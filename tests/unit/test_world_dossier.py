@@ -37,7 +37,7 @@ import pytest
 
 from evals import artifacts, dossier
 from evals.scenarios.loader import load_scenarios
-from evals.scenarios.schema import Scenario
+from evals.scenarios.schema import Scenario, chaos_tool_names
 from incident_commander.tools.mcp_client import MCPError, ToolResult
 from incident_commander.tools.policies import RESOURCE_ARG_FIELDS, Tier, tier_of
 from incident_commander.tools.registry import TOOL_REGISTRY
@@ -349,6 +349,133 @@ class TestCoherenceLint:
             )
         )
         assert sorted(str(row["id"]) for row in found) == ["a", "b"]
+
+
+class TestTheSanctionedIncoherentFixture:
+    """The lab's ONE deliberately mislabelled row reads as the premise, not red.
+
+    `dlq_mislabeled_replay_safe` (WO-R2-167) seeds a row whose hint says
+    `replay_safe` and whose error is a permanent CSV data fault. The lint is
+    right to see a contradiction — that IS the fixture — and the rem-4 sentence
+    it would otherwise print ("decide which one is wrong BEFORE spending") is
+    actively wrong advice on a row whose whole product is the contradiction.
+
+    What must NOT happen is the row going quiet: a dossier that showed it as
+    coherent would be the same species of untrue-but-green the file exists to
+    prevent. So the row keeps a finding and keeps its own verdict word.
+    """
+
+    _MISLABELLED = "be64a675-212b-5379-8349-816d17a8107a"
+    _CSV_ERROR = "ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382"
+
+    def _readings(self) -> list[dossier.Reading]:
+        client = FakeClient(
+            {
+                "list_dlq_messages": {
+                    "total": 2,
+                    "items": [
+                        {
+                            "id": self._MISLABELLED,
+                            "remediation_hint": "replay_safe",
+                            "error_message": self._CSV_ERROR,
+                        },
+                        {
+                            "id": "fc8d2a03-23b3-5371-9acb-46443c73baa5",
+                            "remediation_hint": "replay_safe",
+                            "error_message": "UpstreamTimeout: partner-api timed out after 30s",
+                        },
+                    ],
+                }
+            }
+        )
+        return [dossier.read(client, dossier._probe("list_dlq_messages", {}, "test"))]
+
+    def test_without_the_exemption_it_is_the_rem_4_finding(self) -> None:
+        """Red-before: this is what every other incoherent row still gets."""
+        findings, rows = dossier.lint_dlq_coherence(self._readings())
+        assert [f.kind for f in findings] == [dossier.INCOHERENT_KIND]
+        assert "efdc3b2a9864" in findings[0].detail
+        assert {row[3] for row in rows} == {"FLAG", "coherent"}
+
+    def test_with_the_exemption_it_is_named_as_the_fixture(self) -> None:
+        findings, rows = dossier.lint_dlq_coherence(self._readings(), {self._MISLABELLED})
+        assert [f.kind for f in findings] == [dossier.SANCTIONED_KIND]
+        assert "WO-R2-167" in findings[0].kind
+        assert "the fixture, not a defect" in findings[0].detail
+        assert "DISBELIEVING the hint" in findings[0].detail
+        verdicts = {row[0]: row[3] for row in rows}
+        assert verdicts[self._MISLABELLED] == "sanctioned incoherent (WO-R2-167)"
+
+    def test_the_row_is_still_reported_rather_than_silenced(self) -> None:
+        """The important half. Silence would read as "this row is fine"."""
+        findings, rows = dossier.lint_dlq_coherence(self._readings(), {self._MISLABELLED})
+        assert findings, "the sanctioned row produced no finding at all"
+        assert all(row[3] != "coherent" or row[0] != self._MISLABELLED for row in rows)
+        # And the pair itself is still printed, so a reader can check it is the
+        # contradiction they expected rather than a different one.
+        assert any(row[0] == self._MISLABELLED and "bad_data" in row[2] for row in rows)
+
+    def test_the_exemption_does_not_reach_the_row_beside_it(self) -> None:
+        """Naming one row exempts one row. The neighbour is linted normally."""
+        client = FakeClient(
+            {
+                "list_dlq_messages": {
+                    "total": 2,
+                    "items": [
+                        {
+                            "id": self._MISLABELLED,
+                            "remediation_hint": "replay_safe",
+                            "error_message": self._CSV_ERROR,
+                        },
+                        {
+                            "id": "someone-else",
+                            "remediation_hint": "replay_safe",
+                            "error_message": self._CSV_ERROR,
+                        },
+                    ],
+                }
+            }
+        )
+        readings = [dossier.read(client, dossier._probe("list_dlq_messages", {}, "test"))]
+        findings, rows = dossier.lint_dlq_coherence(readings, {self._MISLABELLED})
+        kinds = {f.subject.split("`")[1]: f.kind for f in findings}
+        assert kinds[self._MISLABELLED] == dossier.SANCTIONED_KIND
+        assert kinds["someone-else"] == dossier.INCOHERENT_KIND
+        verdicts = {row[0]: row[3] for row in rows}
+        assert verdicts["someone-else"] == "FLAG"
+
+    def test_a_coherent_row_named_as_sanctioned_is_unaffected(self) -> None:
+        """The exemption rewrites an existing finding; it never invents one.
+
+        So a sanctioned id whose row turned out coherent — the hook writing
+        something else — reads coherent, which is itself a signal worth seeing.
+        """
+        client = FakeClient(
+            {
+                "list_dlq_messages": {
+                    "total": 1,
+                    "items": [
+                        {
+                            "id": self._MISLABELLED,
+                            "remediation_hint": "human_required",
+                            "error_message": self._CSV_ERROR,
+                        }
+                    ],
+                }
+            }
+        )
+        readings = [dossier.read(client, dossier._probe("list_dlq_messages", {}, "test"))]
+        findings, rows = dossier.lint_dlq_coherence(readings, {self._MISLABELLED})
+        assert findings == []
+        assert rows[0][3] == "coherent"
+
+    def test_the_sanctioned_hook_set_is_the_platforms_one_exception(self) -> None:
+        """Keyed on the hook, so no scenario can declare itself exempt."""
+        hooks = dossier.SANCTIONED_INCOHERENT_HOOKS
+        assert hooks == frozenset({"create_mislabeled_dlq_job"})
+        # And it is a hook the platform actually registers, so the exemption
+        # cannot outlive the tool that earns it.
+        assert not hooks - chaos_tool_names()
 
 
 class TestSelectionGuard:

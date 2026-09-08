@@ -207,6 +207,42 @@ HINT_ROUTED_TOOLS: Final[dict[str, frozenset[str]]] = {
     "unclassified": frozenset({"mark_dlq_permanent"}),
 }
 
+# WHEN THE LABEL AND THE EVIDENCE DISAGREE, THE ROUTING ABOVE DOES NOT APPLY.
+#
+# Every entry in `HINT_ROUTED_TOOLS` reads the `remediation_hint` column as the
+# decision. That is right while the column is true, and the column is a
+# CLASSIFICATION — something wrote it, and triage, an operator or a backfill can
+# each write the wrong one. Nothing downstream re-derives it from the error
+# text, so a mislabelled row keeps its label until a person notices.
+#
+# The user's ruling (WO-R2-167, 2026-09-08): when a row's `remediation_hint` and
+# its `error_message` disagree, **the error wins**, the row is not replayed, and
+# the disagreement is reported in the briefing. So the row is routed as what it
+# IS rather than as what it says it is, and for a permanent fault under any hint
+# that is one tool — the fence — for exactly the reasons the `human_required`
+# and `unclassified` entries above give: it stops the next bulk sweep re-running
+# a payload that cannot succeed, and it repairs nothing, so the run escalates.
+#
+# Why this is a separate constant and not a fifth `HINT_ROUTED_TOOLS` entry: the
+# contradiction is not a hint value. It is a property of a ROW — a pair of two
+# fields — and a per-slice map cannot hold a per-row condition without saying
+# something false about every other row in the slice. Adding `mark_dlq_permanent`
+# to `replay_safe`'s routed set would say "a replay_safe row may be fenced",
+# which is the opposite of what `dlq_replay_safe_success` grades.
+#
+# NOT READ AT RUNTIME, and that is a decision rather than an omission — see
+# ADR 0034. A plan-time refusal keyed on the error text would derive a control
+# from tool output, which CLAUDE.md invariant 4 forbids, and it would fail open
+# silently on any wording outside its vocabulary. The enforcement is the prompt
+# rule this constant is the source of, plus exact grading in
+# `dlq_mislabeled_replay_safe`, plus the free `make world-dossier` lint that
+# reads the pair before any spend. Checked by
+# `tests/unit/test_policies.py::TestHintRoutedToolsMatchTheSuite`, which derives
+# "this scenario's subject row is mislabelled" from the scenario's own pinned
+# hint and error text rather than from anything a scenario declares about
+# itself.
+CONTRADICTED_HINT_TOOLS: Final[frozenset[str]] = frozenset({"mark_dlq_permanent"})
+
 
 class SubjectMatch(StrEnum):
     """How a probe is judged to have read the subject.

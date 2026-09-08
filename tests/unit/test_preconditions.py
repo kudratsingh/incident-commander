@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from evals.graders.deterministic import RowSelector, where_path_errors
 from evals.preconditions import resolve, unmet
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import PreconditionField, PreconditionProbe, Scenario
@@ -123,6 +124,94 @@ class TestUnmet:
             )
         )
         assert len(unmet(probe, _DLQ_PAYLOAD)) == 2
+
+
+class TestARowSelectorOnAPrecondition:
+    """`where` narrows a premise to ONE row (v0.6.3 re-pin, WO-R2-168).
+
+    The any-row reading every precondition field has is cross-satisfiable, and
+    in the world `remediate_dlq_backlog_success` runs in it was satisfied by
+    the wrong rows: "the chaos row is present" and "some row is unclassified"
+    are both true of a queue where the chaos row landed CLASSIFIED and a
+    different row happens to carry no hint. That is the same fake-green
+    `RowSelector` was minted for on the grader side, one moment earlier.
+    """
+
+    def test_the_pair_of_any_row_claims_is_cross_satisfiable(self) -> None:
+        """Red-before: the weaker premise passes on a world it should refuse.
+
+        Row `a` is the one the scenario is about and it is classified; row `c`
+        is unclassified and is someone else's. Both any-row claims hold.
+        """
+        probe = _probe(
+            expect=(
+                PreconditionField(path="items[].id", equals="a"),
+                PreconditionField(path="items[].remediation_hint", is_null=True),
+            )
+        )
+        assert unmet(probe, _DLQ_PAYLOAD) == []
+
+    def test_the_selector_refuses_that_same_world(self) -> None:
+        probe = _probe(
+            expect=(
+                PreconditionField(
+                    path="items[].remediation_hint",
+                    where=RowSelector(field="id", equals="a"),
+                    is_null=True,
+                ),
+            )
+        )
+        failures = unmet(probe, _DLQ_PAYLOAD)
+        assert len(failures) == 1
+        assert "'id' equals 'a'" in failures[0]
+        assert "'replay_safe'" in failures[0]
+
+    def test_the_selector_is_met_on_the_row_that_carries_it(self) -> None:
+        probe = _probe(
+            expect=(
+                PreconditionField(
+                    path="items[].remediation_hint",
+                    where=RowSelector(field="id", equals="c"),
+                    is_null=True,
+                ),
+            )
+        )
+        assert unmet(probe, _DLQ_PAYLOAD) == []
+
+    def test_a_selector_matching_no_row_fails_closed_and_names_the_row(self) -> None:
+        """The diagnosis that matters: the hook did not fire, vs it wrote junk."""
+        probe = _probe(
+            expect=(
+                PreconditionField(
+                    path="items[].remediation_hint",
+                    where=RowSelector(field="id", equals="absent-row"),
+                    is_null=True,
+                ),
+            )
+        )
+        failures = unmet(probe, _DLQ_PAYLOAD)
+        assert len(failures) == 1
+        assert "nothing at 'items[].remediation_hint'" in failures[0]
+        assert "'id' equals 'absent-row'" in failures[0]
+
+    def test_a_scalar_path_cannot_carry_a_selector(self) -> None:
+        with pytest.raises(ValidationError, match="no '\\[\\]' segment"):
+            PreconditionField(path="total", where=RowSelector(field="id", equals="a"), equals=4)
+
+    def test_a_path_resolving_to_the_rows_themselves_cannot_carry_one(self) -> None:
+        with pytest.raises(ValidationError, match="resolves to the rows themselves"):
+            PreconditionField(path="items[]", where=RowSelector(field="id", equals="a"), equals="a")
+
+    def test_the_rule_is_the_graders_own(self) -> None:
+        """One statement of "what a selector attaches to", not two copies.
+
+        A second implementation is exactly how the two sides would come to
+        disagree about a path shape, and the disagreement would show up as a
+        scenario that loads and then grades nothing.
+        """
+        assert where_path_errors("total", RowSelector(field="id", equals="a")) is not None
+        assert where_path_errors("items[].hint", RowSelector(field="id", equals="a")) is None
+        assert where_path_errors("items[].hint", None) is None
 
 
 class TestProbeSchema:

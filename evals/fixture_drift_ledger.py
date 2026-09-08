@@ -330,6 +330,69 @@ _JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
         "create_bad_data_job has fired, so no un-faulted reading of the DLQ "
         "contains it — the same absence already recorded for the two chain roots",
     ),
+    # `poison_message` joins the family at the v0.6.3 re-pin, through TWO
+    # scenarios, and the pair is worth reading together because the same row
+    # produces the entries for opposite reasons.
+    #
+    # The mechanism is the one the two saga blocks and the bad-data block above
+    # already record: a scenario seeds a fault, the drift walk probes the
+    # un-faulted world, and the row the fault creates is in one and not the
+    # other. What is new is that the row can now be NAMED. Through v0.6.2
+    # `poison_message` minted a random id per call, so an `items[].id[]` entry
+    # was impossible and the recordings could not include the row at all —
+    # `remediate_dlq_backlog_success` counted a fifth row in `total` and listed
+    # four, and its comment said so. v0.6.3 derives the id
+    # (`uuid5(eeeeeeee-dead-4000-8000-000000000000, "{tenant_id}:poison-message")`),
+    # so both fixtures now record the row itself and both report its absence
+    # from the un-faulted queue.
+    #
+    # POST_FAULT, not a defect, and specifically NOT to be "fixed" by trimming
+    # the recordings back to four rows: the poisoned row IS the incident in one
+    # scenario and the row the other one must not touch, and a four-row
+    # recording would describe a world in which neither premise is true.
+    #
+    # `Drift.key` carries no sequence index, so one key covers every element of
+    # a sequenced fixture — three elements in `remediate_dlq_backlog_success`,
+    # two in `dlq_poison_unclassified`.
+    #
+    # What is NOT here: `remediate_dlq_backlog_success`'s `total`, which is
+    # already recorded above and stayed recorded through the re-derivation (the
+    # faulted queue still holds five rows where the un-faulted world holds
+    # four); and any entry for the poisoned row's `remediation_hint`, because
+    # `walk_leaves` strips `None` from both sides before comparing — a canned
+    # null against a live domain that never contains the row reports nothing.
+    # Whether the hint LANDED null is a scenario claim (the precondition), not
+    # a ratchet claim.
+    (
+        "remediate_dlq_backlog_success",
+        "list_dlq_messages",
+        "items[].id[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "the poisoned row's id is uuid5(eeeeeeee-dead-4000-8000-000000000000, "
+        "'{tenant_id}:poison-message') and exists only after poison_message has "
+        "fired, so no un-faulted reading of the DLQ contains it — the row this "
+        "scenario forbids replaying is one the drift walk can never see",
+    ),
+    ("dlq_poison_unclassified", "list_dlq_messages", "total", "value"): (
+        POST_FAULT,
+        "poison_message injects the unclassified row this scenario exists to fence, "
+        "so the faulted world holds five DLQ rows where the un-faulted world the "
+        "check probes holds the four boot-seeded ones",
+    ),
+    (
+        "dlq_poison_unclassified",
+        "list_dlq_messages",
+        "items[].id[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "the poisoned row's id is uuid5(eeeeeeee-dead-4000-8000-000000000000, "
+        "'{tenant_id}:poison-message') and exists only after poison_message has "
+        "fired — the same absence already recorded for the two chain roots and the "
+        "bad-data row",
+    ),
     # alert_storm went the other way at wave-10: it is `use_live_mcp: false`
     # now, because the pinned platform cannot burst alerts. Alerts have three
     # producers (the bad_deploy chaos hook, the SLO fast-burn loop, the boot

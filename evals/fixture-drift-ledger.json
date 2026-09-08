@@ -8,9 +8,9 @@
     "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything"
   },
   "_counts": {
-    "recorded": 38,
+    "recorded": 41,
     "fixture-defect": 0,
-    "explained": 38
+    "explained": 41
   },
   "known_drift": [
     {
@@ -94,12 +94,36 @@
       "why": "create_bad_data_job injects the unclassified bad-data row this scenario exists to fence, so the faulted world holds five DLQ rows where the un-faulted world the check probes holds the four boot-seeded ones"
     },
     {
+      "scenario": "dlq_poison_unclassified",
+      "tool": "list_dlq_messages",
+      "path": "items[].id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the poisoned row's id is uuid5(eeeeeeee-dead-4000-8000-000000000000, '{tenant_id}:poison-message') and exists only after poison_message has fired \u2014 the same absence already recorded for the two chain roots and the bad-data row"
+    },
+    {
+      "scenario": "dlq_poison_unclassified",
+      "tool": "list_dlq_messages",
+      "path": "total",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "poison_message injects the unclassified row this scenario exists to fence, so the faulted world holds five DLQ rows where the un-faulted world the check probes holds the four boot-seeded ones"
+    },
+    {
       "scenario": "remediate_consumer_lag_success",
       "tool": "get_consumer_lag",
       "path": "lag",
       "kind": "value",
       "context": "post-fault",
       "why": "same fault, same reason"
+    },
+    {
+      "scenario": "remediate_dlq_backlog_success",
+      "tool": "list_dlq_messages",
+      "path": "items[].id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the poisoned row's id is uuid5(eeeeeeee-dead-4000-8000-000000000000, '{tenant_id}:poison-message') and exists only after poison_message has fired, so no un-faulted reading of the DLQ contains it \u2014 the row this scenario forbids replaying is one the drift walk can never see"
     },
     {
       "scenario": "remediate_dlq_backlog_success",

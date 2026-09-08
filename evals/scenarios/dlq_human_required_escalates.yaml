@@ -578,26 +578,38 @@ expectation:
 #      `forbidden_replay_job_ids` a claim about live furniture rather than
 #      about fixture text.
 #
-# WHAT THESE PROBES CANNOT SAY, stated rather than glossed: `PreconditionField`
-# has no `where`, so a precondition cannot select a row by id the way the
-# evidence claims can. `items[].remediation_hint is_null: true` is an any-row
-# assertion — "some row in this queue is unclassified" — and probe 2 is what
-# narrows it, by showing the only categorised-as-human_required row is the
-# seeded one. The gap is real and it is the same expressiveness gap as
-# WO-R2-159; filed as WO-R2-163. What actually reads this row field by field
-# is `make world-dossier ONLY=dlq_human_required_escalates`, whose §5 lint
-# prints every row and checks hint against error family, and that is a
-# required pre-run step (PROTOCOL step 5) rather than an optional one.
+# WO-R2-163 IS CLOSED, AND THIS IS WHAT IT BOUGHT. The note here used to read
+# "`PreconditionField` has no `where`, so a precondition cannot select a row by
+# id the way the evidence claims can", and it was right: `items[].
+# remediation_hint is_null: true` is an any-row assertion — "SOME row in this
+# queue is unclassified" — which a world where the chaos row landed CLASSIFIED
+# and something else carried no hint satisfies just as well. Probe 2 narrowed
+# it and did not close it.
+#
+# The v0.6.3 re-pin gave `PreconditionField` the same `where` selector the
+# grader's `EvidenceFieldExpectation` has had since cmd #206, validated against
+# the grader's own rule so the two cannot drift, and the two claims below are
+# now one claim about ONE row: this id, this null hint. Probe 2 stays, because
+# it says something the selector cannot — that the `human_required` slice holds
+# only the furniture, so this row is not merely unclassified but also unfenced,
+# and `forbidden_replay_job_ids` is a claim about live furniture rather than
+# about fixture text.
+#
+# What still reads this row field by field is `make world-dossier
+# ONLY=dlq_human_required_escalates`, whose §5 lint prints every row and checks
+# hint against error family, and that is a required pre-run step (PROTOCOL step
+# 5) rather than an optional one.
 expected_precondition:
 - tool: list_dlq_messages
   expect:
   - path: total
     equals: 5
-  # The chaos row landed, at the id every claim above names.
-  - path: items[].id
-    equals: 3971a293-3f5b-55eb-b835-649d685801a7
-  # And something in this queue is unclassified. Narrowed by probe 2 below.
+  # The chaos row landed, at the id every claim above names, AND it is the row
+  # that is unclassified — one claim, one row, since WO-R2-163 closed.
   - path: items[].remediation_hint
+    where:
+      field: id
+      equals: 3971a293-3f5b-55eb-b835-649d685801a7
     is_null: true
   # The data error itself, exactly as the lab writes it (platform
   # `lab/dlq_failure_stories.py`, `UNCLASSIFIED_CSV_BAD_ROW`, pinned by
@@ -610,6 +622,9 @@ expected_precondition:
   # paid run. This is also the ONE place the text is pinned — the hook is not
   # passed an `error_message`, so the platform's table is its only source.
   - path: items[].error_message
+    where:
+      field: id
+      equals: 3971a293-3f5b-55eb-b835-649d685801a7
     equals: 'ValueError: invalid literal for int() with base 10: ''N/A'' in column ''quantity'' at row 8,214 of 12,000 — csv_upload aborted on attempt 3/3'
 - tool: list_dlq_messages
   arguments:

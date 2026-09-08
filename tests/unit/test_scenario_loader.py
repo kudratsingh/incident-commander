@@ -676,11 +676,17 @@ class TestBadDataFixtureIdIsPinnedCorrectly:
             "evidence where-selectors": {
                 str(e.where.equals) for e in expectation.expected_evidence_fields if e.where
             },
-            "precondition": {
-                str(field.equals)
+            # Since WO-R2-163 the premise names this row through a `where`
+            # SELECTOR rather than an any-row `items[].id equals` — one claim
+            # about one row instead of two claims a different pair of rows can
+            # satisfy — so this is where the precondition's copy of the id
+            # lives now, and it is read from every selector on the unfiltered
+            # probe rather than from one field.
+            "precondition selectors": {
+                str(field.where.equals)
                 for probe in scenario.expected_precondition
                 for field in probe.expect
-                if field.path == "items[].id" and not probe.arguments
+                if field.where is not None and not probe.arguments
             },
         }
         for site, values in pinned.items():
@@ -734,3 +740,144 @@ class TestBadDataFixtureIdIsPinnedCorrectly:
             ("total", 1),
             ("items[].id", seeded),
         }
+
+
+class TestPoisonFixtureIdIsPinnedCorrectly:
+    """Two scenarios hard-code the id `poison_message` derives, from opposite sides.
+
+    Third instance of the rule ``TestStuckDagChainIdsArePinnedCorrectly`` and
+    ``TestBadDataFixtureIdIsPinnedCorrectly`` already carry, on the hook
+    platform v0.6.3 made honest. Until v0.6.3 `poison_message` minted a RANDOM
+    id per call, so no scenario could name its row at all — which is precisely
+    how `remediate_dlq_backlog_success` came to bound the poisoned row with a
+    count instead of a denylist, and how it passed live twice while replaying
+    it (WO-R2-166). The id being derivable is what lets the row be forbidden by
+    name there and required by name here.
+
+    Both directions are checked because both are load-bearing and they fail
+    differently:
+
+    * `dlq_poison_unclassified` FENCES this row, so every claim about it — the
+      action pin, the `where` selectors, the briefing, the premise — has to
+      name the same id, and a drifted one would surface as an unmet
+      precondition in the middle of a paid run.
+    * `remediate_dlq_backlog_success` must NOT touch it, so the id has to be in
+      its forbidden list and out of its action. A typo there fails open: the
+      denylist would simply never match, and the scenario would go back to
+      grading exactly what it graded before the re-derivation.
+    """
+
+    # backend/app/mcp/tools/chaos/poison_message.py::_NAMESPACE (plat #199)
+    _NAMESPACE = uuid.UUID("eeeeeeee-dead-4000-8000-000000000000")
+    # backend/app/models/tenant.py::DEFAULT_TENANT_ID, seeded by migration
+    # f8a1c4e23507_multi_tenancy. Read back off the running v0.6.3 demo stack
+    # at the re-pin, and the hook was then fired and its `dlq_job_id` compared
+    # against this derivation, rather than trusting either alone.
+    _DEFAULT_TENANT = "d3fa17de-7a17-de7a-17de-7a17de7a17de"
+    # The hook's own default. Neither scenario passes `fixture_name`, so this
+    # is the value the derivation actually uses — asserted below rather than
+    # assumed, because a scenario that started passing one would silently move
+    # every id in this class.
+    _FIXTURE_NAME = "poison-message"
+    _SUBJECT = "dlq_poison_unclassified"
+    _BYSTANDER = "remediate_dlq_backlog_success"
+
+    def _expected_id(self) -> str:
+        return str(uuid.uuid5(self._NAMESPACE, f"{self._DEFAULT_TENANT}:{self._FIXTURE_NAME}"))
+
+    def _scenario(self, name: str) -> Scenario:
+        return {s.name: s for s in _shipped_scenarios()}[name]
+
+    def test_both_scenarios_fire_the_hook_with_its_honest_default(self) -> None:
+        """No `remediation_hint` argument, in either — and that is the fixture.
+
+        v0.6.3's default is `unclassified`, which is how a freshly poisoned
+        message really arrives (LLM triage is off here). Asking for
+        `human_required` would hand the agent the classification both scenarios
+        exist to make it derive; `replay_safe` is refused by the input model on
+        either spelling, which is the whole of WO-R2-166.
+        """
+        for name in (self._SUBJECT, self._BYSTANDER):
+            scenario = self._scenario(name)
+            assert scenario.chaos_setup is not None, name
+            assert scenario.chaos_setup.name == "poison_message", name
+            assert "remediation_hint" not in scenario.chaos_setup.arguments, name
+            assert "fixture_name" not in scenario.chaos_setup.arguments, name
+            assert scenario.chaos_setup.arguments["payload"] == {}, name
+
+    def test_every_pinned_id_in_the_subject_scenario_is_the_hook_derivation(self) -> None:
+        scenario = self._scenario(self._SUBJECT)
+        expected = self._expected_id()
+        expectation = scenario.expectation
+
+        pinned: dict[str, set[str]] = {
+            "expected_action_arguments": {
+                str(a.equals) for a in expectation.expected_action_arguments
+            },
+            "evidence where-selectors": {
+                str(e.where.equals) for e in expectation.expected_evidence_fields if e.where
+            },
+            "precondition selectors": {
+                str(field.where.equals)
+                for probe in scenario.expected_precondition
+                for field in probe.expect
+                if field.where is not None and not probe.arguments
+            },
+        }
+        for site, values in pinned.items():
+            assert values == {expected}, (
+                f"{self._SUBJECT}: {site} pins {sorted(values)}, but "
+                f"poison_message(fixture_name={self._FIXTURE_NAME!r}) produces {expected}"
+            )
+
+        assert expected in expectation.expect_briefing_contains, (
+            f"{self._SUBJECT}: the briefing claim does not name the fenced row"
+        )
+        assert expected in expectation.forbidden_replay_job_ids, (
+            f"{self._SUBJECT}: the poisoned row must be forbidden as a replay target — "
+            "it is the one row a replay is guaranteed to re-fail on"
+        )
+
+    def test_the_bystander_scenario_forbids_it_and_never_names_it_as_a_target(self) -> None:
+        """The WO-R2-166 pin: the row it used to replay is now on the denylist.
+
+        And nothing else about the row is asserted positively there — no action
+        argument names it, no category can reach it — so the only way this
+        scenario passes is by leaving it alone.
+        """
+        scenario = self._scenario(self._BYSTANDER)
+        expected = self._expected_id()
+        expectation = scenario.expectation
+        assert expected in expectation.forbidden_replay_job_ids, (
+            f"{self._BYSTANDER}: the poisoned row is not forbidden — this is the "
+            "claim WO-R2-166 exists for"
+        )
+        assert all(a.equals != expected for a in expectation.expected_action_arguments)
+        # And its premise reads the row by that id: unclassified, with a text.
+        selectors = {
+            str(field.where.equals)
+            for probe in scenario.expected_precondition
+            for field in probe.expect
+            if field.where is not None
+        }
+        assert selectors == {expected}, (
+            f"{self._BYSTANDER}: the premise selects {sorted(selectors)}; it has to "
+            f"prove the fault landed AND landed unclassified at {expected}"
+        )
+        # The briefing names it, because "act on the alerted slice, report the
+        # rest" (ADR 0031) is only half-graded without the second half.
+        assert expected in expectation.expect_briefing_contains
+
+    def test_the_two_hooks_derive_different_rows(self) -> None:
+        """Separate uuid5 namespaces, so a shared fixture_name is two rows.
+
+        Not decoration: `create_bad_data_job` and `poison_message` both default
+        to per-tenant keys, and a shared namespace would make the same name a
+        primary-key collision between two hooks rather than two independent
+        fixtures (plat #199's id-scheme table).
+        """
+        bad_data_ns = uuid.UUID("dddddddd-bad0-4000-8000-000000000000")
+        same_name = "collide"
+        assert uuid.uuid5(bad_data_ns, f"{self._DEFAULT_TENANT}:{same_name}") != uuid.uuid5(
+            self._NAMESPACE, f"{self._DEFAULT_TENANT}:{same_name}"
+        )

@@ -18,7 +18,12 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from evals.graders.deterministic import FieldComparator, ScenarioExpectation
+from evals.graders.deterministic import (
+    FieldComparator,
+    RowSelector,
+    ScenarioExpectation,
+    where_path_errors,
+)
 from incident_commander.api.schemas import AlertPayload
 from incident_commander.tools.mcp_client import ToolResult
 from incident_commander.tools.policies import Tier, tier_of
@@ -238,9 +243,37 @@ class PreconditionField(FieldComparator):
     ``[]`` — ``total``, or ``items[].remediation_hint``. An assertion holds
     when ANY observed value satisfies it, which is the only useful reading
     for a fixture pack whose row order is not guaranteed.
+
+    ``where`` narrows those values to ONE row first, exactly as it does on
+    ``EvidenceFieldExpectation``, and it is here because the any-row reading
+    above is cross-satisfiable in the world these preconditions describe. A
+    five-row dead-letter queue asserted as ``items[].id equals <chaos row>``
+    plus ``items[].remediation_hint is_null true`` is satisfied by two
+    DIFFERENT rows — the chaos row being present, and some other row being
+    unclassified — so a premise that reads like "the injected fault landed
+    unclassified" was in fact two weaker premises side by side. With a
+    selector it is one claim about one row:
+
+    ``path: items[].remediation_hint``, ``where: {field: id, equals: <row>}``,
+    ``is_null: true``.
+
+    A selector matching no row fails the assertion closed, and the failure
+    text says the row was never seen rather than that its field was wrong —
+    the same two-diagnoses split the grader side makes, and the one that
+    matters most here, because "the chaos hook did not fire" and "it fired
+    and wrote the wrong thing" send a reader to different places.
     """
 
     path: str = Field(min_length=1)
+    where: RowSelector | None = None
+
+    @model_validator(mode="after")
+    def _where_needs_rows_to_select_from(self) -> PreconditionField:
+        """Validated against the grader's own rule, never a second copy."""
+        error = where_path_errors(self.path, self.where)
+        if error is not None:
+            raise ValueError(error)
+        return self
 
 
 class PreconditionProbe(BaseModel):

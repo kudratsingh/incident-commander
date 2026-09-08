@@ -87,6 +87,26 @@ key — what changed is that a NEW key now always writes, where a mark on an
 already-`human_required` row used to be a no-op (plat #198, WO-R2-158). No
 assertion below depends on that no-op.
 
+**Updated 2026-09-08 (v0.6.3 re-pin).** The pin is now
+``ghcr.io/kudratsingh/incident-platform:v0.6.3@sha256:683949544d9a…``. This
+release moves the TOOL COUNT for the first time since v0.5.0 — 29 → 30, adding
+`create_mislabeled_dlq_job` — and moves `poison_message`'s input and output
+schemas (`fixture_name`, `remediation_hint`, `created`). Every `required_scope`
+and every `is_idempotent` is unchanged, no pre-existing tool lost a field, and
+— the part that matters to THIS file — the release adds two refusal codes,
+``poison_fixture_name_in_use`` and ``mislabeled_fixture_name_in_use`` (both 409,
+raised when a `fixture_name` names a row that has drifted). Both are chaos-tool
+refusals and nothing here asserts them; every error code and envelope asserted
+below is untouched. They ARE ledgered on the commander side, in
+``evals/chaos_hooks.py``, so a fixture-name collision during seeding reads as
+"reset the world" rather than as transport flakiness (WO-R2-16).
+
+One behaviour change is worth naming even though no assertion depends on it:
+`poison_message` is now idempotent on its ROW (a repeat under an unchanged row
+returns ``created: false`` and writes no second row) while PUBLISHING is not —
+every accepted call puts another poisoned message on the topic. The tool's own
+description says so. Nothing below sends that hook.
+
 These assertions are re-run against the pin by CI's ``contract`` job, which
 is where this test belongs: it MUTATES the world it reads
 (``kill_consumer``, repeated consumer-group restarts), so it was

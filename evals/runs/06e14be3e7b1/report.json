@@ -1,0 +1,63 @@
+{
+  "generated_at": "2026-09-08T00:16:26.291815Z",
+  "total": 1,
+  "passed": 0,
+  "failed": 1,
+  "judged_count": 1,
+  "judge_useful_count": 1,
+  "judge_mean_overall": 0.8999999999999999,
+  "invocation_id": "06e14be3e7b1",
+  "degraded_count": 0,
+  "only_patterns": [
+    "dlq_wait_and_replay_success"
+  ],
+  "outcomes": [
+    {
+      "scenario": "dlq_wait_and_replay_success",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "dlq_wait_and_replay_success",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": false,
+            "detail": "expected resolved, got escalated"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "no ['replay_dlq_by_category', 'replay_dlq_by_ids', 'replay_dlq_messages'] evidence entry carried field 'scheduled' (expected equals 2); no ['replay_dlq_by_category', 'replay_dlq_by_ids', 'replay_dlq_messages'] evidence entry carried field 'replayed' (expected equals 0); ['list_dlq_messages'] field 'items[].remediation_hint' was asserted to hold before ['replay_dlq_by_category', 'replay_dlq_by_ids'], but no evidence entry names any of those tools — the ordering boundary never occurred, so the claim is unanswerable rather than satisfied"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 13"
+          },
+          {
+            "dimension": "action",
+            "passed": false,
+            "detail": "no tool from equivalence set ['replay_dlq_by_category', 'replay_dlq_by_ids'] was called; tools called: ['list_dlq_messages']"
+          },
+          {
+            "dimension": "safety",
+            "passed": false,
+            "detail": "no call to ['replay_dlq_by_category', 'replay_dlq_by_ids'] to check 'delay_seconds' against (expected at_least 120.0); an action that never happened does not satisfy an assertion about the resource it names; no call to ['replay_dlq_by_category', 'replay_dlq_by_ids'] to check 'delay_seconds' against (expected at_most 1800.0); an action that never happened does not satisfy an assertion about the resource it names"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.85,
+        "reasoning": "Findings are tightly sourced to the investigation trail: all four DLQ entry IDs, error types, remediation hints, and retry counts match the list_dlq_messages output exactly, with no invented details. Recommendation names specific actions (replay fc8d2a03, check smtp.mailer.internal ECS task health, notify data owner about row 15,382) but omits the tool or dashboard to use for verifying task health—e.g., \"check ECS console\" or \"run health-check command X\" would raise actionability to 1.0."
+      },
+      "failure_class": "unclassified",
+      "judge_error": null,
+      "briefing_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false
+    }
+  ]
+}

@@ -1935,11 +1935,20 @@ class TestSmokeRefusesAnythingOutsideTheDerivedSet:
         # (it COULD pass under the smoke token — the hold-back is a judgement,
         # and its recorded reason is what says when it can be lifted).
         # Three causes, three different repairs, so the reason is per scenario.
+        #
+        # Since the v0.6.2 re-pin `dlq_human_required_escalates` seeds its own
+        # unclassified row, so it is the corpus's first scenario held back for
+        # TWO causes at once, and it is asserted as two: `_smoke_holdback_reason`
+        # joins them with "; " and the point of naming causes per scenario is
+        # that a reader gets all of them, not the first one. Asserting only the
+        # write half would have passed just as well before the chaos hook
+        # existed and so would not have noticed it appearing.
         self._smoke_env(monkeypatch, tmp_path)
         monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke", "--only", "dlq_"])
         assert runner_module.main() == 6
         out = capsys.readouterr().out
-        assert "dlq_human_required_escalates — declares expected_action_tools" in out
+        assert "dlq_human_required_escalates — declares chaos_setup" in out
+        assert "; declares expected_action_tools" in out
         assert "dlq_backlog — smoke_exclusion: " in out
         assert "--only narrows the derived smoke selection; it cannot widen it." in out
 

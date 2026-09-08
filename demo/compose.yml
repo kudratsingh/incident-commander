@@ -1,6 +1,6 @@
 # Live demo: full platform footprint sufficient for remediation eval.
 #
-# Pinned to the incident-platform v0.6.1 release by digest so the agent's
+# Pinned to the incident-platform v0.6.2 release by digest so the agent's
 # contract expectations don't shift under us. Every platform-code service
 # below uses the SAME pinned digest. Bump the digest whenever the platform
 # ships a new release and rerun `make eval-live` to catch drift.
@@ -132,7 +132,7 @@ services:
     # One-shot schema migration, mirroring the dev compose's migrate
     # service: with two app-code services (mcp + api) neither should
     # race `alembic upgrade head` at boot.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.1@sha256:411f8b4da7946ccbf49d5c651b51fa56ca27b992cd9dba0aae78cd97303488bc
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.2@sha256:fd24d6a0011edde8f13c1e1c621f65378e168736d1d7a4bc79e942252c3fae88
     platform: linux/amd64
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
@@ -144,14 +144,14 @@ services:
     restart: "no"
 
   platform:
-    # incident-platform v0.6.1 (INDEX digest published by the platform
+    # incident-platform v0.6.2 (INDEX digest published by the platform
     # release, confirmed with `docker buildx imagetools inspect` — the
     # top-level `Digest:`, not a per-platform child manifest).
     # Do not switch to `:latest` — the whole point of pinning by digest is
     # that a platform-side prompt or schema change can't shift agent
     # behavior without an explicit bump here.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.1@sha256:411f8b4da7946ccbf49d5c651b51fa56ca27b992cd9dba0aae78cd97303488bc
-    # v0.6.1 is an OCI index, but it still lists linux/amd64 ONLY (plus an
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.2@sha256:fd24d6a0011edde8f13c1e1c621f65378e168736d1d7a4bc79e942252c3fae88
+    # v0.6.2 is an OCI index, but it still lists linux/amd64 ONLY (plus an
     # attestation manifest) — being an index is not the same as being
     # multi-arch, and this one is not. On Apple Silicon this runs under
     # Rosetta (slower cold start, correct output) — REQUIRED there; without
@@ -256,7 +256,7 @@ services:
     # Env copied deliberately from the dev compose's `app` service
     # (drift between services is platform bug #69's class); minio/jaeger
     # endpoints omitted with the services (see header note).
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.1@sha256:411f8b4da7946ccbf49d5c651b51fa56ca27b992cd9dba0aae78cd97303488bc
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.2@sha256:fd24d6a0011edde8f13c1e1c621f65378e168736d1d7a4bc79e942252c3fae88
     platform: linux/amd64
     ports:
       - "${DEMO_API_HOST_PORT:-8000}:8000"

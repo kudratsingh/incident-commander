@@ -63,16 +63,35 @@ pinned** image serves: ``ghcr.io/kudratsingh/incident-platform:v0.6.0
 comments that still said v0.4.9 were corrected in the same PR that moved
 this pin; the digest remains the truth.)
 
-**Updated 2026-09-07 (v0.6.1 re-pin).** The pin is now
+**Updated 2026-09-07 (v0.6.1 re-pin).** The pin was
 ``ghcr.io/kudratsingh/incident-platform:v0.6.1@sha256:411f8b4d…``. That
 release moved six description strings and nothing else — the reblessed
 snapshot diff carries zero schema, scope, field or tool-count change — so
 every error code and envelope asserted below still describes the pinned
-image. These assertions are re-run against it by CI's ``contract`` job,
-which is where this test belongs: it MUTATES the world it reads
+image.
+
+**Updated 2026-09-08 (v0.6.2 re-pin).** The pin is now
+``ghcr.io/kudratsingh/incident-platform:v0.6.2@sha256:fd24d6a0…``. This one
+DID move schemas, so the reasoning above is restated rather than inherited:
+`create_bad_data_job` gained `fixture_name` + `remediation_hint` inputs and
+`fixture_name` + `created` outputs, `DlqEntry` gained `fenced_at` +
+`fenced_by`, and `mark_dlq_permanent`'s output gained a required
+`fenced_at`. Tool count, every `required_scope` and every `is_idempotent`
+are unchanged, and — the part that matters to THIS file — the release adds
+one refusal code, ``bad_data_fixture_name_in_use`` (409, raised by
+`create_bad_data_job` when a `fixture_name` names a row that has drifted).
+It is a chaos-tool refusal and nothing here asserts it; every error code and
+envelope asserted below is untouched. `mark_dlq_permanent` is still
+``is_idempotent=True`` and still returns the stored response for a repeated
+key — what changed is that a NEW key now always writes, where a mark on an
+already-`human_required` row used to be a no-op (plat #198, WO-R2-158). No
+assertion below depends on that no-op.
+
+These assertions are re-run against the pin by CI's ``contract`` job, which
+is where this test belongs: it MUTATES the world it reads
 (``kill_consumer``, repeated consumer-group restarts), so it was
-deliberately not run against the shared eval stack at the re-pin, which has
-to be left seeded and idle for the paid sequence.
+deliberately not run against the shared eval stack at either re-pin, which
+has to be left seeded and idle for the paid sequence.
 
 This pin is the first that INCLUDES platform #154, "put tools/call's
 post-execution and error paths inside one transaction envelope" — the

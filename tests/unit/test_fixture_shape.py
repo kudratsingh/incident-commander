@@ -109,6 +109,17 @@ class TestFabricatedTierOneFixtures:
     def test_a_nullable_field_accepts_null(self) -> None:
         # `previous_hint` is `str | null`; a fixture recording the
         # never-classified case is legal and must not be reported.
+        #
+        # That case stopped being hypothetical at the v0.6.2 re-pin:
+        # `create_bad_data_job(remediation_hint=unclassified)` writes a row
+        # with a null hint, so `dlq_human_required_escalates` now cans
+        # exactly this payload and `previous_hint: null` is what the
+        # platform actually answers there.
+        #
+        # `fenced_at` is present because v0.6.2 (plat #198) declares it
+        # REQUIRED on `MarkDlqPermanentOutput` — this test asserts that a
+        # legal nullable is not flagged, so it has to be legal in every
+        # other respect or it stops testing what it is named for.
         defects = check_call(
             _call(
                 "mark_dlq_permanent",
@@ -117,6 +128,7 @@ class TestFabricatedTierOneFixtures:
                     "previous_hint": None,
                     "remediation_hint": "human_required",
                     "already_marked": False,
+                    "fenced_at": "2026-07-28T10:04:11.712904Z",
                 },
             ),
             self._schema("mark_dlq_permanent"),

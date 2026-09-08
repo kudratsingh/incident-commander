@@ -128,8 +128,40 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
     # `jobs.updated_at` lesson from the batch-4 re-record applied on the
     # way in instead of after the fact. The field's ORDERING contract (the
     # list is now sorted by it) is asserted by the scenarios, not here.
+    # `items.fenced_at` and `items.fenced_by` arrived with the v0.6.2 re-pin
+    # (plat #198, WO-R2-158) and join the three clocks above for the same
+    # reason, applied on the way in rather than after the fact — the same call
+    # the `dead_lettered_at` note describes ("declared here rather than blessed
+    # as six known-drift entries").
+    #
+    # `fenced_at` is the fourth clock on this row and fails the only test that
+    # matters here — does the fixture pack FIX the value? It cannot: it is
+    # stamped by the platform at the moment an operator fences, so it exists
+    # only in a post-action reading and its value is whenever that happened.
+    #
+    # `fenced_by` is not a clock and is exempt for a stronger reason: it is
+    # `"{principal_type}:{principal_id}"`, and the principal id is minted by
+    # `make bootstrap-token`, so it changes on every `down -v`. A recording
+    # that pinned it would drift on every fresh stack — a ratchet reddening
+    # for something that is not drift — and no scenario asserts it.
+    #
+    # What this does NOT silence, and the distinction is the whole reason this
+    # is safe: _VOLATILE is a LEAF-VALUE exemption, checked inside `walk`'s
+    # leaf branch and `walk_leaves`. The key-set diff above it runs first and
+    # is untouched, so a fixture that omitted either field is still reported as
+    # `live_only_field` — which is exactly how this re-pin found the 30 rows it
+    # had to re-record. Presence is enforced; the value is not asserted.
+    # Whether a fence LANDED is a scenario claim (`dlq_human_required_escalates`
+    # grades `items[].fenced_at is_null: false` on the row it fenced), not a
+    # ratchet claim.
     "list_dlq_messages": frozenset(
-        {"items.created_at", "items.updated_at", "items.dead_lettered_at"}
+        {
+            "items.created_at",
+            "items.updated_at",
+            "items.dead_lettered_at",
+            "items.fenced_at",
+            "items.fenced_by",
+        }
     ),
     "list_active_alerts": frozenset({"alerts.fired_at", "alerts.created_at"}),
     "list_incidents": frozenset({"incidents.fired_at", "incidents.created_at"}),

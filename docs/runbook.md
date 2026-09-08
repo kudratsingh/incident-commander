@@ -648,7 +648,7 @@ After the smoke stage, the runner grades the platform's audit log and
 fails (exit 5) if any successful Tier-1 action landed during the stage
 window. Each individual read is still **one page of at most 200 rows** —
 `list_audit_events` exposes no `offset` and no `created_after` (the pinned
-v0.6.1 `inputSchema` declares `additionalProperties: false` over
+v0.6.2 `inputSchema` declares `additionalProperties: false` over
 `action` / `action_prefix` / `principal_type` / `limit`, and sending
 `offset` anyway is refused `-32602 extra_forbidden`; `list_dlq_messages`
 is the tool in this platform that pages, not this one). But the window is
@@ -795,11 +795,11 @@ For deeper introspection, the newest `evals/trajectories/<scenario>.<stamp>.<inv
 ## Contract-test target (constraint in force)
 
 **Run contract tests ONLY against the pinned demo stack.** The pin is
-v0.6.1 by index digest (`sha256:411f8b4d…`) and the committed snapshot
+v0.6.2 by index digest (`sha256:fd24d6a0…`) and the committed snapshot
 carries its 29 tools, blessed from that stack with the full 4-scope
 service-account token.
 
-The rule outlives the v0.4.9 → v0.5.0 → v0.6.0 → v0.6.1 bumps that motivated it: platform
+The rule outlives the v0.4.9 → v0.5.0 → v0.6.0 → v0.6.1 → v0.6.2 bumps that motivated it: platform
 master moves ahead of whatever tag is pinned, so a contract check against
 a master-built dev stack can fail **by design**. That is master drift, not
 drift in the pinned artifact, and it must never trigger a snapshot rebless

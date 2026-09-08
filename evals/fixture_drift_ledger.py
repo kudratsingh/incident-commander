@@ -279,6 +279,57 @@ _JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
         "create_stuck_dag stamps the root's trace_id from the same namespace and "
         "chain_name, so it appears and disappears with the row itself",
     ),
+    # `dlq_human_required_escalates` joined the seeds-its-own-fault family at
+    # the v0.6.2 re-pin, and its two entries are the same mechanism as the two
+    # saga blocks above seen through a third hook.
+    #
+    # It declared no `chaos_setup` until now: it ran against the four
+    # boot-seeded rows and fenced the seeded `human_required` one. That row
+    # already carried the value the fence would set, and through v0.6.1 the
+    # platform's mark on such a row wrote nothing at all — so the drill could
+    # not tell an agent that fenced from one that skipped the step (LESSONS
+    # 2026-09-08). Platform v0.6.2 (plat #198) added
+    # `create_bad_data_job(remediation_hint=unclassified)`, which writes a
+    # dead-letter row with `remediation_hint = NULL` and a bad-data error text,
+    # so the scenario now manufactures its own subject and the fence is a real
+    # write with a real audit row.
+    #
+    # The faulted world therefore holds five rows where the un-faulted world
+    # the check probes holds four, and both entries below are that one fact
+    # seen through a different field. Both sequence elements of the listing
+    # fixture (pre-fence and post-fence) report them; `Drift.key` does not
+    # include the index, so two keys cover four observations.
+    #
+    # POST_FAULT, not a defect, and specifically NOT to be "fixed" by trimming
+    # the recording back to four rows: the chaos row IS the incident, and a
+    # four-row recording would describe a world in which the scenario's own
+    # premise is false. Same reading as the saga roots above.
+    #
+    # Note what is NOT here, because it is the part that took work: the
+    # `fenced_at` / `fenced_by` that plat #198 added to every `DlqEntry`
+    # produce no drift at all. On the four seeded rows they are null on both
+    # sides, and on the post-fence recording they are exempted as leaf values
+    # by `fixture_drift._VOLATILE` (a clock, and a per-boot principal id).
+    # Their PRESENCE is still compared — which is how this re-pin found the 30
+    # canned rows that had to be re-recorded.
+    ("dlq_human_required_escalates", "list_dlq_messages", "total", "value"): (
+        POST_FAULT,
+        "create_bad_data_job injects the unclassified bad-data row this scenario "
+        "exists to fence, so the faulted world holds five DLQ rows where the "
+        "un-faulted world the check probes holds the four boot-seeded ones",
+    ),
+    (
+        "dlq_human_required_escalates",
+        "list_dlq_messages",
+        "items[].id[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "the chaos row's id is uuid5(dddddddd-bad0-4000-8000-000000000000, "
+        "'{tenant_id}:human-required-eval') and exists only after "
+        "create_bad_data_job has fired, so no un-faulted reading of the DLQ "
+        "contains it — the same absence already recorded for the two chain roots",
+    ),
     # alert_storm went the other way at wave-10: it is `use_live_mcp: false`
     # now, because the pinned platform cannot burst alerts. Alerts have three
     # producers (the bad_deploy chaos hook, the SLO fast-burn loop, the boot

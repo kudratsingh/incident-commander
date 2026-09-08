@@ -136,15 +136,34 @@ def _build_parser() -> argparse.ArgumentParser:
     bad_data = sub.add_parser(
         "bad-data-job",
         help=(
-            "Create a synthetic DLQ entry hinted human_required — a persistent "
-            "data bug the agent should mark permanent, not replay. v0.4.0+."
+            "Create a synthetic bad-data DLQ entry — a persistent data bug the "
+            "agent should fence with mark_dlq_permanent, not replay. Defaults "
+            "to the UNCLASSIFIED form (remediation_hint=null), which is what "
+            "`dlq_human_required_escalates` seeds. v0.4.0+; fixture_name and "
+            "remediation_hint need v0.6.2+."
         ),
     )
     bad_data.add_argument("--job-type", default="csv_upload")
+    # v0.6.2 (plat #198). The row's id is
+    # uuid5(dddddddd-bad0-4000-8000-000000000000, "{tenant_id}:{fixture_name}"),
+    # so a caller can compute it before invoking. The default matches the
+    # scenario's own chaos_setup so a hand-seeded world is the same world.
+    bad_data.add_argument("--fixture-name", default="human-required-eval")
+    # `unclassified` (JSON null on the row), NOT the hook's own
+    # `human_required` default, and the difference is the whole point of the
+    # v0.6.2 re-pin: a row seeded already-classified makes the fence set a
+    # value it already had, so the drill measures nothing. See
+    # `evals/scenarios/dlq_human_required_escalates.yaml`.
     bad_data.add_argument(
-        "--error-message",
-        default="ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382",
+        "--remediation-hint",
+        default="unclassified",
+        choices=["unclassified", "human_required"],
     )
+    # Left unset by default so the platform picks the story its declared hint
+    # pins (`lab/dlq_failure_stories.py`), which keeps the lab's coherence
+    # table the single source of the text instead of copying it here — the
+    # copy that used to live in this default went stale at v0.6.1.
+    bad_data.add_argument("--error-message", default=None)
 
     return parser
 
@@ -251,15 +270,25 @@ def main() -> int:
             )
             _print_result("restore-consumer", result)
         elif args.command == "bad-data-job":
-            result = client.call(
-                "create_bad_data_job",
-                {"job_type": args.job_type, "error_message": args.error_message},
-            )
+            arguments: dict[str, object] = {
+                "job_type": args.job_type,
+                "fixture_name": args.fixture_name,
+                "remediation_hint": args.remediation_hint,
+            }
+            # Omitted rather than sent as null: the platform's own default
+            # depends on the declared hint, and passing null would be a
+            # caller asserting a text it has not chosen.
+            if args.error_message is not None:
+                arguments["error_message"] = args.error_message
+            result = client.call("create_bad_data_job", arguments)
             _print_result("bad-data-job", result)
             print(
                 "\nNext: run scenario `dlq_human_required_escalates` — the "
-                "agent should probe list_dlq_messages, see hint=human_required, "
-                "and mark_dlq_permanent instead of attempting replay."
+                "agent should probe list_dlq_messages UNFILTERED (no hint "
+                "filter selects an unclassified row), read the bad-data error, "
+                "classify it, fence it with mark_dlq_permanent, and escalate. "
+                "The run ends ESCALATED: a fence stabilizes, it does not "
+                "resolve."
             )
         else:
             parser.error(f"unknown command: {args.command}")

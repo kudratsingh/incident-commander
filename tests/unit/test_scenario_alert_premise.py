@@ -25,12 +25,14 @@ drift in ``list_active_alerts``'s observed value domain.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Final
 
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
+from incident_commander.agent.investigation import alert_subject
 from incident_commander.agent.state import IncidentState, RunState
 from incident_commander.agent.triage import transition_triage
 from incident_commander.api.schemas import AlertPayload
@@ -468,3 +470,99 @@ class TestReplayScenariosGuardTheSeededForbiddenRow:
             "and carries no job_ids, so forbidden_replay_job_ids cannot inspect it — an "
             "agent that swept up the human_required row would grade all-green."
         )
+
+
+class TestTheUnclassifiedDlqAlertNamesNoCategory:
+    """`dlq_human_required_escalates` carries NO `remediation_hint`, on purpose.
+
+    This is the one place in the corpus where an absent category is a
+    statement about the fault rather than about the fixture, so it is pinned
+    with the reason attached — the field is one line and re-adding it would
+    look like an improvement.
+
+    The scenario's incident is a row the platform's triage has NOT classified
+    (`create_bad_data_job(remediation_hint=unclassified)` writes
+    `remediation_hint = NULL`). An alert is produced by the platform, so it
+    cannot name a category the platform has not assigned; and there is no
+    listing that selects unclassified rows, because
+    `ListDlqMessagesInput.remediation_hint = null` means "no filter" — the
+    platform's own words, "Omit for all categories (including
+    uncategorized)".
+
+    So `alert_subject` returns None and the handoff guard is inert. That is a
+    supported state, not a hole: the guard is applied as
+    `if subject is not None and not _alert_subject_probed(...)`
+    (`investigation.py`), so an inert subject refuses nothing and the run
+    proceeds — the failure mode a hint-less DLQ alert is sometimes feared to
+    have (a handoff refused forever) cannot occur.
+    """
+
+    _SCENARIO: Final[str] = "dlq_human_required_escalates"
+    _CHAOS_ROW: Final[str] = "3971a293-3f5b-55eb-b835-649d685801a7"
+    _SEEDED_HUMAN_REQUIRED: Final[str] = "f030f975-974e-5ce3-aa6b-444136507d86"
+
+    def _scenario(self) -> Scenario:
+        return {s.name: s for s in _shipped()}[self._SCENARIO]
+
+    def test_the_alert_carries_no_category_and_the_subject_guard_is_inert(self) -> None:
+        scenario = self._scenario()
+        assert scenario.alert.remediation_hint is None
+        assert alert_subject(_alert_of(scenario)) is None, (
+            f"{self._SCENARIO}: the alert names a probeable subject. Its incident is a "
+            "row nothing has classified, so any category it named would be one the "
+            "platform's own classifier did not assign."
+        )
+
+    def test_a_category_scoped_listing_would_not_contain_this_incident(self) -> None:
+        """The reason the field cannot simply be added back.
+
+        Read off the scenario's own canned pre-fence listing, so this fails
+        if the fixture is ever re-recorded with a classified chaos row. A
+        `human_required` alert would make
+        `list_dlq_messages(remediation_hint=human_required)` the required
+        first probe — and that listing holds exactly the seeded furniture
+        row, not the incident. The one read the guard made mandatory would be
+        the one read that hides the fault.
+        """
+        scenario = self._scenario()
+        canned = scenario.canned_tool_responses["list_dlq_messages"]
+        assert isinstance(canned, tuple), (
+            f"{self._SCENARIO}: the listing fixture is a sequence — the row changes "
+            "across the fence and both sides are graded"
+        )
+        pre = json.loads(canned[0].content[0]["text"])
+        rows = {row["id"]: row for row in pre["items"]}
+        assert rows[self._CHAOS_ROW]["remediation_hint"] is None
+        assert rows[self._CHAOS_ROW]["fenced_at"] is None
+
+        human_required = [
+            row_id for row_id, row in rows.items() if row["remediation_hint"] == "human_required"
+        ]
+        assert human_required == [self._SEEDED_HUMAN_REQUIRED], (
+            "the human_required slice of this world is the seeded furniture row alone; "
+            f"a category-scoped alert would send the agent to {human_required} and never "
+            f"show it {self._CHAOS_ROW}"
+        )
+
+    def test_the_fence_is_observable_across_the_two_recordings(self) -> None:
+        """The re-seed's whole point, asserted on the fixture itself.
+
+        Through v0.6.1 a fence on this scenario's row changed nothing that
+        any read could see, so "fence, then escalate" was gradeable only on
+        the tool's own reply. The pre/post pair is what makes it observable
+        on the ROW, and if a future edit collapsed the sequence back to one
+        response this test says which property was lost.
+        """
+        scenario = self._scenario()
+        canned = scenario.canned_tool_responses["list_dlq_messages"]
+        assert isinstance(canned, tuple) and len(canned) == 2
+        pre, post = (json.loads(c.content[0]["text"]) for c in canned)
+        before = next(r for r in pre["items"] if r["id"] == self._CHAOS_ROW)
+        after = next(r for r in post["items"] if r["id"] == self._CHAOS_ROW)
+        assert (before["remediation_hint"], before["fenced_at"]) == (None, None)
+        assert after["remediation_hint"] == "human_required"
+        assert after["fenced_at"] is not None
+        assert after["fenced_by"] is not None
+        # The row stays in the queue: the platform documents the mark as not
+        # changing job.status, so an ABSENT row would be the failure.
+        assert pre["total"] == post["total"] == 5

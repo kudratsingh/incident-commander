@@ -373,6 +373,32 @@ class DlqEntry(BaseModel):
     # and the field the list is now ordered by. `created_at` is when it was
     # SUBMITTED — the two can be days apart.
     dead_lettered_at: datetime | None = None
+    # v0.6.2 (plat #198, WO-R2-158): who fenced this row, and when. A THIRD
+    # clock on the same row — `created_at` is submission, `dead_lettered_at`
+    # is death, `fenced_at` is the operator's decision about the corpse.
+    #
+    # These exist because `remediation_hint` could not answer the question a
+    # fence verification actually asks. `human_required` is the same string
+    # whether the platform's triage pass classified the row or an operator
+    # pulled it out of auto-replay, so re-reading the hint proves only that
+    # SOMEBODY categorized the row at some point — never that this run's own
+    # `mark_dlq_permanent` call landed. `fenced_at` is that proof, and it is
+    # re-stamped on every mark, so it moves even on a re-fence of a row that
+    # already carried the hint. Both are null on a row nobody has fenced,
+    # and a replay clears them along with the hint.
+    #
+    # Declared rather than left to `extra="ignore"`: the config above would
+    # have dropped both fields silently, so the grader could not assert a
+    # fence and no test would have said why. That is the failure mode the
+    # registry/snapshot agreement test exists to catch — see
+    # `tests/unit/test_registry_matches_snapshot.py`.
+    fenced_at: datetime | None = None
+    # `"{principal_type}:{principal_id}"` — self-describing because the id
+    # alone cannot say which table it names. Its VALUE is per-stack: the
+    # principal id is minted by `make bootstrap-token`, so it changes on
+    # every fresh boot. Assert `fenced_at is not null` to prove a fence;
+    # never pin this string in a fixture or a claim.
+    fenced_by: str | None = None
     extra: dict[str, Any] | None = None
 
 
@@ -609,14 +635,15 @@ class MarkDlqPermanentInput(BaseModel):
 
 
 class MarkDlqPermanentOutput(BaseModel):
-    """Output shape from v0.4.4 platform.
+    """Output shape from v0.4.4 platform, extended by v0.6.2.
 
     ``previous_hint`` shows what the categorizer had classified this
     entry as before the mark. ``remediation_hint`` is always
     ``'human_required'`` after the call (that's the whole point).
-    ``already_marked`` tells the operator whether this call was a
-    no-op (repeat call with the same idempotency_key OR the entry was
-    already ``human_required``).
+
+    ``already_marked`` says whether the row ALREADY carried
+    ``human_required`` before this call. Read the v0.6.2 correction
+    below before trusting the older reading of it.
     """
 
     model_config = ConfigDict(extra="ignore", frozen=True)
@@ -624,7 +651,26 @@ class MarkDlqPermanentOutput(BaseModel):
     # Nullable but required (no default) per v0.4.8 outputSchema.
     previous_hint: str | None
     remediation_hint: str
+    # v0.6.2 (plat #198) CORRECTS THIS FIELD'S MEANING. The docstring above
+    # used to call `already_marked: true` a no-op, and that was true of the
+    # platform through v0.6.1: the handler read the flag, skipped the row
+    # update, skipped the audit row, and returned. It is no longer true.
+    # Every mark now writes — hint, `fenced_at`, `fenced_by` and an audit
+    # row — whatever the previous hint was, because deciding again that a row
+    # needs a person is still an operator action. `already_marked` now says
+    # only "you were not the first to classify this row".
+    #
+    # Nothing in this repo may infer "nothing happened" from it. That
+    # inference is what made the fence unmeasurable and cost this scenario a
+    # release cycle (LESSONS 2026-09-08, WO-R2-158).
     already_marked: bool
+    # v0.6.2 (plat #198): when THIS call fenced the row, on the platform's
+    # clock. Required in the outputSchema, so no default — a response
+    # without it is a contract violation and should fail parsing rather than
+    # read as "not fenced". Verify a fence on this, not on
+    # `remediation_hint`: the hint is the same value from triage and from a
+    # fence, so it cannot tell a caller its own call landed.
+    fenced_at: datetime
 
 
 # --- Registry ------------------------------------------------------------

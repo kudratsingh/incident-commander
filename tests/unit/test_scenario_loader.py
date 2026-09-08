@@ -553,3 +553,137 @@ class TestStuckDagChainIdsArePinnedCorrectly:
             for n in ("saga_stuck", "remediate_runaway_saga_success")
         ]
         assert len(set(names)) == len(names), f"saga scenarios share a chain_name: {names}"
+
+
+class TestBadDataFixtureIdIsPinnedCorrectly:
+    """`dlq_human_required_escalates` hard-codes an id its chaos hook derives.
+
+    Same rule and same reason as ``TestStuckDagChainIdsArePinnedCorrectly``
+    above, on the hook the v0.6.2 re-pin introduced.
+    ``create_bad_data_job`` does not take an id: it computes the row's
+    primary key as ``uuid5(namespace, f"{tenant_id}:{fixture_name}")`` and
+    the platform exports that derivation as ``fixture_id(...)`` precisely so
+    a scenario can pin the id ahead of the call (plat #198 — "so a caller can
+    pin it before invoking").
+
+    Pinning it is not optional for this scenario. It grades WHICH row the
+    agent fenced, and a claim written before the run cannot name a random id
+    (cmd #187). Recomputing it here is what makes the hard-coded string safe:
+    a typo, a renamed fixture, or a platform that changed its derivation
+    would otherwise surface as an unmet precondition during a paid live run,
+    which is the most expensive place to learn it. This costs nothing and
+    fails offline.
+
+    It checks EVERY place the id appears, not just one. The scenario names it
+    in the action-argument pin, in four ``where`` row selectors, in the
+    briefing claim, in the forbidden-replay list and in the precondition, and
+    a single-site check would let the others drift apart from each other —
+    which is the "five stale copies" hazard the repo has already paid for.
+    """
+
+    # backend/app/mcp/tools/chaos/create_bad_data_job.py::_NAMESPACE
+    _NAMESPACE = uuid.UUID("dddddddd-bad0-4000-8000-000000000000")
+    # backend/app/models/tenant.py::DEFAULT_TENANT_ID, seeded by migration
+    # f8a1c4e23507_multi_tenancy, so it is identical on every stack. Read back
+    # off the running v0.6.2 demo stack at the re-pin to confirm it, rather
+    # than trusted from the migration alone.
+    _DEFAULT_TENANT = "d3fa17de-7a17-de7a-17de-7a17de7a17de"
+    _SCENARIO = "dlq_human_required_escalates"
+    _FIXTURE_NAME = "human-required-eval"
+
+    def _fixture_id(self, fixture_name: str) -> str:
+        return str(uuid.uuid5(self._NAMESPACE, f"{self._DEFAULT_TENANT}:{fixture_name}"))
+
+    def _scenario(self) -> Scenario:
+        return {s.name: s for s in _shipped_scenarios()}[self._SCENARIO]
+
+    def test_the_hook_is_the_unclassified_bad_data_seeder(self) -> None:
+        """The whole drill rests on the row arriving UNCLASSIFIED.
+
+        Seeded ``human_required`` — the hook's default, and its only
+        behaviour before v0.6.2 — the fence would be setting the value the
+        row already has. Every mark writes now, so that would no longer be a
+        silent no-op, but it would still measure nothing: the agent would not
+        have had to read the error and classify it, which is the decision
+        this scenario exists to grade.
+        """
+        scenario = self._scenario()
+        assert scenario.chaos_setup is not None
+        assert scenario.chaos_setup.name == "create_bad_data_job"
+        assert scenario.chaos_setup.arguments["fixture_name"] == self._FIXTURE_NAME
+        assert scenario.chaos_setup.arguments["remediation_hint"] == "unclassified"
+        # Not passed on purpose: the hook defaults the text to the story its
+        # declared hint pins, so the platform's coherence table stays the
+        # single source of it and this repo holds no second copy to go stale.
+        assert "error_message" not in scenario.chaos_setup.arguments
+
+    def test_every_pinned_id_is_the_hook_derivation(self) -> None:
+        scenario = self._scenario()
+        expected = self._fixture_id(self._FIXTURE_NAME)
+        expectation = scenario.expectation
+
+        pinned: dict[str, set[str]] = {
+            "expected_action_arguments": {
+                str(a.equals) for a in expectation.expected_action_arguments
+            },
+            "evidence where-selectors": {
+                str(e.where.equals) for e in expectation.expected_evidence_fields if e.where
+            },
+            "precondition": {
+                str(field.equals)
+                for probe in scenario.expected_precondition
+                for field in probe.expect
+                if field.path == "items[].id" and not probe.arguments
+            },
+        }
+        for site, values in pinned.items():
+            assert values == {expected}, (
+                f"{self._SCENARIO}: {site} pins {sorted(values)}, but "
+                f"create_bad_data_job(fixture_name={self._FIXTURE_NAME!r}) "
+                f"produces {expected}"
+            )
+
+        assert expected in expectation.expect_briefing_contains, (
+            f"{self._SCENARIO}: the briefing claim does not name the fenced row"
+        )
+        assert expected in expectation.forbidden_replay_job_ids, (
+            f"{self._SCENARIO}: the chaos row must be forbidden as a replay target — "
+            "it is the one row a replay is guaranteed to re-fail on"
+        )
+
+    def test_the_seeded_human_required_row_is_furniture_and_stays_untouched(self) -> None:
+        """f030f975 is in this world and must not be the thing acted on.
+
+        It is the seeded ``human_required`` row, and it is the trap this
+        re-seed exists to step around: before v0.6.2 it WAS the fenced row,
+        and a mark on it wrote nothing. It is still listed (the agent reads
+        the whole queue), so the scenario has to say positively that the
+        action names the chaos row and not this one.
+
+        Under v0.6.2 fencing it is no longer harmless — every mark re-stamps
+        ``fenced_at`` and writes an audit row — so "the argument pin excludes
+        it" is a safety claim now, not just a precision one.
+        """
+        scenario = self._scenario()
+        seeded = "f030f975-974e-5ce3-aa6b-444136507d86"
+        assert seeded != self._fixture_id(self._FIXTURE_NAME)
+        assert seeded in scenario.expectation.forbidden_replay_job_ids
+        assert all(a.equals != seeded for a in scenario.expectation.expected_action_arguments), (
+            f"{self._SCENARIO}: the action pin names the seeded furniture row"
+        )
+        # And the premise proves it is the ONLY row already in the category,
+        # which is what says the chaos row is neither classified nor fenced
+        # when the agent starts.
+        scoped = [
+            probe
+            for probe in scenario.expected_precondition
+            if probe.arguments.get("remediation_hint") == "human_required"
+        ]
+        assert len(scoped) == 1, (
+            f"{self._SCENARIO}: the premise must probe the human_required slice — "
+            "it is the only free read that proves the chaos row is unfenced"
+        )
+        assert {(f.path, f.equals) for f in scoped[0].expect} == {
+            ("total", 1),
+            ("items[].id", seeded),
+        }

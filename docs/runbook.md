@@ -97,7 +97,7 @@ is a documented substring override, and neither path spends or shares state).
 
 Trace files land in `evals/traces/*.jsonl`; the formatter turns them into readable stepwise trajectories in `evals/reports/human/*.txt`.
 
-**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 38 (~32 live: 24 read-only, 8 remediation) is ~$1.70 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
+**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 39 (~33 live: 23 read-only, 10 remediation) is ~$1.70 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
 
 **Side effects:** remediation scenarios fire real Tier-1 mutations against the platform. Idempotent — repeat runs with the same `(incident_id, tool, args)` hash return the cached result. But the *first* run of a scenario does apply changes.
 
@@ -368,6 +368,45 @@ make eval-live ONLY=saga_stuck && make eval-reset
 # a chain's root completes it, and create_stuck_dag refuses a drifted
 # chain (409 stuck_chain_name_in_use) rather than rebuilding it, so a
 # shared name would make each run depend on the other's order.
+
+# --- THE ORDER THE REMAINING PAID RUNS GO IN (2026-09-08, WO-R2-166/167/168)
+#
+# This block is an ORDER, not a batch: every line below still needs the
+# user's own explicit yes, one scenario per invocation (ADR 0020), with a
+# reset and a world audit between them. Readiness is not authorization.
+#
+# The order is not arbitrary — each run establishes the premise the next
+# one is read against:
+#
+#   1. remediate_dlq_backlog_success  — RE-RUN. Its two earlier passes
+#      (e72b5ffb9df0, e8404306138c) replayed a poisoned message on the
+#      lab's word, so neither is evidence about the agent. It is re-derived
+#      against v0.6.3: the replay_safe slice is one row, the poisoned row
+#      sits beside it unclassified and is forbidden.
+#   2. dlq_poison_unclassified        — NEW. The same poisoned row, now as
+#      the SUBJECT: read it, fence it, escalate. This is the positive half
+#      of 1, and between them an agent that treats a poisoned message as
+#      replayable is red either way round.
+#   3. saga_stuck                     — READY since cmd #211, held.
+#   4. dlq_mixed_partial              — READY since cmd #212, held.
+#
+# A fifth, `dlq_mislabeled_replay_safe` (WO-R2-167 — the classifier lies:
+# the row says replay_safe and its error says permanent bad data), slots in
+# between 2 and 3 and is NOT listed as a command below because it does not
+# exist on this branch yet. It lands in the PR stacked on this one, which
+# adds its line here rather than leaving the runbook naming a scenario the
+# tree does not hold.
+#
+# All of them seed their own fault and abort pre-spend if the premise is
+# missing. Runs 1 and 2 poison a DLQ row, so `make eval-reset
+# PURGE_IDEMPOTENCY=1` after each is not optional: the row is deleted by the
+# reset, and a survivor makes the NEXT run's precondition read six rows
+# where it wants five. Runs 2 and 3 also stamp `fenced_at` on one row, which
+# the same reset clears.
+make eval-live ONLY=remediate_dlq_backlog_success && make eval-reset PURGE_IDEMPOTENCY=1
+make eval-live ONLY=dlq_poison_unclassified       && make eval-reset PURGE_IDEMPOTENCY=1
+make eval-live ONLY=saga_stuck                    && make eval-reset PURGE_IDEMPOTENCY=1
+make eval-live ONLY=dlq_mixed_partial             && make eval-reset PURGE_IDEMPOTENCY=1
 
 # alert_storm and remediate_verify_fails are NOT in this list: they are
 # canned-only (use_live_mcp/use_live_llm false in the YAML, with the
@@ -804,11 +843,12 @@ For deeper introspection, the newest `evals/trajectories/<scenario>.<stamp>.<inv
 ## Contract-test target (constraint in force)
 
 **Run contract tests ONLY against the pinned demo stack.** The pin is
-v0.6.2 by index digest (`sha256:fd24d6a0…`) and the committed snapshot
-carries its 29 tools, blessed from that stack with the full 4-scope
-service-account token.
+v0.6.3 by index digest (`sha256:683949544d9a…`) and the committed snapshot
+carries its **30** tools, blessed from that stack with the full 4-scope
+service-account token. The count moved for the first time since v0.5.0:
+plat #199 added `create_mislabeled_dlq_job`.
 
-The rule outlives the v0.4.9 → v0.5.0 → v0.6.0 → v0.6.1 → v0.6.2 bumps that motivated it: platform
+The rule outlives the v0.4.9 → v0.5.0 → v0.6.0 → v0.6.1 → v0.6.2 → v0.6.3 bumps that motivated it: platform
 master moves ahead of whatever tag is pinned, so a contract check against
 a master-built dev stack can fail **by design**. That is master drift, not
 drift in the pinned artifact, and it must never trigger a snapshot rebless

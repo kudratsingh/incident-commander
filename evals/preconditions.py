@@ -31,23 +31,40 @@ from collections.abc import Mapping
 from typing import Any
 
 from evals.graders.deterministic import resolve_path as resolve
-from evals.scenarios.schema import PreconditionProbe
+from evals.graders.deterministic import selected_values
+from evals.scenarios.schema import PreconditionField, PreconditionProbe
 
 __all__ = ["resolve", "unmet"]
+
+
+def _selector_clause(field: PreconditionField) -> str:
+    """Name the row the selector was looking for, in a failure detail.
+
+    Same split as the grader's ``_selector_clause``, for the same reason: "the
+    row is not in this listing" and "the row is here and says something else"
+    are different diagnoses, and a detail that renders identically for both
+    sends the reader looking in the wrong place. Here the first one usually
+    means the chaos hook did not fire.
+    """
+    if field.where is None:
+        return ""
+    return f" for a row whose {field.where.field!r} {field.where.describe()}"
 
 
 def unmet(probe: PreconditionProbe, payload: Mapping[str, Any]) -> list[str]:
     """Ways this probe's observation fails the precondition. Empty means met."""
     failures: list[str] = []
     for field in probe.expect:
-        observed = resolve(payload, field.path)
+        observed = selected_values(payload, field.path, field.where)
+        clause = _selector_clause(field)
         if not observed:
             failures.append(
-                f"{probe.tool}: nothing at {field.path!r} (expected {field.describe()})"
+                f"{probe.tool}: nothing at {field.path!r}{clause} (expected {field.describe()})"
             )
             continue
         if not any(field.satisfied_by(value) for value in observed):
             failures.append(
-                f"{probe.tool}: {field.path} expected {field.describe()}, observed {observed!r}"
+                f"{probe.tool}: {field.path}{clause} expected {field.describe()}, "
+                f"observed {observed!r}"
             )
     return failures

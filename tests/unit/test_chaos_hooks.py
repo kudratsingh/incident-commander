@@ -136,3 +136,76 @@ class TestToolLevelFailureIsAFailedSeed:
         }
         client = self._client(lambda _r: httpx.Response(200, json=payload))
         assert client.call("kill_consumer", {"consumer_group": "wd"}) == {"killed": 1}
+
+
+class TestARefusalIsNamedNotBucketedAsFlakiness:
+    """A chaos refusal carries the platform's own code, not just ``-32011``.
+
+    WO-R2-16's second half, and the reason plat #199 flagged it at the release:
+    every tool-level refusal the platform raises arrives as JSON-RPC ``-32011``
+    with the name in ``data.error_code``, so on the code alone a fixture-name
+    collision and a Kafka outage read identically. The runner buckets a failed
+    seed as ``shared-env`` and a human reads the message — and a message that
+    looks like transport flakiness gets re-run, which is exactly wrong for
+    ``*_fixture_name_in_use``: the previous run's row is still there, so the
+    retry seeds the same refusal again. The fix is a reset, and the message now
+    says so.
+    """
+
+    @staticmethod
+    def _client(handler: Any) -> ChaosClient:
+        client = ChaosClient("http://platform.test/mcp", "tok")
+        client._client = httpx.Client(transport=httpx.MockTransport(handler))
+        return client
+
+    @staticmethod
+    def _refusal(code: str) -> dict[str, Any]:
+        return {
+            "error": {
+                "code": -32011,
+                "message": f"fixture_name 'x' is already in use ({code})",
+                "data": {"error_code": code},
+            }
+        }
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "poison_fixture_name_in_use",
+            "mislabeled_fixture_name_in_use",
+            "bad_data_fixture_name_in_use",
+            "stuck_chain_name_in_use",
+        ],
+    )
+    def test_a_ledgered_refusal_names_itself_and_says_what_to_do(self, code: str) -> None:
+        client = self._client(lambda _r: httpx.Response(200, json=self._refusal(code)))
+        with pytest.raises(ChaosInvocationError) as err:
+            client.call("poison_message", {"topic": "job.submitted", "payload": {}})
+        message = str(err.value)
+        assert "poison_message" in message  # still names the hook
+        assert code in message  # the platform's own name for the refusal
+        assert "reset the world, do not retry" in message  # what it means
+
+    def test_an_unledgered_code_still_surfaces_by_name(self) -> None:
+        """The table adds a sentence; the NAME comes off the wire.
+
+        So a refusal code the platform ships tomorrow cannot go quiet while
+        this dict is out of date — it loses the advice, never the identity.
+        """
+        client = self._client(lambda _r: httpx.Response(200, json=self._refusal("some_new_code")))
+        with pytest.raises(ChaosInvocationError) as err:
+            client.call("poison_message", {"topic": "job.submitted", "payload": {}})
+        assert "some_new_code" in str(err.value)
+        assert "reset the world" not in str(err.value)
+
+    def test_an_error_with_no_data_block_is_unchanged(self) -> None:
+        payload = {"error": {"code": -32010, "message": "unknown tool: nope"}}
+        client = self._client(lambda _r: httpx.Response(200, json=payload))
+        with pytest.raises(ChaosInvocationError, match="-32010: unknown tool"):
+            client.call("nope", {})
+
+    def test_a_non_object_error_member_is_still_wrapped(self) -> None:
+        """The isinstance guard the hint helper must not undo."""
+        client = self._client(lambda _r: httpx.Response(200, json={"error": "just a string"}))
+        with pytest.raises(ChaosInvocationError, match="just a string"):
+            client.call("poison_message", {"topic": "t", "payload": {}})

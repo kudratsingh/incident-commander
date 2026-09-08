@@ -21,7 +21,8 @@ failure ("agent behaved wrong in a valid world").
 from __future__ import annotations
 
 import json
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, Final
 
 import httpx
 
@@ -30,6 +31,68 @@ _DEFAULT_TIMEOUT_SECONDS = 15.0
 
 class ChaosInvocationError(RuntimeError):
     """The platform rejected or errored on a chaos-hook invocation."""
+
+
+# The chaos refusals a seeding failure can legitimately be, and what each one
+# MEANS — the ledger WO-R2-16 asked for, kept here because this is the only
+# place a chaos refusal passes through.
+#
+# Why it earns its place. Every tool-level refusal the platform raises arrives
+# as JSON-RPC ``-32011`` with the name in ``data.error_code``, so on the code
+# alone a fixture-name collision and a Kafka outage are the same event. The
+# runner buckets a failed seed as ``shared-env`` and the operator reads the
+# message; without the name, the message reads like transport flakiness and the
+# reflex is to re-run — which is precisely wrong for every entry below. Each of
+# these says the WORLD is not what the scenario assumes, and re-running seeds
+# the same refusal again.
+#
+# ``*_fixture_name_in_use`` / ``stuck_chain_name_in_use`` (409) all mean one
+# thing: a previous run's row or chain is still there and has DRIFTED from what
+# the hook declares, so the hook refuses to rewrite somebody's evidence. The fix
+# is `make eval-reset PURGE_IDEMPOTENCY=1` and a re-audit, never a retry and
+# never a second fixture_name.
+#
+# Deliberately a MESSAGE ledger and not a control: nothing here changes what is
+# raised or what the runner does with it. A code absent from this table still
+# surfaces with its own name attached (the name comes off the wire, not out of
+# this dict) — the table only adds the sentence a reader would otherwise have to
+# go and find. That is why an unledgered future code cannot go quiet.
+_REFUSAL_MEANINGS: Final[dict[str, str]] = {
+    "poison_fixture_name_in_use": (
+        "a poison_message row under this fixture_name already exists and no longer "
+        "matches the declared fixture — reset the world, do not retry"
+    ),
+    "mislabeled_fixture_name_in_use": (
+        "a create_mislabeled_dlq_job row under this fixture_name already exists and "
+        "has been re-classified — reset the world, do not retry"
+    ),
+    "bad_data_fixture_name_in_use": (
+        "a create_bad_data_job row under this fixture_name already exists and has "
+        "drifted — reset the world, do not retry"
+    ),
+    "stuck_chain_name_in_use": (
+        "a create_stuck_dag chain under this chain_name already exists and has "
+        "drifted — reset the world, do not retry"
+    ),
+}
+
+
+def _refusal_code(err_body: Mapping[str, Any]) -> str | None:
+    """The platform's own name for this refusal, out of ``error.data.error_code``."""
+    data = err_body.get("data")
+    if not isinstance(data, Mapping):
+        return None
+    code = data.get("error_code")
+    return code if isinstance(code, str) and code else None
+
+
+def _refusal_hint(err_body: object) -> str:
+    """The one sentence that says what a ledgered refusal means for the operator."""
+    if not isinstance(err_body, Mapping):
+        return ""
+    code = _refusal_code(err_body)
+    meaning = _REFUSAL_MEANINGS.get(code) if code is not None else None
+    return f" — {meaning}" if meaning else ""
 
 
 def _error_text(content: list[Any]) -> str:
@@ -114,9 +177,21 @@ class ChaosClient:
             # every response shape, not just the well-formed ones.
             if isinstance(err_body, dict):
                 detail = f"{err_body.get('code')}: {err_body.get('message')}"
+                # The JSON-RPC `code` is a transport-shaped integer
+                # (-32011 for every tool-level refusal the platform raises),
+                # so it says nothing about WHICH refusal this is. The name
+                # lives one level down in `data.error_code`, and dropping it
+                # is what made a fixture-name collision read as flakiness.
+                # Prefixed, not appended, so it is the first thing in the
+                # message the runner puts on a failed seed.
+                code = _refusal_code(err_body)
+                if code is not None:
+                    detail = f"{code} ({detail})"
             else:
                 detail = repr(err_body)
-            raise ChaosInvocationError(f"{tool_name}: platform returned MCP error {detail}")
+            raise ChaosInvocationError(
+                f"{tool_name}: platform returned MCP error {detail}{_refusal_hint(err_body)}"
+            )
         result = payload.get("result", {})
         if not isinstance(result, dict):
             return {}

@@ -487,29 +487,13 @@ class EvidenceFieldExpectation(FieldComparator):
     def _where_needs_rows_to_select_from(self) -> Self:
         """``where`` picks among rows, so ``field`` must descend into a list.
 
-        Two shapes have no rows and are refused rather than silently ignored:
-        a ``field`` with no ``[]`` segment at all (one scalar, nothing to
-        select), and one whose ``[]`` is the LAST segment (the values ARE the
-        rows, so the selector and the comparator would be asking the same
-        question of the same value and the pair could only ever be a
-        tautology or a contradiction).
+        The rule and its two refused shapes live in ``where_path_errors``,
+        which ``PreconditionField`` validates against too — one statement of
+        "what a selector can be attached to", not two.
         """
-        if self.where is None:
-            return self
-        segments = self.field.split(".")
-        descends = [i for i, segment in enumerate(segments) if segment.endswith("[]")]
-        if not descends:
-            raise ValueError(
-                f"where selects among the rows of a list, but field {self.field!r} "
-                "names a single value — it has no '[]' segment to descend into. "
-                "Write the row path (e.g. 'items[].remediation_hint'), or drop where."
-            )
-        if descends[-1] == len(segments) - 1:
-            raise ValueError(
-                f"field {self.field!r} resolves to the rows themselves, so where "
-                "would select and grade the same value. Name a field INSIDE the "
-                "row (e.g. 'items[].remediation_hint' with where.field 'id')."
-            )
+        error = where_path_errors(self.field, self.where)
+        if error is not None:
+            raise ValueError(error)
         return self
 
     @field_validator("before_tools")
@@ -1065,18 +1049,67 @@ def _split_row_path(field: str) -> tuple[str, str]:
     return ".".join(segments[: last + 1]), ".".join(segments[last + 1 :])
 
 
-def _selected_values(parsed: Mapping[str, Any], exp: EvidenceFieldExpectation) -> list[Any]:
-    """Values one entry contributes, after ``where`` narrows it to some rows."""
-    if exp.where is None:
-        return resolve_path(parsed, exp.field)
-    rows_path, in_row_path = _split_row_path(exp.field)
+def selected_values(payload: Mapping[str, Any], field: str, where: RowSelector | None) -> list[Any]:
+    """Every value at ``field``, narrowed to the rows ``where`` selects.
+
+    ``where is None`` is plain ``resolve_path``. Otherwise the path is split at
+    its last ``[]``, each row is tested against the selector, and only the
+    selected rows contribute values.
+
+    Shared by ``EvidenceFieldExpectation`` (asserting on what a run recorded)
+    and ``PreconditionField`` (asserting on the world before a run starts), for
+    the reason ``resolve_path`` is shared: the two ask about different moments
+    and the selection rules are the same, so a second copy would drift. The
+    precondition side gained ``where`` at the v0.6.3 re-pin, because "the DLQ
+    holds five rows AND some row is unclassified" is satisfied by two different
+    rows, and the claim that scenario needed is about ONE row — the same
+    cross-satisfiable fake-green ``RowSelector`` was minted for.
+    """
+    if where is None:
+        return resolve_path(payload, field)
+    rows_path, in_row_path = _split_row_path(field)
     values: list[Any] = []
-    for row in resolve_path(parsed, rows_path):
+    for row in resolve_path(payload, rows_path):
         if not isinstance(row, Mapping):
             continue
-        if any(exp.where.satisfied_by(value) for value in resolve_path(row, exp.where.field)):
+        if any(where.satisfied_by(value) for value in resolve_path(row, where.field)):
             values.extend(resolve_path(row, in_row_path))
     return values
+
+
+def where_path_errors(field: str, where: RowSelector | None) -> str | None:
+    """Why ``field`` cannot carry this ``where``, or ``None`` when it can.
+
+    Two shapes have no rows and are refused rather than silently ignored: a
+    ``field`` with no ``[]`` segment at all (one scalar, nothing to select),
+    and one whose ``[]`` is the LAST segment (the values ARE the rows, so the
+    selector and the comparator would ask the same question of the same value
+    and the pair could only ever be a tautology or a contradiction).
+
+    Shared with ``PreconditionField`` for the same reason as the walker above.
+    """
+    if where is None:
+        return None
+    segments = field.split(".")
+    descends = [i for i, segment in enumerate(segments) if segment.endswith("[]")]
+    if not descends:
+        return (
+            f"where selects among the rows of a list, but field {field!r} names a "
+            "single value — it has no '[]' segment to descend into. Write the row "
+            "path (e.g. 'items[].remediation_hint'), or drop where."
+        )
+    if descends[-1] == len(segments) - 1:
+        return (
+            f"field {field!r} resolves to the rows themselves, so where would select "
+            "and grade the same value. Name a field INSIDE the row (e.g. "
+            "'items[].remediation_hint' with where.field 'id')."
+        )
+    return None
+
+
+def _selected_values(parsed: Mapping[str, Any], exp: EvidenceFieldExpectation) -> list[Any]:
+    """Values one entry contributes, after ``where`` narrows it to some rows."""
+    return selected_values(parsed, exp.field, exp.where)
 
 
 def _graded_evidence(

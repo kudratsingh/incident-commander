@@ -73,7 +73,7 @@
     },
     {
       "name": "create_bad_data_job",
-      "description": "[chaos: environment_wide] Inject a synthetic dead-letter row whose error text is a permanent data fault (a non-numeric value in an integer CSV column). Complement to `poison_message`, which produces `replay_safe` entries. `remediation_hint` decides whether the row arrives classified: `human_required` (default) stamps the category, so `replay_dlq_by_category` refuses it immediately; `unclassified` (or null) leaves `remediation_hint` NULL, so the row has to be read and classified before anything can act on it — which is the only shape that makes a fence by `mark_dlq_permanent` an observable action rather than a value the row already had. The id derives deterministically from the calling tenant and `fixture_name`, so a caller can pin it before invoking and the same name in another tenant is a separate row; a repeat call is idempotent while the row still matches, and refused once it has drifted. The row is tagged as a seeded fixture and DELETEd by the next environment reset. Written directly to `jobs`; doesn't touch Kafka.",
+      "description": "[chaos: environment_wide] Inject a synthetic dead-letter row whose error text is a permanent data fault (a non-numeric value in an integer CSV column). Complement to `poison_message`, whose row carries a schema violation instead; neither is replay-safe, and neither can be asked to be. `remediation_hint` decides whether the row arrives classified: `human_required` (default) stamps the category, so `replay_dlq_by_category` refuses it immediately; `unclassified` (or null) leaves `remediation_hint` NULL, so the row has to be read and classified before anything can act on it — which is the only shape that makes a fence by `mark_dlq_permanent` an observable action rather than a value the row already had. The id derives deterministically from the calling tenant and `fixture_name`, so a caller can pin it before invoking and the same name in another tenant is a separate row; a repeat call is idempotent while the row still matches, and refused once it has drifted. The row is tagged as a seeded fixture and DELETEd by the next environment reset. Written directly to `jobs`; doesn't touch Kafka.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -168,6 +168,85 @@
           "accepted"
         ],
         "title": "CreateBadDataJobOutput",
+        "type": "object"
+      },
+      "required_scope": "chaos:invoke",
+      "is_idempotent": false
+    },
+    {
+      "name": "create_mislabeled_dlq_job",
+      "description": "[chaos: environment_wide] Inject ONE deliberately mislabelled dead-letter row: `remediation_hint` is `replay_safe` while the error text is a permanent data fault (a non-numeric value in an integer CSV column) that no replay can fix. The hint and the text contradict each other, and that contradiction is the fixture — it reproduces a wrong classification, which is a real failure (triage, an operator or a backfill can all write the wrong category, and nothing downstream re-derives it from the error). This is the ONLY sanctioned incoherent row in the lab; every other hook is held to the rule that a row's text must match the action its hint prescribes. Requires `mislabel: true`, passed explicitly — there is no default and no other accepted value, so the row can never be produced by accident. The id derives deterministically from the calling tenant and `fixture_name`, in its own namespace, so a caller can pin it before invoking and the same name under another fixture hook is a separate row; a repeat call is idempotent while the row still matches, and refused once it has drifted. The row is tagged as a seeded fixture and DELETEd by the next environment reset. Written directly to `jobs`; doesn't touch Kafka.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "mislabel": {
+            "const": true,
+            "description": "Must be `true`, and must be passed explicitly — there is no default. It is the caller's acknowledgement that this row is deliberately self-contradictory: `remediation_hint` will say `replay_safe` while the error text describes a permanent data fault that no replay can fix. Omitting the field, or passing `false`, is a validation error rather than a coherent row, because there is no coherent row this tool could fall back to writing.",
+            "title": "Mislabel",
+            "type": "boolean"
+          },
+          "fixture_name": {
+            "default": "mislabeled-dlq-job",
+            "description": "Name the row's id derives from — uuid5(ffffffff-11ed-4000-8000-000000000000, '{tenant_id}:{fixture_name}') — so a caller can pin the id before invoking. Its own namespace, so the same name under `create_bad_data_job` or `poison_message` is a different row, not a collision. Ids are scoped to the calling tenant, so the same name in two tenants creates two independent rows. A repeat call is idempotent while the row still matches; refused with `mislabeled_fixture_name_in_use` once it has drifted (a replay moved it out of `dead_letter`, or somebody fenced it) — on this fixture a drifted row is the run's result, so the hook never rewrites it.",
+            "maxLength": 63,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "title": "Fixture Name",
+            "type": "string"
+          },
+          "job_type": {
+            "default": "csv_upload",
+            "description": "Type stamped on the synthetic job. Should match a real processor type so the agent's downstream reasoning stays plausible, and a CSV type is what the error text describes.",
+            "title": "Job Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mislabel"
+        ],
+        "title": "CreateMislabeledDlqJobInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "job_id": {
+            "description": "The dead-lettered job — the id to read with `list_dlq_messages`. Derived from the tenant and `fixture_name`, so a caller can compute it in advance.",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "fixture_name": {
+            "title": "Fixture Name",
+            "type": "string"
+          },
+          "remediation_hint": {
+            "description": "Always `replay_safe` — the label that is wrong. This is the whole point of the fixture, not a configurable field.",
+            "title": "Remediation Hint",
+            "type": "string"
+          },
+          "error_message": {
+            "description": "The permanent bad-data text the hint contradicts, returned so a scenario can assert the pair without a second read.",
+            "title": "Error Message",
+            "type": "string"
+          },
+          "created": {
+            "description": "False when the call was an idempotent repeat that found the row already present and still matching.",
+            "title": "Created",
+            "type": "boolean"
+          },
+          "accepted": {
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "job_id",
+          "fixture_name",
+          "remediation_hint",
+          "error_message",
+          "created",
+          "accepted"
+        ],
+        "title": "CreateMislabeledDlqJobOutput",
         "type": "object"
       },
       "required_scope": "chaos:invoke",
@@ -2292,7 +2371,7 @@
     },
     {
       "name": "poison_message",
-      "description": "[chaos: single_consumer] Publish a schema-invalid payload to one Kafka topic AND drop a synthetic `replay_safe` DLQ entry the agent's remediation loop can act on. Bypasses producer-side validation; real consumers log-and-drop schema errors rather than routing to DLQ, so the synthetic row makes the effect observable through `list_dlq_messages`.",
+      "description": "[chaos: single_consumer] Publish a schema-invalid payload to one Kafka topic AND guarantee a synthetic dead-letter row the agent's remediation loop can act on. Bypasses producer-side validation; real consumers log-and-drop schema errors rather than routing to DLQ, so the synthetic row is what makes the effect observable through `list_dlq_messages`. THE ROW IS NOT REPLAY-SAFE: its error text is a schema violation (a required field missing from the stored payload), so every replay of it fails on the same field. `remediation_hint` decides only whether anything has classified that yet — `unclassified` (the default, and how a freshly poisoned message really arrives, because LLM triage is off by default here) leaves `remediation_hint` NULL, and `human_required` stamps the category so `replay_dlq_by_category` refuses the row on sight. `replay_safe` cannot be asked for. The row's id derives deterministically from the calling tenant and `fixture_name`, in its own namespace, so a caller can pin it before invoking and the same name under another fixture hook is a separate row; a repeat call is idempotent on the row while it still matches, and refused before publishing once it has drifted. Publishing is not idempotent — every accepted call puts another poisoned message on the topic. The row is tagged as a seeded fixture and DELETEd by the next environment reset.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -2321,6 +2400,32 @@
             "default": null,
             "description": "Optional Kafka message key. Omit to let the broker hash by partition round-robin.",
             "title": "Partition Key"
+          },
+          "fixture_name": {
+            "default": "poison-message",
+            "description": "Name the dead-letter row's id derives from — uuid5(eeeeeeee-dead-4000-8000-000000000000, '{tenant_id}:{fixture_name}') — so a caller can pin the id before invoking. Its own namespace, so the same name under `create_bad_data_job` or `create_mislabeled_dlq_job` is a different row, not a collision. Ids are scoped to the calling tenant, so the same name in two tenants creates two independent rows. A repeat call is idempotent on the row while it still matches what the call declares, and refused with `poison_fixture_name_in_use` once it has drifted (someone fenced it, a replay moved it out of `dead_letter`, or this call declares a different `remediation_hint`); the refusal happens before the Kafka send, so nothing is published. The Kafka send itself is NOT idempotent — every accepted call publishes another poisoned message.",
+            "maxLength": 63,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "title": "Fixture Name",
+            "type": "string"
+          },
+          "remediation_hint": {
+            "anyOf": [
+              {
+                "enum": [
+                  "human_required",
+                  "unclassified"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "unclassified",
+            "description": "Whether the dead-letter row arrives already classified. `unclassified` (the DEFAULT) — or JSON `null`, which means the same thing — writes `remediation_hint = NULL`: nothing has categorised the failure, which is how a freshly poisoned message really arrives, because LLM triage is off by default on this platform. `human_required` stamps the category, so `replay_dlq_by_category` refuses the row on sight and there is nothing left for a reader to decide. `replay_safe` is not accepted on either spelling: this hook injects a payload that fails schema validation, so every replay of it fails identically.",
+            "title": "Remediation Hint"
           }
         },
         "required": [
@@ -2357,16 +2462,40 @@
             "type": "boolean"
           },
           "dlq_job_id": {
-            "description": "ID of the synthetic DLQ entry the hook wrote (remediation_hint=replay_safe). Observable via `list_dlq_messages`. Always populated on a successful call: an unseeded tenant gets a lazy-created chaos owner rather than a skipped row, so `accepted` and this field can no longer disagree.",
+            "description": "ID of the synthetic DLQ entry this call guarantees exists. Observable via `list_dlq_messages`; NOT replay-safe. Derived from the calling tenant and `fixture_name`, so a caller can compute it in advance. Always populated on a successful call: an unseeded tenant gets a lazy-created chaos owner rather than a skipped row, so `accepted` and this field can no longer disagree.",
             "title": "Dlq Job Id",
             "type": "string"
+          },
+          "fixture_name": {
+            "title": "Fixture Name",
+            "type": "string"
+          },
+          "remediation_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The category actually stamped on the dead-letter row: `human_required`, or null when the call declared `unclassified`. Never `replay_safe`.",
+            "title": "Remediation Hint"
+          },
+          "created": {
+            "description": "False when the DLQ row was already present and still matching, so this call only published to Kafka.",
+            "title": "Created",
+            "type": "boolean"
           }
         },
         "required": [
           "topic",
           "payload_bytes",
           "accepted",
-          "dlq_job_id"
+          "dlq_job_id",
+          "fixture_name",
+          "remediation_hint",
+          "created"
         ],
         "title": "PoisonMessageOutput",
         "type": "object"

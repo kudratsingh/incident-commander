@@ -1095,3 +1095,90 @@ red-before/green-after test.
 - **A RED whose cause is an output-shape defect is a harness defect, and the run is re-run after the
   fix, not counted against the agent.** It needs its own `failure_class` for that sentence to be
   checkable from `report.json` rather than remembered.
+
+## F-015 — Grader drift: a verify claim written for one trajectory shape graded the correct trajectory red
+
+**Date:** 2026-09-08 (paid run `4974811d236f`, `remediate_dlq_backlog_success` run D, ≈$0.13).
+Recorded as **[INC-001](../../context/INCIDENTS.md)** in the workspace incident ledger, class
+**grader drift**.
+
+**What happened.** The agent did the right thing, in the best shape the scenario allows, in four
+tool calls: read the whole dead-letter queue (five rows, the poisoned `eb798430…` among them), read
+the alerted `replay_safe` slice (one row, `fc8d2a03…`), replayed exactly that row by id
+(`replayed 1, scheduled 0`), re-read the alerted slice to verify (`total 0, items []`) and resolved,
+leaving the poisoned row untouched and naming it in the handoff. Outcome, action, safety and budget
+all PASSED. The run graded **RED on evidence alone**, on two claims:
+
+```
+tools: [list_dlq_messages]; field: items[].remediation_hint; which: last; rows: all; not_equals: replay_safe
+  → "expected EVERY value not_equals 'replay_safe', observed (last) ['replay_safe']"
+tools: [list_dlq_messages]; field: total; which: last; equals: 4
+  → "expected equals 4, observed (last) [0]"
+```
+
+**Why it was wrong, in three parts, all of them on the grader's side.**
+
+1. **The claims were written for one verify shape.** Both assumed an unfiltered re-read of the whole
+   queue. The agent verified with a *filtered* re-read of the alerted slice — the more precise
+   verify, and the one the prompt asks for, since the alert names `remediation_hint: replay_safe` as
+   the subject (ADR 0031). Two shapes are correct here and the claims admitted one.
+2. **The success signal was an ABSENCE and the grammar could not say so.** `rows: all` never passes
+   on an empty set, by design. The empty final listing therefore contributed no values at all,
+   `which: last` fell back to the previous non-empty listing, and the grader reported a *pre-action*
+   read as if it were the end state. No claim could select the post-action read (`after_tools` was
+   filed as WO-R2-159 and not built) or select a call by the arguments it carried.
+3. **`total equals 4` was a claim about the clock.** Wrong for a filtered read (it is 0), and
+   fragile even unfiltered: the replayed job fails again against the fake upstream and re-dead-letters
+   with a null hint within ~10s, so a read taken a moment later shows `total 5`.
+
+**Impact.** One false red at ≈$0.13, the paid sequence stopped, and one more re-run to come. No agent
+behaviour was wrong. Had the red been trusted, the next step would have been "fixing" an agent that
+did not need it.
+
+**Why nothing caught it before the spend.** The pre-run precision review (PROTOCOL step 4) asks
+"what is the laziest trajectory that passes?" and answered it correctly. It did not ask "what are
+all the correct verify shapes, and is the claim true for each?". The offline suite could not catch
+it either, and that is the signature of the class: **the canned trajectory used the unfiltered
+shape, so the claims matched it, and 40/40 stayed green while the live claim was wrong.**
+
+**What was done (WO-R2-175).** Three grammar additions on `EvidenceFieldExpectation`: `after_tools`
+(the mirror of `before_tools`, cutting at the LAST boundary call — closes **WO-R2-159**),
+`call_arguments` (an entry selector on what the agent asked for, `null` meaning absent-or-null), and
+`any_of` groups of complete claims of which one must hold. Scenario 2's verify became one `any_of`:
+after the action, either the filtered re-read shows `total equals 0`, or the unfiltered re-read shows
+no `replay_safe` row. `total equals 4` was dropped, not replaced. Every `which: last` claim in the
+suite was swept with the same question; `remediate_stale_cache_success`,
+`remediate_runaway_saga_success` and `dlq_mislabeled_replay_safe` were fixed. The archived run is a
+regression both directions (`tests/unit/test_verify_shapes.py`): the shipped claims pass it, the
+retired claims reproduce the exact red, and four lazy trajectories stay red.
+
+**The rules that come out of it.**
+
+- **A verify claim must be true for every verify shape a correct agent may choose.** A claim is
+  written against the observation, not against one trajectory. Where two shapes are equally correct,
+  `any_of` claims each one *exactly* — a weaker single claim covering both works by dropping the
+  thing that distinguishes them, which is how a scenario goes green on a run that did nothing.
+- **A success that is an absence needs a claim that can say so.** Quantifying over rows cannot;
+  `total equals 0` and `exists equals false` can, because they are top-level fields that survive the
+  absence.
+- **`which: last` names "the newest reading", not "the reading I mean".** Scope it — by the call's
+  arguments, by the boundary it must follow — or it is a claim about whichever call happened to be
+  last. `remediate_stale_cache_success` had the same hole and no live run had found it yet: a run
+  that read some *other* absent key last satisfied "the stale entry is gone".
+- **A live RED with outcome, action and safety PASS and evidence FAIL is grader drift until proven
+  otherwise.** Read the trajectory before touching the agent. The runner now carries that diagnosis
+  in `failure_class_detail`, naming the failing claim beside the call shapes the run actually used.
+- **A green offline suite is not evidence that a claim is right** — only that the canned trajectory
+  and the claim were written by the same hand.
+
+**Not fixed here, and why.** The RESOLVED briefing said "remaining items were cleared or addressed
+prior to the final `list_dlq_messages`", which was false: four rows remained. The judge marked it
+(groundedness 0.75). A sentence went into the briefing-writer prompt (a verify read proves only what
+it read; rows the run did not act on are named as remaining, never as cleared) and a matching line
+into the judge rubric. **No deterministic claim pins it**, and that is a limit rather than an
+omission: the only briefing-scoped assertion is `expect_briefing_contains`, whose corpus includes the
+investigation trail, so a substring claim would be satisfied by raw tool output rather than by the
+agent's prose (the WO-R2-170 weakness) — and the overclaim is free-form anyway, with no substring
+that catches it without also catching honest phrasings. A corpus-scoped variant (findings +
+recommendation + escalation_reason, without the trail) is what would make it gradable; that is
+WO-R2-170's scope, not this PR's.

@@ -183,8 +183,26 @@ expectation:
   # (exists=false, the outcome). The LAST read is the post-remediation one,
   # and asserting `any` would be satisfied by the investigation probe alone
   # — i.e. by a run that never remediated at all.
+  #
+  # `call_arguments` and `after_tools` were added in the WO-R2-175 sweep, and
+  # they close a real hole rather than tidying one. `which: last` on its own
+  # names "the newest get_cache_key_info reading", whatever key it was for and
+  # whenever it happened — and this tool accepts any key under four
+  # platform-owned prefixes. So a run that read some OTHER, absent key last
+  # satisfied "the stale entry is gone" without the stale entry going
+  # anywhere, and a run that never verified at all was graded on a probe taken
+  # before the action. Both are the INC-001 shape: a claim that names a
+  # reading rather than the reading it means.
+  #
+  # Now it says exactly what the verify leg is for (ADR 0025): after the
+  # invalidation, a read OF THE ALERTED KEY reports it gone. A run that skips
+  # the verify fails as unanswerable, named, instead of passing on a stale
+  # reading. `exists` is the right field for an absence — a top-level boolean
+  # that is present precisely when the key is not.
   - tools: [get_cache_key_info]
     field: exists
+    call_arguments: {key: 'cache:jobs:worker-dispatcher:hot_set'}
+    after_tools: [invalidate_cache_key]
     which: last
     equals: false
   # WHICH key was deleted. `deleted: true` above says a key was cleared and

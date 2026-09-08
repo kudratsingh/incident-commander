@@ -17,6 +17,7 @@ import pytest
 from pydantic import BaseModel
 
 from evals.dossier import HINT_COHERENT_FAMILIES, error_families
+from evals.graders.deterministic import leaf_claims
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
 from incident_commander.agent.hypothesis import HypothesisCategory, ReadToolName
@@ -1262,7 +1263,7 @@ class TestHintRoutedToolsMatchTheSuite:
             subject = cls._resource_subject(scenario)
             if subject is None:
                 continue
-            for claim in scenario.expectation.expected_evidence_fields:
+            for claim in leaf_claims(scenario.expectation.expected_evidence_fields):
                 if (
                     claim.field == wanted_field
                     and claim.where is not None

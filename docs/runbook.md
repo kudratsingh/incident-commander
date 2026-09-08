@@ -351,10 +351,17 @@ make eval-live ONLY=remediate_runaway_saga_success && make eval-reset
 #     un-stick path; pause_dag only stabilizes and is no longer graded as
 #     a fix by any scenario.
 # saga_stuck also became live-capable in the same change, on its own
-# chain. It is a read-only escalation scenario, but it now declares
-# chaos_setup, so it is NO LONGER part of the read-only smoke pass (a
-# --smoke selection carrying chaos is refused, exit 6) and belongs to the
-# one-at-a-time stage below with a reset after it:
+# chain. It declares chaos_setup, so it is NO LONGER part of the read-only
+# smoke pass (a --smoke selection carrying chaos is refused, exit 6) and
+# belongs to the one-at-a-time stage below with a reset after it. Since
+# WO-R2-160 it is also no longer read-only: its chain root is classified
+# human_required, so the correct run FENCES that root with
+# mark_dlq_permanent and then escalates (ADR 0033). The ADR 0020
+# one-mutating-scenario gate already covered it — that gate is keyed on
+# `expected_action_tools OR chaos_setup` and the hook alone was enough —
+# so nothing about the command changes. What changes is what the run does
+# to the world: it now stamps `fenced_at` on one DLQ row, which the reset
+# below clears with the chain itself:
 make eval-live ONLY=saga_stuck && make eval-reset
 
 # The two saga scenarios deliberately use DIFFERENT chain_names. Replaying

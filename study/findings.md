@@ -805,3 +805,77 @@ and non-inert on every production alert. The RESOLVED-honesty question for a
 subject-less mixed queue is answered in the ADR and filed as WO-R2-164 rather
 than encoded: it flips `dlq_mixed_partial`'s expected terminal state, which is a
 spend decision on a queued scenario and contradicts an accepted ADR.
+
+## F-011 — The carve-out that made the passing trajectory the lazy one
+
+**Where:** `evals/scenarios/saga_stuck.yaml`; both planner prompts;
+[ADR 0026](../docs/ADR/0026-a-stabilizer-is-not-a-resolution.md)'s `saga_stuck`
+consequence. Found by reading, not by a run — WO-R2-160, decided by the user on
+2026-09-08. Cost: $0.
+
+**What it was.** cmd #205 settled `human_required` DLQ rows as *fence, then
+escalate*, and carved out one exception in the same change: a `human_required`
+row that is the ROOT of a stuck chain was to be escalated with nothing touched,
+on the reasoning that a `platform.dag` alert makes the chain the incident and
+replaying the root is the human's decision, so a fence would record the opposite
+disposition against a decision already handed over.
+
+The carve-out was written carefully, pinned by a prompt test in both planners,
+stated in the ADR's consequences, and left to the user rather than taken quietly.
+It was still wrong, and the thing that makes it worth writing down is *how* it
+was wrong: not a missing fact, but two decisions collapsed into one.
+
+**The premise.** The exception treats the fence and the replay as alternatives.
+The platform does not: a fenced row is still replayable **by explicit id** —
+only category scans and the default bulk sweep skip fenced rows. ADR 0026 quotes
+that sentence and draws the opposite conclusion from it. So the fence forecloses
+nothing the human is being asked to decide, and the thing it *does* foreclose is
+the next operator's `replay_dlq_by_category` sweep re-running a payload that
+cannot succeed — which is not a decision anyone was making.
+
+**What the carve-out cost the scenario, which is the part worth generalising.**
+With every Tier-1 tool forbidden, the correct-behaviour claim was "touch
+nothing", so the LAZY trajectory — probe the chain, read the row, escalate — was
+the *passing* one. `saga_stuck` had already been repaired once for grading
+temperament rather than reasoning (cmd #192 gave it the `human_required`
+discriminator, so the escalation rests on something the agent reads); the
+carve-out left the second half of that defect standing. A run that read nothing
+past the chain and stopped still passed on four of five dimensions and could
+only fail on the evidence claim.
+
+The rule that falls out, now in `docs/eval-methodology.md`: **derive the
+forbidden set from the sanctioned action, never from the terminal state.** An
+escalating scenario forbids all seven Tier-1 tools when its correct action count
+is zero, and six when it is one. Terminal state is not a proxy for "did nothing".
+
+**The measurement that settled the stabilizer half.** Before writing the claims,
+`get_dag_state` on the chain root was read against the pinned v0.6.2 stack
+immediately before and immediately after a real `mark_dlq_permanent`, and the two
+responses were **byte-identical** — root `dead_letter` at `retry_count: 3`,
+descendant `waiting`, `paused: false`. The fence stamps the DLQ row and touches
+the chain not at all. That is the difference between asserting a stabilizer
+repairs nothing and knowing it, and it is why the run escalates and why the
+briefing must say `STABILIZED, NOT RESOLVED`.
+
+**Two things the fix deliberately did not do.**
+
+*It did not put the hint in the alert.* Adding `remediation_hint: human_required`
+to the `platform.dag` alert was the cheap way to make the existing corpus check
+(`TestHintRoutedToolsMatchTheSuite`, keyed on the alert's own hint) reach this
+scenario. It would also have handed the agent the discriminator cmd #192 created
+precisely so the escalation would rest on a READ. The check was widened instead:
+it now also selects a scenario whose alert names a resource and whose graded
+evidence pins that resource's row hint, narrowed to the routed tools that can
+name a resource — ADR 0032's own rule reused rather than a second hand-written
+list.
+
+*It did not assert a post-fence chain read.* It is the scenario's whole point and
+it is still not gradeable: a plan has one verify tool, `fenced_at` lives only in
+the DLQ listing, and any `get_dag_state` claim would therefore be read off the
+pre-action investigation probe under every `which` — a statement about the world
+before the fence dressed as one about the world after it, which is the
+cross-satisfiable fake-green this suite has corrected twice already. Said in the
+YAML rather than papered over; the briefing carries the claim instead.
+
+**Full record:** [ADR 0033](../docs/ADR/0033-a-human-required-chain-root-is-fenced-then-escalated.md),
+[`docs/lessons/live-eval-sequence-2026-09.md` §15](../docs/lessons/live-eval-sequence-2026-09.md).

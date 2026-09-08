@@ -179,7 +179,13 @@ _NON_REMEDIATION_CAPS: dict[str, int | None] = {
     "planner_stops_immediately": 0,
     "postgres_slow": 5,
     "redis_saturation": 5,
-    "saga_stuck": 11,
+    # `saga_stuck` left this table with WO-R2-160 (user decision, 2026-09-08):
+    # it fences its human_required chain root and then escalates, so it
+    # requires an action, enters the VERIFYING poll loop, and the polling
+    # profile applies to it. Its cap moved 11 -> 13 in the same change. At 11
+    # ADR 0019's runtime ceiling would have TRUNCATED the verify loop rather
+    # than grading a correct run red, which is the failure mode that reads
+    # exactly like an agent defect.
     "tool_missing_response": 0,
     "tool_output_schema_mismatch": 0,
     "tool_result_marked_error": 0,
@@ -537,6 +543,47 @@ class TestStuckDagChainIdsArePinnedCorrectly:
         assert probed == {expected}, (
             f"{scenario_name}: the precondition probes {probed}, not the "
             f"chain's derived root {expected}"
+        )
+
+    def test_every_site_naming_the_saga_stuck_root_is_the_hook_derivation(self) -> None:
+        """WO-R2-160 made this scenario grade WHICH job it fenced.
+
+        Until the fence became a required action the root id appeared in the
+        alert and the precondition only, and the check above covered both.
+        It is now in the action-argument pin, two ``where`` row selectors,
+        the briefing claim and the forbidden-replay list as well, and a
+        single-site check would let those drift apart from each other —
+        the "five stale copies" hazard this repo has already paid for. Same
+        shape as ``TestBadDataFixtureIdIsPinnedCorrectly`` below, on the
+        other hook.
+        """
+        scenario = {s.name: s for s in _shipped_scenarios()}["saga_stuck"]
+        expected = self._root_id("saga-stuck-eval")
+        expectation = scenario.expectation
+
+        pinned: dict[str, set[str]] = {
+            "expected_action_arguments": {
+                str(a.equals) for a in expectation.expected_action_arguments
+            },
+            "evidence where-selectors": {
+                str(e.where.equals) for e in expectation.expected_evidence_fields if e.where
+            },
+            "get_dag_state seed_id claim": {
+                str(e.equals) for e in expectation.expected_evidence_fields if e.field == "seed_id"
+            },
+        }
+        for site, values in pinned.items():
+            assert values == {expected}, (
+                f"saga_stuck: {site} pins {sorted(values)}, but "
+                f"create_stuck_dag(chain_name='saga-stuck-eval') produces {expected}"
+            )
+
+        assert expected in expectation.expect_briefing_contains, (
+            "saga_stuck: the briefing claim does not name the fenced root"
+        )
+        assert expected in expectation.forbidden_replay_job_ids, (
+            "saga_stuck: the chain root must be forbidden as a replay target — "
+            "a human_required payload re-fails on every replay"
         )
 
     def test_the_two_scenarios_do_not_share_a_chain(self) -> None:

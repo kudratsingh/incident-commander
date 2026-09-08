@@ -23,9 +23,12 @@ from incident_commander.agent.investigation import (
     FIX_MAP,
     HINT_ROUTED_CATEGORIES,
     HINT_ROUTED_TOOLS,
+    AlertSubject,
     SubjectMatch,
+    alert_subject,
 )
 from incident_commander.agent.remediation import (
+    DLQ_ROW_SOURCE,
     RemediationPlan,
     Tier1ToolName,
     _absent_resource_args,
@@ -1189,12 +1192,36 @@ class TestHintRoutedToolsMatchTheSuite:
 
     Keyed on the alert field for the same reason ``ALERT_SUBJECT_PROBES`` is:
     the field carries the VALUE, and the value is what makes the row this
-    incident's subject (ADR 0031). It is also what keeps this check silent on
-    ``saga_stuck``, whose alert names a ``job_id`` — its seeded chain root is
-    ``human_required`` and it forbids ``mark_dlq_permanent`` deliberately,
-    because there the incident is the chain and the replay is the human's
-    decision. That boundary is prose in both prompts and pinned in
-    ``test_prompts_snapshot.py``; here it falls out of the key.
+    incident's subject (ADR 0031).
+
+    TWO SELECTIONS SINCE WO-R2-160, because a hint reaches an incident two
+    ways. The note here used to say the alert key was also what kept this
+    check silent on ``saga_stuck``, "which forbids ``mark_dlq_permanent``
+    deliberately, because there the incident is the chain and the replay is
+    the human's decision". The user reversed that on 2026-09-08: a
+    ``human_required`` chain root is fenced and then escalated, exactly like
+    a ``human_required`` DLQ row, so silence on that scenario is no longer
+    the right answer and the reach had to widen.
+
+    * **the alert names the SLICE** (``remediation_hint``) — the original
+      selection. The hint is the incident's subject and the routing is a
+      statement about that subject.
+    * **the alert names a RESOURCE** (``job_id`` today) and the scenario's
+      own graded evidence pins THAT resource's dead-letter row hint. The hint
+      is then a fact the agent has to read rather than one it is handed, and
+      the routing still has to agree with what the scenario expects. Keyed on
+      the scenario's ``where``-scoped claim rather than on the alert, because
+      putting the hint in the alert would hand the agent the discriminator
+      ``saga_stuck`` exists to make it find.
+
+    The two selections differ in one place and it is derived, not declared:
+    for a RESOURCE subject the routed set is narrowed to the tools that can
+    NAME a resource (``RESOURCE_ARG_FIELDS``). That is ADR 0032's own rule
+    reused — an action must address the alerted resource, and a category
+    replay names a filter, not a row — and without it every resource-subject
+    scenario would collide on ``replay_dlq_by_category``, which
+    ``remediate_runaway_saga_success`` forbids precisely because its incident
+    is one job.
     """
 
     @staticmethod
@@ -1206,36 +1233,104 @@ class TestHintRoutedToolsMatchTheSuite:
                 pairs.append((scenario, hint))
         return pairs
 
+    @staticmethod
+    def _resource_subject(scenario: Scenario) -> AlertSubject | None:
+        """The alert's subject, when it is a RESOURCE rather than a slice.
+
+        "Resource" is derived from ``RESOURCE_ARG_FIELDS``: the subject's
+        probe argument is a resource argument of the probe's own tool
+        (``get_dag_state.job_id`` is; ``list_dlq_messages`` has none, which
+        is exactly why a hint and the unclassified scope are slices). One
+        source of truth, and the same one ``_resource_values`` grades plans
+        against.
+        """
+        subject = alert_subject(scenario.alert.model_dump())
+        if subject is None:
+            return None
+        if subject.argument_field not in RESOURCE_ARG_FIELDS.get(subject.tool_name, frozenset()):
+            return None
+        return subject
+
+    @classmethod
+    def _hint_graded_scenarios(cls) -> list[tuple[Scenario, str]]:
+        """Resource-subject scenarios whose evidence pins that row's hint."""
+        pairs: list[tuple[Scenario, str]] = []
+        wanted_field = f"{DLQ_ROW_SOURCE.rows_field}[].{DLQ_ROW_SOURCE.decision_field}"
+        for scenario in load_scenarios(_SCENARIO_DIR):
+            subject = cls._resource_subject(scenario)
+            if subject is None:
+                continue
+            for claim in scenario.expectation.expected_evidence_fields:
+                if (
+                    claim.field == wanted_field
+                    and claim.where is not None
+                    and claim.where.field == DLQ_ROW_SOURCE.id_field
+                    and claim.where.equals == subject.value
+                    and isinstance(claim.equals, str)
+                ):
+                    pairs.append((scenario, claim.equals))
+                    break
+        return pairs
+
+    @classmethod
+    def _checked(cls) -> list[tuple[Scenario, str, frozenset[str], str]]:
+        """Every (scenario, hint, admissible tools, why) pair this class grades."""
+        rows: list[tuple[Scenario, str, frozenset[str], str]] = []
+        for scenario, hint in cls._hint_alerting_scenarios():
+            rows.append((scenario, hint, HINT_ROUTED_TOOLS.get(hint, frozenset()), "its alert"))
+        for scenario, hint in cls._hint_graded_scenarios():
+            routed = frozenset(
+                tool
+                for tool in HINT_ROUTED_TOOLS.get(hint, frozenset())
+                if RESOURCE_ARG_FIELDS.get(tool)
+            )
+            rows.append((scenario, hint, routed, "the alerted resource's own row"))
+        return rows
+
     def test_the_corpus_has_hint_alerting_scenarios_to_check(self) -> None:
         """Anti-vacuity canary: an empty selection would report nothing, green."""
         assert self._hint_alerting_scenarios()
 
+    def test_the_corpus_has_hint_graded_resource_scenarios_to_check(self) -> None:
+        """The second selection's canary, and it names what it must cover.
+
+        ``saga_stuck`` and ``remediate_runaway_saga_success`` are the saga
+        pair: same alert shape, same chain shape, opposite actions decided
+        by the root's own hint. If either drops out of this selection the
+        check has stopped reading the thing that separates them.
+        """
+        covered = {scenario.name for scenario, _ in self._hint_graded_scenarios()}
+        assert {"saga_stuck", "remediate_runaway_saga_success"} <= covered, (
+            f"the saga pair is not covered by the resource-subject selection: {sorted(covered)}"
+        )
+
     def test_every_alerted_hint_is_a_routing_this_map_knows(self) -> None:
-        """An alert may not name a category the routing has no entry for.
+        """A scenario may not rest on a category the routing has no entry for.
 
         The gap would be silent in the worst way: the two assertions below
-        skip a hint they cannot look up, so an alert carrying a typo'd or a
-        newly-added hint would pass this class by being unrecognised.
+        skip a hint they cannot look up, so a typo'd or newly-added hint
+        would pass this class by being unrecognised.
         """
         unknown = sorted(
-            {hint for _, hint in self._hint_alerting_scenarios() if hint not in HINT_ROUTED_TOOLS}
+            {hint for _, hint in self._hint_alerting_scenarios() + self._hint_graded_scenarios()}
+            - set(HINT_ROUTED_TOOLS)
         )
         assert not unknown, (
-            f"scenario alerts name remediation hints {unknown}, which "
+            f"scenarios name remediation hints {unknown}, which "
             f"HINT_ROUTED_TOOLS does not route. Either the hint is wrong in "
             f"the scenario or the routing is missing a decision — and an "
             f"unroutable hint reaches the planner as an incident subject "
             f"with no action attached to it."
         )
 
-    def test_no_scenario_forbids_a_tool_its_alerted_hint_routes_to(self) -> None:
+    def test_no_scenario_forbids_a_tool_its_hint_routes_to(self) -> None:
         problems: list[str] = []
-        for scenario, hint in self._hint_alerting_scenarios():
+        for scenario, hint, routed, why in self._checked():
             forbidden = set(scenario.expectation.forbidden_action_tools)
-            collision = sorted(HINT_ROUTED_TOOLS.get(hint, frozenset()) & forbidden)
+            collision = sorted(routed & forbidden)
             if collision:
                 problems.append(
-                    f"{scenario.name}: its alert names remediation_hint="
+                    f"{scenario.name}: {why} names remediation_hint="
                     f"{hint!r}, which routes to {collision}, and those are "
                     f"in its forbidden_action_tools"
                 )
@@ -1244,12 +1339,10 @@ class TestHintRoutedToolsMatchTheSuite:
             "as a safety violation:\n  " + "\n  ".join(problems) + "\n"
             "Either the routing is stale (fix HINT_ROUTED_TOOLS *and* the "
             "remediation-planner prompt, which is written from it) or the "
-            "scenario forbids the wrong tool. If the scenario is right "
-            "because its subject is not the row — a stuck chain's root, say "
-            "— then its alert should not be naming that row's category."
+            "scenario forbids the wrong tool."
         )
 
-    def test_every_expected_action_is_one_the_alerted_hint_routes_to(self) -> None:
+    def test_every_expected_action_is_one_the_hint_routes_to(self) -> None:
         """The other direction: a scenario cannot expect an unsteered tool.
 
         ``forbidden`` catches the prompt sending the agent somewhere the
@@ -1258,17 +1351,16 @@ class TestHintRoutedToolsMatchTheSuite:
         end, and the half that was invisible for the whole life of PR #173.
         """
         problems: list[str] = []
-        for scenario, hint in self._hint_alerting_scenarios():
-            routed = HINT_ROUTED_TOOLS.get(hint, frozenset())
+        for scenario, hint, routed, why in self._checked():
             unsteered = sorted(set(scenario.expectation.expected_action_tools) - routed)
             if unsteered:
                 problems.append(
-                    f"{scenario.name}: alert names remediation_hint={hint!r} "
+                    f"{scenario.name}: {why} names remediation_hint={hint!r} "
                     f"(routed to {sorted(routed)}) but the scenario expects "
                     f"{unsteered}"
                 )
         assert not problems, (
-            "a scenario expects an action its alerted hint does not route "
+            "a scenario expects an action its hint does not route "
             "to:\n  " + "\n  ".join(problems) + "\n"
             "The live agent reads the prompt, and the prompt is written from "
             "HINT_ROUTED_TOOLS; an expectation outside that routing is a "

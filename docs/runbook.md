@@ -556,12 +556,14 @@ the degradation is now recorded in the report (`degraded_count` in
 
 A scenario with both `use_live_mcp` and `use_live_llm` false is
 **canned-only**: a claim that the live platform cannot manufacture or
-expose its fault, not that nobody wired it up. Three scenarios carry the
+expose its fault, not that nobody wired it up. Two scenarios carry the
 marker today — `remediate_verify_fails` (a healthy platform cannot supply
-a fault that verify then fails to see cleared), `remediate_runaway_saga_success`
-(the seeded DAG auto-completes within seconds and no chaos hook builds a
-runaway chain), and `remediate_stale_cache_success` (`create_stale_cache`
-writes a Redis key invisible to every read tool). Each YAML documents the
+a fault that verify then fails to see cleared: `restart_consumer_group`
+clears the kill flag, so no hook keeps a consumer dead through a restart —
+WO-R2-165 proposes a sticky kill) and `alert_storm` (no producer emits a
+burst). `remediate_runaway_saga_success` and `remediate_stale_cache_success`
+lost the marker at the v0.6.0 pin (`create_stuck_dag`, `get_cache_key_info`)
+and both passed live on 2026-09-07. Each canned-only YAML documents the
 reason and the platform change that unblocks it directly above the flags.
 
 Without the refusal, `run_scenario` would fall back to canned for such a

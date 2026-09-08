@@ -943,13 +943,19 @@ class TestAlertSubjectProbeGuard:
     def test_subjectless_alert_leaves_the_guard_inert(
         self, run_state: RunState, now: datetime
     ) -> None:
-        """A DLQ-depth alert names a condition, not a resource — never blocked.
+        """A whole-queue DLQ alert names a condition, not a resource.
 
-        This is the shape of all five canned DLQ remediation flows. Note the
-        explicit ``group: None``: ``AlertPayload.group`` defaults to None and
-        the eval runner dumps without ``exclude_none``, so the key is PRESENT
-        on every alert the agent ever sees. A guard that tested for the key
-        rather than for a usable value would block the entire DLQ family.
+        This is the shape of the two DLQ scenarios that deliberately name no
+        category — `dlq_backlog` (queue depth) and `dlq_mixed_partial` (a
+        genuinely mixed queue). The other four now carry an explicit
+        `remediation_hint` and are covered by
+        ``TestDlqCategoryIsTheAlertSubject`` below.
+
+        Note the explicit ``group: None``: ``AlertPayload.group`` defaults to
+        None and the eval runner dumps without ``exclude_none``, so the key is
+        PRESENT on every alert the agent ever sees — and since 2026-09-07 so
+        is ``remediation_hint``. A guard that tested for the key rather than
+        for a usable value would block the entire DLQ family.
         """
         alert = {
             "source": "platform.dlq",
@@ -1001,40 +1007,295 @@ class TestAlertSubjectProbeGuard:
         assert markers and all(e.tool_name.startswith("_") for e in markers)
 
 
+def _dlq_alert(hint: str | None) -> dict[str, Any]:
+    """A DLQ alert as the eval runner dumps one, with or without a category.
+
+    ``group`` and ``remediation_hint`` are both present-and-None when unset,
+    because ``AlertPayload`` declares them and the runner dumps without
+    ``exclude_none``. Writing them out is the point: the guard must key on a
+    usable value, never on a key's presence.
+    """
+    return {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning_wait_replay",
+        "group": None,
+        "remediation_hint": hint,
+    }
+
+
+class TestDlqCategoryIsTheAlertSubject:
+    """A DLQ alert naming a category is investigated through that slice.
+
+    Live run `06e14be3e7b1` (`dlq_wait_and_replay_success`, 2026-09-07) is
+    what these pin. The alert's subject was the wait_and_replay backlog and
+    the only thing saying so was the fingerprint STRING. The agent listed the
+    DLQ unfiltered, reasoned correctly about all four rows across all three
+    categories, and then stopped:
+
+        "The DLQ contains 4 entries with mixed remediation hints that cannot
+        be handled by a single Tier-1 action"
+
+    Every clause of that is true. It is an escalation only because the scope
+    was four rows instead of two — ADR 0008 gives one attempt with one
+    action, so an over-wide scope cannot degrade into a partial fix. Zero
+    plans, one tool call, red on four of five dimensions.
+
+    The subject is a SLICE rather than a row, which is the one thing new here;
+    ``tests/unit/test_policies.py::TestAlertSubjectProbes`` holds the
+    admissibility rule for that.
+    """
+
+    def test_the_unfiltered_listing_does_not_satisfy_a_category_subject(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Run B's trajectory, exactly: whole-queue read, then handoff.
+
+        This is the red-before. The same two canned steps reached PLANNING
+        before the map entry existed, because the alert named nothing and the
+        guard was inert on every DLQ alert in the corpus.
+        """
+        llm = CannedLLMClient([_probe_step("list_dlq_messages", {}), _remediate_step()])
+        mcp = _multi_tool_mcp()
+        transition = make_llm_investigate(mcp, llm, model="m")
+        result = transition(
+            run_state.model_copy(
+                update={
+                    "state": IncidentState.INVESTIGATING,
+                    "alert": _dlq_alert("wait_and_replay"),
+                }
+            ),
+            now,
+        )
+
+        assert result.state is not IncidentState.PLANNING
+        refusals = [e for e in result.evidence if e.tool_name == "_handoff_refused"]
+        assert len(refusals) == 1
+        assert "wait_and_replay" in refusals[0].result_summary
+        assert "list_dlq_messages" in refusals[0].result_summary
+        # The unfiltered call wires `remediation_hint` to None, and the whole
+        # queue is not the slice — so the refusal has to say so in as many
+        # words, or the planner re-reads the same page and stops again.
+        assert "does not count" in refusals[0].result_summary
+        assert mcp.calls == [
+            (
+                "list_dlq_messages",
+                {"job_type": None, "remediation_hint": None, "limit": 50, "offset": 0},
+            )
+        ]
+
+    def test_the_scoped_listing_admits_the_handoff(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The green-after, and the shape the four scenarios now script."""
+        llm = CannedLLMClient(
+            [
+                _probe_step("list_dlq_messages", {}),
+                _probe_step("list_dlq_messages", {"remediation_hint": "wait_and_replay"}),
+                _remediate_step(),
+            ]
+        )
+        mcp = _multi_tool_mcp()
+        transition = make_llm_investigate(mcp, llm, model="m")
+        result = transition(
+            run_state.model_copy(
+                update={
+                    "state": IncidentState.INVESTIGATING,
+                    "alert": _dlq_alert("wait_and_replay"),
+                }
+            ),
+            now,
+        )
+
+        assert result.state is IncidentState.PLANNING
+        assert not [e for e in result.evidence if e.tool_name == "_handoff_refused"]
+
+    def test_the_refusal_steers_the_planner_to_the_scoped_read(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Refused once, told which call to make, recovers inside the run.
+
+        The behavioural claim the whole guard rests on: it steers rather than
+        ends. Run B had no such turn available to it — it stopped on its own
+        and the loop was over.
+        """
+        llm = CannedLLMClient(
+            [
+                _probe_step("list_dlq_messages", {}),
+                _remediate_step(),
+                _probe_step("list_dlq_messages", {"remediation_hint": "wait_and_replay"}),
+                _remediate_step(),
+            ]
+        )
+        mcp = _multi_tool_mcp()
+        transition = make_llm_investigate(mcp, llm, model="m")
+        result = transition(
+            run_state.model_copy(
+                update={
+                    "state": IncidentState.INVESTIGATING,
+                    "alert": _dlq_alert("wait_and_replay"),
+                }
+            ),
+            now,
+        )
+
+        assert result.state is IncidentState.PLANNING
+        assert len([e for e in result.evidence if e.tool_name == "_handoff_refused"]) == 1
+        assert (
+            "list_dlq_messages",
+            {
+                "job_type": None,
+                "remediation_hint": "wait_and_replay",
+                "limit": 50,
+                "offset": 0,
+            },
+        ) in mcp.calls
+
+    def test_reading_a_different_category_does_not_satisfy_it(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Value-matched, like every other entry in the map.
+
+        The failure this forbids is the one ADR 0028 documents from the other
+        side: read `replay_safe`, act on `wait_and_replay`. Here it would be
+        read `replay_safe`, claim the wait backlog was investigated.
+        """
+        llm = CannedLLMClient(
+            [
+                _probe_step("list_dlq_messages", {"remediation_hint": "replay_safe"}),
+                _remediate_step(),
+            ]
+        )
+        transition = make_llm_investigate(_multi_tool_mcp(), llm, model="m")
+        result = transition(
+            run_state.model_copy(
+                update={
+                    "state": IncidentState.INVESTIGATING,
+                    "alert": _dlq_alert("wait_and_replay"),
+                }
+            ),
+            now,
+        )
+
+        assert result.state is not IncidentState.PLANNING
+        assert any(e.tool_name == "_handoff_refused" for e in result.evidence)
+
+    def test_a_hintless_dlq_alert_is_unaffected(self, run_state: RunState, now: datetime) -> None:
+        """`dlq_mixed_partial` and `dlq_backlog`: same payload, hint None.
+
+        The inert case has to stay inert, and it has to stay inert for the
+        RIGHT reason — a mixed queue names no slice, so there is nothing to
+        demand. The steering for that case lives in the planner prompt ("a
+        mixed queue is never a reason to escalate"), which is exactly why
+        `dlq_mixed_partial` keeps no category: a rule with no scenario that
+        can fail it is not measured.
+        """
+        llm = CannedLLMClient([_probe_step("list_dlq_messages", {}), _remediate_step()])
+        transition = make_llm_investigate(_multi_tool_mcp(), llm, model="m")
+        result = transition(
+            run_state.model_copy(
+                update={"state": IncidentState.INVESTIGATING, "alert": _dlq_alert(None)}
+            ),
+            now,
+        )
+
+        assert result.state is IncidentState.PLANNING
+        assert not [e for e in result.evidence if e.tool_name == "_handoff_refused"]
+
+    def test_a_named_resource_outranks_a_slice(self) -> None:
+        """Declaration order is priority order, and the hint is last.
+
+        A stuck-chain alert carrying both a dead-lettered `job_id` and the
+        category that job sits in is about the job. The coarser reading would
+        also be defensible prose, which is why the ordering is pinned rather
+        than left to the dict literal's shape.
+        """
+        subject = alert_subject(
+            {
+                "source": "platform.dag",
+                "job_id": "a2412a54-65f0-5258-95ab-5c168a15df64",
+                "remediation_hint": "replay_safe",
+            }
+        )
+        assert subject is not None
+        assert (subject.alert_field, subject.tool_name) == ("job_id", "get_dag_state")
+
+    def test_a_hint_inside_extra_data_is_found(self) -> None:
+        """Where a real webhook would put it.
+
+        ``alert_subject`` reads one level into ``extra_data`` because that is
+        the platform's actual alert body. The corpus carries the field at the
+        top level; production would not, and a guard that only worked offline
+        would be worse than none.
+        """
+        subject = alert_subject(
+            {"source": "platform.dlq", "extra_data": {"remediation_hint": "human_required"}}
+        )
+        assert subject is not None
+        assert subject.tool_name == "list_dlq_messages"
+        assert subject.argument_field == "remediation_hint"
+        assert subject.value == "human_required"
+
+
+# One case per ``ALERT_SUBJECT_PROBES`` entry: the alert that names it, and
+# the probe call it must resolve to. A module constant rather than an inline
+# parametrize list so the totality test below can compare it against the map —
+# the list held five cases for five entries by coincidence, not by
+# construction, so a sixth entry could have shipped with no case here and
+# nothing would have said so.
+_MAPPED_FIELD_CASES: list[tuple[dict[str, Any], tuple[str, str, str]]] = [
+    (
+        {"group": "orders-consumer"},
+        ("get_consumer_lag", "consumer_group", "orders-consumer"),
+    ),
+    (
+        {"consumer_group": "worker-dispatcher"},
+        ("get_consumer_lag", "consumer_group", "worker-dispatcher"),
+    ),
+    (
+        {"cache_key": "cache:jobs:worker-dispatcher:hot_set"},
+        ("get_cache_key_info", "key", "cache:jobs:worker-dispatcher:hot_set"),
+    ),
+    (
+        {"job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"},
+        ("get_dag_state", "job_id", "a2412a54-65f0-5258-95ab-5c168a15df64"),
+    ),
+    (
+        {"trace_id": "0e24ca29-1d47-57e9-b898-4d79bb6da981"},
+        ("get_trace", "trace_id", "0e24ca29-1d47-57e9-b898-4d79bb6da981"),
+    ),
+    (
+        {"remediation_hint": "wait_and_replay"},
+        ("list_dlq_messages", "remediation_hint", "wait_and_replay"),
+    ),
+]
+
+
 class TestAlertSubjectDerivation:
     """``alert_subject`` is mechanical: a closed field map, never a heuristic."""
 
-    @pytest.mark.parametrize(
-        ("alert", "expected"),
-        [
-            (
-                {"group": "orders-consumer"},
-                ("get_consumer_lag", "consumer_group", "orders-consumer"),
-            ),
-            (
-                {"consumer_group": "worker-dispatcher"},
-                ("get_consumer_lag", "consumer_group", "worker-dispatcher"),
-            ),
-            (
-                {"cache_key": "cache:jobs:worker-dispatcher:hot_set"},
-                ("get_cache_key_info", "key", "cache:jobs:worker-dispatcher:hot_set"),
-            ),
-            (
-                {"job_id": "a2412a54-65f0-5258-95ab-5c168a15df64"},
-                ("get_dag_state", "job_id", "a2412a54-65f0-5258-95ab-5c168a15df64"),
-            ),
-            (
-                {"trace_id": "0e24ca29-1d47-57e9-b898-4d79bb6da981"},
-                ("get_trace", "trace_id", "0e24ca29-1d47-57e9-b898-4d79bb6da981"),
-            ),
-        ],
-    )
+    @pytest.mark.parametrize(("alert", "expected"), _MAPPED_FIELD_CASES)
     def test_every_mapped_field_resolves_to_its_probe(
         self, alert: dict[str, Any], expected: tuple[str, str, str]
     ) -> None:
         subject = alert_subject(alert)
         assert subject is not None
         assert (subject.tool_name, subject.argument_field, subject.value) == expected
+
+    def test_the_case_list_covers_every_mapped_field(self) -> None:
+        """Anti-vacuity for the name of the test above.
+
+        "Every mapped field" is a claim about the map, so the case list has to
+        be held against the map rather than trusted to have kept up with it.
+        """
+        from incident_commander.agent.investigation import ALERT_SUBJECT_PROBES
+
+        covered = {field for alert, _ in _MAPPED_FIELD_CASES for field in alert}
+        assert covered == set(ALERT_SUBJECT_PROBES), (
+            "_MAPPED_FIELD_CASES does not cover every ALERT_SUBJECT_PROBES field: "
+            f"missing {sorted(set(ALERT_SUBJECT_PROBES) - covered)}, "
+            f"extra {sorted(covered - set(ALERT_SUBJECT_PROBES))}."
+        )
 
     @pytest.mark.parametrize(
         "alert",

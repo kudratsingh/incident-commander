@@ -14,6 +14,17 @@ alert:
   source: platform.dlq
   severity: critical
   fingerprint: dlq_depth_warning_replay_safe
+  # The category this alert fires on, stated as a field rather than left
+  # inside the fingerprint string. See the long note in
+  # `dlq_wait_and_replay_success.yaml` for the live run (`06e14be3e7b1`) that
+  # made every category-scoped DLQ alert in this corpus carry one.
+  #
+  # This scenario passed live (`3c65c04326d4`) with the agent listing
+  # unfiltered and then filtering `replay_safe` on its own initiative. The
+  # field turns that from a thing the agent happened to do into a thing the
+  # handoff guard requires, and the scoped reading is also what ADR 0028
+  # needs to cover the `replay_safe` category replay this scenario grades.
+  remediation_hint: replay_safe
 canned_tool_responses:
   # Re-recorded against the platform's seeded dead-letter pack, the same four
   # rows the other DLQ scenarios now carry. What was here was hand-written:
@@ -43,15 +54,30 @@ canned_tool_responses:
     is_error: false
 canned_llm_responses:
   investigation_planner:
+  # Unfiltered page first (context, and the reading the drift check compares
+  # the recording above against), then the alerted slice, which the handoff
+  # guard requires by value. Same two-step shape as
+  # `dlq_wait_and_replay_success`.
   - hypotheses:
     - category: poison_message
       name: poison_message_replay_safe
       confidence: 0.5
-      reasoning: DLQ depth alert; probe list_dlq_messages to see hint categories.
+      reasoning: DLQ depth alert on the replay_safe slice; read the whole queue first so the briefing can say what is being left behind.
     next_action:
       kind: probe
       tool_name: list_dlq_messages
       arguments:
+        limit: 50
+  - hypotheses:
+    - category: poison_message
+      name: poison_message_replay_safe
+      confidence: 0.6
+      reasoning: "Four rows in three categories, and the alert names one of them. Read the alerted slice on its own before acting on it.\n"
+    next_action:
+      kind: probe
+      tool_name: list_dlq_messages
+      arguments:
+        remediation_hint: replay_safe
         limit: 50
   - hypotheses:
     - category: poison_message

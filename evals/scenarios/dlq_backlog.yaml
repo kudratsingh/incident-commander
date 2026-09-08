@@ -26,6 +26,18 @@ alert:
   severity: critical
   fingerprint: dlq_depth_warning
   queue: dlq
+  # DELIBERATELY CARRIES NO `remediation_hint`, unlike the four
+  # category-scoped DLQ scenarios (see `dlq_wait_and_replay_success.yaml` for
+  # the live run behind that change).
+  #
+  # This alert is about QUEUE DEPTH — `queue: dlq` above is its subject in
+  # prose and there is no probe that reads a depth by name — and the scenario
+  # asserts exactly that premise: one unfiltered `list_dlq_messages`, then
+  # escalate with the summary. It is a read-only scenario with no
+  # `expected_action_tools` at all, so the handoff guard is unreachable here
+  # in any case; giving it a category would change the premise the scenario
+  # was written to measure and would say the alert is about a slice when it
+  # is about a total.
 canned_tool_responses:
   # Re-recorded against the platform's seeded dead-letter pack. The old row
   # was hand-written and almost nothing in it was a value the platform can

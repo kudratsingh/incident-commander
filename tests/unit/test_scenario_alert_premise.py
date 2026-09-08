@@ -151,6 +151,16 @@ _REWRITTEN: Final[dict[str, tuple[str, str]]] = {
 # because the divergence is uniform and structural: it is one disagreement
 # between the commander's ingress model and the platform's emitter, not 38
 # separate scenario mistakes.
+#
+# `remediation_hint` is the newest entry and the one with a platform-side
+# note attached: the commander now READS it (a category-scoped DLQ alert is
+# investigated through the hint-filtered listing —
+# `investigation.ALERT_SUBJECT_PROBES`), and the platform's DLQ-depth alert
+# producer does not yet EMIT it. Until it does, the field is a top-level
+# scenario convention like the ten above it. When the platform starts
+# emitting the category inside `extra_data`, nothing here changes —
+# `alert_subject` already looks one level into `extra_data` — and this entry
+# stays, because the corpus keeps carrying it at the top level.
 _NON_WEBHOOK_ALERT_FIELDS: Final[frozenset[str]] = frozenset(
     {
         "fingerprint",
@@ -163,6 +173,7 @@ _NON_WEBHOOK_ALERT_FIELDS: Final[frozenset[str]] = frozenset(
         "job_type",
         "cache_key",
         "trace_id",
+        "remediation_hint",
     }
 )
 
@@ -309,12 +320,38 @@ class TestIngressModelMatchesTheEmitter:
     def test_alert_payload_declares_fields_the_webhook_does_not_send(self) -> None:
         declared = set(AlertPayload.model_fields)
         unsent = sorted(declared - _WEBHOOK_FIELDS)
-        assert unsent == ["fingerprint", "group"], (
+        assert unsent == ["fingerprint", "group", "remediation_hint"], (
             "the set of AlertPayload fields the platform's webhook does not send has "
             f"changed: {unsent}. Either the platform started sending them (update "
             "_WEBHOOK_FIELDS from backend/app/services/alerts.py::_maybe_emit_webhook), "
             "or the commander added another field the platform never sends."
         )
+
+    def test_the_dlq_category_field_is_one_of_them_and_is_a_filed_platform_gap(self) -> None:
+        """`remediation_hint` joined the list on 2026-09-07, deliberately.
+
+        Unlike `fingerprint`, this one was added to `AlertPayload` by the
+        commander in full knowledge that the platform does not send it, so it
+        is worth being explicit that the gap is intentional and outstanding
+        rather than an oversight this test caught.
+
+        The commander now READS it: `investigation.ALERT_SUBJECT_PROBES` maps
+        it to `list_dlq_messages(remediation_hint=…)`, which is the probe a
+        category-scoped DLQ incident must be investigated through (live run
+        `06e14be3e7b1`). Offline the eval corpus supplies it. In production the
+        field arrives from nowhere, so the guard is inert on real DLQ alerts
+        until the platform's DLQ-depth alert producer emits the category —
+        filed as the platform-side note on this change.
+
+        Inert is the correct failure mode and that is why this ships ahead of
+        the platform: `alert_subject` returns None on an alert with no hint, so
+        a production DLQ alert investigates exactly as it does today. When the
+        platform starts emitting the category inside `extra_data`, nothing here
+        changes — `alert_subject` already reads one level in.
+        """
+        assert "remediation_hint" not in _WEBHOOK_FIELDS
+        assert "remediation_hint" in AlertPayload.model_fields
+        assert AlertPayload(source="platform.dlq").remediation_hint is None
 
     def test_the_dedupe_key_field_is_one_of_them(self) -> None:
         # Stated separately because it is the one with a production symptom.

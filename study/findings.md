@@ -564,3 +564,96 @@ that produced the mangled plan.
 wire, and no UUID is ever re-typed. That removes the surface rather than guarding
 it; it invalidates every canned plan fixture at once, so it wants its own PR and
 its own paid run.
+
+---
+
+## F-008 — The alert named a slice; the agent scoped itself to the collection
+
+**Where it bit.** Live paid run `06e14be3e7b1`, `dlq_wait_and_replay_success`,
+2026-09-07. Red on outcome, evidence, action and safety. One tool call, one
+planner turn, zero plans. ~$0.06.
+
+**What happened.** The agent called `list_dlq_messages` unfiltered, got the four
+seeded rows, and classified all four correctly — one `replay_safe` upstream
+timeout, two `wait_and_replay` rows on two different dependencies, one
+`human_required` CSV parse error — naming the right remedy for each. Then it
+stopped:
+
+> The DLQ contains 4 entries with mixed remediation hints that cannot be handled
+> by a single Tier-1 action […] A human operator must triage each entry
+> individually.
+
+The briefing judge scored groundedness **0.95**. Every id, error type, hint and
+retry count in the escalation matches the tool output exactly.
+
+**The defect is the scope, and it is upstream of the model.** The alert was
+`{"source": "platform.dlq", "severity": "critical", "fingerprint":
+"dlq_depth_warning_wait_replay", "group": null}`. The incident is the
+wait_and_replay backlog: two rows, one deferred replay, exactly one Tier-1
+action. The only thing in the payload that said so was the substring
+`wait_replay` inside a free-text fingerprint — and `ALERT_SUBJECT_PROBES` is
+keyed on the field rather than on `fingerprint` precisely because that string is
+free text nobody validates. So the agent set its scope from the queue it could
+observe rather than from the incident it was paged for.
+
+**Why a true sentence became an escalation.** ADR 0008 allows one attempt with
+one action. With a four-row scope and one action available, there is no partial
+fix to fall back to, so the correct behaviour *given that scope* is to hand off.
+
+> **An over-wide scope does not degrade into a partial fix; it converts into an
+> escalation.** The single-action limit is not the defect — it is what makes an
+> under-specified alert expensive. Where a run's stated reason for escalating is
+> that the work did not fit in one action, suspect the scope before the
+> reasoning, and ask what the smallest scope that would have explained the alert
+> was. (WO-R2-155 already records the single-action limit as the live constraint;
+> this is the first run where it converted a specification gap into a red.)
+
+**Why the previous green does not count as evidence.** Run A of the same
+scenario (`5c8895771fbd`, F-007) scoped itself correctly and unprompted on the
+same world — its first call was
+`list_dlq_messages(remediation_hint="wait_and_replay")`. Nothing changed between
+the two runs except sampling.
+
+> **A behaviour that appears when the model happens to read a fingerprint the
+> way you hoped is not a behaviour the harness has.** F-006's lesson was that a
+> check which never names the subject verifies only that something happened.
+> This is its twin one level up: an *alert* that never names its subject
+> specifies only that something is wrong. A trajectory that got the scope right
+> is evidence the scope was guessable, not that it was given.
+
+**Why no grader could have caught it.** Every dimension was red, so the suite
+reported the failure loudly — but nothing in the trajectory, the briefing or the
+judge score identifies the *cause*. An escalation that names four
+correctly-classified rows reads as diligence, and `failure_class` came back
+`unclassified`. The discriminator is not in the run at all; it is in the alert
+the run started from. Same shape as F-005: the archive cannot tell you whether
+the question was well posed.
+
+**Fix.** ADR 0031. Structural first: `AlertPayload.remediation_hint` carries the
+category, and `ALERT_SUBJECT_PROBES` gains `remediation_hint →
+list_dlq_messages.remediation_hint` so the handoff guard requires the scoped
+listing by value — an unfiltered page wires the argument to `None` and does not
+satisfy it. Prompt second: an alerted category *is* the incident, and a mixed
+queue is never a reason to escalate. The remediation planner's contradicting
+"pick the most impactful action" mixed-DLQ steer is replaced by an ordered rule,
+because on this exact alert it pointed at the one `replay_safe` row beside the
+subject.
+
+**Two properties of the fix worth reusing.**
+
+> **A guard that costs no tool call is usually asking for something an existing
+> guard already needed.** The scoped listing the subject guard demands is the
+> same reading that COVERS a same-category replay under ADR 0028, so the two
+> guards share one call.
+
+> **When a structural fix makes a class of failure unreachable, check whether it
+> also made the accompanying prompt rule untestable.** `dlq_mixed_partial` keeps
+> no category on purpose: it is the only scenario left that can fail "a mixed
+> queue is not an escalation". Completing the set would have made the suite
+> assert the fix rather than measure it.
+
+**Filed, not done.** The platform's DLQ-depth alert producer does not emit the
+category, so the guard is inert on real production alerts until it does — inert
+being the correct failure mode, which is why this ships first. Recorded as a
+test with a docstring rather than a silent gap
+(`test_the_dlq_category_field_is_one_of_them_and_is_a_filed_platform_gap`).

@@ -163,12 +163,55 @@ HINT_ROUTED_CATEGORIES: Final[frozenset[HypothesisCategory]] = frozenset(
 # The tool/argument halves must stay consistent with
 # `policies.RESOURCE_ARG_FIELDS` (the same fields, seen from the tool
 # side); `tests/unit/test_policies.py::TestAlertSubjectProbes` pins that.
+#
+# ONE ENTRY IS A SLICE RATHER THAN A RESOURCE, AND THAT IS DELIBERATE.
+# `remediation_hint` names no single row: it names a partition of the
+# dead-letter queue. It is here because a category-scoped DLQ alert has a
+# subject in exactly the sense this guard means — there is one probe that
+# reads what the alert is complaining about, and it is the hint-filtered
+# listing — and because leaving it out cost a live run. In
+# `dlq_wait_and_replay_success` (archive `06e14be3e7b1`, 2026-09-07) the
+# alert's subject was the wait_and_replay backlog and the only thing saying
+# so was the fingerprint string `dlq_depth_warning_wait_replay`. The agent
+# listed the queue UNFILTERED, reasoned correctly about all four rows in
+# all three categories, and then stopped: "The DLQ contains 4 entries with
+# mixed remediation hints that cannot be handled by a single Tier-1
+# action." Every sentence of that is true, and it is an escalation only
+# because the scope was four rows instead of two. ADR 0008 allows one
+# attempt with one action, so an over-wide scope does not become a partial
+# fix — it becomes a handoff to a human. The alert now carries its category
+# (`api/schemas.AlertPayload.remediation_hint`) and this entry turns that
+# into the required first discriminating read.
+#
+# Why the resource/slice distinction does not weaken the guard, and where
+# the line is: a slice-valued subject is admissible only when the platform
+# names the same slice on BOTH sides of the read/act boundary — the value
+# filters a listing AND selects what an action touches. That is not a
+# judgement call, it is `remediation.SOURCE_LISTING_FOR_ACTION`'s own
+# `ListingScope(read_field="remediation_hint", action_field="category")`,
+# and `TestAlertSubjectProbes` derives the admissible set from it rather
+# than from a second hand-written list. `limit`, `offset` and `since_hours`
+# page or window a listing and select nothing on any action, so they can
+# never qualify — which is the property the resource-field check was
+# protecting.
+#
+# The two guards compose the right way round. A reading filtered to exactly
+# the slice an action names COVERS that action under ADR 0028, so the probe
+# this entry demands is also the probe that licenses a same-category
+# replay: the subject read and the read-before-act read are one call, not
+# two, and no scenario pays a tool call for the overlap.
+#
+# LAST in declaration order, so a resource always outranks a slice. An
+# alert naming both a `job_id` and a hint (a stuck chain whose root is
+# dead-lettered) is about that job; the hint would be the coarser reading
+# of the same incident.
 ALERT_SUBJECT_PROBES: Final[dict[str, tuple[str, str]]] = {
     "consumer_group": ("get_consumer_lag", "consumer_group"),
     "group": ("get_consumer_lag", "consumer_group"),
     "cache_key": ("get_cache_key_info", "key"),
     "job_id": ("get_dag_state", "job_id"),
     "trace_id": ("get_trace", "trace_id"),
+    "remediation_hint": ("list_dlq_messages", "remediation_hint"),
 }
 
 
@@ -188,12 +231,22 @@ class AlertSubject(NamedTuple):
 def alert_subject(alert: Mapping[str, Any]) -> AlertSubject | None:
     """The alert's own subject, or ``None`` when it names nothing mappable.
 
-    ``None`` is the inert case and it is common and legitimate: a DLQ-depth
-    alert, an alert-storm meta-alert, and a `db_latency_high` alert all name
-    a *condition* rather than a resource this agent can probe by name. Every
-    caller must treat ``None`` as "no opinion" — a guard that fabricated a
-    subject for those alerts would block investigations it knows nothing
-    about, which is worse than the gap it closes.
+    ``None`` is the inert case and it is common and legitimate: an
+    alert-storm meta-alert, a `db_latency_high` alert, and a whole-queue DLQ
+    depth alert all name a *condition* rather than a resource or slice this
+    agent can probe by name. Every caller must treat ``None`` as "no
+    opinion" — a guard that fabricated a subject for those alerts would
+    block investigations it knows nothing about, which is worse than the gap
+    it closes.
+
+    The DLQ case used to be listed here without qualification, and the
+    qualification is the point: a DLQ alert that fires on ONE remediation
+    category carries `remediation_hint` and DOES have a probe that reads it
+    (the hint-filtered listing). A DLQ alert about the queue's total depth,
+    or about a genuinely mixed queue, carries no hint and stays inert here —
+    `dlq_backlog` and `dlq_mixed_partial` are the corpus's two witnesses,
+    and the second one is deliberate: "a mixed queue is not a category" is a
+    statement the suite has to be able to fail.
 
     Looks at the top level first, then one level into ``extra_data``. That
     second lookup is not speculative: the platform's alert webhook sends
@@ -639,6 +692,16 @@ def _alert_subject_probed(run_state: RunState, subject: AlertSubject) -> bool:
     group is visible here as the literal ``worker-dispatcher`` it became on
     the wire, rather than as the absence the planner emitted.
 
+    The same comparison is what makes a SLICE subject checkable, and the
+    second live run is why that matters. A ``remediation_hint`` alert is
+    answered by ``list_dlq_messages(remediation_hint=<hint>)``; an unfiltered
+    listing wires that argument to ``None``, which is not a ``str`` and so
+    matches nothing here. That is the correct reading rather than a
+    technicality: the unfiltered page is the whole queue, and the run this
+    guard exists for (`06e14be3e7b1`) read exactly that page, described all
+    four rows accurately, and escalated because it never scoped itself to the
+    two the alert was about.
+
     Values compare exactly after ``strip()`` — no substring, case-insensitive,
     or prefix matching, for the reason ``remediation._unsourced_resource_args``
     gives: the campaign's own failure values are substrings of the true ones.
@@ -671,10 +734,12 @@ def _refuse_handoff(run_state: RunState, at: datetime, subject: AlertSubject) ->
         f"handoff refused: this incident's alert names "
         f"{subject.alert_field}={subject.value!r}, and no probe in the evidence "
         f"trail has read it. Call {subject.tool_name} with "
-        f"{subject.argument_field}={subject.value!r} before remediating. Other "
-        "incidents, alerts, and DLQ entries visible in the evidence are context, "
-        "not this incident's subject — remediating one of those leaves the "
-        "alerted signal unexplained."
+        f"{subject.argument_field}={subject.value!r} before remediating. A call "
+        f"to {subject.tool_name} that did not carry that exact value does not "
+        "count — an unfiltered or default-filled read observes something else. "
+        "Other incidents, alerts, and DLQ entries visible in the evidence are "
+        "context, not this incident's subject — remediating one of those leaves "
+        "the alerted signal unexplained."
     )
     entry = EvidenceEntry(
         tool_name="_handoff_refused",

@@ -936,6 +936,84 @@ untestable, and keep one witness back if it did.**
 
 ---
 
+## 13. The scenario whose name disagreed with its own expectation
+
+**`dlq_human_required_escalates`, 2026-09-08. No archive: nothing ran. WO-R2-140.**
+
+The scenario is called `dlq_human_required_escalates`. Its description said "correct
+action is mark_dlq_permanent per job + escalate". The remediation-planner prompt
+routed `human_required` to "mark, then `stop` (escalate)". The platform's own tool
+description says the mark "Doesn't change job.status — the entry stays in DLQ". And
+the expectation read `expected_terminal_state: resolved`.
+
+Four statements, three of them agreeing, and the one that disagreed was the one the
+grader reads. It had been that way since PR #112 on 2026-08-09.
+
+**Nothing here was a discovery.** §8's `RESOLUTION_CLASS` work found the whole
+contradiction a day earlier and wrote it down three times — in ADR 0026's
+consequences, in a twenty-line comment at the map entry itself, and in a filed work
+order — and deliberately did not fix it, because flipping the classification would
+turn a scenario that was queued for a paid run red, and that is a decision with money
+behind it rather than a side effect of a refactor. That was the right call: the
+alternative was a builder quietly re-pointing what a queued scenario measures. The
+lesson is not "act sooner". It is that **a contradiction between a scenario and the
+code needs a decision, and a decision needs to be routed to whoever is spending** —
+recording it beside the code is how it survives long enough to be decided, and filing
+it is what gets it decided.
+
+**What the decision cost, once taken, was not the enum.** The user's rule — for a
+human-required row the correct behaviour is fence, then escalate — flips
+`mark_dlq_permanent` to `Resolution.STABILIZES` in one line. The work is everything
+that line invalidates:
+
+- **The terminal state stopped distinguishing right from wrong.** With `resolved`, the
+  lazy trajectory (read the row, see `human_required`, escalate having fenced nothing)
+  failed on OUTCOME for free. With `escalated`, that trajectory reaches the expected
+  terminal state. So the action had to become graded — `expected_action_tools` plus a
+  universal `equals` on the fenced `job_id`, fail-closed if no fence fired — or the
+  reclassification would have *weakened* the scenario while making it consistent.
+  Generalise it: **when you change a scenario's expected outcome, ask what the old
+  outcome was carrying that nothing else now carries.**
+- **The prompt was steering at the lazy trajectory in as many words.** The
+  investigation planner's dead-letter-row rule ended `human_required … means stop`.
+  That is not a subtle mis-steer; it is the failing trajectory, in the prompt, and it
+  would have produced a red live run that looked like an agent judgement call. Same
+  shape as §8 (a scenario redesign that left its steering behind), found the same way:
+  read what the agent reads.
+- **A category table can route around a rule.** A CSV parse error is literally
+  "real bug in source data", so a planner reading the hypothesis-category table alone
+  lands on `persistent_data_bug`, which has no Tier-1 fix and auto-escalates before
+  any fence — the same failure by a route the new rule never touches. Both had to
+  move.
+
+**The honest limit, stated rather than papered over.** The fence has no observable of
+its own. `DlqEntry` carries no flag separating a row an operator fenced from one the
+classifier put in that category, and on a row *already* classified `human_required` —
+which is every row the agent knows to fence, since the hint is how it knows — the
+platform takes its `already_marked` branch and writes nothing at all, not even the
+audit row. So the scenario grades the tool's own reply plus the row still being
+listed, and says in its comments that this is a claim about the DECISION rather than
+about an effect. §7's rule was "a scenario's verify leg must observe the resource it
+acted on"; this is its uncomfortable corollary — **when the platform exposes no
+observation, say so in the scenario and file the gap, rather than letting a
+plausible-looking assertion imply one exists.** Filed as WO-R2-158 (platform) and
+WO-R2-159 (the grader has no `after_tools`, so "still listed AFTER the fence" is not
+expressible today).
+
+**Where the rule deliberately stops.** `saga_stuck` seeds its chain root
+`human_required` and forbids every Tier-1 tool including the fence. It was left that
+way, because the rule underneath both scenarios is the oldest one in this document —
+act on the alert's subject. A DLQ alert makes the poisoned row the incident, so the
+row gets fenced. A `platform.dag` alert makes the *chain* the incident: replaying that
+root by id is how the chain drains, the platform permits it, and it is the exact
+question being escalated, so fencing the root records "never auto-replay this" against
+the decision the human has just been handed. Both prompts state that boundary and a
+prompt-invariant test pins it — because the corpus check that would otherwise catch a
+steer-vs-forbid conflict (`TestFixMapMatchesTheSuite`) is scoped to scenarios
+expecting `resolved`, and this PR created the first scenario that expects `escalated`
+*and* requires an action. **A new shape can fall outside an existing check without
+either being wrong; the check's scope is the thing to re-read when you invent one.**
+
 ## Summary: what each failure was actually caused by
 
 | # | Run / event | Looked like | Actually was | Fix |

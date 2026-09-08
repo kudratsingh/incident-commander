@@ -1859,6 +1859,220 @@ class TestStabilizeOnlyActionsNeverResolve:
         assert result.state is IncidentState.RESOLVED
 
 
+_FENCED_ROW = "f030f975-974e-5ce3-aa6b-444136507d86"
+
+
+def _dlq_mcp(*, hint: str = "human_required") -> _FakeMCP:
+    """A ``list_dlq_messages`` verify probe that still carries the fenced row.
+
+    Presence-with-hint is the platform's documented success reading for a
+    mark: ``job.status`` stays ``dead_letter`` and only ``remediation_hint``
+    moves, so a working fence reads back as the row STILL being listed.
+    """
+
+    payload = {
+        "total": 1,
+        "items": [
+            {
+                "id": _FENCED_ROW,
+                "type": "csv_upload",
+                "error_message": (
+                    "ValueError: invalid literal for int() with base 10: "
+                    "'not-a-number' at row 15,382"
+                ),
+                "retry_count": 3,
+                "remediation_hint": hint,
+                "created_at": "2026-07-28T09:48:00Z",
+            }
+        ],
+    }
+
+    def handler(_name: str, _args: Mapping[str, Any]) -> ToolResult:
+        return ToolResult(content=[{"type": "text", "text": json.dumps(payload)}], is_error=False)
+
+    return _FakeMCP(handler)
+
+
+class TestAVerifiedFenceEscalatesRatherThanResolving:
+    """WO-R2-140: `mark_dlq_permanent` is the second stabilize-only action.
+
+    The sibling class above proves the rule reaches the one RESOLVED
+    transition for ``pause_dag``. This proves it for the fence, and the fence
+    is the case where the judge is *most* obviously right and the old terminal
+    state *most* obviously wrong: the platform's own description says the mark
+    "doesn't change job.status — the entry stays in DLQ", so a working fence
+    reads back as the row still sitting there, a judge holding the expectation
+    "the row is still listed with hint human_required" answers ``verified``,
+    and the run reported RESOLVED on a job that is still dead with its source
+    data still wrong.
+
+    Written as its own class rather than parametrized onto the pause class
+    because the two differ in what the escalation has to TELL the human — a
+    pause is on a clock and blocks the fix, a fence is permanent and blocks
+    nothing — and that text is the whole product of the class
+    (``_stabilized_reason`` quotes the policy rationale verbatim).
+    """
+
+    def _fence_plan(self, **overrides: Any) -> dict[str, Any]:
+        base = {
+            "target_hypothesis": "persistent_data_bug",
+            "action_tool": "mark_dlq_permanent",
+            "action_arguments": {
+                "job_id": _FENCED_ROW,
+                "reason": (
+                    "Row 15,382 of the upload carries a non-numeric value in an "
+                    "integer column; a replay re-reads the same byte and fails."
+                ),
+            },
+            "verify_tool": "list_dlq_messages",
+            "verify_arguments": {"remediation_hint": "human_required", "limit": 50},
+            "verify_expectation": ("the fenced job_id is still listed in the human_required slice"),
+        }
+        base.update(overrides)
+        return base
+
+    def _verified(self) -> CannedLLMClient:
+        return CannedLLMClient(
+            [
+                {
+                    "verdict": "verified",
+                    "reasoning": (
+                        "the job_id is still present in the human_required-filtered "
+                        "listing, which is the documented post-mark state"
+                    ),
+                }
+            ]
+        )
+
+    def test_a_verified_fence_escalates_instead_of_resolving(self) -> None:
+        transition = make_llm_verify(_dlq_mcp(), self._verified(), model=_MODEL)
+        run = _run_state(state=IncidentState.VERIFYING, remediation_plan=self._fence_plan())
+
+        result = transition(run, _now())
+
+        # Before WO-R2-140 these exact inputs produced RESOLVED, and
+        # `dlq_human_required_escalates` asserted that.
+        assert result.state is IncidentState.ESCALATED
+
+    def test_the_judge_still_answered_verified(self) -> None:
+        """The escalation is the policy's decision, not a re-judged verdict.
+
+        The same anti-vacuity check the pause class carries: if a later
+        change made this class pass by making the judge say ``not_verified``,
+        the guarantee "a working fence still escalates" would have been
+        replaced by "a fence is graded as a failure", which is a different
+        and wrong claim — and the scenario would then be measuring a botched
+        remediation rather than a deliberate handoff.
+        """
+        transition = make_llm_verify(_dlq_mcp(), self._verified(), model=_MODEL)
+        run = _run_state(state=IncidentState.VERIFYING, remediation_plan=self._fence_plan())
+
+        result = transition(run, _now())
+
+        judge_entries = [e for e in result.evidence if e.tool_name == "_verify_judge"]
+        assert judge_entries, "the verify judge should still have run"
+        assert judge_entries[-1].result_summary.startswith("verified:")
+
+    def test_the_reason_opens_stabilized_and_names_the_fenced_row(self) -> None:
+        """`expect_briefing_contains` in the scenario grades this text.
+
+        ``startswith``, not ``in``: the scenario claims the escalation reason
+        OPENS with the phrase, and a substring assertion cannot say that
+        (nor can `expect_briefing_contains`, which reads a joined corpus). A
+        reader who cannot tell a deliberate handoff from a failed
+        remediation discounts both, and the first words are what carries it.
+        """
+        transition = make_llm_verify(_dlq_mcp(), self._verified(), model=_MODEL)
+        run = _run_state(state=IncidentState.VERIFYING, remediation_plan=self._fence_plan())
+
+        result = transition(run, _now())
+
+        reason = result.evidence[-1].result_summary
+        assert reason.startswith("STABILIZED, NOT RESOLVED.")
+        # The row a human has to make a decision about.
+        assert _FENCED_ROW in reason
+        # And the policy rationale, quoted: what the fence did not do.
+        assert "doesn't change job.status" in reason
+        assert "a human still has to act" in reason
+
+    def test_the_reason_does_not_promise_a_clock_the_fence_does_not_have(self) -> None:
+        """A fence is not a pause, and the briefing must not read like one.
+
+        ``_stabilized_reason``'s closing sentence is "Treat the
+        stabilization as a clock, not an outcome" — true of a pause, whose
+        TTL lapses, and misleading for a fence, which never expires. The
+        rationale is the per-tool half of that text and it is where the
+        difference has to be said, so it says it. Pinned because an on-call
+        told a permanent fence expires will go looking for the expiry.
+        """
+        transition = make_llm_verify(_dlq_mcp(), self._verified(), model=_MODEL)
+        run = _run_state(state=IncidentState.VERIFYING, remediation_plan=self._fence_plan())
+
+        result = transition(run, _now())
+
+        reason = result.evidence[-1].result_summary
+        assert "the fence does not expire" in reason
+        assert "self-cleans on its TTL" not in reason
+
+    def test_the_executed_fence_reaches_the_briefing(self) -> None:
+        """``attempted_action`` survives, so the briefing writer sees the fence.
+
+        Its own prompt rule forbids recommending a repeat of an attempted
+        action, and "mark it permanent" is exactly the recommendation that
+        must not come back to a human whose row is already fenced.
+        """
+        transition = make_llm_verify(_dlq_mcp(), self._verified(), model=_MODEL)
+        run = _run_state(state=IncidentState.VERIFYING, remediation_plan=self._fence_plan())
+
+        result = transition(run, _now())
+
+        marker = result.evidence[-1]
+        assert marker.tool_name == "_remediation_escalate"
+        assert marker.arguments["attempted_tool"] == "mark_dlq_permanent"
+        attempted = marker.arguments["attempted_arguments"]
+        assert isinstance(attempted, Mapping)
+        assert attempted["job_id"] == _FENCED_ROW
+
+    def test_the_fence_is_not_billed_twice(self) -> None:
+        transition = make_llm_verify(_dlq_mcp(), self._verified(), model=_MODEL)
+        run = _run_state(
+            state=IncidentState.VERIFYING,
+            remediation_plan=self._fence_plan(),
+            remediation_attempts=1,
+        )
+
+        result = transition(run, _now())
+
+        assert result.budget.tool_calls_used == run.budget.tool_calls_used + 1
+        assert result.remediation_attempts == 1
+
+    def test_a_replay_verified_on_the_same_listing_still_resolves(self) -> None:
+        """The control: the class is about the ACTION, not about DLQ listings.
+
+        Same verify tool, same probe shape, same verdict — only the action
+        differs. Without it, a regression that stopped every
+        ``list_dlq_messages``-verified plan from resolving would leave every
+        assertion above green while breaking three replay scenarios.
+        """
+        plan = self._fence_plan(
+            action_tool="replay_dlq_by_ids",
+            action_arguments={"job_ids": [_FENCED_ROW]},
+            verify_expectation="the replayed id leaves the listing",
+        )
+        transition = make_llm_verify(
+            _dlq_mcp(hint="replay_safe"),
+            CannedLLMClient(
+                [{"verdict": "verified", "reasoning": "the slice the replay targeted is empty"}]
+            ),
+            model=_MODEL,
+        )
+        run = _run_state(state=IncidentState.VERIFYING, remediation_plan=plan)
+
+        result = transition(run, _now())
+
+        assert result.state is IncidentState.RESOLVED
+
+
 class TestReplayRequiresTheJobsDeadLetterRow:
     """ADR 0027: a dead-lettered job may not be replayed until its own
     dead-letter row is in the evidence.

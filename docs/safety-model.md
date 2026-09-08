@@ -189,7 +189,11 @@ Nothing in the guard stack caught it. Right tier, real tools, resources named an
 |---|---|---|
 | `RESOLUTION_CLASS` at the `RESOLVED` transition | a run resolving on a verified action whose only effect is to hold the system still | reporting a fix that fixed nothing, and closing the incident on a timer nobody is watching |
 
-`Resolution.STABILIZES` says a verified success holds the incident still and leaves its cause in place; `Resolution.RESOLVES` says it removes the cause. `pause_dag` is the only stabilizer on the current surface.
+`Resolution.STABILIZES` says a verified success holds the incident still and leaves its cause in place; `Resolution.RESOLVES` says it removes the cause. Two of the seven Tier-1 tools are stabilizers: `pause_dag`, and — since 2026-09-08 (WO-R2-140) — `mark_dlq_permanent`.
+
+**The fence.** `mark_dlq_permanent` sets `remediation_hint=human_required` on one dead-lettered job and writes the operator's reason to the audit trail, which takes the row out of every future `replay_dlq_by_category` scan and out of the default `replay_dlq_messages` sweep. The platform's own description says the rest: "Doesn't change job.status — the entry stays in DLQ." So the job is still dead, its work still undone, and the bad data or producer bug behind it untouched. For a human-required row the correct behaviour is therefore **fence, then escalate** — the fence first, because it is the only thing standing between the poisoned payload and the next bulk replay, and the escalation because nothing has been repaired. It differs from a pause in two ways, both of which make it the *better* stabilizer and neither of which makes it a resolution: it does not self-expire, so there is no clock and nothing to undo; and it does not block the real fix, where a pause makes a replay fail while it holds. "Permanent" describes the fence, not the incident.
+
+One consequence worth stating: the fence is not independently observable. `DlqEntry` carries no flag distinguishing a row an operator fenced from one the classifier put in that category, and on a row already classified `human_required` — which is every row the agent knows to fence, since the hint is how it knows — the handler takes its `already_marked` branch and writes nothing at all, not even the audit row. The honest verify is the tool's own reply plus the row still being listed (WO-R2-158 files the platform gap).
 
 Four properties:
 

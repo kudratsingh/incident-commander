@@ -162,9 +162,12 @@ def test_every_exclusion_is_eligible_and_gives_a_reason(scenarios: list[Scenario
     """A hold-back only means something for a scenario the stage could run.
 
     ``dlq_human_required_escalates`` is the worked example of the other case:
-    it expects RESOLVED via ``mark_dlq_permanent``, so the predicate excludes
-    it for free and a hand-written entry would imply a decision nobody still
-    has to make.
+    it requires a ``mark_dlq_permanent`` fence, so it declares
+    ``expected_action_tools`` and the predicate excludes it for free — a
+    hand-written entry would imply a decision nobody still has to make. Note
+    the predicate keys on the ACTION, not on the terminal state: since
+    WO-R2-140 that scenario expects ``escalated`` (a fence is a stabilizer)
+    and is still a graded Tier-1 write the read-scoped token would 403.
     """
     for scenario in scenarios:
         if scenario.smoke_exclusion is None:

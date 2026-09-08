@@ -34,9 +34,9 @@ from incident_commander.llm.prompts.loader import (
 
 _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("2fbebe9dcd49d48e41a580b1093f8e66cdb063482ea78ee5873be2eaa3dc0eda"),
-    "investigation_planner": ("216088622460a4195084cd3816bec787799603c72afa77020020d78dd4746cff"),
+    "investigation_planner": ("1580fd2cb5ac2b283cd9e1d1548e7c651c32baace05c8ecd6d045f0a41ab2cc9"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
-    "remediation_planner": ("b656f851a85fc8c5332464388d21cda6a67fd42100b5a659cc67c34849e52cf4"),
+    "remediation_planner": ("dd3d5152083c4f2abffc6997909ccba59cd3fff527b1218b7c6fd090c781989f"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
 }
 
@@ -216,6 +216,35 @@ class TestInvestigationPlannerInvariants:
         # compares the argument and an unfiltered listing wires it to null.
         assert "is not the subject read" in content
 
+    def test_a_human_required_row_is_fenced_before_it_is_escalated(self) -> None:
+        """WO-R2-140's steering half, and it is a reversal.
+
+        This prompt used to end its dead-letter-row rule with
+        "`human_required` … means `stop`" — escalate straight from the read,
+        no fence. That is the laziest trajectory through
+        `dlq_human_required_escalates`, and after WO-R2-140 it FAILS the
+        scenario's ACTION and SAFETY dimensions: the correct behaviour is
+        fence, then escalate, and the terminal state is the same either way,
+        so the terminal state cannot be what distinguishes them.
+
+        Also pinned: the `remediate` handoff has to survive the category
+        choice. A CSV parse error is literally "real bug in source data", so
+        a planner reading the category table alone lands on
+        `persistent_data_bug`, which has no Tier-1 fix and auto-escalates
+        before any fence — the same failure by a different route.
+        """
+        content = load_prompt("investigation_planner")
+        assert "A `human_required` row is fenced first, then escalated" in content
+        assert "never escalated straight from the read" in content
+        # The row is `poison_message` (a fix exists: the fence), not
+        # `persistent_data_bug` (no fix, auto-escalate).
+        assert (
+            "A dead-lettered job whose `remediation_hint` is `human_required` is "
+            "`poison_message`, not this" in content
+        )
+        # The old rule must be gone, not merely outvoted by the new one.
+        assert "`human_required`, an `error_message` describing bad data" not in content
+
     def test_a_mixed_queue_is_not_a_reason_to_escalate(self) -> None:
         # The half the alert field cannot state. A category-scoped alert is
         # now answered structurally, but `dlq_mixed_partial` carries no
@@ -340,6 +369,54 @@ class TestRemediationPlannerInvariants:
         assert "`pause_dag` never resolves an incident" in content
         assert "self-cleans on its TTL" in content
         assert "refuses to replay any job inside a paused DAG" in content
+
+    def test_the_fence_is_named_as_a_stabilizer_that_never_resolves(self) -> None:
+        """The second member of the stabilize-only class, steered like the first.
+
+        `mark_dlq_permanent` became `Resolution.STABILIZES` with WO-R2-140,
+        and a planner that does not know the run will escalate afterwards
+        reads its own correct plan as a failure — or worse, avoids the plan.
+        So the prompt says the outcome out loud: fence, and the escalation
+        follows by design.
+
+        Both halves are pinned because either alone is the failure this
+        scenario grades. "Never resolves" without "plan it anyway" steers
+        the planner off the fence and back to a bare escalation, which
+        leaves the poisoned row exposed to the next bulk sweep; "plan it
+        anyway" without "never resolves" is the RESOLVED-on-a-fenced-row
+        report ADR 0026 exists to stop.
+        """
+        content = load_prompt("remediation_planner")
+        assert "`mark_dlq_permanent` never resolves an incident" in content
+        assert "Plan it anyway when the hint says `human_required`" in content
+        # The sentence that stops "permanent" being read as "fixed".
+        assert 'The word "permanent" describes the fence, not the incident' in content
+
+    def test_the_fence_is_not_the_default_for_a_stuck_chain_root(self) -> None:
+        """The boundary between this rule and `saga_stuck`, stated in the prompt.
+
+        Both prompts now route a `human_required` row to the fence, and
+        `saga_stuck` — whose seeded chain root is `human_required` since cmd
+        #192 — forbids every Tier-1 tool including `mark_dlq_permanent`, on
+        the grounds that replaying that root is the human's decision and the
+        fence records the opposite disposition against it. Without this
+        paragraph the two disagree, and the disagreement is invisible: the
+        corpus check in ``test_policies.py::TestFixMapMatchesTheSuite`` is
+        scoped to scenarios expecting ``resolved``, so an escalate-only
+        scenario forbidding its own steered tool fires nothing there.
+
+        The exception is not a special case for one scenario. It is the
+        alert's subject — the oldest rule in this codebase: a DLQ alert
+        makes the row the incident, a `platform.dag` alert makes the chain
+        the incident, and you act on the subject.
+        """
+        for prompt in ("remediation_planner", "investigation_planner"):
+            content = load_prompt(prompt)
+            assert "root of a stuck chain" in content.lower(), prompt
+        assert (
+            "A `human_required` chain root is the one place the fence is not the default"
+            in load_prompt("remediation_planner")
+        )
 
     def test_counters_the_pinned_tool_descriptions(self) -> None:
         # The two descriptions the agent is handed verbatim both steer

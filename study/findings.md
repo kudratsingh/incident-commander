@@ -657,3 +657,71 @@ category, so the guard is inert on real production alerts until it does — iner
 being the correct failure mode, which is why this ships first. Recorded as a
 test with a docstring rather than a silent gap
 (`test_the_dlq_category_field_is_one_of_them_and_is_a_filed_platform_gap`).
+
+## F-009 — A contradiction recorded three times, and the terminal state that was carrying the whole claim
+
+**Date:** 2026-09-08 (no run; caught by reading, before spend). WO-R2-140.
+
+**What happened.** `evals/scenarios/dlq_human_required_escalates.yaml` — the
+scenario whose name, description and steering all say *escalate* — asserted
+`expected_terminal_state: resolved`, and had since PR #112 on 2026-08-09. It was
+next in the paid sequence.
+
+**Evidence that settled it.** Not a run. The platform's own handler:
+`mark_dlq_permanent` sets `remediation_hint = human_required` and writes an audit
+row, and its description says "Doesn't change job.status — the entry stays in
+DLQ". Three readings already agreed with the name and the fourth was the one the
+grader reads. Confirming the reply's shape needed one offline run
+(`already_marked: true`, `previous_hint: human_required`) and no money.
+
+**Root cause of the delay, which is the interesting part.** The contradiction was
+found by ADR 0026's `RESOLUTION_CLASS` work on 2026-09-07 and deliberately not
+fixed — recorded instead in ADR 0026's consequences, in a comment at the map
+entry, and in a filed work order — because flipping the classification reddens a
+scenario queued for a paid run, and a builder does not quietly re-point what a
+queued scenario measures. **A contradiction between a scenario and the code is
+not always a defect to fix; sometimes it is a decision to route.** Recording it
+beside the code is what let it survive until the person spending the money could
+take it.
+
+**The failure the fix nearly introduced.** With `resolved`, the lazy trajectory —
+read the row, see `human_required`, escalate having fenced nothing — failed on
+OUTCOME for free. With `escalated` it reaches the expected terminal state. So
+flipping the enum without grading the action would have made the scenario
+consistent and strictly weaker.
+
+> **When you change a scenario's expected outcome, ask what the old outcome was
+> carrying that nothing else now carries.** Here: the action itself. It is now
+> `expected_action_tools` plus a universal `equals` on the fenced `job_id`, which
+> fails closed when no fence fired.
+
+**Fix.** `mark_dlq_permanent` is `Resolution.STABILIZES` (ADR 0026's open
+classification, resolved): a verified fence escalates with the
+`STABILIZED, NOT RESOLVED` briefing naming the row. The scenario expects
+`escalated` and grades the fence, the row's own pre-fence hint (`where`-selected
+by id), the reply's `previous_hint`, and the briefing text. Both prompts were
+re-steered — the investigation planner's rule literally ended
+"`human_required` … means `stop`", which is the failing trajectory in the prompt,
+and the hypothesis-category table routed a CSV parse error to
+`persistent_data_bug`, which auto-escalates before any fence.
+
+**Two limits stated rather than papered over.**
+
+> **When the platform exposes no observation of an action, say so in the scenario
+> instead of writing an assertion that implies one.** The fence has no observable:
+> no field separates a row an operator fenced from one the classifier categorised,
+> and on an already-classified row — every row the agent knows to fence — the
+> handler writes nothing at all, not even the audit row. The scenario grades the
+> tool's reply plus the row still being listed, and its comments say that is a
+> claim about the decision, not about an effect. WO-R2-158 (platform),
+> WO-R2-159 (the grader has no `after_tools`).
+
+> **A new scenario shape can fall outside an existing corpus check without either
+> being wrong.** `TestFixMapMatchesTheSuite` is scoped to scenarios expecting
+> `resolved`, because escalate-only scenarios forbid every Tier-1 tool on purpose.
+> This is the first scenario expecting `escalated` that nevertheless requires an
+> action, so a prompt routing `human_required` at a tool it forbids would have
+> been invisible there. `HINT_ROUTED_TOOLS` plus
+> `TestHintRoutedToolsMatchTheSuite` closes it, keyed on the ALERT's own hint —
+> which is also what keeps it silent on `saga_stuck`, whose subject is a chain and
+> which forbids the fence deliberately.

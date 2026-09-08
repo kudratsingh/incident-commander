@@ -87,6 +87,13 @@ class JsonlTracer:
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def write(self, record: dict[str, Any]) -> None:
+        # ``record_id`` identifies ONE record inside an invocation, which
+        # ``invocation_id`` cannot: a repaired LLM call writes two records
+        # for one logical step and the second names the first as
+        # ``repair_of`` (ADR 0035). ``setdefault`` because ``LLMClient``
+        # mints its own before the payload reaches here — it has to hand the
+        # id back to the caller, which only the producer can do.
+        record.setdefault("record_id", uuid.uuid4().hex[:12])
         record.setdefault("timestamp", datetime.now(UTC).isoformat())
         record.setdefault("invocation_id", self.invocation_id)
         record.setdefault("invocation_started_at", self.invocation_started_at)

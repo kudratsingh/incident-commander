@@ -14,15 +14,24 @@ the ``LLMClient`` forces the model to satisfy it via
 
 This is the Phase-6 hardening of a Phase-2 shortcut that let the LLM
 produce free-form strings. See ADR-0005.
+
+Every model here inherits ``StructuredOutput`` (``llm/structured.py``), which
+decodes a nested object or array that arrived as a JSON *string* before the
+normal validators run — the shape live run ``779b19a287a7`` emitted for
+``next_action`` (ADR 0035). It replaces the field-level ``json.loads``
+coercion this module used to carry on that one field: the same defect can
+land on any nested field of any ``record_output`` model, and a one-field
+patch is not a fix for the class.
 """
 
 from __future__ import annotations
 
-import json
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
+
+from incident_commander.llm.structured import StructuredOutput
 
 
 class HypothesisCategory(StrEnum):
@@ -62,7 +71,7 @@ class HypothesisCategory(StrEnum):
     Escalate with the full evidence chain in the briefing."""
 
 
-class Hypothesis(BaseModel):
+class Hypothesis(StructuredOutput):
     """One candidate root cause with a confidence score, category, and reasoning.
 
     ``category`` is the structural key remediation routing uses. ``name``
@@ -127,7 +136,7 @@ half of the guard only; ``_execute_probe`` re-checks ``tier_of`` at
 runtime for the reclassification case the Literal cannot see."""
 
 
-class ProbeAction(BaseModel):
+class ProbeAction(StructuredOutput):
     """Call a read tool from the registry to gather more evidence."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -137,7 +146,7 @@ class ProbeAction(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
-class StopAction(BaseModel):
+class StopAction(StructuredOutput):
     """Enough evidence — hand off to a human."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -146,7 +155,7 @@ class StopAction(BaseModel):
     reason: str = Field(min_length=1)
 
 
-class RemediateAction(BaseModel):
+class RemediateAction(StructuredOutput):
     """Root cause confirmed AND category has a Tier-1 fix — hand off
     to the remediation planner.
 
@@ -165,7 +174,7 @@ class RemediateAction(BaseModel):
 NextAction = Annotated[ProbeAction | StopAction | RemediateAction, Field(discriminator="kind")]
 
 
-class InvestigationStep(BaseModel):
+class InvestigationStep(StructuredOutput):
     """One iteration of the investigation loop."""
 
     model_config = ConfigDict(extra="forbid")
@@ -196,15 +205,3 @@ class InvestigationStep(BaseModel):
         tests/unit/test_hypothesis.py::TestInvestigationStepOrdering).
         """
         return tuple(sorted(value, key=lambda h: h.confidence, reverse=True))
-
-    @field_validator("next_action", mode="before")
-    @classmethod
-    def _coerce_string_action(cls, value: Any) -> Any:
-        """Anthropic's tool-use sometimes emits nested oneOf fields as JSON strings.
-
-        Coerce to a dict before the discriminated-union validator runs so the
-        planner works uniformly across API providers and prompt-shape variants.
-        """
-        if isinstance(value, str):
-            return json.loads(value)
-        return value

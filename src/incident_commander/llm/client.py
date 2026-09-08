@@ -13,6 +13,7 @@ cache_creation from cache_read so we can graph hit-rate over time.
 from __future__ import annotations
 
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Final, Protocol
@@ -77,11 +78,14 @@ class LLMUsage:
         """Conservative token charge for the billed-then-discarded attempts."""
         return self.discarded_attempts * self.discarded_max_tokens
 
-    def with_output[T: BaseModel](self, output: T, stop_reason: str) -> LLMResult[T]:
+    def with_output[T: BaseModel](
+        self, output: T, stop_reason: str, record_id: str = ""
+    ) -> LLMResult[T]:
         """Promote a usage record to a full result once parsing has succeeded."""
         return LLMResult(
             output=output,
             stop_reason=stop_reason,
+            record_id=record_id,
             input_tokens=self.input_tokens,
             output_tokens=self.output_tokens,
             cache_creation_tokens=self.cache_creation_tokens,
@@ -102,9 +106,33 @@ class LLMError(RuntimeError):
     escalation charge it with ``accounting.accrue_llm_error``.
     """
 
-    def __init__(self, message: str, *, usage: LLMUsage | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        usage: LLMUsage | None = None,
+        record_id: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.usage = usage
+        #: Trace-record id of the call that failed, when the client wrote one.
+        #: A repair re-ask carries it as ``repair_of`` so the two records are
+        #: linked in the JSONL and in the human report (ADR 0035).
+        self.record_id = record_id
+
+
+class LLMOutputError(LLMError):
+    """The call RETURNED and was billed; its payload did not fit the model.
+
+    Split out of ``LLMError`` because the two failures want opposite
+    dispositions and the caller could not tell them apart. A transport
+    failure (429, dropped connection, exhausted retries) is the client's
+    business and it has already retried; re-asking it with a "your JSON was
+    malformed" turn would be nonsense. An output-shape failure is a harness
+    event the model itself can repair, and ADR 0035 gives it exactly one
+    bounded re-ask. Every ``except LLMError`` still catches this — it is a
+    subclass — so nothing that used to escalate stops escalating.
+    """
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -113,10 +141,19 @@ class LLMResult[T: BaseModel](LLMUsage):
 
     output: T
     stop_reason: str
+    #: Trace-record id this call was written under, or "" when untraced.
+    record_id: str = ""
 
 
 class LLMClientProtocol(Protocol):
-    """Structural type for anything the agent can use as an LLM."""
+    """Structural type for anything the agent can use as an LLM.
+
+    ``repair_of`` is trace correlation only: when this call is the one
+    bounded re-ask of a call whose output failed validation (ADR 0035), it
+    carries that call's trace-record id so the JSONL and the human report
+    can show the pair as one repaired step rather than two unrelated ones.
+    It changes nothing about what is sent to the model.
+    """
 
     def call[T: BaseModel](
         self,
@@ -125,6 +162,8 @@ class LLMClientProtocol(Protocol):
         output_model: type[T],
         model: str,
         max_tokens: int = 4096,
+        *,
+        repair_of: str | None = None,
     ) -> LLMResult[T]: ...
 
 
@@ -164,6 +203,8 @@ class LLMClient:
         output_model: type[T],
         model: str,
         max_tokens: int = 4096,
+        *,
+        repair_of: str | None = None,
     ) -> LLMResult[T]:
         request_body: dict[str, Any] = {
             "model": model,
@@ -205,13 +246,19 @@ class LLMClient:
                     "terminal": terminal,
                     "output_model": output_model.__name__,
                     "duration_seconds": time.monotonic() - started,
+                    **_repair_keys(record_id, repair_of),
                 }
             )
 
         last_exc: Exception | None = None
         retry_after: float | None = None
+        # One id per ATTEMPT, not per logical call: a logical call can write
+        # several trace records (a retried 5xx writes one per attempt), and
+        # ``repair_of`` has to name the exact record whose payload failed.
+        record_id = ""
         for attempt in range(self._max_attempts):
             started = time.monotonic()
+            record_id = uuid.uuid4().hex[:12]
             # `attempt` doubles as the count of attempts already billed and
             # thrown away: on attempt 2, two responses have been discarded.
             # Every exit below carries that count out so the ledger charges
@@ -233,7 +280,9 @@ class LLMClient:
                     # the one arm where the current attempt is known unbilled.
                     _trace_error(err, attempt, terminal=True)
                     raise LLMError(
-                        f"LLM API error {err.status_code}: {err}", usage=discarded
+                        f"LLM API error {err.status_code}: {err}",
+                        usage=discarded,
+                        record_id=record_id,
                     ) from err
                 # 429 + 5xx are transient: retry with backoff, honoring a
                 # numeric Retry-After when the platform sends one.
@@ -255,6 +304,7 @@ class LLMClient:
                 raise LLMError(
                     f"LLM API error: {type(err).__name__}: {err}",
                     usage=LLMUsage(discarded_attempts=attempt + 1, discarded_max_tokens=max_tokens),
+                    record_id=record_id,
                 ) from err
             else:
                 # Trace BEFORE parsing: the API call is already billed at
@@ -270,9 +320,12 @@ class LLMClient:
                         "response": response.model_dump(mode="json"),
                         "output_model": output_model.__name__,
                         "duration_seconds": time.monotonic() - started,
+                        **_repair_keys(record_id, repair_of),
                     }
                 try:
-                    result = self._parse(response, output_model, _usage_of(response, discarded))
+                    result = self._parse(
+                        response, output_model, _usage_of(response, discarded), record_id
+                    )
                 except LLMError:
                     if trace is not None:
                         self._tracer(dict(trace, parse_failed=True))  # type: ignore[misc]
@@ -295,10 +348,11 @@ class LLMClient:
             f"LLM transport failure after {self._max_attempts} attempts: "
             f"{type(last_exc).__name__}: {last_exc}",
             usage=LLMUsage(discarded_attempts=self._max_attempts, discarded_max_tokens=max_tokens),
+            record_id=record_id,
         ) from last_exc
 
     def _parse[T: BaseModel](
-        self, response: Message, output_model: type[T], usage: LLMUsage
+        self, response: Message, output_model: type[T], usage: LLMUsage, record_id: str = ""
     ) -> LLMResult[T]:
         for block in response.content:
             if block.type == "tool_use" and block.name == _STRUCTURED_TOOL_NAME:
@@ -312,20 +366,35 @@ class LLMClient:
                     # can still fail validation — and a raw ValidationError
                     # here also skipped the parse_failed trace below,
                     # leaving billed calls with no record (F-002).
-                    raise LLMError(
+                    raise LLMOutputError(
                         f"output failed schema validation for {output_model.__name__}: {err}",
                         usage=usage,
+                        record_id=record_id,
                     ) from err
-                return usage.with_output(output, response.stop_reason or "unknown")
+                return usage.with_output(output, response.stop_reason or "unknown", record_id)
         # Billed and unreturned. This is the max_tokens-truncation case:
         # the model generated a full response, the platform charged for it,
         # and there is no `record_output` block to parse. Raising without
         # `usage` meant the most expensive failure the client has — a full
         # output-token bill for nothing — was the one it charged the least.
-        raise LLMError(
+        raise LLMOutputError(
             f"no {_STRUCTURED_TOOL_NAME} tool_use in response; stop_reason={response.stop_reason}",
             usage=usage,
+            record_id=record_id,
         )
+
+
+def _repair_keys(record_id: str, repair_of: str | None) -> dict[str, Any]:
+    """Identity keys for one trace record: its own id, and what it repairs.
+
+    ``repair_of`` is omitted rather than written as ``null`` on an ordinary
+    call, so the JSONL shape of every non-repair record is unchanged and
+    ``"repair_of" in record`` is a straight answer to "is this a re-ask?".
+    """
+    keys: dict[str, Any] = {"record_id": record_id}
+    if repair_of is not None:
+        keys["repair_of"] = repair_of
+    return keys
 
 
 def _usage_of(response: Message, discarded: LLMUsage) -> LLMUsage:

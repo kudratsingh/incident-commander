@@ -41,6 +41,7 @@ class CannedLLMClient:
         self._usage = usage or CannedUsage()
         self._index = 0
         self.calls: list[tuple[str, str]] = []
+        self.repair_of: list[str | None] = []
 
     @property
     def has_remaining(self) -> bool:
@@ -53,8 +54,14 @@ class CannedLLMClient:
         output_model: type[T],
         model: str,
         max_tokens: int = 4096,
+        *,
+        repair_of: str | None = None,
     ) -> LLMResult[T]:
+        # ``repair_of`` is trace correlation on the real client and has no
+        # canned equivalent; it is recorded so a test can assert the repair
+        # re-ask named the record it was repairing (ADR 0035).
         self.calls.append((system_prompt, user_message))
+        self.repair_of.append(repair_of)
         if self._index >= len(self._outputs):
             raise LLMError("no more canned responses")
         payload = self._outputs[self._index]

@@ -100,6 +100,8 @@ incident-commander/
 │       │   └── briefing_enrichment.py  # LLM findings + recommendation over that template
 │       ├── llm/
 │       │   ├── client.py           # Anthropic SDK, typed structured outputs, retries
+│       │   ├── structured.py       # StructuredOutput base: decode stringified nested output (ADR 0035)
+│       │   ├── repair.py           # one bounded re-ask when our own output fails validation (ADR 0035)
 │       │   ├── fakes.py            # offline LLMClientProtocol fakes for tests and evals
 │       │   └── prompts/            # versioned prompt .md files + loader.py, snapshot-tested
 │       ├── tools/

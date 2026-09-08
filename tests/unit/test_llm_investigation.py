@@ -436,6 +436,8 @@ class TestBudgetGuards:
                 output_model: type[T],
                 model: str,
                 max_tokens: int = 2048,
+                *,
+                repair_of: str | None = None,
             ) -> LLMResult[T]:
                 self.calls += 1
                 payload = {

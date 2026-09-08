@@ -10,6 +10,7 @@ from incident_commander.agent.briefing_enrichment import (
 )
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 from incident_commander.llm.fakes import CannedLLMClient
+from incident_commander.llm.repair import OutputRepairExhausted
 
 
 def _evidence(now: datetime, tool: str, summary: str) -> EvidenceEntry:
@@ -102,13 +103,39 @@ class TestEnrichBriefing:
         assert "ALREADY ATTEMPTED" in user_message
         assert "restart_consumer_group" in user_message
 
-    def test_empty_string_output_rejected_by_schema(
+    def test_empty_string_output_is_re_asked_once_then_raises(
         self, run_state: RunState, now: datetime
     ) -> None:
-        client = CannedLLMClient([{"findings": "", "recommendation": "x"}])
+        """The schema still rejects it; ADR 0035 buys one re-ask first.
+
+        Two canned payloads and only two: the client raises "no more canned
+        responses" on a third call, so a cap that stopped holding would show
+        up here as that message rather than as a silent extra call. What the
+        test is really pinning is that ``findings=""`` is still invalid —
+        the repair path must not have loosened the schema, only retried it.
+        """
+        client = CannedLLMClient(
+            [{"findings": "", "recommendation": "x"}, {"findings": "", "recommendation": "y"}]
+        )
         briefing = _briefing_with_probe(run_state, now)
-        with pytest.raises(ValidationError):
+        with pytest.raises(OutputRepairExhausted):
             enrich_briefing(briefing, client, model="m")
+        assert len(client.calls) == 2
+        assert not client.has_remaining
+
+    def test_one_malformed_reply_is_repaired_rather_than_lost(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        client = CannedLLMClient(
+            [
+                {"findings": "", "recommendation": "x"},
+                {"findings": "one replay_safe row left", "recommendation": "check fc8d2a03"},
+            ]
+        )
+        briefing = _briefing_with_probe(run_state, now)
+        enriched = enrich_briefing(briefing, client, model="m")
+        assert enriched.findings == "one replay_safe row left"
+        assert len(client.calls) == 2
 
 
 class TestBriefingContent:

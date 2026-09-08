@@ -36,12 +36,20 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from enum import StrEnum
 from functools import lru_cache
-from typing import Any, Literal, Self, get_args
+from typing import Annotated, Any, Literal, Self, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    Tag,
+    field_validator,
+    model_validator,
+)
 
 from incident_commander.agent.briefing import EscalationBriefing
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
@@ -207,6 +215,21 @@ def resolve_path(payload: Mapping[str, Any], path: str) -> list[Any]:
     return values
 
 
+def values_match(operand: object, value: object) -> bool:
+    """``value == operand``, with booleans compared identically.
+
+    The one equality rule in this module, shared by the comparators (which
+    ask it about a tool's OUTPUT) and by ``call_arguments`` (which asks it
+    about a call's INPUT). A bool is never equal to a number here: a field
+    that came back ``1`` where ``true`` was claimed is contract drift, and
+    quietly passing it would be the kind of coincidence this suite exists to
+    refuse.
+    """
+    if isinstance(operand, bool) or isinstance(value, bool):
+        return operand is value
+    return operand == value
+
+
 class FieldComparator(BaseModel):
     """One assertion about one already-parsed value. Exactly one comparator.
 
@@ -299,9 +322,7 @@ class FieldComparator(BaseModel):
     @staticmethod
     def _matches(operand: object, value: object) -> bool:
         """``value == operand``, with booleans compared identically."""
-        if isinstance(operand, bool) or isinstance(value, bool):
-            return operand is value
-        return operand == value
+        return values_match(operand, value)
 
     def satisfied_by(self, value: object) -> bool:
         """Does one observed (already parsed) value satisfy this assertion?"""
@@ -445,6 +466,78 @@ class EvidenceFieldExpectation(FieldComparator):
     # and the alternative reading ("nothing came after, so everything counts")
     # turns the assertion off in exactly the runs where the action was skipped.
     before_tools: tuple[str, ...] = ()
+    # The mirror of ``before_tools``: only entries recorded AFTER the LAST
+    # entry naming one of these tools are graded. Filed as WO-R2-159 when
+    # ``before_tools`` shipped and built by WO-R2-175, because the run that
+    # needed it (paid run ``4974811d236f``) showed what its absence costs.
+    #
+    # The asymmetry is deliberate and it is the whole point. ``before_tools``
+    # cuts at the FIRST boundary entry because a read-before-act claim is
+    # about the earliest moment the agent could have acted. ``after_tools``
+    # cuts at the LAST one because a verify claim is about the state the world
+    # was left in: if the agent replayed twice, the reading that matters is
+    # the one after BOTH replays, and cutting at the first would grade a
+    # listing taken between them as if it were the end state.
+    #
+    # Without it, "the alerted slice is drained" cannot be said at all.
+    # ``which: last`` picks the newest entry that CARRIED the field, which is
+    # not the same as the newest entry after the action — an assertion whose
+    # rows go empty (the drained case) contributes no values, so ``last``
+    # silently falls back to the previous, pre-action listing and the grader
+    # reports it. That is exactly the red 4974811d236f produced.
+    #
+    # Fails closed when no entry names any of these tools, for the same
+    # reason ``before_tools`` does: a claim about the state after an event
+    # that never happened is unanswerable, not satisfied, and the permissive
+    # reading would switch the verify claim off in precisely the runs where
+    # the agent skipped the action.
+    after_tools: tuple[str, ...] = ()
+    # An ENTRY selector: grade only the entries whose recorded ``arguments``
+    # carry these key/value pairs. Every other axis on this model selects
+    # among entries by the tool's NAME or among rows by their content; this
+    # one selects by what the agent ASKED FOR, which is the axis a verify
+    # claim needs when one tool serves several shapes of the same read.
+    #
+    # ``list_dlq_messages`` is that tool on every DLQ scenario: called with
+    # no filter it is the whole-queue read, called with
+    # ``remediation_hint=replay_safe`` it is the alerted slice, and the two
+    # answer different questions with the same name. A claim about the slice
+    # that cannot say which call it means is a claim about whichever call
+    # happened to be last.
+    #
+    # A pair's value is compared with the same rules as every comparator
+    # (``FieldComparator._matches``: bools compare identically, never
+    # numerically). ``null`` is the one special value and it means "the key
+    # is absent, or present and null" — one reading, because an omitted
+    # optional argument and an explicitly-null one are the same call to the
+    # platform, and the wire layer fills defaults so the agent's own choice
+    # is not recoverable from the recorded arguments.
+    #
+    # Selecting no entry fails closed with the argument sets that WERE seen,
+    # named: "no call carried these arguments" and "the call carried them and
+    # returned the wrong thing" are different diagnoses, and the failure text
+    # has to say which.
+    call_arguments: Mapping[str, bool | int | float | str | None] | None = None
+
+    def describe_claim(self) -> str:
+        """One line naming the whole claim — tools, field, selectors, comparator.
+
+        ``describe()`` names only the comparator, which is enough inside a
+        failure detail that has already said which assertion it is about.
+        An ``any_of`` report has not: it lists several complete claims side
+        by side, so each one has to identify itself.
+        """
+        parts = [f"{sorted(self.tools)} field {self.field!r}"]
+        if self.call_arguments is not None:
+            parts.append(f"called with {dict(sorted(self.call_arguments.items()))!r}")
+        if self.where is not None:
+            parts.append(f"rows whose {self.where.field!r} {self.where.describe()}")
+        if self.before_tools:
+            parts.append(f"before {sorted(self.before_tools)}")
+        if self.after_tools:
+            parts.append(f"after {sorted(self.after_tools)}")
+        parts.append(f"{self.which}/{self.rows} {self.describe()}")
+        return ", ".join(parts)
 
     @model_validator(mode="after")
     def _sum_has_no_rows_to_quantify(self) -> Self:
@@ -496,15 +589,19 @@ class EvidenceFieldExpectation(FieldComparator):
             raise ValueError(error)
         return self
 
-    @field_validator("before_tools")
+    @field_validator("before_tools", "after_tools")
     @classmethod
-    def _before_tools_can_actually_occur(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+    def _ordering_boundary_can_actually_occur(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         """The boundary must be an event an evidence entry can name.
 
         Same closure, same reasoning as ``forbidden_action_tools``: this
         assertion fails closed when the boundary is never found, so a
         misspelled or bookkeeping name would red every run forever while
         looking like an agent defect. A load error says what it is.
+
+        One validator for both directions on purpose: the closure is the same
+        question ("can an evidence entry name this?") and two copies of it
+        would drift the day a third boundary axis lands.
         """
         for item in value:
             if item.startswith("_"):
@@ -520,6 +617,87 @@ class EvidenceFieldExpectation(FieldComparator):
                     f"would fail on every run. Name one of: {sorted(TOOL_REGISTRY)}."
                 )
         return value
+
+    @model_validator(mode="after")
+    def _one_ordering_boundary_at_a_time(self) -> Self:
+        """``before_tools`` and ``after_tools`` are not written together.
+
+        The pair reads as a window ("after the replay and before the
+        escalation") and a window is a third thing, with its own empty case
+        and its own failure text — not the conjunction of two cuts. Refused at
+        load rather than implemented by accident, because a claim graded over
+        a window nobody designed is worse than one that will not load. Nothing
+        in the suite needs it today; when something does, it gets a named
+        axis and its own tests.
+        """
+        if self.before_tools and self.after_tools:
+            raise ValueError(
+                "before_tools and after_tools together describe a window between "
+                "two boundaries, which this grader does not implement. Write one "
+                "cut, or split the claim in two."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _after_boundary_is_not_the_observation(self) -> Self:
+        """A tool cannot be its own ``after_tools`` boundary.
+
+        The boundary is the LAST entry naming an ``after_tools`` tool and only
+        entries strictly after it are graded — so no entry naming that tool
+        can ever be graded. Naming it in ``tools`` as well is at best dead
+        weight and at worst reads as a claim about calls that were excluded by
+        construction.
+        """
+        both = sorted(set(self.tools) & set(self.after_tools))
+        if both:
+            raise ValueError(
+                f"{both} appear in both tools and after_tools. The boundary is the "
+                "LAST entry naming an after_tools tool and only later entries are "
+                "graded, so no call to those tools can ever be graded by this "
+                "assertion."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _call_arguments_name_real_arguments(self) -> Self:
+        """Every key must be an argument some named tool actually accepts.
+
+        Same fail-at-load posture as ``tools`` and the ordering boundaries,
+        and for the same reason: this selector fails CLOSED when it matches no
+        entry, so a misspelled argument name would red every run forever while
+        reading like an agent defect. The registry's input models are the
+        authority — the same models ``wire.py`` builds the request bytes from —
+        so a platform rename fails here rather than silently selecting
+        nothing.
+
+        Checked against the UNION over ``tools`` (not the intersection): the
+        tool set is an equivalence class of same-effect calls and a sibling
+        may legitimately not take the argument, which the runtime reading
+        already handles — an entry that does not carry the pair is simply not
+        selected.
+        """
+        if self.call_arguments is None:
+            return self
+        if not self.call_arguments:
+            raise ValueError(
+                "call_arguments is an entry selector and an empty one selects "
+                "every entry, which is what omitting it already means. Name at "
+                "least one argument, or drop it."
+            )
+        accepted = {
+            name
+            for tool in self.tools
+            if tool in TOOL_REGISTRY
+            for name in TOOL_REGISTRY[tool].input_model.model_fields
+        }
+        unknown = sorted(set(self.call_arguments) - accepted)
+        if unknown:
+            raise ValueError(
+                f"call_arguments names {unknown}, which none of {sorted(self.tools)} "
+                "accepts. No recorded call could carry it, so this assertion would "
+                f"fail on every run. Accepted arguments: {sorted(accepted)}."
+            )
+        return self
 
     @model_validator(mode="after")
     def _boundary_is_not_the_observation(self) -> Self:
@@ -539,6 +717,113 @@ class EvidenceFieldExpectation(FieldComparator):
                 "graded, so such an assertion can never be satisfied."
             )
         return self
+
+
+class AnyOfExpectation(BaseModel):
+    """Several complete claims, satisfied when at least ONE of them holds.
+
+    The construct for a scenario whose correct behaviour has more than one
+    equally-correct SHAPE, and it exists because a claim written against one
+    shape grades the others red. That is not hypothetical: paid run
+    ``4974811d236f`` (INC-001) is exactly it. Scenario 2's verify claims were
+    written for an unfiltered re-read of the whole dead-letter queue; the
+    agent verified with a filtered re-read of the alerted slice — the more
+    precise verify, and the one the prompt asks for — and the run graded RED
+    with outcome, action, safety and budget all green.
+
+    The rule that produced this class: **a verify claim must be true for
+    every verify shape a correct agent may choose.** Written as a conjunction
+    of ordinary claims that is impossible — the shapes are mutually exclusive
+    by construction, so requiring both requires the agent to verify twice.
+    Written as a weaker single claim it is worse: the way to make one claim
+    cover both readings is to stop asserting the thing that distinguishes
+    them, which is how a scenario ends up green on a run that did nothing.
+    A disjunction of EXACT claims is the only shape that keeps each branch as
+    strict as it was.
+
+    Every member is a complete ``EvidenceFieldExpectation`` — its own tools,
+    field, selectors and comparator — so nothing about a branch is inherited
+    or implied, and each one can be read on its own and argued with on its
+    own. The report names which member satisfied the group, so a passing run
+    still says WHICH shape the agent chose; a failing group shows every
+    member's own failure detail, because "none of these held" is only useful
+    if you can see what each one wanted.
+
+    Two deliberate limits:
+
+    * **No nesting.** A member is a plain claim, never another group. One
+      level is enough for "either shape", and the failure text of a nested
+      disjunction is unreadable — which matters more here than expressive
+      power, since the whole point of the construct is to make a red
+      diagnosable.
+    * **No ``which: sum`` members.** ``sum`` grades a VOLUME — "exactly one
+      row was replayed, across every call" — and a disjunction of volumes is
+      a way to write "one or the other total is fine", which is not a claim
+      about a correct trajectory but an unwillingness to say what correct is.
+      Shapes differ in how the agent OBSERVES; they do not differ in how much
+      it changed.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    any_of: tuple[EvidenceFieldExpectation, ...] = Field(min_length=2)
+
+    @model_validator(mode="after")
+    def _members_are_not_volume_claims(self) -> Self:
+        offenders = [m.describe_claim() for m in self.any_of if m.which == "sum"]
+        if offenders:
+            raise ValueError(
+                "any_of members grade which observation the agent made, not how "
+                f"much it changed; which: sum has no business in a disjunction: {offenders}"
+            )
+        return self
+
+
+def _claim_tag(value: Any) -> str:
+    """Which arm of ``EvidenceClaim`` a YAML mapping (or model) is.
+
+    A plain tag function rather than pydantic's smart union so a typo inside
+    one arm reports that arm's own error. Under a smart union a claim with a
+    misspelled ``field`` key reports both arms' failures at once, and the
+    ``any_of`` half of that message is noise pointing at the wrong mistake.
+    """
+    if isinstance(value, AnyOfExpectation):
+        return "any_of"
+    if isinstance(value, Mapping) and "any_of" in value:
+        return "any_of"
+    return "field"
+
+
+# One entry of ``expected_evidence_fields``: a claim, or a group of claims of
+# which one must hold. The union is at the list level rather than as an
+# optional field on the claim itself because a group has no tools, no field
+# and no comparator of its own — modelling it as a claim with everything
+# optional would make every existing validator conditional and leave the type
+# unable to say which shape it is.
+EvidenceClaim = Annotated[
+    Annotated[EvidenceFieldExpectation, Tag("field")] | Annotated[AnyOfExpectation, Tag("any_of")],
+    Discriminator(_claim_tag),
+]
+
+
+def leaf_claims(claims: Iterable[EvidenceClaim]) -> Iterator[EvidenceFieldExpectation]:
+    """Every plain field claim, with ``any_of`` groups flattened into members.
+
+    The one place that knows the union's shape. Readers that ask structural
+    questions of a scenario's claims — which tools it reads, which row ids it
+    pins, whether an ordering boundary covers every permitted action — want
+    the leaves, and each of them growing its own ``isinstance`` walk is how a
+    new arm gets silently skipped by half the suite.
+
+    It is deliberately NOT what the grader uses: flattening a disjunction
+    into its members would grade them as a conjunction, which is the opposite
+    claim.
+    """
+    for claim in claims:
+        if isinstance(claim, AnyOfExpectation):
+            yield from claim.any_of
+        else:
+            yield claim
 
 
 class ActionArgumentExpectation(FieldComparator):
@@ -636,7 +921,10 @@ class ScenarioExpectation(BaseModel):
     # Structured value assertions, graded inside the EVIDENCE dimension (no
     # sixth GradeDimension: the report shape, ``_classify_failure``'s
     # failing-dimension buckets and the committed baseline all key on five).
-    expected_evidence_fields: tuple[EvidenceFieldExpectation, ...] = ()
+    # An entry is either one claim or an ``any_of`` group of them — see
+    # ``AnyOfExpectation`` for why the disjunction is a first-class shape.
+    # Structural readers flatten with ``leaf_claims``; the grader does not.
+    expected_evidence_fields: tuple[EvidenceClaim, ...] = ()
     max_tool_calls: int | None = None
     # For remediation scenarios: the tight equivalence set of Tier-1 tools
     # whose firing satisfies the scenario's intended effect (matched by
@@ -971,11 +1259,13 @@ def _grade_evidence(
     present = [s for s in exp.forbidden_evidence_contains if s in corpus]
     if present:
         failures.append(f"forbidden signals present: {', '.join(present)}")
-    failures.extend(
-        detail
-        for detail in (_grade_evidence_field(run, field) for field in exp.expected_evidence_fields)
-        if detail is not None
-    )
+    satisfied_notes: list[str] = []
+    for claim in exp.expected_evidence_fields:
+        detail, note = _grade_evidence_claim(run, claim)
+        if detail is not None:
+            failures.append(detail)
+        elif note is not None:
+            satisfied_notes.append(note)
     if exp.expect_briefing_contains:
         if briefing is None:
             # Fail closed. The alternative — treat "no briefing" as nothing to
@@ -1007,6 +1297,11 @@ def _grade_evidence(
         satisfied.append(
             f"all {len(exp.expected_evidence_fields)} evidence field assertion(s) satisfied"
         )
+        # Which branch of each disjunction held. A green ``any_of`` otherwise
+        # reports only that "one of them" did, and then the report cannot say
+        # WHICH verify shape the agent chose — the single most interesting
+        # fact about a run the construct exists to admit.
+        satisfied.extend(satisfied_notes)
     if exp.expect_briefing_contains:
         satisfied.append(
             f"briefing carries all {len(exp.expect_briefing_contains)} required signal(s)"
@@ -1032,9 +1327,17 @@ def _selector_clause(exp: EvidenceFieldExpectation) -> str:
 
 
 def _ordering_clause(exp: EvidenceFieldExpectation) -> str:
-    if not exp.before_tools:
+    if exp.before_tools:
+        return f" recorded before {sorted(exp.before_tools)}"
+    if exp.after_tools:
+        return f" recorded after the last {sorted(exp.after_tools)}"
+    return ""
+
+
+def _arguments_clause(exp: EvidenceFieldExpectation) -> str:
+    if exp.call_arguments is None:
         return ""
-    return f" recorded before {sorted(exp.before_tools)}"
+    return f" called with {dict(sorted(exp.call_arguments.items()))!r}"
 
 
 def _split_row_path(field: str) -> tuple[str, str]:
@@ -1117,25 +1420,99 @@ def _graded_evidence(
 ) -> tuple[EvidenceEntry, ...] | None:
     """The entries this assertion may read, or ``None`` when its boundary never fired.
 
-    Without ``before_tools`` that is the whole ledger. With it, the ledger up
-    to (not including) the first entry naming one of the boundary tools —
-    which is what makes "observed BEFORE the action" expressible at all.
+    With neither boundary that is the whole ledger. With ``before_tools``, the
+    ledger up to (not including) the FIRST entry naming a boundary tool —
+    which is what makes "observed BEFORE the action" expressible at all. With
+    ``after_tools``, everything strictly after the LAST such entry, which is
+    what makes "the state the run left behind" expressible: the last boundary,
+    not the first, because a run that acted twice was only finished after the
+    second one.
+
+    Both are refused together at load, so the two branches never meet.
     """
-    if not exp.before_tools:
-        return run.evidence
-    for index, entry in enumerate(run.evidence):
-        if entry.tool_name in exp.before_tools:
-            return run.evidence[:index]
-    return None
+    if exp.before_tools:
+        for index, entry in enumerate(run.evidence):
+            if entry.tool_name in exp.before_tools:
+                return run.evidence[:index]
+        return None
+    if exp.after_tools:
+        for index in range(len(run.evidence) - 1, -1, -1):
+            if run.evidence[index].tool_name in exp.after_tools:
+                return run.evidence[index + 1 :]
+        return None
+    return run.evidence
+
+
+def _argument_selected(exp: EvidenceFieldExpectation, entry: EvidenceEntry) -> bool:
+    """Does this entry's recorded ``arguments`` carry every claimed pair?
+
+    ``None`` on the claim's side means "absent, or present and null" — the
+    two are the same call once ``wire.py`` has filled the defaults the
+    platform sees, and a scenario that had to distinguish them would be
+    asserting on the harness rather than on the agent.
+
+    Values compare by ``FieldComparator._matches``, so the bool-identity rule
+    holds here too: ``call_arguments: {flag: true}`` is not satisfied by a
+    recorded ``1``.
+    """
+    if exp.call_arguments is None:
+        return True
+    for name, expected in exp.call_arguments.items():
+        observed = entry.arguments.get(name)
+        if expected is None:
+            if observed is not None:
+                return False
+        elif not values_match(expected, observed):
+            return False
+    return True
+
+
+def _grade_evidence_claim(run: RunState, claim: EvidenceClaim) -> tuple[str | None, str | None]:
+    """Grade one entry of ``expected_evidence_fields``.
+
+    Returns ``(failure detail, satisfied note)`` — at most one of the two is
+    ever set. The note exists only for ``any_of``: a group that passed has
+    said something a plain claim has not, namely WHICH of the admissible
+    shapes the run actually took, and that belongs in the report rather than
+    only in the trajectory.
+    """
+    if isinstance(claim, AnyOfExpectation):
+        return _grade_any_of(run, claim)
+    return _grade_evidence_field(run, claim), None
+
+
+def _grade_any_of(run: RunState, group: AnyOfExpectation) -> tuple[str | None, str | None]:
+    """One member is enough; when none holds, show what every member wanted.
+
+    Members are graded in order and the first satisfied one wins, so the
+    order a scenario writes them in is the order the report prefers — put the
+    shape the prompt actually asks for first and a green run names it.
+
+    The failing report is the part that had to be designed. "any_of failed"
+    with one member's detail would send the reader after the wrong shape, so
+    every member's own detail is shown, numbered and prefixed with the claim
+    it belongs to. That is verbose, and it is verbose exactly once per red.
+    """
+    details: list[str] = []
+    for position, member in enumerate(group.any_of, start=1):
+        detail = _grade_evidence_field(run, member)
+        if detail is None:
+            return None, f"any_of satisfied by member {position} ({member.describe_claim()})"
+        details.append(f"member {position} [{member.describe_claim()}]: {detail}")
+    return (
+        f"any_of: none of {len(group.any_of)} admissible shapes held — " + "; ".join(details)
+    ), None
 
 
 def _grade_evidence_field(run: RunState, exp: EvidenceFieldExpectation) -> str | None:
     """Return a failure detail for one field assertion, or ``None`` when satisfied."""
     considered = _graded_evidence(run, exp)
     if considered is None:
+        boundary = exp.before_tools or exp.after_tools
+        when = "before" if exp.before_tools else "after the last"
         return (
-            f"{sorted(exp.tools)} field {exp.field!r} was asserted to hold before "
-            f"{sorted(exp.before_tools)}, but no evidence entry names any of those "
+            f"{sorted(exp.tools)} field {exp.field!r} was asserted to hold {when} "
+            f"{sorted(boundary)}, but no evidence entry names any of those "
             "tools — the ordering boundary never occurred, so the claim is "
             "unanswerable rather than satisfied"
         )
@@ -1144,8 +1521,16 @@ def _grade_evidence_field(run: RunState, exp: EvidenceFieldExpectation) -> str |
     # that carried the field — an entry-level cut, so a path that reads
     # many rows from that entry still gets its any-row semantics.
     observed: list[list[object]] = []
+    # Every argument set the named tools were called with inside the window,
+    # kept only to make a ``call_arguments`` miss diagnosable: "the call you
+    # mean was never made, and here is what WAS called" is a different
+    # finding from "it was made and returned the wrong thing".
+    seen_arguments: list[dict[str, object]] = []
     for entry in considered:
         if entry.tool_name not in exp.tools:
+            continue
+        seen_arguments.append(dict(entry.arguments))
+        if not _argument_selected(exp, entry):
             continue
         # Judge verdicts and bookkeeping entries carry prose, not JSON —
         # skip them silently rather than failing the dimension on them.
@@ -1159,9 +1544,31 @@ def _grade_evidence_field(run: RunState, exp: EvidenceFieldExpectation) -> str |
                 observed.append(values)
 
     if not observed:
+        # Three failures wear one shape and they are three different findings:
+        # the tool was never called here at all, it was called but never with
+        # these arguments, or it was called that way and did not carry the
+        # field. Only the middle one gets the argument wording — with nothing
+        # seen there is no "you called it differently" to report, and saying so
+        # would send the reader looking for a call shape rather than for a
+        # missing read.
+        if (
+            exp.call_arguments is not None
+            and seen_arguments
+            and not any(
+                _argument_selected(exp, entry)
+                for entry in considered
+                if entry.tool_name in exp.tools
+            )
+        ):
+            return (
+                f"no {sorted(exp.tools)} evidence entry{_ordering_clause(exp)} was"
+                f"{_arguments_clause(exp)} — the call this claim is about was never "
+                f"made (expected {exp.describe()} on {exp.field!r}); calls seen: "
+                f"{seen_arguments!r}"
+            )
         return (
             f"no {sorted(exp.tools)} evidence entry"
-            f"{_ordering_clause(exp)} carried field {exp.field!r}"
+            f"{_ordering_clause(exp)}{_arguments_clause(exp)} carried field {exp.field!r}"
             f"{_selector_clause(exp)} (expected {exp.describe()})"
         )
     if exp.which == "sum":

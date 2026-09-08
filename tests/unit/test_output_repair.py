@@ -399,7 +399,7 @@ class TestTheFailureClass:
         self, run_state: RunState, now: datetime, prefix: str
     ) -> None:
         final = self._final(run_state, now, f"{prefix}: 1 validation error for InvestigationStep")
-        assert _classify_failure(self._failing_report(), final) == PLANNER_OUTPUT_INVALID_CLASS
+        assert _classify_failure(self._failing_report(), final)[0] == PLANNER_OUTPUT_INVALID_CLASS
 
     def test_it_is_not_reported_as_a_transport_failure(
         self, run_state: RunState, now: datetime
@@ -411,13 +411,13 @@ class TestTheFailureClass:
         rejection is filed as a network problem.
         """
         final = self._final(run_state, now, "planner LLM invalid: output failed schema validation")
-        assert _classify_failure(self._failing_report(), final) != "transport"
+        assert _classify_failure(self._failing_report(), final)[0] != "transport"
 
     def test_a_real_transport_failure_still_classifies_as_transport(
         self, run_state: RunState, now: datetime
     ) -> None:
         final = self._final(run_state, now, "MCP error -32000 while calling list_dlq_messages")
-        assert _classify_failure(self._failing_report(), final) == "transport"
+        assert _classify_failure(self._failing_report(), final)[0] == "transport"
 
 
 class TestTheLiveRunEndToEnd:

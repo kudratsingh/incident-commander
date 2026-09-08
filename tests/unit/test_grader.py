@@ -19,6 +19,7 @@ from evals.graders.deterministic import (
     ScenarioExpectation,
     grade,
     is_vacuous_detail,
+    leaf_claims,
 )
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
@@ -2546,7 +2547,7 @@ class TestShippedDlqScenariosStateAnExactCount:
             for s in self._replay_scenarios()
             if not any(
                 f.which == "sum" and f.field in {"replayed", "scheduled"}
-                for f in s.expectation.expected_evidence_fields
+                for f in leaf_claims(s.expectation.expected_evidence_fields)
             )
         ]
         assert missing == [], (
@@ -3989,7 +3990,7 @@ class TestExactActionScenariosPinTheResource:
         exp = _shipped_expectation("remediate_runaway_saga_success")
         recovery = [
             f
-            for f in exp.expected_evidence_fields
+            for f in leaf_claims(exp.expected_evidence_fields)
             if f.field == "nodes[].status" and f.rows == "all"
         ]
         assert recovery, (
@@ -4193,7 +4194,7 @@ class TestShippedDlqScenariosRequireTheReadFirst:
         for scenario in self._acting_scenarios():
             ordered = [
                 f
-                for f in scenario.expectation.expected_evidence_fields
+                for f in leaf_claims(scenario.expectation.expected_evidence_fields)
                 if "list_dlq_messages" in f.tools and f.before_tools
             ]
             if not ordered:
@@ -4218,7 +4219,7 @@ class TestShippedDlqScenariosRequireTheReadFirst:
         gaps: list[str] = []
         for scenario in self._acting_scenarios():
             permitted = set(scenario.expectation.expected_action_tools) & self._DLQ_ACTIONS
-            for field in scenario.expectation.expected_evidence_fields:
+            for field in leaf_claims(scenario.expectation.expected_evidence_fields):
                 if "list_dlq_messages" not in field.tools or not field.before_tools:
                     continue
                 uncovered = sorted(permitted - set(field.before_tools))
@@ -4860,7 +4861,7 @@ class TestReplayNowScenariosForbidASchedule:
 
     @staticmethod
     def _summed(scenario: Scenario, field: str) -> float | None:
-        for claim in scenario.expectation.expected_evidence_fields:
+        for claim in leaf_claims(scenario.expectation.expected_evidence_fields):
             if claim.field == field and claim.which == "sum" and claim.equals is not None:
                 return float(claim.equals)
         return None

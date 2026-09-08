@@ -8,7 +8,7 @@ import stat
 import sys
 import time
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -57,7 +57,7 @@ from incident_commander.agent.remediation import (
     make_llm_verify,
     make_remediate,
 )
-from incident_commander.agent.state import IncidentState, RunState
+from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 from incident_commander.config import Settings
 from incident_commander.llm.client import LLMClient, LLMClientProtocol, LLMError, preflight_auth
 from incident_commander.llm.fakes import CannedLLMClient
@@ -132,6 +132,13 @@ class ScenarioOutcome(BaseModel):
     # derived from the grade report and the run's evidence — a starting
     # point for bucket-before-you-debug, not a verdict.
     failure_class: str = "unclassified"
+    # Why the bucket, in enough detail to act on without opening the
+    # trajectory. Empty on a pass and on buckets whose name already says
+    # everything. `grader-brittleness` is the one that earns it: WO-R2-175
+    # (INC-001) — the class was correct on live run 4974811d236f and the
+    # coordinator still had to read the whole trace to learn WHICH claim and
+    # WHICH call shape disagreed.
+    failure_class_detail: str = ""
     # Set when the briefing judge call itself failed: the scenario result
     # stands (graded deterministically); only the judge column is missing.
     judge_error: str | None = None
@@ -652,7 +659,7 @@ def run_scenario(
         if live_mcp_client is not None:
             live_mcp_client.close()
 
-    failure_class = _classify_failure(report, final)
+    failure_class, failure_class_detail = _classify_failure(report, final)
     outcome = ScenarioOutcome(
         scenario=scenario.name,
         final_state=final.state,
@@ -660,6 +667,7 @@ def run_scenario(
         report=report,
         judge_score=judge_score,
         failure_class=failure_class,
+        failure_class_detail=failure_class_detail,
         judge_error=judge_error,
         briefing_error=briefing_error,
         # Provenance mirrors the tracer's scenario_start keys above.
@@ -682,8 +690,45 @@ def run_scenario(
     return ScenarioResult(outcome=outcome, trajectory=trajectory, briefing=briefing)
 
 
-def _classify_failure(report: GradeReport, final: RunState | None) -> str:
-    """Bucket a graded run into the noise taxonomy.
+def _grader_drift_detail(report: GradeReport, evidence: Sequence[EvidenceEntry]) -> str:
+    """Why an evidence-only red is probably the grader's fault, and where to look.
+
+    The `grader-brittleness` bucket was already correct on live run
+    ``4974811d236f`` and it still cost a full trace read to learn what had
+    gone wrong: the claim was written for an unfiltered listing and the agent
+    verified with a filtered one. Both halves of that sentence are in the
+    graded artifacts already — the claim is in the EVIDENCE detail, and the
+    call shapes are in the ledger's ``arguments`` — so the diagnosis belongs
+    in ``report.json`` where the coordinator reads it.
+
+    The call shapes are listed per tool, deduplicated, in call order, and only
+    for tools the failing claims actually name. That is the comparison a
+    reader has to make: "the claim wants THIS shape, the agent used THAT
+    one".
+    """
+    detail = next(
+        (d.detail for d in report.dimensions if d.dimension == GradeDimension.EVIDENCE), ""
+    )
+    shapes: list[str] = []
+    for entry in evidence:
+        if entry.tool_name.startswith("_") or entry.tool_name not in detail:
+            continue
+        rendered = f"{entry.tool_name}({json.dumps(entry.arguments, sort_keys=True)})"
+        if rendered not in shapes:
+            shapes.append(rendered)
+    called = "; ".join(shapes) if shapes else "no matching tool call in the ledger"
+    return (
+        "outcome, action and safety PASSED and only EVIDENCE failed — the grader-drift "
+        "signature (INC-001): suspect the claim before the agent, and read the trajectory "
+        f"before changing any prompt. Failing claim(s): {detail} | call shapes the run "
+        f"actually used for the named tool(s): {called} | if a correct agent may reasonably "
+        "have chosen this shape, the claim is what has to move (docs/eval-methodology.md "
+        "§ verify claims and verify shapes)."
+    )
+
+
+def _classify_failure(report: GradeReport, final: RunState | None) -> tuple[str, str]:
+    """Bucket a graded run into the noise taxonomy, with a reason for the bucket.
 
     Heuristic and deliberately conservative: anything ambiguous lands in
     "unclassified" rather than a wrong bucket. Priority order mirrors the
@@ -691,7 +736,7 @@ def _classify_failure(report: GradeReport, final: RunState | None) -> str:
     environment before consistency before variance before grader.
     """
     if report.passed:
-        return "passed"
+        return "passed", ""
     dims = {d.dimension: d for d in report.dimensions}
     failing = {d.dimension for d in report.dimensions if not d.passed}
     evidence = final.evidence if final is not None else ()
@@ -705,14 +750,14 @@ def _classify_failure(report: GradeReport, final: RunState | None) -> str:
     if any(
         summary.startswith(prefix) for summary in summaries for prefix in OUTPUT_INVALID_PREFIXES
     ):
-        return PLANNER_OUTPUT_INVALID_CLASS
+        return PLANNER_OUTPUT_INVALID_CLASS, ""
     if any(
         ("MCP error" in s) or ("MCPError" in s) or ("LLM" in s and "invalid" in s)
         for s in summaries
     ):
-        return "transport"
+        return "transport", ""
     if any("is_error=True" in s for s in summaries):
-        return "shared-env"
+        return "shared-env", ""
     action = dims.get(GradeDimension.ACTION)
     if (
         action is not None
@@ -723,12 +768,12 @@ def _classify_failure(report: GradeReport, final: RunState | None) -> str:
         )
     ):
         # Right action, judge said not-yet: the fix outran the probe.
-        return "eventual-consistency"
+        return "eventual-consistency", ""
     if failing == {GradeDimension.BUDGET}:
-        return "llm-variance"
+        return "llm-variance", ""
     if failing == {GradeDimension.EVIDENCE}:
-        return "grader-brittleness"
-    return "unclassified"
+        return "grader-brittleness", _grader_drift_detail(report, evidence)
+    return "unclassified", ""
 
 
 def _crashed_result(
@@ -1231,6 +1276,10 @@ def _print_summary(report: RunReport) -> None:
             for dim in outcome.report.dimensions:
                 if not dim.passed:
                     print(f"    - {dim.dimension.value}: {dim.detail}")
+            # The diagnosis, where a bucket name alone would send the reader
+            # to the agent instead of to the claim (INC-001, WO-R2-175).
+            if outcome.failure_class_detail:
+                print(f"    ! {outcome.failure_class_detail}")
 
 
 def _canned_equivalent_knob_warning(settings: Settings) -> str | None:

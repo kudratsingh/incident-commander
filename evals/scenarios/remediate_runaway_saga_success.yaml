@@ -317,8 +317,19 @@ expectation:
   # came back a number is indeed "not dead_letter") — the precondition
   # below asserts the positive on the same field, which is where drift
   # would show.
+  #
+  # `call_arguments` and `after_tools` were added in the WO-R2-175 sweep. The
+  # claim always meant "the chain the run acted on, read AFTER it acted", and
+  # `which: last` said only "the newest get_dag_state reading" — which is a
+  # different sentence in two runs: one that read a different chain last, and
+  # one that never verified at all and is then graded on its own pre-action
+  # probe. Neither is hypothetical enough to leave, given INC-001 was exactly
+  # this substitution of "the last reading" for "the reading I mean". A run
+  # that skips the verify now fails as unanswerable, and it says so.
   - tools: [get_dag_state]
     field: nodes[].status
+    call_arguments: {job_id: a2412a54-65f0-5258-95ab-5c168a15df64}
+    after_tools: [replay_dlq_by_ids]
     which: last
     rows: all
     not_equals: dead_letter

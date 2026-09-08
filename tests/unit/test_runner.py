@@ -658,20 +658,81 @@ class TestFailureClassification:
         )
 
     def test_passed(self) -> None:
-        assert _classify_failure(self._report(set()), self._final()) == "passed"
+        assert _classify_failure(self._report(set()), self._final()) == ("passed", "")
 
     def test_budget_only_is_llm_variance(self) -> None:
         got = _classify_failure(self._report({GradeDimension.BUDGET}), self._final())
-        assert got == "llm-variance"
+        assert got == ("llm-variance", "")
 
     def test_evidence_only_is_grader_brittleness(self) -> None:
         got = _classify_failure(self._report({GradeDimension.EVIDENCE}), self._final())
-        assert got == "grader-brittleness"
+        assert got[0] == "grader-brittleness"
+
+    def test_the_grader_drift_bucket_carries_its_diagnosis(self) -> None:
+        """The bucket names the suspect; the detail says where to look.
+
+        `grader-brittleness` was already the right label on live run
+        4974811d236f (INC-001) and it still cost a full trace read to learn
+        WHICH claim and WHICH call shape disagreed. Both facts are in the
+        graded artifacts, so the detail carries them into `report.json`.
+        """
+        report = GradeReport(
+            scenario="s",
+            passed=False,
+            dimensions=tuple(
+                DimensionResult(
+                    dimension=d,
+                    passed=d is not GradeDimension.EVIDENCE,
+                    detail=(
+                        "['list_dlq_messages'] field 'total' expected equals 4, observed (last) [0]"
+                        if d is GradeDimension.EVIDENCE
+                        else "ok"
+                    ),
+                )
+                for d in GradeDimension
+            ),
+        )
+        final = self._final().model_copy(
+            update={
+                "evidence": (
+                    EvidenceEntry(
+                        tool_name="list_dlq_messages",
+                        arguments={"remediation_hint": None},
+                        result_summary='{"total":5}',
+                        timestamp=self._NOW,
+                    ),
+                    EvidenceEntry(
+                        tool_name="list_dlq_messages",
+                        arguments={"remediation_hint": "replay_safe"},
+                        result_summary='{"total":0}',
+                        timestamp=self._NOW,
+                    ),
+                    EvidenceEntry(
+                        tool_name="_verify_judge",
+                        arguments={},
+                        result_summary="verified",
+                        timestamp=self._NOW,
+                    ),
+                )
+            }
+        )
+        bucket, detail = _classify_failure(report, final)
+        assert bucket == "grader-brittleness"
+        assert "grader-drift signature" in detail
+        assert "read the trajectory before changing any prompt" in detail
+        # The claim that failed...
+        assert "expected equals 4" in detail
+        # ...beside the shapes the agent actually used, so the mismatch reads
+        # off the report instead of out of the trace.
+        assert '"remediation_hint": null' in detail
+        assert '"remediation_hint": "replay_safe"' in detail
+        # Bookkeeping entries are not tool calls and stay out of it.
+        assert "_verify_judge" not in detail
 
     def test_tool_is_error_is_shared_env(self) -> None:
         final = self._final(("get_redis_health", "tool reported is_error=True (get_redis_health)"))
         got = _classify_failure(self._report({GradeDimension.OUTCOME}), final)
-        assert got == "shared-env"
+        assert got == ("shared-env", "")
 
     def test_real_mcp_transport_summary_is_transport(self) -> None:
         # Summary built exactly as investigation.py's tool-error escalation
@@ -680,7 +741,7 @@ class TestFailureClassification:
         err = MCPError(-32000, "connection reset by peer")
         final = self._final(("get_consumer_lag", f"tool error (get_consumer_lag): {err}"))
         got = _classify_failure(self._report({GradeDimension.OUTCOME}), final)
-        assert got == "transport"
+        assert got == ("transport", "")
 
     def test_transport_beats_shared_env(self) -> None:
         # Priority order is deliberate: transport before shared-env, per the
@@ -691,7 +752,7 @@ class TestFailureClassification:
             ("get_redis_health", "tool reported is_error=True (get_redis_health)"),
         )
         got = _classify_failure(self._report({GradeDimension.OUTCOME}), final)
-        assert got == "transport"
+        assert got == ("transport", "")
 
     def test_not_verified_with_correct_action_is_eventual_consistency(self) -> None:
         final = self._final(
@@ -699,7 +760,7 @@ class TestFailureClassification:
             ("_verify_judge", "not_verified: nodes still waiting"),
         )
         got = _classify_failure(self._report({GradeDimension.OUTCOME}), final)
-        assert got == "eventual-consistency"
+        assert got == ("eventual-consistency", "")
 
     def test_wrong_action_outcome_fail_is_unclassified(self) -> None:
         # ACTION failed + OUTCOME failed with no environment/consistency
@@ -707,7 +768,7 @@ class TestFailureClassification:
         got = _classify_failure(
             self._report({GradeDimension.OUTCOME, GradeDimension.ACTION}), self._final()
         )
-        assert got == "unclassified"
+        assert got == ("unclassified", "")
 
     def test_crashed_result_is_transport_or_shared_env(self) -> None:
         scenario = _passing_scenario()

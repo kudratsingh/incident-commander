@@ -70,6 +70,7 @@ from pydantic import ValidationError
 
 from evals import artifacts
 from evals.chaos_hooks import ChaosInvocationError, invoke_chaos_hook
+from evals.graders.deterministic import AnyOfExpectation, leaf_claims
 from evals.preconditions import unmet
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import PreconditionProbe, Scenario
@@ -509,7 +510,7 @@ def derive_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
                     )
                 )
 
-    for claim in scenario.expectation.expected_evidence_fields:
+    for claim in leaf_claims(scenario.expectation.expected_evidence_fields):
         for tool in claim.tools:
             if not _read_tool(tool):
                 continue
@@ -1303,24 +1304,54 @@ def render(
     add("")
     add("**Evidence claims**")
     add("")
-    add(
-        _table(
-            ("tools", "field", "comparator", "which/rows", "where", "before"),
-            [
+    # `group` is the column that makes an `any_of` readable in a flat table:
+    # its members are ALTERNATIVES, and a reviewer who reads them as a
+    # conjunction would conclude the scenario demands two verify reads. The
+    # `args` and `after` columns exist for the same reason — a claim scoped to
+    # one call shape or to the post-action window says something a reviewer
+    # cannot infer from tools/field alone, and this table is the pre-run
+    # review surface (PROTOCOL step 4) where verify shapes get checked.
+    evidence_rows: list[tuple[str, ...]] = []
+    for position, claim_entry in enumerate(expectation.expected_evidence_fields, start=1):
+        members = (
+            claim_entry.any_of if isinstance(claim_entry, AnyOfExpectation) else (claim_entry,)
+        )
+        for member in members:
+            evidence_rows.append(
                 (
-                    ", ".join(claim.tools),
-                    claim.field,
-                    claim.describe(),
-                    f"{claim.which}/{claim.rows}",
+                    f"any_of #{position}" if len(members) > 1 else "—",
+                    ", ".join(member.tools),
+                    member.field,
+                    member.describe(),
+                    f"{member.which}/{member.rows}",
                     (
-                        f"{claim.where.field} {claim.where.describe()}"
-                        if claim.where is not None
+                        f"{member.where.field} {member.where.describe()}"
+                        if member.where is not None
                         else "—"
                     ),
-                    ", ".join(claim.before_tools) or "—",
+                    (
+                        ", ".join(f"{k}={v!r}" for k, v in sorted(member.call_arguments.items()))
+                        if member.call_arguments is not None
+                        else "—"
+                    ),
+                    ", ".join(member.before_tools) or "—",
+                    ", ".join(member.after_tools) or "—",
                 )
-                for claim in expectation.expected_evidence_fields
-            ],
+            )
+    add(
+        _table(
+            (
+                "group",
+                "tools",
+                "field",
+                "comparator",
+                "which/rows",
+                "where",
+                "args",
+                "before",
+                "after",
+            ),
+            evidence_rows,
         )
     )
     add("")

@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from evals.graders.deterministic import leaf_claims
 from evals.scenarios.loader import ScenarioLoadError, load_scenario, load_scenarios
 from evals.scenarios.schema import Scenario, chaos_tool_schemas
 from incident_commander.agent.state import IncidentState
@@ -45,7 +46,7 @@ class TestLoadScenario:
         # fixtures too (evals/evidence_audit.py).
         group_asserts = [
             f
-            for f in scenario.expectation.expected_evidence_fields
+            for f in leaf_claims(scenario.expectation.expected_evidence_fields)
             if f.tools == ("get_consumer_lag",) and f.field == "consumer_group"
         ]
         assert [f.equals for f in group_asserts] == ["worker-dispatcher"]
@@ -363,7 +364,7 @@ class TestEvidenceExpectationHygiene:
         for name in sorted(_STRUCTURED_EVIDENCE_SCENARIOS):
             scenario = {s.name: s for s in _shipped_scenarios()}[name]
             canned = set(scenario.canned_tool_responses)
-            for expectation in scenario.expectation.expected_evidence_fields:
+            for expectation in leaf_claims(scenario.expectation.expected_evidence_fields):
                 if not canned.intersection(expectation.tools):
                     offenders.append(f"{name}: {expectation.field} on {list(expectation.tools)}")
         assert offenders == [], (
@@ -566,10 +567,14 @@ class TestStuckDagChainIdsArePinnedCorrectly:
                 str(a.equals) for a in expectation.expected_action_arguments
             },
             "evidence where-selectors": {
-                str(e.where.equals) for e in expectation.expected_evidence_fields if e.where
+                str(e.where.equals)
+                for e in leaf_claims(expectation.expected_evidence_fields)
+                if e.where
             },
             "get_dag_state seed_id claim": {
-                str(e.equals) for e in expectation.expected_evidence_fields if e.field == "seed_id"
+                str(e.equals)
+                for e in leaf_claims(expectation.expected_evidence_fields)
+                if e.field == "seed_id"
             },
         }
         for site, values in pinned.items():
@@ -674,7 +679,9 @@ class TestBadDataFixtureIdIsPinnedCorrectly:
                 str(a.equals) for a in expectation.expected_action_arguments
             },
             "evidence where-selectors": {
-                str(e.where.equals) for e in expectation.expected_evidence_fields if e.where
+                str(e.where.equals)
+                for e in leaf_claims(expectation.expected_evidence_fields)
+                if e.where
             },
             # Since WO-R2-163 the premise names this row through a `where`
             # SELECTOR rather than an any-row `items[].id equals` — one claim
@@ -815,7 +822,9 @@ class TestPoisonFixtureIdIsPinnedCorrectly:
                 str(a.equals) for a in expectation.expected_action_arguments
             },
             "evidence where-selectors": {
-                str(e.where.equals) for e in expectation.expected_evidence_fields if e.where
+                str(e.where.equals)
+                for e in leaf_claims(expectation.expected_evidence_fields)
+                if e.where
             },
             "precondition selectors": {
                 str(field.where.equals)
@@ -958,7 +967,11 @@ class TestMislabeledFixtureIdIsPinnedCorrectly:
         # The evidence claims name TWO rows on purpose — the mislabelled one and
         # the genuine row the run must leave alone — so this site is checked as
         # a set rather than as a single value.
-        assert {str(e.where.equals) for e in expectation.expected_evidence_fields if e.where} == {
+        assert {
+            str(e.where.equals)
+            for e in leaf_claims(expectation.expected_evidence_fields)
+            if e.where
+        } == {
             expected,
             self._SEEDED_SAFE,
         }

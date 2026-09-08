@@ -12,7 +12,8 @@ inside the ``ProbeSummary`` records.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -20,12 +21,69 @@ from incident_commander.agent.state import EvidenceEntry, IncidentState, RunStat
 
 
 class ProbeSummary(BaseModel):
-    """One entry in the investigation trail."""
+    """One entry in the investigation trail: the call, and what it returned.
+
+    ``arguments`` is carried, not dropped. It used to be dropped, and the
+    result was INC-002: one tool serves several shapes of the same read —
+    ``list_dlq_messages`` is the whole queue *or* one slice under one name —
+    so a result read without its arguments is a result whose scope is
+    unknowable. Paid run ``54ab08425f82`` is the reference case: the briefing
+    judge was shown ``list_dlq_messages: {"total":0,"items":[]}`` with the
+    ``remediation_hint='replay_safe'`` that scoped it stripped away, read it
+    as "the queue is empty", and scored an honest briefing 0.0 for
+    groundedness. The deterministic grader had already been given the same
+    ability in cmd #218 (``call_arguments``); a rule about how evidence may
+    be read belongs to every reader of it.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     tool: str
     summary: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+TRAIL_HEADING: Final = "Investigation trail:"
+NO_TRAIL_LINE: Final = "No probes were run before escalation."
+
+
+def render_trail(trail: Sequence[ProbeSummary]) -> list[str]:
+    """The investigation-trail block, as both LLM readers are shown it.
+
+    Shared rather than duplicated: the briefing writer
+    (``briefing_enrichment._format_context``) and the briefing judge
+    (``evals/graders/llm_judge.py::_format_briefing``) render two overlapping
+    contexts on purpose, but the trail is the half they share, and a judge
+    grading groundedness against different phrasing than the writer received
+    is grading a different briefing. One function means the two cannot drift;
+    ``tests/unit/test_llm_judge.py`` pins that they still don't.
+    """
+    if not trail:
+        return [NO_TRAIL_LINE]
+    return [TRAIL_HEADING, *(render_probe(probe) for probe in trail)]
+
+
+def render_probe(probe: ProbeSummary) -> str:
+    """One trail line: the call with its arguments, then what it returned.
+
+    Arguments come first because that is the reading order the rubric asks
+    for — the call's scope, then its result. A result read without the
+    arguments that scoped it is a result whose scope is unknowable, which is
+    the whole of INC-002.
+    """
+    return f"  - {probe.tool}({_render_arguments(probe.arguments)}) -> {probe.summary}"
+
+
+def _render_arguments(arguments: Mapping[str, Any]) -> str:
+    """``key=value`` pairs, ``repr``'d, in the order the agent sent them.
+
+    Every argument, including the ``None`` ones: an unfiltered read is
+    ``remediation_hint=None`` and that is the fact that distinguishes it from
+    the filtered one. Dropping "noisy" keys would be a hand-maintained
+    exclusion list of exactly the kind the trail filter in ``render_briefing``
+    avoids, and the key it dropped would eventually be the load-bearing one.
+    """
+    return ", ".join(f"{key}={value!r}" for key, value in arguments.items())
 
 
 class AttemptedAction(BaseModel):
@@ -69,7 +127,11 @@ def render_briefing(run_state: RunState) -> EscalationBriefing:
         escalation_reason=_escalation_reason(terminal_marker),
         attempted_action=_attempted_action(terminal_marker),
         investigation_trail=tuple(
-            ProbeSummary(tool=entry.tool_name, summary=entry.result_summary)
+            ProbeSummary(
+                tool=entry.tool_name,
+                summary=entry.result_summary,
+                arguments=dict(entry.arguments),
+            )
             # Bookkeeping markers are underscore-prefixed by convention; no
             # registry tool name is. Filtering structurally (the grader does
             # the same, evals/graders/deterministic.py) means a new evidence

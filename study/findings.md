@@ -1182,3 +1182,68 @@ agent's prose (the WO-R2-170 weakness) — and the overclaim is free-form anyway
 that catches it without also catching honest phrasings. A corpus-scoped variant (findings +
 recommendation + escalation_reason, without the trail) is what would make it gradable; that is
 WO-R2-170's scope, not this PR's.
+
+## F-016 — A rule given to the writer and not to its judge is half a rule
+
+**Date:** 2026-09-08 (paid run `54ab08425f82`, `remediate_dlq_backlog_success` run E, GREEN).
+Recorded as **[INC-002](../../context/INCIDENTS.md)** in the workspace incident ledger, class
+**grader drift (soft grader)**. Fix: WO-R2-178.
+
+**What happened.** Run E passed all five deterministic dimensions and the briefing was honest in
+exactly the way [F-015](#f-015--grader-drift-a-verify-claim-written-for-one-trajectory-shape-graded-the-correct-trajectory-red)'s
+fix had asked for: `fc8d2a03` replayed, four rows named as remaining with what each still needs
+(`f030f975` needs the uploader, `97d91272` the SMTP relay, `af67d1b1` the rate-limit window,
+`eb798430` poisoned and unclassified). The briefing judge scored it **groundedness 0.0, overall
+0.375, "0/1 useful"**, and said why:
+
+> Groundedness fails because the briefing claims "fc8d2a03 cleared" and that "four REMAINING
+> messages were not acted on" — but the final DLQ read list shows total=0, meaning all 5 messages
+> are gone from the queue, not cleared+four remaining.
+
+The final read was `list_dlq_messages(remediation_hint='replay_safe')`. It read **one slice**, and
+the four rows it did not read are the four the briefing named. The judge widened a filtered read
+into a claim about the whole queue — the exact overclaim cmd #218 had just forbidden the writer,
+made by the thing that grades the writer for making it.
+
+**Root cause, two halves.**
+
+1. **The rule was given to one reader.** Cmd #218 gave the *writer* prompt "a verify read proves
+   only what it read", and gave the *deterministic* grader `call_arguments`, which says the same
+   thing in the grammar. The judge rubric got the line about overclaimed verifies being invented
+   facts — enough to mark the writer **down** — and nothing saying the same limit binds its own
+   reading. Half the rule is the half that punishes honesty.
+2. **The fact was stripped from its context.** `ProbeSummary` carried `tool` and `summary` and
+   dropped `arguments`, so the judge (and the writer) were shown
+   `list_dlq_messages: {"total":0,"items":[]}`. `list_dlq_messages` is the whole queue *or* one
+   slice under one name; without arguments the two reads are the same line with different numbers,
+   and the scope is not recoverable from the context at all. The judge was not being careless — it
+   was answering the only question its context could pose.
+
+**Impact.** $0 and no verdict moved: judge scores are informational, deterministic dimensions
+decide. The cost is a wrong measurement sitting on a green archive, and the near-miss is that the
+same judge would have produced a **false red** the moment anything gated on it — the honest
+briefing scores worse than the overclaiming one it replaced (0.75 → 0.0).
+
+**Fix.** Both halves, in one change. `ProbeSummary.arguments` is carried; both LLM contexts render
+the trail through one shared function (`briefing.render_trail`) as `tool(arguments) -> result`,
+arguments first, so the scope is read before the number. The rubric mirrors the writer's rule and
+names the direction explicitly: a briefing that names untouched rows as remaining after a filtered
+read is **grounded**, not contradicted. Proof is offline and read-only —
+`tests/unit/test_llm_judge.py` rebuilds run E's judge context from the archived trajectory and
+asserts `remediation_hint='replay_safe'` renders beside `"total":0`, and that the earlier
+unfiltered read of the same tool stays distinguishable from it.
+
+**The rule that comes out of it.**
+
+- **Any constraint on how evidence may be read is given to every reader of that evidence — writer,
+  judge, and deterministic grader — in the same change.** They read the same trail; a limit that
+  binds one of them binds all of them.
+- **A soft grader is still a measurement.** "Informational, doesn't gate" explains why this cost
+  nothing; it does not make a wrong score right, and the gating decision can change later while
+  the archive cannot.
+- **A rule the reader cannot apply is not a rule.** Steering that depends on a fact the context
+  strips out reads as installed and is inert. Ship the rubric line and the context change together,
+  and pin the context with a test — the rubric's snapshot hash cannot see what the context omits.
+- **Where one tool name serves several shapes of a read, the arguments are load-bearing evidence,
+  not bookkeeping.** This is the same lesson `call_arguments` learned on the deterministic side one
+  PR earlier, arriving on the prose side.

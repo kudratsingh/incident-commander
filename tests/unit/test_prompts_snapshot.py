@@ -34,9 +34,9 @@ from incident_commander.llm.prompts.loader import (
 
 _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("2fbebe9dcd49d48e41a580b1093f8e66cdb063482ea78ee5873be2eaa3dc0eda"),
-    "investigation_planner": ("f5ff4ef191b4a7581d8e41b9e5a32563c2f683ab357c0e329384922ce7c5b9d7"),
+    "investigation_planner": ("216088622460a4195084cd3816bec787799603c72afa77020020d78dd4746cff"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
-    "remediation_planner": ("ac6769f16d046572d8d8e9b079025b4b38152abda5524a334af93c070b65c564"),
+    "remediation_planner": ("b656f851a85fc8c5332464388d21cda6a67fd42100b5a659cc67c34849e52cf4"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
 }
 
@@ -198,6 +198,33 @@ class TestInvestigationPlannerInvariants:
         assert "re-read the alerted signal" in content
         assert "static reading of a moving metric" in content
 
+    def test_an_alerted_dlq_category_is_the_whole_subject(self) -> None:
+        # Live run `06e14be3e7b1` (dlq_wait_and_replay_success, 2026-09-07).
+        # The alert was the wait_and_replay backlog; the agent listed the
+        # queue unfiltered, described all four rows in all three categories
+        # correctly, and stopped — "mixed remediation hints that cannot be
+        # handled by a single Tier-1 action". True, and an escalation only
+        # because the scope was four rows instead of two. The structural half
+        # is `ALERT_SUBJECT_PROBES`' `remediation_hint` entry plus the alert
+        # field it reads; this is the steering half, and steering that can be
+        # silently deleted is not steering.
+        content = load_prompt("investigation_planner").lower()
+        assert "that category is the incident" in content
+        assert "rows in other categories are context, not the subject" in content
+        # The unfiltered page is where that run stopped, so the prompt has to
+        # say in as many words that it is not the subject read — the guard
+        # compares the argument and an unfiltered listing wires it to null.
+        assert "is not the subject read" in content
+
+    def test_a_mixed_queue_is_not_a_reason_to_escalate(self) -> None:
+        # The half the alert field cannot state. A category-scoped alert is
+        # now answered structurally, but `dlq_mixed_partial` carries no
+        # category on purpose (see its YAML) precisely so this rule has a
+        # scenario that can fail it.
+        content = load_prompt("investigation_planner").lower()
+        assert "a mixed queue is never a reason to escalate" in content
+        assert "escalating with nothing done is right only when no slice is safe" in content
+
 
 class TestRemediationPlannerInvariants:
     def test_mentions_structured_tool(self) -> None:
@@ -262,6 +289,23 @@ class TestRemediationPlannerInvariants:
         content = load_prompt("remediation_planner").lower()
         assert "verify by re-reading the resource you acted on" in content
         assert "not evidence about one key, group or job" in content
+
+    def test_the_alerted_slice_outranks_the_most_impactful_one(self) -> None:
+        """The cross-check on the investigation planner's new DLQ rule.
+
+        Both prompts route mixed DLQs and until now they disagreed. This one
+        said "pick the most impactful action. If replay_safe entries exist,
+        replay those" — which, on the alert that produced live run
+        `06e14be3e7b1`, steers away from the alerted slice: the queue holds a
+        `replay_safe` row, the alert is about the two `wait_and_replay` rows,
+        and "most impactful" picks the wrong one while looking obedient. The
+        alerted category outranks impact; impact is the tiebreak when the
+        alert named nothing.
+        """
+        content = load_prompt("remediation_planner").lower()
+        assert "if the alert named a category, act on that one" in content
+        # The steer it replaced, pinned negatively so it cannot drift back.
+        assert "pick the most impactful action" not in content
 
     def test_cache_verify_targets_the_key_not_the_server(self) -> None:
         # The specific inversion that cost the run, pinned as its own case

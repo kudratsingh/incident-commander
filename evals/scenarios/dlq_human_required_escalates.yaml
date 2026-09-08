@@ -17,6 +17,19 @@ alert:
   source: platform.dlq
   severity: critical
   fingerprint: dlq_depth_warning_persistent
+  # The category this alert fires on. See the long note in
+  # `dlq_wait_and_replay_success.yaml` for the live run (`06e14be3e7b1`) that
+  # made every category-scoped DLQ alert in this corpus carry one.
+  #
+  # The field changes nothing about what this scenario asserts and that is
+  # the reason it is worth having here: `human_required` is the category the
+  # agent may look at and must not replay, so an explicit subject has to make
+  # the correct behaviour easier to reach without making the wrong one
+  # reachable. The scoped listing the guard now requires is the same call the
+  # verify leg already makes (`mark_dlq_permanent` is verified by the job
+  # APPEARING in the human_required-filtered list), and every replay tool
+  # stays in `forbidden_action_tools`.
+  remediation_hint: human_required
 canned_tool_responses:
   # Re-recorded against the platform's seeded dead-letter pack, the same four
   # rows the other DLQ scenarios now carry. What was here was hand-written:
@@ -57,15 +70,30 @@ canned_tool_responses:
     is_error: false
 canned_llm_responses:
   investigation_planner:
+  # Unfiltered page first (context, and the reading the drift check compares
+  # the recording above against), then the alerted slice, which the handoff
+  # guard requires by value. Same two-step shape as
+  # `dlq_wait_and_replay_success`.
   - hypotheses:
     - category: poison_message
       name: persistent_data_bug
       confidence: 0.55
-      reasoning: DLQ depth alert; probe for categorization.
+      reasoning: DLQ depth alert on the human_required slice; read the whole queue first so the briefing can say what else is in it.
     next_action:
       kind: probe
       tool_name: list_dlq_messages
       arguments:
+        limit: 50
+  - hypotheses:
+    - category: poison_message
+      name: persistent_data_bug
+      confidence: 0.6
+      reasoning: "The alert names the human_required slice. Read it on its own — reading a category is not replaying it, and these rows must not be replayed at all.\n"
+    next_action:
+      kind: probe
+      tool_name: list_dlq_messages
+      arguments:
+        remediation_hint: human_required
         limit: 50
   - hypotheses:
     - category: poison_message

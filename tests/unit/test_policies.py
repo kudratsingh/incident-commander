@@ -406,21 +406,89 @@ class TestAlertSubjectProbes:
                 f"of {tool}. The refusal reason tells the planner to call it."
             )
 
-    def test_every_probe_argument_is_a_declared_resource_field(self) -> None:
-        """The two maps must agree on what counts as naming a resource.
+    def test_every_probe_argument_names_a_resource_or_an_actionable_slice(self) -> None:
+        """The maps must agree on what a subject probe is allowed to be about.
 
         ``RESOURCE_ARG_FIELDS`` already decided which arguments NAME a
-        platform resource as opposed to filtering or counting. A subject
-        probe pointed at a non-resource argument (``limit``, ``since_hours``)
-        would be asking the planner to prove something about a filter.
+        platform resource as opposed to filtering or counting, and for four
+        of the five original entries that is the whole answer.
+
+        The fifth kind is a SLICE — ``remediation_hint`` names a partition of
+        the dead-letter queue, not a row — and it is admissible on one
+        condition, which is derived here rather than declared: the platform
+        must name the same slice on BOTH sides of the read/act boundary, so
+        the value that filters the listing is also the value an action
+        narrows on. ``SOURCE_LISTING_FOR_ACTION`` already records exactly
+        that pairing for ADR 0028's coverage check
+        (``ListingScope("remediation_hint", "category")``), so the admissible
+        set is a projection of it and cannot drift from it — which is the
+        point, and is why this is not simply an exception list.
+
+        What the original rule was protecting still holds: ``limit``,
+        ``offset`` and ``since_hours`` page or window a listing and narrow no
+        action on any dimension, so no ``ListingScope`` pairs them with an
+        action field and none of them can ever qualify. A subject probe
+        pointed at one of those would be asking the planner to prove
+        something about a page boundary.
         """
         from incident_commander.agent.investigation import ALERT_SUBJECT_PROBES
+        from incident_commander.agent.remediation import SOURCE_LISTING_FOR_ACTION
+
+        # Read-side fields the platform also lets an action narrow on, per
+        # tool. `action_field is None` means the action spans every value of
+        # that dimension (the unfilterable bulk sweep), so a filtered read
+        # can never correspond to it and it does not license a subject probe.
+        actionable_slices: dict[str, set[str]] = {}
+        for listings in SOURCE_LISTING_FOR_ACTION.values():
+            for listing in listings:
+                for scope in listing.scopes:
+                    if scope.action_field is not None:
+                        actionable_slices.setdefault(listing.tool_name, set()).add(scope.read_field)
 
         for alert_field, (tool, arg) in ALERT_SUBJECT_PROBES.items():
-            assert arg in RESOURCE_ARG_FIELDS[tool], (
-                f"{alert_field} maps to {tool}.{arg}, which RESOURCE_ARG_FIELDS "
-                f"does not classify as resource-naming ({sorted(RESOURCE_ARG_FIELDS[tool])})."
+            names_resource = arg in RESOURCE_ARG_FIELDS[tool]
+            names_slice = arg in actionable_slices.get(tool, set())
+            assert names_resource or names_slice, (
+                f"{alert_field} maps to {tool}.{arg}, which is neither "
+                f"resource-naming per RESOURCE_ARG_FIELDS "
+                f"({sorted(RESOURCE_ARG_FIELDS[tool])}) nor a slice any action "
+                f"narrows on per SOURCE_LISTING_FOR_ACTION "
+                f"({sorted(actionable_slices.get(tool, set()))}). A subject probe "
+                "must read either the resource the alert named or a partition "
+                "the platform lets an action act on."
             )
+
+    def test_the_slice_arm_is_not_vacuous(self) -> None:
+        """Anti-vacuity canary for the derivation above.
+
+        The `or` in that assertion is only a real widening while the slice
+        side is non-empty for some entry. If ``SOURCE_LISTING_FOR_ACTION``
+        ever stopped pairing ``remediation_hint`` with ``category`` — a
+        platform change, or a refactor of that map — the test above would
+        keep passing for the four resource entries and start failing for the
+        hint one, which is correct; this case says so directly instead of
+        leaving the reader to work out which arm carried it.
+        """
+        from incident_commander.agent.investigation import ALERT_SUBJECT_PROBES
+        from incident_commander.agent.remediation import SOURCE_LISTING_FOR_ACTION
+
+        pairs = {
+            (listing.tool_name, scope.read_field)
+            for listings in SOURCE_LISTING_FOR_ACTION.values()
+            for listing in listings
+            for scope in listing.scopes
+            if scope.action_field is not None
+        }
+        assert ("list_dlq_messages", "remediation_hint") in pairs
+        assert ALERT_SUBJECT_PROBES["remediation_hint"] == (
+            "list_dlq_messages",
+            "remediation_hint",
+        )
+        assert "remediation_hint" not in RESOURCE_ARG_FIELDS["list_dlq_messages"], (
+            "if the platform ever made `remediation_hint` resource-naming, the "
+            "slice arm stopped being what admits this entry and this whole "
+            "derivation should be re-read rather than left in place."
+        )
 
     def test_the_alert_fields_are_drawn_from_the_known_alert_vocabulary(self) -> None:
         """No invented alert keys.
@@ -442,6 +510,7 @@ class TestAlertSubjectProbes:
             "job_type",
             "cache_key",
             "trace_id",
+            "remediation_hint",
         }
         assert set(ALERT_SUBJECT_PROBES) <= known, (
             f"unknown alert field(s): {sorted(set(ALERT_SUBJECT_PROBES) - known)}. "

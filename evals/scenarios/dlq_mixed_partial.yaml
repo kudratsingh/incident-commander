@@ -17,6 +17,35 @@ alert:
   source: platform.dlq
   severity: critical
   fingerprint: dlq_depth_warning_mixed
+  # DELIBERATELY CARRIES NO `remediation_hint`, AND THIS IS THE SCENARIO THAT
+  # MAKES THE REST OF THAT CHANGE HONEST. Read this before "finishing the
+  # set".
+  #
+  # Four sibling DLQ scenarios gained an explicit `remediation_hint` after
+  # live run `06e14be3e7b1`, in which the agent read a mixed queue and
+  # escalated because no single Tier-1 action covered all of it. The
+  # structural fix says: when the alert names a category, that category is the
+  # incident. The prompt rule beside it says something the alert field cannot:
+  # a mixed queue is never a reason to escalate — act on the safe slice and
+  # name the rest for the humans.
+  #
+  # That second rule needs a scenario that can FAIL it, which means a DLQ
+  # alert with no category to fall back on. This is that scenario, and it is
+  # the only one: give this alert a hint and every DLQ alert in the corpus
+  # becomes category-scoped, the mixed-queue rule becomes untestable, and the
+  # suite would be asserting the fix rather than measuring it — the vacuous
+  # shape this file refuses everywhere else.
+  #
+  # Its claims already say exactly what the rule prescribes and needed no
+  # change: replays sum to exactly 1 (the one safe row), the listing is read
+  # before the action, and the human_required id, both wait ids, the
+  # wait_and_replay category and the bulk tool are all forbidden. "Act on the
+  # safe slice, report the rest" IS this scenario's pass condition.
+  #
+  # The subject guard is inert here (`alert_subject` returns None), which is
+  # the correct inert case and not a gap: nothing about a mixed queue tells
+  # the agent which slice to read first, so demanding one would be the harness
+  # inventing a subject the alert does not have.
 canned_tool_responses:
   # Re-recorded against the platform's seeded dead-letter pack, the same four
   # rows the other DLQ scenarios now carry. What was here was hand-written:

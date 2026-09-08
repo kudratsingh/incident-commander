@@ -9,7 +9,8 @@ name: dlq_wait_and_replay_success
 # unobservable signal became the instruction the agent followed. Success
 # here is the ACTION's own scheduled/execute_at response, and an
 # unchanged listing is the expected reading, not a failure.
-description: "DLQ has entries hinted wait_and_replay (two transient downstream failures on two different dependencies: partner-api.internal answering 429 with an explicit retry-after of 120s,\
+description: "The alert names its category (remediation_hint: wait_and_replay), so this incident IS that slice: two rows, one action, and the replay_safe and human_required rows are context\
+  \ for the briefing rather than part of the subject. DLQ has entries hinted wait_and_replay (two transient downstream failures on two different dependencies: partner-api.internal answering 429 with an explicit retry-after of 120s,\
   \ and smtp.mailer.internal refusing connections with no stated wait). Agent schedules a DELAYED replay of exactly those two rows, and the delay has to be DERIVED from the rows rather than\
   \ picked: at least the largest wait any scheduled row states (120s here), the stated dependency-down default (300s) where a row states none, never under 60s, never over the tool's maximum.\
   \ Platform holds the timer. Verify re-reads the wait_and_replay listing and expects it UNCHANGED: the ids stay dead-lettered until execute_at, so success is scheduled=requested with future\
@@ -29,6 +30,25 @@ alert:
   source: platform.dlq
   severity: critical
   fingerprint: dlq_depth_warning_wait_replay
+  # THE ALERT SAYS WHAT IT IS ABOUT. Added after live run `06e14be3e7b1`, in
+  # which the only thing naming this incident's subject was the fingerprint
+  # STRING above. The agent listed the DLQ unfiltered, described all four
+  # rows and all three categories accurately, and stopped: "The DLQ contains
+  # 4 entries with mixed remediation hints that cannot be handled by a single
+  # Tier-1 action." One action is all ADR 0008 allows, so an over-wide scope
+  # cannot degrade into a partial fix — it escalates. The scope was the
+  # defect and the alert was where the scope should have come from: this
+  # incident is the wait_and_replay backlog, which IS one action.
+  #
+  # Not a fingerprint parse. `investigation.ALERT_SUBJECT_PROBES` is keyed on
+  # the FIELD for the reason its own comment gives (fingerprints are free
+  # text the platform's alert rules author), and the field is what carries
+  # the value the handoff guard compares against. With this line the guard
+  # requires `list_dlq_messages(remediation_hint="wait_and_replay")` in
+  # evidence before a remediate handoff, and that same scoped reading is what
+  # ADR 0028 needs to cover a `wait_and_replay` category replay — one call
+  # satisfies both.
+  remediation_hint: wait_and_replay
 canned_tool_responses:
   # Re-recorded against the platform's seeded dead-letter pack, the same four
   # rows the other DLQ scenarios now carry. What was here was hand-written:
@@ -58,15 +78,37 @@ canned_tool_responses:
     is_error: false
 canned_llm_responses:
   investigation_planner:
+  # Two listings, and the order is the scenario. The unfiltered page is
+  # CONTEXT — it is what lets the briefing tell the human which rows were
+  # left behind and why — and it is also the reading `evals/fixture_drift.py`
+  # compares the recording below against (`_planner_arguments` takes the
+  # FIRST probe of each tool), which is why it stays first and stays
+  # unfiltered.
+  #
+  # The scoped page is the SUBJECT. The handoff guard now requires it by
+  # value, so deleting the second step here does not merely change a
+  # trajectory: it reproduces `06e14be3e7b1` exactly — a run that read the
+  # whole queue, saw a mix, and had no scoped reading to act on.
   - hypotheses:
     - category: poison_message
       name: transient_downstream_failure
       confidence: 0.55
-      reasoning: DLQ depth alert; probe list_dlq_messages for categorization.
+      reasoning: DLQ depth alert on the wait_and_replay slice; read the whole queue first so the briefing can say what is being left behind.
     next_action:
       kind: probe
       tool_name: list_dlq_messages
       arguments:
+        limit: 50
+  - hypotheses:
+    - category: poison_message
+      name: transient_downstream_failure
+      confidence: 0.6
+      reasoning: "Four rows in three categories, and the alert names one of them. Read the alerted slice on its own — the other rows are context for the humans, not this incident's subject.\n"
+    next_action:
+      kind: probe
+      tool_name: list_dlq_messages
+      arguments:
+        remediation_hint: wait_and_replay
         limit: 50
   - hypotheses:
     - category: poison_message

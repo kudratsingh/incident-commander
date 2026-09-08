@@ -22,6 +22,20 @@ class AlertPayload(BaseModel):
     severity: str = "unknown"
     fingerprint: str | None = None
     group: str | None = None
+    # The DLQ half of "an alert names its subject" (`group` is the consumer
+    # half). A dead-letter alert that fires on ONE remediation category names
+    # that category here, and the value is the platform's own DLQ vocabulary —
+    # `replay_safe`, `wait_and_replay`, `human_required`, the same strings
+    # `list_dlq_messages.remediation_hint` filters on and
+    # `replay_dlq_by_category.category` acts on. Typed rather than left to
+    # `extra="allow"` because it is load-bearing: it is the field
+    # `investigation.ALERT_SUBJECT_PROBES` reads to derive the scoped listing
+    # a category-scoped DLQ incident must be investigated through.
+    #
+    # `None` is the correct value for a whole-queue depth alert, and the
+    # subject guard is inert then — see `alert_subject`. A mixed DLQ is not a
+    # category, so it leaves this unset rather than picking one.
+    remediation_hint: str | None = None
 
 
 class IngestResponse(BaseModel):

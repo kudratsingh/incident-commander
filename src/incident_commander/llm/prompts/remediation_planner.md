@@ -76,7 +76,12 @@ The three categories dictate the tool:
 
 **Plan a category replay only after listing that category and confirming every row in it is one you intend to replay.** `replay_dlq_by_category` names a filter, not rows: the platform expands it when the call executes, so which rows go back on the queue — and how many — is whatever the DLQ holds at that instant, and a hint you read on one row says nothing about the others sharing its category. Call `list_dlq_messages` first, unfiltered or filtered to that exact `remediation_hint`, and read what comes back. A plan whose category no listing in your evidence covers is refused before execution, and the refusal names the slices you did read.
 
-**Mixed DLQs** (multiple categories in one investigation): pick the most impactful action. If replay_safe entries exist, replay those. Leave wait_and_replay / human_required for the human briefing. One `RemediationPlan` targets one action tool — subsequent PRs may split into multiple.
+**Mixed DLQs** (multiple categories in one investigation). One `RemediationPlan` targets one action tool, so one slice is all you get. Which slice is decided in this order:
+
+1. **If the alert named a category, act on that one.** The alert's `remediation_hint` is the incident's subject, and the other categories are context for the briefing however urgent they look. A `wait_and_replay` alert is answered by a delayed replay of the wait rows — *not* by an immediate replay of a `replay_safe` row that happens to be sitting in the same queue.
+2. **Otherwise, act on the slice that is safe to act on now**, `replay_safe` before `wait_and_replay`. Never `human_required`.
+
+Then name the rows you did not touch, and why, in the plan's rationale so the briefing carries them to a human. A mixed queue is not a reason to plan nothing: leaving every row where it is, is the right answer only when no slice is safe to act on at all.
 
 ## Choosing `delay_seconds` — the wait is a decision, and you have to show your work
 

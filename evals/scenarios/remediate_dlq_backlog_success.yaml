@@ -24,6 +24,24 @@ alert:
   source: platform.dlq
   severity: critical
   fingerprint: dlq_depth_warning
+  # The category this alert fires on. See the long note in
+  # `dlq_wait_and_replay_success.yaml` for the live run (`06e14be3e7b1`) that
+  # made every category-scoped DLQ alert in this corpus carry one.
+  #
+  # `replay_safe` and not something broader, because that is what this
+  # scenario already grades and has graded since cmd #184: exactly the two
+  # replay-safe rows (the seeded upstream-timeout row and the one the
+  # `poison_message` hook injects, which the platform also writes as
+  # `replay_safe`), the two wait rows and the human_required row untouched,
+  # and never the bulk tool that sweeps null hints. The field states the
+  # premise the claims were already written against.
+  #
+  # The fingerprint stays the generic `dlq_depth_warning` on purpose, and the
+  # pair is the argument for keying the guard on the FIELD: free text an
+  # alert rule happened to author is not the scope, and here it is not even
+  # unique — `dlq_backlog` uses the same string for a whole-queue alert with
+  # no category at all.
+  remediation_hint: replay_safe
 canned_tool_responses:
   # Re-recorded against the platform's seeded dead-letter pack. The old row
   # was hand-written and almost nothing in it was a value the platform can
@@ -88,15 +106,29 @@ canned_tool_responses:
     is_error: false
 canned_llm_responses:
   investigation_planner:
+  # Unfiltered page first (context, and the reading the drift check compares
+  # the recording above against), then the alerted slice, which the handoff
+  # guard requires by value. Same two-step shape as
+  # `dlq_wait_and_replay_success`.
   - hypotheses:
     - category: poison_message
       name: transient_dependency_failure
       confidence: 0.5
-      reasoning: DLQ depth crossed threshold; probe to see what's stuck.
+      reasoning: DLQ depth crossed threshold on the replay_safe slice; read the whole queue first so the briefing can say what is being left behind.
     next_action:
       kind: probe
       tool_name: list_dlq_messages
       arguments: {}
+  - hypotheses:
+    - category: poison_message
+      name: transient_dependency_failure
+      confidence: 0.6
+      reasoning: "The alert names the replay_safe slice. Read it on its own before sweeping it — the wait_and_replay and human_required rows are context, not this incident's subject.\n"
+    next_action:
+      kind: probe
+      tool_name: list_dlq_messages
+      arguments:
+        remediation_hint: replay_safe
   - hypotheses:
     - category: poison_message
       name: transient_dependency_failure

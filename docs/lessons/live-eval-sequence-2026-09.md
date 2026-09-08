@@ -836,6 +836,106 @@ fake.
   guarding it.
 
 
+## 12. The scope came from the queue instead of from the alert
+
+**Run:** `dlq_wait_and_replay_success`, invocation `06e14be3e7b1`, 2026-09-07,
+archive under `evals/runs/`. Red on outcome, evidence, action and safety. One
+tool call, one planner turn, **zero plans**. ~$0.06.
+
+Run B of the same scenario, taken after §11's fix landed. §11's slip did not
+recur. Something else did, and this one is the most instructive red in the
+sequence, because **nothing the agent said was false**.
+
+### What the agent did
+
+Called `list_dlq_messages` with no filter, got the four seeded rows, and
+classified every one of them correctly. Then it stopped:
+
+> The DLQ contains 4 entries with mixed remediation hints that cannot be
+> handled by a single Tier-1 action: (1) fc8d2a03 — bulk_api_sync, replay_safe
+> (upstream timeout, idempotent, safe to replay immediately); (2) f030f975 —
+> csv_upload, human_required (bad CSV data at row 15,382, non-retryable, data
+> producer must fix); (3) af67d1b1 — bulk_api_sync, wait_and_replay
+> (rate-limited, replay after 120s quota window); (4) 97d91272 — bulk_api_sync,
+> wait_and_replay (SMTP unavailable, replay after smtp.mailer.internal
+> recovers). […] A human operator must triage each entry individually.
+
+Four ids, four categories, four remedies, all correct. The briefing judge scored
+groundedness **0.95** and could quote every id back out of the tool output.
+
+### Why a true sentence was the wrong decision
+
+The alert was:
+
+```json
+{"source": "platform.dlq", "severity": "critical",
+ "fingerprint": "dlq_depth_warning_wait_replay", "group": null}
+```
+
+The incident is the **wait_and_replay backlog** — two rows, one deferred
+replay, exactly one Tier-1 action. The only thing in that payload saying so was
+the substring `wait_replay` inside a free-text fingerprint. So the agent took
+its scope from the queue it could see rather than from the incident it was paged
+for, arrived at a four-row scope, and then [ADR 0008](../ADR/0008-single-attempt-remediation.md)
+did what it is designed to do: one attempt, one action, and no partial fix to
+fall back to.
+
+> **An over-wide scope does not degrade into a partial fix. It converts into an
+> escalation.** That is the ADR-0008 interaction, and it will recur anywhere
+> scope is inferred rather than given. Note which way round the causation runs:
+> the single-action limit is not the defect, it is what makes an under-specified
+> alert *expensive*.
+
+### The variance is the finding, not the run
+
+Compare §11. **Run A, on the same world, scoped itself correctly** — its first
+call was `list_dlq_messages(remediation_hint="wait_and_replay")` — and went on
+to derive the right delay from the right two rows. Nothing changed between the
+runs except the model's sampling.
+
+> **A behaviour that appears when the model happens to read a fingerprint string
+> the way you hoped is not a behaviour the harness has.** Run A is not evidence
+> that the scope was specified; it is evidence that it was guessable. The
+> question to ask of a green run is not "did it do the right thing" but "was it
+> *made* to" — the same question §10 asks about grounds.
+
+### What it cost, and what it did not
+
+$0.06 and a paid slot. Cheap in money, and the two useful facts about it are
+free: the failure is reproducible offline (drop the scoped probe from the
+scenario's canned planner script and the run reproduces the stop), and it needed
+no fixture repair — the world was pristine and the four rows were coherent.
+
+### Fix
+
+[ADR 0031](../ADR/0031-an-alerted-dlq-category-is-the-incident.md). The alert
+carries its category in a field (`AlertPayload.remediation_hint`), the existing
+subject guard gains the entry that turns that field into the required first read
+(`ALERT_SUBJECT_PROBES["remediation_hint"] → list_dlq_messages.remediation_hint`,
+value-matched, so the unfiltered page does not satisfy it), and two prompt rules
+say the rest: an alerted category *is* the incident, and a mixed queue is never a
+reason to escalate. The remediation planner's contradicting "pick the most
+impactful action" mixed-DLQ steer — which on this exact alert points at the one
+`replay_safe` row sitting beside the subject — is replaced by an ordered rule.
+
+Two things about that fix are worth carrying forward more than the fix itself.
+
+**The scoped read is free.** A listing filtered to exactly the slice an action
+names already *covers* that action under ADR 0028, so the read the subject guard
+demands is the same read that licenses the replay. When a new guard costs no
+tool call, it is usually because it is asking for something an existing guard
+already needed.
+
+**One scenario deliberately keeps no category.** `dlq_mixed_partial` stays
+subjectless so the prompt rule — the half no alert field can state — has a
+scenario that can fail it. Giving every DLQ alert a category would have made the
+suite assert the fix instead of measuring it, which is the same vacuity §10
+found in three scenarios' claims. **When a structural fix makes a class of
+failure unreachable, check whether it also made the accompanying prompt rule
+untestable, and keep one witness back if it did.**
+
+---
+
 ## Summary: what each failure was actually caused by
 
 | # | Run / event | Looked like | Actually was | Fix |
@@ -852,6 +952,7 @@ fake.
 | 10 | `remediate_runaway_saga_success` (still not run) | a staged, *corrected*, twice-swept scenario | **The corrected fix was never checked for safety**: the agent would replay a dead-lettered root knowing only that it was dead-lettered, because `get_dag_state` carries no `remediation_hint` — and six guards admitted the plan | ADR 0027; §9 |
 | 11 | The DLQ category scenarios (not run) | a rule already closed by ADR 0027 | **The by-id guard is inert for a call that names a filter** — a bulk `replay_dlq_by_category` by a run that had listed nothing was admitted by seven guards, and three scenarios' claims could not tell act-then-read from read-then-act | ADR 0028; §10 |
 | 12 | `dlq_wait_and_replay_success` (`5c8895771fbd`) | a red remediation run | **A transcription slip, escalated like a judgement error**: the plan derived the right delay from the right rows and then zero-filled one job id's trailing blocks; the argument guard had no re-ask to give, so one planner call ended the run | ADR 0030; §11 |
+| 13 | `dlq_wait_and_replay_success` (`06e14be3e7b1`) | an honest escalation on a mixed queue | **The alert never named its own scope**: the agent listed the whole DLQ, described all four rows correctly (judge groundedness 0.95), and stopped because no single Tier-1 action covered them — a true sentence and a wrong decision, since the alert was about the two-row wait slice and said so only inside a fingerprint string. Run A had scoped itself right from the same world, so the behaviour was guessable, not specified | ADR 0031; §12 |
 
 **The through-line.** Six of these ten are failures of *procedure and
 environment*, not of the agent — only rows 2 and 3 are genuine agent defects,
@@ -860,11 +961,21 @@ attributing it to the model. Before you accept a red live result, establish that
 the world was clean, the invocation was the runbook's, and the knobs let the
 agent see the truth — in that order. Only then is the result about the agent.
 
-(The count said "eight" until row 10 landed, row 11 came after that, and row 12
-after that; each arrived once the prose was written, which is the
-five-stale-copies problem in miniature and is why the counts are corrected in
-place rather than left to be re-derived. Read "six of these ten" above as six of
-twelve.)
+(The count said "eight" until row 10 landed, row 11 came after that, row 12
+after that, and row 13 after that; each arrived once the prose was written,
+which is the five-stale-copies problem in miniature and is why the counts are
+corrected in place rather than left to be re-derived. Read "six of these ten"
+above as six of thirteen.)
+
+**Row 13 is a fourth kind, and it is the subtlest one in the table.** Rows 2 and
+3 are wrong beliefs; row 12 is a fumble; rows 9–11 are steering defects caught
+before spending. Row 13's agent held only true beliefs, executed cleanly, and
+still failed — because the *question it answered* was wider than the question it
+was asked. Nothing in the trajectory, the briefing or the judge score marks it:
+groundedness was 0.95, and an escalation naming four correctly-classified rows
+reads as diligence. The tell is entirely in the alert, and the diagnostic is
+"what was the smallest scope that would have explained this alert?" Ask it of
+any escalation whose stated reason is that the work did not fit in one action.
 
 **Row 12 is a third genuine agent defect, and it is not the same kind as rows 2
 and 3.** Those two are reasoning failures — the agent believed the wrong thing

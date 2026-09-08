@@ -18,8 +18,12 @@ import pytest
 from pydantic import BaseModel
 
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
+from incident_commander.agent.investigation import HINT_ROUTED_TOOLS
 from incident_commander.agent.remediation import (
     _PLAN_REFUSED_SUBJECT_TARGET_MARKER,
+    _ROW_DISPOSITION,
+    DEAD_LETTER_ACTIONS,
+    DLQ_LISTING_SCOPES,
     DLQ_ROW_SOURCE,
     RemediationPlan,
     SubjectKind,
@@ -3589,7 +3593,572 @@ class TestTheActionMustAddressTheAlertsSubject:
         two would make "act on an unclassified row" satisfiable by acting on
         any row at all.
         """
-        decisions = _row_decisions_in_evidence(self._run(self._UNCLASSIFIED_ALERT), DLQ_ROW_SOURCE)
+        decisions = _row_decisions_in_evidence(
+            self._run(self._UNCLASSIFIED_ALERT).evidence, DLQ_ROW_SOURCE
+        )
         assert decisions[self._CHAOS_ROW] is None
         assert decisions[self._SAFE_ROW] == "replay_safe"
         assert "never-listed-id" not in decisions
+
+
+class TestResolvedRequiresTheAlertedConditionCleared:
+    """WO-R2-164: a partial action on a subject-less alert escalates.
+
+    Decided by the user on 2026-09-08 as Option B of three. ADR 0032 set out
+    the design and deliberately did not encode it, because encoding it flips a
+    queued paid scenario's terminal state — a spend decision, not a refactor.
+
+    The failure it closes is live run ``a0aa257bf865``, and what makes that run
+    the right witness is that nothing it said was false. It replayed one of
+    five dead-lettered rows, verified that slice empty, and reported RESOLVED
+    with a briefing that read "leaving four unresolved" — scored 1.0 for
+    groundedness by the judge, because it was. The judge answers "did the
+    action work?"; ADR 0026 already separated that from "is the incident over?"
+    for a stabilize-only TOOL. This is the same separation for a
+    stabilize-only OUTCOME: an action that resolves, on a condition it only
+    partly cleared.
+
+    Where the two rules meet is the wording. Both escalations open
+    ``STABILIZED, NOT RESOLVED``, deliberately and not by accident of reuse —
+    it is one message to one reader, and two phrasings would make every claim
+    on it tool-specific.
+    """
+
+    _SAFE_ROW = "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+    _HUMAN_ROW = "f030f975-974e-5ce3-aa6b-444136507d86"
+    _WAIT_ROW = "af67d1b1-13f8-5a2c-8c44-66ec5564597d"
+    _WAIT_ROW_2 = "97d91272-9774-5b8e-980b-f0d2fa6ed619"
+
+    #: `dlq_mixed_partial`'s alert: a DLQ depth alert on a mixed queue, naming
+    #: no category and no scope. `alert_subject` returns None, so ADR 0032's
+    #: subject-target guard is inert and this rule is the only thing left
+    #: asking whether the incident is over.
+    _SUBJECTLESS_ALERT: Final[dict[str, Any]] = {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning_mixed",
+    }
+    #: The same queue under an alert that DOES name its slice. ADR 0031/0032
+    #: govern this one and this rule must stay silent on it.
+    _CATEGORY_ALERT: Final[dict[str, Any]] = {
+        **_SUBJECTLESS_ALERT,
+        "remediation_hint": "replay_safe",
+    }
+
+    def _listing(
+        self,
+        rows: tuple[tuple[str, str | None], ...],
+        *,
+        arguments: dict[str, Any] | None = None,
+        total: int | None = None,
+    ) -> EvidenceEntry:
+        """One ``list_dlq_messages`` reading, wired as the loop records it.
+
+        Default arguments are the UNFILTERED read: ``wire_arguments`` fills
+        every unset optional with an explicit ``null``, so the whole-queue page
+        reaches the ledger with ``remediation_hint: None`` rather than with the
+        key absent — which is the four-way collapse ``_scope_value`` makes and
+        the reason a fixture cannot just omit the key.
+        """
+        items = ",".join(
+            json.dumps(
+                {
+                    "id": row_id,
+                    "type": "bulk_api_sync",
+                    "remediation_hint": hint,
+                    "error_message": "UpstreamTimeout after 30s",
+                    "retry_count": 3,
+                }
+            )
+            for row_id, hint in rows
+        )
+        return EvidenceEntry(
+            tool_name="list_dlq_messages",
+            arguments=arguments
+            if arguments is not None
+            else {"job_type": None, "remediation_hint": None, "limit": 50, "offset": 0},
+            result_summary=f'{{"total":{len(rows) if total is None else total},"items":[{items}]}}',
+            timestamp=_now(),
+        )
+
+    _MIXED = (
+        (_SAFE_ROW, "replay_safe"),
+        (_HUMAN_ROW, "human_required"),
+        (_WAIT_ROW, "wait_and_replay"),
+        (_WAIT_ROW_2, "wait_and_replay"),
+    )
+
+    def _action_entry(self, tool: str, arguments: dict[str, Any]) -> EvidenceEntry:
+        """The Tier-1 call's own entry, exactly as ``make_remediate`` writes it.
+
+        Load-bearing rather than scenery: it is the boundary
+        ``_evidence_before`` slices on, so a state without it is one the rule
+        declines to answer.
+        """
+        return EvidenceEntry(
+            tool_name=tool,
+            arguments=arguments,
+            result_summary=json.dumps({"matched": 1, "replayed": 1, "scheduled": 0, "failed": 0}),
+            timestamp=_now(),
+        )
+
+    def _run(
+        self,
+        *,
+        alert: dict[str, Any],
+        plan: dict[str, Any],
+        evidence: tuple[EvidenceEntry, ...],
+    ) -> RunState:
+        return _run_state(
+            state=IncidentState.VERIFYING,
+            alert=alert,
+            remediation_plan=plan,
+            evidence=evidence,
+        )
+
+    def _category_replay(self, **overrides: Any) -> dict[str, Any]:
+        base = {
+            "target_hypothesis": "mixed_dlq_pattern",
+            "action_tool": "replay_dlq_by_category",
+            "action_arguments": {"category": "replay_safe", "max_replays": 50},
+            "verify_tool": "list_dlq_messages",
+            "verify_arguments": {"remediation_hint": "replay_safe", "limit": 50},
+            "verify_expectation": "the replay_safe filter returns an empty items list",
+        }
+        base.update(overrides)
+        return base
+
+    def _verified(self) -> CannedLLMClient:
+        return CannedLLMClient(
+            [
+                {
+                    "verdict": "verified",
+                    "reasoning": (
+                        "replay_dlq_by_category(replay_safe) reported replayed=1, "
+                        "scheduled=0, and the filtered listing came back empty"
+                    ),
+                }
+            ]
+        )
+
+    def _empty_slice_mcp(self) -> _FakeMCP:
+        """The verify probe a correct partial replay makes: its slice, now empty."""
+
+        def handler(_name: str, _args: Mapping[str, Any]) -> ToolResult:
+            return ToolResult(
+                content=[{"type": "text", "text": json.dumps({"total": 0, "items": []})}],
+                is_error=False,
+            )
+
+        return _FakeMCP(handler)
+
+    def _verify(self, run: RunState) -> RunState:
+        return make_llm_verify(self._empty_slice_mcp(), self._verified(), model=_MODEL)(run, _now())
+
+    # -- the red-before ----------------------------------------------------
+
+    def test_a_partial_replay_on_a_subjectless_mixed_queue_escalates(self) -> None:
+        """`dlq_mixed_partial`'s canned trajectory, which reached RESOLVED.
+
+        Three tool calls: list the queue unfiltered, replay the one
+        `replay_safe` row, re-read that slice and find it empty. Every step is
+        correct and the queue still holds three rows. Before this rule the
+        same inputs produced ``IncidentState.RESOLVED``.
+        """
+        plan = self._category_replay()
+        run = self._run(
+            alert=self._SUBJECTLESS_ALERT,
+            plan=plan,
+            evidence=(
+                self._listing(self._MIXED),
+                self._action_entry("replay_dlq_by_category", {"category": "replay_safe"}),
+            ),
+        )
+
+        result = self._verify(run)
+
+        assert result.state is IncidentState.ESCALATED
+
+    def test_the_judge_still_answered_verified(self) -> None:
+        """The escalation is a policy decision, not a re-judged verdict.
+
+        The same separation ``TestStabilizeOnlyActionsNeverResolve`` pins for
+        `pause_dag`: if a later change made this class green by making the
+        judge say ``not_verified``, the guarantee would have quietly become "a
+        partial fix is graded a failure", which is a different and wrong claim.
+        The replay DID work.
+        """
+        run = self._run(
+            alert=self._SUBJECTLESS_ALERT,
+            plan=self._category_replay(),
+            evidence=(
+                self._listing(self._MIXED),
+                self._action_entry("replay_dlq_by_category", {"category": "replay_safe"}),
+            ),
+        )
+
+        result = self._verify(run)
+
+        judge = [e for e in result.evidence if e.tool_name == "_verify_judge"]
+        assert judge, "the verify judge should still have run"
+        assert judge[-1].result_summary.startswith("verified:")
+
+    def test_the_escalation_names_every_remaining_row_and_what_it_needs(self) -> None:
+        """The briefing is the product, so the reason carries the whole handoff.
+
+        Asserted per row rather than as one string: "3 rows remain" is a count,
+        and a human needs the ids and the disposition of each. The dispositions
+        come from ``_ROW_DISPOSITION`` and the tools from ``HINT_ROUTED_TOOLS``,
+        so this is also the end-to-end check that the two compose.
+        """
+        run = self._run(
+            alert=self._SUBJECTLESS_ALERT,
+            plan=self._category_replay(),
+            evidence=(
+                self._listing(self._MIXED),
+                self._action_entry("replay_dlq_by_category", {"category": "replay_safe"}),
+            ),
+        )
+
+        reason = self._verify(run).evidence[-1].result_summary
+
+        assert "STABILIZED, NOT RESOLVED" in reason
+        for row in (self._HUMAN_ROW, self._WAIT_ROW, self._WAIT_ROW_2):
+            assert row in reason, f"{row} is still dead-lettered and unnamed"
+        assert "a delayed replay" in reason
+        assert "a human decision" in reason
+        assert "mark_dlq_permanent" in reason
+        # And the row the action DID address is not listed as remaining.
+        remaining = reason.split("by this run:", 1)[1]
+        assert self._SAFE_ROW not in remaining
+
+    def test_the_executed_replay_reaches_the_briefing(self) -> None:
+        """``attempted_action`` survives, so the writer never recommends a repeat.
+
+        The same reason the stabilizer branch carries it: the replay already
+        fired, and an on-call told only "three rows remain" would reasonably
+        replay the safe slice again.
+        """
+        run = self._run(
+            alert=self._SUBJECTLESS_ALERT,
+            plan=self._category_replay(),
+            evidence=(
+                self._listing(self._MIXED),
+                self._action_entry("replay_dlq_by_category", {"category": "replay_safe"}),
+            ),
+        )
+
+        marker = self._verify(run).evidence[-1]
+
+        assert marker.tool_name == "_remediation_escalate"
+        assert marker.arguments["attempted_tool"] == "replay_dlq_by_category"
+        attempted = marker.arguments["attempted_arguments"]
+        assert isinstance(attempted, Mapping)
+        assert attempted["category"] == "replay_safe"
+
+    def test_the_action_is_not_billed_twice(self) -> None:
+        """Only the verify probe is new spend, as on every other escalation.
+
+        ``executed=True`` is for the one branch where the platform acted and no
+        entry was written. This is not that branch: ``make_remediate`` charged
+        the call and counted the attempt, and re-charging would push
+        ``remediation_attempts`` past ADR 0008's single-attempt invariant.
+        """
+        run = _run_state(
+            state=IncidentState.VERIFYING,
+            alert=self._SUBJECTLESS_ALERT,
+            remediation_plan=self._category_replay(),
+            evidence=(
+                self._listing(self._MIXED),
+                self._action_entry("replay_dlq_by_category", {"category": "replay_safe"}),
+            ),
+            remediation_attempts=1,
+        )
+
+        result = self._verify(run)
+
+        assert result.budget.tool_calls_used == run.budget.tool_calls_used + 1
+        assert result.remediation_attempts == 1
+
+    # -- the positive control ---------------------------------------------
+
+    def test_a_queue_holding_only_the_replayed_row_resolves(self) -> None:
+        """The reason this is a rule and not a ban on resolving.
+
+        Same alert, same action, same judge — one row in the queue instead of
+        four, and that row is the one the replay addressed. The alerted
+        condition IS cleared, so the run resolves. Without this the rule would
+        be indistinguishable from "a subject-less DLQ alert can never resolve",
+        which is not what the user decided and would make every future
+        queue-depth incident a manual handoff.
+        """
+        run = self._run(
+            alert=self._SUBJECTLESS_ALERT,
+            plan=self._category_replay(),
+            evidence=(
+                self._listing(((self._SAFE_ROW, "replay_safe"),)),
+                self._action_entry("replay_dlq_by_category", {"category": "replay_safe"}),
+            ),
+        )
+
+        assert self._verify(run).state is IncidentState.RESOLVED
+
+    def test_a_by_id_replay_of_every_row_resolves(self) -> None:
+        """The other addressing route: named ids rather than a slice.
+
+        Two rows, both named, both replayed. Proves "addressed" reads
+        ``RESOURCE_ARG_FIELDS`` on the action side as well as the category
+        filter — a rule that only understood categories would escalate a run
+        that cleared the queue by name.
+        """
+        rows = ((self._SAFE_ROW, "replay_safe"), (self._WAIT_ROW, "wait_and_replay"))
+        plan = self._category_replay(
+            action_tool="replay_dlq_by_ids",
+            action_arguments={"job_ids": [self._SAFE_ROW, self._WAIT_ROW]},
+        )
+        run = self._run(
+            alert=self._SUBJECTLESS_ALERT,
+            plan=plan,
+            evidence=(
+                self._listing(rows),
+                self._action_entry(
+                    "replay_dlq_by_ids", {"job_ids": [self._SAFE_ROW, self._WAIT_ROW]}
+                ),
+            ),
+        )
+
+        assert self._verify(run).state is IncidentState.RESOLVED
+
+    def test_a_scheduled_replay_addresses_its_rows(self) -> None:
+        """ "Addressed" is not "fixed", and it must not be.
+
+        A delayed replay has not run — the rows are still dead-lettered and
+        still listed, which is the documented success reading (ADR 0029). What
+        the run did is take a decision about them and record it, which is
+        exactly what a briefing can honestly carry. Requiring the queue to be
+        EMPTY instead would make the correct answer for a `wait_and_replay`
+        incident permanently unreachable.
+        """
+        rows = ((self._WAIT_ROW, "wait_and_replay"), (self._WAIT_ROW_2, "wait_and_replay"))
+        args = {"job_ids": [self._WAIT_ROW, self._WAIT_ROW_2], "delay_seconds": 300}
+        plan = self._category_replay(action_tool="replay_dlq_by_ids", action_arguments=args)
+        run = self._run(
+            alert=self._SUBJECTLESS_ALERT,
+            plan=plan,
+            evidence=(self._listing(rows), self._action_entry("replay_dlq_by_ids", args)),
+        )
+
+        assert self._verify(run).state is IncidentState.RESOLVED
+
+    # -- inertness ---------------------------------------------------------
+
+    def test_an_alert_that_names_its_slice_is_inert(self) -> None:
+        """ADR 0032 governs these, and governs them harder.
+
+        No plan executes at all unless its action targets the alerted subject,
+        so a run that reached VERIFYING necessarily acted on what it was paged
+        for. Asking a second question about the furniture beside it would turn
+        every correctly-scoped run into an escalation — the opposite of ADR
+        0031's decision, which this amendment narrows rather than reverses.
+        """
+        run = self._run(
+            alert=self._CATEGORY_ALERT,
+            plan=self._category_replay(),
+            evidence=(
+                self._listing(self._MIXED),
+                self._action_entry("replay_dlq_by_category", {"category": "replay_safe"}),
+            ),
+        )
+
+        assert self._verify(run).state is IncidentState.RESOLVED
+
+    def test_a_non_dlq_action_is_inert(self) -> None:
+        """A consumer restart says nothing about a queue read as context.
+
+        The link that makes the dead-letter queue the incident is the agent's
+        OWN plan: under a subject-less alert, choosing a dead-letter action is
+        the run saying the queue is what it was paged for. Nothing here parses
+        alert free text — the heuristic ADR 0031 refused twice. So a run that
+        restarted a consumer group, having listed the DLQ for context, resolves
+        with four rows still in that queue, and that is correct: the rows were
+        never this incident.
+        """
+        args = {"consumer_group": "worker-dispatcher"}
+        plan = self._category_replay(
+            action_tool="restart_consumer_group",
+            action_arguments=args,
+            verify_tool="get_consumer_lag",
+            verify_arguments=args,
+            verify_expectation="lag drops to near zero for that group",
+        )
+        run = self._run(
+            alert=self._SUBJECTLESS_ALERT,
+            plan=plan,
+            evidence=(
+                self._listing(self._MIXED),
+                self._action_entry("restart_consumer_group", args),
+            ),
+        )
+
+        result = make_llm_verify(_lag_mcp(0), self._verified(), model=_MODEL)(run, _now())
+
+        assert result.state is IncidentState.RESOLVED
+
+    def test_a_run_that_never_read_the_queue_is_inert(self) -> None:
+        """Nothing in this run says the queue is the incident.
+
+        Reachable only by hand: ADR 0027 refuses a by-id replay whose row was
+        never read and ADR 0028 refuses a category replay no listing covered,
+        so the only DLQ action that can reach VERIFYING on an unread queue is
+        the fence — which escalates a branch earlier as a stabilizer. Pinned
+        because the alternative reading (escalate on no evidence) would fire on
+        the two anti-vacuity controls in the stabilizer classes above, which
+        assert a resolving action resolves from a hand-built state.
+        """
+        run = self._run(
+            alert=self._SUBJECTLESS_ALERT,
+            plan=self._category_replay(),
+            evidence=(self._action_entry("replay_dlq_by_category", {"category": "replay_safe"}),),
+        )
+
+        assert self._verify(run).state is IncidentState.RESOLVED
+
+    def test_a_state_with_no_action_entry_is_inert(self) -> None:
+        """No boundary means every reading is of unknown vintage.
+
+        ``make_remediate`` always writes the action's entry, so a real run
+        cannot produce this. Declining is the honest answer: the alternative is
+        reading the POST-action verify page as though it showed what the alert
+        was about, which is the exact confusion ``_evidence_before`` exists to
+        prevent.
+        """
+        run = self._run(
+            alert=self._SUBJECTLESS_ALERT,
+            plan=self._category_replay(),
+            evidence=(self._listing(self._MIXED),),
+        )
+
+        assert self._verify(run).state is IncidentState.RESOLVED
+
+    # -- looking away is not clearing --------------------------------------
+
+    def test_a_filtered_listing_is_not_a_reading_of_the_queue(self) -> None:
+        """The laziest trajectory that would otherwise pass.
+
+        Read only `list_dlq_messages(remediation_hint="replay_safe")`, replay
+        that category, and every row you looked at is addressed — so a rule
+        keyed on "the rows in evidence" would resolve on a queue it never saw.
+        Under a subject-less alert there is nothing to filter BY: the alerted
+        signal is the queue itself, which is the same reasoning
+        ``SubjectMatch.UNFILTERED`` applies to the unclassified subject.
+        """
+        run = self._run(
+            alert=self._SUBJECTLESS_ALERT,
+            plan=self._category_replay(),
+            evidence=(
+                self._listing(
+                    ((self._SAFE_ROW, "replay_safe"),),
+                    arguments={
+                        "job_type": None,
+                        "remediation_hint": "replay_safe",
+                        "limit": 50,
+                        "offset": 0,
+                    },
+                ),
+                self._action_entry("replay_dlq_by_category", {"category": "replay_safe"}),
+            ),
+        )
+
+        result = self._verify(run)
+
+        assert result.state is IncidentState.ESCALATED
+        reason = result.evidence[-1].result_summary
+        assert "STABILIZED, NOT RESOLVED" in reason
+        assert "narrowed to a slice or was a partial page" in reason
+
+    def test_a_partial_page_is_not_a_reading_of_the_queue(self) -> None:
+        """``total`` against the rows returned: page one of ten is not the queue.
+
+        The same claim as the filter check from the other side. A reading with
+        no usable ``total`` is accepted — this is a contradiction test, not an
+        invention.
+        """
+        run = self._run(
+            alert=self._SUBJECTLESS_ALERT,
+            plan=self._category_replay(),
+            evidence=(
+                self._listing(((self._SAFE_ROW, "replay_safe"),), total=40),
+                self._action_entry("replay_dlq_by_category", {"category": "replay_safe"}),
+            ),
+        )
+
+        assert self._verify(run).state is IncidentState.ESCALATED
+
+    def test_narrowing_the_action_on_another_dimension_addresses_nothing(self) -> None:
+        """Un-provable is unaddressed, and the asymmetry is deliberate.
+
+        ``replay_dlq_by_category(category="replay_safe", job_type="csv_upload")``
+        replays the intersection, and no map here says which rows survive it.
+        Guessing high lets a run resolve on rows it may never have touched;
+        guessing low escalates with a row a human can see was handled. Only one
+        of those wakes somebody for nothing, and it is the recoverable one.
+        """
+        args = {"category": "replay_safe", "job_type": "csv_upload"}
+        run = self._run(
+            alert=self._SUBJECTLESS_ALERT,
+            plan=self._category_replay(action_arguments=args),
+            evidence=(
+                self._listing(((self._SAFE_ROW, "replay_safe"),)),
+                self._action_entry("replay_dlq_by_category", args),
+            ),
+        )
+
+        result = self._verify(run)
+
+        assert result.state is IncidentState.ESCALATED
+        assert self._SAFE_ROW in result.evidence[-1].result_summary
+
+    # -- the derivations, pinned ------------------------------------------
+
+    def test_the_dead_letter_action_set_is_what_the_maps_say(self) -> None:
+        """Anti-vacuity canary on the union of three maps.
+
+        Derived rather than declared (architecture-principles rule 2), which
+        means it can silently empty out if any of the three changes shape. It
+        must hold `mark_dlq_permanent`, which is declared inert in the two
+        read-before-act maps and reachable only through ``HINT_ROUTED_TOOLS``.
+        """
+        assert {
+            "mark_dlq_permanent",
+            "replay_dlq_by_category",
+            "replay_dlq_by_ids",
+            "replay_dlq_messages",
+        } == DEAD_LETTER_ACTIONS
+        assert "restart_consumer_group" not in DEAD_LETTER_ACTIONS
+        assert "invalidate_cache_key" not in DEAD_LETTER_ACTIONS
+        assert "pause_dag" not in DEAD_LETTER_ACTIONS
+
+    def test_the_narrowing_dimensions_are_the_declared_listing_scopes(self) -> None:
+        """ "Unfiltered" means narrowed on none of these, and they are derived.
+
+        ``limit`` and ``offset`` are deliberately absent: they page a listing
+        rather than select rows, so no ``ListingScope`` pairs them with an
+        action field, and the completeness half (``total`` against the rows
+        returned) is what answers paging.
+        """
+        assert {"remediation_hint", "job_type"} == DLQ_LISTING_SCOPES
+        assert "limit" not in DLQ_LISTING_SCOPES
+        assert "offset" not in DLQ_LISTING_SCOPES
+
+    def test_every_slice_word_has_a_disposition_a_briefing_can_carry(self) -> None:
+        """The two halves of "what does this row need" must cover one vocabulary.
+
+        ``HINT_ROUTED_TOOLS`` holds the tool; ``_ROW_DISPOSITION`` holds the
+        phrase no map can. Pinned equal so a hint the platform ships tomorrow
+        cannot reach a human's briefing unnamed — the fallback text exists, but
+        a fallback firing in production is a gap, not a design.
+        """
+        assert set(_ROW_DISPOSITION) == set(HINT_ROUTED_TOOLS)
+        # ``unclassified`` is the key a null hint reads as: there is no row
+        # hint for a row nobody classified.
+        assert "unclassified" in _ROW_DISPOSITION

@@ -34,9 +34,9 @@ from incident_commander.llm.prompts.loader import (
 
 _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("2fbebe9dcd49d48e41a580b1093f8e66cdb063482ea78ee5873be2eaa3dc0eda"),
-    "investigation_planner": ("7fb96c352bf963e46149da8020d6b4d080760daa73bfe60bf8afefc68c90886d"),
+    "investigation_planner": ("412ecb029c8bef6a05461d30f6a9ec46b57c07bc61ed56f3cc3be0c8ca2e415e"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
-    "remediation_planner": ("1ee8b6640ae937acf28faa4048ddba7d1e9f04ea7bc53954cab5d35cbbf0b0bc"),
+    "remediation_planner": ("37aaf09397f43a6aee79b3ec117c820329cf9cc3a8e517a860b468d78686d970"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
 }
 
@@ -268,6 +268,29 @@ class TestInvestigationPlannerInvariants:
         assert "applies only when the alert names no subject at all" in content
         assert "a partial action does not finish the incident" in content
 
+    def test_a_partial_action_on_a_subjectless_queue_ends_in_escalation(self) -> None:
+        """WO-R2-164, the half ADR 0032 recorded and deliberately did not encode.
+
+        The risk this rule manages is not the model resolving too eagerly —
+        the state machine now decides that, whatever the model believes. It is
+        the model reading "this will not close the incident" as "there is no
+        point acting" and emitting `stop`, which is how live run
+        `06e14be3e7b1` ended: correct about the queue, and the queue untouched.
+        So the rule has to say both halves — the run escalates, AND you still
+        act — and the second half is the one asserted first here.
+
+        Option C (several actions in one incident, so the queue could actually
+        be cleared — WO-R2-155) is the future design and is deliberately NOT in
+        the prompt: it would describe a loop the agent does not have. It lives
+        in ADR 0031's amendment and in `docs/eval-methodology.md`.
+        """
+        content = load_prompt("investigation_planner").lower()
+        assert "a partial action ends the run in escalation" in content
+        assert "still emit `remediate` for the safe slice rather than `stop`" in content
+        # The rule names what "cleared" means, because "the incident is not
+        # over" with no test attached is a mood rather than a rule.
+        assert "replayed, scheduled or fenced by this run" in content
+
     def test_unclassified_rows_are_a_subject_with_their_own_routing(self) -> None:
         """The vocabulary half: a null hint is a classification, not a gap."""
         content = load_prompt("investigation_planner").lower()
@@ -370,6 +393,30 @@ class TestRemediationPlannerInvariants:
         content = load_prompt("remediation_planner").lower()
         assert "only when the alert names no slice at all" in content
         assert "not a licence to call a partial job finished" in content
+
+    def test_a_partial_action_on_a_subjectless_queue_escalates_structurally(self) -> None:
+        """WO-R2-164. Named as structural for the same reason ADR 0032's guard is.
+
+        A planner that expects RESOLVED and gets an escalation has no way to
+        learn from the schema that the outcome was decided elsewhere, and the
+        specific misreading to prevent is writing `verify_expectation` about
+        the INCIDENT ("the DLQ is clear") instead of the ACTION. The judge is
+        asked only whether the call did what the sentence said, so an
+        incident-shaped expectation reads `not_verified` on a correct run —
+        which is the shape that cost `7acd2b441961` (ADR 0025) in a different
+        dress. Both halves pinned.
+
+        ADR 0008 is named in the prompt rather than merely implied: "one
+        action cannot close a mixed queue" is a fact about the loop, and a
+        planner told the reason does not spend a turn proposing a second call.
+        """
+        content = load_prompt("remediation_planner").lower()
+        assert "the run escalates after your action, not resolves" in content
+        assert "this is structural, not advice" in content
+        assert "adr 0008" in content
+        # Act anyway, and write the expectation about the call.
+        assert "plan the action anyway" in content
+        assert "about the action, not about the incident" in content
 
     def test_an_unclassified_row_is_acted_on_by_id_and_never_by_category(self) -> None:
         """The routing a null hint has, and the one it can never have.

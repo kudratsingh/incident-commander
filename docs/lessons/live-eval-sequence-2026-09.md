@@ -1203,6 +1203,111 @@ on a missing required field), the action's target present in the world, baseline
 re-audit PASS. `make eval-reg` 38/38, `saga_stuck` green on all five dimensions
 at 4 of 13 calls.
 
+## 16. The terminal state nobody was grading against the briefing
+
+`dlq_mixed_partial`, **not run**. Found by reading, decided by the user on
+2026-09-08 as WO-R2-164. Cost: nothing, which is the whole reason it belongs
+in this document.
+
+Row 14's ADR wrote down a question it declined to answer: after the agent has
+replayed one of four dead-lettered rows, is the incident over? It declined
+because answering it flips a queued paid scenario's terminal state, which is a
+spend decision, and because it contradicts an accepted ADR — both of which make
+it the user's call. This section records the answer and the reasoning, because
+the reasoning is the transferable part.
+
+### The scenario was exact everywhere except the one field that mattered
+
+`dlq_mixed_partial` has some of the tightest claims in the corpus. Replays sum
+to exactly 1. Scheduled sums to exactly 0. The `human_required` id, both wait
+ids, the `wait_and_replay` category and the bulk sweep tool are all forbidden.
+The listing must be read BEFORE the action. The precondition pins the queue at
+four rows with both a `replay_safe` and a `human_required` row present. Every
+one of those was checked against the platform's own behaviour before it was
+written.
+
+And it said `expected_terminal_state: resolved`, on a run that leaves three rows
+dead-lettered — one of them a poisoned CSV nobody has fenced. Its own canned
+briefing named them.
+
+### Why the exactness did not help
+
+Because the count claims and the terminal state are claims about different
+things, and nothing compared them. This is row 14's failure one layer up: there,
+the plan was never checked against the alert; here, the terminal state was never
+checked against the briefing. The suite grades briefing content four ways
+(groundedness, actionability, required substrings, forbidden substrings) and
+grades the terminal state against one expected value someone typed. On live run
+`a0aa257bf865` those two graders were handed *"leaving four unresolved"* and
+`RESOLVED` in the same run and both passed.
+
+> **A terminal state is a claim, and it is the one claim a briefing cannot
+> correct.** Prose saying "four rows remain" under RESOLVED warns nobody,
+> because RESOLVED is what decides whether the prose is read at all. When a
+> run's briefing contradicts its terminal state, the terminal state is the
+> defect — the writer had the facts.
+
+### The three options, and why the middle one
+
+The user was given the decision in these terms:
+
+* **A — keep `resolved` for the actionable slice, and record why.** Rejected. It
+  is `a0aa257bf865`'s shape made policy: a true briefing under a terminal state
+  that contradicts it.
+* **B — stabilize what one action reaches, escalate naming the remainder and
+  what each row needs.** Taken. Honest under ADR 0008 exactly as it stands, and
+  it costs nothing: the rows are already in evidence and the briefing is already
+  written on an escalation.
+* **C — let one incident carry several Tier-1 calls against disjoint groups, so
+  a mixed queue can actually be cleared.** Deferred to **WO-R2-155**. It revises
+  ADR 0008's single-attempt invariant and every plan guard would have to apply
+  per call. Under C a run could replay the safe row, schedule both wait rows and
+  fence the poisoned one — and then honestly resolve.
+
+The user's words were "B now, C later". Worth keeping the shape of that decision
+rather than only its outcome: B is not a claim that a mixed queue is
+unresolvable, it is the honest terminal state for the loop the agent currently
+has. The two are easy to conflate, and conflating them is how a stopgap becomes
+a permanent design.
+
+> **ADR 0008 does not degrade a wide scope into a partial fix — it converts one
+> into a handoff.** §12 wrote that sentence about a run that escalated having
+> done nothing, and read it as an argument for narrowing the scope. It is also
+> an argument about the terminal state: when the scope genuinely cannot be
+> narrowed (there is no slice named), one action is a partial fix, and a partial
+> fix plus a named remainder is a handoff. The sentence was right; only half of
+> it had been applied.
+
+### What the fix is, and the one place it goes further than asked
+
+RESOLVED is admissible only when the alerted condition is cleared. For a
+subject-less DLQ alert that condition is the queue the run read, and a row is
+**addressed** when the one executed action named it — by id, or by the slice it
+narrowed to — so it was replayed, scheduled, or fenced. Addressed is not fixed:
+a scheduled replay has not run and a fence repairs nothing. It is "this run took
+a decision about this row and recorded it", which is the strongest claim a
+briefing can honestly carry. It reuses ADR 0026's stabilizer path, escalating
+with the same `STABILIZED, NOT RESOLVED` opening, and it is inert wherever the
+alert names a subject — ADR 0032 already makes RESOLVED honest there.
+
+The one addition nobody asked for, stated plainly because it changes behaviour:
+**a run that read the queue only through filtered or partial pages escalates
+too.** The reason is the standing pre-spend question — *what is the laziest
+trajectory that passes this?* — and the answer was: read
+`list_dlq_messages(remediation_hint="replay_safe")`, replay that category, and
+every row you looked at is addressed. A rule keyed on "the rows in evidence"
+resolves on a queue it never saw. Under a subject-less alert there is nothing to
+filter BY, so demanding the whole page is exact rather than strict, and it is the
+same comparison `SubjectMatch.UNFILTERED` already makes for the unclassified
+subject.
+
+> **A rule about coverage can be satisfied by looking away, unless it says what
+> looking means.** "Everything I read is handled" and "the condition is cleared"
+> are the same sentence only for a run that read everything. Any check built
+> from evidence has this shape, and the fix is always the same: say which
+> reading counts, and make the incomplete one fail loudly rather than pass
+> quietly.
+
 ## Summary: what each failure was actually caused by
 
 | # | Run / event | Looked like | Actually was | Fix |
@@ -1221,6 +1326,8 @@ at 4 of 13 calls.
 | 12 | `dlq_wait_and_replay_success` (`5c8895771fbd`) | a red remediation run | **A transcription slip, escalated like a judgement error**: the plan derived the right delay from the right rows and then zero-filled one job id's trailing blocks; the argument guard had no re-ask to give, so one planner call ended the run | ADR 0030; §11 |
 | 13 | `dlq_wait_and_replay_success` (`06e14be3e7b1`) | an honest escalation on a mixed queue | **The alert never named its own scope**: the agent listed the whole DLQ, described all four rows correctly (judge groundedness 0.95), and stopped because no single Tier-1 action covered them — a true sentence and a wrong decision, since the alert was about the two-row wait slice and said so only inside a fingerprint string. Run A had scoped itself right from the same world, so the behaviour was guessable, not specified | ADR 0031; §12 |
 | 14 | `dlq_human_required_escalates` (`a0aa257bf865`) | a green-looking resolved run | **The action never addressed the alert's subject**: the agent made the right (unfiltered) read, found the unclassified row, named it in its own rationale as untouchable — then replayed a different slice and RESOLVED, with a 1.0-groundedness briefing that says four rows are still unhandled. The subject guard had only ever checked the READ, so `adcdcadd94a3` (row 3) was the same defect half-fixed | ADR 0032; §14 |
+| 15 | `saga_stuck` (not run) | a rule already settled by §13, with its one exception written down and pinned | **The exception had a false premise**: a fenced row is still replayable by explicit id — only category scans and the bulk sweep skip it — so fencing a `human_required` chain root forecloses nothing the human is being asked to decide, and leaving it unfenced hands the next sweep a payload that cannot succeed. The carve-out kept the lazy trajectory (escalate having touched nothing) green | ADR 0033 (WO-R2-160); §15 |
+| 16 | `dlq_mixed_partial` (not run) | a tightly-graded scenario, ready for its go | **Its terminal state was the one claim nothing checked against its briefing**: `expected_terminal_state: resolved` on a run that leaves three of four rows dead-lettered, one of them poisoned and unfenced, with its own canned briefing naming them. Every count claim in the file was exact; RESOLVED is what stops a human being paged | ADR 0031 amended (WO-R2-164, user: "B now, C later"); Option C = WO-R2-155; §16 |
 
 **The through-line.** Six of these ten are failures of *procedure and
 environment*, not of the agent — only rows 2 and 3 are genuine agent defects,
@@ -1230,10 +1337,13 @@ the world was clean, the invocation was the runbook's, and the knobs let the
 agent see the truth — in that order. Only then is the result about the agent.
 
 (The count said "eight" until row 10 landed, row 11 came after that, row 12
-after that, and row 13 after that; each arrived once the prose was written,
-which is the five-stale-copies problem in miniature and is why the counts are
-corrected in place rather than left to be re-derived. Read "six of these ten"
-above as six of thirteen.)
+after that, and rows 13 through 16 after that; each arrived once the prose was
+written, which is the five-stale-copies problem in miniature and is why the
+counts are corrected in place rather than left to be re-derived. Read "six of
+these ten" above as **six of sixteen** — and note the denominator keeps growing
+while the numerator does not: rows 9–11, 15 and 16 were all found by reading,
+before any money was released, which is the direction this sequence has been
+moving since row 8.)
 
 **Row 13 is a fourth kind, and it is the subtlest one in the table.** Rows 2 and
 3 are wrong beliefs; row 12 is a fumble; rows 9–11 are steering defects caught

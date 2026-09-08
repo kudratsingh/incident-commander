@@ -40,6 +40,8 @@ All seven are idempotent (caller-supplied `idempotency_key`, see below) with a b
 
 Tier answers "how much damage can this do?". A second, independent classification answers "can a successful call END the incident?" — `RESOLUTION_CLASS` in the same module, total over the Tier-1 slice. See [A stabilizer is not a resolution](#a-stabilizer-is-not-a-resolution).
 
+A third question sits beside it and cannot be answered by a map at all: **did the call end THIS incident?** A tool that resolves, applied to a condition it only partly covers, leaves the incident open — one replay on a four-row mixed queue is the case, and ADR 0008 allows exactly one action. That is a property of the run rather than of the tool, so it is decided from the run's own evidence at the same `RESOLVED` transition (`remediation._uncleared_alert_condition`, WO-R2-164 / [ADR 0031](ADR/0031-an-alerted-dlq-category-is-the-incident.md)'s 2026-09-08 amendment) and escalates with every unaddressed row named. Inert wherever the alert names a subject, since no plan aimed elsewhere executes there ([ADR 0032](ADR/0032-the-action-must-address-the-alerts-subject.md)).
+
 No `TIER_2` tools ship today. When they land, they use the platform's propose/approve/execute flow (Wave 3 PR F on the platform side).
 
 ## The remediation loop
@@ -188,6 +190,7 @@ Nothing in the guard stack caught it. Right tier, real tools, resources named an
 | Check | Rejects | Failure it prevents |
 |---|---|---|
 | `RESOLUTION_CLASS` at the `RESOLVED` transition | a run resolving on a verified action whose only effect is to hold the system still | reporting a fix that fixed nothing, and closing the incident on a timer nobody is watching |
+| the alerted-condition check at the same transition (WO-R2-164) | a run resolving on a verified action that addressed only part of what the alert reported — for a subject-less DLQ alert, a replay of one slice of a mixed queue | reporting a partial fix as a finished incident, so nobody is paged about the rows still in the queue |
 
 `Resolution.STABILIZES` says a verified success holds the incident still and leaves its cause in place; `Resolution.RESOLVES` says it removes the cause. Two of the seven Tier-1 tools are stabilizers: `pause_dag`, and — since 2026-09-08 (WO-R2-140) — `mark_dlq_permanent`.
 

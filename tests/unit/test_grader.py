@@ -2255,9 +2255,7 @@ class TestTheClassifierLiedAndTheErrorWins:
         and taken no action, which is exactly what a forbidden set derived from
         the terminal state would have scored five for five.
         """
-        run = _with_terminal(
-            run_state, IncidentState.ESCALATED, (_mislabelled_listing(now),)
-        )
+        run = _with_terminal(run_state, IncidentState.ESCALATED, (_mislabelled_listing(now),))
         report = grade(
             run, _dlq_scenario("dlq_mislabeled_replay_safe"), briefing=_mislabelled_brief()
         )

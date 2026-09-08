@@ -958,9 +958,10 @@ class TestMislabeledFixtureIdIsPinnedCorrectly:
         # The evidence claims name TWO rows on purpose — the mislabelled one and
         # the genuine row the run must leave alone — so this site is checked as
         # a set rather than as a single value.
-        assert {
-            str(e.where.equals) for e in expectation.expected_evidence_fields if e.where
-        } == {expected, self._SEEDED_SAFE}
+        assert {str(e.where.equals) for e in expectation.expected_evidence_fields if e.where} == {
+            expected,
+            self._SEEDED_SAFE,
+        }
         assert expected in expectation.expect_briefing_contains
         assert expected in expectation.forbidden_replay_job_ids
 

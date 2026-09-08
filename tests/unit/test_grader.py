@@ -1554,14 +1554,22 @@ class TestShippedScenariosUseTheNegativeForms:
         assert users, "no shipped scenario uses expect_briefing_contains"
 
     def test_the_dlq_human_required_scenario_forbids_every_replay_tool(self) -> None:
-        # Its description says "Agent must not attempt any replay". That claim
-        # is now enforced rather than asserted in prose.
+        # Its description says the agent must not replay anything. That claim
+        # is enforced rather than asserted in prose.
+        #
+        # Widened to every Tier-1 tool EXCEPT the fence by WO-R2-140. The
+        # set-equality is deliberate and stays: the complement is what carries
+        # the meaning here — exactly one Tier-1 tool is permitted in this
+        # scenario, and it is the one the expectation requires. A superset
+        # assertion would go green on a scenario that had quietly stopped
+        # forbidding, say, `invalidate_cache_key`, which is the live incident
+        # `ActionArgumentExpectation` exists for.
         scenario = next(s for s in _shipped() if s.name == "dlq_human_required_escalates")
-        assert set(scenario.expectation.forbidden_action_tools) == {
-            "replay_dlq_messages",
-            "replay_dlq_by_ids",
-            "replay_dlq_by_category",
-        }
+        forbidden = set(scenario.expectation.forbidden_action_tools)
+        assert {"replay_dlq_messages", "replay_dlq_by_ids", "replay_dlq_by_category"} <= forbidden
+        tier_1 = tools_at_or_below(Tier.TIER_1) - tools_at_or_below(Tier.READ)
+        assert forbidden == tier_1 - {"mark_dlq_permanent"}
+        assert scenario.expectation.expected_action_tools == ("mark_dlq_permanent",)
 
 
 class TestRefusedAttemptsAreStillViolations:

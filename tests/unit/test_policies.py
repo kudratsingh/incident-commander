@@ -19,7 +19,11 @@ from pydantic import BaseModel
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
 from incident_commander.agent.hypothesis import HypothesisCategory, ReadToolName
-from incident_commander.agent.investigation import FIX_MAP, HINT_ROUTED_CATEGORIES
+from incident_commander.agent.investigation import (
+    FIX_MAP,
+    HINT_ROUTED_CATEGORIES,
+    HINT_ROUTED_TOOLS,
+)
 from incident_commander.agent.remediation import (
     RemediationPlan,
     Tier1ToolName,
@@ -936,6 +940,40 @@ class TestResolutionClass:
         assert resolution_class_of("pause_dag").resolution is Resolution.STABILIZES
         assert "pause_dag" in stabilize_only_tools()
 
+    def test_mark_dlq_permanent_is_stabilize_only(self) -> None:
+        """The fence is a stabilizer (WO-R2-140, user decision 2026-09-08).
+
+        ADR 0026 shipped this entry as RESOLVES with the disagreement
+        recorded at the map rather than settled, because flipping it turned
+        a green scenario red and that scenario was queued for a paid run.
+        The decision went the way all three readings pointed: the platform
+        says the mark "doesn't change job.status — the entry stays in DLQ",
+        the planner prompt routes it as "mark, then `stop` (escalate)", and
+        the scenario is named ``dlq_human_required_escalates``.
+
+        What a verified fence has achieved: nobody will bulk-replay the
+        poisoned row again. What it has not: the job is still dead, its work
+        still undone, and the bad data behind it still bad. That is the
+        ``pause_dag`` shape — a verified success that holds the incident
+        still — so it takes the same class.
+        """
+        assert resolution_class_of("mark_dlq_permanent").resolution is Resolution.STABILIZES
+        assert "mark_dlq_permanent" in stabilize_only_tools()
+
+    def test_the_fence_rationale_says_what_the_mark_leaves_untouched(self) -> None:
+        """Not a length check — the fence's rationale has one job.
+
+        ``remediation._stabilized_reason`` quotes it verbatim into the
+        escalation the on-call reads, and the whole point of the class here
+        is that a reader must not mistake a fenced row for a fixed one. So
+        the sentence has to name what did NOT change. A rationale that only
+        praised the fence would satisfy the 40-character floor above and
+        lose the entire decision.
+        """
+        rationale = resolution_class_of("mark_dlq_permanent").rationale
+        assert "doesn't change job.status" in rationale
+        assert "a human still has to act" in rationale
+
     def test_the_stabilize_only_set_is_not_empty(self) -> None:
         """Anti-vacuity canary.
 
@@ -1073,6 +1111,32 @@ class TestFixMapMatchesTheSuite:
                 f"propose Tier-1 actions, so this routing is unreachable."
             )
 
+    def test_every_hint_routed_scenario_is_checked_elsewhere(self) -> None:
+        """The gap this class does not cover, named so nobody looks for it here.
+
+        Scoping to ``resolved`` is right for ``FIX_MAP`` (see the class
+        docstring) and it leaves one shape unchecked: a scenario that expects
+        ``escalated`` and nevertheless requires an action.
+        ``dlq_human_required_escalates`` became exactly that with WO-R2-140 —
+        fence, then escalate — so a prompt that routed ``human_required`` at
+        a tool that scenario forbids would slip through every assertion
+        above. ``TestHintRoutedToolsMatchTheSuite`` below is that check; this
+        assertion fails if it is deleted, because a documented gap with no
+        check behind it is worse than an undocumented one.
+        """
+        assert HINT_ROUTED_TOOLS, "HINT_ROUTED_TOOLS is empty; the hint-routing check is vacuous"
+        escalating_with_an_action = [
+            s.name
+            for s in load_scenarios(_SCENARIO_DIR)
+            if s.expectation.expected_terminal_state is IncidentState.ESCALATED
+            and s.expectation.expected_action_tools
+        ]
+        assert escalating_with_an_action, (
+            "no scenario expects `escalated` while requiring an action. If "
+            "that is deliberate, TestHintRoutedToolsMatchTheSuite has "
+            "nothing left to protect and this note is stale."
+        )
+
     def test_every_steered_tool_is_named_in_the_planner_prompt(self) -> None:
         """Rule 2's "prompt describes the mapping *from* the code", checked.
 
@@ -1090,3 +1154,130 @@ class TestFixMapMatchesTheSuite:
                 f"written from this map; a tool the map steers to and the "
                 f"prompt omits is a routing the live agent never sees."
             )
+
+
+class TestHintRoutedToolsMatchTheSuite:
+    """A hint's routed tools must be what the scenario alerting on it expects.
+
+    ``TestFixMapMatchesTheSuite`` above is scoped to scenarios expecting
+    ``resolved``, and that scoping is right there: an escalate-only scenario
+    forbids every Tier-1 tool on purpose, so including them would make the
+    check fire on every category that has a fix at all. WO-R2-140 created the
+    shape that falls between the two — ``dlq_human_required_escalates``
+    expects ``escalated`` AND requires an action, because for a human-required
+    row the correct behaviour is fence, then escalate. Its terminal state
+    excludes it from the check above; its required action means a steer-vs-
+    forbid conflict would be a real defect.
+
+    So this class asks the same question keyed on the ALERT's own
+    ``remediation_hint`` rather than on the hypothesis category:
+
+    * every tool ``HINT_ROUTED_TOOLS`` routes that hint to is one the
+      scenario permits — never in its ``forbidden_action_tools``;
+    * the scenario's ``expected_action_tools`` are drawn from that routing,
+      so a scenario cannot quietly expect a tool the prompt never steers at.
+
+    Keyed on the alert field for the same reason ``ALERT_SUBJECT_PROBES`` is:
+    the field carries the VALUE, and the value is what makes the row this
+    incident's subject (ADR 0031). It is also what keeps this check silent on
+    ``saga_stuck``, whose alert names a ``job_id`` — its seeded chain root is
+    ``human_required`` and it forbids ``mark_dlq_permanent`` deliberately,
+    because there the incident is the chain and the replay is the human's
+    decision. That boundary is prose in both prompts and pinned in
+    ``test_prompts_snapshot.py``; here it falls out of the key.
+    """
+
+    @staticmethod
+    def _hint_alerting_scenarios() -> list[tuple[Scenario, str]]:
+        pairs: list[tuple[Scenario, str]] = []
+        for scenario in load_scenarios(_SCENARIO_DIR):
+            hint = getattr(scenario.alert, "remediation_hint", None)
+            if isinstance(hint, str) and hint:
+                pairs.append((scenario, hint))
+        return pairs
+
+    def test_the_corpus_has_hint_alerting_scenarios_to_check(self) -> None:
+        """Anti-vacuity canary: an empty selection would report nothing, green."""
+        assert self._hint_alerting_scenarios()
+
+    def test_every_alerted_hint_is_a_routing_this_map_knows(self) -> None:
+        """An alert may not name a category the routing has no entry for.
+
+        The gap would be silent in the worst way: the two assertions below
+        skip a hint they cannot look up, so an alert carrying a typo'd or a
+        newly-added hint would pass this class by being unrecognised.
+        """
+        unknown = sorted(
+            {hint for _, hint in self._hint_alerting_scenarios() if hint not in HINT_ROUTED_TOOLS}
+        )
+        assert not unknown, (
+            f"scenario alerts name remediation hints {unknown}, which "
+            f"HINT_ROUTED_TOOLS does not route. Either the hint is wrong in "
+            f"the scenario or the routing is missing a decision — and an "
+            f"unroutable hint reaches the planner as an incident subject "
+            f"with no action attached to it."
+        )
+
+    def test_no_scenario_forbids_a_tool_its_alerted_hint_routes_to(self) -> None:
+        problems: list[str] = []
+        for scenario, hint in self._hint_alerting_scenarios():
+            forbidden = set(scenario.expectation.forbidden_action_tools)
+            collision = sorted(HINT_ROUTED_TOOLS.get(hint, frozenset()) & forbidden)
+            if collision:
+                problems.append(
+                    f"{scenario.name}: its alert names remediation_hint="
+                    f"{hint!r}, which routes to {collision}, and those are "
+                    f"in its forbidden_action_tools"
+                )
+        assert not problems, (
+            "the hint routing steers the agent at a tool the scenario grades "
+            "as a safety violation:\n  " + "\n  ".join(problems) + "\n"
+            "Either the routing is stale (fix HINT_ROUTED_TOOLS *and* the "
+            "remediation-planner prompt, which is written from it) or the "
+            "scenario forbids the wrong tool. If the scenario is right "
+            "because its subject is not the row — a stuck chain's root, say "
+            "— then its alert should not be naming that row's category."
+        )
+
+    def test_every_expected_action_is_one_the_alerted_hint_routes_to(self) -> None:
+        """The other direction: a scenario cannot expect an unsteered tool.
+
+        ``forbidden`` catches the prompt sending the agent somewhere the
+        scenario punishes. This catches the scenario grading an action the
+        prompt never sends it to — the same drift, discovered from the other
+        end, and the half that was invisible for the whole life of PR #173.
+        """
+        problems: list[str] = []
+        for scenario, hint in self._hint_alerting_scenarios():
+            routed = HINT_ROUTED_TOOLS.get(hint, frozenset())
+            unsteered = sorted(set(scenario.expectation.expected_action_tools) - routed)
+            if unsteered:
+                problems.append(
+                    f"{scenario.name}: alert names remediation_hint={hint!r} "
+                    f"(routed to {sorted(routed)}) but the scenario expects "
+                    f"{unsteered}"
+                )
+        assert not problems, (
+            "a scenario expects an action its alerted hint does not route "
+            "to:\n  " + "\n  ".join(problems) + "\n"
+            "The live agent reads the prompt, and the prompt is written from "
+            "HINT_ROUTED_TOOLS; an expectation outside that routing is a "
+            "scenario nothing steers the agent to pass."
+        )
+
+    def test_every_routed_tool_is_a_tier_1_action_named_in_the_prompt(self) -> None:
+        """Same two floors ``FIX_MAP``'s values carry, for the same reasons."""
+        prompt = load_prompt("remediation_planner")
+        for hint, tools in sorted(HINT_ROUTED_TOOLS.items()):
+            assert tools, f"{hint} routes to nothing; a hint with no action does not belong here"
+            for tool in sorted(tools):
+                assert tool in TOOL_REGISTRY, f"{hint} → unknown tool {tool!r}"
+                assert tier_of(tool) is Tier.TIER_1, (
+                    f"{hint} → {tool!r}, which is tier {tier_of(tool).value}. "
+                    f"The remediation planner may only propose Tier-1 "
+                    f"actions, so this routing is unreachable."
+                )
+                assert tool in prompt, (
+                    f"HINT_ROUTED_TOOLS routes {hint!r} to {tool!r}, which "
+                    f"the remediation planner prompt never names."
+                )

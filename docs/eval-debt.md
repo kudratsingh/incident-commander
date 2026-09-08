@@ -27,3 +27,19 @@ validating?"
 | 2026-08-09 | #111 | WO-C6-06 | `evals/scenarios/**`: canned `get_consumer_lag` payloads + one new scenario's expectation | the unknown-group fixture now encodes the platform's real `lag:null` contract (was `lag:42` with another group's `cache_key`), every consumer-lag fixture's `cache_key` echoes the group it probed, `consumer_lag_healthy_zero` retargets its zero reading at the seeded `healthy-consumer`, and the new `consumer_lag_null_unknown_state` scenario drives a null reading end-to-end expecting escalation | on the live run the unknown-group scenario returns `lag:null` from the real platform with the request-derived `cache_key`, and `consumer_lag_null_unknown_state` escalates rather than grading healthy — i.e. the source-authored fixtures match a real recording |
 | 2026-08-09 | #112 | WO-C5-01 | prompt (`llm/prompts/remediation_planner.md`) + `evals/scenarios/**` verify expectation (`dlq_human_required_escalates.yaml`) | the `mark_dlq_permanent` verify rule flipped from absence to presence-with-hint: the planner is now taught that marking leaves the entry in the DLQ (`job.status` stays `dead_letter`, only `remediation_hint` → `human_required`) so success is the job_id APPEARING in `list_dlq_messages(remediation_hint="human_required")`; the scenario's `verify_expectation` and its scripted judge reasoning were realigned to that (platform-authoritative) semantic | the `dlq_human_required_escalates` scenario verifies live via presence-with-hint and terminates RESOLVED — planner writes a presence-based expectation, the verify probe shows the entry still present with `remediation_hint=human_required`, the judge returns `verified` (not `not_verified` → ESCALATED as it must today) |
 | 2026-08-09 | #117 | WO-C3-04 | `evals/graders/**` EVIDENCE matching mechanism + `evals/scenarios/**` expectations (eight scenarios) | value assertions moved from substring matches on the serialized evidence corpus to structured `expected_evidence_fields` (equals/at_least/is_null on the parsed tool output), and the schema now refuses the two toxic substring shapes — the exact item `verified` (it matches a `not_verified:` verdict) and any `"<field>":` fragment; presence substrings and the other four dimensions are unchanged | on the live run the eight migrated scenarios pass the EVIDENCE dimension via their structured fields, no scenario fails ONLY on EVIDENCE for a trajectory a human judges correct, and no scenario passes on a substring coincidence (a `not_verified` run fails EVIDENCE where it previously passed) |
+
+## Corrections (append-only, never edit a row)
+
+The table is walked row by row at the eval restart, so a row whose observable has since been
+overtaken has to be answerable. Rows stay verbatim; corrections go here, dated.
+
+- **2026-09-08 — row 7 (#112, WO-C5-01).** Its observable ends "the `dlq_human_required_escalates`
+  scenario verifies live via presence-with-hint and terminates RESOLVED". The first half still
+  holds and is the whole point of that row: marking leaves the entry in the DLQ, so success is the
+  job_id APPEARING in `list_dlq_messages(remediation_hint="human_required")`, and both the prompt
+  and the scenario's verify leg say so. **The second half is superseded.** WO-R2-140 (user
+  decision) reclassified `mark_dlq_permanent` as `Resolution.STABILIZES`, so a verified fence
+  escalates by design: the scenario expects `escalated` and grades the fence as a required action
+  beside it. Confirm row 7 against the verify semantics, not against the terminal state. See
+  [ADR 0026](ADR/0026-a-stabilizer-is-not-a-resolution.md) § "Resolution of the open
+  classification".

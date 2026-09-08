@@ -187,30 +187,52 @@ RESOLUTION_CLASS: Final[dict[str, ResolutionPolicy]] = {
         "legacy bulk re-submit. Kept resolving for parity with the two "
         "targeted replay tools it predates.",
     ),
-    # Classified RESOLVES, and this one is genuinely arguable — recorded
-    # here rather than settled quietly.
+    # STABILIZES since 2026-09-08 (WO-R2-140, decided by the user). ADR 0026
+    # shipped this entry as RESOLVES with the disagreement recorded here
+    # rather than settled, because flipping it would have turned a green
+    # scenario red and that scenario was queued for a paid live run. The
+    # decision is taken now, and it went the way the platform's own words
+    # point: **fence, then escalate.**
     #
-    # The case for STABILIZES: the platform's own description says the mark
-    # "doesn't change job.status — the entry stays in DLQ", the remediation
-    # planner prompt routes it as "mark, then `stop` (escalate)", and the
-    # scenario that exercises it is named `dlq_human_required_escalates`.
-    # Fencing a poison row stops the bleeding; a human still has to fix the
-    # source data.
+    # Three readings, all agreeing, none of which were in doubt — what was
+    # missing was the decision, not the evidence:
     #
-    # Why it stays RESOLVES here: `dlq_human_required_escalates.yaml`
-    # asserts `expected_terminal_state: resolved`, so reclassifying it would
-    # turn a green scenario red — and that scenario is queued for a paid
-    # live run. The disagreement between that scenario's name, its own
-    # description ("correct action is mark_dlq_permanent per job +
-    # escalate") and its expectation is a real contradiction, but it is a
-    # scenario decision with money behind it, not a side effect of this
-    # change. Filed for the coordinator; flip this entry and the scenario
-    # together or not at all.
+    # * The platform's tool description: the mark "Doesn't change
+    #   job.status — the entry stays in DLQ, just won't be auto-replayed."
+    #   The handler backs that up: it flips `remediation_hint` to
+    #   `human_required` and writes an audit row, and touches nothing else
+    #   (platform `mcp/tools/actions/mark_dlq_permanent.py`).
+    # * The remediation planner prompt routes `human_required` as
+    #   "`mark_dlq_permanent` … then `stop` (escalate)".
+    # * The scenario exercising it is named `dlq_human_required_escalates`
+    #   and its own description says "correct action is mark_dlq_permanent
+    #   per job + escalate".
+    #
+    # So the fence is the `pause_dag` shape in a different dress: a verified
+    # success that holds the incident still. The poisoned row cannot re-fail
+    # a replay it is now excluded from — that is real and worth doing first,
+    # because a later bulk replay by another operator (or by this agent on a
+    # later incident) would otherwise re-run it — and the job is still dead,
+    # its work still undone, its source data still wrong. Nothing about the
+    # cause moved. A human fixes the CSV, the producer, or the schema; the
+    # mark only makes sure nobody re-runs the poison in the meantime.
+    #
+    # It differs from a pause in one way worth stating: it does NOT
+    # self-expire, and it does not block the real fix. That makes it a
+    # *better* stabilizer than a pause and not a resolution — "permanent"
+    # names the durability of the fence, never the end of the incident.
     "mark_dlq_permanent": ResolutionPolicy(
-        Resolution.RESOLVES,
-        "fences one dead-lettered job out of auto-replay with a reason on "
-        "the audit trail. See the note above: this classification is under "
-        "review.",
+        Resolution.STABILIZES,
+        "fences one dead-lettered job out of auto-replay — it sets "
+        "`remediation_hint=human_required` and writes the operator's reason "
+        "to the audit trail, and the platform's own description says it "
+        '"doesn\'t change job.status — the entry stays in DLQ". So the job '
+        "is still dead and its work is still undone: the fence stops a "
+        "later bulk replay from re-running a poisoned payload, and it fixes "
+        "nothing about why the payload failed. The bad data, the producer "
+        "bug or the schema behind it is untouched and a human still has to "
+        "act. Unlike a pause the fence does not expire, so nothing is on a "
+        "clock — but 'permanent' describes the fence, not the incident.",
     ),
 }
 

@@ -132,6 +132,48 @@ HINT_ROUTED_CATEGORIES: Final[frozenset[HypothesisCategory]] = frozenset(
 )
 
 
+# The routing the set above defers to, written down: per-row
+# `remediation_hint` → the Tier-1 tools that hint admits.
+#
+# Vocabulary is the platform's `RemediationHint` (mirrored in
+# `list_dlq_messages`' own description: `replay_safe`, `wait_and_replay`,
+# `human_required`, or null). A null hint is deliberately absent rather than
+# mapped to an empty set: the platform calls it UNKNOWN, nothing has
+# classified the row, and there is no routing to record.
+#
+# Sets, not single values, because two of the three hints genuinely admit two
+# tools — by-id and by-category are the same decision reached by naming rows
+# or by naming a filter — and `FIX_MAP`'s "the value names the common case"
+# hedge is exactly the vagueness that let a stale entry sit unnoticed. Where
+# the answer is one tool, the set has one member.
+#
+# NOT read at runtime, and that has to be said out loud because it is the
+# trap `FIX_MAP` fell into: only the prompt obeys this, so the map's job is
+# to be the single source the prompt is written FROM (architecture-principles
+# rule 2) and to be checkable. `tests/unit/test_policies.py::
+# TestHintRoutedToolsMatchTheSuite` is the check — for every scenario whose
+# ALERT names a hint, the tools this map routes it to must be the tools that
+# scenario expects, and none of them may be in its forbidden set.
+#
+# Why it had to exist by WO-R2-140: `TestFixMapMatchesTheSuite` is scoped to
+# scenarios expecting `resolved`, because escalate-only scenarios forbid
+# every Tier-1 tool on purpose. `dlq_human_required_escalates` is now an
+# escalated scenario that nevertheless REQUIRES an action, so it fell in the
+# gap — the prompt could route `human_required` at a tool that scenario
+# forbids and no test would have seen it. Keyed on the alert's hint rather
+# than on the hypothesis category so the check stays silent on scenarios
+# whose subject is not a DLQ row at all: `saga_stuck`'s alert names a
+# `job_id`, its incident is the chain, and it forbids the fence deliberately.
+HINT_ROUTED_TOOLS: Final[dict[str, frozenset[str]]] = {
+    "replay_safe": frozenset({"replay_dlq_by_ids", "replay_dlq_by_category"}),
+    "wait_and_replay": frozenset({"replay_dlq_by_ids", "replay_dlq_by_category"}),
+    # One tool, and after WO-R2-140 the run escalates once it lands: the
+    # fence is `Resolution.STABILIZES`, so this entry routes an action whose
+    # success is a handoff, not an answer (`policies.RESOLUTION_CLASS`).
+    "human_required": frozenset({"mark_dlq_permanent"}),
+}
+
+
 # Single source of truth for alert-field → subject-probe routing.
 #
 # An alert names the resource it is about in one of these payload fields.

@@ -1268,6 +1268,16 @@ _MAPPED_FIELD_CASES: list[tuple[dict[str, Any], tuple[str, str, str]]] = [
         {"remediation_hint": "wait_and_replay"},
         ("list_dlq_messages", "remediation_hint", "wait_and_replay"),
     ),
+    # The unfiltered arm (ADR 0032). Same tool and same argument as the entry
+    # above, and the opposite claim about it: the probe that satisfies this
+    # subject is the one that did NOT narrow on `remediation_hint`. The tuple
+    # here records what the subject resolves TO; `match` is asserted separately
+    # in `TestTheUnclassifiedSliceIsASubject`, because a value comparison is
+    # exactly what this arm does not make.
+    (
+        {"dlq_scope": "unclassified"},
+        ("list_dlq_messages", "remediation_hint", "unclassified"),
+    ),
 ]
 
 

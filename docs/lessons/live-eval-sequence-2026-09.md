@@ -1014,6 +1014,92 @@ expecting `resolved`, and this PR created the first scenario that expects `escal
 *and* requires an action. **A new shape can fall outside an existing check without
 either being wrong; the check's scope is the thing to re-read when you invent one.**
 
+## 14. It read the right row, named it, and then fixed something else
+
+`dlq_human_required_escalates`, archive `a0aa257bf865`, 2026-09-08, ~$0.12.
+Red on outcome, action, evidence and safety; budget green at 3 of 13 calls.
+
+The alert was about a dead-letter row the platform's classifier has never
+touched — `fingerprint: dlq_unclassified_dead_letter`, `remediation_hint: null`,
+which is honest: an alert cannot name a category its own producer has not
+assigned. The correct run is one call: fence `3971a293…` with
+`mark_dlq_permanent`, verify `fenced_at` on the row, escalate with a
+`STABILIZED, NOT RESOLVED` briefing naming the CSV parse error.
+
+What the agent did, in order, is worth reading slowly, because almost all of it
+is right:
+
+1. Listed the DLQ **unfiltered** — the correct read, and the only read that
+   shows a null-hint row.
+2. Found the unclassified row at the top of the listing.
+3. Wrote, in its own plan rationale: *"The human_required and unclassified
+   csv_upload entries (3971a293 and any null-hint row) must not be touched by
+   auto-replay and are left for human review."*
+4. Planned `replay_dlq_by_category(category="replay_safe")` — replaying the one
+   seeded row the scenario forbids acting on.
+5. Verified the `replay_safe` slice empty, and RESOLVED.
+6. Wrote a briefing that says *"leaving four unresolved"* and scored **1.0
+   groundedness, 1.0 actionability** from the judge.
+
+**The diagnostic.** Steps 1–3 mean this is not a perception failure and not a
+reasoning failure — the agent saw the row, classified it correctly, and said so.
+It is a *targeting* failure, and it is the fourth kind this document has had to
+name. Rows 2 and 3 were the agent believing the wrong thing about which resource
+mattered. Row 12 was the agent believing everything and fumbling a keystroke.
+This is the agent believing everything, saying everything, and then aiming the
+one action it gets at something else. Ask of any green or resolved run: **which
+resource does the ACTION name, and is it the one in the alert?** The answer is
+mechanical and it is not in the briefing prose.
+
+**The rule it borrowed, and why it was there to borrow.** The rationale quotes
+its own reasoning: *"The alert named no specific category, so the mixed-queue
+rule applies: act on the safest slice first."* That rule is correct — for a bare
+queue-depth alert on a mixed queue, which is what it was written for
+(`dlq_mixed_partial`, ADR 0031). It had no stated precondition, so the model
+supplied one, and an alert whose subject the harness could not express looked
+exactly like an alert with no subject. **A rule with an unstated precondition
+will be applied wherever it fits.**
+
+**The two defects, and the older one is not about the DLQ at all.**
+
+* **The subject guard only ever checked the READ.** PR #177 requires the alert's
+  subject to have been probed before a `remediate` handoff. Nothing required the
+  chosen ACTION to target it. So `adcdcadd94a3` — row 3 in the table below, the
+  run that produced #177 — was only half fixed: it probed
+  `get_consumer_lag(consumer_group="worker-dispatcher")`, read lag 17, and then
+  planned `replay_dlq_by_category(category="replay_safe")` with the string
+  `worker-dispatcher` appearing **nowhere** in the plan. The same plan shape,
+  eight days and one scenario apart. Both were admitted by every plan guard in
+  the file, and the second one satisfied ADR 0028's coverage check *by
+  construction*: an unfiltered listing covers every slice, so the run had read
+  strictly more than required and still acted on the wrong rows.
+* **An inert guard was mistaken for a correct reading.** The scenario's own YAML
+  argued at length that the subject guard going inert here was "the CORRECT
+  reading of a real fault", and filed the residue as WO-R2-161. Three of its
+  arguments were and remain right — the alert cannot name a category, no filter
+  selects null-hint rows, and explicit-null is indistinguishable from absent
+  after `model_dump()`. The conclusion drawn from them was wrong. **"Nobody has
+  classified this row" is a positive statement about the world, not the absence
+  of one**, and it needed a field that could carry it (`dlq_scope:
+  unclassified`), not an inert guard.
+
+**Two things to carry forward.**
+
+> **A judge score of 1.0 is a statement about the prose, not about the
+> incident.** This briefing earned it while naming four unresolved rows,
+> including the one the run existed to handle. Both live runs in this family
+> scored ≥0.95. Never read groundedness as a proxy for correctness — it measures
+> whether the sentences match the evidence, and a run that acts on the wrong
+> thing and describes it accurately scores full marks.
+
+> **When a guard is inert on the scenario it was written near, ask whether the
+> inertness is a decision or a gap.** The distinction is answerable: an inert
+> case is a DECISION when the alert names a condition nobody can probe by name
+> (`dlq_backlog`'s queue depth, `alert_storm`'s meta-alert), and a GAP when the
+> alert is about something specific the payload has no field for. Row 14 spent
+> a live run on the second being filed as the first — with the reasoning written
+> out, reviewed, and shipped inside a re-pin.
+
 ## Summary: what each failure was actually caused by
 
 | # | Run / event | Looked like | Actually was | Fix |
@@ -1031,6 +1117,7 @@ either being wrong; the check's scope is the thing to re-read when you invent on
 | 11 | The DLQ category scenarios (not run) | a rule already closed by ADR 0027 | **The by-id guard is inert for a call that names a filter** — a bulk `replay_dlq_by_category` by a run that had listed nothing was admitted by seven guards, and three scenarios' claims could not tell act-then-read from read-then-act | ADR 0028; §10 |
 | 12 | `dlq_wait_and_replay_success` (`5c8895771fbd`) | a red remediation run | **A transcription slip, escalated like a judgement error**: the plan derived the right delay from the right rows and then zero-filled one job id's trailing blocks; the argument guard had no re-ask to give, so one planner call ended the run | ADR 0030; §11 |
 | 13 | `dlq_wait_and_replay_success` (`06e14be3e7b1`) | an honest escalation on a mixed queue | **The alert never named its own scope**: the agent listed the whole DLQ, described all four rows correctly (judge groundedness 0.95), and stopped because no single Tier-1 action covered them — a true sentence and a wrong decision, since the alert was about the two-row wait slice and said so only inside a fingerprint string. Run A had scoped itself right from the same world, so the behaviour was guessable, not specified | ADR 0031; §12 |
+| 14 | `dlq_human_required_escalates` (`a0aa257bf865`) | a green-looking resolved run | **The action never addressed the alert's subject**: the agent made the right (unfiltered) read, found the unclassified row, named it in its own rationale as untouchable — then replayed a different slice and RESOLVED, with a 1.0-groundedness briefing that says four rows are still unhandled. The subject guard had only ever checked the READ, so `adcdcadd94a3` (row 3) was the same defect half-fixed | ADR 0032; §14 |
 
 **The through-line.** Six of these ten are failures of *procedure and
 environment*, not of the agent — only rows 2 and 3 are genuine agent defects,

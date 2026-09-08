@@ -34,9 +34,9 @@ from incident_commander.llm.prompts.loader import (
 
 _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("2fbebe9dcd49d48e41a580b1093f8e66cdb063482ea78ee5873be2eaa3dc0eda"),
-    "investigation_planner": ("1580fd2cb5ac2b283cd9e1d1548e7c651c32baace05c8ecd6d045f0a41ab2cc9"),
+    "investigation_planner": ("fa05aad86042c4f91403dcc85c65b87c4873699d69f36f179ccf995d5cfb1544"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
-    "remediation_planner": ("dd3d5152083c4f2abffc6997909ccba59cd3fff527b1218b7c6fd090c781989f"),
+    "remediation_planner": ("c470a27c849aeb4e079ab69c2d54a8e5ddda2d2e007157fa43cb440b00388704"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
 }
 
@@ -254,6 +254,29 @@ class TestInvestigationPlannerInvariants:
         assert "a mixed queue is never a reason to escalate" in content
         assert "escalating with nothing done is right only when no slice is safe" in content
 
+    def test_the_safest_slice_rule_is_scoped_to_a_subjectless_alert(self) -> None:
+        """ADR 0032. The rule that cost live run `a0aa257bf865`.
+
+        "Act on the safest slice first" is correct for a bare queue-depth
+        alert and wrong for every alert that names a slice — and the run
+        quoted its own reasoning: "The alert named no specific category, so
+        the mixed-queue rule applies: act on the safest slice first." The
+        alert DID name its subject; nothing in the prompt said the rule had a
+        precondition, so the model supplied one.
+        """
+        content = load_prompt("investigation_planner").lower()
+        assert "applies only when the alert names no subject at all" in content
+        assert "a partial action does not finish the incident" in content
+
+    def test_unclassified_rows_are_a_subject_with_their_own_routing(self) -> None:
+        """The vocabulary half: a null hint is a classification, not a gap."""
+        content = load_prompt("investigation_planner").lower()
+        assert "dlq_scope: unclassified" in content
+        assert "unfiltered" in content
+        # The two routes off an unclassified row, and the one that is barred.
+        assert "by its id" in content
+        assert "never a category replay" in content
+
 
 class TestRemediationPlannerInvariants:
     def test_mentions_structured_tool(self) -> None:
@@ -332,9 +355,47 @@ class TestRemediationPlannerInvariants:
         alert named nothing.
         """
         content = load_prompt("remediation_planner").lower()
-        assert "if the alert named a category, act on that one" in content
+        assert "if the alert named a slice, act on that one" in content
         # The steer it replaced, pinned negatively so it cannot drift back.
         assert "pick the most impactful action" not in content
+
+    def test_the_fallback_slice_rule_is_scoped_to_a_subjectless_alert(self) -> None:
+        """ADR 0032, the remediation half of the investigation planner's rule.
+
+        Rule 2 of the mixed-DLQ ordering used to read as an unconditional
+        "otherwise", and live run `a0aa257bf865` reached it under an alert
+        that named its subject. It now carries its own precondition in the
+        rule text, where the model reads it, rather than only in rule 1.
+        """
+        content = load_prompt("remediation_planner").lower()
+        assert "only when the alert names no slice at all" in content
+        assert "not a licence to call a partial job finished" in content
+
+    def test_an_unclassified_row_is_acted_on_by_id_and_never_by_category(self) -> None:
+        """The routing a null hint has, and the one it can never have.
+
+        `remediation_hint=null` as an ARGUMENT means "every category", so no
+        filter selects these rows — which makes "act on it by id" a property
+        of the platform's own tool surface rather than a preference. Pinned
+        because the corresponding plan guard refuses the category replay, and
+        a prompt that still steered at one would spend a re-ask every time.
+        """
+        content = load_prompt("remediation_planner").lower()
+        assert "dlq_scope: unclassified" in content
+        assert "no category replay can ever act on one" in content
+        # Both routes off the row's own error text, neither assumed.
+        assert "mark_dlq_permanent" in content
+        assert "replay_dlq_by_ids" in content
+
+    def test_the_subject_target_check_is_named_as_structural(self) -> None:
+        """Architecture-principles rule 2: the prompt describes the code.
+
+        The planner is told the subject rule is enforced rather than advised,
+        because a refusal it did not expect costs a re-ask and the model has
+        no way to learn the guard exists from the schema.
+        """
+        content = load_prompt("remediation_planner").lower()
+        assert "this is a structural check, not advice" in content
 
     def test_cache_verify_targets_the_key_not_the_server(self) -> None:
         # The specific inversion that cost the run, pinned as its own case

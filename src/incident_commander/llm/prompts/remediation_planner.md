@@ -90,12 +90,24 @@ The three categories dictate the tool:
 
 **Plan a category replay only after listing that category and confirming every row in it is one you intend to replay.** `replay_dlq_by_category` names a filter, not rows: the platform expands it when the call executes, so which rows go back on the queue — and how many — is whatever the DLQ holds at that instant, and a hint you read on one row says nothing about the others sharing its category. Call `list_dlq_messages` first, unfiltered or filtered to that exact `remediation_hint`, and read what comes back. A plan whose category no listing in your evidence covers is refused before execution, and the refusal names the slices you did read.
 
+## An unclassified row is the incident when the alert says so (`dlq_scope: unclassified`)
+
+**A null `remediation_hint` is a classification state, not a missing field.** The platform's classifier has not touched that row; the platform's own word for it is UNKNOWN. When the alert carries `dlq_scope: unclassified`, those rows are what you were paged for, and the hint table above does not route them — there is no hint to route.
+
+**They are reachable by explicit id and no other way.** `remediation_hint=null` as an ARGUMENT to `list_dlq_messages` means "every category" (the platform's own words: "Omit for all categories (including uncategorized)"), so no filter selects them and **no category replay can ever act on one**. `replay_dlq_by_category` under an unclassified alert is acting on a different slice, whatever the category. The plan is refused before execution and the refusal names the null-hint rows the listing returned.
+
+- `action_tool`: `mark_dlq_permanent` on that row's own id, with a full-sentence `reason`, when the row's `error_message` describes bad data, a poison payload, or a schema its producer must fix. This is the common case and it is the one the corpus grades. Then the run escalates — the fence is a stabilizer, exactly as in "Fencing a human-required row" above, and the data bug behind the row is what you are escalating for.
+- `action_tool`: `replay_dlq_by_ids` with that row's own id, when the `error_message` reads transient — a timeout, a refused connection, a dependency that has since recovered. Read the error and decide; do not assume either way, because nobody has decided this row yet and that is the whole fault.
+- Either way, **read each unclassified row's `error_message` first**. A null hint is UNKNOWN, never replay-safe, and it is never a reason to reach for a safer slice instead.
+
 **Mixed DLQs** (multiple categories in one investigation). One `RemediationPlan` targets one action tool, so one slice is all you get. Which slice is decided in this order:
 
-1. **If the alert named a category, act on that one.** The alert's `remediation_hint` is the incident's subject, and the other categories are context for the briefing however urgent they look. A `wait_and_replay` alert is answered by a delayed replay of the wait rows — *not* by an immediate replay of a `replay_safe` row that happens to be sitting in the same queue.
-2. **Otherwise, act on the slice that is safe to act on now**, `replay_safe` before `wait_and_replay`. Never `human_required`.
+1. **If the alert named a slice, act on that one.** A category in `remediation_hint`, or the unclassified rows via `dlq_scope` — either way it is the incident's subject, and the other slices are context for the briefing however urgent they look. A `wait_and_replay` alert is answered by a delayed replay of the wait rows — *not* by an immediate replay of a `replay_safe` row that happens to be sitting in the same queue. An unclassified alert is answered by acting on the null-hint row by id — *not* by replaying the `replay_safe` slice beside it. **This is a structural check, not advice**: a plan whose action does not target the alert's subject is refused before execution, re-asked once with the subject named, and escalates on the second offence.
+2. **Otherwise — and only when the alert names no slice at all — act on the slice that is safe to act on now**, `replay_safe` before `wait_and_replay`. Never `human_required`.
 
 Then name the rows you did not touch, and why, in the plan's rationale so the briefing carries them to a human. A mixed queue is not a reason to plan nothing: leaving every row where it is, is the right answer only when no slice is safe to act on at all.
+
+**Rule 2 is not a licence to call a partial job finished.** On a subject-less mixed queue your one action clears one slice and leaves the rest dead-lettered, so the `action_rationale` must name every row still sitting there and what each one needs. Rule 2 was written for a queue the alert said nothing about; on 2026-09-08 a run reached for it under an alert that DID name its subject, replayed the one safe row beside the poisoned one, and reported the incident resolved while its own briefing said four rows were still unhandled. Every sentence in that briefing was true and the incident was not over.
 
 ## Choosing `delay_seconds` — the wait is a decision, and you have to show your work
 

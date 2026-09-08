@@ -35,7 +35,7 @@ from incident_commander.llm.prompts.loader import (
 _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("118e7739f4261a4b49ac8fda63b149e058621a6ba81f04108c3e64a214ff16af"),
     "investigation_planner": ("c5705b7436d86f57f830ab01bce8e646c5bfaefc4f0acc2a1041c9048cf3c653"),
-    "briefing_judge": ("981d40747559eeacffe62cdf890d115a988ba543deef74de8bf8b17d8a1b4730"),
+    "briefing_judge": ("838a5ee5de6081c32ef1b7aba35aefe0ddd83826e841af2ca831ba76f4692719"),
     "remediation_planner": ("15a7f80c766bc21f2ab7dec47ad77c3a79bcaa70c5de051a8da2273f7afcfe55"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
     "output_repair": ("461943691f22c6fb6c0c1b62a1cb356dc43eab3ec963b21db069a5701e86a1a0"),
@@ -750,6 +750,33 @@ class TestBriefingJudgeInvariants:
     def test_out_of_scope_narrowed(self) -> None:
         content = load_prompt("briefing_judge")
         assert "out of scope" in content.lower()
+
+    def test_a_verify_read_proves_only_what_it_read(self) -> None:
+        # WO-R2-175 (cmd #218) gave the WRITER the rule that a verify read
+        # proves only its own slice. INC-002 is what a half-given rule costs:
+        # the judge kept the line about overclaimed verifies being invented
+        # facts, so it could mark the writer down — and had nothing telling it
+        # that the same limit binds its own reading. It read a filtered
+        # `total 0` as "the queue is empty" and scored an honest briefing 0.0.
+        content = load_prompt("briefing_judge").lower()
+        assert "overclaiming a verify read is an invented fact" in content
+        assert "a filtered read proves only its own slice" in content
+        assert "a filtered read proves that slice and nothing outside it" in content
+
+    def test_arguments_are_read_before_the_result(self) -> None:
+        # The context renders each probe as `tool(arguments) -> result`
+        # (`briefing.render_probe`). A judge that reads the result without the
+        # arguments cannot tell the whole-queue read from the one-slice read,
+        # because `list_dlq_messages` is both.
+        content = load_prompt("briefing_judge").lower()
+        assert "read the arguments before you interpret the result" in content
+        assert "remediation_hint='replay_safe'" in content
+
+    def test_honest_remaining_rows_are_named_as_grounded(self) -> None:
+        # The direction matters. Without this the rubric reads as one more
+        # reason to mark a briefing DOWN, which is how the judge got here.
+        content = load_prompt("briefing_judge").lower()
+        assert "names untouched rows as remaining after a filtered read is grounded" in content
 
 
 class TestLoader:

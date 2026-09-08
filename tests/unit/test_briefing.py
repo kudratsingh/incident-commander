@@ -115,6 +115,31 @@ class TestRenderBriefing:
             ProbeSummary(tool="get_consumer_lag", summary='{"group":"billing","lag":42}'),
         )
 
+    def test_the_trail_carries_each_probes_arguments(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # INC-002: `list_dlq_messages` is the whole queue OR one slice under
+        # one name, so a result recorded without the arguments that scoped it
+        # cannot be read correctly by anyone downstream — and the trail is
+        # what both LLM readers of the briefing are given. The evidence ledger
+        # always had them; the briefing used to drop them on the floor.
+        evidence = (
+            EvidenceEntry(
+                tool_name="list_dlq_messages",
+                arguments={"remediation_hint": "replay_safe", "limit": 50},
+                result_summary='{"total":0,"items":[]}',
+                timestamp=now,
+            ),
+        )
+        run = run_state.model_copy(update={"state": IncidentState.RESOLVED, "evidence": evidence})
+        assert render_briefing(run).investigation_trail == (
+            ProbeSummary(
+                tool="list_dlq_messages",
+                summary='{"total":0,"items":[]}',
+                arguments={"remediation_hint": "replay_safe", "limit": 50},
+            ),
+        )
+
     def test_no_registry_tool_is_hidden_by_the_underscore_filter(self) -> None:
         # Registry names mirror platform tool names, so the structural filter
         # can never swallow a real probe.

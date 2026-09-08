@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from pydantic import ConfigDict, Field
 
-from incident_commander.agent.briefing import EscalationBriefing
+from incident_commander.agent.briefing import EscalationBriefing, render_trail
 from incident_commander.llm.client import LLMClientProtocol
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.repair import call_with_output_repair
@@ -84,11 +84,6 @@ def _format_context(briefing: EscalationBriefing) -> str:
             f"without checking its effect first): {briefing.attempted_action.tool} "
             f"{briefing.attempted_action.arguments}"
         )
-    if briefing.investigation_trail:
-        lines.append("Investigation trail:")
-        for probe in briefing.investigation_trail:
-            lines.append(f"  - {probe.tool}: {probe.summary}")
-    else:
-        lines.append("No probes were run before escalation.")
+    lines.extend(render_trail(briefing.investigation_trail))
     lines.append(f"Budget used: {briefing.budget_used}")
     return "\n".join(lines)

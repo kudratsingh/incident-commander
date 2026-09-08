@@ -96,6 +96,19 @@ BUDGET has no case on purpose: since [ADR 0019](ADR/0019-scenario-cap-is-the-run
 
 A separate LLM judge (`evals/graders/llm_judge.py`, Haiku) scores briefing quality on `groundedness` + `actionability`. Judge scores are informational — they don't gate the pass/fail. Deterministic dimensions do.
 
+#### Every reader of the evidence gets the same reading rule
+
+A rule about how evidence may be read is given to **every** reader of that evidence — the briefing writer, the briefing judge, and the deterministic grader — in the same change. A rule given to the writer and not to its judge is half a rule, and the half that is missing is the half that grades.
+
+The case that produced this is [INC-002](../../context/INCIDENTS.md) / [F-016](../study/findings.md), paid run `54ab08425f82`. Cmd #218 gave the writer "a verify read proves only what it read; a filtered read proves that slice and nothing outside it", and gave the deterministic grader the `call_arguments` selector that says the same thing in the grammar. The judge got neither. It then read the run's final probe — `list_dlq_messages` returning `{"total":0,"items":[]}` — without the `remediation_hint='replay_safe'` that scoped it, concluded "all 5 messages are gone", and scored an honest briefing 0.0 for groundedness. **The judge made the exact overclaim the writer had just been forbidden to make.**
+
+Two halves are needed, and neither works alone:
+
+- **The rule**, in the rubric (`llm/prompts/briefing_judge.md`, snapshot-pinned): read each probe's arguments before interpreting its result; a briefing that names untouched rows as remaining after a filtered read is grounded, not contradicted.
+- **The fact**, in the context. `ProbeSummary` carries `arguments`, and both LLM contexts render the trail through one shared function (`briefing.render_trail`) as `tool(arguments) -> result`, arguments first. A rule the reader cannot apply because the fact was stripped from its context is not a rule. `tests/unit/test_llm_judge.py` rebuilds run E's context from the archived trajectory and asserts the filter is rendered beside the zero.
+
+The general shape: **a soft grader is a reader of evidence, so every constraint on reading evidence binds it too.** Judge scores are informational, which is why this cost $0 rather than a false red — but a wrong judge score on a green archive is still a wrong measurement, and it would have been a false red the moment anything gated on it.
+
 ### The alert is a fixture too
 
 Everything else in the suite is checked against the platform somewhere — tool schemas by the contract diff, canned response values by `make test-drift`, chaos arguments at scenario load. The alert that *starts* every run was checked against nothing, and it is the most wrong part of the corpus. `tests/unit/test_scenario_alert_premise.py` now holds two separate claims:

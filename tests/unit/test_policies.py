@@ -23,6 +23,7 @@ from incident_commander.agent.investigation import (
     FIX_MAP,
     HINT_ROUTED_CATEGORIES,
     HINT_ROUTED_TOOLS,
+    SubjectMatch,
 )
 from incident_commander.agent.remediation import (
     RemediationPlan,
@@ -393,7 +394,8 @@ class TestAlertSubjectProbes:
     def test_every_probe_tool_is_a_registered_read_tool(self) -> None:
         from incident_commander.agent.investigation import ALERT_SUBJECT_PROBES
 
-        for alert_field, (tool, _arg) in ALERT_SUBJECT_PROBES.items():
+        for alert_field, probe in ALERT_SUBJECT_PROBES.items():
+            tool = probe.tool_name
             assert tool in TOOL_REGISTRY, f"{alert_field} maps to unknown tool {tool}"
             assert tier_of(tool) is Tier.READ, (
                 f"{alert_field} maps to {tool}, which is tier "
@@ -404,7 +406,8 @@ class TestAlertSubjectProbes:
     def test_every_probe_argument_exists_on_its_input_model(self) -> None:
         from incident_commander.agent.investigation import ALERT_SUBJECT_PROBES
 
-        for alert_field, (tool, arg) in ALERT_SUBJECT_PROBES.items():
+        for alert_field, probe in ALERT_SUBJECT_PROBES.items():
+            tool, arg = probe.tool_name, probe.argument_field
             assert arg in TOOL_REGISTRY[tool].input_model.model_fields, (
                 f"{alert_field} maps to {tool}.{arg}, which is not an argument "
                 f"of {tool}. The refusal reason tells the planner to call it."
@@ -449,7 +452,8 @@ class TestAlertSubjectProbes:
                     if scope.action_field is not None:
                         actionable_slices.setdefault(listing.tool_name, set()).add(scope.read_field)
 
-        for alert_field, (tool, arg) in ALERT_SUBJECT_PROBES.items():
+        for alert_field, probe in ALERT_SUBJECT_PROBES.items():
+            tool, arg = probe.tool_name, probe.argument_field
             names_resource = arg in RESOURCE_ARG_FIELDS[tool]
             names_slice = arg in actionable_slices.get(tool, set())
             assert names_resource or names_slice, (
@@ -484,9 +488,14 @@ class TestAlertSubjectProbes:
             if scope.action_field is not None
         }
         assert ("list_dlq_messages", "remediation_hint") in pairs
-        assert ALERT_SUBJECT_PROBES["remediation_hint"] == (
+        hint_probe = ALERT_SUBJECT_PROBES["remediation_hint"]
+        assert (hint_probe.tool_name, hint_probe.argument_field) == (
             "list_dlq_messages",
             "remediation_hint",
+        )
+        assert hint_probe.match is SubjectMatch.EQUALS, (
+            "the category entry is value-matched; the unfiltered arm belongs to "
+            "`dlq_scope` and is checked in TestTheUnclassifiedSliceIsASubject."
         )
         assert "remediation_hint" not in RESOURCE_ARG_FIELDS["list_dlq_messages"], (
             "if the platform ever made `remediation_hint` resource-naming, the "
@@ -515,6 +524,7 @@ class TestAlertSubjectProbes:
             "cache_key",
             "trace_id",
             "remediation_hint",
+            "dlq_scope",
         }
         assert set(ALERT_SUBJECT_PROBES) <= known, (
             f"unknown alert field(s): {sorted(set(ALERT_SUBJECT_PROBES) - known)}. "

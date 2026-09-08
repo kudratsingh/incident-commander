@@ -15,6 +15,7 @@ import json
 import time
 from collections.abc import Callable, Mapping
 from datetime import datetime
+from enum import StrEnum
 from typing import Any, Final, NamedTuple
 from uuid import UUID
 
@@ -135,11 +136,24 @@ HINT_ROUTED_CATEGORIES: Final[frozenset[HypothesisCategory]] = frozenset(
 # The routing the set above defers to, written down: per-row
 # `remediation_hint` → the Tier-1 tools that hint admits.
 #
-# Vocabulary is the platform's `RemediationHint` (mirrored in
-# `list_dlq_messages`' own description: `replay_safe`, `wait_and_replay`,
-# `human_required`, or null). A null hint is deliberately absent rather than
-# mapped to an empty set: the platform calls it UNKNOWN, nothing has
-# classified the row, and there is no routing to record.
+# Vocabulary is the alerted DLQ SLICE, which the alert names one of two ways:
+# the platform's `RemediationHint` values (mirrored in `list_dlq_messages`'
+# own description: `replay_safe`, `wait_and_replay`, `human_required`) in
+# `AlertPayload.remediation_hint`, or the unclassified scope in
+# `AlertPayload.dlq_scope`. Both are "which slice of the queue is this
+# incident", so both belong in one map.
+#
+# `unclassified` was absent here until 2026-09-08, on the reasoning that "the
+# platform calls a null hint UNKNOWN, nothing has classified the row, and
+# there is no routing to record". Live run `a0aa257bf865` showed that reading
+# to be wrong in the way that matters: there IS a routing — read the row's
+# error, then fence it (bad data, a schema the producer must fix) or replay it
+# by explicit id (transient) — and while nothing has classified the row, the
+# fact that nothing has is itself the finding (ADR 0032). What the map records
+# is the conservative floor the corpus grades, `mark_dlq_permanent`; the
+# by-id replay of an unclassified row whose error reads transient is
+# legitimate and is a PER-ROW decision from the error text, which a per-slice
+# map cannot express and the remediation-planner prompt owns.
 #
 # Sets, not single values, because two of the three hints genuinely admit two
 # tools — by-id and by-category are the same decision reached by naming rows
@@ -171,7 +185,66 @@ HINT_ROUTED_TOOLS: Final[dict[str, frozenset[str]]] = {
     # fence is `Resolution.STABILIZES`, so this entry routes an action whose
     # success is a handoff, not an answer (`policies.RESOLUTION_CLASS`).
     "human_required": frozenset({"mark_dlq_permanent"}),
+    # Keyed on `AlertPayload.dlq_scope`'s only value rather than on a row
+    # hint — there is no row hint for a row nobody classified. Same one tool
+    # and the same stabilizer reasoning: a fence records "never auto-replay
+    # this" and hands the data bug to a human.
+    "unclassified": frozenset({"mark_dlq_permanent"}),
 }
+
+
+class SubjectMatch(StrEnum):
+    """How a probe is judged to have read the subject.
+
+    Two kinds, because the platform names a DLQ slice two ways and only one
+    of them is a value.
+
+    ``EQUALS`` is the original and the default: the probe counts when its
+    argument carries the subject's exact value. Every resource subject and
+    the category subject work this way.
+
+    ``UNFILTERED`` is the inverse claim: the probe counts when it did NOT
+    narrow on that argument. It exists for one subject — the unclassified
+    slice — and it is not a loophole in the value-matching rule, it is the
+    same rule applied to a slice the platform cannot express as a filter.
+    ``ListDlqMessagesInput.remediation_hint = null`` means "every category"
+    (the platform's own words: "Omit for all categories (including
+    uncategorized)"), so there is no ``list_dlq_messages(remediation_hint=
+    <unclassified>)`` to demand; the whole-queue page is the only read that
+    shows a null-hint row, and demanding it is therefore exact rather than
+    lax.
+
+    The same field name means opposite things on the two sides of that call
+    and it is worth saying once: ``remediation_hint: null`` in a listing
+    ARGUMENT means "no filter", while ``remediation_hint: null`` on a
+    returned ROW means "nobody classified this". Live run ``a0aa257bf865``
+    is what happens when the two are read as one fact — the agent made the
+    unfiltered read, saw the null-hint row, described it correctly, and then
+    acted on a different slice entirely.
+    """
+
+    EQUALS = "equals"
+    UNFILTERED = "unfiltered"
+
+
+class SubjectProbe(NamedTuple):
+    """The read call that observes one kind of alert subject."""
+
+    tool_name: str
+    """Read tool that observes this resource or slice."""
+    argument_field: str
+    """The tool argument the subject's value belongs in — or, under
+    ``SubjectMatch.UNFILTERED``, the argument that must NOT be narrowed."""
+    match: SubjectMatch = SubjectMatch.EQUALS
+    """How ``_alert_subject_probed`` judges a candidate probe."""
+    admissible_values: frozenset[str] | None = None
+    """The alert values this entry recognises, or ``None`` for "any non-empty
+    string" — which is right wherever the value IS the resource, since the
+    value is then compared against the probe's own argument and a wrong one
+    simply fails to match. An ``UNFILTERED`` entry MUST declare its
+    vocabulary: there the value is a word rather than a name and nothing
+    downstream compares it, so an unrecognised string would otherwise mean
+    "unclassified" by default."""
 
 
 # Single source of truth for alert-field → subject-probe routing.
@@ -247,13 +320,32 @@ HINT_ROUTED_TOOLS: Final[dict[str, frozenset[str]]] = {
 # alert naming both a `job_id` and a hint (a stuck chain whose root is
 # dead-lettered) is about that job; the hint would be the coarser reading
 # of the same incident.
-ALERT_SUBJECT_PROBES: Final[dict[str, tuple[str, str]]] = {
-    "consumer_group": ("get_consumer_lag", "consumer_group"),
-    "group": ("get_consumer_lag", "consumer_group"),
-    "cache_key": ("get_cache_key_info", "key"),
-    "job_id": ("get_dag_state", "job_id"),
-    "trace_id": ("get_trace", "trace_id"),
-    "remediation_hint": ("list_dlq_messages", "remediation_hint"),
+#
+# ONE ENTRY IS THE *ABSENCE* OF A FILTER, AND THAT IS THE THIRD SHAPE.
+# `dlq_scope="unclassified"` names the rows the platform's classifier has
+# not touched — the null-hint partition — and the only read that shows them
+# is the UNFILTERED listing. So its probe is value-matched on the absence of
+# a `remediation_hint` argument rather than on a value, which is what
+# ``SubjectMatch.UNFILTERED`` says. See ADR 0032 for why this is a separate
+# field rather than a reading of `remediation_hint: null`.
+ALERT_SUBJECT_PROBES: Final[dict[str, SubjectProbe]] = {
+    "consumer_group": SubjectProbe("get_consumer_lag", "consumer_group"),
+    "group": SubjectProbe("get_consumer_lag", "consumer_group"),
+    "cache_key": SubjectProbe("get_cache_key_info", "key"),
+    "job_id": SubjectProbe("get_dag_state", "job_id"),
+    "trace_id": SubjectProbe("get_trace", "trace_id"),
+    "remediation_hint": SubjectProbe("list_dlq_messages", "remediation_hint"),
+    # LAST, after the category: an alert that somehow named both a category
+    # and the unclassified scope is about the category it named. The
+    # admissible-value set is not decoration — for an UNFILTERED probe the
+    # value is never compared against anything, so without it any string a
+    # future producer put in this field would silently mean "unclassified".
+    "dlq_scope": SubjectProbe(
+        "list_dlq_messages",
+        "remediation_hint",
+        SubjectMatch.UNFILTERED,
+        frozenset({"unclassified"}),
+    ),
 }
 
 
@@ -268,6 +360,8 @@ class AlertSubject(NamedTuple):
     """The tool argument the value belongs in."""
     value: str
     """The resource name, verbatim from the alert."""
+    match: SubjectMatch = SubjectMatch.EQUALS
+    """How a probe qualifies as having read it — see ``SubjectMatch``."""
 
 
 def alert_subject(alert: Mapping[str, Any]) -> AlertSubject | None:
@@ -304,7 +398,7 @@ def alert_subject(alert: Mapping[str, Any]) -> AlertSubject | None:
     for source in (alert, alert.get("extra_data")):
         if not isinstance(source, Mapping):
             continue
-        for field, (tool_name, argument_field) in ALERT_SUBJECT_PROBES.items():
+        for field, probe in ALERT_SUBJECT_PROBES.items():
             raw = source.get(field)
             # str and UUID only: an alert arriving as JSON gives strings,
             # and a run state assembled in Python may hold a real UUID for
@@ -314,8 +408,17 @@ def alert_subject(alert: Mapping[str, Any]) -> AlertSubject | None:
             if not isinstance(raw, (str, UUID)):
                 continue
             value = str(raw).strip()
-            if value:
-                return AlertSubject(field, tool_name, argument_field, value)
+            if not value:
+                continue
+            # An entry that declares a vocabulary recognises only that
+            # vocabulary. Unrecognised → this field named nothing this agent
+            # knows how to read, which is the inert case and not an error:
+            # the platform may ship a scope word before the commander learns
+            # what probe reads it, and refusing an investigation over a word
+            # is worse than the gap.
+            if probe.admissible_values is not None and value not in probe.admissible_values:
+                continue
+            return AlertSubject(field, probe.tool_name, probe.argument_field, value, probe.match)
     return None
 
 
@@ -747,12 +850,28 @@ def _alert_subject_probed(run_state: RunState, subject: AlertSubject) -> bool:
     Values compare exactly after ``strip()`` — no substring, case-insensitive,
     or prefix matching, for the reason ``remediation._unsourced_resource_args``
     gives: the campaign's own failure values are substrings of the true ones.
+
+    Under ``SubjectMatch.UNFILTERED`` the comparison inverts and nothing else
+    changes: the qualifying probe is the one that did NOT narrow on that
+    argument. The four ways a call declines to narrow — key absent, explicit
+    ``null`` (what ``wire_arguments`` writes for every unset optional filter,
+    so the wired arguments on the ledger are full of them), a non-string, a
+    whitespace-only string — all read as unfiltered, which is the same
+    collapse ``remediation._scope_value`` makes on both sides of ADR 0028's
+    coverage check. It has to be: the unfiltered page is the platform's "every
+    category", and a run that read it has seen the null-hint rows whichever
+    way its argument was spelled.
     """
     for entry in run_state.evidence:
         if entry.tool_name != subject.tool_name:
             continue
         raw = entry.arguments.get(subject.argument_field)
-        if isinstance(raw, (str, UUID)) and str(raw).strip() == subject.value:
+        narrowed = str(raw).strip() if isinstance(raw, (str, UUID)) else ""
+        if subject.match is SubjectMatch.UNFILTERED:
+            if not narrowed:
+                return True
+            continue
+        if narrowed == subject.value:
             return True
     return False
 
@@ -772,13 +891,28 @@ def _refuse_handoff(run_state: RunState, at: datetime, subject: AlertSubject) ->
     "tools called" set both exclude it — a refusal is bookkeeping, not a
     probe, and it spends no tool-call budget.
     """
+    if subject.match is SubjectMatch.UNFILTERED:
+        instruction = (
+            f"Call {subject.tool_name} with NO {subject.argument_field} filter "
+            f"before remediating — the whole-queue page is the only read that "
+            f"shows rows the platform has not classified, because "
+            f"{subject.argument_field}=null on that call means 'every category' "
+            f"rather than 'the uncategorised ones'. A call to "
+            f"{subject.tool_name} that narrowed to some category does not "
+            "count: the rows this incident is about are the ones no category "
+            "contains."
+        )
+    else:
+        instruction = (
+            f"Call {subject.tool_name} with "
+            f"{subject.argument_field}={subject.value!r} before remediating. A call "
+            f"to {subject.tool_name} that did not carry that exact value does not "
+            "count — an unfiltered or default-filled read observes something else."
+        )
     reason = (
         f"handoff refused: this incident's alert names "
         f"{subject.alert_field}={subject.value!r}, and no probe in the evidence "
-        f"trail has read it. Call {subject.tool_name} with "
-        f"{subject.argument_field}={subject.value!r} before remediating. A call "
-        f"to {subject.tool_name} that did not carry that exact value does not "
-        "count — an unfiltered or default-filled read observes something else. "
+        f"trail has read it. {instruction} "
         "Other incidents, alerts, and DLQ entries visible in the evidence are "
         "context, not this incident's subject — remediating one of those leaves "
         "the alerted signal unexplained."

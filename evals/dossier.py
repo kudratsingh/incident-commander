@@ -73,7 +73,12 @@ from evals.chaos_hooks import ChaosInvocationError, invoke_chaos_hook
 from evals.preconditions import unmet
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import PreconditionProbe, Scenario
-from incident_commander.agent.investigation import ALERT_SUBJECT_PROBES
+from incident_commander.agent.investigation import (
+    ALERT_SUBJECT_PROBES,
+    SubjectMatch,
+    SubjectProbe,
+    alert_subject,
+)
 from incident_commander.agent.remediation import (
     SOURCE_LISTING_FOR_ACTION,
     SOURCE_ROW_FOR_ACTION,
@@ -222,19 +227,44 @@ def _alert_values(alert: Mapping[str, Any]) -> list[tuple[str, str, str]]:
     read. Same map, same two lookup levels (top level, then ``extra_data``) —
     that second level is not speculative, it is where the platform's webhook
     actually puts these fields (see ``alert_subject``'s docstring).
+
+    ``SubjectMatch.UNFILTERED`` entries are skipped here and handled in
+    ``derive_probes``, because their probe is the absence of an argument rather
+    than a value in one: there is no ``(argument_field, value)`` pair to return
+    and putting one in would make the dossier print
+    ``list_dlq_messages(remediation_hint='unclassified')`` — a call the
+    platform does not have. ``_value_pool`` reads this function too, and the
+    skip is right for it in the same way: `unclassified` is a scope word, not
+    a resource, so it must never become an argument value.
     """
     found: list[tuple[str, str, str]] = []
     for source in (alert, alert.get("extra_data")):
         if not isinstance(source, Mapping):
             continue
-        for field, (_tool, argument_field) in ALERT_SUBJECT_PROBES.items():
+        for field, probe in ALERT_SUBJECT_PROBES.items():
+            if probe.match is not SubjectMatch.EQUALS:
+                continue
             raw = source.get(field)
             if not isinstance(raw, (str, uuid.UUID)):
                 continue
             value = str(raw).strip()
-            if value and (field, argument_field, value) not in found:
-                found.append((field, argument_field, value))
+            if value and (field, probe.argument_field, value) not in found:
+                found.append((field, probe.argument_field, value))
     return found
+
+
+def _unfiltered_subject(alert: Mapping[str, Any]) -> tuple[str, SubjectProbe] | None:
+    """The alert field naming an unfiltered-probe subject, and its probe.
+
+    Reads ``investigation.alert_subject``'s own answer rather than re-walking
+    the map, so the dossier cannot disagree with the guard about whether a
+    scope word is recognised — an unadmitted value is inert in both places or
+    in neither.
+    """
+    subject = alert_subject(alert)
+    if subject is None or subject.match is not SubjectMatch.UNFILTERED:
+        return None
+    return subject.alert_field, ALERT_SUBJECT_PROBES[subject.alert_field]
 
 
 def _value_pool(scenario: Scenario) -> dict[str, list[str]]:
@@ -345,8 +375,9 @@ def derive_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
     probes: list[Probe] = []
     notes: list[str] = []
 
-    for alert_field, argument_field, value in _alert_values(scenario.alert.model_dump()):
-        tool = ALERT_SUBJECT_PROBES[alert_field][0]
+    dumped = scenario.alert.model_dump()
+    for alert_field, argument_field, value in _alert_values(dumped):
+        tool = ALERT_SUBJECT_PROBES[alert_field].tool_name
         probes.append(
             _probe(
                 tool,
@@ -356,7 +387,29 @@ def derive_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
                 "probe this first (cmd #177).",
             )
         )
-    if not _alert_values(scenario.alert.model_dump()):
+    # The unfiltered arm (ADR 0032). Derived separately because its probe is
+    # the absence of a filter: the call is the tool with NO narrowing argument,
+    # which is also what `_fill` produces for a tool that names no resource, so
+    # it merges with the source-listing derivation below into one line rather
+    # than adding a call.
+    unfiltered_subject = _unfiltered_subject(dumped)
+    if unfiltered_subject is not None:
+        alert_field, probe = unfiltered_subject
+        probes.append(
+            _probe(
+                probe.tool_name,
+                {},
+                f"ALERT_SUBJECT_PROBES: the alert's `{alert_field}` names the "
+                f"`{dumped.get(alert_field)}` scope, and the UNFILTERED "
+                f"`{probe.tool_name}` is the only read that observes it — "
+                f"`{probe.argument_field}=null` on that call means 'every category', "
+                f"so no filtered page shows a row nothing has classified. The agent is "
+                "required to probe this first, and the plan guard then requires the "
+                "action to name one of the rows it returns with a null "
+                f"`{probe.argument_field}` (ADR 0032).",
+            )
+        )
+    if not _alert_values(dumped) and unfiltered_subject is None:
         notes.append(
             "The alert names no resource in ALERT_SUBJECT_PROBES, so there is no "
             "subject probe to derive. Legitimate and common — a DLQ-depth alert "

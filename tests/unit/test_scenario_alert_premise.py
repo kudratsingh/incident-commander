@@ -32,7 +32,7 @@ from typing import Final
 
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
-from incident_commander.agent.investigation import alert_subject
+from incident_commander.agent.investigation import SubjectMatch, alert_subject
 from incident_commander.agent.state import IncidentState, RunState
 from incident_commander.agent.triage import transition_triage
 from incident_commander.api.schemas import AlertPayload
@@ -176,6 +176,10 @@ _NON_WEBHOOK_ALERT_FIELDS: Final[frozenset[str]] = frozenset(
         "cache_key",
         "trace_id",
         "remediation_hint",
+        # ADR 0032: the positive statement `remediation_hint: null` cannot
+        # make, in its own field. Non-webhook for the same reason its sibling
+        # is — the platform's DLQ alert producer does not send it yet.
+        "dlq_scope",
     }
 )
 
@@ -322,7 +326,7 @@ class TestIngressModelMatchesTheEmitter:
     def test_alert_payload_declares_fields_the_webhook_does_not_send(self) -> None:
         declared = set(AlertPayload.model_fields)
         unsent = sorted(declared - _WEBHOOK_FIELDS)
-        assert unsent == ["fingerprint", "group", "remediation_hint"], (
+        assert unsent == ["dlq_scope", "fingerprint", "group", "remediation_hint"], (
             "the set of AlertPayload fields the platform's webhook does not send has "
             f"changed: {unsent}. Either the platform started sending them (update "
             "_WEBHOOK_FIELDS from backend/app/services/alerts.py::_maybe_emit_webhook), "
@@ -354,6 +358,36 @@ class TestIngressModelMatchesTheEmitter:
         assert "remediation_hint" not in _WEBHOOK_FIELDS
         assert "remediation_hint" in AlertPayload.model_fields
         assert AlertPayload(source="platform.dlq").remediation_hint is None
+
+    def test_the_unclassified_scope_field_is_one_of_them_and_the_same_filed_gap(self) -> None:
+        """`dlq_scope` joined the list on 2026-09-08, with the same posture.
+
+        Same shape as `remediation_hint` above and the same outstanding
+        platform-side ask: the commander reads a field the platform's DLQ
+        alert producer does not send yet, and until it does, a production
+        unclassified-row alert investigates exactly as it does today because
+        `alert_subject` returns None without it.
+
+        It is a SEPARATE field rather than a reading of `remediation_hint:
+        null`, and this is the test that records why: `model_dump()`
+        materialises every declared field, so an omitted `remediation_hint`
+        and an explicit null are the same object by the time the state machine
+        sees them. A guard keyed on key-presence would be inert offline for
+        the scenarios that omit the key and non-inert for every production
+        alert of any kind — the fail-open/fail-closed asymmetry
+        `alert_subject`'s docstring names as the worst shape of guard.
+        """
+        assert "dlq_scope" not in _WEBHOOK_FIELDS
+        assert "dlq_scope" in AlertPayload.model_fields
+        assert AlertPayload(source="platform.dlq").dlq_scope is None
+        # The collapse itself, asserted rather than described.
+        omitted = AlertPayload(source="platform.dlq").model_dump()
+        explicit = AlertPayload(source="platform.dlq", remediation_hint=None).model_dump()
+        assert omitted == explicit, (
+            "an omitted `remediation_hint` and an explicit null no longer dump "
+            "identically. If pydantic gained a way to distinguish them here, ADR 0032's "
+            "reason for a separate field is worth re-reading before adding another."
+        )
 
     def test_the_dedupe_key_field_is_one_of_them(self) -> None:
         # Stated separately because it is the one with a production symptom.
@@ -472,13 +506,12 @@ class TestReplayScenariosGuardTheSeededForbiddenRow:
         )
 
 
-class TestTheUnclassifiedDlqAlertNamesNoCategory:
-    """`dlq_human_required_escalates` carries NO `remediation_hint`, on purpose.
+class TestTheUnclassifiedDlqAlertNamesTheScopeNotACategory:
+    """`dlq_human_required_escalates` carries NO `remediation_hint`, on purpose,
+    and since 2026-09-08 it DOES carry `dlq_scope: unclassified` (ADR 0032).
 
-    This is the one place in the corpus where an absent category is a
-    statement about the fault rather than about the fixture, so it is pinned
-    with the reason attached — the field is one line and re-adding it would
-    look like an improvement.
+    Both halves are the premise and they pull in opposite directions, which is
+    why they are pinned together.
 
     The scenario's incident is a row the platform's triage has NOT classified
     (`create_bad_data_job(remediation_hint=unclassified)` writes
@@ -486,15 +519,23 @@ class TestTheUnclassifiedDlqAlertNamesNoCategory:
     cannot name a category the platform has not assigned; and there is no
     listing that selects unclassified rows, because
     `ListDlqMessagesInput.remediation_hint = null` means "no filter" — the
-    platform's own words, "Omit for all categories (including
-    uncategorized)".
+    platform's own words, "Omit for all categories (including uncategorized)".
+    So the category field stays null, permanently, and the two tests below
+    about what a category-scoped listing would contain are unchanged.
 
-    So `alert_subject` returns None and the handoff guard is inert. That is a
-    supported state, not a hole: the guard is applied as
-    `if subject is not None and not _alert_subject_probed(...)`
-    (`investigation.py`), so an inert subject refuses nothing and the run
-    proceeds — the failure mode a hint-less DLQ alert is sometimes feared to
-    have (a handoff refused forever) cannot occur.
+    What DID change is the conclusion drawn from that. This class used to
+    assert `alert_subject` returns None here and called an inert guard "the
+    correct reading of a real fault". Live run `a0aa257bf865` cost that
+    reading: with no subject, nothing required the agent's ACTION to be about
+    the unclassified row, and the agent — having read the right page and named
+    the right row in its own rationale — replayed a different slice and
+    resolved. "Nobody has classified this row" is a positive statement about
+    the world, and the alert now makes it in a field that can carry it.
+
+    The inert case itself is untouched and still supported: `alert_subject`
+    returns None for an alert naming neither, the handoff guard is applied as
+    `if subject is not None and not _alert_subject_probed(...)`, and
+    `dlq_backlog` and `dlq_mixed_partial` remain the corpus's witnesses for it.
     """
 
     _SCENARIO: Final[str] = "dlq_human_required_escalates"
@@ -504,14 +545,39 @@ class TestTheUnclassifiedDlqAlertNamesNoCategory:
     def _scenario(self) -> Scenario:
         return {s.name: s for s in _shipped()}[self._SCENARIO]
 
-    def test_the_alert_carries_no_category_and_the_subject_guard_is_inert(self) -> None:
-        scenario = self._scenario()
-        assert scenario.alert.remediation_hint is None
-        assert alert_subject(_alert_of(scenario)) is None, (
-            f"{self._SCENARIO}: the alert names a probeable subject. Its incident is a "
-            "row nothing has classified, so any category it named would be one the "
+    def test_the_alert_carries_no_category(self) -> None:
+        assert self._scenario().alert.remediation_hint is None, (
+            f"{self._SCENARIO}: the alert names a category. Its incident is a row "
+            "nothing has classified, so any category it named would be one the "
             "platform's own classifier did not assign."
         )
+
+    def test_the_alert_names_the_unclassified_scope_instead(self) -> None:
+        assert self._scenario().alert.dlq_scope == "unclassified", (
+            f"{self._SCENARIO}: the alert no longer names the unclassified scope. "
+            "Without it the subject guard is inert here, and an inert subject is what "
+            "admitted live run a0aa257bf865's plan — a category replay of the "
+            "replay_safe slice under an alert about a row nothing had classified."
+        )
+
+    def test_the_subject_is_the_unfiltered_listing_not_a_filtered_one(self) -> None:
+        """The derived subject, and the shape of the probe it demands.
+
+        Point 3 of the scenario's own note — the unfiltered page is the only
+        read that shows this row — is what this asserts as a property of the
+        guard rather than as prose: the subject resolves to
+        `list_dlq_messages` on the `remediation_hint` argument under
+        `SubjectMatch.UNFILTERED`, so a page narrowed to any category does NOT
+        satisfy it and the whole-queue page does.
+        """
+        subject = alert_subject(_alert_of(self._scenario()))
+        assert subject is not None
+        assert (subject.alert_field, subject.tool_name, subject.argument_field) == (
+            "dlq_scope",
+            "list_dlq_messages",
+            "remediation_hint",
+        )
+        assert subject.match is SubjectMatch.UNFILTERED
 
     def test_a_category_scoped_listing_would_not_contain_this_incident(self) -> None:
         """The reason the field cannot simply be added back.

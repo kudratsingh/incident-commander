@@ -11,7 +11,7 @@ import json
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Final
 from uuid import UUID
 
 import pytest
@@ -19,8 +19,14 @@ from pydantic import BaseModel
 
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
 from incident_commander.agent.remediation import (
+    _PLAN_REFUSED_SUBJECT_TARGET_MARKER,
+    DLQ_ROW_SOURCE,
     RemediationPlan,
+    SubjectKind,
     _evidence_value_corpus,
+    _row_decisions_in_evidence,
+    _row_source_for_subject,
+    _subject_kind,
     _unsourced_resource_args,
     build_idempotency_key,
     make_llm_plan,
@@ -60,6 +66,48 @@ def _now() -> datetime:
     return datetime(2026, 7, 30, 12, 0, tzinfo=UTC)
 
 
+#: The default alert for this file, and it names NO subject on purpose.
+#:
+#: It used to carry ``consumer_group: "worker-dispatcher"``, which was harmless
+#: for as long as nothing compared the alert against the plan. ADR 0032 does:
+#: the subject-target guard refuses any plan whose action does not act on the
+#: alert's subject, so a subject-naming default would bind that guard on every
+#: test in this file — and seventeen of them plan a DLQ action to exercise a
+#: DIFFERENT guard entirely (verify targeting, read-before-act, argument
+#: shape). Each would then be refused for a reason it is not about, and the
+#: file would read as if those guards had changed.
+#:
+#: A condition-naming alert is the honest default, not a convenience: it is one
+#: of the three legitimate inert cases ``alert_subject`` documents, and it is
+#: what `db_latency_high`, `alert_storm_meta` and a whole-queue DLQ depth alert
+#: all look like. Tests that mean to exercise the subject-target guard pass
+#: their own ``alert=`` and say which subject they are naming.
+_CONDITION_ALERT: Final[dict[str, Any]] = {
+    "source": "platform.kafka",
+    "severity": "high",
+    "fingerprint": "db_latency_high",
+}
+
+#: The alert for tests whose plan acts on ``worker-dispatcher``.
+#:
+#: Two jobs, and separating them from the default above is the point. It names
+#: the consumer group as the alert's SUBJECT, so a plan that restarts that group
+#: satisfies ADR 0032's target test — which is the realistic pairing, and the
+#: one live run D actually made. And it puts the string ``"worker-dispatcher"``
+#: in the evidence value corpus, which is what ``_unsourced_resource_args``
+#: requires of any resource a plan names: the group has to have been uttered by
+#: the platform (alert or tool result) before a plan may act on it. That second
+#: job is why the default alert cannot simply drop the group and be done —
+#: without a provenance source, every consumer-restart plan in this file is
+#: refused for a copy-don't-re-type violation instead.
+_GROUP_ALERT: Final[dict[str, Any]] = {
+    "source": "platform.kafka",
+    "severity": "high",
+    "fingerprint": "consumer_stalled",
+    "consumer_group": "worker-dispatcher",
+}
+
+
 def _run_state(
     *,
     state: IncidentState,
@@ -67,15 +115,12 @@ def _run_state(
     remediation_plan: dict[str, Any] | None = None,
     evidence: tuple[EvidenceEntry, ...] = (),
     remediation_attempts: int = 0,
+    alert: dict[str, Any] | None = None,
 ) -> RunState:
     return RunState(
         incident_id=UUID("11111111-1111-1111-1111-111111111111"),
         state=state,
-        alert={
-            "source": "platform.kafka",
-            "severity": "high",
-            "consumer_group": "worker-dispatcher",
-        },
+        alert=dict(_CONDITION_ALERT if alert is None else alert),
         budget=BudgetLedger(
             max_tool_calls=25,
             max_tokens=200_000,
@@ -173,6 +218,7 @@ class TestPlanning:
                     reasoning="r",
                 ),
             ),
+            alert=_GROUP_ALERT,
         )
         result = transition(run, _now())
         assert result.state is IncidentState.REMEDIATING
@@ -563,6 +609,7 @@ class TestSingleAttemptInvariant:
                 ),
             ),
             remediation_attempts=0,
+            alert=_GROUP_ALERT,
         )
         result = transition(run, _now())
         assert result.state is IncidentState.REMEDIATING
@@ -938,7 +985,20 @@ class TestNamedResourceArgs:
     _DEFAULT_FILLED = "worker-dispatcher"  # GetConsumerLagInput's default
 
     def _run(self, **overrides: Any) -> RunState:
-        run = _run_state(
+        # The alert names the group this class's plans remediate, so it is both
+        # the provenance source `_unsourced_resource_args` demands and the
+        # subject ADR 0032's target test compares the action against. A test
+        # whose plan deliberately acts on something else passes its own
+        # ``alert=`` rather than having this one contradict it.
+        overrides.setdefault(
+            "alert",
+            {
+                "source": "platform.kafka",
+                "severity": "high",
+                "consumer_group": self._REMEDIATED,
+            },
+        )
+        return _run_state(
             state=IncidentState.PLANNING,
             hypotheses=(
                 Hypothesis(
@@ -949,15 +1009,6 @@ class TestNamedResourceArgs:
                 ),
             ),
             **overrides,
-        )
-        return run.model_copy(
-            update={
-                "alert": {
-                    "source": "platform.kafka",
-                    "severity": "high",
-                    "consumer_group": self._REMEDIATED,
-                }
-            }
         )
 
     def _plan(self, **overrides: Any) -> dict[str, Any]:
@@ -1050,7 +1101,12 @@ class TestNamedResourceArgs:
         # category replay is that action — it names a category, not a row.
         # The listing is ADR 0028's requirement on a bulk replay, not this
         # guard's; without it the refusal would land before this check.
-        run = self._run(evidence=(_dlq_listing(),))
+        # A condition-naming alert, not this class's consumer alert: the
+        # example plan is a bulk DLQ replay, and under an alert about a
+        # consumer group ADR 0032's target test would refuse it for acting on
+        # something the alert never reported — a correct refusal about a
+        # different property than the one under test here.
+        run = self._run(evidence=(_dlq_listing(),), alert=dict(_CONDITION_ALERT))
         plan = _plan_dict(
             target_hypothesis="consumer_saturation",
             action_tool="replay_dlq_by_category",
@@ -1195,7 +1251,9 @@ class TestLLMUsageAccrual:
     def test_planning_charges_cache_tokens_and_dollars(self) -> None:
         llm = CannedLLMClient([_plan_dict()], usage=self._USAGE)
         transition = make_llm_plan(llm, model="claude-sonnet-4-6")
-        run = _run_state(state=IncidentState.PLANNING, hypotheses=self._hypotheses())
+        run = _run_state(
+            state=IncidentState.PLANNING, hypotheses=self._hypotheses(), alert=_GROUP_ALERT
+        )
         result = transition(run, _now())
 
         assert result.state is IncidentState.REMEDIATING
@@ -1226,7 +1284,9 @@ class TestLLMUsageAccrual:
         """Canned scenarios stay byte-identical: no usage, no charge."""
         llm = CannedLLMClient([_plan_dict()])
         transition = make_llm_plan(llm, model="claude-sonnet-4-6")
-        run = _run_state(state=IncidentState.PLANNING, hypotheses=self._hypotheses())
+        run = _run_state(
+            state=IncidentState.PLANNING, hypotheses=self._hypotheses(), alert=_GROUP_ALERT
+        )
         result = transition(run, _now())
         assert result.budget.tokens_used == 0
         assert result.budget.usd_used == Decimal("0")
@@ -1235,7 +1295,9 @@ class TestLLMUsageAccrual:
         """The USD dimension is reachable: one call can exhaust the ledger."""
         llm = CannedLLMClient([_plan_dict()], usage=CannedUsage(output_tokens=200_000))
         transition = make_llm_plan(llm, model="claude-sonnet-4-6")
-        run = _run_state(state=IncidentState.PLANNING, hypotheses=self._hypotheses())
+        run = _run_state(
+            state=IncidentState.PLANNING, hypotheses=self._hypotheses(), alert=_GROUP_ALERT
+        )
         result = transition(run, _now())
         # 200_000 * 15.00 / 1e6 = 3.00 against the fixture's 1.00 cap.
         assert result.budget.usd_used == Decimal("3.000000")
@@ -1266,7 +1328,9 @@ class TestRejectedPlansAreStillBilled:
     def _plan(self, **overrides: Any) -> RunState:
         llm = CannedLLMClient([_plan_dict(**overrides)], usage=self._USAGE)
         transition = make_llm_plan(llm, model="claude-sonnet-4-6")
-        run = _run_state(state=IncidentState.PLANNING, hypotheses=self._hypotheses())
+        run = _run_state(
+            state=IncidentState.PLANNING, hypotheses=self._hypotheses(), alert=_GROUP_ALERT
+        )
         return transition(run, _now())
 
     # Only the branches a schema-valid plan can reach. The tier/registry
@@ -1309,7 +1373,10 @@ class TestRejectedPlansAreStillBilled:
         )
         llm = CannedLLMClient([bad, bad], usage=self._USAGE)
         result = make_llm_plan(llm, model="claude-sonnet-4-6")(
-            _run_state(state=IncidentState.PLANNING, hypotheses=self._hypotheses()), _now()
+            _run_state(
+                state=IncidentState.PLANNING, hypotheses=self._hypotheses(), alert=_GROUP_ALERT
+            ),
+            _now(),
         )
         assert result.state is IncidentState.ESCALATED
         assert len(llm.calls) == 2
@@ -1331,7 +1398,10 @@ class TestRejectedPlansAreStillBilled:
             usage=self._USAGE,
         )
         result = make_llm_plan(llm, model="claude-sonnet-4-6")(
-            _run_state(state=IncidentState.PLANNING, hypotheses=self._hypotheses()), _now()
+            _run_state(
+                state=IncidentState.PLANNING, hypotheses=self._hypotheses(), alert=_GROUP_ALERT
+            ),
+            _now(),
         )
         assert result.state is IncidentState.REMEDIATING
         assert result.budget.tokens_used == 300
@@ -1362,7 +1432,9 @@ class TestRejectedPlansAreStillBilled:
                 )
 
         transition = make_llm_plan(_Truncating(), model="claude-sonnet-4-6")
-        run = _run_state(state=IncidentState.PLANNING, hypotheses=self._hypotheses())
+        run = _run_state(
+            state=IncidentState.PLANNING, hypotheses=self._hypotheses(), alert=_GROUP_ALERT
+        )
         result = transition(run, _now())
         assert result.state is IncidentState.ESCALATED
         assert result.budget.tokens_used == 4196
@@ -1511,6 +1583,7 @@ class TestVerifyLegObservesTheAction:
         result = make_llm_plan(llm, model=_MODEL)(
             _run_state(
                 state=IncidentState.PLANNING,
+                alert=_GROUP_ALERT,
                 hypotheses=(
                     Hypothesis(
                         category=HypothesisCategory.CONSUMER_SATURATION,
@@ -2221,21 +2294,30 @@ class TestReplayRequiresTheJobsDeadLetterRow:
         go and fetch a row it is missing — but it CAN drop the ids it has no
         row for. A batch carrying one listed job and one unlisted one is
         repaired by replaying the first.
+
+        WHICH id survives the drop is the half this test used to get backwards,
+        and ADR 0032 is what made it visible. The batch was ``[_OTHER, _ROOT]``
+        with only ``_OTHER``'s row read, so the repair kept ``_OTHER`` — a
+        dead-lettered row that is not the alerted chain root and whose replay
+        does nothing for the stuck chain. That was a green test asserting the
+        harness would admit a repair aimed at the wrong job. The subject-target
+        guard refuses it now, correctly, so the batch is the other way round:
+        the READ row is the alerted root, and the repair keeps it.
         """
         llm = CannedLLMClient(
             [
-                self._replay_plan(self._OTHER, self._ROOT, verify_id=self._OTHER),
-                self._replay_plan(self._OTHER),
+                self._replay_plan(self._ROOT, self._OTHER, verify_id=self._ROOT),
+                self._replay_plan(self._ROOT),
             ]
         )
         result = make_llm_plan(llm, model=_MODEL)(
-            self._saga_run((self._chain_probe(), self._dlq_probe(self._OTHER))), _now()
+            self._saga_run((self._chain_probe(), self._dlq_probe(self._ROOT))), _now()
         )
 
         assert result.state is IncidentState.REMEDIATING
         assert result.remediation_plan is not None
         replanned = RemediationPlan.model_validate(result.remediation_plan)
-        assert replanned.action_arguments["job_ids"] == [self._OTHER]
+        assert replanned.action_arguments["job_ids"] == [self._ROOT]
 
     # -- positive control --------------------------------------------------
 
@@ -2343,6 +2425,7 @@ class TestReplayRequiresTheJobsDeadLetterRow:
                     reasoning="lag climbing on the alerted group",
                 ),
             ),
+            alert=_GROUP_ALERT,
         )
         result = make_llm_plan(llm, model=_MODEL)(run, _now())
 
@@ -2641,6 +2724,7 @@ class TestBulkReplayRequiresTheListing:
                     reasoning="lag climbing on the alerted group",
                 ),
             ),
+            alert=_GROUP_ALERT,
         )
         result = make_llm_plan(llm, model=_MODEL)(run, _now())
 
@@ -3029,3 +3113,483 @@ class TestAMangledIdIsRePlannedWithCandidates:
             "wrote a resource identifier that is not the shape the platform declares"
             in malformed.evidence[-1].result_summary
         )
+
+
+class TestTheActionMustAddressTheAlertsSubject:
+    """ADR 0032: when the alert names a subject, the plan has to act on it.
+
+    The subject guard shipped in PR #177 requires the alert's subject to have
+    been PROBED before a `remediate` handoff. Nothing required the ACTION to
+    target it, and the gap is not theoretical — two paid live runs walked
+    straight through it, eight days apart, and both reported RESOLVED:
+
+    * `adcdcadd94a3` (`remediate_consumer_lag_success`): alert names
+      `consumer_group: worker-dispatcher`, the probe reads exactly that group
+      (lag 17), and the plan is `replay_dlq_by_category(category=
+      "replay_safe")` on DLQ furniture. The consumer group appears nowhere in
+      the plan. The killed consumer was never restarted.
+    * `a0aa257bf865` (`dlq_human_required_escalates`): alert is about a row
+      nothing has classified, the unfiltered listing is read, and the plan's
+      own rationale names the null-hint row `3971a293…` as "must not be
+      touched by auto-replay" — then replays the `replay_safe` slice instead
+      and verifies THAT slice empty.
+
+    Both plans satisfied every other guard in the file. The second one
+    satisfied ADR 0028's coverage check by construction, because an unfiltered
+    listing covers every slice — so the run had read more than enough, and
+    still acted on the wrong thing.
+    """
+
+    _CHAOS_ROW = "3971a293-3f5b-55eb-b835-649d685801a7"
+    _SAFE_ROW = "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+    _HUMAN_ROW = "f030f975-974e-5ce3-aa6b-444136507d86"
+    _WAIT_ROW = "af67d1b1-13f8-5a2c-8c44-66ec5564597d"
+
+    _UNCLASSIFIED_ALERT = {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_unclassified_dead_letter",
+        "remediation_hint": None,
+        "dlq_scope": "unclassified",
+    }
+    _CATEGORY_ALERT = {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning_wait_replay",
+        "remediation_hint": "wait_and_replay",
+    }
+    _SUBJECTLESS_ALERT = {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning_mixed",
+    }
+
+    def _five_row_listing(self) -> EvidenceEntry:
+        """The live listing from `a0aa257bf865`, hints verbatim.
+
+        Wired arguments, so `remediation_hint` is an explicit ``None`` — the
+        unfiltered read, which is the only page that carries the null-hint row.
+        """
+        rows = [
+            (self._CHAOS_ROW, "csv_upload", None, "ValueError: invalid literal for int()"),
+            (self._SAFE_ROW, "bulk_api_sync", "replay_safe", "upstream timeout"),
+            (self._HUMAN_ROW, "csv_upload", "human_required", "bad CSV at row 15,382"),
+            (self._WAIT_ROW, "bulk_api_sync", "wait_and_replay", "rate limited"),
+        ]
+        items = ",".join(
+            json.dumps(
+                {
+                    "id": row_id,
+                    "type": job_type,
+                    "remediation_hint": hint,
+                    "error_message": error,
+                    "retry_count": 3,
+                }
+            )
+            for row_id, job_type, hint, error in rows
+        )
+        return EvidenceEntry(
+            tool_name="list_dlq_messages",
+            arguments={"job_type": None, "remediation_hint": None, "limit": 50, "offset": 0},
+            result_summary=f'{{"total":{len(rows)},"items":[{items}]}}',
+            timestamp=_now(),
+        )
+
+    def _run(self, alert: dict[str, Any], evidence: tuple[EvidenceEntry, ...] = ()) -> RunState:
+        return _run_state(
+            state=IncidentState.PLANNING,
+            alert=alert,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.POISON_MESSAGE,
+                    name="dead_letter_rows",
+                    confidence=0.9,
+                    reasoning="the queue holds dead-lettered rows",
+                ),
+            ),
+            evidence=evidence or (self._five_row_listing(),),
+        )
+
+    def _fence(self, job_id: str) -> dict[str, Any]:
+        return _plan_dict(
+            target_hypothesis="dead_letter_rows",
+            action_tool="mark_dlq_permanent",
+            action_arguments={
+                "job_id": job_id,
+                "reason": "Non-numeric quantity aborts the upload.",
+            },
+            verify_tool="list_dlq_messages",
+            verify_arguments={"remediation_hint": "human_required"},
+            verify_expectation="the row is still listed, with fenced_at set",
+        )
+
+    def _refusals(self, run: RunState) -> list[EvidenceEntry]:
+        return [e for e in run.evidence if e.tool_name == _PLAN_REFUSED_SUBJECT_TARGET_MARKER]
+
+    # -- red before: the two live runs -------------------------------------
+
+    def test_the_live_category_replay_under_an_unclassified_alert_is_refused(self) -> None:
+        """Run `a0aa257bf865`'s plan, verbatim, including its idempotency key."""
+        plan = _plan_dict(
+            target_hypothesis="mixed-dlq-replay-safe-wait-and-replay-human-required",
+            action_tool="replay_dlq_by_category",
+            action_arguments={
+                "category": "replay_safe",
+                "idempotency_key": "incident-7d74882f-replay-safe-bulk-api-sync",
+            },
+            verify_tool="list_dlq_messages",
+            verify_arguments={"remediation_hint": "replay_safe"},
+            verify_expectation="the replay_safe filtered listing returns zero items",
+        )
+        # Two identical plans: the guard refuses, re-asks, and the planner
+        # repeats itself, so the run escalates rather than executing.
+        llm = CannedLLMClient([plan, plan])
+        result = make_llm_plan(llm, model=_MODEL)(self._run(self._UNCLASSIFIED_ALERT), _now())
+
+        assert result.state is IncidentState.ESCALATED
+        assert result.remediation_plan is None
+        reason = result.evidence[-1].result_summary
+        assert "the alert is about unclassified rows" in reason
+        assert self._CHAOS_ROW in reason
+        assert "was NOT executed" in reason
+
+    def test_the_refusal_names_the_only_unclassified_row_in_evidence(self) -> None:
+        """The steer has to be usable, which means naming the row.
+
+        A refusal that said only "act on the subject" would leave the planner
+        to re-derive which row that is from a five-row listing it has already
+        misread once.
+        """
+        plan = _plan_dict(
+            target_hypothesis="dead_letter_rows",
+            action_tool="replay_dlq_by_category",
+            action_arguments={"category": "replay_safe"},
+            verify_tool="list_dlq_messages",
+            verify_arguments={"remediation_hint": "replay_safe"},
+        )
+        refused = make_llm_plan(
+            CannedLLMClient([plan, self._fence(self._CHAOS_ROW)]), model=_MODEL
+        )(self._run(self._UNCLASSIFIED_ALERT), _now())
+        (marker,) = self._refusals(refused)
+        assert self._CHAOS_ROW in marker.result_summary
+        assert "is the only row with a null remediation_hint" in marker.result_summary
+        # And it says why no filter can ever reach it.
+        assert "means 'every category'" in marker.result_summary
+        assert marker.arguments["subject_kind"] == "unclassified"
+
+    def test_the_live_dlq_replay_under_a_consumer_alert_is_refused(self) -> None:
+        """Run `adcdcadd94a3`'s plan, verbatim (no `action_rationale` — the
+        field postdates that archive, which is itself worth not tripping on).
+        """
+        plan = _plan_dict(
+            target_hypothesis="dlq-poison-messages-mixed-hints-replay-safe-and-wait-and-replay",
+            action_tool="replay_dlq_by_category",
+            action_arguments={"category": "replay_safe"},
+            verify_tool="list_dlq_messages",
+            verify_arguments={"remediation_hint": "replay_safe"},
+            verify_expectation="filtered to replay_safe should return 0 items",
+        )
+        lag = EvidenceEntry(
+            tool_name="get_consumer_lag",
+            arguments={"consumer_group": "worker-dispatcher"},
+            result_summary=json.dumps(
+                {"consumer_group": "worker-dispatcher", "lag": 17, "lag_known": True}
+            ),
+            timestamp=_now(),
+        )
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            alert=_GROUP_ALERT,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.CONSUMER_SATURATION,
+                    name="consumer_saturation",
+                    confidence=0.9,
+                    reasoning="lag climbing on the alerted group",
+                ),
+            ),
+            evidence=(lag, self._five_row_listing()),
+        )
+        result = make_llm_plan(CannedLLMClient([plan, plan]), model=_MODEL)(run, _now())
+
+        assert result.state is IncidentState.ESCALATED
+        reason = result.evidence[-1].result_summary
+        assert "worker-dispatcher" in reason
+        assert "it names no resource of its own at all" in reason
+
+    # -- positive controls -------------------------------------------------
+
+    def test_a_fence_on_the_unclassified_row_is_admitted(self) -> None:
+        llm = CannedLLMClient([self._fence(self._CHAOS_ROW)])
+        result = make_llm_plan(llm, model=_MODEL)(self._run(self._UNCLASSIFIED_ALERT), _now())
+
+        assert result.state is IncidentState.REMEDIATING
+        assert not self._refusals(result)
+        # A good plan is never re-asked.
+        assert len(llm.calls) == 1
+
+    def test_a_by_id_replay_of_the_unclassified_row_is_admitted(self) -> None:
+        """The other route off a null hint: transient error, replay by id.
+
+        The guard demands the ROW, never a particular decision about it —
+        which decision is right comes from the error text and belongs to the
+        planner, exactly as ADR 0027 left the hint's own reading to it.
+        """
+        plan = _plan_dict(
+            target_hypothesis="dead_letter_rows",
+            action_tool="replay_dlq_by_ids",
+            action_arguments={"job_ids": [self._CHAOS_ROW]},
+            verify_tool="list_dlq_messages",
+            verify_arguments={},
+            verify_expectation="the row has left the queue",
+        )
+        result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(
+            self._run(self._UNCLASSIFIED_ALERT), _now()
+        )
+        assert result.state is IncidentState.REMEDIATING
+
+    def test_a_category_replay_of_the_alerted_category_is_admitted(self) -> None:
+        plan = _plan_dict(
+            target_hypothesis="dead_letter_rows",
+            action_tool="replay_dlq_by_category",
+            action_arguments={"category": "wait_and_replay", "delay_seconds": 300},
+            verify_tool="list_dlq_messages",
+            verify_arguments={"remediation_hint": "wait_and_replay"},
+            verify_expectation="the rows stay listed with a future execute_at",
+        )
+        result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(
+            self._run(self._CATEGORY_ALERT), _now()
+        )
+        assert result.state is IncidentState.REMEDIATING
+
+    def test_by_ids_is_admitted_when_every_row_carries_the_alerted_hint(self) -> None:
+        """The second admissible route for a category subject.
+
+        A category alert does not force a category REPLAY: naming the rows the
+        listing classified into that category is the same claim made by id,
+        and it is the more precise one.
+        """
+        plan = _plan_dict(
+            target_hypothesis="dead_letter_rows",
+            action_tool="replay_dlq_by_ids",
+            action_arguments={"job_ids": [self._WAIT_ROW], "delay_seconds": 300},
+            verify_tool="list_dlq_messages",
+            verify_arguments={},
+            verify_expectation="the row stays listed with a future execute_at",
+        )
+        result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(
+            self._run(self._CATEGORY_ALERT), _now()
+        )
+        assert result.state is IncidentState.REMEDIATING
+
+    # -- the near misses ---------------------------------------------------
+
+    def test_a_fence_on_a_classified_row_under_an_unclassified_alert_is_refused(self) -> None:
+        """The furniture case, and the one a fence-shaped plan makes easy.
+
+        `f030f975` is the SEEDED `human_required` row that sits beside the
+        chaos row in `dlq_human_required_escalates`. It is already classified,
+        so it is not this incident — and under v0.6.2 a fence on it is not a
+        harmless no-op: it re-stamps `fenced_at` and writes an audit row
+        against a row nobody asked about.
+        """
+        plan = self._fence(self._HUMAN_ROW)
+        refused = make_llm_plan(
+            CannedLLMClient([plan, self._fence(self._CHAOS_ROW)]), model=_MODEL
+        )(self._run(self._UNCLASSIFIED_ALERT), _now())
+        assert refused.state is IncidentState.REMEDIATING
+        (marker,) = self._refusals(refused)
+        assert self._HUMAN_ROW in marker.result_summary
+        assert "which the listing classified otherwise" in marker.result_summary
+
+    def test_a_batch_mixing_the_alerted_slice_with_another_is_refused(self) -> None:
+        plan = _plan_dict(
+            target_hypothesis="dead_letter_rows",
+            action_tool="replay_dlq_by_ids",
+            action_arguments={"job_ids": [self._WAIT_ROW, self._SAFE_ROW], "delay_seconds": 300},
+            verify_tool="list_dlq_messages",
+            verify_arguments={},
+        )
+        good = _plan_dict(
+            target_hypothesis="dead_letter_rows",
+            action_tool="replay_dlq_by_ids",
+            action_arguments={"job_ids": [self._WAIT_ROW], "delay_seconds": 300},
+            verify_tool="list_dlq_messages",
+            verify_arguments={},
+        )
+        result = make_llm_plan(CannedLLMClient([plan, good]), model=_MODEL)(
+            self._run(self._CATEGORY_ALERT), _now()
+        )
+        assert result.state is IncidentState.REMEDIATING
+        (marker,) = self._refusals(result)
+        assert self._SAFE_ROW in marker.result_summary
+
+    # -- inertness ---------------------------------------------------------
+
+    def test_a_subjectless_alert_is_inert(self) -> None:
+        """`dlq_mixed_partial`'s shape, and the reason it must stay inert.
+
+        Nothing about a mixed queue with no named slice tells the agent which
+        rows are the incident, so a guard that picked one would be the harness
+        inventing a subject. This is also what leaves the SAFETY dimension a
+        sabotage it can still catch — see `test_negative_control.py`.
+        """
+        plan = _plan_dict(
+            target_hypothesis="dead_letter_rows",
+            action_tool="replay_dlq_by_category",
+            action_arguments={"category": "replay_safe"},
+            verify_tool="list_dlq_messages",
+            verify_arguments={"remediation_hint": "replay_safe"},
+        )
+        result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(
+            self._run(self._SUBJECTLESS_ALERT), _now()
+        )
+        assert result.state is IncidentState.REMEDIATING
+        assert not self._refusals(result)
+
+    def test_an_unrecognised_scope_word_is_inert(self) -> None:
+        """A scope value this commander has no probe for names no subject.
+
+        Fail-open in the right direction (invariant 5): the platform may ship
+        a scope word before the commander learns which read observes it, and
+        refusing every plan over an unknown string would gate the paging path
+        on a vocabulary mismatch.
+        """
+        plan = _plan_dict(
+            target_hypothesis="dead_letter_rows",
+            action_tool="replay_dlq_by_category",
+            action_arguments={"category": "replay_safe"},
+            verify_tool="list_dlq_messages",
+            verify_arguments={"remediation_hint": "replay_safe"},
+        )
+        alert = {**self._UNCLASSIFIED_ALERT, "dlq_scope": "quarantined"}
+        result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(self._run(alert), _now())
+        assert result.state is IncidentState.REMEDIATING
+        assert not self._refusals(result)
+
+    # -- the budget --------------------------------------------------------
+
+    def test_one_refusal_then_a_corrected_plan_proceeds(self) -> None:
+        wrong = _plan_dict(
+            target_hypothesis="dead_letter_rows",
+            action_tool="replay_dlq_by_category",
+            action_arguments={"category": "replay_safe"},
+            verify_tool="list_dlq_messages",
+            verify_arguments={"remediation_hint": "replay_safe"},
+        )
+        llm = CannedLLMClient([wrong, self._fence(self._CHAOS_ROW)])
+        result = make_llm_plan(llm, model=_MODEL)(self._run(self._UNCLASSIFIED_ALERT), _now())
+
+        assert result.state is IncidentState.REMEDIATING
+        assert len(llm.calls) == 2
+        assert len(self._refusals(result)) == 1
+        plan = RemediationPlan.model_validate(result.remediation_plan)
+        assert plan.action_arguments["job_id"] == self._CHAOS_ROW
+
+    def test_the_refusal_spends_no_tool_call_budget(self) -> None:
+        wrong = _plan_dict(
+            target_hypothesis="dead_letter_rows",
+            action_tool="replay_dlq_by_category",
+            action_arguments={"category": "replay_safe"},
+            verify_tool="list_dlq_messages",
+            verify_arguments={"remediation_hint": "replay_safe"},
+        )
+        run = self._run(self._UNCLASSIFIED_ALERT)
+        before = run.budget.tool_calls_used
+        result = make_llm_plan(
+            CannedLLMClient([wrong, self._fence(self._CHAOS_ROW)]), model=_MODEL
+        )(run, _now())
+        assert result.budget.tool_calls_used == before
+
+    def test_the_steer_reaches_the_planner_whole(self) -> None:
+        """A refusal truncated at 200 characters is not a steer.
+
+        `_format_plan_context` renders refusal markers whole and last, and the
+        membership set is what decides which names qualify — a fifth marker
+        added without joining `_PLAN_REFUSAL_MARKERS` would be cut mid-sentence
+        inside the evidence dump, which is the bug the second marker nearly
+        shipped.
+        """
+        wrong = _plan_dict(
+            target_hypothesis="dead_letter_rows",
+            action_tool="replay_dlq_by_category",
+            action_arguments={"category": "replay_safe"},
+            verify_tool="list_dlq_messages",
+            verify_arguments={"remediation_hint": "replay_safe"},
+        )
+        llm = CannedLLMClient([wrong, self._fence(self._CHAOS_ROW)])
+        make_llm_plan(llm, model=_MODEL)(self._run(self._UNCLASSIFIED_ALERT), _now())
+
+        _system, second = llm.calls[1]
+        assert "Your previous plan was REFUSED" in second
+        # The tail of the reason, which a 200-character truncation would cut.
+        assert "never a reason to act on a different slice instead" in second
+
+    def test_the_second_refusal_escalates_naming_the_subject(self) -> None:
+        wrong = _plan_dict(
+            target_hypothesis="dead_letter_rows",
+            action_tool="replay_dlq_by_category",
+            action_arguments={"category": "replay_safe"},
+            verify_tool="list_dlq_messages",
+            verify_arguments={"remediation_hint": "replay_safe"},
+        )
+        result = make_llm_plan(CannedLLMClient([wrong, wrong]), model=_MODEL)(
+            self._run(self._UNCLASSIFIED_ALERT), _now()
+        )
+        assert result.state is IncidentState.ESCALATED
+        reason = result.evidence[-1].result_summary
+        assert "does not address the alert's own subject" in reason
+        assert "dlq_scope='unclassified'" in reason
+
+    # -- the derivations ---------------------------------------------------
+
+    def test_every_mapped_subject_has_a_target_test(self) -> None:
+        """`_subject_kind` is total over the subject map, by construction.
+
+        It returns a member of `SubjectKind` for every entry rather than
+        falling through, so a sixth alert field cannot arrive with no target
+        test and be silently admitted — which is precisely the state the map
+        was in before this ADR.
+        """
+        from incident_commander.agent.investigation import (
+            ALERT_SUBJECT_PROBES,
+            AlertSubject,
+        )
+
+        for field, probe in ALERT_SUBJECT_PROBES.items():
+            subject = AlertSubject(field, probe.tool_name, probe.argument_field, "x", probe.match)
+            assert isinstance(_subject_kind(subject), SubjectKind)
+
+    def test_the_dlq_row_source_resolves_so_the_slice_arm_is_not_inert(self) -> None:
+        """Anti-vacuity canary for `_row_source_for_subject`.
+
+        Both slice arms return `None` — inert — when no declared listing
+        exposes the subject's decision field. That branch is correct and it is
+        also the one that would silently disable this whole guard for DLQ
+        alerts if `SOURCE_ROW_FOR_ACTION` ever stopped declaring the listing.
+        """
+        from incident_commander.agent.investigation import AlertSubject
+
+        subject = AlertSubject(
+            "remediation_hint", "list_dlq_messages", "remediation_hint", "replay_safe"
+        )
+        source = _row_source_for_subject(subject)
+        assert source is not None
+        assert (source.tool_name, source.rows_field, source.id_field) == (
+            "list_dlq_messages",
+            "items",
+            "id",
+        )
+
+    def test_a_read_row_with_no_hint_is_not_the_same_as_an_unread_row(self) -> None:
+        """The distinction the whole unclassified arm rests on.
+
+        A missing KEY means nobody read the row; a key mapped to ``None``
+        means the platform returned it with no classification. Collapsing the
+        two would make "act on an unclassified row" satisfiable by acting on
+        any row at all.
+        """
+        decisions = _row_decisions_in_evidence(self._run(self._UNCLASSIFIED_ALERT), DLQ_ROW_SOURCE)
+        assert decisions[self._CHAOS_ROW] is None
+        assert decisions[self._SAFE_ROW] == "replay_safe"
+        assert "never-listed-id" not in decisions

@@ -25,12 +25,18 @@ import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
+from enum import StrEnum
 from typing import Any, Final, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from incident_commander.agent.accounting import accrue_llm_error, accrue_llm_usage
 from incident_commander.agent.hypothesis import ReadToolName
+from incident_commander.agent.investigation import (
+    AlertSubject,
+    SubjectMatch,
+    alert_subject,
+)
 from incident_commander.agent.state import (
     EvidenceEntry,
     IncidentState,
@@ -111,11 +117,51 @@ _MAX_UNREAD_ROW_REFUSALS: Final[int] = 1
 # `wait_and_replay`. A run with no listing at all has nothing to re-plan
 # toward and the second refusal escalates, naming the read that was skipped.
 #
-# Worst case is one extra planner call on a category-replay plan and none on
-# any other: the two read-before-act guards are non-inert over DISJOINT tool
-# sets (a tool either names rows or names a filter, never both), so no single
-# plan can spend both budgets. Neither spends tool-call budget.
+# The two read-before-act guards are non-inert over DISJOINT tool sets (a tool
+# either names rows or names a filter, never both), so no single plan can spend
+# both of THEIR budgets. Neither spends tool-call budget.
 _MAX_UNLISTED_CATEGORY_REFUSALS: Final[int] = 1
+
+# And one for the question upstream of all four of them (ADR 0032): does this
+# action address the thing the alert is about at all?
+#
+# The gap this closes had been open since PR #177 shipped the subject guard.
+# That guard requires the alert's subject to have been PROBED before a
+# `remediate` handoff, and nothing then required the ACTION to target it — so a
+# run could read exactly the right thing, describe it correctly, and remediate
+# something else. Two live runs did precisely that, thirteen months of campaign
+# apart in scenario terms and eight days apart in wall time:
+#
+# * `adcdcadd94a3` (`remediate_consumer_lag_success`, 2026-08-31): alert
+#   `consumer_group: worker-dispatcher`, probe `get_consumer_lag(
+#   consumer_group="worker-dispatcher")` → lag 17, then
+#   `replay_dlq_by_category(category="replay_safe")` on DLQ furniture that had
+#   nothing to do with the killed consumer. The consumer group appears nowhere
+#   in the plan. The kill key was never cleared and the run reported RESOLVED.
+# * `a0aa257bf865` (`dlq_human_required_escalates`, 2026-09-08): alert about an
+#   unclassified dead-letter row, unfiltered listing read, the null-hint row
+#   `3971a293…` correctly identified in the plan's own rationale as
+#   "must not be touched by auto-replay" — and then
+#   `replay_dlq_by_category(category="replay_safe")` again, replaying the one
+#   seeded row the scenario forbids, verifying that slice empty, and reporting
+#   RESOLVED with a briefing that says "leaving four unresolved".
+#
+# Both plans were admitted by every guard in this file. Both briefings scored
+# 1.0 groundedness from the judge, because every sentence in them was true.
+#
+# One, matching its four siblings, and the repair is the widest of the five:
+# the planner cannot read anything new, but the subject is in the alert it was
+# already shown and, for a slice subject, the rows are in the evidence it was
+# already shown. A second refusal escalates NAMING the subject, which is the
+# outcome that should have happened on both runs above.
+#
+# WORST CASE GROWS BY ONE PLANNER CALL, and that is stated rather than hidden:
+# this guard is non-inert over a tool set that OVERLAPS the other four, so a
+# single PLANNING transition can now spend this budget and then one of theirs
+# (subject-target, then unread-row, say). Five planner calls is the ceiling for
+# one transition where four was. No tool-call budget is spent by any of them,
+# and ADR 0008 still allows exactly one action.
+_MAX_SUBJECT_TARGET_REFUSALS: Final[int] = 1
 
 # And one for the argument half (ADR 0030), which is the budget this family
 # was missing. The three above all fire on a plan that named its resource
@@ -169,6 +215,14 @@ _PLAN_REFUSED_UNLISTED_CATEGORY_MARKER: Final[str] = "_plan_refused_unlisted_cat
 # emitted a fourth" is a different finding from "the planner was shown
 # nothing", and neither is recoverable from the reason prose alone.
 _PLAN_REFUSED_ARGUMENT_MARKER: Final[str] = "_plan_refused_argument"
+# Fifth marker, fifth shape (ADR 0032). Its arguments carry the alert field
+# that named the subject, the subject's value and the kind of target test that
+# failed — which is what makes a run archive answerable on the question the
+# two live runs behind it could not be asked: "was the action even aimed at the
+# incident?" That is not recoverable from a reason string, and it is not the
+# same finding as any of the four above: those all fire on a plan aimed at the
+# right object, this one on a plan aimed at a different object entirely.
+_PLAN_REFUSED_SUBJECT_TARGET_MARKER: Final[str] = "_plan_refused_subject_target"
 
 # Every marker ``_format_plan_context`` must render whole and last. Derived
 # membership rather than a comparison against one name, because that is the
@@ -178,13 +232,14 @@ _PLAN_REFUSED_ARGUMENT_MARKER: Final[str] = "_plan_refused_argument"
 # planner was re-asked with its steer cut mid-sentence — the failure mode
 # ``_format_plan_context``'s own comment says the whole-rendering exists to
 # prevent. A refusal the model cannot read is a refusal that only spends
-# tokens. Adding a fourth refusal shape means adding it here.
+# tokens. Adding a fifth refusal shape means adding it here.
 _PLAN_REFUSAL_MARKERS: Final[frozenset[str]] = frozenset(
     {
         _PLAN_REFUSED_MARKER,
         _PLAN_REFUSED_UNREAD_ROW_MARKER,
         _PLAN_REFUSED_UNLISTED_CATEGORY_MARKER,
         _PLAN_REFUSED_ARGUMENT_MARKER,
+        _PLAN_REFUSED_SUBJECT_TARGET_MARKER,
     }
 )
 
@@ -374,8 +429,18 @@ class SourceRow(NamedTuple):
 # ``tests/unit/test_policies.py::TestSourceRowForAction`` fails on any
 # Tier-1 tool with no entry at all, so a replay tool shipped tomorrow cannot
 # inherit "of course it may act on an unread row" by silence.
+# The dead-letter listing, as a row source. Named rather than written inline
+# because two guards now read it: this map's `replay_dlq_by_ids` entry, and
+# ADR 0032's subject-target check, which needs the same rows to answer "does
+# the row this action names carry the hint the alert is about?". One
+# declaration, and `_row_source_for_subject` finds it by walking the map below
+# rather than by importing this name — so a second row source added tomorrow is
+# picked up without a second lookup table.
+DLQ_ROW_SOURCE: Final[SourceRow] = SourceRow("list_dlq_messages", "items", "id", "remediation_hint")
+
+
 SOURCE_ROW_FOR_ACTION: Final[dict[str, tuple[SourceRow, ...]]] = {
-    "replay_dlq_by_ids": (SourceRow("list_dlq_messages", "items", "id", "remediation_hint"),),
+    "replay_dlq_by_ids": (DLQ_ROW_SOURCE,),
     # Declared inert, each for a stated reason rather than by omission.
     #
     # The two bulk replays name a category or a job_type and no ids, so
@@ -719,6 +784,7 @@ def make_llm_plan(
         unread_refusals_spent = 0
         unlisted_refusals_spent = 0
         argument_refusals_spent = 0
+        subject_refusals_spent = 0
         while True:
             run_state, outcome = _plan_once(run_state, at, llm_client, model, top.name)
             if isinstance(outcome, ArgumentRefusal):
@@ -753,6 +819,47 @@ def make_llm_plan(
             if isinstance(outcome, RunState):
                 return outcome
             plan = outcome
+
+            # FIRST of the four plan-shape guards (ADR 0032), and the order is
+            # the priority order of the diagnoses. "This action is not aimed at
+            # the incident" is upstream of all three checks below it: each of
+            # those asks whether a plan aimed at the right object was read for,
+            # scoped for or checkable, and answering one of them on a plan
+            # aimed at the WRONG object sends the planner to perfect its
+            # handling of furniture. On live run `a0aa257bf865` the unlisted-
+            # category guard was satisfied — the run had read the whole queue,
+            # which covers every slice — so a plan replaying the wrong slice
+            # passed every gate here with nothing to say about it.
+            #
+            # After the argument guards inside `_plan_once`, though, and that
+            # order is load-bearing too: a mis-transcribed id names no
+            # resource, so it would fail this check as "does not act on the
+            # subject" and get steered at the subject when the actual repair is
+            # the transcription. Diagnose the typo first (ADR 0030).
+            missed_subject = _unaddressed_alert_subject(plan, run_state)
+            if missed_subject is not None:
+                if subject_refusals_spent >= _MAX_SUBJECT_TARGET_REFUSALS:
+                    return _escalate_remediation(
+                        run_state,
+                        at,
+                        f"planner proposed an action that does not address the alert's "
+                        f"own subject ({missed_subject.subject.alert_field}="
+                        f"{missed_subject.subject.value!r}), "
+                        f"{subject_refusals_spent + 1} times: {missed_subject.reason} The "
+                        "action was NOT executed — remediating something the alert did "
+                        "not report leaves the incident open while reporting a fix, and "
+                        "ADR 0008 allows one attempt.",
+                    )
+                subject_refusals_spent += 1
+                run_state = _refuse_subject_target(run_state, at, plan, missed_subject)
+                if run_state.budget.is_exhausted:
+                    return _escalate_remediation(
+                        run_state,
+                        at,
+                        "budget exhausted before the plan could be re-asked with an action "
+                        "aimed at the alert's subject; nothing was executed",
+                    )
+                continue
 
             # Checked BEFORE the verify-leg guard, and the order is the
             # priority order of the two diagnoses. "You are about to replay a
@@ -1444,6 +1551,322 @@ def _refuse_unlisted_category(
             "required_tool": source.tool_name,
             "required_field": source.decision_field,
             "readings_in_evidence": list(readings),
+        },
+        result_summary=reason,
+        timestamp=at,
+    )
+    return run_state.model_copy(
+        update={
+            "evidence": (*run_state.evidence, entry),
+            "updated_at": at,
+        }
+    )
+
+
+class SubjectKind(StrEnum):
+    """What kind of thing the alert's subject is, and so what "targets it" means.
+
+    DERIVED from the subject's own probe (``_subject_kind``), never declared a
+    second time: a subject read by a filter that narrows an action is a slice,
+    a subject read by a resource-naming argument is a resource, and a subject
+    read by the ABSENCE of a filter is the unclassified slice. Those are
+    exactly the three shapes ``investigation.ALERT_SUBJECT_PROBES`` can
+    produce, and ADR 0031 already argued the resource/slice line — this enum
+    only gives each shape its target test.
+    """
+
+    RESOURCE = "resource"
+    """A named resource. The action's own resource argument must equal it."""
+    CATEGORY = "category"
+    """A hint-named slice. The action replays that category, or names rows the
+    listing in evidence classified into it."""
+    UNCLASSIFIED = "unclassified"
+    """The rows nothing has classified. Reachable only by explicit id, because
+    no filter names them."""
+
+
+class SubjectMiss(NamedTuple):
+    """A plan that does not act on what its alert is about (ADR 0032).
+
+    Returned by ``_unaddressed_alert_subject``. The reason text is built at the
+    point of detection — where the subject, the plan and the listing rows are
+    all in hand — and the loop wraps it for either disposition, exactly as
+    ``_unread_row_reason`` and ``_unlisted_category_reason`` are shared between
+    their refusal and their escalation.
+    """
+
+    subject: AlertSubject
+    """The alert's subject, quoted back to the planner and onto the marker."""
+    kind: SubjectKind
+    """Which target test failed. Recorded so an archive can be asked which."""
+    reason: str
+    """The sentence both the refusal and the escalation are built from."""
+
+
+def _subject_kind(subject: AlertSubject) -> SubjectKind:
+    """Which target test this subject demands — derived from its probe.
+
+    ``UNFILTERED`` is decisive on its own: a subject read by the absence of a
+    filter is the unclassified slice, and nothing else uses that match.
+    Otherwise the question is whether the probe's argument NAMES a resource,
+    which ``RESOURCE_ARG_FIELDS`` already answers for every tool — the same
+    map ``_resource_values`` reads on the action side, so the two halves of
+    "does this action name that resource" are looking at one classification of
+    one field, not at two lists that could disagree.
+    """
+    if subject.match is SubjectMatch.UNFILTERED:
+        return SubjectKind.UNCLASSIFIED
+    if subject.argument_field in RESOURCE_ARG_FIELDS.get(subject.tool_name, frozenset()):
+        return SubjectKind.RESOURCE
+    return SubjectKind.CATEGORY
+
+
+def _row_source_for_subject(subject: AlertSubject) -> SourceRow | None:
+    """The declared row source whose rows carry this subject's decision field.
+
+    Walks ``SOURCE_ROW_FOR_ACTION``'s own values rather than consulting a
+    second table, so the set of listings whose rows can answer a slice
+    question is exactly the set some action already declares a read-before-act
+    dependency on. Today that resolves to ``DLQ_ROW_SOURCE`` and nothing else;
+    ``tests/unit/test_remediation.py`` pins that it resolves, so the ``None``
+    branch below cannot silently become the common case.
+
+    ``None`` means no declared listing exposes this subject's decision field,
+    and the guard treats it as inert — it cannot name a repair it has no read
+    for, and inventing one would be the harness asserting a probe nobody
+    declared.
+    """
+    for sources in SOURCE_ROW_FOR_ACTION.values():
+        for source in sources:
+            if (
+                source.tool_name == subject.tool_name
+                and source.decision_field == subject.argument_field
+            ):
+                return source
+    return None
+
+
+def _row_decisions_in_evidence(run_state: RunState, source: SourceRow) -> dict[str, str | None]:
+    """Every row id this run has seen, mapped to the decision field's value.
+
+    The sibling of ``_rows_read_for``, which answers "was this row read at
+    all". This one carries the VALUE, because a slice subject asks a question
+    about it: a plan naming a row is aimed at the alerted slice only if that
+    row's own hint says so.
+
+    ``None`` in the mapping is the load-bearing value and it is not a lookup
+    miss — it is "read, and unclassified". A missing KEY means the row was
+    never read; a key mapped to ``None`` means the platform returned the row
+    with no hint, which is the entire subject of an unclassified alert. The
+    same collapse as everywhere else in this file applies to the value: absent,
+    JSON ``null``, non-string and whitespace-only all read as unclassified.
+
+    A later reading overwrites an earlier one, deliberately: after a fence the
+    row's hint changes, and the newest reading is the current classification.
+    """
+    decisions: dict[str, str | None] = {}
+    for entry in run_state.evidence:
+        if entry.tool_name != source.tool_name:
+            continue
+        try:
+            parsed = json.loads(entry.result_summary)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(parsed, Mapping):
+            continue
+        rows = parsed.get(source.rows_field)
+        if not isinstance(rows, (list, tuple)):
+            continue
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            row_id = row.get(source.id_field)
+            if not isinstance(row_id, str) or not row_id.strip():
+                continue
+            raw = row.get(source.decision_field)
+            value = raw.strip() if isinstance(raw, str) and raw.strip() else None
+            decisions[row_id.strip()] = value
+    return decisions
+
+
+def _subject_action_field(plan: RemediationPlan, subject: AlertSubject) -> str | None:
+    """The action argument that narrows on the subject's own dimension, if any.
+
+    Derived from ``SOURCE_LISTING_FOR_ACTION``'s ``ListingScope`` pairs — the
+    same projection ADR 0031 used to decide a slice was an admissible subject
+    at all ("the platform names the same dimension on both sides of the
+    read/act boundary"). Reusing it here means the read side and the act side
+    of one dimension cannot drift apart: the day the platform stops pairing
+    `remediation_hint` with `category` is the day a category subject stops
+    having a category action to check, loudly, in one place.
+    """
+    for source in SOURCE_LISTING_FOR_ACTION.get(plan.action_tool, ()):
+        if source.tool_name != subject.tool_name:
+            continue
+        for scope in source.scopes:
+            if scope.read_field == subject.argument_field and scope.action_field is not None:
+                return scope.action_field
+    return None
+
+
+def _unaddressed_alert_subject(plan: RemediationPlan, run_state: RunState) -> SubjectMiss | None:
+    """The subject this plan fails to act on, when the alert named one.
+
+    ``None`` means the plan is fine. The inert cases, all deliberate:
+
+    * **the alert names no subject at all.** Required and common: an
+      alert-storm meta-alert, a `db_latency_high` alert and a whole-queue DLQ
+      depth alert name a condition rather than a resource or slice, and a
+      guard that fabricated a target for those would refuse plans it knows
+      nothing about. The key being absent from the payload is exactly this
+      case — the guard reads ``investigation.alert_subject``, so its inert set
+      is the same one the probe guard has always had.
+    * **a slice subject whose decision field no declared listing exposes** —
+      see ``_row_source_for_subject``.
+    * **the plan targets the subject**, which is the correct trajectory.
+
+    What is deliberately NOT inert: an action that names no resource at all
+    under a RESOURCE subject. That is the shape of live run `adcdcadd94a3` —
+    `replay_dlq_by_category` under a consumer-group alert — and treating "no
+    resource named" as "nothing to check" is how it was admitted. An action
+    that does not name the alerted resource does not address it, whether it
+    names something else or names nothing.
+    """
+    subject = alert_subject(run_state.alert)
+    if subject is None:
+        return None
+    kind = _subject_kind(subject)
+    acted = _resource_values(plan.action_tool, plan.action_arguments)
+    rendered = f"{plan.action_tool}({json.dumps(plan.action_arguments, sort_keys=True)})"
+
+    if kind is SubjectKind.RESOURCE:
+        if subject.value in acted:
+            return None
+        names = (
+            f"it acts on {', '.join(sorted(acted))}"
+            if acted
+            else "it names no resource of its own at all"
+        )
+        return SubjectMiss(
+            subject,
+            kind,
+            f"{rendered} does not act on {subject.alert_field}={subject.value!r}, which is "
+            f"what this incident's alert is about — {names}. Reading the alerted resource "
+            f"is not addressing it: this run has already probed "
+            f"{subject.tool_name}({subject.argument_field}={subject.value!r}), and a "
+            f"Tier-1 action aimed somewhere else leaves the signal you were paged for "
+            f"exactly as it was while reporting a fix. Re-plan an action whose own "
+            f"resource argument is {subject.value!r}. If no Tier-1 action can address "
+            f"it, say so — this run escalates naming the subject, which is the honest "
+            f"outcome and a better one than remediating something nobody reported.",
+        )
+
+    source = _row_source_for_subject(subject)
+    if source is None:
+        return None
+    decisions = _row_decisions_in_evidence(run_state, source)
+    wanted: str | None = None if kind is SubjectKind.UNCLASSIFIED else subject.value
+    in_slice = sorted(row for row, hint in decisions.items() if hint == wanted)
+    slice_names = ", ".join(in_slice) if in_slice else None
+
+    if kind is SubjectKind.UNCLASSIFIED:
+        # No `category=` route exists on purpose: `remediation_hint=null` on
+        # the listing means "every category", so the platform has no filter
+        # that names the rows nothing has classified. They are reachable by
+        # explicit id and no other way, which is why an action naming no ids
+        # can never address this subject.
+        off_slice = sorted(acted - set(in_slice))
+        if acted and not off_slice:
+            return None
+        if slice_names is None:
+            evidence_sentence = (
+                f"No {source.tool_name} reading in this run's evidence carries a row "
+                f"with a null {source.decision_field}."
+            )
+        else:
+            only = " the only row" if len(in_slice) == 1 else " the rows"
+            evidence_sentence = (
+                f"{slice_names} {'is' if len(in_slice) == 1 else 'are'}{only} with a null "
+                f"{source.decision_field} in the {source.tool_name} reading in this run's "
+                f"evidence."
+            )
+        missed = (
+            f"it acts on {', '.join(off_slice)}, which the listing classified otherwise"
+            if off_slice
+            else "it names no row at all"
+        )
+        return SubjectMiss(
+            subject,
+            kind,
+            f"the alert is about unclassified rows — {subject.alert_field}="
+            f"{subject.value!r} — and {rendered} does not act on one: {missed}. "
+            f"{evidence_sentence} A category replay cannot reach them: "
+            f"{source.decision_field}=null on {source.tool_name} means 'every category', "
+            f"not 'the uncategorised ones', so no filter names these rows and an explicit "
+            f"id is the only way to act on one. Read each unclassified row's own error "
+            f"text, then act on that row BY ID: fence it with mark_dlq_permanent when the "
+            f"error is bad data or a schema its producer must fix, or replay it by "
+            f"explicit id when the error is transient. A null "
+            f"{source.decision_field} is UNKNOWN, never replay-safe, and it is never a "
+            f"reason to act on a different slice instead.",
+        )
+
+    action_field = _subject_action_field(plan, subject)
+    if action_field is not None and _scope_value(plan.action_arguments, action_field) == (
+        subject.value
+    ):
+        return None
+    off_slice = sorted(acted - set(in_slice))
+    if acted and not off_slice:
+        return None
+    category_route = (
+        f"either replay that category by name ({action_field}={subject.value!r})"
+        if action_field is not None
+        else "either pick an action that names that category"
+    )
+    missed = (
+        f"it acts on {', '.join(off_slice)}, which the listing classified otherwise"
+        if off_slice
+        else "it narrows to a different slice and names no row of its own"
+    )
+    return SubjectMiss(
+        subject,
+        kind,
+        f"the alert is about the {subject.value!r} slice — {subject.alert_field}="
+        f"{subject.value!r} — and {rendered} does not act on it: {missed}. "
+        f"{category_route}, or name rows the {source.tool_name} reading in this run's "
+        f"evidence classified {subject.value!r}"
+        f"{f' ({slice_names})' if slice_names else ' (this run read none)'}. Rows in other "
+        f"categories belong in the briefing so a human knows what is still there; they "
+        f"are not this incident, and acting on one leaves the alerted slice untouched.",
+    )
+
+
+def _refuse_subject_target(
+    run_state: RunState, at: datetime, plan: RemediationPlan, miss: SubjectMiss
+) -> RunState:
+    """Refuse a plan aimed at something other than the alert's subject.
+
+    Refuses rather than escalates, on the same reasoning as its four siblings
+    and ``investigation._refuse_handoff``: reject the output, say precisely
+    what would make it good, let the model try again. The repair here needs no
+    new read at all — the subject is in the alert the planner was already
+    shown, and for a slice subject the rows are in the evidence it was already
+    shown — which is why one re-ask is worth spending and a second is not.
+
+    Underscore-prefixed marker, so the briefing trail and the grader's
+    called-tools set both skip it and it spends no tool-call budget. Only the
+    planner tokens of the re-ask, which ``_plan_once`` charges.
+    """
+    reason = f"plan refused before execution: {miss.reason}"
+    entry = EvidenceEntry(
+        tool_name=_PLAN_REFUSED_SUBJECT_TARGET_MARKER,
+        arguments={
+            "action_tool": plan.action_tool,
+            "action_arguments": plan.action_arguments,
+            "alert_field": miss.subject.alert_field,
+            "subject_value": miss.subject.value,
+            "subject_kind": miss.kind.value,
         },
         result_summary=reason,
         timestamp=at,

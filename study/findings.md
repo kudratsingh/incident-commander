@@ -948,3 +948,77 @@ pages escalates too, with a different reason. "Everything I looked at is
 addressed" is satisfiable by looking away, and the cheapest way to close that is
 to require the reading that a subject-less queue alert should have produced
 anyway — the whole page.
+
+## F-013 — The lab lied for four releases, and the exact claim written against it made the lie load-bearing
+
+**Date:** 2026-09-08 (found by the user reading the 2026-08-30 trajectory of
+`remediate_dlq_backlog_success`; evidence is live runs `e72b5ffb9df0` and
+`e8404306138c`; WO-R2-166/167/168)
+
+**What happened.** The user asked why the agent had replayed a dead-letter row
+whose `error_message` read `SchemaValidationError: payload missing required
+field` — a payload that fails validation fails identically on every attempt, so
+the sender has to change it — and why that graded a pass. It graded a pass twice,
+on all five dimensions, in the only two live runs this scenario has ever had.
+
+Three independent things had to be true, and all three were:
+
+1. **The lab's `poison_message` hook stamped its dead-letter row
+   `remediation_hint: replay_safe`**, and had done since the hook shipped. The
+   tool description said so too, so nothing on the commander side could tell.
+2. **The remediation-planner prompt said to use the hint as a strong prior**, and
+   to fall back to reading the error only when the hint was null.
+3. **The grader counted replays.** `replayed at_least 1` until cmd #184, then
+   `which: sum, equals: 2`.
+
+Any one of the three alone is survivable. Together they form a closed loop: the
+lab writes a label, the prompt believes it, the grader counts the consequence,
+and nothing in the loop ever reads the error text that contradicts all three.
+
+**The part that is worth the finding is (3), because it was the fix.** cmd #184
+was a deliberate precision pass over exactly this scenario — the review that
+asked "what is the laziest trajectory that passes this?" and replaced
+`at_least 1` with an exact sum. It was exact, and it was exact about a world the
+lab was lying about, so the tightening did not merely fail to catch the defect:
+**it pinned it.** After #184, an agent that replayed only the genuinely transient
+row — the correct behaviour — would have graded RED on evidence.
+
+And the comment written beside the number cited its source: the hook's snapshot
+description, plus the platform file that implements it. That is exactly the
+discipline the repo asks for, and it is why the number looked derived rather
+than chosen. The source was the lie.
+
+**Why the earlier near-miss did not catch it.** WO-R2-146 had already touched
+this same pair and moved the wrong half: it rewrote the row's TEXT to an
+`UpstreamTimeout` so the row would agree with its `replay_safe` hint. That made
+the row self-consistent and left it describing a transient fault the hook never
+injects — a different lie, and one the platform's coherence screen cannot catch,
+because that screen compares two fields to each other and never either field to
+the code that wrote them.
+
+**What was done.** Platform v0.6.3 (plat #199) moved the other half: the row is
+UNCLASSIFIED by default with the schema-violation text, `replay_safe` is
+unaskable on either spelling, and the id is deterministic so a scenario can
+forbid the row by name. The commander re-derived `remediate_dlq_backlog_success`
+(one replay, the poisoned row forbidden and named in the handoff), added
+`dlq_poison_unclassified` so the same row is graded as a subject, and added
+`dlq_mislabeled_replay_safe` so the CLASS survives the instance —
+[ADR 0034](../docs/ADR/0034-when-the-hint-and-the-error-disagree-the-error-wins.md).
+
+**The rules that come out of it.**
+
+- **A vague claim is wrong and looks wrong; an exact claim written against a
+  lying fixture is wrong and looks authoritative.** When a number goes into a
+  claim, the comment must say where it came from — and then that source has to
+  be read against the code that produces the rows, not against the description
+  of the code.
+- **Fixing a fixture closes the instance and none of the class.** The lab was
+  made honest; a mislabelled dead-letter row remains an ordinary production
+  event, because a `remediation_hint` is a classification something wrote, and
+  nothing downstream re-derives it from the failure. The scenario that survives
+  the fix is the one worth having.
+- **When a fixture's hint and its text disagree, work out which half describes
+  what the hook actually DID before deciding which half to move.** WO-R2-146
+  moved the text; the code was writing a schema violation; the hint was the
+  wrong half. This rule is in the platform's `context/INDEX.md` too, from the
+  other side of the same seam.

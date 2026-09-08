@@ -34,9 +34,9 @@ from incident_commander.llm.prompts.loader import (
 
 _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("2fbebe9dcd49d48e41a580b1093f8e66cdb063482ea78ee5873be2eaa3dc0eda"),
-    "investigation_planner": ("412ecb029c8bef6a05461d30f6a9ec46b57c07bc61ed56f3cc3be0c8ca2e415e"),
+    "investigation_planner": ("c5705b7436d86f57f830ab01bce8e646c5bfaefc4f0acc2a1041c9048cf3c653"),
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
-    "remediation_planner": ("37aaf09397f43a6aee79b3ec117c820329cf9cc3a8e517a860b468d78686d970"),
+    "remediation_planner": ("15a7f80c766bc21f2ab7dec47ad77c3a79bcaa70c5de051a8da2273f7afcfe55"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
 }
 

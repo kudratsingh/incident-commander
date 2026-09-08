@@ -60,7 +60,7 @@ import os
 import subprocess
 import sys
 import uuid
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -639,6 +639,15 @@ def error_families(error_message: str) -> frozenset[str]:
     )
 
 
+#: The lint's own name for a hint/error contradiction, and the name of the one
+#: case where that contradiction is the point. Constants because two readers
+#: now compare against them — the renderer's verdict column and the sanctioned
+#: rewrite below — and a string literal in three places is how the two would
+#: quietly stop agreeing.
+INCOHERENT_KIND: Final[str] = "INCOHERENT hint vs error"
+SANCTIONED_KIND: Final[str] = "sanctioned incoherent fixture (WO-R2-167)"
+
+
 @dataclass(frozen=True)
 class Finding:
     """One thing the reader should look at. Never a verdict."""
@@ -702,7 +711,7 @@ def lint_dlq_row(row: Mapping[str, Any], seen_in: str) -> list[Finding]:
         return []
     return [
         Finding(
-            "INCOHERENT hint vs error",
+            INCOHERENT_KIND,
             subject,
             f"hint {raw_hint!r} sanctions {sorted(sanctioned)} error texts; this "
             f"row's text reads as {sorted(families)}: {error.strip()!r}. This is the "
@@ -860,11 +869,45 @@ def action_targets(scenario: Scenario) -> dict[str, list[str]]:
     return targets
 
 
-def lint_dlq_coherence(readings: Sequence[Reading]) -> tuple[list[Finding], list[tuple[str, ...]]]:
-    """Findings and a summary table row per dead-letter row seen anywhere."""
+#: Chaos hooks whose declared product IS an incoherent row. Exactly one, and
+#: the platform is where that is decided: `create_mislabeled_dlq_job` writes
+#: the lab's ONE sanctioned incoherent pair (hint `replay_safe`, a permanent
+#: bad-data text), reachable only through `sanctioned_incoherent_story()`,
+#: gated behind an explicit `mislabel: true` with no default, and still flagged
+#: by the platform's own coherence screen — plat #199 keeps all three
+#: guardrails and a test there asserts the screen keeps reporting it.
+#:
+#: Keyed on the HOOK rather than on a scenario name or a YAML flag, because a
+#: scenario must not be able to declare itself exempt: the exemption below
+#: applies to the one row this hook returned during THIS dossier's own seeding,
+#: so it can neither be borrowed by another scenario nor stretched to a second
+#: row inside this one.
+SANCTIONED_INCOHERENT_HOOKS: Final[frozenset[str]] = frozenset({"create_mislabeled_dlq_job"})
+
+
+def lint_dlq_coherence(
+    readings: Sequence[Reading], sanctioned_incoherent: Collection[str] = ()
+) -> tuple[list[Finding], list[tuple[str, ...]]]:
+    """Findings and a summary table row per dead-letter row seen anywhere.
+
+    ``sanctioned_incoherent`` names row ids whose (hint, error) contradiction is
+    the scenario's PREMISE rather than a defect — see
+    ``SANCTIONED_INCOHERENT_HOOKS``. Such a row is still linted, still shown,
+    and still reported: what changes is which sentence it gets. The rem-4
+    finding ("decide which one is wrong BEFORE spending") would be actively
+    wrong advice on a row whose whole product is the contradiction, and a
+    reader who has learned that INCOHERENT means stop needs to be told plainly
+    that this one is deliberate — not left to infer it from silence.
+
+    Silence was the alternative and it is the worse one: dropping the row's
+    finding would make the dossier read as if the lab's one deliberately
+    mislabelled row were coherent, which is the exact species of untrue-but-
+    green this file exists to prevent.
+    """
     findings: list[Finding] = []
     rows: list[tuple[str, ...]] = []
     seen_ids: set[str] = set()
+    sanctioned = set(sanctioned_incoherent)
     for reading in readings:
         if reading.payload is None:
             continue
@@ -874,15 +917,40 @@ def lint_dlq_coherence(readings: Sequence[Reading]) -> tuple[list[Finding], list
                 continue
             seen_ids.add(row_id)
             row_findings = lint_dlq_row(row, reading.probe.label)
+            incoherent = [f for f in row_findings if f.kind == INCOHERENT_KIND]
+            if row_id in sanctioned and incoherent:
+                row_findings = [
+                    Finding(
+                        SANCTIONED_KIND,
+                        f.subject,
+                        f"{f.detail.split(' This is the ')[0]} **This row is the fixture, not a "
+                        "defect.** It was written by a chaos hook whose declared product is the "
+                        "contradiction (WO-R2-167), and the scenario grades the agent for "
+                        "DISBELIEVING the hint: the error wins, the row is not replayed, and the "
+                        "disagreement is reported. Read it and confirm it is the pair you "
+                        "expected — a DIFFERENT contradiction on this row would still be a "
+                        "defect, and every other row in this world is linted normally.",
+                    )
+                    if f.kind == INCOHERENT_KIND
+                    else f
+                    for f in row_findings
+                ]
             findings.extend(row_findings)
             raw_error = row.get("error_message")
             error = raw_error if isinstance(raw_error, str) else ""
+            verdict = "coherent"
+            if row_findings:
+                verdict = (
+                    "sanctioned incoherent (WO-R2-167)"
+                    if row_id in sanctioned and incoherent
+                    else "FLAG"
+                )
             rows.append(
                 (
                     row_id,
                     repr(row.get("remediation_hint")),
                     ", ".join(sorted(error_families(error))) or "—",
-                    "FLAG" if row_findings else "coherent",
+                    verdict,
                     error.strip() or "(none)",
                 )
             )
@@ -1600,6 +1668,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 seeding = f"**SEEDING FAILED** — {err}"
                 print(f"DOSSIER: chaos seeding failed — {err}")
 
+        # The row this scenario's OWN sanctioned hook just wrote, if any. Read
+        # off the hook's reply rather than computed or configured, so the §5.1
+        # exemption below can only ever apply to a row the platform confirmed
+        # it created during this dossier's own seeding.
+        sanctioned_incoherent: set[str] = set()
+        if (
+            scenario.chaos_setup is not None
+            and scenario.chaos_setup.name in SANCTIONED_INCOHERENT_HOOKS
+            and not seeding_failed
+        ):
+            seeded_id = result.get("job_id") if isinstance(result, dict) else None
+            if isinstance(seeded_id, str) and seeded_id:
+                sanctioned_incoherent.add(seeded_id)
+
         preconditions = [check_precondition(read_client, p) for p in scenario.expected_precondition]
         probes, notes = derive_probes(scenario)
         readings = [read(read_client, p) for p in probes]
@@ -1608,7 +1690,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         # precondition's filtered DLQ page is a reading of the world too, and
         # the row it returns is the one the scenario is about.
         all_readings = [entry.reading for entry in preconditions] + readings
-        dlq_findings, dlq_rows = lint_dlq_coherence(all_readings)
+        dlq_findings, dlq_rows = lint_dlq_coherence(all_readings, sanctioned_incoherent)
         target_findings, target_rows = lint_action_targets(scenario, all_readings, preconditions)
         furniture_findings, furniture_rows = lint_forbidden_furniture(scenario, all_readings)
 

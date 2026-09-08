@@ -21,14 +21,16 @@ else.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from incident_commander.agent.briefing import EscalationBriefing
 from incident_commander.llm.client import LLMClientProtocol
 from incident_commander.llm.prompts.loader import load_prompt
+from incident_commander.llm.repair import call_with_output_repair
+from incident_commander.llm.structured import StructuredOutput
 
 
-class BriefingContent(BaseModel):
+class BriefingContent(StructuredOutput):
     """LLM-produced portion of the briefing. Validated by the tool-use schema."""
 
     model_config = ConfigDict(extra="forbid")
@@ -42,8 +44,15 @@ def enrich_briefing(
     llm_client: LLMClientProtocol,
     model: str,
 ) -> EscalationBriefing:
-    """Return a new briefing with ``findings`` and ``recommendation`` filled by an LLM."""
-    result = llm_client.call(
+    """Return a new briefing with ``findings`` and ``recommendation`` filled by an LLM.
+
+    Gets the same one bounded repair as the two planners (ADR 0035). There is
+    no ``BudgetLedger`` to charge here — enrichment runs after the run reaches
+    a terminal state and is outside the run ledger by ADR 0015 §4 — so the
+    repair's cost is visible where the rest of this call's cost is: the trace.
+    """
+    call = call_with_output_repair(
+        llm_client,
         system_prompt=load_prompt("briefing_writer"),
         user_message=_format_context(briefing),
         output_model=BriefingContent,
@@ -51,8 +60,8 @@ def enrich_briefing(
     )
     return briefing.model_copy(
         update={
-            "findings": result.output.findings,
-            "recommendation": result.output.recommendation,
+            "findings": call.result.output.findings,
+            "recommendation": call.result.output.recommendation,
         }
     )
 

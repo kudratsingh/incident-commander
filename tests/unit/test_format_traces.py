@@ -725,3 +725,64 @@ def test_a_kind_from_a_newer_harness_is_dumped_not_dropped(tmp_path: Path) -> No
 
     assert "unknown kind=from_the_future" in text
     assert "not yet invented" in text
+
+
+class TestTheRepairedCallIsLabeled:
+    """ADR 0035: a repair re-ask is one logical step, not a second attempt.
+
+    Without the label, run ``779b19a287a7``'s successor would render as two
+    consecutive ``investigation_planner`` calls with no relationship between
+    them — a reader counting planner calls sees a loop that never happened,
+    and a reader auditing spend cannot tell which of the two was billed for
+    the answer that was used.
+    """
+
+    def test_the_repair_re_ask_is_labeled_and_names_its_original(self, tmp_path: Path) -> None:
+        failed = _llm_parse_failed("inv1", "2026-08-01T10:00:05+00:00")
+        failed["record_id"] = "aaaa1111bbbb"
+        repair = _llm("inv1", "2026-08-01T10:00:20+00:00")
+        repair["record_id"] = "cccc2222dddd"
+        repair["repair_of"] = "aaaa1111bbbb"
+        path = _write_jsonl(
+            tmp_path / "redis_saturation.jsonl",
+            [
+                _scenario_start("inv1", "2026-08-01T10:00:00+00:00"),
+                failed,
+                repair,
+                _scenario_end(
+                    "inv1", "2026-08-01T10:00:30+00:00", passed=True, final_state="escalated"
+                ),
+            ],
+        )
+        text = format_trace(path)
+        assert "REPAIR (1 of 1)" in text
+        assert "Repair of trace record: aaaa1111bbbb" in text
+        # The failed leg keeps its own label; the pair reads as one step.
+        assert "PARSE FAILED (billed, no parsed output)" in text
+
+    def test_an_ordinary_call_carries_no_repair_label(self, tmp_path: Path) -> None:
+        path = _write_jsonl(
+            tmp_path / "redis_saturation.jsonl",
+            [
+                _scenario_start("inv1", "2026-08-01T10:00:00+00:00"),
+                _llm("inv1", "2026-08-01T10:00:05+00:00"),
+                _scenario_end(
+                    "inv1", "2026-08-01T10:00:30+00:00", passed=True, final_state="escalated"
+                ),
+            ],
+        )
+        text = format_trace(path)
+        assert "REPAIR" not in text
+        assert "Repair of trace record" not in text
+
+    def test_the_renderers_cap_matches_the_one_the_harness_enforces(self) -> None:
+        """The literal in the script is a copy. Copies drift; this one may not.
+
+        ``format_traces.py`` stays stdlib-only so it can render an archived
+        slice from any checkout, which is why the number is not imported
+        there. A test can import both.
+        """
+        from incident_commander.llm.repair import MAX_OUTPUT_REPAIRS
+        from scripts.format_traces import _MAX_OUTPUT_REPAIRS
+
+        assert _MAX_OUTPUT_REPAIRS == MAX_OUTPUT_REPAIRS

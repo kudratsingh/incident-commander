@@ -38,6 +38,7 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_judge": ("9924e8b7469b1d615715ad30e602a808fe597df027dff8f3064078c94efd364d"),
     "remediation_planner": ("15a7f80c766bc21f2ab7dec47ad77c3a79bcaa70c5de051a8da2273f7afcfe55"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
+    "output_repair": ("461943691f22c6fb6c0c1b62a1cb356dc43eab3ec963b21db069a5701e86a1a0"),
 }
 
 
@@ -67,7 +68,7 @@ def test_the_prompt_directory_is_not_empty() -> None:
     so that adding a prompt does not fail *here*; it fails in the coverage
     test below, which says what to do about it.
     """
-    assert len(available_prompts()) >= 5, (
+    assert len(available_prompts()) >= 6, (
         f"available_prompts() returned {available_prompts()!r}. The snapshot "
         f"suite enumerates the prompt directory, so an empty listing silently "
         f"disables every case in this file. Check that "
@@ -871,3 +872,40 @@ class TestRemediationPlannerDelayDerivation:
         assert "Replay DLQ → verify with `list_dlq_messages` (list should be shorter" not in content
         assert "Replay DLQ **immediately** (no `delay_seconds`)" in content
         assert "Replay DLQ **with a delay**" in content
+
+
+class TestOutputRepairInvariants:
+    """ADR 0035's re-ask. It is one turn, and every word of it is load-bearing.
+
+    The turn is appended to the ORIGINAL planner context, so it competes for
+    attention with an entire investigation. What keeps it from doing damage is
+    that it asks for a re-format and explicitly nothing else — a re-ask that
+    read as "have another go" would let a correct decision drift on its way
+    through the harness, which is the opposite of what ADR 0035 is for.
+    """
+
+    def test_it_carries_the_error_placeholder(self) -> None:
+        # `llm/repair.py` substitutes the pydantic error here. Without the
+        # placeholder the model is told something failed and not what.
+        assert "{error}" in load_prompt("output_repair")
+
+    def test_it_names_the_structured_tool(self) -> None:
+        assert "record_output" in load_prompt("output_repair")
+
+    def test_it_names_the_live_defect_by_shape(self) -> None:
+        content = load_prompt("output_repair")
+        assert "Nested objects are objects" in content
+        assert "Do not JSON-encode a field" in content
+
+    def test_it_forbids_stray_delimiters(self) -> None:
+        # The 779b19a287a7 payload was a valid object plus a stray "]".
+        assert "trailing bracket or brace" in load_prompt("output_repair")
+
+    def test_it_asks_for_a_reformat_and_not_a_rethink(self) -> None:
+        content = load_prompt("output_repair").lower()
+        assert "formatting correction" in content
+        assert "do not revise your findings" in content
+
+    def test_it_states_the_cap(self) -> None:
+        content = load_prompt("output_repair").lower()
+        assert "one correction" in content

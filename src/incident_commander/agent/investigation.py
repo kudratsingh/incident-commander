@@ -21,7 +21,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ValidationError
 
-from incident_commander.agent.accounting import accrue_llm_error, accrue_llm_usage
+from incident_commander.agent.accounting import accrue_llm_error, accrue_structured_call
 from incident_commander.agent.hypothesis import (
     Hypothesis,
     HypothesisCategory,
@@ -37,6 +37,10 @@ from incident_commander.agent.state import (
 )
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
+from incident_commander.llm.repair import (
+    INVESTIGATION_PLANNER_INVALID,
+    call_with_output_repair,
+)
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError, ToolResult
 from incident_commander.tools.policies import Tier, is_cached_read, tier_of, tools_at_or_below
 from incident_commander.tools.registry import TOOL_REGISTRY, description_of
@@ -601,7 +605,9 @@ def make_llm_investigate(
                 run_state = run_state.model_copy(
                     update={"budget": accrue_llm_error(run_state.budget, err, model)}
                 )
-                return _escalate_investigation(run_state, at, f"planner output invalid: {err}")
+                return _escalate_investigation(
+                    run_state, at, f"{INVESTIGATION_PLANNER_INVALID}: {err}"
+                )
 
             killed = _cached_probe_contradiction(prior_hypotheses, step.hypotheses, last_probe)
             if (
@@ -716,22 +722,31 @@ def _plan_next_step(
     llm_client: LLMClientProtocol,
     model: str,
 ) -> tuple[RunState, InvestigationStep]:
-    """One planner LLM call. Updates budget + hypotheses + updated_at."""
-    result = llm_client.call(
+    """One planner LLM call — plus one bounded repair if it does not parse.
+
+    ADR 0035: a ``record_output`` payload the schema rejects is a harness
+    event, not a decision. ``call_with_output_repair`` re-asks once with the
+    validation error quoted back; both calls are billed and both are accrued
+    (``accrue_structured_call``). A second failure raises
+    ``OutputRepairExhausted``, which the caller escalates on exactly as it
+    escalated on the first failure before this change.
+    """
+    call = call_with_output_repair(
+        llm_client,
         system_prompt=load_prompt("investigation_planner"),
         user_message=_format_planner_context(run_state),
         output_model=InvestigationStep,
         model=model,
     )
-    new_budget = accrue_llm_usage(run_state.budget, result, model)
+    new_budget = accrue_structured_call(run_state.budget, call, model)
     updated = run_state.model_copy(
         update={
             "budget": new_budget,
-            "hypotheses": result.output.hypotheses,
+            "hypotheses": call.result.output.hypotheses,
             "updated_at": at,
         }
     )
-    return updated, result.output
+    return updated, call.result.output
 
 
 def _execute_probe(

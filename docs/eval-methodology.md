@@ -255,6 +255,10 @@ Live runs can pass while offline runs fail (canned data went stale) or offline c
 - **Offline drift**: rerun the scenario live, capture new `canned_tool_responses` from the actual platform response, commit the updated YAML.
 - **Live drift**: platform-side change moved a field or renamed a tool. Bump `contracts/platform-tools.snapshot.json` via `make snapshot`, update `src/incident_commander/tools/registry.py` to match.
 
+## A RED whose cause is an output-shape defect is a harness defect
+
+Not every RED is a measurement of the agent. When a run ends because the harness could not decode the agent's own `record_output` payload — the shape of the JSON, not its contents — nothing about the agent's judgement was measured, and the result must not be read as one. Paid run `779b19a287a7` is the reference case ([F-014](../study/findings.md), [ADR 0035](ADR/0035-a-parse-failure-of-our-own-output-is-a-harness-event.md)): the planner made the correct call and emitted the nested `next_action` as a JSON string, the schema rejected it, the run escalated on the first failure, and the scenario graded RED on outcome, evidence and action with a correct decision sitting inside the trace. Such a run is **fixed and re-run**, and the RED is attributed to the harness in the ledger — it is not evidence about the agent, and it is not a scenario-design defect either (the scenario asked for exactly the right thing and got it). Since ADR 0035 the runner names this case rather than leaving it to a reader: `failure_class: planner_output_invalid`, checked ahead of the `transport` bucket, so it can be separated from network noise and from genuine agent findings when a suite is read. A re-run still needs its own explicit go, like any paid run.
+
 ## Case study: DLQ categorization discovery
 
 The first live runs of the Phase-6 remediation scenarios surfaced a real design gap. Documenting here as the reference example for what live-eval is supposed to catch.

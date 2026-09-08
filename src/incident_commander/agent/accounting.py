@@ -7,9 +7,12 @@ not depend on the model client.
 
 from __future__ import annotations
 
+from typing import Any
+
 from incident_commander.agent.state import BudgetLedger
 from incident_commander.llm.client import LLMError, LLMUsage
 from incident_commander.llm.pricing import cost_of
+from incident_commander.llm.repair import RepairedCall
 
 
 def accrue_llm_usage(budget: BudgetLedger, usage: LLMUsage, model: str) -> BudgetLedger:
@@ -56,3 +59,19 @@ def accrue_llm_error(budget: BudgetLedger, err: Exception, model: str) -> Budget
     if not isinstance(err, LLMError) or err.usage is None:
         return budget
     return accrue_llm_usage(budget, err.usage, model)
+
+
+def accrue_structured_call(
+    budget: BudgetLedger, call: RepairedCall[Any], model: str
+) -> BudgetLedger:
+    """Charge a possibly-repaired structured-output call: every leg of it.
+
+    A repair is one more billed LLM call (ADR 0035), and ADR 0015's rule is
+    that a billed call reaches the ledger whatever it produced. Charging only
+    the leg that parsed would make the repaired path look exactly as cheap as
+    the clean one, which is the shape of under-report that lets an unattended
+    run outspend its ceiling.
+    """
+    for failure in call.failures:
+        budget = accrue_llm_error(budget, failure, model)
+    return accrue_llm_usage(budget, call.result, model)

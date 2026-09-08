@@ -1022,3 +1022,76 @@ forbid the row by name. The commander re-derived `remediate_dlq_backlog_success`
   moved the text; the code was writing a schema violation; the hint was the
   wrong half. This rule is in the platform's `context/INDEX.md` too, from the
   other side of the same seam.
+
+---
+
+## F-014 — The harness threw away a correct answer over its wrapping
+
+**Date:** 2026-09-08 (paid run `779b19a287a7`, `remediate_dlq_backlog_success` run C, ~$0.1)
+
+**What happened.** The agent investigated the DLQ correctly and, at step 11, decided the right
+thing: replay the one confirmed-safe row `fc8d2a03-23b3-5371-9acb-46443c73baa5`, leave the poisoned
+`eb798430…` alone, name the `human_required` row for the human. Then it filled `record_output` with
+the nested `next_action` **serialised as a JSON string**, with the enclosing array's `]` still stuck
+to the end:
+
+```json
+"next_action": "{\"kind\": \"remediate\", \"reason\": \"The replay_safe DLQ slice has been read …\"}]"
+```
+
+`InvestigationStep.next_action` is a discriminated union of objects. The field-level `json.loads`
+coercion that had sat on that one field since July raised `Extra data: line 1 column 893
+(char 892)`; `investigation.py` caught it and escalated **on the first failure**. RED on outcome,
+evidence and action. `failure_class: unclassified`. Nothing executed; the paid sequence stopped.
+
+**Evidence that settled it.** The trace, because `llm/client.py` writes the raw response *before*
+parsing (the discipline F-002 produced). `evals/traces/remediate_dlq_backlog_success.jsonl` holds
+the tool-use block verbatim under `parse_failed: true`, and the human report renders it at STEP 11.
+Without the before-parse trace the only artifact would have been an escalation reason quoting a
+pydantic error, and the actual bytes — the thing that says the object was complete and only its
+wrapping was wrong — would not exist anywhere.
+
+**Root cause, in three parts.** None of them is the model.
+
+1. **The coercion covered one field of one model.** Five other nested fields across four other
+   `record_output` models had nothing. The same API behaviour anywhere else would have escalated
+   with no coercion attempted at all.
+2. **The first failure was terminal.** Six guards in this codebase re-ask once before escalating
+   (ADR 0025, 0027, 0028, 0030, 0031, 0032). The one failure the model can *always* fix when told —
+   the shape of its own JSON — had no re-ask.
+3. **The classifier could not name it.** `_classify_failure` buckets on evidence prose; its
+   transport arm matches any summary containing "LLM" and "invalid", which two of the three
+   output-invalid escalation reasons do. This one fell through to `unclassified`. Either way, a
+   schema rejection of our own output was going to be filed as a network problem or as nothing.
+
+**Why the earlier fix did not hold.** The `json.loads` coercion landed in July with an honest
+comment — "Anthropic's tool-use sometimes emits nested oneOf fields as JSON strings" — so the
+failure mode was *known* and had been *seen*. What shipped was a patch for the instance: one field,
+one strict decode, no re-ask, and no test that the class was covered. It then read as solved for
+six weeks. **A known failure mode with a one-field mitigation is not a mitigated failure mode; it
+is a mitigated field**, and the difference is invisible until the same API behaviour lands on a
+different field.
+
+**What was done.** [ADR 0035](../docs/ADR/0035-a-parse-failure-of-our-own-output-is-a-harness-event.md).
+A shared `mode="before"` decoder on a `StructuredOutput` base class that every `record_output` model
+inherits, deriving covered fields from the annotations rather than from a list; one bounded repair
+(`MAX_OUTPUT_REPAIRS = 1`, matching ADR 0030's cap) that re-asks with the pydantic error, billed and
+traced as `repair_of` and rendered as `REPAIR (1 of 1)`; and `failure_class:
+planner_output_invalid` checked ahead of the transport bucket. The exact live payload is a
+red-before/green-after test.
+
+**The rules that come out of it.**
+
+- **A parse failure of the agent's own structured output is a harness event, not a decision.** The
+  agent's answer was in the response; the harness could not open the envelope and escalated to a
+  human as if the agent had given up on a DLQ. A run that ends this way is measuring the harness.
+- **When a defect is about a *class* of field, the fix belongs where the class is defined.** The
+  July patch was applied to the field that failed. Deriving the covered set from
+  `cls.model_fields` costs about the same and cannot be outrun by the next schema change.
+- **Tolerating malformation needs a stated limit and a negative test per rule.** The decoder accepts
+  one thing beyond strict JSON — trailing whitespace and closing delimiters — and refuses a trailing
+  comma, a second value, prose, and a truncated object, each with its own test. "Be liberal in what
+  you accept" without a fence is how a broken payload becomes a quietly wrong object.
+- **A RED whose cause is an output-shape defect is a harness defect, and the run is re-run after the
+  fix, not counted against the agent.** It needs its own `failure_class` for that sentence to be
+  checkable from `report.json` rather than remembered.

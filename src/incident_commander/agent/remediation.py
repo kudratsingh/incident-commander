@@ -30,7 +30,11 @@ from typing import Any, Final, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from incident_commander.agent.accounting import accrue_llm_error, accrue_llm_usage
+from incident_commander.agent.accounting import (
+    accrue_llm_error,
+    accrue_llm_usage,
+    accrue_structured_call,
+)
 from incident_commander.agent.hypothesis import ReadToolName
 from incident_commander.agent.investigation import (
     HINT_ROUTED_TOOLS,
@@ -45,6 +49,12 @@ from incident_commander.agent.state import (
 )
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
+from incident_commander.llm.repair import (
+    REMEDIATION_PLANNER_INVALID,
+    VERIFY_JUDGE_INVALID,
+    call_with_output_repair,
+)
+from incident_commander.llm.structured import StructuredOutput
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError
 from incident_commander.tools.policies import (
     RESOURCE_ARG_FIELDS,
@@ -604,7 +614,7 @@ SOURCE_LISTING_FOR_ACTION: Final[dict[str, tuple[SourceListing, ...]]] = {
 }
 
 
-class RemediationPlan(BaseModel):
+class RemediationPlan(StructuredOutput):
     """One remediation plan: action + verification.
 
     ``action_tool`` and ``verify_tool`` are Literal-typed against the
@@ -671,7 +681,7 @@ class RemediationPlan(BaseModel):
     )
 
 
-class VerificationJudgment(BaseModel):
+class VerificationJudgment(StructuredOutput):
     """Judge LLM's verdict on whether the remediation worked."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -1007,7 +1017,8 @@ def _plan_once(
     the misdirected-verify check — see the comment at their call site.
     """
     try:
-        result = llm_client.call(
+        call = call_with_output_repair(
+            llm_client,
             system_prompt=load_prompt("remediation_planner"),
             user_message=_format_plan_context(run_state, top_hypothesis_name),
             output_model=RemediationPlan,
@@ -1017,7 +1028,9 @@ def _plan_once(
         run_state = run_state.model_copy(
             update={"budget": accrue_llm_error(run_state.budget, err, model)}
         )
-        return run_state, _escalate_remediation(run_state, at, f"planner LLM invalid: {err}")
+        return run_state, _escalate_remediation(
+            run_state, at, f"{REMEDIATION_PLANNER_INVALID}: {err}"
+        )
 
     # Charge the call the moment it returns, BEFORE the plan is judged.
     # The accrual used to sit after the six validation branches below,
@@ -1026,11 +1039,13 @@ def _plan_once(
     # case: they are what a bad planner does repeatedly. ADR 0015 says
     # the meter may over-report and never under-report; a billed call
     # whose output we threw away is still a billed call. This holds for
-    # the re-ask too: a refused plan is billed, then re-asked.
+    # the re-ask too: a refused plan is billed, then re-asked. Since ADR 0035
+    # the same holds one level down: a planner call whose OUTPUT did not parse
+    # is billed, re-asked once, and both legs reach the ledger here.
     run_state = run_state.model_copy(
-        update={"budget": accrue_llm_usage(run_state.budget, result, model)}
+        update={"budget": accrue_structured_call(run_state.budget, call, model)}
     )
-    plan = result.output
+    plan = call.result.output
 
     def refuse(reason: str) -> tuple[RunState, RunState]:
         return run_state, _escalate_remediation(run_state, at, reason)
@@ -2522,7 +2537,7 @@ def make_llm_verify(
                     update={"budget": accrue_llm_error(run_state.budget, err, model)}
                 )
                 return _escalate_remediation(
-                    run_state, at_attempt, f"verify judge LLM invalid: {err}"
+                    run_state, at_attempt, f"{VERIFY_JUDGE_INVALID}: {err}"
                 )
 
             judgment = judgment_result.output

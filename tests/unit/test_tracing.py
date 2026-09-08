@@ -130,3 +130,30 @@ class TestNoTruncationAcrossInvocations:
         tracer = tracer_for("scenario_x", tmp_path)
         tracer.write({"kind": "llm", "invocation_id": "explicit"})
         assert self._records(tmp_path / "scenario_x.jsonl")[0]["invocation_id"] == "explicit"
+
+
+class TestRecordIdentity:
+    """Every record is addressable, so one can name another (ADR 0035).
+
+    ``invocation_id`` groups an attempt; it cannot say *which* record inside
+    that attempt a repair re-ask is repairing. Two planner records with the
+    same invocation id and no per-record identity are two records a reader
+    has to pair by timestamp, which is a guess.
+    """
+
+    def test_every_record_gets_a_record_id(self, tmp_path: Path) -> None:
+        tracer = JsonlTracer(path=tmp_path / "t.jsonl")
+        tracer.write({"kind": "llm"})
+        tracer.write({"kind": "llm"})
+        ids = [
+            json.loads(line)["record_id"]
+            for line in (tmp_path / "t.jsonl").read_text().splitlines()
+        ]
+        assert all(ids)
+        assert len(set(ids)) == 2
+
+    def test_a_caller_supplied_record_id_is_not_overwritten(self, tmp_path: Path) -> None:
+        """``LLMClient`` mints its own so it can hand it back to the caller."""
+        tracer = JsonlTracer(path=tmp_path / "t.jsonl")
+        tracer.write({"kind": "llm", "record_id": "mine"})
+        assert json.loads((tmp_path / "t.jsonl").read_text())["record_id"] == "mine"

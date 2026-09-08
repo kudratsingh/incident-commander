@@ -77,6 +77,12 @@ _OUT_DIR = _REPO_ROOT / "evals" / "reports" / "human"
 # attempts differently and quietly contradict each other.
 PRE_INVOCATION_ID: Final[str] = "pre-invocation-id"
 
+# Mirror of ``incident_commander.llm.repair.MAX_OUTPUT_REPAIRS``, kept as a
+# literal so this script stays importable with only the stdlib (see the
+# comment above the ``evals.artifacts`` import). The copy is not allowed to
+# drift: ``tests/unit/test_format_traces.py`` asserts the two are equal.
+_MAX_OUTPUT_REPAIRS: Final[int] = 1
+
 
 def _fmt_ts(ts: str) -> str:
     return ts.replace("T", " ").split("+")[0].split(".")[0]
@@ -115,6 +121,13 @@ def _fmt_llm(step: int, r: dict[str, Any]) -> str:
     # before the parse exists to preserve — render them, never crash (A-05).
     parse_failed = bool(r.get("parse_failed"))
     label = f"LLM CALL ({role})"
+    # ADR 0035: a call carrying `repair_of` is the one bounded re-ask of the
+    # call whose output did not parse. Labeling it says the pair is ONE
+    # logical step — without it a reader counts two planner calls and reads a
+    # loop that never happened.
+    repair_of = r.get("repair_of")
+    if repair_of:
+        label += f" — REPAIR (1 of {_MAX_OUTPUT_REPAIRS})"
     if parse_failed:
         label += " — PARSE FAILED (billed, no parsed output)"
     lines.append(_rule("="))
@@ -134,6 +147,8 @@ def _fmt_llm(step: int, r: dict[str, Any]) -> str:
         f"cache_write={_token_count(usage, 'cache_creation_input_tokens')}"
     )
     lines.append(f"Stop reason: {response.get('stop_reason', '?')}")
+    if repair_of:
+        lines.append(f"Repair of trace record: {repair_of}")
     lines.append("")
 
     lines.append("--- SYSTEM PROMPT ---")

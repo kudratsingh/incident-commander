@@ -15,16 +15,17 @@ from __future__ import annotations
 
 from typing import Final
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from incident_commander.agent.briefing import EscalationBriefing
 from incident_commander.llm.client import LLMClientProtocol
 from incident_commander.llm.prompts.loader import load_prompt
+from incident_commander.llm.structured import StructuredOutput
 
 USEFUL_THRESHOLD: Final[float] = 0.7
 
 
-class JudgeScore(BaseModel):
+class JudgeScore(StructuredOutput):
     """Per-briefing judge score. LLM emits the two numeric dimensions + reasoning."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")

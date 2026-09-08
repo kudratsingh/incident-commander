@@ -61,6 +61,10 @@ from incident_commander.agent.state import IncidentState, RunState
 from incident_commander.config import Settings
 from incident_commander.llm.client import LLMClient, LLMClientProtocol, LLMError, preflight_auth
 from incident_commander.llm.fakes import CannedLLMClient
+from incident_commander.llm.repair import (
+    OUTPUT_INVALID_PREFIXES,
+    PLANNER_OUTPUT_INVALID_CLASS,
+)
 from incident_commander.persistence.memory import InMemoryCheckpointer
 from incident_commander.tools.mcp_client import (
     MCPClient,
@@ -679,7 +683,7 @@ def run_scenario(
 
 
 def _classify_failure(report: GradeReport, final: RunState | None) -> str:
-    """Bucket a graded run into the five-bucket noise taxonomy.
+    """Bucket a graded run into the noise taxonomy.
 
     Heuristic and deliberately conservative: anything ambiguous lands in
     "unclassified" rather than a wrong bucket. Priority order mirrors the
@@ -692,6 +696,16 @@ def _classify_failure(report: GradeReport, final: RunState | None) -> str:
     failing = {d.dimension for d in report.dimensions if not d.passed}
     evidence = final.evidence if final is not None else ()
     summaries = [e.result_summary for e in evidence]
+    # First, and ahead of "transport", because it is the one bucket that says
+    # the AGENT was right and the HARNESS could not read it. Live run
+    # 779b19a287a7 graded RED on three dimensions with a correct decision in
+    # hand, and reported `failure_class: unclassified` — two of the three
+    # prefixes below already contain "LLM" and "invalid", so without this it
+    # would have been filed as a network problem instead (ADR 0035).
+    if any(
+        summary.startswith(prefix) for summary in summaries for prefix in OUTPUT_INVALID_PREFIXES
+    ):
+        return PLANNER_OUTPUT_INVALID_CLASS
     if any(
         ("MCP error" in s) or ("MCPError" in s) or ("LLM" in s and "invalid" in s)
         for s in summaries

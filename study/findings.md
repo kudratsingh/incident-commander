@@ -879,3 +879,72 @@ YAML rather than papered over; the briefing carries the claim instead.
 
 **Full record:** [ADR 0033](../docs/ADR/0033-a-human-required-chain-root-is-fenced-then-escalated.md),
 [`docs/lessons/live-eval-sequence-2026-09.md` §15](../docs/lessons/live-eval-sequence-2026-09.md).
+
+## F-012 — A true briefing under a false terminal state
+
+**Date:** 2026-09-08 (decided by the user as WO-R2-164; the evidence is live run
+`a0aa257bf865`, already recorded under F-010)
+
+**What happened.** Two separate claims come out of every remediation run: the
+briefing, which is prose, and the terminal state, which is one enum value. The
+suite grades the briefing's content in several ways — groundedness, actionability,
+required substrings — and grades the terminal state against a single expected
+value written in the scenario. On `a0aa257bf865` the briefing said *"leaving four
+unresolved"*, the judge scored it 1.0 for groundedness because it was true, and
+the terminal state said RESOLVED. Both claims were graded. Nothing anywhere
+compared them.
+
+The same shape was sitting, unspent, in `dlq_mixed_partial`: `expected_terminal_state:
+resolved` on a scenario whose own canned briefing named the three rows the run
+left dead-lettered. Its trajectory was correct — one listing, one replay of
+exactly the one safe row, nothing else touched — and every count claim it makes
+is exact. The terminal state was the only wrong thing in the file, and it was
+wrong in the direction that stops a human being paged.
+
+**Evidence that settled it.** Not a red run: a reading, and then a decision. The
+scenario passed 38/38 offline for as long as it existed, and would have passed
+live. What settled it was the user's answer to a question ADR 0032 wrote down
+rather than took: after replaying one of four dead-lettered rows, is the incident
+over? Three options were on the table (keep `resolved`; stabilize and escalate
+naming the remainder; allow several actions per incident so the queue can
+actually be cleared). The middle one was chosen, with the third filed as
+WO-R2-155.
+
+> **A terminal state is a claim, and it is the one claim a briefing cannot
+> correct.** Prose that says "four rows remain" under RESOLVED does not warn
+> anybody, because RESOLVED is what decides whether the prose is ever read. When
+> a run's own briefing contradicts its terminal state, the terminal state is the
+> defect — the writer had the facts.
+
+> **"The action worked" and "the incident is over" are different questions, and
+> there are now two ways they come apart.** ADR 0026 found the first: an action
+> whose entire effect is to hold the system still (`pause_dag`, the fence). This
+> is the second: an action that genuinely resolves, applied to a condition it
+> only partly covers. The first is a property of the tool and is answered once,
+> in a map. The second is a property of the run and can only be answered at the
+> end, from the evidence.
+
+> **A rule that says "act on the safe slice and name the rest" needs to say what
+> the run then REPORTS.** ADR 0031's sentence was written against a run that
+> escalated having done nothing, and it corrects that run. Read as guidance for
+> a run that DID act, its silence about the terminal state supplied the answer
+> RESOLVED. A correction aimed at one failure will be read as licence for its
+> opposite unless the second half is written down.
+
+**The fix.** RESOLVED is admissible only when the alerted condition is cleared
+(`remediation._uncleared_alert_condition`, at the same `RESOLVED` transition as
+ADR 0026's check and reusing its `STABILIZED, NOT RESOLVED` wording). For a
+subject-less DLQ alert the condition is the queue the run read, and a row counts
+as addressed when the one executed action named it — by id, or by the slice it
+narrowed to — so it was replayed, scheduled, or fenced. Inert wherever the alert
+names a subject, because ADR 0032's plan guard already makes RESOLVED honest
+there. `dlq_mixed_partial` expects `escalated` and grades the handoff: the three
+remaining ids and the disposition word for each. Recorded as an amendment to
+ADR 0031, whose framing it corrects, and closed out in ADR 0032, which had
+recommended exactly this and left it for the user.
+
+One honest limit: a run that read the queue only through filtered or partial
+pages escalates too, with a different reason. "Everything I looked at is
+addressed" is satisfiable by looking away, and the cheapest way to close that is
+to require the reading that a subject-less queue alert should have produced
+anyway — the whole page.

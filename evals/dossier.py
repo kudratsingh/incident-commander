@@ -1268,6 +1268,23 @@ def render(
         )
     )
     add("")
+    # The handoff's own claims, and they were missing from this section until
+    # 2026-09-08 (WO-R2-164). On an escalate-with-an-action scenario the
+    # briefing IS the product — `dlq_human_required_escalates` grades three
+    # strings in it, `dlq_mixed_partial` six — and a pre-spend reviewer reading
+    # only the two tables above would not have known those claims existed, let
+    # alone whether this world can satisfy them. Same species as the gap this
+    # module was built to close: the mechanics were checked and the content was
+    # not.
+    add("**Briefing claims** — substrings the handoff must carry")
+    add("")
+    add(
+        _table(
+            ("required substring",),
+            [(text,) for text in expectation.expect_briefing_contains],
+        )
+    )
+    add("")
 
     add("## 2. Chaos seeded")
     add("")

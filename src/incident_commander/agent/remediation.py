@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from incident_commander.agent.accounting import accrue_llm_error, accrue_llm_usage
 from incident_commander.agent.hypothesis import ReadToolName
 from incident_commander.agent.investigation import (
+    HINT_ROUTED_TOOLS,
     AlertSubject,
     SubjectMatch,
     alert_subject,
@@ -1646,8 +1647,10 @@ def _row_source_for_subject(subject: AlertSubject) -> SourceRow | None:
     return None
 
 
-def _row_decisions_in_evidence(run_state: RunState, source: SourceRow) -> dict[str, str | None]:
-    """Every row id this run has seen, mapped to the decision field's value.
+def _row_decisions_in_evidence(
+    evidence: Sequence[EvidenceEntry], source: SourceRow
+) -> dict[str, str | None]:
+    """Every row id these evidence entries carry, mapped to the decision field's value.
 
     The sibling of ``_rows_read_for``, which answers "was this row read at
     all". This one carries the VALUE, because a slice subject asks a question
@@ -1665,7 +1668,7 @@ def _row_decisions_in_evidence(run_state: RunState, source: SourceRow) -> dict[s
     row's hint changes, and the newest reading is the current classification.
     """
     decisions: dict[str, str | None] = {}
-    for entry in run_state.evidence:
+    for entry in evidence:
         if entry.tool_name != source.tool_name:
             continue
         try:
@@ -1764,7 +1767,7 @@ def _unaddressed_alert_subject(plan: RemediationPlan, run_state: RunState) -> Su
     source = _row_source_for_subject(subject)
     if source is None:
         return None
-    decisions = _row_decisions_in_evidence(run_state, source)
+    decisions = _row_decisions_in_evidence(run_state.evidence, source)
     wanted: str | None = None if kind is SubjectKind.UNCLASSIFIED else subject.value
     in_slice = sorted(row for row, hint in decisions.items() if hint == wanted)
     slice_names = ", ".join(in_slice) if in_slice else None
@@ -2590,6 +2593,27 @@ def make_llm_verify(
                         attempted_tool=plan.action_tool,
                         attempted_arguments=plan.action_arguments,
                     )
+                # The tool resolves, and the action landed. One question is
+                # left, and it is about the INCIDENT rather than the action:
+                # is the condition the alert reported actually cleared? With
+                # a subject the answer is yes by construction (ADR 0032
+                # refuses any plan aimed elsewhere). With no subject the
+                # answer is the queue's own rows, and a partial action leaves
+                # some of them — WO-R2-164, decided by the user on 2026-09-08.
+                condition = _uncleared_alert_condition(plan, run_state)
+                if condition is not None:
+                    return _escalate_remediation(
+                        run_state,
+                        at_attempt,
+                        condition.reason,
+                        # Same reasoning as the stabilizer branch above: the
+                        # action executed and was already charged, and
+                        # carrying it onto the briefing's `attempted_action`
+                        # is what stops the writer recommending a repeat of a
+                        # replay that already fired.
+                        attempted_tool=plan.action_tool,
+                        attempted_arguments=plan.action_arguments,
+                    )
                 return run_state.with_state(IncidentState.RESOLVED, at_attempt)
 
         return run_state.with_state(IncidentState.ESCALATED, at_attempt)
@@ -2682,6 +2706,366 @@ def _stabilized_reason(plan: RemediationPlan, rationale: str) -> str:
         f"human decision on the real fix. Treat the stabilization as a clock, "
         f"not an outcome."
     )
+
+
+# ---------------------------------------------------------------------------
+# ADR 0031, amended: a partial action on a subject-less alert does not resolve
+
+
+def _dead_letter_actions() -> frozenset[str]:
+    """Every Tier-1 action that acts on dead-letter rows — derived, not declared.
+
+    Three existing maps already answer this question from three directions,
+    and the union of them is the answer (architecture-principles rule 2):
+
+    * ``SOURCE_ROW_FOR_ACTION`` — the actions that must have READ a row of
+      ``DLQ_ROW_SOURCE`` before touching it (`replay_dlq_by_ids`);
+    * ``SOURCE_LISTING_FOR_ACTION`` — the actions whose slice a dead-letter
+      listing must have COVERED (`replay_dlq_by_category`,
+      `replay_dlq_messages`);
+    * ``investigation.HINT_ROUTED_TOOLS`` — the actions the platform's own DLQ
+      vocabulary routes a row to (`mark_dlq_permanent` joins here, and only
+      here: it is declared inert in both maps above, for reasons ADR 0027 and
+      ADR 0028 each state).
+
+    A fourth hand-written list would be a list to keep in sync with three that
+    already move; ``tests/unit/test_remediation.py`` pins the derived set so it
+    cannot silently empty out or silently grow.
+    """
+    tools = {
+        tool
+        for tool, rows in SOURCE_ROW_FOR_ACTION.items()
+        if any(source.tool_name == DLQ_ROW_SOURCE.tool_name for source in rows)
+    }
+    tools |= {
+        tool
+        for tool, listings in SOURCE_LISTING_FOR_ACTION.items()
+        if any(source.tool_name == DLQ_ROW_SOURCE.tool_name for source in listings)
+    }
+    tools |= {tool for routed in HINT_ROUTED_TOOLS.values() for tool in routed}
+    return frozenset(tools)
+
+
+DEAD_LETTER_ACTIONS: Final[frozenset[str]] = _dead_letter_actions()
+
+
+def _dlq_listing_scopes() -> frozenset[str]:
+    """Every argument that narrows WHICH ROWS a dead-letter listing returns.
+
+    Derived from the same ``ListingScope`` pairs ADR 0028's coverage check
+    reads, so "unfiltered" here means exactly what it means there: narrowed on
+    none of the declared dimensions. `limit` and `offset` are not among them —
+    they page a listing rather than select rows, and the completeness half of
+    ``_whole_queue_readings`` (``total`` against the rows returned) is what
+    answers paging.
+    """
+    return frozenset(
+        scope.read_field
+        for listings in SOURCE_LISTING_FOR_ACTION.values()
+        for source in listings
+        if source.tool_name == DLQ_ROW_SOURCE.tool_name
+        for scope in source.scopes
+    )
+
+
+DLQ_LISTING_SCOPES: Final[frozenset[str]] = _dlq_listing_scopes()
+
+
+class UnaddressedRow(NamedTuple):
+    """One dead-letter row the alerted condition still holds after the action."""
+
+    job_id: str
+    """The row's own id, verbatim from the listing — the briefing names it."""
+    hint: str | None
+    """Its ``remediation_hint`` as the listing carried it. ``None`` is a value,
+    not a lookup miss: the platform returned the row with nothing classified."""
+
+
+class ConditionMiss(NamedTuple):
+    """A verified action that leaves the alerted condition standing.
+
+    The sibling of ``SubjectMiss`` one state later. That one asks, at PLANNING
+    time, "is this action aimed at the incident?" and refuses. This one asks,
+    at the one RESOLVED transition, "did the action clear the condition the
+    alert reported?" and escalates — because by then the action has executed
+    and been verified, and the only remaining question is what to tell the
+    human.
+    """
+
+    unaddressed: tuple[UnaddressedRow, ...]
+    """The rows still dead-lettered and untouched by this run. Empty when the
+    miss is that no reading in evidence shows what the queue held at all."""
+    reason: str
+    """The escalation reason, which is the whole human-facing product here —
+    ``_escalate_remediation`` puts it on the marker's ``result_summary`` and
+    ``agent/briefing.py`` reads it into ``EscalationBriefing.
+    escalation_reason``."""
+
+
+def _evidence_before(
+    evidence: Sequence[EvidenceEntry], tool_name: str
+) -> tuple[EvidenceEntry, ...] | None:
+    """The evidence prefix recorded before ``tool_name`` was first called.
+
+    ``make_remediate`` writes the action's own entry under
+    ``plan.action_tool``, so this is the run as it stood when the action was
+    chosen. Slicing there is not tidiness: the verify probe re-reads the same
+    listing afterwards, a row the action replayed has left the queue by then,
+    and the post-action page therefore answers "what did the action do?" and
+    not "what was the alert about?". Reading one as the other is how a
+    stale-vs-fresh reading confusion becomes a wrong terminal state.
+
+    ``None`` — no entry under that name at all — means the action cannot be
+    located in this run's evidence, so there is no boundary and every reading
+    is of unknown vintage. Callers treat it as inert. A real run cannot produce
+    it: the only edge into VERIFYING is ``make_remediate``'s success path,
+    which appends that entry, and a resumed checkpoint carries the evidence it
+    was written with. A hand-built VERIFYING state can, and answering it from
+    post-action readings would be worse than declining.
+    """
+    prefix: list[EvidenceEntry] = []
+    for entry in evidence:
+        if entry.tool_name == tool_name:
+            return tuple(prefix)
+        prefix.append(entry)
+    return None
+
+
+def _whole_queue_readings(
+    evidence: Sequence[EvidenceEntry], source: SourceRow
+) -> tuple[EvidenceEntry, ...]:
+    """The readings that saw the WHOLE dead-letter queue, not a slice or a page.
+
+    Two conditions, both of them the same claim from different sides:
+
+    * **narrowed on nothing.** Every declared ``ListingScope.read_field`` is
+      absent from the arguments, judged by ``_scope_value``'s four-way collapse
+      — the same comparison ``SubjectMatch.UNFILTERED`` makes for the
+      unclassified subject, and for the same reason: a filtered page cannot
+      show what the whole queue holds.
+    * **the page is the queue.** ``total`` equals the number of rows returned.
+      A reading with ``total: 40`` and four rows saw page one of ten, and
+      "everything I read is addressed" says nothing about the other thirty-six.
+      A response with no usable ``total`` is accepted — the check is a
+      contradiction test, not an invention.
+    """
+    readings: list[EvidenceEntry] = []
+    for entry in evidence:
+        if entry.tool_name != source.tool_name:
+            continue
+        if any(_scope_value(entry.arguments, field) is not None for field in DLQ_LISTING_SCOPES):
+            continue
+        try:
+            parsed = json.loads(entry.result_summary)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(parsed, Mapping):
+            continue
+        rows = parsed.get(source.rows_field)
+        if not isinstance(rows, (list, tuple)):
+            continue
+        total = parsed.get("total")
+        if isinstance(total, int) and not isinstance(total, bool) and total != len(rows):
+            continue
+        readings.append(entry)
+    return tuple(readings)
+
+
+def _rows_addressed_by(
+    plan: RemediationPlan, decisions: Mapping[str, str | None]
+) -> frozenset[str]:
+    """The rows this run's one action ADDRESSED — replayed, scheduled, or fenced.
+
+    "Addressed" is deliberately narrow and provable, because the whole value of
+    the rule rests on it. A row is addressed when the executed action **named**
+    it, one of two ways:
+
+    * **by id** — the row's id is among the action's own resource arguments
+      (``RESOURCE_ARG_FIELDS``, the same map every other guard in this file
+      reads). That covers ``replay_dlq_by_ids(job_ids=[…])``, immediately or on
+      a timer, and ``mark_dlq_permanent(job_id=…)``.
+    * **by slice** — the action narrowed to a value on the dimension the
+      listing classified the row on, so the platform will expand the filter
+      over it (``replay_dlq_by_category(category="replay_safe")`` addresses
+      every row the listing read as ``replay_safe``). An action that does not
+      narrow on that dimension at all (``ListingScope.action_field is None``,
+      which is ``replay_dlq_messages``, the unfilterable sweep) spans every
+      value and so addresses every row.
+
+    Everything else is UNaddressed, and the two directions of that are not
+    symmetric on purpose. Un-provable is unaddressed: when the action also
+    narrows on some OTHER declared scope (``job_type``), no map here says which
+    rows survive that intersection, so the slice route yields nothing rather
+    than guessing. Guessing high would let a run resolve on rows it may never
+    have touched; guessing low escalates with a row named that a human can see
+    was in fact handled. Only one of those two errors wakes somebody for
+    nothing, and it is the recoverable one.
+
+    Note what "addressed" does NOT claim: that the row is fixed. A scheduled
+    replay has not run and a fence repairs nothing (``RESOLUTION_CLASS`` says
+    so, and a fence escalates on its own before this check is ever reached).
+    The claim is only that this run took a decision about the row and recorded
+    it — which is exactly the claim a briefing can honestly carry.
+    """
+    addressed = {
+        value
+        for value in _resource_values(plan.action_tool, plan.action_arguments)
+        if value in decisions
+    }
+    for source in SOURCE_LISTING_FOR_ACTION.get(plan.action_tool, ()):
+        if source.tool_name != DLQ_ROW_SOURCE.tool_name:
+            continue
+        hint_scope = next(
+            (s for s in source.scopes if s.read_field == DLQ_ROW_SOURCE.decision_field), None
+        )
+        if hint_scope is None:
+            continue
+        if any(
+            _scope_value(plan.action_arguments, scope.action_field) is not None
+            for scope in source.scopes
+            if scope is not hint_scope
+        ):
+            continue
+        if hint_scope.action_field is None:
+            addressed |= set(decisions)
+            continue
+        wanted = _scope_value(plan.action_arguments, hint_scope.action_field)
+        if wanted is None:
+            continue
+        addressed |= {row for row, hint in decisions.items() if hint == wanted}
+    return frozenset(addressed)
+
+
+# What each remaining row still needs, in words a human can act on.
+#
+# The TOOL half is derived — ``HINT_ROUTED_TOOLS`` is the platform vocabulary's
+# own routing and this map does not repeat it — and the phrase half is the part
+# no map can hold. Keyed on the same four slice words that map uses, with
+# ``None`` (a row nobody classified) reading as ``unclassified``, so
+# ``tests/unit/test_remediation.py`` can pin the two key sets equal and a hint
+# the platform ships tomorrow cannot go unnamed in a briefing.
+_ROW_DISPOSITION: Final[dict[str, str]] = {
+    "replay_safe": "an immediate replay",
+    "wait_and_replay": "a delayed replay, once the dependency its error names answers",
+    "human_required": "a human decision, behind a fence so no later bulk replay re-runs it",
+    "unclassified": (
+        "a human decision — nobody has classified it, so no routing here can either; "
+        "read its error first"
+    ),
+}
+
+
+def _row_needs(row: UnaddressedRow) -> str:
+    """One remaining row, rendered as "id (hint) needs <disposition> (<tools>)"."""
+    slice_word = row.hint if row.hint is not None else "unclassified"
+    disposition = _ROW_DISPOSITION.get(
+        slice_word, "a decision this agent has no routing for — hand it over as it stands"
+    )
+    tools = HINT_ROUTED_TOOLS.get(slice_word, frozenset())
+    routed = f" ({', '.join(sorted(tools))})" if tools else ""
+    shown = row.hint if row.hint is not None else "no hint"
+    return f"{row.job_id} [{shown}] needs {disposition}{routed}"
+
+
+def _uncleared_condition_reason(
+    plan: RemediationPlan, miss_rows: tuple[UnaddressedRow, ...], read_count: int
+) -> str:
+    """The escalation reason for a verified action that left the condition standing.
+
+    Deliberately the same opening as ``_stabilized_reason`` —
+    ``STABILIZED, NOT RESOLVED`` — because it is the same message to the same
+    reader: the action worked, the incident is not over, here is what still
+    needs a decision. ADR 0026 minted that string for a stabilize-only TOOL and
+    this is a stabilize-only OUTCOME; a second wording for one fact would make
+    the handoff harder to scan and every scenario claim on it tool-specific.
+    """
+    if not miss_rows:
+        return (
+            f"STABILIZED, NOT RESOLVED. {plan.action_tool} executed successfully and "
+            f"{plan.verify_tool} confirmed it landed — this is an escalation by design, "
+            f"not a failed remediation. The alert named no subject, so the incident is "
+            f"the dead-letter queue itself, and no reading in this run's evidence shows "
+            f"what that queue held before the action: every listing was narrowed to a "
+            f"slice or was a partial page. One action cannot be shown to have cleared a "
+            f"queue nobody read whole. Handing this to a human with the action named is "
+            f"the honest end; RESOLVED would claim a queue is clear on evidence that "
+            f"never covered it."
+        )
+    listed = "; ".join(_row_needs(row) for row in miss_rows)
+    return (
+        f"STABILIZED, NOT RESOLVED. {plan.action_tool} executed successfully and "
+        f"{plan.verify_tool} confirmed it landed — this is an escalation by design, not "
+        f"a failed remediation. The alert named no subject, so the incident is the "
+        f"dead-letter queue this run read, and one Tier-1 action (ADR 0008) addressed "
+        f"{read_count - len(miss_rows)} of its {read_count} rows. "
+        f"{len(miss_rows)} row(s) are still dead-lettered with nothing recorded against "
+        f"them by this run: {listed}. Each needs an action this run had no second call "
+        f"for, so a human decides them. The partial fix is real and it is not an "
+        f"outcome: RESOLVED here would tell the on-call the queue is clear while these "
+        f"rows sit in it."
+    )
+
+
+def _uncleared_alert_condition(plan: RemediationPlan, run_state: RunState) -> ConditionMiss | None:
+    """The alerted condition this verified action did not clear (WO-R2-164).
+
+    ``None`` means RESOLVED is admissible. The inert cases, all deliberate:
+
+    * **the alert names a subject.** ADR 0032 already governs those and governs
+      them harder: no plan executes at all unless its action targets the
+      subject, so a run that got this far necessarily addressed what it was
+      paged for. Asking a second question about the furniture beside it would
+      convert every correctly-scoped run into an escalation, which is the
+      opposite of ADR 0031's decision and is not what the user asked for.
+    * **the action is not a dead-letter action.** Restarting a consumer group
+      or invalidating a cache key says nothing about a queue, and a DLQ listing
+      the run happened to read as context is context. The link that makes the
+      queue the incident is the agent's OWN plan: under an alert that names no
+      subject, choosing a dead-letter action is the run saying the dead-letter
+      queue is what it was paged for. Nothing here parses alert free text —
+      that is the heuristic ADR 0031 refused, twice.
+    * **the run read the whole queue and addressed every row of it.** The
+      positive case, and the reason this is a rule rather than a ban: a
+      subject-less alert on a queue holding only replay-safe rows IS cleared by
+      replaying them, and that run resolves.
+
+    * **the action is not locatable in the evidence** — see
+      ``_evidence_before``. Unreachable from ``make_remediate``; declined
+      rather than answered from readings of unknown vintage.
+    * **no dead-letter listing at all before the action.** Then nothing in
+      this run says the queue is the incident, and the read-before-act guards
+      own that question: ADR 0027 refuses a by-id replay whose row was never
+      read and ADR 0028 refuses a category replay no listing covered, so the
+      only DLQ action that reaches VERIFYING on an unread queue is the fence —
+      which escalates one branch earlier as a stabilizer.
+
+    Deliberately NOT inert: a run that DID read the queue but only through
+    filtered pages or partial ones. See ``_whole_queue_readings`` — "everything
+    I looked at is handled" is not "the condition is cleared", and a rule that
+    accepted the narrower read would be satisfied by looking away.
+    """
+    if alert_subject(run_state.alert) is not None:
+        return None
+    if plan.action_tool not in DEAD_LETTER_ACTIONS:
+        return None
+    before = _evidence_before(run_state.evidence, plan.action_tool)
+    if before is None:
+        return None
+    if not any(entry.tool_name == DLQ_ROW_SOURCE.tool_name for entry in before):
+        return None
+    readings = _whole_queue_readings(before, DLQ_ROW_SOURCE)
+    if not readings:
+        return ConditionMiss((), _uncleared_condition_reason(plan, (), 0))
+    decisions = _row_decisions_in_evidence(readings, DLQ_ROW_SOURCE)
+    addressed = _rows_addressed_by(plan, decisions)
+    miss_rows = tuple(
+        UnaddressedRow(row_id, decisions[row_id])
+        for row_id in sorted(decisions)
+        if row_id not in addressed
+    )
+    if not miss_rows:
+        return None
+    return ConditionMiss(miss_rows, _uncleared_condition_reason(plan, miss_rows, len(decisions)))
 
 
 def _escalate_remediation(

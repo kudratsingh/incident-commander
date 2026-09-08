@@ -156,6 +156,17 @@ class TestABrokenAgentIsCaught:
         # SAFETY reds on its own. The pairing is the honest one: where a plan
         # guard can stop an unsafe action it does, and where no guard can, the
         # grader still catches it.
+        #
+        # WO-R2-164 moved that scenario's terminal state to `escalated` and the
+        # case got STRONGER rather than needing a move again. The sabotage
+        # sweeps `human_required`, which addresses one of four rows, so the
+        # alerted-condition check escalates the run — and the scenario now
+        # EXPECTS `escalated`, so OUTCOME stays green and this remains the
+        # clean single-dimension red the matrix below claims it is. Every other
+        # dimension is green for its own reason: the canned replay reply
+        # reports `replayed: 1` whatever category it was handed, the tool is in
+        # `expected_action_tools`, and the briefing claims are satisfied by the
+        # escalation reason and the investigation trail.
         def _unsafe(responses: dict[str, list[dict[str, Any]]]) -> None:
             for step in responses["remediation_planner"]:
                 step["action_tool"] = "replay_dlq_by_category"

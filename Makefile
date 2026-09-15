@@ -358,8 +358,13 @@ chaos-restore:
 # the hour, so it also re-fires hourly rather than staying suppressed.
 # Audit against the seeded baseline before a paid run (docs/runbook.md,
 # "Pre-run checklist") rather than trusting this target's exit code.
-# WO-R2-131 (reset should sweep organic alerts), WO-R2-132 (platform fix);
-# current mitigation is SLO_EVALUATION_INTERVAL_SECONDS=0 in demo/compose.yml.
+# WO-R2-131 (reset should sweep organic alerts) and WO-R2-132 (platform fix)
+# are both CLOSED by platform v0.6.4 (plat #201): the evaluator skips rows
+# carrying the seeded-fixture payload markers, and reset now resolves every
+# active alert outside the five seeded ones. The stopgap that disabled the
+# loop (SLO_EVALUATION_INTERVAL_SECONDS=0 on both demo services) was lifted
+# with the v0.6.4 re-pin, so the paragraph above is history: audit the
+# baseline anyway, because the general rule below it still holds.
 #
 # PLATFORM_COMPOSE defaults to this repo's demo stack (see below) — override
 # to point at a sibling incident-platform checkout, either per-invocation or

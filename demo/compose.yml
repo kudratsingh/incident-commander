@@ -132,7 +132,7 @@ services:
     # One-shot schema migration, mirroring the dev compose's migrate
     # service: with two app-code services (mcp + api) neither should
     # race `alembic upgrade head` at boot.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.3@sha256:683949544d9a6d912a2b80861a1fedc10f389d594c8a4470081c31b2998fa06d
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.4@sha256:75eab293ec26ffce7419fbf5608c32bb6f8d40d86130843018441d382ed22240
     platform: linux/amd64
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
@@ -144,14 +144,14 @@ services:
     restart: "no"
 
   platform:
-    # incident-platform v0.6.3 (INDEX digest published by the platform
+    # incident-platform v0.6.4 (INDEX digest published by the platform
     # release, confirmed with `docker buildx imagetools inspect` — the
     # top-level `Digest:`, not a per-platform child manifest).
     # Do not switch to `:latest` — the whole point of pinning by digest is
     # that a platform-side prompt or schema change can't shift agent
     # behavior without an explicit bump here.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.3@sha256:683949544d9a6d912a2b80861a1fedc10f389d594c8a4470081c31b2998fa06d
-    # v0.6.3 is an OCI index, but it still lists linux/amd64 ONLY (plus an
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.4@sha256:75eab293ec26ffce7419fbf5608c32bb6f8d40d86130843018441d382ed22240
+    # v0.6.4 is an OCI index, but it still lists linux/amd64 ONLY (plus an
     # attestation manifest) — being an index is not the same as being
     # multi-arch, and this one is not. On Apple Silicon this runs under
     # Rosetta (slower cold start, correct output) — REQUIRED there; without
@@ -199,22 +199,21 @@ services:
       # that need a real broken state to fix. Triple-gated on the
       # platform side — refuses to enable in prod. See docs/runbook.md.
       CHAOS_ENABLED: "true"
-      # The SLO evaluator reads the seeded fixtures as real traffic: 4 of
-      # the 7 seeded jobs are dead-lettered, so a fresh eval world is a
+      # NO SLO_EVALUATION_INTERVAL_SECONDS here, deliberately: the
+      # evaluator runs at its default interval. It used to be pinned to "0"
+      # (PR #180) because it read the seeded fixtures as real traffic — 4 of
+      # the 7 seeded jobs are dead-lettered, so a fresh eval world was a
       # "fast burn" by construction and raised a critical alert within 5
-      # minutes of every boot (observed 2026-09-07, WO-R2-132). 0 disables
-      # the loop; scenarios deliver their own alert payloads, so the eval
-      # world loses nothing. Mirrors the api service below.
-      #
-      # Why the loop had to be disabled rather than cleaned up after:
-      # `make eval-reset` does NOT clear organic alerts. Reset undoes what
-      # the eval seeds, and this alert is raised by a platform loop reading
-      # data that reset itself puts BACK — so resetting re-arms it. The
-      # fast-burn dedup key (_fast_burn_dedup_key) is bucketed by the hour,
-      # so it re-fires hourly instead of staying suppressed. This setting is
-      # a workaround in the eval world only; WO-R2-131 tracks making reset
-      # sweep organic alerts, WO-R2-132 the platform-side fix.
-      SLO_EVALUATION_INTERVAL_SECONDS: "0"
+      # minutes of every boot — and `make eval-reset` could not clean up
+      # after it, because resetting the fixtures re-armed the same alert.
+      # Platform v0.6.4 (plat #201) closes both halves: the evaluator skips
+      # rows carrying the `eval_fixture` / `seeded_fixture` payload markers
+      # (WO-R2-132), and reset resolves any active alert outside the five
+      # seeded ones (WO-R2-131). Turning the loop back on is the point of
+      # the bump: an evaluator that never runs cannot be shown to be fixed,
+      # and the eval world should behave like the product. If a fast-burn
+      # alert ever reappears on a seeded world, that is a platform
+      # regression to report — not a reason to re-pin this to 0.
     depends_on:
       postgres:
         condition: service_healthy
@@ -256,7 +255,7 @@ services:
     # Env copied deliberately from the dev compose's `app` service
     # (drift between services is platform bug #69's class); minio/jaeger
     # endpoints omitted with the services (see header note).
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.3@sha256:683949544d9a6d912a2b80861a1fedc10f389d594c8a4470081c31b2998fa06d
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.4@sha256:75eab293ec26ffce7419fbf5608c32bb6f8d40d86130843018441d382ed22240
     platform: linux/amd64
     ports:
       - "${DEMO_API_HOST_PORT:-8000}:8000"
@@ -281,12 +280,11 @@ services:
       # process).
       CHAOS_ENABLED: "true"
       # See the platform service: the worker loops run in THIS process, so
-      # this is the setting that actually silences the fixture-driven SLO
-      # alert (WO-R2-132). Both services must carry it. Note the negative
-      # recorded there: `make eval-reset` cannot clear an alert like this
-      # one — resetting the fixtures re-arms it, and its dedup key is
-      # hour-bucketed, so it returns hourly (WO-R2-131).
-      SLO_EVALUATION_INTERVAL_SECONDS: "0"
+      # this is where the SLO evaluator actually ran, and this is the
+      # service whose "0" was doing the silencing. Both services carried the
+      # override and both have dropped it on v0.6.4 — they must stay in
+      # step, since a leftover "0" on either one would silence the loop
+      # again and make the other service's setting meaningless.
     depends_on:
       postgres:
         condition: service_healthy

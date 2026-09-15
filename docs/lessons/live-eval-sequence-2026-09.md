@@ -225,6 +225,14 @@ demo services, disabling the loop in the eval world. Scenarios deliver their own
 alert payloads, so nothing of value is lost. **WO-R2-132** tracks the real
 platform-side fix — a demo-compose value is a workaround, not a repair.
 
+**Repaired → platform v0.6.4 (plat #201), 2026-09-15.** The evaluator now skips
+rows carrying the seeded-fixture payload markers and reset resolves organic
+alerts, so the workaround was lifted with the v0.6.4 re-pin and the loop runs at
+its default interval again. The workaround stood for eight days and silenced a
+real platform signal on the eval world for all of them — which is the cost a
+compose-level mute always carries, and the reason to book the repair when you
+reach for one.
+
 Generalize past the SLO evaluator: **reset clears what it seeds, and anything
 the world grows on its own outlives it.** Audit against the baseline before a
 run rather than trusting a clean reset exit code.

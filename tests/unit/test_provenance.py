@@ -138,7 +138,7 @@ def _provenance(
         agent_model=agent_model,
         model_role=model_role,
         judge_model="claude-haiku-4-5",
-        strategy="builtin",
+        strategy="baseline",
         scenario=scenario,
         invocation_id="inv000000001",
         recorded_at=datetime(2026, 9, 15, tzinfo=UTC),

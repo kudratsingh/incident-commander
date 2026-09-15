@@ -43,6 +43,33 @@ Optional fields drive richer grading:
 - `canned_tool_responses: {tool_name: {...}}` — canned platform responses for offline determinism
 - `canned_llm_responses: {role: [{...}]}` — canned LLM outputs per role, keyed by `investigation_planner` / `remediation_planner` / `verification_judge` / `briefing_writer` / `briefing_judge`
 
+## Benchmark inventory
+
+`make inventory` regenerates `evals/benchmark_inventory.json` from the validated
+scenario models through `evals/scenarios/loader.py`. The inventory covers the
+loader's entire corpus (currently 40 `.yaml` scenarios; `.yml` is also accepted),
+sorted by scenario name with stable JSON key order. It records declared live MCP
+and LLM flags, the chaos hook name or null, expected terminal state, expected and
+forbidden action tools, forbidden replay ids/categories, and tags. The flags
+describe scenario capabilities; generating this file runs no scenario and makes
+no platform or LLM call. This is a source manifest, not a run artifact.
+
+Family and difficulty each use `{"value": ..., "provisional": true}` until
+WP-1.4 adds explicit metadata. Family takes the first case-insensitive substring
+match across tags, name and alert source, in this order: `dlq` → `dlq`;
+`consumer_lag`/`consumer-lag` → `consumer_lag`; `saga`/`dag` → `workflow`;
+`cache`/`redis` → `cache_redis`; `postgres` → `postgres`; `deploy` → `deploy`;
+`trace` → `traces`; `noise`/`alert_storm` → `noise_control`; `tool_` → `tool_fault`;
+otherwise `uncategorized`. These are provisional legacy groups, not the future
+B (jobs not progressing), C (workflow stuck), and A (API latency) families.
+Difficulty is 0 for names starting with `noise_` and `planner_stops_immediately`
+(controls), and 1 for everything else (provisionally a single obvious fault).
+
+`tests/unit/test_benchmark_inventory.py` requires every scenario exactly once
+and byte-for-byte equality with a fresh in-memory generation. Adding, removing,
+or renaming a scenario reports the affected names; metadata drift requires
+regeneration too. Commit the regenerated inventory with its source change.
+
 ## Grading dimensions
 
 `evals/graders/deterministic.py` scores five dimensions with pure logic (`GradeDimension`). Aggregate `passed` is their conjunction — one red dimension fails the scenario:

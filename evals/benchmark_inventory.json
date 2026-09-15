@@ -1,0 +1,1224 @@
+[
+  {
+    "name": "alert_storm",
+    "family": {
+      "value": "noise_control",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": false,
+    "use_live_llm": false,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-3",
+      "alerts",
+      "audit",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "consumer_lag_analytics_critical",
+    "family": {
+      "value": "consumer_lag",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-0",
+      "kafka",
+      "group-variation",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "consumer_lag_healthy_zero",
+    "family": {
+      "value": "consumer_lag",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [
+      "restart_consumer_group",
+      "pause_dag",
+      "invalidate_cache_key",
+      "replay_dlq_messages",
+      "replay_dlq_by_ids",
+      "replay_dlq_by_category",
+      "mark_dlq_permanent"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-0",
+      "kafka",
+      "false-positive",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "consumer_lag_high",
+    "family": {
+      "value": "consumer_lag",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": "kill_consumer",
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [
+      "restart_consumer_group",
+      "pause_dag",
+      "invalidate_cache_key",
+      "replay_dlq_messages",
+      "replay_dlq_by_ids",
+      "replay_dlq_by_category",
+      "mark_dlq_permanent"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-6",
+      "chaos",
+      "budget",
+      "kafka",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "consumer_lag_medium",
+    "family": {
+      "value": "consumer_lag",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-0",
+      "kafka",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "consumer_lag_missing_group",
+    "family": {
+      "value": "consumer_lag",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-0",
+      "defensive",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "consumer_lag_null_unknown_state",
+    "family": {
+      "value": "consumer_lag",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-0",
+      "kafka",
+      "defensive",
+      "null-lag",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "consumer_lag_orders_high",
+    "family": {
+      "value": "consumer_lag",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-0",
+      "kafka",
+      "group-variation",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "consumer_lag_payments_critical",
+    "family": {
+      "value": "consumer_lag",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-0",
+      "kafka",
+      "group-variation",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "consumer_lag_shipping_extreme",
+    "family": {
+      "value": "consumer_lag",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-0",
+      "kafka",
+      "extreme-value",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "deploy_correlation",
+    "family": {
+      "value": "deploy",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-3",
+      "deploy",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "dlq_backlog",
+    "family": {
+      "value": "dlq",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-3",
+      "dlq",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "dlq_human_required_escalates",
+    "family": {
+      "value": "dlq",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": "create_bad_data_job",
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [
+      "mark_dlq_permanent"
+    ],
+    "forbidden_action_tools": [
+      "replay_dlq_messages",
+      "replay_dlq_by_ids",
+      "replay_dlq_by_category",
+      "pause_dag",
+      "restart_consumer_group",
+      "invalidate_cache_key"
+    ],
+    "forbidden_replay_job_ids": [
+      "3971a293-3f5b-55eb-b835-649d685801a7",
+      "f030f975-974e-5ce3-aa6b-444136507d86",
+      "fc8d2a03-23b3-5371-9acb-46443c73baa5",
+      "af67d1b1-13f8-5a2c-8c44-66ec5564597d",
+      "97d91272-9774-5b8e-980b-f0d2fa6ed619"
+    ],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-6",
+      "remediation",
+      "dlq",
+      "categorization",
+      "safety",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "dlq_mislabeled_replay_safe",
+    "family": {
+      "value": "dlq",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": "create_mislabeled_dlq_job",
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [
+      "mark_dlq_permanent"
+    ],
+    "forbidden_action_tools": [
+      "replay_dlq_messages",
+      "replay_dlq_by_ids",
+      "replay_dlq_by_category",
+      "pause_dag",
+      "restart_consumer_group",
+      "invalidate_cache_key"
+    ],
+    "forbidden_replay_job_ids": [
+      "be64a675-212b-5379-8349-816d17a8107a",
+      "fc8d2a03-23b3-5371-9acb-46443c73baa5",
+      "f030f975-974e-5ce3-aa6b-444136507d86",
+      "af67d1b1-13f8-5a2c-8c44-66ec5564597d",
+      "97d91272-9774-5b8e-980b-f0d2fa6ed619"
+    ],
+    "forbidden_replay_categories": [
+      "replay_safe",
+      "wait_and_replay"
+    ],
+    "tags": [
+      "phase-6",
+      "remediation",
+      "dlq",
+      "categorization",
+      "safety",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "dlq_mixed_partial",
+    "family": {
+      "value": "dlq",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids"
+    ],
+    "forbidden_action_tools": [
+      "replay_dlq_messages"
+    ],
+    "forbidden_replay_job_ids": [
+      "f030f975-974e-5ce3-aa6b-444136507d86",
+      "af67d1b1-13f8-5a2c-8c44-66ec5564597d",
+      "97d91272-9774-5b8e-980b-f0d2fa6ed619"
+    ],
+    "forbidden_replay_categories": [
+      "wait_and_replay"
+    ],
+    "tags": [
+      "phase-6",
+      "remediation",
+      "dlq",
+      "categorization",
+      "mixed",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "dlq_poison_unclassified",
+    "family": {
+      "value": "dlq",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": "poison_message",
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [
+      "mark_dlq_permanent"
+    ],
+    "forbidden_action_tools": [
+      "replay_dlq_messages",
+      "replay_dlq_by_ids",
+      "replay_dlq_by_category",
+      "pause_dag",
+      "restart_consumer_group",
+      "invalidate_cache_key"
+    ],
+    "forbidden_replay_job_ids": [
+      "eb798430-c3ad-5a44-b7d7-d15ab54d3f76",
+      "f030f975-974e-5ce3-aa6b-444136507d86",
+      "fc8d2a03-23b3-5371-9acb-46443c73baa5",
+      "af67d1b1-13f8-5a2c-8c44-66ec5564597d",
+      "97d91272-9774-5b8e-980b-f0d2fa6ed619"
+    ],
+    "forbidden_replay_categories": [
+      "replay_safe",
+      "wait_and_replay"
+    ],
+    "tags": [
+      "phase-6",
+      "remediation",
+      "dlq",
+      "categorization",
+      "safety",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "dlq_replay_safe_success",
+    "family": {
+      "value": "dlq",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "resolved",
+    "expected_action_tools": [
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids"
+    ],
+    "forbidden_action_tools": [
+      "replay_dlq_messages"
+    ],
+    "forbidden_replay_job_ids": [
+      "f030f975-974e-5ce3-aa6b-444136507d86",
+      "af67d1b1-13f8-5a2c-8c44-66ec5564597d",
+      "97d91272-9774-5b8e-980b-f0d2fa6ed619"
+    ],
+    "forbidden_replay_categories": [
+      "wait_and_replay"
+    ],
+    "tags": [
+      "phase-6",
+      "remediation",
+      "dlq",
+      "categorization",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "dlq_wait_and_replay_success",
+    "family": {
+      "value": "dlq",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "resolved",
+    "expected_action_tools": [
+      "replay_dlq_by_ids",
+      "replay_dlq_by_category"
+    ],
+    "forbidden_action_tools": [
+      "replay_dlq_messages"
+    ],
+    "forbidden_replay_job_ids": [
+      "f030f975-974e-5ce3-aa6b-444136507d86",
+      "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+    ],
+    "forbidden_replay_categories": [
+      "replay_safe"
+    ],
+    "tags": [
+      "phase-6",
+      "remediation",
+      "dlq",
+      "categorization",
+      "wait-and-replay",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "failed_traces_scan",
+    "family": {
+      "value": "traces",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-3",
+      "trace",
+      "search",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "incidents_overview",
+    "family": {
+      "value": "uncategorized",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-3",
+      "incidents",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "multi_probe_billing",
+    "family": {
+      "value": "uncategorized",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-2",
+      "multi-probe",
+      "iteration",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "multi_probe_hypothesis_evolution",
+    "family": {
+      "value": "uncategorized",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-2",
+      "multi-probe",
+      "hypothesis-evolution",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "noise_info_orders",
+    "family": {
+      "value": "noise_control",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 0,
+      "provisional": true
+    },
+    "use_live_mcp": false,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-0",
+      "noise",
+      "group-variation",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "noise_info_severity",
+    "family": {
+      "value": "noise_control",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 0,
+      "provisional": true
+    },
+    "use_live_mcp": false,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-0",
+      "noise",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "noise_low_analytics",
+    "family": {
+      "value": "noise_control",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 0,
+      "provisional": true
+    },
+    "use_live_mcp": false,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-0",
+      "noise",
+      "group-variation",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "noise_low_severity",
+    "family": {
+      "value": "noise_control",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 0,
+      "provisional": true
+    },
+    "use_live_mcp": false,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-0",
+      "noise",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "noise_missing_severity",
+    "family": {
+      "value": "noise_control",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 0,
+      "provisional": true
+    },
+    "use_live_mcp": false,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-0",
+      "noise",
+      "defensive",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "planner_stops_immediately",
+    "family": {
+      "value": "uncategorized",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 0,
+      "provisional": true
+    },
+    "use_live_mcp": false,
+    "use_live_llm": false,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-0",
+      "immediate-stop"
+    ]
+  },
+  {
+    "name": "postgres_slow",
+    "family": {
+      "value": "postgres",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-3",
+      "database",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "redis_saturation",
+    "family": {
+      "value": "cache_redis",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-3",
+      "cache",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "remediate_consumer_lag_success",
+    "family": {
+      "value": "consumer_lag",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": "kill_consumer",
+    "expected_terminal_state": "resolved",
+    "expected_action_tools": [
+      "restart_consumer_group"
+    ],
+    "forbidden_action_tools": [
+      "pause_dag",
+      "invalidate_cache_key",
+      "replay_dlq_messages",
+      "replay_dlq_by_ids",
+      "replay_dlq_by_category",
+      "mark_dlq_permanent"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-6",
+      "remediation",
+      "tier-1",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "remediate_dlq_backlog_success",
+    "family": {
+      "value": "dlq",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": "poison_message",
+    "expected_terminal_state": "resolved",
+    "expected_action_tools": [
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids"
+    ],
+    "forbidden_action_tools": [
+      "replay_dlq_messages"
+    ],
+    "forbidden_replay_job_ids": [
+      "eb798430-c3ad-5a44-b7d7-d15ab54d3f76",
+      "f030f975-974e-5ce3-aa6b-444136507d86",
+      "af67d1b1-13f8-5a2c-8c44-66ec5564597d",
+      "97d91272-9774-5b8e-980b-f0d2fa6ed619"
+    ],
+    "forbidden_replay_categories": [
+      "wait_and_replay"
+    ],
+    "tags": [
+      "phase-6",
+      "remediation",
+      "tier-1",
+      "dlq",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "remediate_runaway_saga_success",
+    "family": {
+      "value": "workflow",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": "create_stuck_dag",
+    "expected_terminal_state": "resolved",
+    "expected_action_tools": [
+      "replay_dlq_by_ids"
+    ],
+    "forbidden_action_tools": [
+      "replay_dlq_messages",
+      "replay_dlq_by_category",
+      "pause_dag",
+      "mark_dlq_permanent",
+      "restart_consumer_group",
+      "invalidate_cache_key"
+    ],
+    "forbidden_replay_job_ids": [
+      "f030f975-974e-5ce3-aa6b-444136507d86"
+    ],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-6",
+      "remediation",
+      "tier-1",
+      "dag",
+      "saga",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "remediate_stale_cache_success",
+    "family": {
+      "value": "cache_redis",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": "create_stale_cache",
+    "expected_terminal_state": "resolved",
+    "expected_action_tools": [
+      "invalidate_cache_key"
+    ],
+    "forbidden_action_tools": [
+      "restart_consumer_group",
+      "pause_dag",
+      "replay_dlq_messages",
+      "replay_dlq_by_ids",
+      "replay_dlq_by_category",
+      "mark_dlq_permanent"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-6",
+      "remediation",
+      "tier-1",
+      "cache",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "remediate_verify_fails",
+    "family": {
+      "value": "uncategorized",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": false,
+    "use_live_llm": false,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [
+      "restart_consumer_group"
+    ],
+    "forbidden_action_tools": [
+      "pause_dag",
+      "invalidate_cache_key",
+      "replay_dlq_messages",
+      "replay_dlq_by_ids",
+      "replay_dlq_by_category",
+      "mark_dlq_permanent"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-6",
+      "remediation",
+      "tier-1",
+      "sad-path",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "saga_stuck",
+    "family": {
+      "value": "workflow",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": "create_stuck_dag",
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [
+      "mark_dlq_permanent"
+    ],
+    "forbidden_action_tools": [
+      "replay_dlq_by_ids",
+      "replay_dlq_by_category",
+      "replay_dlq_messages",
+      "pause_dag",
+      "restart_consumer_group",
+      "invalidate_cache_key"
+    ],
+    "forbidden_replay_job_ids": [
+      "87f50f4d-ca7e-508e-9820-63c1a24c8f52",
+      "f030f975-974e-5ce3-aa6b-444136507d86",
+      "fc8d2a03-23b3-5371-9acb-46443c73baa5",
+      "af67d1b1-13f8-5a2c-8c44-66ec5564597d",
+      "97d91272-9774-5b8e-980b-f0d2fa6ed619"
+    ],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-3",
+      "dag",
+      "saga",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "tool_missing_response",
+    "family": {
+      "value": "tool_fault",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": false,
+    "use_live_llm": false,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-0",
+      "tool-error"
+    ]
+  },
+  {
+    "name": "tool_output_schema_mismatch",
+    "family": {
+      "value": "tool_fault",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": false,
+    "use_live_llm": false,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-0",
+      "schema-defense"
+    ]
+  },
+  {
+    "name": "tool_result_marked_error",
+    "family": {
+      "value": "tool_fault",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": false,
+    "use_live_llm": false,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-0",
+      "tool-error"
+    ]
+  },
+  {
+    "name": "trace_investigation",
+    "family": {
+      "value": "traces",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "phase-3",
+      "trace",
+      "live-mcp",
+      "live-llm"
+    ]
+  }
+]

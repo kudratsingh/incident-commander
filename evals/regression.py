@@ -6,9 +6,14 @@ gate. Regressions fail it (exit 1) — and so do DROPPED scenarios (baseline
 scenarios missing from ``latest``): coverage loss is a gate failure, not a
 pass, and genuinely removing a scenario requires a deliberate re-bless via
 ``make baseline`` (A-03). A report produced under ``--only`` is refused
-outright (exit 2) — a filtered report is not a comparable gate input. A
-baseline/latest provenance mismatch (``degraded_count``, ADR 0013) warns and
-never gates (S-14).
+outright (exit 2) — a filtered report is not a comparable gate input. So is a
+comparison whose two sides name DIFFERENT ``agent_model`` ids: a leaderboard
+row built across two models is a statement about neither of them (WP-0.3,
+plan 02 § 9). A baseline/latest provenance mismatch (``degraded_count``, ADR
+0013) warns and never gates (S-14), and a report containing a
+``development``-role run is MARKED non-closing — printed, never gated: a
+development run is a legitimate comparison input, it just cannot close a
+phase (plan 03 § 14).
 
 "latest" is the NEWEST versioned report under ``evals/reports/``, resolved
 by ``evals.artifacts.newest("report")``. Reports are never overwritten, so
@@ -27,7 +32,7 @@ in exactly the case it exists to catch.
 Exit codes — the gate's slice of the ADR 0013 contract: 0 = comparable
 full-suite input with no regressions and no coverage loss; 1 = gate failed
 (regression, dropped scenario, dropped dimension, or vacated assertion);
-2 = not a comparable input (missing file, filtered report).
+2 = not a comparable input (missing file, filtered report, two models).
 """
 
 from __future__ import annotations
@@ -177,6 +182,67 @@ def _print_comparison(result: ComparisonResult) -> None:
         print("no changes vs baseline")
 
 
+def _models_in(report: RunReport) -> frozenset[str]:
+    """Every ``agent_model`` id the report's rows name, ignoring the unknown.
+
+    A row with no provenance predates the record (the committed baseline and
+    every archived report do). Absence is not a second model: it is one less
+    thing known about the same one, so it is skipped rather than counted.
+    """
+    return frozenset(
+        outcome.provenance.agent_model
+        for outcome in report.outcomes
+        if outcome.provenance is not None and outcome.provenance.agent_model
+    )
+
+
+def cross_model_refusal(baseline: RunReport, latest: RunReport) -> str | None:
+    """Why these two reports cannot share a table, or ``None`` if they can.
+
+    A leaderboard row is a claim about one model. Put two models' runs on it
+    and every delta it shows — a regression, an improvement, a token count —
+    is unattributable: the reader cannot tell a behaviour change from a model
+    change, which is precisely the class of untrue statement about the agent
+    that ``INCIDENTS.md`` exists to record after the fact. So this REFUSES
+    (exit 2, "not a comparable input") instead of warning: a warning above a
+    printed table is still a printed table.
+
+    Both ids are named in the message, because the next action depends on
+    which side is wrong — re-run ``latest`` under the baseline's model, or
+    re-bless the baseline on the new one.
+    """
+    models = _models_in(baseline) | _models_in(latest)
+    if len(models) < 2:
+        return None
+    where = "; ".join(
+        f"{name}: {', '.join(sorted(_models_in(report))) or 'unknown'}"
+        for name, report in (("baseline", baseline), ("latest", latest))
+    )
+    return (
+        f"two agent models in one comparison: {', '.join(sorted(models))} ({where}). "
+        "A leaderboard row holds one model — a delta across two is a model change "
+        "and a behaviour change added together, and the table cannot say which. "
+        "Re-run the new report under the other model, or re-bless the baseline on "
+        "this one via 'make baseline'."
+    )
+
+
+def _print_closing_status(latest: RunReport) -> None:
+    """Mark a report that cannot close a phase, without gating on it.
+
+    Plan 03 § 14: a phase report generated with any ``development`` run in it
+    is non-closing. That is a statement about what the report may be USED
+    for, not about whether the suite regressed — development runs are the
+    normal way this gate is exercised — so it prints and never changes the
+    exit code. The mark is in the artifact too (``RunReport.closing``); this
+    is the line that puts it in front of whoever ran the gate.
+    """
+    if reason := latest.non_closing_reason:
+        print(f"NON-CLOSING: latest cannot close a phase — {reason}")
+    else:
+        print("closing: every run in latest was made under the benchmark model role")
+
+
 def _print_provenance(baseline: RunReport, latest: RunReport) -> None:
     """Warn-only provenance check (S-14; ADR 0013).
 
@@ -222,7 +288,14 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+    if (refusal := cross_model_refusal(baseline, latest)) is not None:
+        # Exit 2 with the comparison unprinted, for the same reason a
+        # filtered report is refused above: the gate's output IS the table,
+        # so refusing has to happen before it is written.
+        print(f"GATE REFUSED: {refusal}", file=sys.stderr)
+        return 2
     _print_provenance(baseline, latest)
+    _print_closing_status(latest)
     result = compare(baseline, latest)
     _print_comparison(result)
     if result.dropped_scenarios:

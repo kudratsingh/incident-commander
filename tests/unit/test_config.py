@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from incident_commander.config import Settings, get_settings, settings_env_var_names
+from incident_commander.config import ModelRole, Settings, get_settings, settings_env_var_names
 from incident_commander.llm.pricing import MODEL_PRICING
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -32,6 +32,7 @@ _DOCUMENTED_ENV_VARS = frozenset(
         "AGENT_MAX_CONCURRENT_RUNS",
         "AGENT_MODEL",
         "ANTHROPIC_API_KEY",
+        "BENCHMARK_MODEL",
         "BUDGET_MAX_SECONDS",
         "BUDGET_MAX_TOKENS",
         "BUDGET_MAX_TOOL_CALLS",
@@ -41,6 +42,7 @@ _DOCUMENTED_ENV_VARS = frozenset(
         "DB_MAX_OVERFLOW",
         "DB_POOL_SIZE",
         "DB_POOL_TIMEOUT_SECONDS",
+        "DEVELOPMENT_MODEL",
         "HEALTH_PROBE_TIMEOUT_SECONDS",
         "INVESTIGATE_REPROBE_ATTEMPTS",
         "INVESTIGATE_REPROBE_DELAY_SECONDS",
@@ -262,6 +264,79 @@ class TestSettings:
         # The default must not be the thing that trips the validator.
         valid_kwargs.pop("agent_model", None)
         assert _settings(**valid_kwargs).agent_model in MODEL_PRICING
+
+
+class TestModelRoles:
+    """The two model roles (WP-0.3, plan 02 section 9).
+
+    A role is a pointer to a model id, and the point of recording it is that
+    a reported number can name the model that produced it. Which makes the
+    price guard load-bearing on BOTH new settings: ``--model-role benchmark``
+    resolves ``BENCHMARK_MODEL`` on the paid path, and an unpriced id
+    discovered there bills at the per-class ceiling with one log line — the
+    accounting hole ADR 0015 exists to close, rediscovered mid-run.
+    """
+
+    def test_unpriced_development_model_refused_at_startup(
+        self, valid_kwargs: dict[str, Any]
+    ) -> None:
+        # Red before the validator tuple was extended: with only AGENT_MODEL
+        # and JUDGE_MODEL in it, this constructed fine and the unpriced id
+        # was discovered by the meter instead (divergence D5).
+        valid_kwargs["development_model"] = "not-a-priced-model"
+        with pytest.raises(ValidationError) as err:
+            _settings(**valid_kwargs)
+        message = str(err.value)
+        assert "DEVELOPMENT_MODEL" in message
+        assert "not-a-priced-model" in message
+        assert "MODEL_PRICING" in message
+
+    def test_unpriced_benchmark_model_refused_at_startup(
+        self, valid_kwargs: dict[str, Any]
+    ) -> None:
+        valid_kwargs["benchmark_model"] = "not-a-priced-model"
+        with pytest.raises(ValidationError) as err:
+            _settings(**valid_kwargs)
+        message = str(err.value)
+        assert "BENCHMARK_MODEL" in message
+        assert "MODEL_PRICING" in message
+
+    def test_all_four_unpriced_models_named_in_one_refusal(
+        self, valid_kwargs: dict[str, Any]
+    ) -> None:
+        # One boot, one list — now over four settings, not two.
+        valid_kwargs.update(
+            agent_model="bad-agent",
+            judge_model="bad-judge",
+            development_model="bad-development",
+            benchmark_model="bad-benchmark",
+        )
+        with pytest.raises(ValidationError) as err:
+            _settings(**valid_kwargs)
+        message = str(err.value)
+        for bad in ("bad-agent", "bad-judge", "bad-development", "bad-benchmark"):
+            assert bad in message
+
+    def test_both_role_defaults_are_priced(self, valid_kwargs: dict[str, Any]) -> None:
+        # Same guarantee as the agent-model default: a fresh checkout boots.
+        settings = _settings(**valid_kwargs)
+        assert settings.development_model in MODEL_PRICING
+        assert settings.benchmark_model in MODEL_PRICING
+
+    def test_each_role_resolves_its_own_setting(self, valid_kwargs: dict[str, Any]) -> None:
+        valid_kwargs.update(
+            development_model="claude-haiku-4-5", benchmark_model="claude-sonnet-4-6"
+        )
+        settings = _settings(**valid_kwargs)
+        assert settings.model_for_role(ModelRole.DEVELOPMENT) == "claude-haiku-4-5"
+        assert settings.model_for_role(ModelRole.BENCHMARK) == "claude-sonnet-4-6"
+
+    def test_every_role_has_a_resolvable_model(self, valid_kwargs: dict[str, Any]) -> None:
+        # Total over the enum: a role added without a setting to resolve it
+        # would be a run that cannot say which model it billed.
+        settings = _settings(**valid_kwargs)
+        for role in ModelRole:
+            assert settings.model_for_role(role) in MODEL_PRICING
 
     def test_frozen_direct_mutation_rejected(self, valid_kwargs: dict[str, Any]) -> None:
         settings = _settings(**valid_kwargs)

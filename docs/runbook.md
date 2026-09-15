@@ -577,6 +577,51 @@ retention ADR decides. If an archive does get removed, say so where the next
 reader will look (the commit message, or the run ledger): a gap that
 announces itself is fine; a gap that looks like it was never there is not.
 
+### Model roles: `--model-role` and what a run records (ADR 0013 amendment)
+
+Every run stamps a provenance record into its report and its archive — commander
+revision, the platform image digest read out of `demo/compose.yml`, the agent
+model **and the role it was resolved from**, the judge model, the strategy, the
+scenario, the invocation id, the timestamp, the execution mode, and the run's own
+`BudgetLedger` (the budgets it was actually seeded with plus all four used
+meters). The record is what lets a saved run answer "exactly what produced
+this?" months later, which is what every phase report is built on.
+
+There are two model roles, each a setting:
+
+| Env var | What it is for |
+|---|---|
+| `DEVELOPMENT_MODEL` | harness work, schema work, plumbing, grader logic |
+| `BENCHMARK_MODEL` | every reported number; the phase-close protocol |
+
+Both default to the id in `src/incident_commander/config.py`, so the roles
+change nothing until you point one somewhere else — and when you do, that id
+needs a price row in `src/incident_commander/llm/pricing.py` or startup
+refuses it, exactly as it does for `AGENT_MODEL` and `JUDGE_MODEL`.
+
+Select one per run; the flag resolves `AGENT_MODEL` from it:
+
+```bash
+uv run python -m evals.runner --model-role benchmark --only <scenario_name>
+```
+
+**The default is `development`.** A run that does not name a role is not a
+benchmark run, and a mistyped role is refused (exit 2, nothing runs, nothing
+spent) rather than quietly treated as the default. Two consequences to know
+about before a phase close:
+
+* a report containing any development run is **marked non-closing** — printed
+  by the runner and by `make eval-reg`, and stored in the report as
+  `closing: false`. It is a mark, not a gate failure: development runs are the
+  normal way the regression gate is exercised, they just cannot close a phase.
+* `make eval-reg` **refuses** (exit 2) a comparison whose two sides name
+  different `agent_model` ids, naming both. A leaderboard row across two
+  models shows a model change and a behaviour change added together.
+
+`make eval` / `make eval-live` do not pass the flag through yet — a benchmark
+run invokes `python -m evals.runner` directly until a follow-up adds a make
+variable for it.
+
 ### Runner exit codes and --live refusal (ADR 0013)
 
 `--live` now **refuses to run against an env that would degrade any selected
@@ -595,7 +640,7 @@ the degradation is now recorded in the report (`degraded_count` in
 |---|---|
 | 0 | all selected scenarios passed |
 | 1 | ≥1 scenario failed (regression gate: regression detected, or a baseline scenario dropped from latest) |
-| 2 | the selection is not one the runner will spend on. Three cases: `--live` with no `--only` and no `--smoke` (an unfiltered live run is the whole suite against one shared platform — refused before the settings load, and `make eval-live` refuses the same thing at Makefile parse time); an `--only` pattern matched no scenario — *any* single dead pattern, not only a wholly empty selection, since a dead pattern is a renamed scenario dropping silently out of the run; or, under `--live`, an `--only` pattern that is not a full scenario name — the refusal lists the scenarios it would have substring-matched, because a widened live selection slips past the ADR 0020 gate whenever only one of the matches mutates (regression gate: missing report, or a filtered `--only` `latest.json` — refused as gate input) |
+| 2 | the selection is not one the runner will spend on. Four cases: an unrecognised `--model-role` value (refused before the settings load — a typo must not be read as the default role); `--live` with no `--only` and no `--smoke` (an unfiltered live run is the whole suite against one shared platform — refused before the settings load, and `make eval-live` refuses the same thing at Makefile parse time); an `--only` pattern matched no scenario — *any* single dead pattern, not only a wholly empty selection, since a dead pattern is a renamed scenario dropping silently out of the run; or, under `--live`, an `--only` pattern that is not a full scenario name — the refusal lists the scenarios it would have substring-matched, because a widened live selection slips past the ADR 0020 gate whenever only one of the matches mutates (regression gate: missing report; a filtered `--only` `latest.json`; or a comparison spanning two `agent_model` ids — all refused as gate input) |
 | 3 | preflight/env failure: `--smoke` without `--live`, degraded `--live` env, invalid or missing settings, missing smoke token, LLM auth preflight failure |
 | 4 | principal guard: the token is not the one the selection needs — the smoke token holds more than read scope, or a remediation selection lacks `actions:execute`, or a chaos-seeding selection lacks `chaos:invoke` (each guard probes only the scope its half of the selection needs, and each fails closed on any probe outcome that is neither a scope refusal nor an argument-validation refusal) |
 | 5 | post-stage audit failed, was unreadable, or was inconclusive |

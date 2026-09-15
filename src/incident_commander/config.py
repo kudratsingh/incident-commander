@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from enum import StrEnum
 from functools import lru_cache
 from typing import Final
 
@@ -26,6 +27,37 @@ _CONNECTIONS_PER_RUN: Final[int] = 2
 # polling window that must observe a *change* has to outlast this number —
 # a shorter window can only ever look at the pre-change value.
 PLATFORM_METRICS_INTERVAL_SECONDS: Final[float] = 60.0
+
+
+# The id every model ROLE resolves to unless an operator points it somewhere
+# else. One constant rather than three copies of a literal: the three settings
+# below are the same claim about which model this repo is pinned to, and three
+# copies of a pinned id is three places for it to drift. Verify a change
+# against docs.claude.com (CLAUDE.md) AND add the new id's row to
+# ``MODEL_PRICING`` — the validator at the bottom of this file refuses startup
+# otherwise.
+_DEFAULT_MODEL_ID: Final[str] = "claude-sonnet-4-6"
+
+
+class ModelRole(StrEnum):
+    """Which of the two model roles a run is being made under (plan 02 § 9).
+
+    The roles are not two more model dimensions: a run resolves ``AGENT_MODEL``
+    from exactly one of them, and the role travels with the run's provenance so
+    a reported number can name the role that produced it.
+
+    * ``DEVELOPMENT`` — harness work, schema work, plumbing, grader logic. A
+      report containing one of these cannot close a phase (03 § 14), which is
+      the whole reason the role is recorded rather than inferred.
+    * ``BENCHMARK`` — every reported number; the phase-close protocol.
+
+    ``DEVELOPMENT`` is the default everywhere, deliberately: the expensive
+    mistake is a development run that is mistaken for a benchmark one, so the
+    role that claims less is the one you get without asking.
+    """
+
+    DEVELOPMENT = "development"
+    BENCHMARK = "benchmark"
 
 
 def polling_window_seconds(attempts: int, delay_seconds: float) -> float:
@@ -73,7 +105,22 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr
 
     # Models. Verify strings against docs.claude.com before changing defaults.
-    agent_model: str = "claude-sonnet-4-6"
+    agent_model: str = _DEFAULT_MODEL_ID
+    # The two model ROLES (plan 02 § 9, WP-0.3). ``AGENT_MODEL`` above stays
+    # the id a run actually bills; these two say which id each role resolves
+    # it to, and the eval runner's ``--model-role`` picks between them. They
+    # are separate settings rather than one AGENT_MODEL an operator edits
+    # per run because the point is to tell the two apart *in the artifact*:
+    # every reported number has to name the model that produced it, and a
+    # development run must never be mistaken for a closing one.
+    #
+    # Both default to the id this repo is pinned to, so adding the roles
+    # changes what no run resolves to. Pointing either at another id is a
+    # configuration change that needs that id's row in MODEL_PRICING — the
+    # validator below refuses startup without one, for both of these exactly
+    # as it already does for AGENT_MODEL and JUDGE_MODEL.
+    development_model: str = _DEFAULT_MODEL_ID
+    benchmark_model: str = _DEFAULT_MODEL_ID
     # Required with no default (pinned separately for eval stability, per
     # CLAUDE.md). min_length guards direct construction — Settings(
     # judge_model="") — which env_ignore_empty cannot reach; an empty judge
@@ -231,6 +278,19 @@ class Settings(BaseSettings):
             return ceiling
         return min(self.agent_max_concurrent_runs, ceiling)
 
+    def model_for_role(self, role: ModelRole) -> str:
+        """The model id a run of ``role`` bills (plan 02 § 9).
+
+        The one place the mapping lives. A run resolves ``AGENT_MODEL`` from
+        its role here and then stamps BOTH the role and the resolved id into
+        its provenance, so the artifact answers "which model, under which
+        role?" without the reader having to know this table.
+        """
+        return {
+            ModelRole.DEVELOPMENT: self.development_model,
+            ModelRole.BENCHMARK: self.benchmark_model,
+        }[role]
+
     @model_validator(mode="after")
     def _configured_models_are_priced(self) -> Settings:
         """Refuse at startup any model id with no row in the price table.
@@ -260,6 +320,15 @@ class Settings(BaseSettings):
             for name, value in (
                 ("agent_model", self.agent_model),
                 ("judge_model", self.judge_model),
+                # The two role settings are checked here and not only where
+                # they are resolved: ``--model-role benchmark`` resolves
+                # BENCHMARK_MODEL on the paid path, and an unpriced id
+                # discovered there would be discovered mid-run, billing at
+                # the per-class ceiling with one log line (the accounting
+                # hole ADR 0015 exists to close). Four model settings, one
+                # refusal, before anything is in flight.
+                ("development_model", self.development_model),
+                ("benchmark_model", self.benchmark_model),
             )
             if value not in MODEL_PRICING
         }

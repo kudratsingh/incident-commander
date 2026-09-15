@@ -1,4 +1,6 @@
 name: consumer_lag_medium
+family: consumer_lag
+difficulty: single
 description: "Warning-severity alert on consumer lag. Not paging-grade but still actionable \u2014 agent probes and escalates the finding. Scenario name keeps \"medium\" (the pre-WO-R2-45 value) because the regression baseline and run history are keyed on it.\n"
 tags:
 - read-only

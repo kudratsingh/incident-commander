@@ -1,4 +1,6 @@
 name: trace_investigation
+family: traces
+difficulty: single
 description: 'A specific job failed and the alert carries its trace_id. The planner fetches the trace and its audit events before escalating.
 
   '

@@ -1,4 +1,6 @@
 name: remediate_stale_cache_success
+family: cache_redis
+difficulty: single
 description: 'Cache miss rate spike alert. Agent probes get_redis_health, sees the hit rate has collapsed, then reads the named hot key with get_cache_key_info to confirm it is really there before
   touching it. Remediation planner picks invalidate_cache_key targeting that key; verify RE-READS THAT KEY with get_cache_key_info and expects exists=false — the stale entry is gone.
 

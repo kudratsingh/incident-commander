@@ -1,14 +1,17 @@
 [
   {
     "name": "alert_storm",
+    "template_id": "alert_storm",
+    "seed": 0,
     "family": {
       "value": "noise_control",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "noisy",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": false,
     "chaos_hook": null,
@@ -28,14 +31,17 @@
   },
   {
     "name": "consumer_lag_analytics_critical",
+    "template_id": "consumer_lag_analytics_critical",
+    "seed": 0,
     "family": {
       "value": "consumer_lag",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -55,14 +61,17 @@
   },
   {
     "name": "consumer_lag_healthy_zero",
+    "template_id": "consumer_lag_healthy_zero",
+    "seed": 0,
     "family": {
       "value": "consumer_lag",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -90,14 +99,17 @@
   },
   {
     "name": "consumer_lag_high",
+    "template_id": "consumer_lag_high",
+    "seed": 0,
     "family": {
       "value": "consumer_lag",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": "kill_consumer",
@@ -125,14 +137,17 @@
   },
   {
     "name": "consumer_lag_medium",
+    "template_id": "consumer_lag_medium",
+    "seed": 0,
     "family": {
       "value": "consumer_lag",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -151,14 +166,17 @@
   },
   {
     "name": "consumer_lag_missing_group",
+    "template_id": "consumer_lag_missing_group",
+    "seed": 0,
     "family": {
       "value": "consumer_lag",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -177,14 +195,17 @@
   },
   {
     "name": "consumer_lag_null_unknown_state",
+    "template_id": "consumer_lag_null_unknown_state",
+    "seed": 0,
     "family": {
       "value": "consumer_lag",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -205,14 +226,17 @@
   },
   {
     "name": "consumer_lag_orders_high",
+    "template_id": "consumer_lag_orders_high",
+    "seed": 0,
     "family": {
       "value": "consumer_lag",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -232,14 +256,17 @@
   },
   {
     "name": "consumer_lag_payments_critical",
+    "template_id": "consumer_lag_payments_critical",
+    "seed": 0,
     "family": {
       "value": "consumer_lag",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -259,14 +286,17 @@
   },
   {
     "name": "consumer_lag_shipping_extreme",
+    "template_id": "consumer_lag_shipping_extreme",
+    "seed": 0,
     "family": {
       "value": "consumer_lag",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -286,14 +316,17 @@
   },
   {
     "name": "deploy_correlation",
+    "template_id": "deploy_correlation",
+    "seed": 0,
     "family": {
       "value": "deploy",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -312,14 +345,17 @@
   },
   {
     "name": "dlq_backlog",
+    "template_id": "dlq_backlog",
+    "seed": 0,
     "family": {
       "value": "dlq",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -338,14 +374,17 @@
   },
   {
     "name": "dlq_human_required_escalates",
+    "template_id": "dlq_human_required_escalates",
+    "seed": 0,
     "family": {
       "value": "dlq",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": "create_bad_data_job",
@@ -381,14 +420,17 @@
   },
   {
     "name": "dlq_mislabeled_replay_safe",
+    "template_id": "dlq_mislabeled_replay_safe",
+    "seed": 0,
     "family": {
       "value": "dlq",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "ambiguous",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": "create_mislabeled_dlq_job",
@@ -427,14 +469,17 @@
   },
   {
     "name": "dlq_mixed_partial",
+    "template_id": "dlq_mixed_partial",
+    "seed": 0,
     "family": {
       "value": "dlq",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "ambiguous",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -466,14 +511,17 @@
   },
   {
     "name": "dlq_poison_unclassified",
+    "template_id": "dlq_poison_unclassified",
+    "seed": 0,
     "family": {
       "value": "dlq",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": "poison_message",
@@ -512,14 +560,17 @@
   },
   {
     "name": "dlq_replay_safe_success",
+    "template_id": "dlq_replay_safe_success",
+    "seed": 0,
     "family": {
       "value": "dlq",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -550,14 +601,17 @@
   },
   {
     "name": "dlq_wait_and_replay_success",
+    "template_id": "dlq_wait_and_replay_success",
+    "seed": 0,
     "family": {
       "value": "dlq",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -588,14 +642,17 @@
   },
   {
     "name": "failed_traces_scan",
+    "template_id": "failed_traces_scan",
+    "seed": 0,
     "family": {
       "value": "traces",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -615,14 +672,17 @@
   },
   {
     "name": "incidents_overview",
+    "template_id": "incidents_overview",
+    "seed": 0,
     "family": {
-      "value": "uncategorized",
-      "provisional": true
+      "value": "incidents",
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -641,14 +701,17 @@
   },
   {
     "name": "multi_probe_billing",
+    "template_id": "multi_probe_billing",
+    "seed": 0,
     "family": {
-      "value": "uncategorized",
-      "provisional": true
+      "value": "consumer_lag",
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -668,14 +731,17 @@
   },
   {
     "name": "multi_probe_hypothesis_evolution",
+    "template_id": "multi_probe_hypothesis_evolution",
+    "seed": 0,
     "family": {
-      "value": "uncategorized",
-      "provisional": true
+      "value": "consumer_lag",
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -695,14 +761,17 @@
   },
   {
     "name": "no_fault_healthy_cache",
+    "template_id": "no_fault_healthy_cache",
+    "seed": 0,
     "family": {
       "value": "cache_redis",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "control",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": false,
     "chaos_hook": null,
@@ -729,14 +798,17 @@
   },
   {
     "name": "noise_info_orders",
+    "template_id": "noise_info_orders",
+    "seed": 0,
     "family": {
       "value": "noise_control",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 0,
-      "provisional": true
+      "value": "control",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -755,14 +827,17 @@
   },
   {
     "name": "noise_info_severity",
+    "template_id": "noise_info_severity",
+    "seed": 0,
     "family": {
       "value": "noise_control",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 0,
-      "provisional": true
+      "value": "control",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -780,14 +855,17 @@
   },
   {
     "name": "noise_low_analytics",
+    "template_id": "noise_low_analytics",
+    "seed": 0,
     "family": {
       "value": "noise_control",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 0,
-      "provisional": true
+      "value": "control",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -806,14 +884,17 @@
   },
   {
     "name": "noise_low_severity",
+    "template_id": "noise_low_severity",
+    "seed": 0,
     "family": {
       "value": "noise_control",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 0,
-      "provisional": true
+      "value": "control",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -831,14 +912,17 @@
   },
   {
     "name": "noise_missing_severity",
+    "template_id": "noise_missing_severity",
+    "seed": 0,
     "family": {
       "value": "noise_control",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 0,
-      "provisional": true
+      "value": "control",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -857,14 +941,17 @@
   },
   {
     "name": "planner_stops_immediately",
+    "template_id": "planner_stops_immediately",
+    "seed": 0,
     "family": {
-      "value": "uncategorized",
-      "provisional": true
+      "value": "harness_control",
+      "provisional": false
     },
     "difficulty": {
-      "value": 0,
-      "provisional": true
+      "value": "control",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": false,
     "chaos_hook": null,
@@ -881,14 +968,17 @@
   },
   {
     "name": "postgres_slow",
+    "template_id": "postgres_slow",
+    "seed": 0,
     "family": {
       "value": "postgres",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -907,14 +997,17 @@
   },
   {
     "name": "redis_saturation",
+    "template_id": "redis_saturation",
+    "seed": 0,
     "family": {
       "value": "cache_redis",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,
@@ -933,14 +1026,17 @@
   },
   {
     "name": "remediate_consumer_lag_success",
+    "template_id": "remediate_consumer_lag_success",
+    "seed": 0,
     "family": {
       "value": "consumer_lag",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": "kill_consumer",
@@ -968,14 +1064,17 @@
   },
   {
     "name": "remediate_dlq_backlog_success",
+    "template_id": "remediate_dlq_backlog_success",
+    "seed": 0,
     "family": {
       "value": "dlq",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": "poison_message",
@@ -1007,14 +1106,17 @@
   },
   {
     "name": "remediate_runaway_saga_success",
+    "template_id": "remediate_runaway_saga_success",
+    "seed": 0,
     "family": {
       "value": "workflow",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "multi_hop",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": "create_stuck_dag",
@@ -1046,14 +1148,17 @@
   },
   {
     "name": "remediate_stale_cache_success",
+    "template_id": "remediate_stale_cache_success",
+    "seed": 0,
     "family": {
       "value": "cache_redis",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": "create_stale_cache",
@@ -1082,14 +1187,17 @@
   },
   {
     "name": "remediate_verify_fails",
+    "template_id": "remediate_verify_fails",
+    "seed": 0,
     "family": {
-      "value": "uncategorized",
-      "provisional": true
+      "value": "consumer_lag",
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": false,
     "chaos_hook": null,
@@ -1118,14 +1226,17 @@
   },
   {
     "name": "saga_stuck",
+    "template_id": "saga_stuck",
+    "seed": 0,
     "family": {
       "value": "workflow",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "multi_hop",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": "create_stuck_dag",
@@ -1159,14 +1270,17 @@
   },
   {
     "name": "tool_missing_response",
+    "template_id": "tool_missing_response",
+    "seed": 0,
     "family": {
       "value": "tool_fault",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": false,
     "chaos_hook": null,
@@ -1183,14 +1297,17 @@
   },
   {
     "name": "tool_output_schema_mismatch",
+    "template_id": "tool_output_schema_mismatch",
+    "seed": 0,
     "family": {
       "value": "tool_fault",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": false,
     "chaos_hook": null,
@@ -1207,14 +1324,17 @@
   },
   {
     "name": "tool_result_marked_error",
+    "template_id": "tool_result_marked_error",
+    "seed": 0,
     "family": {
       "value": "tool_fault",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": false,
     "chaos_hook": null,
@@ -1231,14 +1351,17 @@
   },
   {
     "name": "trace_investigation",
+    "template_id": "trace_investigation",
+    "seed": 0,
     "family": {
       "value": "traces",
-      "provisional": true
+      "provisional": false
     },
     "difficulty": {
-      "value": 1,
-      "provisional": true
+      "value": "single",
+      "provisional": false
     },
+    "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
     "chaos_hook": null,

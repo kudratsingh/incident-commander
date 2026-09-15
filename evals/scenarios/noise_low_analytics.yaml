@@ -1,6 +1,8 @@
 # Low-severity noise on the analytics group.
 
 name: noise_low_analytics
+family: noise_control
+difficulty: control
 description: >
   Low-severity signal on analytics-consumer that shouldn't consume the tool
   budget. Verifies TRIAGE noise filter is group-agnostic.

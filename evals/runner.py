@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, TypedDict
 from urllib.parse import urlparse
 
 import yaml
@@ -330,6 +330,26 @@ class ScenarioOutcome(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     scenario: str
+    # The benchmark's grouping keys (WP-1.4), carried on the row rather than
+    # re-derived by the reader. From Phase 2 onward every report slices by
+    # family, difficulty and split, and a reader that joins a report back to
+    # ``evals/scenarios/`` to get them is reading TODAY's classification of a
+    # scenario against LAST MONTH's run — which silently re-labels history
+    # every time a scenario is reclassified, and is the same shape as
+    # invariant 9's "a derived metric computed from a mutable artifact is a
+    # lower bound". Present here, the row says what the scenario was when it
+    # ran.
+    #
+    # ``None`` means "predates the record", which every archived report and
+    # the committed baseline do — they are append-only evidence and are never
+    # rewritten, so the reader tolerates their absence exactly as it does for
+    # ``provenance`` below (ADR 0013's precedent). WP-2.5 groups on these; it
+    # needs no schema change to do it.
+    template_id: str | None = None
+    seed: int | None = None
+    family: str | None = None
+    difficulty: str | None = None
+    benchmark_split: str | None = None
     final_state: IncidentState
     tool_calls_used: int
     report: GradeReport
@@ -380,6 +400,33 @@ class ScenarioOutcome(BaseModel):
     # the reader tolerates its absence (ADR 0013's own precedent for
     # ``live_mcp``/``live_llm`` above).
     provenance: RunProvenance | None = None
+
+
+class _GroupingKeys(TypedDict):
+    """The five benchmark keys, typed so ``**`` unpacking stays checked."""
+
+    template_id: str | None
+    seed: int | None
+    family: str | None
+    difficulty: str | None
+    benchmark_split: str | None
+
+
+def _grouping_keys(scenario: Scenario) -> _GroupingKeys:
+    """The benchmark keys a ``ScenarioOutcome`` carries, from the scenario.
+
+    One function for both construction sites — the clean row and the crash
+    row — because a crashed run is still a run of a scenario in a family, and
+    a crash row missing its keys would drop out of exactly the per-family
+    counts that would have shown the family was crashing.
+    """
+    return {
+        "template_id": scenario.template_id,
+        "seed": scenario.seed,
+        "family": scenario.family.value if scenario.family else None,
+        "difficulty": scenario.difficulty.value if scenario.difficulty else None,
+        "benchmark_split": scenario.benchmark_split.value,
+    }
 
 
 class UngradedScenario(BaseModel):
@@ -1286,6 +1333,7 @@ def run_scenario(
     failure_class, failure_class_detail = _classify_failure(report, final)
     outcome = ScenarioOutcome(
         scenario=scenario.name,
+        **_grouping_keys(scenario),
         final_state=final.state,
         tool_calls_used=final.budget.tool_calls_used,
         report=report,
@@ -1481,6 +1529,7 @@ def _crashed_result(
         crash_class = "transport"
     outcome = ScenarioOutcome(
         scenario=scenario.name,
+        **_grouping_keys(scenario),
         # Both read off the last checkpoint the run wrote. Hardcoding TRIAGE
         # and 0 described a run that never started, which is a different
         # failure from the one being reported — and it made every crashed

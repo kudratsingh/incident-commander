@@ -1,4 +1,6 @@
 name: saga_stuck
+family: workflow
+difficulty: multi_hop
 description: 'A dependency chain has stopped draining. The alert carries the dead-lettered root job_id. The planner probes get_dag_state, sees a `dead_letter` root with retries exhausted holding a `waiting`
   descendant behind it, reads that root''s own dead-letter row, finds it classified `human_required` on a bad-data error — and FENCES THE ROOT, THEN ESCALATES. The fence stops any later bulk or category
   replay from re-running a payload that cannot succeed; it does not un-stick the chain, which is why the run ends escalated with the root named (ADR 0026, WO-R2-160).

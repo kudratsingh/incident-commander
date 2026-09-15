@@ -1,6 +1,8 @@
 # Canned tool response has is_error=True — INVESTIGATING escalates without parsing.
 
 name: tool_result_marked_error
+family: tool_fault
+difficulty: single
 description: >
   The platform's tool returns is_error=True (partial failure, degraded response).
   INVESTIGATING should treat this as an inconclusive probe and escalate rather

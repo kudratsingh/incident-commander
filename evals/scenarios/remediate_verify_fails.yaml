@@ -1,4 +1,6 @@
 name: remediate_verify_fails
+family: consumer_lag
+difficulty: single
 description: 'Consumer lag remediation attempt where the restart succeeded but the verify probe shows lag is still high. Judge returns not_verified; scenario ends ESCALATED, remediation_attempts=1, so PLANNING
   cannot autonomously retry.
 

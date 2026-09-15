@@ -12,6 +12,8 @@
 # came back clean.
 
 name: no_fault_healthy_cache
+family: cache_redis
+difficulty: control
 description: >
   Healthy-world control. A cache-miss-spike alert names a hot key; the key is
   there at its seeded size with a live TTL, and Redis is serving normally.

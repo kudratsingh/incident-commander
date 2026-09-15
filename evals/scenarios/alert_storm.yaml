@@ -1,4 +1,6 @@
 name: alert_storm
+family: noise_control
+difficulty: noisy
 description: 'Many alerts fire in a short window. Planner probes list_active_alerts to see the full storm shape, then list_audit_events to check whether an actor (deploy, config change) triggered it.
 
   '

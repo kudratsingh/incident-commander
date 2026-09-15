@@ -1,4 +1,6 @@
 name: consumer_lag_shipping_extreme
+family: consumer_lag
+difficulty: single
 description: 'Shipping consumer with an extreme lag reading (millions of messages). Verifies large integer handling in the typed output and the planner''s response to clearly-catastrophic evidence.
 
   '

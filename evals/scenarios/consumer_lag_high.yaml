@@ -1,4 +1,6 @@
 name: consumer_lag_high
+family: consumer_lag
+difficulty: single
 description: "Stalled-consumer alert on worker-dispatcher, budget-constrained. Chaos kills the\
   \ consumer; it keeps its Kafka assignment so lag genuinely climbs. The agent confirms the fault\
   \ from the live reading, finds it cannot afford a remediate + verify cycle inside a 5-call\

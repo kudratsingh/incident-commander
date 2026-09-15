@@ -1,4 +1,6 @@
 name: dlq_backlog
+family: dlq
+difficulty: single
 description: 'Dead-letter queue depth crossed the warning threshold. The planner probes list_dlq_messages to see what''s stuck before escalating with the summary.
 
   '

@@ -1,4 +1,6 @@
 name: consumer_lag_missing_group
+family: consumer_lag
+difficulty: single
 description: 'Actionable alert naming a consumer group the platform cannot resolve. The planner probes the group the alert names; the platform has no offsets for it, so it answers lag: null, lag_known: false, source: unrecognized with the requested group''s own cache_key. The graded behaviour is that the agent carries that null through as "unknown", never as zero.
 
   '

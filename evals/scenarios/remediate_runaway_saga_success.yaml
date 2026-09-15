@@ -1,4 +1,6 @@
 name: remediate_runaway_saga_success
+family: workflow
+difficulty: multi_hop
 description: 'Stuck dependency chain alert. Agent probes get_dag_state, sees a dead-lettered root holding waiting descendants behind it, then reads that root''s dead-letter row with list_dlq_messages
   to learn whether replaying it is safe — the chain view carries no remediation_hint, so the DLQ listing is the only place that answer exists. The row reads replay_safe, so the agent emits RemediateAction
   and the remediation planner replays the root with replay_dlq_by_ids; the replayed root completes and the resolver promotes the held descendants, so verify re-probes get_dag_state and expects the chain

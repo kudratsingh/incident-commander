@@ -1,4 +1,6 @@
 name: incidents_overview
+family: incidents
+difficulty: single
 description: 'Paging alert with unclear scope. The planner probes list_incidents to see if there''s a cluster of related incidents, then escalates with context.
 
   '

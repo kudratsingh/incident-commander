@@ -1,6 +1,8 @@
 # Actionable alert with no canned tool response — MCP error path escalates.
 
 name: tool_missing_response
+family: tool_fault
+difficulty: single
 description: >
   Actionable alert but the fake platform has no canned response for the tool.
   Exercises the MCPError escalation path: the transition catches -32601

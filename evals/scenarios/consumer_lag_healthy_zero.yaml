@@ -1,4 +1,6 @@
 name: consumer_lag_healthy_zero
+family: consumer_lag
+difficulty: single
 description: 'Paging alert says consumer_lag_high but the probed reading is zero. This is a false-positive from the platform''s alarm side; the agent shouldn''t invent a remediation, it should attach the
   finding and escalate.
 

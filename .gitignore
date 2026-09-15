@@ -74,6 +74,13 @@ evals/reports/human/*
 evals/reports/dossiers/*
 !evals/reports/dossiers/.gitkeep
 
+# The chaos-teardown latch (ADR 0037, evals/runner.py). Operational state
+# with two transitions — a teardown compensator failed; an operator reset the
+# world — and per-checkout by definition. Ignored so it can never be committed
+# as if it were a fact about the repo; the durable record of the same event is
+# the run's own report row, which IS committed with the archive.
+evals/.chaos-teardown-block.json
+
 # Claude Code runtime artifacts (per-machine)
 .claude/
 

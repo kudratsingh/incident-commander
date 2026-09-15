@@ -29,6 +29,7 @@ from evals.graders.deterministic import (
 )
 from evals.runner import (
     _SCENARIOS_DIR,
+    ChaosSetupFailed,
     RunReport,
     ScenarioOutcome,
     ScenarioResult,
@@ -47,7 +48,13 @@ from evals.runner import (
     write_trajectories,
 )
 from evals.scenarios.loader import load_scenarios
-from evals.scenarios.schema import ChaosHook, PreconditionField, PreconditionProbe, Scenario
+from evals.scenarios.schema import (
+    ChaosHook,
+    ChaosPlan,
+    PreconditionField,
+    PreconditionProbe,
+    Scenario,
+)
 from incident_commander.agent import factory
 from incident_commander.agent.briefing import EscalationBriefing
 from incident_commander.agent.investigation import make_llm_investigate
@@ -2788,6 +2795,65 @@ class TestLiveRefusesABatchOfMutatingScenarios:
         )
         assert code == 7
 
+    @staticmethod
+    def _two_hook_plan_scenario(name: str) -> Scenario:
+        base = _passing_scenario()
+        return base.model_copy(
+            update={
+                "name": name,
+                "use_live_mcp": True,
+                "expectation": base.expectation.model_copy(update={"name": name}),
+                "chaos_plan": ChaosPlan(
+                    setup=(
+                        ChaosHook(
+                            name="kill_consumer",
+                            arguments={"consumer_group": "worker-dispatcher"},
+                        ),
+                        ChaosHook(name="create_stale_cache", arguments={"key": "kafka:lag"}),
+                    ),
+                    teardown=(ChaosHook(name="saturate_redis"),),
+                ),
+            }
+        )
+
+    def test_a_two_hook_plan_is_one_scenario_and_still_runs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """ADR 0020 is UNCHANGED by ChaosPlan: two hooks, still one scenario.
+
+        The whole point of plan 01 section 4's closing line. If the gate
+        counted hooks rather than scenarios, every multi-fault world would be
+        unrunnable the day it landed.
+        """
+        code = self._run_main(
+            monkeypatch,
+            tmp_path,
+            [self._two_hook_plan_scenario("cascade_a")],
+            expect_refusal=False,
+        )
+        assert code != 7
+
+    def test_a_two_hook_plan_still_counts_as_mutating(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The regression this gate would have taken silently.
+
+        ``chaos_setup`` is None on a plan-declaring scenario, so a gate
+        reading the legacy field counts a two-fault seeding scenario as
+        read-only and lets it be selected beside a remediation scenario —
+        exactly the isolation defect exit 7 exists to make impossible.
+        """
+        code = self._run_main(
+            monkeypatch,
+            tmp_path,
+            [self._two_hook_plan_scenario("cascade_a"), self._mutating("remediate_a")],
+            expect_refusal=True,
+        )
+        assert code == 7
+        out = capsys.readouterr().out
+        assert "cascade_a" in out
+        assert "nothing was spent" in out
+
     def test_offline_runs_are_untouched(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
@@ -3314,3 +3380,379 @@ class TestPostStageAuditIsCheckpointed:
         monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke", *_SMOKE_ONLY_ARGS])
         assert runner_module.main() == 0
         assert "checkpoint skipped" in capsys.readouterr().out
+
+
+class TestChaosPlanRunnerSemantics:
+    """WP-1.1: setup in order, settle, preconditions, run, teardown in finally.
+
+    Nine steps in plan 01 section 4, and the two failure semantics that make
+    them worth the machinery: a failed SETUP means the benchmark world is
+    invalid, so the agent is not graded at all; a failed TEARDOWN leaves a
+    valid grade beside a contaminated environment, so it is reported
+    separately and blocks the next live run.
+    """
+
+    @staticmethod
+    def _live_settings() -> Settings:
+        return _test_settings(platform_mcp_url="http://real.host:8001/mcp")
+
+    @staticmethod
+    def _plan_scenario(plan: ChaosPlan, **extra: Any) -> Scenario:
+        base = _passing_scenario()
+        return base.model_copy(
+            update={"name": "plan_probe", "use_live_mcp": True, "chaos_plan": plan, **extra}
+        )
+
+    @staticmethod
+    def _two_hook_plan(**extra: Any) -> ChaosPlan:
+        return ChaosPlan(
+            setup=(
+                ChaosHook(name="kill_consumer", arguments={"consumer_group": "worker-dispatcher"}),
+                ChaosHook(name="create_stale_cache", arguments={"key": "kafka:lag"}),
+            ),
+            teardown=(ChaosHook(name="saturate_redis", arguments={"num_keys": 0}),),
+            **extra,
+        )
+
+    @staticmethod
+    def _record_hooks(
+        monkeypatch: pytest.MonkeyPatch,
+        failures: dict[str, str] | None = None,
+    ) -> list[str]:
+        """Capture hook names in fire order; raise for any name in ``failures``."""
+        fired: list[str] = []
+
+        def _fake_invoke(
+            _url: str, _token: str, name: str, _arguments: dict[str, Any]
+        ) -> dict[str, Any]:
+            fired.append(name)
+            if failures and name in failures:
+                raise ChaosInvocationError(failures[name])
+            return {"seeded": name}
+
+        monkeypatch.setattr(runner_module, "invoke_chaos_hook", _fake_invoke)
+        return fired
+
+    @staticmethod
+    def _stub_live_client(monkeypatch: pytest.MonkeyPatch, scenario: Scenario) -> None:
+        monkeypatch.setattr(
+            runner_module,
+            "make_client",
+            lambda *_a, **_kw: _ClosableCanned(scenario.canned_tool_responses),
+        )
+
+    @pytest.fixture(autouse=True)
+    def _isolated_block(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        # The teardown latch is a real file at a module constant. Without
+        # redirecting it, one failing-teardown test would block live runs in
+        # the developer's own checkout — the unit suite writing operational
+        # state into the repo it is testing.
+        monkeypatch.setattr(runner_module, "_CHAOS_BLOCK_PATH", tmp_path / "block.json")
+
+    # --- setup ---------------------------------------------------------
+
+    def test_setup_hooks_fire_in_declared_order_before_the_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scenario = self._plan_scenario(self._two_hook_plan())
+        fired = self._record_hooks(monkeypatch)
+        self._stub_live_client(monkeypatch, scenario)
+        result = run_scenario(scenario, self._live_settings())
+        assert result.outcome.final_state is IncidentState.ESCALATED
+        # Setup in declaration order, then teardown. Order is the scenario's
+        # claim about its world, not an implementation detail.
+        assert fired == ["kill_consumer", "create_stale_cache", "saturate_redis"]
+
+    def test_setup_results_are_recorded_on_the_outcome(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scenario = self._plan_scenario(self._two_hook_plan())
+        self._record_hooks(monkeypatch)
+        self._stub_live_client(monkeypatch, scenario)
+        result = run_scenario(scenario, self._live_settings())
+        records = result.outcome.chaos_hooks
+        assert [(r.phase, r.name, r.ok) for r in records] == [
+            ("setup", "kill_consumer", True),
+            ("setup", "create_stale_cache", True),
+            ("teardown", "saturate_redis", True),
+        ]
+        # The hook's own response, so the archive can answer "what world was
+        # this graded in?" without a trace file.
+        assert records[0].result == {"seeded": "kill_consumer"}
+
+    def test_a_canned_run_fires_no_hook_from_a_plan(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Offline placeholder URL: the canned responses already encode the
+        # broken state, and teardown has nothing to compensate.
+        scenario = self._plan_scenario(self._two_hook_plan())
+        fired = self._record_hooks(monkeypatch)
+        result = run_scenario(scenario, _test_settings())
+        assert fired == []
+        assert result.outcome.chaos_hooks == ()
+        assert result.outcome.teardown_error is None
+
+    def test_settle_seconds_is_waited_before_the_preconditions_look(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        order: list[str] = []
+
+        def _fake_invoke(
+            _url: str, _token: str, name: str, _arguments: dict[str, Any]
+        ) -> dict[str, Any]:
+            order.append(f"hook:{name}")
+            return {}
+
+        monkeypatch.setattr(runner_module, "invoke_chaos_hook", _fake_invoke)
+        monkeypatch.setattr("evals.runner.time.sleep", lambda s: order.append(f"sleep:{s}"))
+        scenario = self._plan_scenario(
+            ChaosPlan(setup=(ChaosHook(name="saturate_redis"),), settle_seconds=7.5),
+            expected_precondition=(
+                PreconditionProbe(
+                    tool="get_consumer_lag",
+                    arguments={"consumer_group": "billing"},
+                    expect=(PreconditionField(path="lag", equals=42),),
+                ),
+            ),
+        )
+        self._stub_live_client(monkeypatch, scenario)
+        run_scenario(scenario, self._live_settings())
+        # The whole ordering claim in one assertion: seed, settle, then look.
+        assert order[:2] == ["hook:saturate_redis", "sleep:7.5"]
+
+    def test_setup_failure_stops_at_the_failing_hook(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        scenario = self._plan_scenario(self._two_hook_plan())
+        fired = self._record_hooks(
+            monkeypatch, failures={"kill_consumer": "poison_fixture_name_in_use (-32011: no)"}
+        )
+        self._stub_live_client(monkeypatch, scenario)
+        with pytest.raises(ChaosSetupFailed) as excinfo:
+            run_scenario(scenario, self._live_settings())
+        # The second setup hook would have seeded into a world that does not
+        # exist yet, so it must not have fired. Teardown still did.
+        assert fired == ["kill_consumer", "saturate_redis"]
+        message = str(excinfo.value)
+        assert "kill_consumer" in message
+        assert "setup hook 1 of 2" in message
+        # The platform's own refusal NAME, not a bare JSON-RPC code: the
+        # difference between "reset the world" and "retry" (chaos_hooks.py).
+        assert "poison_fixture_name_in_use" in message
+
+    def test_a_legacy_chaos_setup_failure_is_a_chaos_setup_failed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The legacy spelling runs the same path, and the message keeps the
+        # `chaos_setup <hook>` shape the runbook and the crash bucketing read.
+        base = _passing_scenario()
+        scenario = base.model_copy(
+            update={
+                "name": "chaos_probe",
+                "use_live_mcp": True,
+                "chaos_setup": ChaosHook(
+                    name="inject_latency",
+                    arguments={"consumer_group": "wd", "latency_ms": 2000},
+                ),
+            }
+        )
+        self._record_hooks(monkeypatch, failures={"inject_latency": "platform said no"})
+        with pytest.raises(ChaosSetupFailed, match="chaos_probe.*inject_latency.*platform said no"):
+            run_scenario(scenario, self._live_settings())
+
+    def test_a_setup_failure_produces_no_grade_report(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The packet's sharpest requirement: not "it failed", but "no grade".
+
+        A crash row would carry a GradeReport saying the scenario failed, and
+        every rate derived from the report would then describe the agent
+        using an event that happened before it started.
+        """
+        scenario = self._plan_scenario(ChaosPlan(setup=(ChaosHook(name="saturate_redis"),)))
+        self._record_hooks(monkeypatch, failures={"saturate_redis": "platform said no"})
+        report, trajectories, briefings = run_all([scenario], self._live_settings())
+        assert report.outcomes == ()
+        assert trajectories == ()
+        assert briefings == ()
+        assert report.total == 0
+        assert report.passed == 0
+        assert report.failed == 0
+        assert [(u.scenario, u.phase) for u in report.ungraded] == [("plan_probe", "chaos_setup")]
+        assert "saturate_redis" in report.ungraded[0].reason
+
+    def test_a_setup_failure_does_not_stop_the_rest_of_the_suite(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scenario = self._plan_scenario(ChaosPlan(setup=(ChaosHook(name="saturate_redis"),)))
+        self._record_hooks(monkeypatch, failures={"saturate_redis": "platform said no"})
+        report, _, _ = run_all([scenario, _passing_scenario()], self._live_settings())
+        assert [o.scenario for o in report.outcomes] == ["consumer_lag_pass"]
+        assert len(report.ungraded) == 1
+
+    # --- teardown ------------------------------------------------------
+
+    def test_teardown_runs_when_the_agent_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        scenario = self._plan_scenario(self._two_hook_plan())
+        fired = self._record_hooks(monkeypatch)
+        self._stub_live_client(monkeypatch, scenario)
+
+        def _boom(*_a: Any, **_kw: Any) -> Any:
+            raise RuntimeError("the agent loop died")
+
+        monkeypatch.setattr(runner_module, "run_to_completion", _boom)
+        with pytest.raises(runner_module.ScenarioCrash, match="the agent loop died"):
+            run_scenario(scenario, self._live_settings())
+        assert fired[-1] == "saturate_redis"
+
+    def test_teardown_runs_when_a_precondition_is_unmet(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The world was seeded, so it has to be put back even though the run
+        # was abandoned before the first model call.
+        scenario = self._plan_scenario(
+            ChaosPlan(
+                setup=(ChaosHook(name="saturate_redis"),),
+                teardown=(ChaosHook(name="bad_deploy", arguments={"label": "restore"}),),
+            ),
+            expected_precondition=(
+                PreconditionProbe(
+                    tool="get_consumer_lag",
+                    arguments={"consumer_group": "billing"},
+                    expect=(PreconditionField(path="lag", equals=999),),
+                ),
+            ),
+        )
+        fired = self._record_hooks(monkeypatch)
+        self._stub_live_client(monkeypatch, scenario)
+        with pytest.raises(runner_module.PreconditionNotMet):
+            run_scenario(scenario, self._live_settings())
+        assert fired == ["saturate_redis", "bad_deploy"]
+
+    def test_teardown_failure_is_distinct_from_the_grade_and_sets_the_block(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        scenario = self._plan_scenario(self._two_hook_plan())
+        self._record_hooks(monkeypatch, failures={"saturate_redis": "compensator refused"})
+        self._stub_live_client(monkeypatch, scenario)
+        result = run_scenario(scenario, self._live_settings(), invocation_id="abc123")
+        # The RUN is untouched: it was graded on a valid world and it passed.
+        assert result.outcome.report.passed is True
+        assert result.outcome.failure_class == "passed"
+        # The ENVIRONMENT is not.
+        assert result.outcome.teardown_error is not None
+        assert "saturate_redis" in result.outcome.teardown_error
+        assert "compensator refused" in result.outcome.teardown_error
+        assert runner_module.chaos_block_reason() is not None
+        payload = json.loads((tmp_path / "block.json").read_text())
+        assert payload["scenario"] == "plan_probe"
+        assert payload["invocation_id"] == "abc123"
+
+    def test_teardown_failure_beside_an_agent_crash_reports_both(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scenario = self._plan_scenario(self._two_hook_plan())
+        self._record_hooks(monkeypatch, failures={"saturate_redis": "compensator refused"})
+        self._stub_live_client(monkeypatch, scenario)
+
+        def _boom(*_a: Any, **_kw: Any) -> Any:
+            raise RuntimeError("the agent loop died")
+
+        monkeypatch.setattr(runner_module, "run_to_completion", _boom)
+        report, _, _ = run_all([scenario], self._live_settings())
+        outcome = report.outcomes[0]
+        # Two separate facts, neither swallowing the other.
+        assert "the agent loop died" in outcome.report.dimensions[0].detail
+        assert outcome.teardown_error is not None
+        assert "compensator refused" in outcome.teardown_error
+        assert report.contaminated_scenarios == ("plan_probe",)
+
+    def test_a_clean_teardown_leaves_no_block(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        scenario = self._plan_scenario(self._two_hook_plan())
+        self._record_hooks(monkeypatch)
+        self._stub_live_client(monkeypatch, scenario)
+        result = run_scenario(scenario, self._live_settings())
+        assert result.outcome.teardown_error is None
+        assert runner_module.chaos_block_reason() is None
+
+    def test_every_teardown_hook_gets_its_turn_even_after_one_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Stopping at the first failure would skip compensators that might
+        # still have worked, on the one path where that matters most.
+        scenario = self._plan_scenario(
+            ChaosPlan(
+                setup=(ChaosHook(name="kill_consumer", arguments={"consumer_group": "wd"}),),
+                teardown=(
+                    ChaosHook(name="saturate_redis"),
+                    ChaosHook(name="bad_deploy", arguments={"label": "restore"}),
+                ),
+            )
+        )
+        fired = self._record_hooks(monkeypatch, failures={"saturate_redis": "refused"})
+        self._stub_live_client(monkeypatch, scenario)
+        result = run_scenario(scenario, self._live_settings())
+        assert fired == ["kill_consumer", "saturate_redis", "bad_deploy"]
+        assert result.outcome.teardown_error is not None
+        assert "1 of 2 hook(s)" in result.outcome.teardown_error
+
+
+class TestChaosTeardownBlocksFurtherLiveRuns:
+    """The latch: a failed teardown refuses the NEXT live invocation."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_block(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.setattr(runner_module, "_CHAOS_BLOCK_PATH", tmp_path / "block.json")
+
+    def test_live_run_is_refused_while_the_block_is_set(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        runner_module.write_chaos_block("plan_probe", "saturate_redis: compensator refused")
+        _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
+        _forbid_run_all(monkeypatch)
+
+        def _boom(*_a: Any, **_kw: Any) -> Any:
+            raise AssertionError("a blocked run must not touch the platform")
+
+        monkeypatch.setattr(runner_module, "make_client", _boom)
+        monkeypatch.setattr(runner_module, "preflight_auth", _boom)
+        monkeypatch.setattr(runner_module, "invoke_chaos_hook", _boom)
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--only", "dlq_backlog"])
+        assert runner_module.main() == 10
+        out = capsys.readouterr().out
+        assert "CONTAMINATED WORLD" in out
+        assert "compensator refused" in out
+        # A refusal that does not hand over the next command gets worked
+        # around — the ADR 0020 lesson, applied to this gate.
+        assert "make eval-reset PURGE_IDEMPOTENCY=1" in out
+        assert "--clear-chaos-block" in out
+        assert "nothing was spent" in out
+
+    def test_offline_runs_are_not_blocked(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Canned scenarios share no world, so a dirty platform says nothing
+        # about them — and the offline gate must keep running in CI.
+        runner_module.write_chaos_block("plan_probe", "saturate_redis: compensator refused")
+        _isolate_settings_env(monkeypatch, tmp_path, _PLACEHOLDER_LIVE_ENV)
+        _stub_run_pipeline(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["evals.runner"])
+        assert runner_module.main() == 0
+
+    def test_clear_chaos_block_drops_the_latch(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        runner_module.write_chaos_block("plan_probe", "saturate_redis: compensator refused")
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--clear-chaos-block"])
+        assert runner_module.main() == 0
+        assert "compensator refused" in capsys.readouterr().out
+        assert runner_module.chaos_block_reason() is None
+
+    def test_clearing_an_unset_block_is_not_an_error(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["evals.runner", "--clear-chaos-block"])
+        assert runner_module.main() == 0
+        assert "nothing to clear" in capsys.readouterr().out
+
+    def test_an_unreadable_block_file_still_blocks(self, tmp_path: Path) -> None:
+        # It can only exist because something wrote it, and "we cannot tell
+        # what went wrong" is not a reason to carry on spending.
+        (tmp_path / "block.json").write_text("{not json")
+        assert runner_module.chaos_block_reason() is not None

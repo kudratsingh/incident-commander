@@ -150,6 +150,95 @@ They are recorded rather than fixed, because TRIAGE classifies on severity: rewr
 
 Zero of 38 scenario alerts are wire-shaped. A test records that count as a fact rather than leaving it in a report.
 
+## The chaos plan: how a fault world is built and put back
+
+A scenario's fault used to be one hook: `chaos_setup`, fired once before the run. That is still the
+only spelling the 40 shipped scenarios use, and none of them changed. What it could not express is
+a world with more than one fault in it — the multi-fault and cascading scenarios the benchmark is
+growing towards — or, for any world at all, how the fault is undone.
+
+`ChaosPlan` is that declaration, and it lives in the scenario file beside the fault it describes:
+
+```yaml
+chaos_plan:
+  setup:
+  - name: kill_consumer
+    arguments: {consumer_group: worker-dispatcher}
+  - name: create_stale_cache
+    arguments: {key: "kafka:consumer_lag:worker-dispatcher"}
+  teardown:
+  - name: bad_deploy
+    arguments: {label: restore}
+  settle_seconds: 15
+```
+
+A legacy `chaos_setup` normalizes to `ChaosPlan(setup=(hook,))` at load, so there is exactly one
+shape downstream — `Scenario.chaos` — and exactly one predicate for "does this touch the chaos
+surface", `Scenario.seeds_chaos`. **Read those, never `chaos_setup` directly.** A plan-declaring
+scenario leaves the legacy field `None`, so a gate keyed on it counts a two-fault scenario as
+read-only; that is how the ADR 0018 smoke refusal, the ADR 0020 mutating-scenario refusal and the
+`chaos:invoke` principal guard would each have stopped seeing a whole class of scenario without
+anything failing. Declaring both spellings is refused at load, as is a plan whose `setup` is empty.
+
+**Order is the declaration.** Setup hooks fire in the order written, under the chaos principal, and
+seeding stops at the first failure — the hooks after it would be seeding into a world that does not
+exist yet. Every hook, setup and teardown alike, goes through the same `ChaosHook` validator against
+the pinned contract snapshot: closed name set, arguments checked against that entry's `inputSchema`.
+A teardown validated more loosely than a setup would be a second, weaker door into the same
+write+chaos principal.
+
+**`settle_seconds` is one wait for the whole plan**, taken after the last setup hook returns and
+before the preconditions look. It does not replace a probe's `attempts`/`delay_seconds` polling; it
+precedes it, because a cascade's second-order effect can take platform loop ticks to appear at all.
+
+The runner's order is therefore: validate at load → setup in order → record each result
+evaluator-side → settle → preconditions → abort before any model call on an unmet premise, naming
+which → run the agent → grade → teardown in a `finally`.
+
+### The two failure semantics, and why they are different
+
+**A setup failure means the benchmark world is invalid, so the agent is not graded at all.** Not
+"graded red" — *not graded*. The scenario produces no `GradeReport`; it lands in the report's
+`ungraded` list with the hook that failed and the platform's own refusal name, and the totals it is
+absent from are `total`, `passed` and `failed` alike. A crash row would carry a report saying the
+scenario failed, and every rate derived from it would then describe the agent using an event that
+happened before the agent started — the same mistake `bb1fa70abb4c` made one step later, which is
+what the precondition split above exists to prevent. The suite keeps running; the invocation exits
+**9**.
+
+**A teardown failure leaves the run's grade intact and the shared environment dirty.** Those are two
+facts and neither swallows the other: `ScenarioOutcome.teardown_error` records the second one beside
+a grade that stands on its own, and where the agent also crashed, the row carries both. Because the
+thing it damages is the *next* invocation, it also writes a latch — `evals/.chaos-teardown-block.json`
+— and while that file exists every `--live` run is refused with exit **10** before settings load,
+before the guards, before any spend. Offline runs are untouched: canned scenarios share no world.
+Clearing it is two deliberate steps, in this order:
+
+```bash
+make eval-reset PURGE_IDEMPOTENCY=1
+uv run python -m evals.runner --clear-chaos-block
+```
+
+The reset is what actually restores the world; the second command only records that it happened. It
+is a separate invocation rather than a flag on the next run because an assertion bundled into the
+run it unblocks is one nobody makes consciously.
+
+### Teardown is compensators, TTL, and the reset — not compensators alone
+
+The accepted model is **a compensating hook where one exists, plus a bounded `ttl_seconds` on the
+hook itself, plus the authoritative `make eval-reset`**. The schema does not require a non-empty
+`teardown`, and that is deliberate rather than lax: several shipped hooks have no compensator on the
+platform at all (`kill_consumer` has no `revive_consumer`), so a schema demanding one would be
+satisfied by fiction. What the schema does guarantee is that a *declared* teardown is a real,
+validated chaos invocation and that it runs — on a clean return, on an agent crash, on an unmet
+precondition, and on a failed seed.
+
+Teardown does not weaken [ADR 0020](ADR/0020-one-mutating-scenario-per-live-invocation.md), whose
+"alternatives considered" rejected a teardown framework as a *substitute* for one-mutating-scenario
+isolation. It still is not one: teardown can only undo what it knows about, and the seeded
+`replay_safe` row is consumed by the agent, not by a hook. The refusal stays, and a two-hook plan is
+still one scenario to it.
+
 ## Preconditions
 
 A live scenario asserts a fault. Until `expected_precondition` existed, nothing verified the fault was there — so when seeding silently failed, or when the fault was one the chaos framework cannot manufacture at all, the agent investigated a healthy system, failed to find the problem it was told about, and was marked down for it.
@@ -210,7 +299,7 @@ All fields are defaulted, so pre-schema artifacts (the committed `baseline.json`
 
 `make eval-smoke` runs a subset of the suite live under `PLATFORM_SMOKE_TOKEN` (`telemetry:read` + `incidents:read` only), so any Tier-1 attempt 403s at the platform, wraps as an `MCPError`, and grades as an escalation instead of mutating state. The subset is not written down anywhere: the runner derives it from the scenario directory.
 
-**Which scenarios belong is derived, not remembered.** A scenario is smoke-eligible when it declares no `chaos_setup` and no `expected_action_tools` — the runner's own two refusals, not a separate opinion about what "read-only" means. `Scenario.in_smoke_pass` is that predicate plus the hold-back below, and a bare `--smoke` selects exactly the scenarios it admits, printing the count and every hold-back it honoured.
+**Which scenarios belong is derived, not remembered.** A scenario is smoke-eligible when it seeds no chaos (`Scenario.seeds_chaos`, which covers both `chaos_setup` and `chaos_plan`) and declares no `expected_action_tools` — the runner's own two refusals, not a separate opinion about what "read-only" means. `Scenario.in_smoke_pass` is that predicate plus the hold-back below, and a bare `--smoke` selects exactly the scenarios it admits, printing the count and every hold-back it honoured.
 
 Until WO-R2-123 the subset was a hand-written `SMOKE_ONLY` pattern list in the `Makefile`, with `SMOKE_EXCLUDE` beside it. WO-R2-41 added tests that compared those lists against the scenario directory, because nothing had been checking them and they had lost coverage in both directions:
 

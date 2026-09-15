@@ -23,6 +23,7 @@ from pydantic import (
     AnyHttpUrl,
     BaseModel,
     ConfigDict,
+    Field,
     PostgresDsn,
     SecretStr,
     ValidationError,
@@ -49,7 +50,7 @@ from evals.guards import (
 )
 from evals.preconditions import unmet
 from evals.scenarios.loader import load_scenarios
-from evals.scenarios.schema import Scenario
+from evals.scenarios.schema import ChaosHook, ChaosPlan, Scenario
 from evals.tracing import JsonlTracer, TraceKind, tracer_for
 from incident_commander.agent.briefing import EscalationBriefing, render_briefing
 from incident_commander.agent.briefing_enrichment import enrich_briefing
@@ -137,6 +138,21 @@ _PLATFORM_SERVICE: Final[str] = "platform"
 # How many scenario names the non-closing mark spells out before counting the
 # rest (see ``RunReport.non_closing_reason``).
 _NON_CLOSING_NAMES_SHOWN: Final[int] = 5
+# Where a failed chaos teardown records that the shared world is dirty.
+#
+# On DISK and not in memory, because the thing it protects is the NEXT
+# invocation: a teardown compensator that did not fire leaves a fault
+# standing in a platform the next live run will read as its baseline, and
+# that run is the one that pays for it. A flag that dies with the process
+# protects nothing.
+#
+# Not evidence, so not under ``evals/runs/`` — it is mutable operational
+# state with exactly two transitions (a teardown failed; an operator reset
+# the world), and invariant 9 covers the append-only record, not the latch.
+# The durable record of the same event is the run's own report row
+# (``ScenarioOutcome.teardown_error``), which is append-only like everything
+# else in the archive.
+_CHAOS_BLOCK_PATH = _REPO_ROOT / "evals" / ".chaos-teardown-block.json"
 
 
 class ExecutionMode(StrEnum):
@@ -337,6 +353,19 @@ class ScenarioOutcome(BaseModel):
     # briefing stands and the run keeps its grade; only the LLM-written
     # findings/recommendation are missing.
     briefing_error: str | None = None
+    # What the scenario's ChaosPlan did, setup then teardown, in the order
+    # the hooks fired (WP-1.1). Evaluator-only: the archive's answer to
+    # "what world was this run actually graded in?", which used to be
+    # answerable only from a trace file, and only when tracing was on.
+    # Empty on every canned run, and on every live run seeding nothing.
+    chaos_hooks: tuple[ChaosHookRecord, ...] = ()
+    # Set when a teardown hook failed. DISTINCT from every field above,
+    # because it is not a statement about this run at all: the grade stands
+    # exactly as reported, and what is wrong is the SHARED environment the
+    # next run would inherit. It travels with the latch on disk
+    # (``_CHAOS_BLOCK_PATH``), which is what actually refuses the next live
+    # invocation — this is the durable record of why.
+    teardown_error: str | None = None
     # Run provenance (ADR 0013): which legs actually ran live, and whether a
     # declared-live leg silently fell back to canned. Defaults are load-
     # bearing — archived reports and the committed baseline predate these
@@ -351,6 +380,31 @@ class ScenarioOutcome(BaseModel):
     # the reader tolerates its absence (ADR 0013's own precedent for
     # ``live_mcp``/``live_llm`` above).
     provenance: RunProvenance | None = None
+
+
+class UngradedScenario(BaseModel):
+    """A scenario that was abandoned before any grade could exist.
+
+    Its own collection, beside ``outcomes`` rather than inside it, and that
+    placement IS the decision: a ``ScenarioOutcome`` carries a
+    ``GradeReport``, and there is no honest ``GradeReport`` for a run that
+    never happened. A red row saying "crashed" would enter the failed count
+    and the pass rate, and every derived number would then quietly describe
+    the agent using an event that had nothing to do with it — the same
+    mistake `bb1fa70abb4c` made one layer up (`PreconditionNotMet`'s
+    docstring).
+
+    So the report says three things instead of two: how many scenarios
+    passed, how many failed, and how many never ran. A reader who wants the
+    third number can no longer get it by subtraction, which is the point.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    scenario: str
+    #: What stage abandoned it. ``chaos_setup`` is the only value today.
+    phase: str = "chaos_setup"
+    reason: str
 
 
 class RunReport(BaseModel):
@@ -389,6 +443,16 @@ class RunReport(BaseModel):
     # the scrollback (ADR 0013).
     closing: bool | None = None
     outcomes: tuple[ScenarioOutcome, ...]
+    # Scenarios whose fault world could not be built (WP-1.1). Defaulted for
+    # the same back-compatibility reason as ``degraded_count`` and
+    # ``closing`` above: every archived report and the committed baseline
+    # predate the field and must keep parsing.
+    ungraded: tuple[UngradedScenario, ...] = ()
+
+    @property
+    def contaminated_scenarios(self) -> tuple[str, ...]:
+        """Rows whose chaos teardown failed — the shared world may be dirty."""
+        return tuple(o.scenario for o in self.outcomes if o.teardown_error is not None)
 
     @property
     def development_scenarios(self) -> tuple[str, ...]:
@@ -511,6 +575,12 @@ class ScenarioCrash(Exception):
         super().__init__(f"{type(cause).__name__}: {cause}")
         self.cause = cause
         self.checkpoints = checkpoints
+        # Set by ``run_scenario`` when the chaos teardown that follows a
+        # crashed run ALSO failed. Carried beside the cause rather than
+        # folded into it: the crash says what happened to the agent, this
+        # says what happened to the world, and the second one decides
+        # whether the next live run may start at all.
+        self.teardown_error: str | None = None
 
     @property
     def final(self) -> RunState | None:
@@ -649,6 +719,224 @@ def _first_json_object(result: ToolResult) -> dict[str, Any] | None:
     return None
 
 
+class ChaosSetupFailed(RuntimeError):
+    """A setup hook did not fire, so the scenario's world was never built.
+
+    Deliberately NOT a graded failure, and deliberately not a
+    ``ScenarioCrash``. The two say different things: a crash is "the agent's
+    run died", and this is "there was no world to run the agent in". Grading
+    a run whose fault was never manufactured is how a report comes to
+    describe the agent when it is describing the environment — the same
+    mistake ``PreconditionNotMet`` exists to avoid one step later, and the
+    reason ``run_all`` records this as *ungraded* rather than as a failed
+    scenario (plan 01 § 4: "setup failure → benchmark world invalid; do not
+    grade the agent").
+    """
+
+
+class ChaosHookRecord(BaseModel):
+    """What one chaos invocation did, recorded evaluator-side.
+
+    Evaluator-only by construction: it is reachable from the grader's
+    ``ScenarioOutcome`` and the run archive, and from nowhere the agent
+    reads. Nothing here is ever put on ``RunState``, on the evidence ledger,
+    or into a prompt — a scenario that told the agent which faults were
+    seeded would be measuring recall of the answer key (WP-1.3 tests that
+    boundary; this packet must not be the thing that breaches it).
+
+    ``result`` holds the hook's own parsed response (seeded ids, fixture
+    names, TTLs), which is what makes a post-hoc reading of the archive able
+    to say what the world was — the question "what exactly was seeded?" was
+    previously answerable only from the trace file, and only when tracing
+    happened to be on.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase: str
+    name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    ok: bool = True
+    result: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+
+
+def _invoke_plan_hook(
+    scenario: Scenario,
+    hook: ChaosHook,
+    settings: Settings,
+    tracer: JsonlTracer | None,
+    *,
+    phase: str,
+) -> ChaosHookRecord:
+    """Fire one hook under the chaos principal and record what happened.
+
+    Never raises: both callers want the record, and they disagree about what
+    a failure MEANS — a failed setup abandons the scenario, a failed teardown
+    lets the graded run stand and latches the environment dirty. Deciding
+    that here would put both policies in the wrong place.
+    """
+    record = ChaosHookRecord(phase=phase, name=hook.name, arguments=dict(hook.arguments))
+    try:
+        result = invoke_chaos_hook(
+            str(settings.platform_mcp_url),
+            settings.platform_token.get_secret_value(),
+            hook.name,
+            dict(hook.arguments),
+        )
+    except ChaosInvocationError as err:
+        # ``err`` already carries the platform's own refusal NAME out of
+        # ``error.data.error_code`` (evals/chaos_hooks.py) — the difference
+        # between "poison_fixture_name_in_use: reset, do not retry" and an
+        # anonymous JSON-RPC -32011 that reads like flakiness. It is carried
+        # verbatim rather than re-summarized for that reason.
+        record = record.model_copy(update={"ok": False, "error": str(err)})
+    else:
+        record = record.model_copy(update={"result": result})
+    if tracer is not None:
+        tracer.write(
+            {
+                # One kind for both halves of a plan, with ``phase`` saying
+                # which. A second TraceKind would have to land in
+                # evals/tracing.py and gain a renderer in the trace
+                # formatter, neither of which this packet owns — and the
+                # record is the same shape either way.
+                "kind": TraceKind.CHAOS_SETUP,
+                "scenario": scenario.name,
+                "phase": phase,
+                "hook": hook.name,
+                "arguments": dict(hook.arguments),
+                "result": record.result,
+                **({"error": record.error} if record.error is not None else {}),
+            }
+        )
+    return record
+
+
+def _seed_chaos_plan(
+    scenario: Scenario,
+    plan: ChaosPlan,
+    settings: Settings,
+    tracer: JsonlTracer | None,
+) -> tuple[ChaosHookRecord, ...]:
+    """Run the plan's setup hooks in declared order; stop at the first failure.
+
+    Order is the declaration, not an implementation detail: a cascading world
+    is only the world it claims to be if its second fault lands on top of the
+    first. Stopping at the first failure follows from the same reading — the
+    hooks after it would be seeding into a world that does not exist yet.
+    """
+    records: list[ChaosHookRecord] = []
+    for position, hook in enumerate(plan.setup, start=1):
+        record = _invoke_plan_hook(scenario, hook, settings, tracer, phase="setup")
+        records.append(record)
+        if not record.ok:
+            raise ChaosSetupFailed(
+                f"scenario {scenario.name!r} chaos_setup {hook.name!r} "
+                f"(setup hook {position} of {len(plan.setup)}) failed: {record.error}. "
+                "The fault world was never manufactured, so the agent was not run and "
+                "nothing was graded — this says nothing about the agent."
+            )
+    return tuple(records)
+
+
+def _teardown_chaos_plan(
+    scenario: Scenario,
+    plan: ChaosPlan,
+    settings: Settings,
+    tracer: JsonlTracer | None,
+) -> tuple[tuple[ChaosHookRecord, ...], str | None]:
+    """Run every teardown hook; return the records and a combined failure text.
+
+    Never raises, and never stops early. Both are deliberate: this runs on
+    the way out of a run that may already be carrying an exception, so
+    raising would replace the run's own cause with the janitor's, and
+    stopping at the first failure would skip compensators that might still
+    have worked. Every hook gets its turn, and the caller decides what a
+    failure means.
+    """
+    records: list[ChaosHookRecord] = []
+    failures: list[str] = []
+    for hook in plan.teardown:
+        record = _invoke_plan_hook(scenario, hook, settings, tracer, phase="teardown")
+        records.append(record)
+        if not record.ok:
+            failures.append(f"{hook.name}: {record.error}")
+    if not failures:
+        return tuple(records), None
+    return tuple(records), (
+        f"scenario {scenario.name!r} chaos teardown failed for "
+        f"{len(failures)} of {len(plan.teardown)} hook(s): {'; '.join(failures)}"
+    )
+
+
+def chaos_block_reason(path: Path | None = None) -> str | None:
+    """Why live runs are blocked, or ``None`` when the world is believed clean.
+
+    Reads the latch a failed teardown wrote. An unreadable or malformed file
+    still blocks — it can only exist because something wrote it, and the safe
+    reading of "we cannot tell what went wrong" is not "carry on spending".
+
+    The path is resolved at CALL time rather than bound as a default, so the
+    module constant is one thing a test can redirect — the alternative is a
+    unit suite that latches the real checkout's world dirty.
+    """
+    path = path or _CHAOS_BLOCK_PATH
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return f"{_repo_relative(path)} exists but could not be read"
+    if isinstance(payload, dict) and isinstance(payload.get("reason"), str):
+        scenario = payload.get("scenario")
+        when = payload.get("recorded_at")
+        prefix = f"{scenario} at {when}: " if isinstance(scenario, str) else ""
+        return f"{prefix}{payload['reason']}"
+    return f"{_repo_relative(path)} exists"
+
+
+def write_chaos_block(
+    scenario_name: str,
+    reason: str,
+    *,
+    invocation_id: str = "",
+    path: Path | None = None,
+    recorded_at: datetime | None = None,
+) -> Path:
+    """Latch "the shared world is dirty" where the next invocation will see it."""
+    path = path or _CHAOS_BLOCK_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "scenario": scenario_name,
+                "invocation_id": invocation_id,
+                "recorded_at": (recorded_at or datetime.now(UTC)).isoformat(),
+                "reason": reason,
+            },
+            indent=2,
+        )
+    )
+    return path
+
+
+def clear_chaos_block(path: Path | None = None) -> str | None:
+    """Drop the latch, returning what it said — or ``None`` if there was none.
+
+    The operator gesture that goes WITH ``make eval-reset``, not instead of
+    it: the reset is what actually restores the world, and this only records
+    that it happened. They are separate because the reset runs inside the
+    platform's container and this file lives in the commander's checkout.
+    """
+    path = path or _CHAOS_BLOCK_PATH
+    reason = chaos_block_reason(path)
+    if reason is None:
+        return None
+    path.unlink(missing_ok=True)
+    return reason
+
+
 def run_scenario(
     scenario: Scenario,
     settings: Settings,
@@ -705,54 +993,85 @@ def run_scenario(
             }
         )
 
+    # The scenario's fault, in one shape whichever way the YAML spells it:
+    # a legacy ``chaos_setup`` normalizes to a one-hook plan (plan 01 § 4).
+    # Read once, here, so the hooks that run and the hooks that are torn
+    # down are provably the same tuple.
+    chaos_plan = scenario.chaos
+    chaos_records: tuple[ChaosHookRecord, ...] = ()
+    teardown_error: str | None = None
+
+    def _tear_down() -> str | None:
+        """Compensate the plan, latch the world dirty if that failed.
+
+        Called on every way out of the live path — clean return, agent
+        crash, unmet precondition, failed seeding — which is what "teardown
+        in ``finally``" means here. It is a named call at each exit rather
+        than a literal ``finally`` for one reason: on the failing path the
+        teardown's own failure has to be attached to the exception that is
+        already in flight, and a ``finally`` block cannot see it without
+        reaching into ``sys.exc_info()``.
+
+        A canned run tears nothing down because it seeded nothing.
+        """
+        nonlocal chaos_records
+        if not live_mcp_available:
+            return None
+        records, error = _teardown_chaos_plan(scenario, chaos_plan, settings, tracer)
+        chaos_records += records
+        if error is not None:
+            # The latch, before the exception (if any) leaves this function:
+            # a killed process must still find the world marked dirty.
+            write_chaos_block(scenario.name, error, invocation_id=invocation_id)
+        return error
+
     mcp_client: MCPClientProtocol
     live_mcp_client: MCPClient | None = None
     if live_mcp_available:
-        # Fire the scenario's declared chaos hook (if any) BEFORE building
-        # the agent's client so a seeding failure surfaces immediately with
-        # a clear reason, not as a downstream "read returned healthy" bug.
+        # Fire the scenario's declared setup hooks BEFORE building the
+        # agent's client so a seeding failure surfaces immediately with a
+        # clear reason, not as a downstream "read returned healthy" bug.
         # Canned runs skip this — the canned tool responses already encode
         # the broken state.
-        if scenario.chaos_setup is not None:
-            try:
-                seed_result = invoke_chaos_hook(
-                    str(settings.platform_mcp_url),
-                    settings.platform_token.get_secret_value(),
-                    scenario.chaos_setup.name,
-                    dict(scenario.chaos_setup.arguments),
-                )
-            except ChaosInvocationError as err:
-                raise RuntimeError(
-                    f"scenario {scenario.name!r} chaos_setup "
-                    f"{scenario.chaos_setup.name!r} failed: {err}"
-                ) from err
-            if tracer is not None:
-                tracer.write(
-                    {
-                        "kind": TraceKind.CHAOS_SETUP,
-                        "scenario": scenario.name,
-                        "hook": scenario.chaos_setup.name,
-                        "arguments": dict(scenario.chaos_setup.arguments),
-                        "result": seed_result,
-                    }
-                )
-        live_mcp_client = make_client(
-            settings,
-            tracer=tracer.mcp_hook() if tracer else None,
-            token=mcp_token,
-        )
-        mcp_client = live_mcp_client
-        # Establish the scenario's premise before spending anything on it.
-        # Runs after seeding and before the first model call, so a fault that
-        # was never manufactured costs one read instead of a full graded run
-        # (see evals/preconditions.py, and `bb1fa70abb4c` for the run that
-        # paid for this lesson).
-        if scenario.expected_precondition:
-            try:
-                _assert_preconditions(scenario, live_mcp_client, tracer)
-            except PreconditionFailure:
-                live_mcp_client.close()
-                raise
+        #
+        # The teardown region opens HERE, before the first setup hook is
+        # attempted, not after seeding succeeds: ``_seed_chaos_plan`` stops
+        # at the first failed hook and raises, and the hooks that already
+        # fired are exactly what ``plan.teardown`` compensates.
+        try:
+            chaos_records = _seed_chaos_plan(scenario, chaos_plan, settings, tracer)
+            # Let the fault become observable before anything looks for it.
+            # One wait for the whole plan, ahead of the per-probe polling the
+            # preconditions do: a cascade's second-order effect is not
+            # visible the instant its last hook returns.
+            if chaos_plan.settle_seconds:
+                time.sleep(chaos_plan.settle_seconds)
+            live_mcp_client = make_client(
+                settings,
+                tracer=tracer.mcp_hook() if tracer else None,
+                token=mcp_token,
+            )
+            mcp_client = live_mcp_client
+            # Establish the scenario's premise before spending anything on
+            # it. Runs after seeding and before the first model call, so a
+            # fault that was never manufactured costs one read instead of a
+            # full graded run (see evals/preconditions.py, and
+            # `bb1fa70abb4c` for the run that paid for this lesson).
+            if scenario.expected_precondition:
+                try:
+                    _assert_preconditions(scenario, live_mcp_client, tracer)
+                except PreconditionFailure:
+                    live_mcp_client.close()
+                    live_mcp_client = None
+                    raise
+        except BaseException:
+            # The world was touched, so it has to be put back — even though
+            # nothing will be graded. Same call the normal exit makes. Its
+            # return value is dropped rather than carried: there is no row to
+            # carry it on, and ``_tear_down`` has already written the latch,
+            # which is the half that reaches the next invocation.
+            _tear_down()
+            raise
     else:
         mcp_client = CannedMCPClient(scenario.canned_tool_responses)
 
@@ -933,16 +1252,30 @@ def run_scenario(
                     "error": f"{type(exc).__name__}: {exc}",
                 }
             )
-        # Re-raise carrying the run's own history, so the crash row reports
-        # what the scenario actually spent instead of a hardcoded zero.
-        raise ScenarioCrash(
+        # The agent's run is over, cleanly or not, so the world goes back
+        # before the exception leaves. A teardown failure rides ALONG with
+        # the crash rather than replacing it: "the agent crashed" and "the
+        # shared environment is now dirty" are two facts, and collapsing
+        # them loses whichever one the reader needed.
+        crash = ScenarioCrash(
             exc,
             () if run is None else tuple(checkpointer.history(run.incident_id)),
-        ) from exc
+        )
+        if live_mcp_client is not None:
+            live_mcp_client.close()
+            live_mcp_client = None
+        crash.teardown_error = _tear_down()
+        # Re-raise carrying the run's own history, so the crash row reports
+        # what the scenario actually spent instead of a hardcoded zero.
+        raise crash from exc
     finally:
         if live_mcp_client is not None:
             live_mcp_client.close()
+            live_mcp_client = None
 
+    # After the run, before the row that reports it: the outcome carries
+    # ``teardown_error``, so the teardown has to have happened by now.
+    teardown_error = _tear_down()
     failure_class, failure_class_detail = _classify_failure(report, final)
     outcome = ScenarioOutcome(
         scenario=scenario.name,
@@ -954,6 +1287,8 @@ def run_scenario(
         failure_class_detail=failure_class_detail,
         judge_error=judge_error,
         briefing_error=briefing_error,
+        chaos_hooks=chaos_records,
+        teardown_error=teardown_error,
         # Provenance mirrors the tracer's scenario_start keys above.
         live_mcp=live_mcp_available,
         live_llm=live_llm_available,
@@ -1127,7 +1462,13 @@ def _crashed_result(
         # The premise is UNKNOWN, not false. Bucketing this as "precondition"
         # would send the reader to seeding when the platform is the problem.
         crash_class = "transport"
-    elif "chaos_setup" in error_detail:
+    elif isinstance(cause, ChaosSetupFailed) or "chaos_setup" in error_detail:
+        # ``run_all`` no longer routes a setup failure here at all — it
+        # records an ungraded row instead, because there is no world to
+        # grade in. This branch survives for the direct ``run_scenario``
+        # caller (a test, a script) that still wants a row, and the
+        # substring half survives for a caller raising a plain RuntimeError
+        # in the old shape.
         crash_class = "shared-env"
     else:
         crash_class = "transport"
@@ -1143,6 +1484,12 @@ def _crashed_result(
         report=report,
         judge_score=None,
         failure_class=crash_class,
+        # A crashed run whose teardown ALSO failed says two things, and the
+        # second one outlives this row: the world the next live run would
+        # inherit is dirty. Carried onto the row for the same reason it is
+        # carried on a clean one — the report is the durable record, and the
+        # on-disk latch is the enforcement.
+        teardown_error=(exc.teardown_error if isinstance(exc, ScenarioCrash) else None),
         # Provenance survives the crash (ADR 0013). These defaulted to False,
         # so every crashed row in a live report claimed it had run canned —
         # and `degraded` False alongside said that was intended. A row that
@@ -1229,6 +1576,7 @@ def run_all(
     # an existing file) aborts the suite loudly instead of being recorded as
     # a scenario crash.
     results: list[ScenarioResult] = []
+    ungraded: list[UngradedScenario] = []
     for scenario in scenarios:
         try:
             result = run_scenario(
@@ -1239,6 +1587,17 @@ def run_all(
                 invocation_id=invocation_id,
                 model_role=model_role,
             )
+        except ChaosSetupFailed as exc:
+            # NOT a graded row, and this is the whole point of the branch
+            # (plan 01 § 4). A seeding failure means the benchmark world was
+            # never built, so there is nothing the agent could have done
+            # right or wrong in it. A crash row here would carry a
+            # ``GradeReport`` saying the scenario failed, and every rate
+            # derived from the report would then describe the agent using an
+            # event that happened before it started.
+            print(f"  UNGRADED {scenario.name}: {exc}")
+            ungraded.append(UngradedScenario(scenario=scenario.name, reason=str(exc)))
+            continue
         except Exception as exc:  # noqa: BLE001 — deliberate: don't abort suite
             print(f"  CRASH {scenario.name}: {type(exc).__name__}: {exc}")
             result = _crashed_result(
@@ -1284,6 +1643,7 @@ def run_all(
         # construction — the ``degraded_count`` discipline (finding A-01).
         closing=model_role is ModelRole.BENCHMARK,
         outcomes=outcomes,
+        ungraded=tuple(ungraded),
     )
     return report, trajectories, briefings
 
@@ -1603,6 +1963,18 @@ def _eval_defaults() -> Settings:
 
 def _print_summary(report: RunReport) -> None:
     print(f"scenarios: {report.total}, passed: {report.passed}, failed: {report.failed}")
+    if report.ungraded:
+        # Above the per-row listing, because it changes how every number
+        # under it is read: these scenarios are absent from the totals.
+        print(
+            f"UNGRADED: {len(report.ungraded)} scenario(s) never ran — the fault world "
+            "could not be built, so the agent was not graded:"
+        )
+        for row in report.ungraded:
+            print(f"  {row.scenario} [{row.phase}] — {row.reason}")
+    for scenario_name in report.contaminated_scenarios:
+        error = next(o.teardown_error for o in report.outcomes if o.scenario == scenario_name)
+        print(f"TEARDOWN FAILED: {scenario_name} — {error}")
     # Printed from the first row's own record, not from the settings this
     # process happens to hold: the line and the artifact then cannot
     # disagree, which is the same rule the degraded line below follows.
@@ -1767,15 +2139,23 @@ def _smoke_holdback_reason(scenario: Scenario) -> str:
     ``smoke_exclusion`` is a deliberate hold-back whose recorded reason says
     what would have to be true to lift it.
 
-    ``chaos_setup`` and ``expected_action_tools`` can both be true, and both
+    Chaos seeding and ``expected_action_tools`` can both be true, and both
     are reported. ``smoke_exclusion`` cannot coexist with either — the schema
     validator refuses a hold-back the predicate already covers — so it is
     reported alone.
     """
     causes: list[str] = []
-    if scenario.chaos_setup is not None:
+    if scenario.seeds_chaos:
+        # Named by the field the YAML actually uses, because the reader's
+        # next move is to open that block. The wording for the legacy
+        # spelling is unchanged.
+        declared = (
+            "declares chaos_setup"
+            if scenario.chaos_setup is not None
+            else f"declares a chaos_plan seeding {len(scenario.chaos.setup)} hook(s)"
+        )
         causes.append(
-            "declares chaos_setup (seeding fires under the full write+chaos "
+            f"{declared} (seeding fires under the full write+chaos "
             "principal, which is the claim --smoke exists to disprove)"
         )
     if scenario.expectation.expected_action_tools:
@@ -1792,6 +2172,17 @@ def _smoke_holdback_reason(scenario: Scenario) -> str:
 
 
 def main() -> int:
+    if "--clear-chaos-block" in sys.argv[1:]:
+        # The operator half of the teardown latch, and deliberately its own
+        # invocation rather than a flag on a run: clearing it asserts that
+        # `make eval-reset` has already put the world back, and an assertion
+        # bundled into the run it unblocks is one nobody makes consciously.
+        cleared = clear_chaos_block()
+        if cleared is None:
+            print("no chaos teardown block is set; nothing to clear")
+        else:
+            print(f"cleared chaos teardown block: {cleared}")
+        return 0
     live = "--live" in sys.argv[1:]
     # Smoke mode selects the read-scoped principal from Settings directly.
     # It is NOT plumbed through the shell: exporting PLATFORM_TOKEN from a
@@ -1808,6 +2199,22 @@ def main() -> int:
             "run the whole suite canned under placeholder settings)"
         )
         return 3
+    if live and (blocked := chaos_block_reason()) is not None:
+        # A previous run's chaos teardown did not complete, so the world the
+        # next live run would read as its baseline still carries a fault
+        # nobody intended. Refused HERE — before settings, before the
+        # guards, before anything is spent — for the same reason exits 6 and
+        # 7 are: a refusal that arrives after the money is gone is a report,
+        # not a guard. Offline runs are untouched; canned scenarios share no
+        # world.
+        print(f"CONTAMINATED WORLD: live runs are blocked — {blocked}")
+        print(
+            "Restore the world, then clear the block:\n"
+            "  make eval-reset PURGE_IDEMPOTENCY=1\n"
+            "  uv run python -m evals.runner --clear-chaos-block"
+        )
+        print("no scenarios ran, nothing was spent")
+        return 10
     # Before the settings load, like the two refusals around it: a mistyped
     # role must cost nothing, and this parse depends on no environment.
     model_role, role_refusal = _parse_model_role(sys.argv[1:])
@@ -2073,8 +2480,16 @@ def main() -> int:
         # and reds the other, and the report blames the agent. The runner has
         # no reset between scenarios; the reset lives outside it, which is why
         # this is a selection refusal and not a scheduling fix.
+        # ``seeds_chaos``, not ``chaos_setup``: ADR 0020 is UNCHANGED by the
+        # ChaosPlan work, and a plan with two hooks is still ONE scenario —
+        # it seeds one world and is reset once. What would have changed
+        # silently is the other direction: reading the legacy field leaves
+        # ``chaos_setup`` None on a plan-declaring scenario, so a two-hook
+        # remediation scenario would stop counting as mutating and could be
+        # selected alongside another one. That is a regression, not a
+        # simplification.
         mutating = [
-            s.name for s in scenarios if s.expectation.expected_action_tools or s.chaos_setup
+            s.name for s in scenarios if s.expectation.expected_action_tools or s.seeds_chaos
         ]
         if len(mutating) > 1:
             print(
@@ -2180,7 +2595,7 @@ def main() -> int:
     write_guard_required = live_platform and any(
         s.expectation.expected_action_tools for s in scenarios
     )
-    chaos_guard_required = live_platform and any(s.chaos_setup is not None for s in scenarios)
+    chaos_guard_required = live_platform and any(s.seeds_chaos for s in scenarios)
     if write_guard_required or chaos_guard_required:
         # One client, both probes: in a live non-smoke run `mcp_token` is None,
         # so this is `settings.platform_token` — the same principal
@@ -2327,6 +2742,36 @@ def main() -> int:
             return 5
         print("post-stage audit: zero successful Tier-1 actions during the smoke stage")
 
+    # Order is the blast radius, widest first. A contaminated world outranks
+    # everything because it is the only one of the three that reaches the
+    # NEXT invocation; an ungraded scenario outranks a failed one because
+    # "the agent failed" is the reading exit 1 invites and is exactly what
+    # did not happen. Every one of them lands AFTER the archive and the
+    # report are on disk — evidence first, verdict second.
+    # The latch, not only the report rows: a scenario abandoned at SEEDING
+    # has no row to carry ``teardown_error``, and its teardown can fail too.
+    # The latch is written on every path, so reading it here is the one check
+    # that covers all of them. Live only, like the pre-run refusal — an
+    # offline suite shares no world with the dirty platform and must keep
+    # exiting on its own result.
+    if live and (report.contaminated_scenarios or chaos_block_reason() is not None):
+        named = ", ".join(report.contaminated_scenarios) or (chaos_block_reason() or "")
+        print(
+            "TEARDOWN FAIL: the shared world is contaminated and further live runs "
+            f"are blocked ({named}). This run's grades stand; the environment does not."
+        )
+        print(
+            "Restore it, then clear the block:\n"
+            "  make eval-reset PURGE_IDEMPOTENCY=1\n"
+            "  uv run python -m evals.runner --clear-chaos-block"
+        )
+        return 10
+    if report.ungraded:
+        print(
+            f"WORLD FAIL: {len(report.ungraded)} scenario(s) could not be seeded and "
+            "were not graded — this is a statement about the environment, not the agent."
+        )
+        return 9
     return 0 if report.failed == 0 else 1
 
 

@@ -56,7 +56,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 import uuid
@@ -74,6 +73,39 @@ from evals.graders.deterministic import AnyOfExpectation, leaf_claims
 from evals.preconditions import unmet
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import PreconditionProbe, Scenario
+from evals.world_audit import (
+    BASELINE_ACTIVE_ALERTS as BASELINE_ACTIVE_ALERTS,
+)
+from evals.world_audit import (
+    BASELINE_CHAOS_KEYS as BASELINE_CHAOS_KEYS,
+)
+from evals.world_audit import (
+    BASELINE_DLQ_TOTAL as BASELINE_DLQ_TOTAL,
+)
+from evals.world_audit import (
+    BaselineLine as BaselineLine,
+)
+from evals.world_audit import (
+    Probe as Probe,
+)
+from evals.world_audit import (
+    Reading as Reading,
+)
+from evals.world_audit import (
+    _payload_of as _payload_of,
+)
+from evals.world_audit import (
+    _probe as _probe,
+)
+from evals.world_audit import (
+    audit_baseline as audit_baseline,
+)
+from evals.world_audit import (
+    chaos_key_count as chaos_key_count,
+)
+from evals.world_audit import (
+    read as read,
+)
 from incident_commander.agent.investigation import (
     ALERT_SUBJECT_PROBES,
     SubjectMatch,
@@ -86,7 +118,7 @@ from incident_commander.agent.remediation import (
     VERIFY_PROBE_FOR_ACTION,
 )
 from incident_commander.config import Settings
-from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError, ToolResult, make_client
+from incident_commander.tools.mcp_client import MCPClientProtocol, make_client
 from incident_commander.tools.policies import RESOURCE_ARG_FIELDS, Tier, tier_of
 from incident_commander.tools.registry import TOOL_REGISTRY
 
@@ -102,36 +134,6 @@ EXIT_PREFLIGHT: Final[int] = 3
 EXIT_BASELINE_DIRTY: Final[int] = 4
 EXIT_SEEDING: Final[int] = 5
 EXIT_RESET: Final[int] = 6
-
-
-# --------------------------------------------------------------------------
-# The seeded baseline the world must return to after the reset.
-# --------------------------------------------------------------------------
-#
-# One copy of these numbers, here, mirrored from the runbook's "Pre-run
-# checklist" table (step 4) — and
-# ``tests/unit/test_world_dossier.py::TestBaselineMatchesTheRunbook`` reads
-# that table and fails if the two disagree. LESSONS 2026-09-07: "five places
-# for the same truth means five stale copies"; on that day every context file
-# in the workspace was wrong at once. A second hand-maintained copy of the
-# baseline is exactly that shape, so it is pinned to the document instead.
-#
-# `worker-dispatcher` lag is deliberately NOT re-audited here. It is the
-# fourth line of the runbook's table, but reading it means `get_consumer_lag`,
-# whose response is served from a 60-second staleness window
-# (``CACHED_READ_FRESHNESS_SECONDS``) — so a post-reset reading can predate
-# the reset and report a number about the seeded world. A check that can
-# answer about the wrong moment is worse than an absent one; the coordinator
-# reads lag as part of PROTOCOL step 3, where the timing is theirs to control.
-BASELINE_DLQ_TOTAL: Final[int] = 4
-BASELINE_ACTIVE_ALERTS: Final[int] = 3
-BASELINE_CHAOS_KEYS: Final[int] = 0
-
-#: Compose file and service names for the redis key scan. Defaults match the
-#: Makefile's ``PLATFORM_COMPOSE`` so an override in ``.env`` reaches both.
-_COMPOSE_FILE_ENV: Final[str] = "PLATFORM_COMPOSE"
-_DEFAULT_COMPOSE_FILE: Final[str] = "demo/compose.yml"
-_REDIS_SERVICE: Final[str] = "redis"
 
 
 # --------------------------------------------------------------------------
@@ -173,36 +175,6 @@ _KIND_BY_FIELD: Final[dict[str, str]] = {
     "root_job_id": "job_id",
     "trace_id": "trace_id",
 }
-
-
-@dataclass(frozen=True)
-class Probe:
-    """One read call to make, and the written reason it is in the set.
-
-    ``origins`` is a tuple rather than a string because two maps often derive
-    the same call — on ``remediate_runaway_saga_success`` the alert's subject
-    probe and the post-replay verify probe are both
-    ``get_dag_state(job_id=<root>)``. Deduplicating them but keeping both
-    reasons is what lets the dossier say why a probe matters twice over,
-    instead of the reader wondering which map put it there.
-    """
-
-    tool: str
-    arguments: tuple[tuple[str, Any], ...]
-    origins: tuple[str, ...]
-
-    @property
-    def args(self) -> dict[str, Any]:
-        return dict(self.arguments)
-
-    @property
-    def label(self) -> str:
-        rendered = ", ".join(f"{name}={value!r}" for name, value in self.arguments)
-        return f"{self.tool}({rendered})"
-
-
-def _probe(tool: str, arguments: Mapping[str, Any], origin: str) -> Probe:
-    return Probe(tool, tuple(sorted(arguments.items())), (origin,))
 
 
 def _merge(probes: Sequence[Probe]) -> list[Probe]:
@@ -749,59 +721,6 @@ def dlq_rows_in(payload: object) -> Iterator[Mapping[str, Any]]:
 
 
 @dataclass(frozen=True)
-class Reading:
-    """One probe's outcome: the call made, and everything that came back."""
-
-    probe: Probe
-    payload: dict[str, Any] | None
-    raw: str
-    error: str | None
-
-    @property
-    def ok(self) -> bool:
-        return self.error is None
-
-
-def _payload_of(result: ToolResult) -> tuple[dict[str, Any] | None, str]:
-    """First JSON object in the result, plus the full raw text of every block.
-
-    The raw text is kept even when the JSON parses, because the dossier prints
-    it when it does not — and a block that failed to parse is exactly the one
-    a reader needs to see verbatim.
-    """
-    blocks: list[str] = []
-    payload: dict[str, Any] | None = None
-    for block in result.content:
-        text = block.get("text")
-        if isinstance(text, str):
-            blocks.append(text)
-            if payload is None:
-                try:
-                    parsed = json.loads(text)
-                except ValueError:
-                    continue
-                if isinstance(parsed, dict):
-                    payload = parsed
-        else:
-            blocks.append(json.dumps(block, indent=2, default=str))
-    return payload, "\n".join(blocks)
-
-
-def read(client: MCPClientProtocol, probe: Probe) -> Reading:
-    """Make one read call. Never raises — a failed probe is part of the report."""
-    try:
-        result = client.call_tool(probe.tool, probe.args)
-    except MCPError as err:
-        return Reading(probe, None, "", f"MCPError: {err}")
-    payload, raw = _payload_of(result)
-    if result.is_error:
-        return Reading(probe, payload, raw, "the tool reported is_error=True")
-    if payload is None:
-        return Reading(probe, None, raw, "no readable JSON object in the result")
-    return Reading(probe, payload, raw, None)
-
-
-@dataclass(frozen=True)
 class PreconditionReading:
     """One precondition probe, checked exactly as ``unmet`` checks it."""
 
@@ -1083,79 +1002,6 @@ def lint_forbidden_furniture(
 # --------------------------------------------------------------------------
 # Reset, and the baseline re-audit
 # --------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class BaselineLine:
-    name: str
-    expected: str
-    observed: str
-    passed: bool
-
-
-def _compose_file() -> str:
-    return os.environ.get(_COMPOSE_FILE_ENV) or _DEFAULT_COMPOSE_FILE
-
-
-def chaos_key_count() -> tuple[int | None, str]:
-    """Number of ``chaos:*`` keys in the demo stack's redis, or why not.
-
-    Read through ``docker compose exec redis redis-cli``, not through an MCP
-    tool, because the platform exposes no read that enumerates its own chaos
-    keys — the runbook's baseline table names this check and the coordinator
-    has always run it by hand. ``--scan`` rather than ``KEYS`` so a large
-    keyspace does not block the server.
-    """
-    command = [
-        "docker",
-        "compose",
-        "-f",
-        _compose_file(),
-        "exec",
-        "-T",
-        _REDIS_SERVICE,
-        "redis-cli",
-        "--scan",
-        "--pattern",
-        "chaos:*",
-    ]
-    try:
-        # Fixed argv, never a shell string: nothing here interpolates a
-        # scenario name or any other caller-supplied text into a command.
-        done = subprocess.run(
-            command, cwd=_REPO_ROOT, capture_output=True, text=True, timeout=60, check=False
-        )
-    except (OSError, subprocess.TimeoutExpired) as err:
-        return None, f"could not run the scan: {type(err).__name__}: {err}"
-    if done.returncode != 0:
-        return None, f"exit {done.returncode}: {(done.stderr or done.stdout).strip()[:300]}"
-    keys = [line for line in done.stdout.splitlines() if line.strip()]
-    return len(keys), ("none" if not keys else ", ".join(sorted(keys)))
-
-
-def audit_baseline(client: MCPClientProtocol) -> list[BaselineLine]:
-    """The seeded baseline, re-read after the reset. PASS/FAIL per line."""
-    lines: list[BaselineLine] = []
-    for tool, expected, label in (
-        ("list_dlq_messages", BASELINE_DLQ_TOTAL, "DLQ total"),
-        ("list_active_alerts", BASELINE_ACTIVE_ALERTS, "active alerts"),
-    ):
-        reading = read(client, _probe(tool, {}, "baseline re-audit"))
-        if not reading.ok or reading.payload is None:
-            lines.append(BaselineLine(label, str(expected), reading.error or "unreadable", False))
-            continue
-        observed = reading.payload.get("total")
-        lines.append(BaselineLine(label, str(expected), str(observed), observed == expected))
-    count, detail = chaos_key_count()
-    lines.append(
-        BaselineLine(
-            "redis `chaos:*` keys",
-            str(BASELINE_CHAOS_KEYS),
-            f"{count} ({detail})" if count is not None else f"unreadable — {detail}",
-            count == BASELINE_CHAOS_KEYS,
-        )
-    )
-    return lines
 
 
 def run_reset() -> tuple[int, str]:

@@ -231,7 +231,7 @@ The harness is the product's proof. Built before the agent, maintained forever.
 - **PRs are coherent vertical slices.** A PR delivers one meaningful capability with its tests, docs, and any ADR bundled together. Bundle related work: the tool, its policy entry, its fixtures, and its eval scenario belong in one PR, not four. Avoid drive-by micro PRs under roughly 50 changed lines unless it is a hotfix, and avoid monsters above roughly 1,000 lines net by splitting along capability seams. Most phases decompose into two to five PRs.
 - **PR description template**: what and why, how it was tested at each level, eval impact (ran or not applicable and why), ADRs touched, screenshots or trajectory links for behavior changes.
 - **Self-review before requesting merge**: read the full diff top to bottom, run `make check` locally, confirm the Definition of Done below.
-- **No AI attribution anywhere.** Commits, PR descriptions, and code comments contain no co-author trailers, generation footers, or tool attributions. This is a standing repository convention.
+- **AI attribution only as one footer line in a PR description; never in commits, code or docs (workspace ruling 2026-09-08).**
 - CI required checks: lint, types, unit, integration, contract. E2E and evals gate per the rules above.
 
 ## Phases
@@ -366,7 +366,7 @@ session — what that session established — followed by a short list of things
 the first time: a gap record that was read backwards and sent a whole build item after a defect
 that did not exist, a seeding bug that made an empty database look identical to a full one, an
 agent that routed around a safety prompt and crash-looped three consumer groups. It is much cheaper
-to read than to rediscover, and it is the counterpart to the workspace-root `STATE.md`: that file
+to read than to rediscover, and it is the counterpart to the workspace `context/STATE.md`: that file
 says where things *are*, this one says how they got there and what has already been ruled out.
 
 `context/archives/` holds the packed transcripts. They are **gitignored and absent from a clone** —

@@ -2853,11 +2853,12 @@ class TestLiveRequiresAnExplicitSelection:
     """A bare ``--live`` is the whole suite, and must be refused as such.
 
     It always looked refused: the exit-8 canned-only gate catches it because
-    six scenarios in the tree declare no live leg. But that is a property of
-    ``evals/scenarios/``, not of the invocation — give those six a live leg and
-    the identical command starts spending with nothing here changed — and the
-    message it refuses with names the wrong problem. The Makefile's `ifndef
-    ONLY` guard says the same thing one layer out; this is the backstop, since
+    some scenarios in the tree declare no live leg. But that is a property of
+    ``evals/scenarios/``, not of the invocation — give every one of them a live
+    leg and the identical command starts spending with nothing here changed —
+    and the message it refuses with names the wrong problem. The Makefile's
+    `ifndef ONLY` guard says the same thing one layer out; this is the backstop,
+    since
     `python -m evals.runner --live` never comes through make.
     """
 
@@ -4091,6 +4092,12 @@ class TestChaosTeardownBlocksFurtherLiveRuns:
         # around — the ADR 0020 lesson, applied to this gate.
         assert "make eval-reset PURGE_IDEMPOTENCY=1" in out
         assert "--clear-chaos-block" in out
+        # Since cmd #233 the reset's last recipe line clears the latch itself,
+        # so the advice must not read as two steps the operator owes: a second
+        # command that is already run for you is one that gets run out of
+        # order, or run alone on a world nobody restored.
+        assert "clears the block on success" in out
+        assert "no stack left to reset" in out
         assert "nothing was spent" in out
 
     def test_offline_runs_are_not_blocked(

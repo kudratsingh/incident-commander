@@ -80,9 +80,13 @@ shared platform, with real spend and no reset between scenarios; run one at a
 time with a reset between, the full protocol is below.
 
 (Until 2026-09 neither refusal existed. A bare `make eval-live` was stopped
-only by the exit-8 canned-only gate, which fires because six scenarios declare
+only by the exit-8 canned-only gate, which fires because 7 scenarios declare
 no live leg — a fact about `evals/scenarios/`, not about the command, and one
-that would stop being true the moment those six gained a live leg.)
+that would stop being true the moment every one of them gained a live leg.
+That count is written down here and nowhere else: the runner and the tests
+that make the same argument now make it without a number, and
+`tests/unit/test_pre_spend_guards.py` fails when the digit above disagrees
+with `evals/benchmark_inventory.json`.)
 
 A live `ONLY=` pattern must be a scenario's full name, and a pattern that is
 not one is refused with **exit 2** listing the scenarios it would have matched.

@@ -971,10 +971,14 @@ def write_chaos_block(
 def clear_chaos_block(path: Path | None = None) -> str | None:
     """Drop the latch, returning what it said — or ``None`` if there was none.
 
-    The operator gesture that goes WITH ``make eval-reset``, not instead of
-    it: the reset is what actually restores the world, and this only records
-    that it happened. They are separate because the reset runs inside the
-    platform's container and this file lives in the commander's checkout.
+    Not instead of ``make eval-reset``: the reset is what actually restores
+    the world, and this only records that it happened. They are separate
+    entry points because the reset runs inside the platform's container and
+    this file lives in the commander's checkout — but since cmd #233 the
+    reset's last recipe line runs this itself, so the operator's normal path
+    is one command. Invoking it alone is for the case with no world left to
+    reset. Last line deliberately: make abandons a recipe at the first
+    failing line, so a reset that did not succeed never clears the latch.
     """
     path = path or _CHAOS_BLOCK_PATH
     reason = chaos_block_reason(path)
@@ -2265,8 +2269,9 @@ def main() -> int:
         # world.
         print(f"CONTAMINATED WORLD: live runs are blocked — {blocked}")
         print(
-            "Restore the world, then clear the block:\n"
+            "Restore the world — the reset clears the block on success:\n"
             "  make eval-reset PURGE_IDEMPOTENCY=1\n"
+            "Only where there is no stack left to reset, clear it alone:\n"
             "  uv run python -m evals.runner --clear-chaos-block"
         )
         print("no scenarios ran, nothing was spent")
@@ -2288,8 +2293,13 @@ def main() -> int:
         # A bare `--live` is the whole suite against one shared platform, with
         # real spend and no reset between scenarios. It was already refused —
         # but only INCIDENTALLY, by the exit-8 canned-only gate below, which
-        # fires because the tree happens to contain six scenarios with no live
-        # leg. That refusal is a fact about the scenario directory, not about
+        # fires because the tree happens to contain scenarios with no live
+        # leg. (How many is deliberately not written here: the count belongs
+        # to the corpus, is stated once in docs/runbook.md, and is asserted
+        # against evals/benchmark_inventory.json by
+        # tests/unit/test_pre_spend_guards.py. The argument below does not
+        # need the number, and every copy of it was one more thing to drift.)
+        # That refusal is a fact about the scenario directory, not about
         # the invocation: give every scenario a live leg and an unfiltered
         # `--live` starts spending, having changed nothing in this file. The
         # exit-8 message also misnames the problem ("these scenarios cannot run
@@ -2817,8 +2827,9 @@ def main() -> int:
             f"are blocked ({named}). This run's grades stand; the environment does not."
         )
         print(
-            "Restore it, then clear the block:\n"
+            "Restore it — the reset clears the block on success:\n"
             "  make eval-reset PURGE_IDEMPOTENCY=1\n"
+            "Only where there is no stack left to reset, clear it alone:\n"
             "  uv run python -m evals.runner --clear-chaos-block"
         )
         return 10

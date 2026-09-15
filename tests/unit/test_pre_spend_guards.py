@@ -7,11 +7,11 @@ guard the code implemented.
 **A missing ``ONLY=`` was refused only by accident.** ``make eval-live`` passed
 ``$(if $(ONLY),--only $(ONLY))``, so a bare invocation handed the runner a bare
 ``--live`` — the whole suite, one shared platform, real spend. What actually
-stopped it was the exit-8 canned-only gate, which fires because six scenarios
+stopped it was the exit-8 canned-only gate, which fires because some scenarios
 in the tree declare no live leg. That is a fact about ``evals/scenarios/``, not
-about the invocation: give those six a live leg and the same command starts
-spending, with nothing in the Makefile or the runner changed. It also refused
-for the wrong reason, in a message about canned-only scenarios rather than
+about the invocation: give every one of them a live leg and the same command
+starts spending, with nothing in the Makefile or the runner changed. It also
+refused for the wrong reason, in a message about canned-only scenarios rather than
 about the selection the operator never made. Both layers now refuse the
 missing filter itself, structurally, with exit 2.
 
@@ -23,6 +23,13 @@ cannot catch this: only one of the two mutates, so ``len(mutating) > 1`` is
 False. That is the 2026-08-30 incident — a read-only stage that smuggled in a
 mutating scenario. Under ``--live`` a pattern is now matched by full name.
 
+**The canned-only count was prose in four files and none of them asserted it**
+(WO-R3-243). "six" was true until cmd #225 added a seventh canned-only
+scenario. It is now stated once, in ``docs/runbook.md``, checked here against
+``evals/benchmark_inventory.json``, and kept out of the three files it drifted
+in — none of which needed it, since their argument is that the refusal is a
+property of the tree rather than of the invocation.
+
 This file lints the Makefile and the operator docs; the runner-side behaviour
 of both guards is pinned in ``test_runner.py``, next to the other ``main()``
 exit-code tests and their env isolation. The Makefile assertions are on its
@@ -33,6 +40,7 @@ a test.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Final
@@ -47,6 +55,7 @@ _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _MAKEFILE: Final[Path] = _REPO_ROOT / "Makefile"
 _RUNBOOK: Final[Path] = _REPO_ROOT / "docs" / "runbook.md"
 _METHODOLOGY: Final[Path] = _REPO_ROOT / "docs" / "eval-methodology.md"
+_INVENTORY: Final[Path] = _REPO_ROOT / "evals" / "benchmark_inventory.json"
 
 
 @pytest.fixture(scope="module")
@@ -181,4 +190,82 @@ def test_the_methodology_states_the_exact_name_rule() -> None:
         "docs/eval-methodology.md documents --only; it must say that under --live a "
         "pattern is matched by full scenario name, and that --smoke and offline runs "
         "keep substring matching (SMOKE_ONLY depends on it)"
+    )
+
+
+# --- the canned-only count is stated once, and it is the corpus's -----------
+
+
+def _canned_only_in_the_inventory() -> list[str]:
+    """Canned-only names per the committed manifest, by its own definition.
+
+    ``Scenario.canned_only`` is ``not (use_live_mcp or use_live_llm)``, and the
+    inventory carries both flags per row, so the manifest answers the question
+    without re-deriving it here. The manifest is kept equal to the corpus by
+    ``tests/unit/test_benchmark_inventory.py::
+    test_committed_inventory_equals_fresh_generation``, which is why reading the
+    JSON is as good as loading 41 YAMLs and much cheaper.
+    """
+    rows = json.loads(_INVENTORY.read_text(encoding="utf-8"))
+    return sorted(row["name"] for row in rows if not (row["use_live_mcp"] or row["use_live_llm"]))
+
+
+def test_the_runbook_states_the_canned_only_count_and_the_corpus_agrees() -> None:
+    """The count was prose in four files and none of them asserted it.
+
+    ``six`` was right when it was written and wrong the moment cmd #225 added a
+    seventh canned-only scenario — in the runbook, in ``evals/runner.py``, in
+    ``test_runner.py`` and here — because a number four files state and nobody
+    checks is a number that drifts silently. The other three now make their
+    argument without a count (none of them needed one: the point is that the
+    refusal is a property of the tree, not of the invocation). The runbook
+    keeps it, because an operator reading about the exit-8 gate wants to know
+    how many scenarios it covers, and this test is what makes keeping it safe.
+
+    Fix the runbook's digit when a scenario gains or loses a live leg; do not
+    reintroduce the number anywhere else.
+    """
+    runbook = _RUNBOOK.read_text(encoding="utf-8")
+    stated = re.findall(r"(\d+) scenarios declare\s+no live leg", runbook)
+    assert len(stated) == 1, (
+        "docs/runbook.md must state the canned-only scenario count exactly once, as "
+        f"a digit, in the form '<n> scenarios declare no live leg' — found {stated}. "
+        "One statement is the whole point of WO-R3-243: four copies drifted."
+    )
+    canned_only = _canned_only_in_the_inventory()
+    assert int(stated[0]) == len(canned_only), (
+        f"docs/runbook.md says {stated[0]} scenarios declare no live leg, but "
+        f"evals/benchmark_inventory.json has {len(canned_only)}: {canned_only}. "
+        "The corpus is right and the prose is stale — update the runbook."
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        _REPO_ROOT / "evals" / "runner.py",
+        _REPO_ROOT / "tests" / "unit" / "test_runner.py",
+        Path(__file__),
+    ],
+)
+def test_the_count_is_not_restated_in_the_files_it_drifted_in(path: Path) -> None:
+    """Each of these once carried its own copy of the number. None may again.
+
+    Cheap and blunt on purpose: a spelled-out or numeric count immediately
+    before "scenarios" in the same breath as a live leg is the exact shape that
+    drifted. Anything subtler than this is a copy that would have to be found
+    by hand, which is how it went wrong the first time.
+
+    Matched against the text with line breaks and comment markers flattened
+    away, because every one of the four originals was wrapped mid-sentence —
+    three of them across a ``#`` — and a regex that only sees one physical line
+    finds none of them.
+    """
+    flat = re.sub(r"\s+#?\s*", " ", path.read_text(encoding="utf-8"))
+    counts = r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
+    offenders = re.findall(rf"{counts} scenarios?\b[^.]{{0,80}}?no live leg", flat, re.IGNORECASE)
+    assert not offenders, (
+        f"{path.name} restates the canned-only count: {offenders}. It is stated once, "
+        "in docs/runbook.md, where this file's sibling test asserts it against "
+        "evals/benchmark_inventory.json. Make the argument without the number."
     )

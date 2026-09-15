@@ -14,7 +14,7 @@ from typing import Any, Final
 from uuid import UUID
 
 import pytest
-from pydantic import SecretStr
+from pydantic import BaseModel, SecretStr
 
 from evals import artifacts
 from evals import guards as guards_module
@@ -62,6 +62,7 @@ from incident_commander.agent.remediation import make_llm_verify
 from incident_commander.agent.state import BudgetLedger, EvidenceEntry, IncidentState, RunState
 from incident_commander.api.schemas import AlertPayload
 from incident_commander.config import Settings, settings_env_var_names
+from incident_commander.llm.client import LLMResult
 from incident_commander.llm.fakes import CannedLLMClient
 from incident_commander.tools.mcp_client import MCPError, ToolResult
 
@@ -2478,6 +2479,374 @@ class TestPreconditions:
         client = _ClosableCanned({"get_consumer_lag": self._lag_result(0)})
         with pytest.raises(runner_module.PreconditionNotMet, match="never manufactured"):
             self._run_live(monkeypatch, self._live_scenario_with_precondition(), client)
+
+
+# The two independent faults the WP-1.2 fixture below manufactures: a dead
+# consumer (lag climbs) and a poisoned cache key (size is the chaos write's
+# own number, not the seeded fixture's 120 — see docs/eval-methodology.md
+# "A precondition that the fixture pack alone can satisfy is not a
+# precondition").
+_TWO_FAULT_GROUP: Final = "billing"
+_TWO_FAULT_KEY: Final = "cache:jobs:worker-dispatcher:hot_set"
+_TWO_FAULT_CHAOS_SIZE: Final = 90
+_TWO_FAULT_SEEDED_SIZE: Final = 120
+
+
+class _OrderedCanned(_ClosableCanned):
+    """A live-path client that appends every call to a shared ordering list.
+
+    The ordering list is the only way to state WP-1.2's acceptance as one
+    assertion: the probes and the first model call are made by different
+    objects, so "both faults proven before the first model call" is a claim
+    about the sequence the two of them share, not about either one's own
+    call count.
+    """
+
+    def __init__(self, responses: Any, order: list[str]) -> None:
+        super().__init__(responses)
+        self._order = order
+
+    def call_tool(
+        self,
+        name: str,
+        arguments: Any,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ToolResult:
+        self._order.append(f"tool:{name}")
+        return super().call_tool(name, arguments, timeout_seconds=timeout_seconds)
+
+
+class TestTwoFaultPreconditions:
+    """WP-1.2: a two-fault scenario proves BOTH faults before the first model call.
+
+    Nothing here is new machinery, and that is the point of the packet.
+    ``expected_precondition`` has always been a tuple, and
+    ``_assert_preconditions`` has always looped it, polled each probe on its
+    own ``attempts``/``delay_seconds``, and named the failing probe's tool.
+    What did not exist was the proof for a world with more than one fault in
+    it — every precondition test above drives a single probe, and the
+    multi-probe scenarios in the shipped suite only run live, where nothing
+    offline can assert on them.
+
+    So this is the acceptance test from plan 04 § WP-1.2 written against a
+    synthetic two-fault scenario: a two-hook ``ChaosPlan`` (dead consumer +
+    poisoned cache key), one read-only probe per fault, driven through the
+    live-MCP path with a fake platform. It is a fixture rather than a new
+    canned scenario YAML for a reason the suite already pins: a canned run
+    ignores preconditions entirely (``test_canned_runs_ignore_preconditions_
+    entirely``), so a canned scenario cannot prove anything about them.
+    """
+
+    @staticmethod
+    def _two_fault_scenario(
+        *,
+        lag_probe: dict[str, Any] | None = None,
+        cache_probe: dict[str, Any] | None = None,
+    ) -> Scenario:
+        """Two faults, two hooks, one read-only probe each, in declared order."""
+        return _passing_scenario().model_copy(
+            update={
+                "name": "two_fault_probe",
+                "use_live_mcp": True,
+                "chaos_plan": ChaosPlan(
+                    setup=(
+                        ChaosHook(
+                            name="kill_consumer",
+                            arguments={"consumer_group": _TWO_FAULT_GROUP},
+                        ),
+                        ChaosHook(name="create_stale_cache", arguments={"key": _TWO_FAULT_KEY}),
+                    ),
+                ),
+                "expected_precondition": (
+                    PreconditionProbe(
+                        tool="get_consumer_lag",
+                        arguments={"consumer_group": _TWO_FAULT_GROUP},
+                        expect=(PreconditionField(path="lag", at_least=1),),
+                        **(lag_probe or {}),
+                    ),
+                    PreconditionProbe(
+                        tool="get_cache_key_info",
+                        arguments={"key": _TWO_FAULT_KEY},
+                        expect=(PreconditionField(path="size", equals=_TWO_FAULT_CHAOS_SIZE),),
+                        **(cache_probe or {}),
+                    ),
+                ),
+            }
+        )
+
+    @staticmethod
+    def _lag(lag: int) -> ToolResult:
+        return ToolResult(
+            content=[
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {
+                            "consumer_group": _TWO_FAULT_GROUP,
+                            "lag": lag,
+                            "lag_known": True,
+                            "source": "static",
+                            "cache_key": "kafka:x",
+                        }
+                    ),
+                }
+            ]
+        )
+
+    @staticmethod
+    def _cache(size: int) -> ToolResult:
+        return ToolResult(
+            content=[
+                {
+                    "type": "text",
+                    "text": json.dumps({"key": _TWO_FAULT_KEY, "exists": True, "size": size}),
+                }
+            ]
+        )
+
+    @staticmethod
+    def _record_llm(monkeypatch: pytest.MonkeyPatch, order: list[str]) -> list[CannedLLMClient]:
+        """Every canned LLM client built, and an ``llm`` mark on every call."""
+        built: list[CannedLLMClient] = []
+
+        class _Recording(CannedLLMClient):
+            def __init__(self, payloads: list[dict[str, Any]]) -> None:
+                super().__init__(payloads)
+                built.append(self)
+
+            def call[T: BaseModel](
+                self,
+                system_prompt: str,
+                user_message: str,
+                output_model: type[T],
+                model: str,
+                max_tokens: int = 4096,
+                *,
+                repair_of: str | None = None,
+            ) -> LLMResult[T]:
+                order.append("llm")
+                return super().call(
+                    system_prompt,
+                    user_message,
+                    output_model,
+                    model,
+                    max_tokens,
+                    repair_of=repair_of,
+                )
+
+        monkeypatch.setattr(runner_module, "CannedLLMClient", _Recording)
+        return built
+
+    def _run(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        scenario: Scenario,
+        responses: dict[str, Any],
+    ) -> tuple[list[str], list[CannedLLMClient], ScenarioResult | None]:
+        """Seed, probe and run against a fake platform; return the ordering.
+
+        Returns ``None`` for the result when the premise was false — the
+        caller is inside ``pytest.raises`` there and wants the ordering, not
+        a grade that by construction does not exist.
+        """
+        order: list[str] = []
+        built = self._record_llm(monkeypatch, order)
+
+        def _fake_invoke(
+            _url: str, _token: str, name: str, _arguments: dict[str, Any]
+        ) -> dict[str, Any]:
+            order.append(f"hook:{name}")
+            return {"seeded": name}
+
+        monkeypatch.setattr(runner_module, "invoke_chaos_hook", _fake_invoke)
+        monkeypatch.setattr(
+            runner_module, "make_client", lambda *_a, **_kw: _OrderedCanned(responses, order)
+        )
+        result = run_scenario(
+            scenario, _test_settings(platform_mcp_url="http://real.host:8001/mcp")
+        )
+        return order, built, result
+
+    def test_both_faults_are_proven_before_the_first_model_call(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Plan 04 § WP-1.2's acceptance, verbatim, in one ordering assertion."""
+        order, built, result = self._run(
+            monkeypatch,
+            self._two_fault_scenario(),
+            {
+                "get_consumer_lag": self._lag(4200),
+                "get_cache_key_info": self._cache(_TWO_FAULT_CHAOS_SIZE),
+            },
+        )
+        assert result is not None and result.outcome.report.passed
+        # Seed both faults in declared order, then prove both in declared
+        # order, and only then spend a token.
+        assert order[:4] == [
+            "hook:kill_consumer",
+            "hook:create_stale_cache",
+            "tool:get_consumer_lag",
+            "tool:get_cache_key_info",
+        ]
+        assert "llm" in order, "the agent never ran, so the ordering proves nothing"
+        assert order.index("llm") == 4
+        # Both probes are the harness's reads, not the agent's: neither is
+        # charged to the run's tool-call budget.
+        assert result.outcome.tool_calls_used == 1
+        assert sum(len(client.calls) for client in built) == len(
+            [mark for mark in order if mark == "llm"]
+        )
+
+    def test_an_unmet_first_fault_abandons_the_run_and_names_only_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The consumer is alive, so the world is not the one being graded."""
+        with pytest.raises(runner_module.PreconditionNotMet) as caught:
+            self._run(
+                monkeypatch,
+                self._two_fault_scenario(),
+                {
+                    "get_consumer_lag": self._lag(0),
+                    "get_cache_key_info": self._cache(_TWO_FAULT_CHAOS_SIZE),
+                },
+            )
+        message = str(caught.value)
+        assert "never manufactured" in message
+        assert "get_consumer_lag: lag expected at_least 1.0, observed [0]" in message
+        # Which premise failed, and — just as important — which did not. The
+        # second fault's tool must not appear in a message about the first.
+        assert "get_cache_key_info" not in message
+
+    def test_an_unmet_second_fault_abandons_the_run_and_names_only_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The cache key is there but carries the seeded size, not the chaos write.
+
+        The half a single-probe suite cannot see: the first premise holds,
+        so reaching this failure at all requires the loop to keep going, and
+        reporting it requires the message to name the SECOND probe.
+        """
+        with pytest.raises(runner_module.PreconditionNotMet) as caught:
+            self._run(
+                monkeypatch,
+                self._two_fault_scenario(),
+                {
+                    "get_consumer_lag": self._lag(4200),
+                    "get_cache_key_info": self._cache(_TWO_FAULT_SEEDED_SIZE),
+                },
+            )
+        message = str(caught.value)
+        assert "never manufactured" in message
+        assert "get_cache_key_info: size expected equals 90, observed [120]" in message
+        assert "get_consumer_lag" not in message
+
+    def test_a_false_premise_in_either_fault_costs_no_model_call(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The cost argument, for a multi-fault world: still zero either way.
+
+        Asserted on the LLM fakes' own call counts rather than on the
+        exception text, because the text is what a message change may edit
+        and the call count is what money is billed against.
+        """
+        worlds = (
+            {
+                "get_consumer_lag": self._lag(0),
+                "get_cache_key_info": self._cache(_TWO_FAULT_CHAOS_SIZE),
+            },
+            {
+                "get_consumer_lag": self._lag(4200),
+                "get_cache_key_info": self._cache(_TWO_FAULT_SEEDED_SIZE),
+            },
+        )
+        for responses in worlds:
+            order: list[str] = []
+            built = self._record_llm(monkeypatch, order)
+
+            def _fake_invoke(
+                _url: str, _token: str, name: str, _arguments: dict[str, Any]
+            ) -> dict[str, Any]:
+                return {"seeded": name}
+
+            monkeypatch.setattr(runner_module, "invoke_chaos_hook", _fake_invoke)
+            monkeypatch.setattr(
+                runner_module,
+                "make_client",
+                lambda *_a, _responses=responses, _order=order, **_kw: _OrderedCanned(
+                    _responses, _order
+                ),
+            )
+            with pytest.raises(runner_module.PreconditionNotMet):
+                run_scenario(
+                    self._two_fault_scenario(),
+                    _test_settings(platform_mcp_url="http://real.host:8001/mcp"),
+                )
+            assert "llm" not in order
+            assert all(not client.calls for client in built), "a model ran on a false premise"
+
+    def test_each_fault_polls_on_its_own_attempts_and_delay(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Attempt/delay semantics are per probe, and unchanged by there being two.
+
+        The two faults land on different clocks — a killed consumer's lag
+        trails the platform's metrics interval, a cache write is visible at
+        once — so a shared polling budget would be wrong for one of them by
+        construction.
+        """
+        slept: list[float] = []
+        monkeypatch.setattr(time, "sleep", slept.append)
+        scenario = self._two_fault_scenario(
+            lag_probe={"attempts": 3, "delay_seconds": 15.0},
+            cache_probe={"attempts": 2, "delay_seconds": 5.0},
+        )
+        order, _built, result = self._run(
+            monkeypatch,
+            scenario,
+            {
+                "get_consumer_lag": [self._lag(0), self._lag(0), self._lag(9000)],
+                "get_cache_key_info": [
+                    self._cache(_TWO_FAULT_SEEDED_SIZE),
+                    self._cache(_TWO_FAULT_CHAOS_SIZE),
+                ],
+            },
+        )
+        assert result is not None and result.outcome.report.passed
+        # Two waits on the first probe's clock, then one on the second's.
+        # A shared budget would read [15.0, 15.0] or [15.0, 15.0, 15.0].
+        assert slept == [15.0, 15.0, 5.0]
+        assert order[:5] == [
+            "hook:kill_consumer",
+            "hook:create_stale_cache",
+            "tool:get_consumer_lag",
+            "tool:get_consumer_lag",
+            "tool:get_consumer_lag",
+        ]
+        assert order.index("llm") > order.index("tool:get_cache_key_info")
+
+    def test_a_dead_platform_on_the_second_fault_is_unverifiable_not_unmet(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The not-met / unverifiable split is per probe, not per scenario.
+
+        A met first premise must not latch "the world answered" for the
+        second: the whole point of the pair is that a claim about the world
+        requires THAT probe's deciding attempt to have answered. Getting
+        this wrong is what once let a dead platform report as "the fault was
+        never manufactured" (runner.py, ``_assert_preconditions``).
+        """
+        with pytest.raises(runner_module.PreconditionUnverifiable) as caught:
+            self._run(
+                monkeypatch,
+                self._two_fault_scenario(),
+                # No canned answer for the second probe's tool => MCPError.
+                {"get_consumer_lag": self._lag(4200)},
+            )
+        message = str(caught.value)
+        assert "UNKNOWN" in message
+        assert "get_cache_key_info" in message
+        assert "never manufactured" not in message
 
 
 class TestLiveRequiresAnExplicitSelection:

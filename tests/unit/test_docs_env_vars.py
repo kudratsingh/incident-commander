@@ -58,10 +58,11 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "TIER_2",
         # Environment variables / make flags consumed outside Settings.
         "CHAOS_ENABLED",  # platform-side chaos gate (demo/compose.yml)
-        # Platform-side SLO evaluator interval, set to 0 on both demo services
-        # (demo/compose.yml) so the eval world stops alerting on its own seeded
-        # fixtures. Named in the runbook because `make eval-reset` cannot clear
-        # the alerts it produces — WO-R2-131/132.
+        # Platform-side SLO evaluator interval. It was pinned to 0 on both demo
+        # services so the eval world stopped alerting on its own seeded fixtures;
+        # platform v0.6.4 made the evaluator skip those rows, so the override is
+        # gone from demo/compose.yml and the loop runs at its default interval.
+        # Still named in the runbook, which tells that story — WO-R2-131/132.
         "SLO_EVALUATION_INTERVAL_SECONDS",
         "EVAL_TRACE_DIR",  # eval runner trace destination (evals/runner.py)
         "PLATFORM_COMPOSE",  # read by `make eval-reset`, not by the agent

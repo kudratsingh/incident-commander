@@ -166,6 +166,9 @@ PROVENANCE_FIELDS: Final[tuple[str, ...]] = tuple(RunProvenance.model_fields)
 #: the writer refuses it here.
 _PLACEHOLDERS: Final[frozenset[str]] = frozenset({"", "unknown", "none", "null", "n/a", "tbd"})
 
+#: Provenance fields that legitimately differ row to row within one run.
+_PER_SCENARIO: Final[frozenset[str]] = frozenset({"scenario", "budget", "recorded_at"})
+
 
 def stamp_of(offline_path: Path) -> dict[str, Any]:
     """The one provenance record every row of the offline suite agrees on.
@@ -181,9 +184,13 @@ def stamp_of(offline_path: Path) -> dict[str, Any]:
     records = [outcome.get("provenance") for outcome in raw["outcomes"]]
     if not records or any(record is None for record in records):
         raise ValueError(f"{offline_path.name}: every outcome must carry a provenance record")
-    # Per-scenario fields differ by design; the rest must be one answer.
+    # Per-scenario by design: the scenario's own name, its own budget ledger,
+    # and the moment IT was recorded (each row is stamped as it finishes, so
+    # the 41 timestamps differ by milliseconds). Everything else — the code,
+    # the platform image, the models, the role, the strategy, the invocation,
+    # the execution mode — has to be one answer for the whole run.
     shared = [
-        {key: value for key, value in record.items() if key not in ("scenario", "budget")}
+        {key: value for key, value in record.items() if key not in _PER_SCENARIO}
         for record in records
     ]
     if any(record != shared[0] for record in shared[1:]):
@@ -192,12 +199,16 @@ def stamp_of(offline_path: Path) -> dict[str, Any]:
     missing = [
         name
         for name in PROVENANCE_FIELDS
-        if name not in ("scenario", "budget")
+        if name not in _PER_SCENARIO
         and str(getattr(validated, name)).strip().lower() in _PLACEHOLDERS
     ]
     if missing:
         raise ValueError(f"provenance field(s) unanswered: {', '.join(sorted(missing))}")
-    stamp = {key: value for key, value in shared[0].items()}
+    stamp = dict(shared[0])
+    # The run's own timestamp, not one row's: a baseline is dated by the run
+    # that produced it, and picking a row would date it by whichever scenario
+    # happened to finish first.
+    stamp["recorded_at"] = raw["generated_at"]
     stamp["budgets_seeded_and_used"] = [
         {"scenario": record["scenario"], **record["budget"]} for record in records
     ]
@@ -364,17 +375,18 @@ def render_markdown(document: dict[str, Any]) -> str:
             "",
             "## Ledger walk",
             "",
-            f"By reference: [`{document['debt_walk']['source']}`]"
-            f"(eval-debt.md#restart-walk-2026-09-15), sha256 "
-            f"`{document['debt_walk']['sha256']}`.",
+            "By reference, not by copy — the walk is appended under the Corrections heading of "
+            "[`docs/eval-debt.md`](../../docs/eval-debt.md#restart-walk-2026-09-15), which is "
+            "where its evidence links resolve. That file's sha256 when this was assembled was "
+            f"`{document['debt_walk']['sha256']}`; each row's full observable and evidence are "
+            "in the JSON companion under `debt_walk.rows`.",
             "",
+            "| Row | PR | Disposition |",
+            "|---|---|---|",
         ]
     )
     for row in document["debt_walk"]["rows"]:
-        lines.append(
-            f"- Row {row['row']} ({row['pr']}): **{row['disposition']}** — "
-            f"{row['observable']} {row['evidence']}"
-        )
+        lines.append(f"| {row['row']} | {row['pr']} | **{row['disposition']}** |")
     lines.extend(["", "## Exclusions and interpretation", ""])
     for entry in document["exclusions"]:
         lines.append(f"- {entry.get('scenario', entry.get('archive'))}: {entry['reason']}")

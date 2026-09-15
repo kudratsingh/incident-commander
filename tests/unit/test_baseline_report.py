@@ -170,7 +170,7 @@ def test_every_provenance_field_is_stamped_and_answered(tmp_path: Path) -> None:
     offline.write_text(_canned_full_report().model_dump_json())
     stamp = baseline.assemble(baseline.REPO_ROOT, offline)["provenance"]
     for field in baseline.PROVENANCE_FIELDS:
-        if field in ("scenario", "budget"):
+        if field in baseline._PER_SCENARIO:
             continue
         assert field in stamp, field
         assert str(stamp[field]).strip().lower() not in baseline._PLACEHOLDERS, field

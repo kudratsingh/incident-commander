@@ -36,8 +36,9 @@ from typing import Any, Final
 import pytest
 
 from evals import artifacts, dossier
+from evals.chaos_hooks import ChaosInvocationError
 from evals.scenarios.loader import load_scenarios
-from evals.scenarios.schema import Scenario, chaos_tool_names
+from evals.scenarios.schema import ChaosHook, ChaosPlan, Scenario, chaos_tool_names
 from incident_commander.tools.mcp_client import MCPError, ToolResult
 from incident_commander.tools.policies import RESOURCE_ARG_FIELDS, Tier, tier_of
 from incident_commander.tools.registry import TOOL_REGISTRY
@@ -769,6 +770,255 @@ class TestReadingTheWorld:
         )
         assert "Baseline re-audit: FAIL" in document
         assert "WO-R2-131" in document
+
+
+class TestAPlanDeclaringScenarioIsSeededAndReportedInFull:
+    """A two-hook `ChaosPlan` is read, fired and written down as a plan.
+
+    The follow-up to WP-1.1 (ADR 0037). A plan-declaring scenario leaves the
+    legacy `chaos_setup` field `None`, so this module reading that field
+    directly would have: seeded **nothing**, printed "declares no chaos_setup.
+    Nothing was seeded", and then linted an un-faulted world as though it were
+    the scenario's own. That is the failure this tool exists to prevent, in
+    the tool itself — a dossier that reads the wrong world reads it in full
+    and prints every field of it.
+
+    Nothing here touches a platform: `invoke` and `sleep` are injected fakes
+    and the reads go through `FakeClient`.
+    """
+
+    _PLAN: Final[ChaosPlan] = ChaosPlan(
+        setup=(
+            ChaosHook(name="kill_consumer", arguments={"consumer_group": "worker-dispatcher"}),
+            ChaosHook(name="saturate_redis", arguments={"num_keys": 10}),
+        ),
+        teardown=(ChaosHook(name="bad_deploy", arguments={"label": "restore"}),),
+        settle_seconds=2.5,
+    )
+
+    @staticmethod
+    def _planned(scenario: Scenario, plan: ChaosPlan) -> Scenario:
+        """The same scenario with its fault respelled as a plan."""
+        return scenario.model_copy(update={"chaos_setup": None, "chaos_plan": plan})
+
+    @staticmethod
+    def _recording_invoke(log: list[str], replies: Mapping[str, Any] | None = None) -> Any:  # noqa: ANN401 — the injected seam's own signature
+        def invoke(url: str, token: str, name: str, arguments: dict[str, Any]) -> Any:
+            log.append(f"hook:{name}")
+            return dict((replies or {}).get(name, {"ok": True, "hook": name}))
+
+        return invoke
+
+    def _render(self, scenario: Scenario, seeding: str = "{}") -> str:
+        return dossier.render(
+            scenario=scenario,
+            generated_at=datetime(2026, 9, 15, 12, 0, 0, tzinfo=UTC),
+            invocation_id="aaaabbbbcccc",
+            settings_url="http://localhost:8001/mcp",
+            head="deadbee",
+            seeding=seeding,
+            preconditions=[],
+            readings=[],
+            notes=[],
+            dlq_findings=[],
+            dlq_rows=[],
+            target_findings=[],
+            target_rows=[],
+            furniture_findings=[],
+            furniture_rows=[],
+            reset_code=0,
+            reset_output="ok",
+            baseline=[dossier.BaselineLine("DLQ total", "4", "4", True)],
+        )
+
+    def test_the_claims_table_names_every_hook(self, scenarios: dict[str, Scenario]) -> None:
+        document = self._render(self._planned(scenarios["dlq_backlog"], self._PLAN))
+        assert "| chaos hooks | `kill_consumer`, `saturate_redis` |" in document
+
+    def test_the_seeded_section_lists_every_hook_with_its_own_arguments(
+        self, scenarios: dict[str, Scenario]
+    ) -> None:
+        document = self._render(self._planned(scenarios["dlq_backlog"], self._PLAN))
+        assert "2 setup hooks, fired in declared order" in document
+        assert "**1/2 — `kill_consumer` arguments**" in document
+        assert "**2/2 — `saturate_redis` arguments**" in document
+        # Each hook's own arguments, in full, beside the hook they belong to.
+        assert document.index("worker-dispatcher") < document.index('"num_keys"')
+
+    def test_the_declared_teardown_is_named_and_said_not_to_be_fired(
+        self, scenarios: dict[str, Scenario]
+    ) -> None:
+        """The dossier's restore is `make eval-reset`, and it says so.
+
+        A reader who saw a teardown in the YAML and no word about it here
+        would reasonably assume the dossier had run it.
+        """
+        document = self._render(self._planned(scenarios["dlq_backlog"], self._PLAN))
+        assert "Teardown declared (`bad_deploy`) and deliberately NOT fired here" in document
+        assert "make eval-reset PURGE_IDEMPOTENCY=1" in document
+
+    def test_the_settle_wait_is_stated(self, scenarios: dict[str, Scenario]) -> None:
+        document = self._render(self._planned(scenarios["dlq_backlog"], self._PLAN))
+        assert "Settle: 2.5s waited after the last hook" in document
+
+    def test_a_scenario_with_no_chaos_still_says_so(self, scenarios: dict[str, Scenario]) -> None:
+        document = self._render(scenarios["alert_storm"])
+        assert "This scenario declares no chaos. Nothing was seeded." in document
+
+    def test_it_derives_and_prints_the_same_probes_as_the_legacy_spelling(
+        self, scenarios: dict[str, Scenario]
+    ) -> None:
+        """Respelling the fault as a plan changes what is SEEDED, not what is READ.
+
+        The probe derivation is the dossier's other half, and the claim under
+        test is that a plan-declaring scenario reaches it intact: same derived
+        calls, same readings, printed in full in the document.
+        """
+        legacy = scenarios["remediate_runaway_saga_success"]
+        planned = self._planned(legacy, self._PLAN)
+        assert dossier.derive_probes(planned) == dossier.derive_probes(legacy)
+
+        client = FakeClient(
+            {
+                "list_dlq_messages": {"total": 1, "items": [{"id": _SAGA_ROOT}]},
+                "get_dag_state": {"dag_id": "chain", "status": "stuck"},
+                "get_job_status": {"job_id": _SAGA_ROOT, "status": "dead_letter"},
+            }
+        )
+        probes, _ = dossier.derive_probes(planned)
+        readings = [dossier.read(client, probe) for probe in probes]
+        assert readings, "a plan-declaring scenario derived no probe at all"
+        document = dossier.render(
+            scenario=planned,
+            generated_at=datetime(2026, 9, 15, 12, 0, 0, tzinfo=UTC),
+            invocation_id="aaaabbbbcccc",
+            settings_url="http://localhost:8001/mcp",
+            head="deadbee",
+            seeding="{}",
+            preconditions=[],
+            readings=readings,
+            notes=[],
+            dlq_findings=[],
+            dlq_rows=[],
+            target_findings=[],
+            target_rows=[],
+            furniture_findings=[],
+            furniture_rows=[],
+            reset_code=0,
+            reset_output="ok",
+            baseline=[],
+        )
+        for reading in readings:
+            if reading.payload is not None:
+                assert json.dumps(reading.payload, indent=2) in document
+
+    def test_every_setup_hook_fires_in_declared_order_then_the_settle_wait(
+        self, scenarios: dict[str, Scenario]
+    ) -> None:
+        """One ordered list, not two independent facts.
+
+        The wait has to land AFTER the last hook — a settle taken before the
+        plan has finished landing is a wait for nothing.
+        """
+        log: list[str] = []
+        seeded = dossier.seed_chaos(
+            self._planned(scenarios["dlq_backlog"], self._PLAN),
+            "http://platform.invalid/mcp",
+            "token",
+            invoke=self._recording_invoke(log),
+            sleep=lambda seconds: log.append(f"slept:{seconds}"),
+            log=lambda message: None,
+        )
+        assert log == ["hook:kill_consumer", "hook:saturate_redis", "slept:2.5"]
+        assert seeded.failed is False
+        assert '"hook": "kill_consumer"' in seeded.markdown
+        assert '"hook": "saturate_redis"' in seeded.markdown
+
+    def test_a_refused_hook_stops_the_plan_and_names_its_position(
+        self, scenarios: dict[str, Scenario]
+    ) -> None:
+        """The second hook of a cascade is not its fault if the first failed."""
+        log: list[str] = []
+
+        def invoke(url: str, token: str, name: str, arguments: dict[str, Any]) -> Any:
+            log.append(f"hook:{name}")
+            raise ChaosInvocationError("poison_fixture_name_in_use: reset the world")
+
+        printed: list[str] = []
+        seeded = dossier.seed_chaos(
+            self._planned(scenarios["dlq_backlog"], self._PLAN),
+            "http://platform.invalid/mcp",
+            "token",
+            invoke=invoke,
+            sleep=lambda seconds: log.append(f"slept:{seconds}"),
+            log=printed.append,
+        )
+        assert log == ["hook:kill_consumer"], "the plan carried on past a refused hook"
+        assert seeded.failed is True
+        assert "**SEEDING FAILED** — hook 1/2 `kill_consumer`" in seeded.markdown
+        assert "poison_fixture_name_in_use" in seeded.markdown
+        assert printed and "chaos seeding failed" in printed[0]
+
+    def test_a_one_hook_plan_seeds_exactly_what_it_always_did(
+        self, scenarios: dict[str, Scenario]
+    ) -> None:
+        """Every shipped scenario is this case; none of them may move."""
+        log: list[str] = []
+        scenario = scenarios["remediate_consumer_lag_success"]
+        assert scenario.chaos_setup is not None, "this test needs a legacy one-hook scenario"
+        seeded = dossier.seed_chaos(
+            scenario,
+            "http://platform.invalid/mcp",
+            "token",
+            invoke=self._recording_invoke(log, {scenario.chaos_setup.name: {"killed": True}}),
+            sleep=lambda seconds: log.append(f"slept:{seconds}"),
+            log=lambda message: None,
+        )
+        assert log == [f"hook:{scenario.chaos_setup.name}"], "a legacy hook did not fire, or slept"
+        # A bare JSON block, with no hook label: byte-for-byte what the
+        # document carried before plans existed.
+        assert seeded.markdown == '```json\n{\n  "killed": true\n}\n```'
+
+    def test_a_scenario_with_no_chaos_fires_nothing(self, scenarios: dict[str, Scenario]) -> None:
+        log: list[str] = []
+        seeded = dossier.seed_chaos(
+            scenarios["alert_storm"],
+            "http://platform.invalid/mcp",
+            "token",
+            invoke=self._recording_invoke(log),
+            sleep=lambda seconds: log.append(f"slept:{seconds}"),
+            log=lambda message: None,
+        )
+        assert log == []
+        assert seeded.sanctioned_incoherent == frozenset()
+        assert "no chaos" in seeded.markdown
+
+    def test_the_sanctioned_exemption_follows_the_hook_that_wrote_the_row(
+        self, scenarios: dict[str, Scenario]
+    ) -> None:
+        """§5.1's exemption must survive the migration, and only for real rows.
+
+        Read off the hook's OWN reply, so a plan whose mislabelling hook is
+        second still exempts the row it created — and a plan that never
+        reached that hook exempts nothing.
+        """
+        plan = ChaosPlan(
+            setup=(
+                ChaosHook(name="kill_consumer", arguments={"consumer_group": "worker-dispatcher"}),
+                ChaosHook(name="create_mislabeled_dlq_job", arguments={"mislabel": True}),
+            )
+        )
+        seeded = dossier.seed_chaos(
+            self._planned(scenarios["dlq_backlog"], plan),
+            "http://platform.invalid/mcp",
+            "token",
+            invoke=self._recording_invoke([], {"create_mislabeled_dlq_job": {"job_id": self._ROW}}),
+            sleep=lambda seconds: None,
+            log=lambda message: None,
+        )
+        assert seeded.sanctioned_incoherent == frozenset({self._ROW})
+
+    _ROW: Final[str] = "be64a675-212b-5379-8349-816d17a8107a"
 
 
 class TestBaselineMatchesTheRunbook:

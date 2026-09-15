@@ -57,10 +57,12 @@ Optional fields drive richer grading:
 scenario models through `evals/scenarios/loader.py`. The inventory covers the
 loader's entire corpus (currently 41 `.yaml` scenarios; `.yml` is also accepted),
 sorted by scenario name with stable JSON key order. It records declared live MCP
-and LLM flags, the chaos hook name or null, expected terminal state, expected and
-forbidden action tools, forbidden replay ids/categories, and tags. The flags
-describe scenario capabilities; generating this file runs no scenario and makes
-no platform or LLM call. This is a source manifest, not a run artifact.
+and LLM flags, `chaos_hooks` (every setup hook of the scenario's `ChaosPlan`, in
+declared order, read through `Scenario.chaos`; empty when the scenario seeds no
+chaos), expected terminal state, expected and forbidden action tools, forbidden
+replay ids/categories, and tags. The flags describe scenario capabilities;
+generating this file runs no scenario and makes no platform or LLM call. This is
+a source manifest, not a run artifact.
 
 Since WP-1.4 the inventory also records `template_id`, `seed` and
 `benchmark_split`, and the family and difficulty columns read the scenario's own
@@ -327,16 +329,26 @@ a grade that stands on its own, and where the agent also crashed, the row carrie
 thing it damages is the *next* invocation, it also writes a latch — `evals/.chaos-teardown-block.json`
 — and while that file exists every `--live` run is refused with exit **10** before settings load,
 before the guards, before any spend. Offline runs are untouched: canned scenarios share no world.
-Clearing it is two deliberate steps, in this order:
+Clearing it is the reset:
 
 ```bash
 make eval-reset PURGE_IDEMPOTENCY=1
-uv run python -m evals.runner --clear-chaos-block
 ```
 
-The reset is what actually restores the world; the second command only records that it happened. It
-is a separate invocation rather than a flag on the next run because an assertion bundled into the
-run it unblocks is one nobody makes consciously.
+The reset is what actually restores the world, and the recipe's last line — `uv run python -m
+evals.runner --clear-chaos-block` — records that it happened. That clear is the LAST line for a
+reason: make abandons a recipe at the first failing line, so a reset that did not succeed never
+reaches it and the latch survives to refuse the next live run. ADR 0037 shipped these as two
+commands an operator typed in order, because the Makefile belonged to another editor that week; the
+decision it records is unchanged, and the clear still refuses to be a flag on the run it unblocks —
+an assertion bundled into that run is one nobody makes consciously.
+
+The standalone command is still there for the case the recipe cannot cover: a latch left by a run
+against a stack that has since been torn down, where there is nothing to reset.
+
+```bash
+uv run python -m evals.runner --clear-chaos-block
+```
 
 ### Teardown is compensators, TTL, and the reset — not compensators alone
 

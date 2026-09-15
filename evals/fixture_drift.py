@@ -203,8 +203,10 @@ class CannedCall:
     payload: Mapping[str, Any]
     # Index within a sequenced fixture (``get_consumer_lag: [before, after]``).
     index: int = 0
-    # True when the scenario declares a ``chaos_setup``, i.e. its fixture
-    # describes a world the hook manufactures. Load-bearing for one case
+    # True when the scenario seeds chaos at all, i.e. its fixture describes a
+    # world its hooks manufacture. Read off ``Scenario.seeds_chaos`` rather
+    # than the legacy ``chaos_setup`` field, which is ``None`` on a
+    # plan-declaring scenario (ADR 0037). Load-bearing for one case
     # only: a tool that answers "that entity does not exist" when probed
     # against the UN-faulted world has made an observation, not failed. See
     # ``evals/fixture_probe.py`` for why that distinction has to be drawn
@@ -318,7 +320,7 @@ def canned_calls(scenarios: Iterable[Scenario]) -> tuple[CannedCall, ...]:
                             arguments=arguments_by_tool.get(tool, {}),
                             payload=payload,
                             index=index,
-                            chaos_seeded=scenario.chaos_setup is not None,
+                            chaos_seeded=scenario.seeds_chaos,
                         )
                     )
     return tuple(calls)

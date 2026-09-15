@@ -9,6 +9,8 @@ from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import (
     ChaosHook,
     ChaosPlan,
+    DiscriminatingProbe,
+    GroundTruth,
     Scenario,
     _chaos_names_from_snapshot,
     chaos_argument_errors,
@@ -16,6 +18,7 @@ from evals.scenarios.schema import (
     chaos_tool_schemas,
     json_types_for,
 )
+from incident_commander.agent.hypothesis import HypothesisCategory
 from incident_commander.agent.state import IncidentState
 from incident_commander.api.schemas import AlertPayload
 
@@ -551,3 +554,215 @@ class TestShippedScenariosRoundTripToPlans:
         # smoke derivation and the ADR 0020 selection just changed silently.
         for scenario in load_scenarios(_SCENARIOS_DIR):
             assert scenario.seeds_chaos is (scenario.chaos_setup is not None), scenario.name
+
+
+class TestGroundTruth:
+    """The evaluator's record of what was actually wrong (WP-1.3, plan 01 § 5).
+
+    Loader-level validation only here; that it never reaches the agent is
+    ``tests/unit/test_ground_truth_never_leaks.py``, which is the half of
+    this packet that carries the weight.
+    """
+
+    def test_a_scenario_ships_without_one(self) -> None:
+        """Optional, and 41 scenarios predate it. Absence is not an error."""
+        scenario = Scenario(
+            name="s",
+            alert=AlertPayload(source="billing"),
+            expectation=ScenarioExpectation(
+                name="s", expected_terminal_state=IncidentState.ESCALATED
+            ),
+        )
+        assert scenario.ground_truth is None
+        assert scenario.discriminating_probes == ()
+        assert scenario.root_cause_graded is False
+
+    def test_it_loads_from_the_yaml_shape_the_plan_documents(self) -> None:
+        scenario = Scenario.model_validate(
+            {
+                "name": "s",
+                "alert": {"source": "billing"},
+                "expectation": {"name": "s", "expected_terminal_state": "escalated"},
+                "ground_truth": {
+                    "incident_count": 1,
+                    "root_causes": ["outbox_stall"],
+                    "affected_components": ["outbox_relay", "worker_dispatcher"],
+                    "causal_chain": ["outbox_stall", "jobs_pending", "no_execution"],
+                },
+                "discriminating_probes": [
+                    {"tool": "list_dlq_messages", "argument_pattern": {"category": "^wait.*"}}
+                ],
+            }
+        )
+        assert scenario.root_cause_graded is True
+        assert scenario.ground_truth is not None
+        assert scenario.ground_truth.root_causes == (HypothesisCategory.OUTBOX_STALL,)
+        assert scenario.ground_truth.affected_components == ("outbox_relay", "worker_dispatcher")
+        assert scenario.ground_truth.causal_chain[0] == "outbox_stall"
+        assert scenario.discriminating_probes[0].tool == "list_dlq_messages"
+
+    def test_an_unknown_root_cause_label_is_rejected(self) -> None:
+        """The label is the enum the agent classifies into, or it is nothing.
+
+        A free-string root cause could never be compared with a
+        ``Hypothesis.category``, so the root-cause grader would be matching
+        prose. ``StrEnum`` makes the typo a load error instead.
+        """
+        with pytest.raises(ValidationError, match="root_causes"):
+            GroundTruth.model_validate({"incident_count": 1, "root_causes": ["outbox_stalled"]})
+
+    def test_every_taxonomy_label_is_admissible(self) -> None:
+        """No category is unreachable — including the WP-1.6 additions."""
+        for category in HypothesisCategory:
+            count = 0 if category is HypothesisCategory.NO_FAULT else 1
+            assert GroundTruth(incident_count=count, root_causes=(category,)).root_causes == (
+                category,
+            )
+
+    def test_an_empty_root_cause_list_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            GroundTruth(incident_count=1, root_causes=())
+
+    def test_a_repeated_root_cause_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="repeats a label"):
+            GroundTruth(
+                incident_count=2,
+                root_causes=(
+                    HypothesisCategory.OUTBOX_STALL,
+                    HypothesisCategory.OUTBOX_STALL,
+                ),
+            )
+
+    def test_no_fault_cannot_sit_beside_a_fault(self) -> None:
+        with pytest.raises(ValidationError, match="whole answer"):
+            GroundTruth(
+                incident_count=1,
+                root_causes=(HypothesisCategory.NO_FAULT, HypothesisCategory.OUTBOX_STALL),
+            )
+
+    def test_no_fault_means_no_incidents(self) -> None:
+        with pytest.raises(ValidationError, match="incident_count: 0"):
+            GroundTruth(incident_count=1, root_causes=(HypothesisCategory.NO_FAULT,))
+
+    def test_a_named_fault_means_at_least_one_incident(self) -> None:
+        with pytest.raises(ValidationError, match="no root cause to name"):
+            GroundTruth(incident_count=0, root_causes=(HypothesisCategory.OUTBOX_STALL,))
+
+    def test_a_blank_component_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="names nothing"):
+            GroundTruth(
+                incident_count=1,
+                root_causes=(HypothesisCategory.OUTBOX_STALL,),
+                affected_components=("outbox_relay", "  "),
+            )
+
+    def test_no_action_fields_exist_on_it(self) -> None:
+        """Divergence C5 / plan 01 § 5, pinned rather than remembered.
+
+        ``expected_action_tools`` and ``forbidden_action_tools`` live on
+        ``ScenarioExpectation`` and are cross-checked against ``FIX_MAP`` by
+        ``test_policies.py``. A second copy here is how ``FIX_MAP`` drifted
+        for weeks; this test is what stops the next author adding one for
+        convenience.
+        """
+        action_shaped = sorted(field for field in GroundTruth.model_fields if "action" in field)
+        assert action_shaped == [], (
+            f"GroundTruth gained {action_shaped}. Admissible and forbidden actions are "
+            "ScenarioExpectation's, cross-checked against FIX_MAP — two sources of "
+            "truth for one fact is the drift plan 01 § 5 forbids."
+        )
+
+    def test_it_is_frozen_and_forbids_extras(self) -> None:
+        truth = GroundTruth(incident_count=1, root_causes=(HypothesisCategory.OUTBOX_STALL,))
+        with pytest.raises(ValidationError):
+            truth.incident_count = 2
+        with pytest.raises(ValidationError):
+            GroundTruth.model_validate(
+                {"incident_count": 1, "root_causes": ["outbox_stall"], "acceptable_actions": []}
+            )
+
+
+class TestDiscriminatingProbe:
+    def test_a_write_tool_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="may only read"):
+            DiscriminatingProbe(tool="replay_dlq_by_ids")
+
+    def test_an_unregistered_tool_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="not a registered tool"):
+            DiscriminatingProbe(tool="get_outbox_status")
+
+    def test_a_broken_pattern_is_a_load_error(self) -> None:
+        with pytest.raises(ValidationError, match="not a valid regular expression"):
+            DiscriminatingProbe(tool="list_dlq_messages", argument_pattern={"category": "["})
+
+    def test_matches_requires_the_tool_and_every_constrained_argument(self) -> None:
+        probe = DiscriminatingProbe(
+            tool="list_dlq_messages", argument_pattern={"category": "^wait_"}
+        )
+        assert probe.matches("list_dlq_messages", {"category": "wait_dependency", "limit": 5})
+        assert not probe.matches("list_dlq_messages", {"category": "replay_safe"})
+        assert not probe.matches("list_dlq_messages", {"limit": 5})
+        assert not probe.matches("get_consumer_lag", {"category": "wait_dependency"})
+
+    def test_an_unconstrained_argument_is_ignored(self) -> None:
+        probe = DiscriminatingProbe(tool="list_dlq_messages")
+        assert probe.matches("list_dlq_messages", {"anything": "at all"})
+
+
+class TestTheGraderSideCanReadTheAnswerKey:
+    """WP-2.2's reader, proven reachable from where the grader is called.
+
+    ``grade()`` takes only ``RunState`` and ``ScenarioExpectation`` today, so
+    the root-cause dimension cannot be a field on the expectation without
+    duplicating it (divergence C4 — WP-2.2 decides whether that is a new
+    signature or a second grader). What this packet owes that decision is a
+    record the evaluator can reach from the ``Scenario`` the runner already
+    holds, and a coverage predicate to report against. Both are asserted
+    here against the real corpus so "the grader can read it" is a fact rather
+    than an intention.
+    """
+
+    def test_the_answer_key_is_reachable_from_a_loaded_scenario(self) -> None:
+        loaded = Scenario.model_validate(
+            {
+                "name": "s",
+                "alert": {"source": "billing"},
+                "expectation": {"name": "s", "expected_terminal_state": "escalated"},
+                "ground_truth": {"incident_count": 1, "root_causes": ["stale_cache"]},
+            }
+        )
+        diagnosis = HypothesisCategory.STALE_CACHE
+        assert loaded.ground_truth is not None
+        assert diagnosis in loaded.ground_truth.root_causes
+
+    def test_coverage_is_reportable_over_the_whole_corpus(self) -> None:
+        corpus = load_scenarios(_SCENARIOS_DIR)
+        graded = [s.name for s in corpus if s.root_cause_graded]
+        # None yet, by design: the fields land before the scenarios that use
+        # them (WP-1.6 opened the taxonomy; the families follow). The number
+        # is what WP-2.2's report prints, and it starts honest at zero rather
+        # than back-filled with a guess.
+        assert graded == []
+        assert len(corpus) >= 41
+
+
+class TestTheAgentVisibleProjection:
+    def test_it_carries_the_alert_the_runner_used_to_read_directly(self) -> None:
+        scenario = Scenario(
+            name="s",
+            alert=AlertPayload(source="billing"),
+            expectation=ScenarioExpectation(
+                name="s", expected_terminal_state=IncidentState.ESCALATED, max_tool_calls=7
+            ),
+        )
+        visible = scenario.agent_visible()
+        assert visible.alert == scenario.alert.model_dump()
+        assert visible.max_tool_calls == 7
+
+    def test_every_shipped_scenario_projects_to_the_same_alert(self) -> None:
+        """The runner change is behaviour-preserving, over the whole corpus."""
+        for scenario in load_scenarios(_SCENARIOS_DIR):
+            visible = scenario.agent_visible()
+            assert visible.alert == scenario.alert.model_dump(), scenario.name
+            assert visible.max_tool_calls == scenario.expectation.max_tool_calls, scenario.name
+            assert visible.canned_tool_responses == scenario.canned_tool_responses, scenario.name

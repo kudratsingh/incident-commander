@@ -960,6 +960,13 @@ def run_scenario(
     tick = clock or (lambda: datetime.now(UTC))
     now = tick()
 
+    # Everything this function is allowed to hand the agent, read once, from
+    # the scenario's own allow-list projection (WP-1.3). The evaluator-only
+    # fields — ``ground_truth`` above all — are not on it and cannot be
+    # reached through it, so a future field on ``Scenario`` cannot leak into
+    # a run by a call site here forgetting to leave it out.
+    agent_visible = scenario.agent_visible()
+
     # use_live_* means "prefer live if env is real, else fall back to canned."
     # Nothing skips just because env is placeholder — canned data is the
     # deterministic offline fallback for `make eval` / CI.
@@ -1073,7 +1080,7 @@ def run_scenario(
             _tear_down()
             raise
     else:
-        mcp_client = CannedMCPClient(scenario.canned_tool_responses)
+        mcp_client = CannedMCPClient(agent_visible.canned_tool_responses)
 
     investigation_llm: LLMClientProtocol
     remediation_planner_llm: LLMClientProtocol
@@ -1185,10 +1192,10 @@ def run_scenario(
         # fleet default of 25 in every scenario — including the ones whose
         # whole subject is behaviour under a tight budget.
         run = start_run(
-            scenario.alert.model_dump(),
+            agent_visible.alert,
             settings,
             now,
-            max_tool_calls=scenario.expectation.max_tool_calls,
+            max_tool_calls=agent_visible.max_tool_calls,
         )
         final = run_to_completion(
             run,

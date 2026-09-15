@@ -42,6 +42,8 @@ Optional fields drive richer grading:
 - `use_live_mcp: true` / `use_live_llm: true` — flip from canned to live for real-platform / real-LLM verification
 - `canned_tool_responses: {tool_name: {...}}` — canned platform responses for offline determinism
 - `canned_llm_responses: {role: [{...}]}` — canned LLM outputs per role, keyed by `investigation_planner` / `remediation_planner` / `verification_judge` / `briefing_writer` / `briefing_judge`
+- `ground_truth: {incident_count, root_causes, affected_components, causal_chain}` — what was actually wrong. **Evaluator-only; never rendered into a prompt.** See [Hidden ground truth](#hidden-ground-truth-and-the-wall-around-it)
+- `discriminating_probes: [{tool, argument_pattern}]` — the reads that tell this fault apart from the ones it resembles. Evaluator-only for the same reason
 
 ## Benchmark inventory
 
@@ -267,6 +269,43 @@ Four properties are load-bearing:
 `attempts` / `delay_seconds` exist for faults that take time to become observable. `remediate_consumer_lag_success` is the case: `kill_consumer` stops the consumer immediately, but lag is recomputed on the platform's 60s metrics interval, so the number is still 0 for up to a minute after seeding. A single look would fail a correctly seeded world.
 
 One remediation scenario deliberately has none, and `tests/unit/test_preconditions.py` holds the reason next to the name so the gap cannot become invisible: `remediate_verify_fails`, which never runs live. Every other remediation scenario has one, and the test fails if a new one arrives without either. `remediate_stale_cache_success` was the second entry on this list until v0.6.0 shipped `get_cache_key_info` — no read tool exposed a Redis key before it, so the fault was real but unobservable and no precondition could be written honestly.
+
+## Hidden ground truth, and the wall around it
+
+A scenario manufactures a fault and then asks what the agent concluded about it. `ground_truth` is the evaluator's record of the answer:
+
+```yaml
+ground_truth:
+  incident_count: 1
+  root_causes: [outbox_stall]              # HypothesisCategory values, not prose
+  affected_components: [outbox_relay, worker_dispatcher]
+  causal_chain: [outbox_stall, jobs_pending, no_execution]
+discriminating_probes:
+- tool: list_dlq_messages
+  argument_pattern: {category: "^wait_"}
+```
+
+`root_causes` are `HypothesisCategory` values — the same closed enum the agent classifies into — so a root-cause grader compares labels rather than parsing English, and a typo is a scenario-load error. `no_fault` is the level-0 control's label; the schema refuses to pair it with any other cause, and refuses to pair it with a non-zero `incident_count`. `discriminating_probes` names the reads a correct investigation would make, as (tool, argument-pattern) pairs, so a strategy comparison can say which run *found* the distinguishing evidence rather than only which one guessed right.
+
+Both are **optional**. Every scenario that predates them carries neither, and a scenario without a `ground_truth` is simply not root-cause-graded — `Scenario.root_cause_graded` is the predicate, and the coverage number it produces is reported honestly rather than back-filled with a guess.
+
+**There are no action fields here, on purpose.** What the agent may and may not do is already `expected_action_tools` and `forbidden_action_tools` on the expectation, cross-checked against `FIX_MAP` by `tests/unit/test_policies.py`. Two records of the same fact is how `FIX_MAP` drifted for weeks; `tests/unit/test_scenario_schema.py::TestGroundTruth::test_no_action_fields_exist_on_it` is what stops the second one being added for convenience.
+
+### Why the wall is structural and not a rule
+
+An agent that can read the answer key is not being measured on diagnosis. The obvious way to enforce that — dump the scenario, delete the secret keys — fails in the direction that matters: the next field added is included by default, and the failure is an omission, which does not announce itself in a diff. `docs/architecture-principles.md` § 3 says take the structural fix instead.
+
+So the agent's input is an **allow-list projection**, not a filtered dump:
+
+- `Scenario.agent_visible()` returns an `AgentVisibleScenario`, which carries exactly the alert, the tool-call cap, and the canned tool responses — and is `frozen`, `extra="forbid"`.
+- `evals/runner.py` builds the run from that object and nothing else. A field added to `Scenario` tomorrow cannot reach the agent, because reaching the agent now takes a deliberate edit to the projection.
+- `Scenario.AGENT_VISIBLE_FIELDS` and `EVALUATOR_ONLY_FIELDS` partition every field, checked **at import**: a field on neither side raises before a scenario can even be loaded, so "nobody decided" is not a state this schema can be in.
+
+`tests/unit/test_ground_truth_never_leaks.py` is the empirical half. For every scenario in the corpus it renders all four agent-visible contexts — investigation planner, remediation planner, verification judge, briefing writer — twice: once as the scenario ships, once with a maximal ground truth (every fault category in the taxonomy, sentinel components and chain) and a discriminating probe attached. The two renderings must be **byte-identical**.
+
+Byte-identity is the primary assertion rather than a substring hunt, and the choice is deliberate: a substring test for root-cause labels cannot tell "the label leaked" from "the label was always in the alert" — `poison_message` is also a chaos tool name. Identical output under an arbitrary ground truth says the ground truth changed nothing, whatever it said. The substring and per-label assertions are kept beside it because they name the leaked thing when something does leak.
+
+The sweep is parameterised over the corpus, so a new scenario is covered the moment it lands, and the file carries its own red-before: a test that breaks the projection the way an exclusion-list design would break it, and asserts the check fails.
 
 ## Live vs canned modes
 

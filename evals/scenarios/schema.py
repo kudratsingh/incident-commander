@@ -10,11 +10,12 @@ one-probe shape; more elaborate matching lands with multi-probe scenarios.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -24,6 +25,7 @@ from evals.graders.deterministic import (
     ScenarioExpectation,
     where_path_errors,
 )
+from incident_commander.agent.hypothesis import HypothesisCategory
 from incident_commander.api.schemas import AlertPayload
 from incident_commander.tools.mcp_client import ToolResult
 from incident_commander.tools.policies import Tier, tier_of
@@ -342,6 +344,28 @@ class PreconditionField(FieldComparator):
         return self
 
 
+def _read_only_registered_tool(value: str, subject: str) -> str:
+    """A tool name that is in the registry and reads. Shared by both probe kinds.
+
+    One copy, because two probes now hold the same rule for the same reason
+    and a second copy is the drift ``docs/architecture-principles.md`` § 2
+    names. ``subject`` is the caller's own noun so the error still reads as a
+    sentence about the thing that failed.
+    """
+    if value not in TOOL_REGISTRY:
+        raise ValueError(
+            f"{value!r} is not a registered tool. {subject} probes the platform "
+            f"through the same typed registry the agent uses: {sorted(TOOL_REGISTRY)}."
+        )
+    if tier_of(value) is not Tier.READ:
+        raise ValueError(
+            f"{value!r} is tier {tier_of(value).value}, and {subject.lower()} may only "
+            "read. A probe that mutates would manufacture the state it claims to "
+            "verify, and the run would prove nothing."
+        )
+    return value
+
+
 class PreconditionProbe(BaseModel):
     """One read the runner performs to confirm the scenario's premise is true.
 
@@ -366,18 +390,213 @@ class PreconditionProbe(BaseModel):
     @field_validator("tool")
     @classmethod
     def _tool_is_read_only(cls, value: str) -> str:
-        if value not in TOOL_REGISTRY:
+        return _read_only_registered_tool(value, "A precondition")
+
+
+class GroundTruth(BaseModel):
+    """What was actually wrong with the world — the evaluator's copy, never the agent's.
+
+    A scenario manufactures a fault and then grades what the agent concluded
+    about it. Until now the only record of the fault was the chaos plan that
+    seeded it plus prose in ``description``, so "did the agent name the right
+    root cause?" could only be answered by a human reading a trajectory. This
+    is that answer written down once, in the enum the agent itself classifies
+    into, so the root-cause grader (WP-2.2) reads a label rather than parsing
+    English.
+
+    **Evaluator-only, structurally.** Nothing here may reach the agent. That
+    is not enforced by remembering to leave it out of a dump — it is enforced
+    by ``Scenario.agent_visible``, which builds the agent's whole input from
+    an allow-list that this field is not on. See
+    ``tests/unit/test_ground_truth_never_leaks.py``.
+
+    **No action fields.** ``acceptable_actions`` / ``forbidden_actions`` are
+    deliberately absent: ``ScenarioExpectation.expected_action_tools`` and
+    ``forbidden_action_tools`` already carry that fact and are cross-checked
+    against ``FIX_MAP`` by ``tests/unit/test_policies.py``. Two sources of
+    truth for one fact is how ``FIX_MAP`` drifted for weeks
+    (``agent/investigation.py``'s own comment records it), so the second one
+    is not created here (plan 01 § 5, divergence C5).
+
+    ``incident_count`` is how many distinct incidents the world holds, which
+    is a fact about the *world* and not about ``root_causes``: a cascade is
+    one incident with several causes, and two unrelated faults seeded
+    together are two incidents. The one pairing that is not a judgement call
+    is the level-0 control — nothing is wrong, so the count is zero and the
+    only admissible label is ``no_fault`` — and that one is enforced below
+    rather than left to a scenario author to get right.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    incident_count: int = Field(ge=0)
+    root_causes: tuple[HypothesisCategory, ...] = Field(min_length=1)
+    affected_components: tuple[str, ...] = ()
+    causal_chain: tuple[str, ...] = ()
+
+    @field_validator("root_causes")
+    @classmethod
+    def _root_causes_are_distinct(
+        cls, value: tuple[HypothesisCategory, ...]
+    ) -> tuple[HypothesisCategory, ...]:
+        """A label twice is a typo, and it would double-count in coverage reports."""
+        seen = sorted({c.value for c in value})
+        if len(seen) != len(value):
             raise ValueError(
-                f"{value!r} is not a registered tool. Preconditions probe the platform "
-                f"through the same typed registry the agent uses: {sorted(TOOL_REGISTRY)}."
-            )
-        if tier_of(value) is not Tier.READ:
-            raise ValueError(
-                f"{value!r} is tier {tier_of(value).value}, and a precondition may only "
-                "read. A probe that mutates would manufacture the state it claims to "
-                "verify, and the run would prove nothing."
+                f"root_causes repeats a label: {[c.value for c in value]}. Each root "
+                f"cause is named once; the distinct set is {seen}."
             )
         return value
+
+    @field_validator("affected_components", "causal_chain")
+    @classmethod
+    def _entries_are_non_blank(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not entry.strip() for entry in value):
+            raise ValueError(
+                "affected_components and causal_chain name things; a blank entry "
+                "names nothing and would read as a component called ''."
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _no_fault_is_the_whole_answer(self) -> GroundTruth:
+        """``no_fault`` means nothing is wrong, so it cannot sit beside a fault.
+
+        Both directions are refused because both are silently wrong rather
+        than loudly wrong. ``root_causes: [no_fault, outbox_stall]`` grades an
+        agent correct for saying either "healthy" or "the outbox stalled",
+        which are opposite answers; and ``incident_count: 1`` with
+        ``root_causes: [no_fault]`` is a world that claims an incident nobody
+        can name — the level-0 control's whole point is that the count is
+        zero (plan 02 § 5, ``HypothesisCategory.NO_FAULT``).
+        """
+        has_no_fault = HypothesisCategory.NO_FAULT in self.root_causes
+        if has_no_fault and len(self.root_causes) > 1:
+            raise ValueError(
+                f"root_causes pairs no_fault with "
+                f"{[c.value for c in self.root_causes if c is not HypothesisCategory.NO_FAULT]}. "
+                "no_fault is the answer 'nothing is wrong'; it is the whole answer or "
+                "it is not the answer."
+            )
+        if has_no_fault and self.incident_count != 0:
+            raise ValueError(
+                f"root_causes is [no_fault] but incident_count is {self.incident_count}. "
+                "A world with nothing wrong holds no incidents — set incident_count: 0."
+            )
+        if not has_no_fault and self.incident_count == 0:
+            raise ValueError(
+                f"incident_count is 0 but root_causes names "
+                f"{[c.value for c in self.root_causes]}. A world with no incidents has "
+                "no root cause to name; use root_causes: [no_fault] for the control."
+            )
+        return self
+
+
+class DiscriminatingProbe(BaseModel):
+    """One read that separates this scenario's true cause from its neighbours.
+
+    Evaluator-only, like ``GroundTruth``: a probe listed here is the read a
+    correct investigation *would* make, and handing the agent that list would
+    be handing it the answer. It exists so a strategy comparison can say
+    which run found the distinguishing evidence and which one guessed, rather
+    than only which one landed on the right label.
+
+    ``argument_pattern`` maps an argument name to a regular expression the
+    agent's own value for that argument must match. A pattern rather than a
+    literal because the discriminating fact is usually the *shape* of the
+    call — ``group_id`` matching ``^worker-.*``, ``status`` matching
+    ``^(replay_safe|human_required)$`` — and an argument the probe does not
+    constrain is simply absent from the mapping. Patterns are compiled at
+    load, so a broken one is a scenario-load error rather than a grader
+    crash halfway through a suite.
+
+    ``tool`` is held to the same rule as ``PreconditionProbe.tool``: a
+    registered read tool. A discriminating probe that wrote would change the
+    world it is supposed to distinguish.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tool: str = Field(min_length=1)
+    argument_pattern: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("tool")
+    @classmethod
+    def _tool_is_read_only(cls, value: str) -> str:
+        return _read_only_registered_tool(value, "A discriminating probe")
+
+    @field_validator("argument_pattern")
+    @classmethod
+    def _patterns_compile(cls, value: dict[str, str]) -> dict[str, str]:
+        for argument, pattern in value.items():
+            try:
+                re.compile(pattern)
+            except re.error as err:
+                raise ValueError(
+                    f"argument_pattern[{argument!r}] is not a valid regular "
+                    f"expression: {pattern!r} ({err}). The pattern is matched against "
+                    "the agent's own argument value, so a broken one would fail in the "
+                    "grader rather than here."
+                ) from err
+        return value
+
+    def matches(self, tool: str, arguments: Mapping[str, Any]) -> bool:
+        """Whether a call the agent actually made is this probe.
+
+        The tool name must be equal and every constrained argument must be
+        present and match its pattern. An argument the pattern does not name
+        is unconstrained, and a constrained argument the agent omitted is a
+        miss rather than a vacuous pass — the grader side of "did the run
+        take the read that tells the two causes apart?".
+        """
+        if tool != self.tool:
+            return False
+        for argument, pattern in self.argument_pattern.items():
+            if argument not in arguments:
+                return False
+            if re.search(pattern, str(arguments[argument])) is None:
+                return False
+        return True
+
+
+class AgentVisibleScenario(BaseModel):
+    """Everything about a scenario that reaches the agent under test. The whole list.
+
+    This is the trust boundary in plan 00 § 3.1, written as a type. The
+    runner used to reach into a ``Scenario`` for each thing it handed the
+    agent — the alert here, the tool-call cap there, the canned platform
+    responses somewhere else — which meant the set of agent-visible fields
+    was whatever those call sites happened to read, discoverable only by
+    grepping. A field added to ``Scenario`` for the evaluator was safe only
+    for as long as nobody wrote a fifth call site.
+
+    An allow-list projection inverts that. A new field on ``Scenario`` is
+    invisible to the agent by construction: it is not on this model, and this
+    model is ``extra="forbid"``, so making it visible takes a deliberate edit
+    here and a reviewer who sees it. The alternative shape — dump the
+    scenario and delete a hand-listed set of keys — fails in the direction
+    that matters, because the failure is an omission and omissions are
+    silent (``docs/architecture-principles.md`` § 3; LESSONS records the same
+    shape going stale twice).
+
+    ``max_tool_calls`` is the one number lifted out of the graded
+    ``expectation``, and it belongs here: the agent is *told* its budget
+    (ADR 0019), and a ceiling is a constraint on the run rather than a fact
+    about the fault.
+
+    ``canned_llm_responses`` is deliberately NOT here. Those are the model's
+    own replies, scripted — an output of the agent, not an observation it
+    reads — so they are on the evaluator side of this boundary even though
+    the harness feeds them into the same run.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    alert: dict[str, Any]
+    max_tool_calls: int | None = None
+    canned_tool_responses: dict[str, ToolResult | tuple[ToolResult, ...]] = Field(
+        default_factory=dict
+    )
 
 
 class Scenario(BaseModel):
@@ -450,6 +669,81 @@ class Scenario(BaseModel):
     # is the un-recorded gap this mechanism exists to prevent, and "skip" is
     # not a reason. Write what would have to be true to lift it.
     smoke_exclusion: str | None = Field(default=None, min_length=20)
+    # What was actually wrong, for the evaluator only. Optional: the 41
+    # scenarios that predate it carry none, and a scenario without one is
+    # simply not root-cause-graded — WP-2.2 reports that coverage rather
+    # than back-filling a guess. See ``GroundTruth`` for why no action
+    # fields live here.
+    ground_truth: GroundTruth | None = None
+    # The reads that tell this fault apart from the ones it looks like.
+    # Evaluator-only for the same reason: it is the answer key to the
+    # investigation, not a hint the agent is entitled to.
+    discriminating_probes: tuple[DiscriminatingProbe, ...] = ()
+
+    # Every field above is on exactly one side of the trust boundary in plan
+    # 00 § 3.1, and the split is declared here rather than inferred from
+    # whichever call sites happen to read what. The pair is checked against
+    # ``model_fields`` at import time (below the class), so a field added
+    # without a side cannot be imported, let alone shipped: a new field is
+    # never agent-visible by accident, and never evaluator-only by accident
+    # either. ``AGENT_VISIBLE_FIELDS`` is the list ``agent_visible`` builds
+    # from; anything else is the evaluator's.
+    AGENT_VISIBLE_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            # The triggering alert — the agent's whole starting brief.
+            "alert",
+            # The canned platform's responses ARE the world the agent reads
+            # in an offline run, so they are agent-visible by definition.
+            "canned_tool_responses",
+        }
+    )
+    EVALUATOR_ONLY_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "name",
+            "description",
+            "tags",
+            "expectation",
+            "canned_llm_responses",
+            "use_live_mcp",
+            "use_live_llm",
+            "chaos_setup",
+            "chaos_plan",
+            "expected_precondition",
+            "smoke_exclusion",
+            "ground_truth",
+            "discriminating_probes",
+        }
+    )
+
+    def agent_visible(self) -> AgentVisibleScenario:
+        """This scenario projected onto everything the agent is allowed to see.
+
+        The runner builds the agent's run from this and nothing else. It is
+        an allow-list, so the interesting property is what it does with a
+        field it has never heard of: nothing. ``ground_truth`` cannot leak by
+        somebody forgetting to exclude it, because there is no exclusion list
+        to forget — the projection names what goes in.
+
+        ``max_tool_calls`` is lifted out of ``expectation`` deliberately; see
+        ``AgentVisibleScenario`` for why that one number crosses and the rest
+        of the graded expectation does not.
+        """
+        return AgentVisibleScenario(
+            alert=self.alert.model_dump(),
+            max_tool_calls=self.expectation.max_tool_calls,
+            canned_tool_responses=dict(self.canned_tool_responses),
+        )
+
+    @property
+    def root_cause_graded(self) -> bool:
+        """Whether this scenario can be scored on the root cause it declares.
+
+        The coverage number WP-2.2's report is built from: a scenario with no
+        ``ground_truth`` is not graded on diagnosis, and saying so is better
+        than a silent pass (a dimension nobody can fail is a dimension that
+        measures nothing).
+        """
+        return self.ground_truth is not None
 
     @property
     def chaos(self) -> ChaosPlan:
@@ -584,3 +878,46 @@ class Scenario(BaseModel):
         right above the ``use_live_*`` flags.
         """
         return not (self.use_live_mcp or self.use_live_llm)
+
+
+def _classify_every_scenario_field() -> None:
+    """Refuse, at import, a ``Scenario`` field nobody put on a side of the boundary.
+
+    This is a module-level check rather than a test because the failure it
+    guards is the quiet one. A new evaluator-only field is safe today — the
+    projection ignores it — and stays safe only while nobody widens the
+    projection; a new agent-visible field that nobody declared is invisible
+    to every leak test that walks the declared sets. Either way the mistake
+    is an omission, and an omission does not announce itself in a diff. Made
+    at import, it announces itself the first time anything loads a scenario.
+
+    Raised as ``RuntimeError`` rather than ``assert`` so ``python -O`` cannot
+    turn the guard off.
+    """
+    declared = Scenario.AGENT_VISIBLE_FIELDS | Scenario.EVALUATOR_ONLY_FIELDS
+    actual = set(Scenario.model_fields)
+    unclassified = sorted(actual - declared)
+    invented = sorted(declared - actual)
+    both = sorted(Scenario.AGENT_VISIBLE_FIELDS & Scenario.EVALUATOR_ONLY_FIELDS)
+    problems = []
+    if unclassified:
+        problems.append(
+            f"Scenario field(s) {unclassified} are on neither side of the trust "
+            "boundary. Add each to AGENT_VISIBLE_FIELDS (and to AgentVisibleScenario, "
+            "and to the projection) or to EVALUATOR_ONLY_FIELDS."
+        )
+    if invented:
+        problems.append(
+            f"AGENT_VISIBLE_FIELDS/EVALUATOR_ONLY_FIELDS name {invented}, which "
+            "Scenario does not define — a renamed or deleted field left a stale entry."
+        )
+    if both:
+        problems.append(
+            f"{both} are declared both agent-visible and evaluator-only. A field is "
+            "on one side of the boundary."
+        )
+    if problems:
+        raise RuntimeError(" ".join(problems))
+
+
+_classify_every_scenario_field()

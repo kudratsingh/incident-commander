@@ -14,7 +14,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": false,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -44,7 +44,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -74,7 +74,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [
@@ -112,7 +112,9 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": "kill_consumer",
+    "chaos_hooks": [
+      "kill_consumer"
+    ],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [
@@ -150,7 +152,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -179,7 +181,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -208,7 +210,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -239,7 +241,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -269,7 +271,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -299,7 +301,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -329,7 +331,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -358,7 +360,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -387,7 +389,9 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": "create_bad_data_job",
+    "chaos_hooks": [
+      "create_bad_data_job"
+    ],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [
       "mark_dlq_permanent"
@@ -433,7 +437,9 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": "create_mislabeled_dlq_job",
+    "chaos_hooks": [
+      "create_mislabeled_dlq_job"
+    ],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [
       "mark_dlq_permanent"
@@ -482,7 +488,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [
       "replay_dlq_by_category",
@@ -524,7 +530,9 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": "poison_message",
+    "chaos_hooks": [
+      "poison_message"
+    ],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [
       "mark_dlq_permanent"
@@ -573,7 +581,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "resolved",
     "expected_action_tools": [
       "replay_dlq_by_category",
@@ -614,7 +622,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "resolved",
     "expected_action_tools": [
       "replay_dlq_by_ids",
@@ -655,7 +663,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -685,7 +693,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -714,7 +722,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -744,7 +752,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -774,7 +782,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": false,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [
@@ -811,7 +819,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -840,7 +848,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -868,7 +876,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -897,7 +905,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -925,7 +933,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -954,7 +962,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": false,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -981,7 +989,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -1010,7 +1018,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -1039,7 +1047,9 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": "kill_consumer",
+    "chaos_hooks": [
+      "kill_consumer"
+    ],
     "expected_terminal_state": "resolved",
     "expected_action_tools": [
       "restart_consumer_group"
@@ -1077,7 +1087,9 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": "poison_message",
+    "chaos_hooks": [
+      "poison_message"
+    ],
     "expected_terminal_state": "resolved",
     "expected_action_tools": [
       "replay_dlq_by_category",
@@ -1119,7 +1131,9 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": "create_stuck_dag",
+    "chaos_hooks": [
+      "create_stuck_dag"
+    ],
     "expected_terminal_state": "resolved",
     "expected_action_tools": [
       "replay_dlq_by_ids"
@@ -1161,7 +1175,9 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": "create_stale_cache",
+    "chaos_hooks": [
+      "create_stale_cache"
+    ],
     "expected_terminal_state": "resolved",
     "expected_action_tools": [
       "invalidate_cache_key"
@@ -1200,7 +1216,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": false,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [
       "restart_consumer_group"
@@ -1239,7 +1255,9 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": "create_stuck_dag",
+    "chaos_hooks": [
+      "create_stuck_dag"
+    ],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [
       "mark_dlq_permanent"
@@ -1283,7 +1301,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": false,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -1310,7 +1328,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": false,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -1337,7 +1355,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": false,
     "use_live_llm": false,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],
@@ -1364,7 +1382,7 @@
     "benchmark_split": "dev",
     "use_live_mcp": true,
     "use_live_llm": true,
-    "chaos_hook": null,
+    "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
     "forbidden_action_tools": [],

@@ -178,6 +178,46 @@ def test_declared_template_seed_and_split_reach_the_row(tmp_path: Path) -> None:
     assert (row["template_id"], row["seed"], row["benchmark_split"]) == ("shared", 3, "validation")
 
 
+def test_a_scenario_with_no_chaos_lists_no_hooks(tmp_path: Path) -> None:
+    _write_scenario(tmp_path, "quiet")
+    assert generate_inventory(tmp_path)[0]["chaos_hooks"] == []
+
+
+def test_a_legacy_chaos_setup_is_a_one_hook_plan_in_the_manifest(tmp_path: Path) -> None:
+    """The 41 shipped scenarios all spell their fault this way; none moved."""
+    path = _write_scenario(tmp_path, "legacy")
+    path.write_text(
+        path.read_text()
+        + "chaos_setup: {name: kill_consumer, arguments: {consumer_group: worker-dispatcher}}\n",
+        encoding="utf-8",
+    )
+    assert generate_inventory(tmp_path)[0]["chaos_hooks"] == ["kill_consumer"]
+
+
+def test_a_two_hook_plan_is_counted_and_named_in_order(tmp_path: Path) -> None:
+    """The under-report this column was migrated to close (WP-1.1 follow-up).
+
+    A plan-declaring scenario leaves `chaos_setup` None. Read directly, the
+    manifest described a two-fault world as seeding nothing at all — a whole
+    class of scenario dropping out of the benchmark's own description with
+    nothing failing (ADR 0037). Order is asserted, not just membership: a
+    cascade's second hook is only the fault it claims to be after the first
+    has landed, so a set would lose the part that makes the plan a plan.
+    """
+    path = _write_scenario(tmp_path, "cascade")
+    path.write_text(
+        path.read_text() + "chaos_plan:\n"
+        "  setup:\n"
+        "    - {name: kill_consumer, arguments: {consumer_group: worker-dispatcher}}\n"
+        "    - {name: saturate_redis, arguments: {num_keys: 10}}\n"
+        "  teardown: [{name: bad_deploy, arguments: {label: restore}}]\n"
+        "  settle_seconds: 2.5\n",
+        encoding="utf-8",
+    )
+    row = generate_inventory(tmp_path)[0]
+    assert row["chaos_hooks"] == ["kill_consumer", "saturate_redis"]
+
+
 def test_name_order_and_yml_match_the_loader(tmp_path: Path) -> None:
     _write_scenario(tmp_path, "zulu", filename="a.yaml")
     _write_scenario(tmp_path, "alpha", filename="z.yml")

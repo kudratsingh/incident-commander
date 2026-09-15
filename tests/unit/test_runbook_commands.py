@@ -418,3 +418,63 @@ def test_env_example_assigns_nothing_the_repo_does_not_read() -> None:
         "Makefile `?=` default, and not referenced by demo/compose.yml. Setting "
         "it does nothing; either wire it up or drop it."
     )
+
+
+# The ADR that restated the exit contract whole, in the pattern ADR 0018 set:
+# a code is defined in exactly one place and every other document agrees with
+# it or is wrong.
+_EXIT_ADR: Final[Path] = (
+    _REPO_ROOT / "docs" / "ADR" / "0037-a-scenarios-fault-is-a-plan-and-the-plan-is-put-back.md"
+)
+# A table row whose first cell is a bare integer, bold or not: `| 7 |`,
+# `| **10** |`. Nothing else in either document is shaped like that.
+_EXIT_ROW: Final[re.Pattern[str]] = re.compile(r"^\|\s*\*{0,2}(\d+)\*{0,2}\s*\|", re.MULTILINE)
+
+
+def _exit_codes(text: str) -> set[int]:
+    return {int(code) for code in _EXIT_ROW.findall(text)}
+
+
+def _runbook_exit_section() -> str:
+    """The runbook's own exit-code section, sliced at its heading."""
+    text = _RUNBOOK.read_text(encoding="utf-8")
+    marker = "### Runner exit codes"
+    assert marker in text, "docs/runbook.md lost its exit-code section heading"
+    body = text.split(marker, 1)[1]
+    return body.split("\n## ", 1)[0]
+
+
+def test_the_runbook_exit_table_carries_every_code_the_adr_defines() -> None:
+    """The operator's table and the contract's table are the same table.
+
+    The exit codes are the refusals an operator meets mid-sequence, and the
+    runbook is what they read at that moment. ADR 0037 restated the contract
+    whole as 0–10 while the runbook's table still stopped at 8 — so exits 9
+    and 10 were real, reachable, pre-spend refusals that the operational
+    record did not mention. Pinned against the ADR rather than a hand-typed
+    list here, because a code 11 must fail this test until both documents
+    have it.
+    """
+    documented = _exit_codes(_runbook_exit_section())
+    contracted = _exit_codes(_EXIT_ADR.read_text(encoding="utf-8"))
+    assert contracted == set(range(11)), (
+        "ADR 0037 no longer enumerates 0-10; a new code extends that ADR the "
+        "way 0018 and 0020 were extended, and this test moves with it"
+    )
+    assert documented == contracted, (
+        f"docs/runbook.md's exit table and ADR 0037 disagree: "
+        f"only in the runbook={sorted(documented - contracted)}, "
+        f"only in the ADR={sorted(contracted - documented)}"
+    )
+
+
+def test_the_runbook_says_how_to_clear_the_teardown_latch() -> None:
+    """Exit 10 is the one refusal that survives the invocation that caused it.
+
+    A blocked operator who cannot find the way out of it in the runbook is an
+    operator who will reach for `rm`.
+    """
+    section = _runbook_exit_section()
+    assert "--clear-chaos-block" in section
+    assert "make eval-reset PURGE_IDEMPOTENCY=1" in section
+    assert ".chaos-teardown-block.json" in section

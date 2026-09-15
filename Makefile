@@ -49,7 +49,8 @@ help:
 	@echo "  trace-report     render evals/traces/*.jsonl → readable txt files"
 	@echo "  chaos-help       list chaos setup subcommands (kill-consumer, etc.)"
 	@echo "  eval-reg         full offline eval + regression gate vs baseline (refuses ONLY=)"
-	@echo "  eval-reset       clear leftover chaos state between live scenarios"
+	@echo "  eval-reset       clear leftover chaos state between live scenarios;"
+	@echo "                   also clears the chaos teardown latch on success"
 	@echo "  demo             compose up only (platform pinned by digest); no eval runs"
 	@echo "  demo-down        stop demo compose services"
 	@echo "  bootstrap-token  mint a service-account token against a running platform"
@@ -402,6 +403,16 @@ PLATFORM_SERVICE ?= api
 # kept as a harmless belt-and-braces for now and is a wave-10 removal
 # candidate — dropping it needs one live `make eval-reset` against the
 # v0.6.0 stack to confirm, which the re-pin PR deliberately does not run.
+#
+# The last line clears the chaos teardown latch (ADR 0037, exit 10). It is
+# LAST on purpose: make aborts a recipe at the first non-zero line, so a reset
+# that failed never reaches it and the latch correctly survives to refuse the
+# next live run. The latch means "the shared world is dirty"; this reset is
+# the thing that makes that untrue, so the assertion is made by what earns it
+# rather than by a second gesture an operator has to remember at the moment
+# they are least likely to. ADR 0037 named this as the expected follow-up and
+# said it changes no decision; `--clear-chaos-block` on an unset latch is not
+# an error, so an ordinary between-scenario reset stays quiet.
 eval-reset:
 	@echo "eval-reset: resetting $(PLATFORM_COMPOSE) service $(PLATFORM_SERVICE)"
 	@if [ ! -f "$(PLATFORM_COMPOSE)" ]; then \
@@ -411,6 +422,7 @@ eval-reset:
 		-e PYTHONPATH=/app:/app/backend $(PLATFORM_SERVICE) \
 		python /app/scripts/reset_eval_state.py \
 		$(PURGE_IDEMPOTENCY_FLAG)
+	@uv run python -m evals.runner --clear-chaos-block
 
 chaos-bad-data-job:
 	PYTHONPATH=. uv run python scripts/chaos_setup.py bad-data-job

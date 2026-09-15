@@ -273,6 +273,46 @@ class TestCannedCallDerivation:
         # A fixture that models a transport failure has no payload to compare.
         assert canned_calls([scenario]) == ()
 
+    @pytest.mark.parametrize("spelling", ["legacy", "plan"])
+    def test_chaos_seeded_reads_the_plan_not_the_legacy_field(self, spelling: str) -> None:
+        """Both spellings of one fault mark the call chaos-seeded.
+
+        `chaos_seeded` decides whether "that entity does not exist" is an
+        observation or a probe error (`evals/fixture_probe.py`). Read off
+        `chaos_setup`, a plan-declaring scenario answers False — so the
+        un-faulted world's "not found" would be reported as a broken probe
+        for exactly the scenarios whose fault is most elaborate (ADR 0037).
+        """
+        from evals.graders.deterministic import ScenarioExpectation
+        from evals.scenarios.schema import ChaosHook, ChaosPlan, Scenario
+        from incident_commander.agent.state import IncidentState
+        from incident_commander.api.schemas import AlertPayload
+
+        kill = ChaosHook(name="kill_consumer", arguments={"consumer_group": "worker-dispatcher"})
+        chaos: dict[str, Any] = (
+            {"chaos_setup": kill}
+            if spelling == "legacy"
+            else {"chaos_plan": ChaosPlan(setup=(kill, ChaosHook(name="saturate_redis")))}
+        )
+        scenario = Scenario(
+            name="seeded",
+            alert=AlertPayload(source="s"),
+            expectation=ScenarioExpectation(
+                name="seeded", expected_terminal_state=IncidentState.ESCALATED
+            ),
+            canned_tool_responses={
+                "get_consumer_lag": ToolResult(
+                    content=[{"type": "text", "text": json.dumps({"lag": 900})}]
+                )
+            },
+            **chaos,
+        )
+        calls = canned_calls([scenario])
+        assert [c.chaos_seeded for c in calls] == [True], (
+            "a plan-declaring scenario is chaos-seeded; reading `chaos_setup` "
+            "directly answers False and silently reclassifies its fixtures"
+        )
+
 
 def _expects_arguments(scenario: Any, tool: str) -> bool:
     """Does this tool take arguments at all in this scenario's canned planner?"""

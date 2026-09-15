@@ -75,7 +75,7 @@ class InventoryRow(TypedDict):
     benchmark_split: str
     use_live_mcp: bool
     use_live_llm: bool
-    chaos_hook: str | None
+    chaos_hooks: list[str]
     expected_terminal_state: str
     expected_action_tools: list[str]
     forbidden_action_tools: list[str]
@@ -143,7 +143,14 @@ def generate_inventory(directory: Path = SCENARIO_DIRECTORY) -> list[InventoryRo
                 "benchmark_split": scenario.benchmark_split.value,
                 "use_live_mcp": scenario.use_live_mcp,
                 "use_live_llm": scenario.use_live_llm,
-                "chaos_hook": scenario.chaos_setup.name if scenario.chaos_setup else None,
+                # Every setup hook of the scenario's plan, in declared order,
+                # read through ``Scenario.chaos`` — never ``chaos_setup``,
+                # which is ``None`` on a plan-declaring scenario and would
+                # describe a two-fault world as seeding nothing (ADR 0037).
+                # A list rather than a name because a manifest whose job is
+                # to describe the corpus cannot describe an ordered plan with
+                # one string; a legacy one-hook scenario is a one-element list.
+                "chaos_hooks": [hook.name for hook in scenario.chaos.setup],
                 "expected_terminal_state": expectation.expected_terminal_state.value,
                 "expected_action_tools": list(expectation.expected_action_tools),
                 "forbidden_action_tools": list(expectation.forbidden_action_tools),

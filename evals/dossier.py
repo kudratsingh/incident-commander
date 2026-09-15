@@ -18,10 +18,12 @@ inputted."
 
 So this module makes that reading mechanical, and free:
 
-1. Seed the scenario's ``chaos_setup`` through the runner's own chaos path —
-   same hook, same arguments, same ``ChaosClient``, same write+chaos
-   principal. Not a re-implementation: ``invoke_chaos_hook`` is the function
-   ``run_scenario`` calls.
+1. Seed the scenario's ``ChaosPlan`` through the runner's own chaos path —
+   every setup hook in declared order, same arguments, same ``ChaosClient``,
+   same write+chaos principal, same settle wait. Not a re-implementation:
+   ``invoke_chaos_hook`` is the function ``run_scenario`` calls, and the plan
+   is read through ``Scenario.chaos`` rather than the legacy ``chaos_setup``
+   field, which is ``None`` on a plan-declaring scenario (ADR 0037).
 2. Run the scenario's ``expected_precondition`` probes and report them.
 3. Run every READ probe the agent is expected to make, derived MECHANICALLY
    from the three guard maps and the scenario's own claims (see
@@ -58,8 +60,9 @@ import argparse
 import json
 import subprocess
 import sys
+import time
 import uuid
-from collections.abc import Collection, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1000,6 +1003,93 @@ def lint_forbidden_furniture(
 
 
 # --------------------------------------------------------------------------
+# Seeding the scenario's fault plan
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Seeding:
+    """What this dossier's own seeding did — for the document and for the lint."""
+
+    #: The "Result" block of § 2, rendered. One JSON block per hook that
+    #: fired, or the failure that stopped the plan.
+    markdown: str
+    #: True when a hook was refused, so the world is half-seeded and the
+    #: §5.1 exemption below must not claim a row the platform never wrote.
+    failed: bool = False
+    #: Row ids a SANCTIONED_INCOHERENT_HOOKS hook reported creating, read off
+    #: each hook's own reply.
+    sanctioned_incoherent: frozenset[str] = frozenset()
+
+
+def seed_chaos(
+    scenario: Scenario,
+    url: str,
+    token: str,
+    *,
+    invoke: Callable[[str, str, str, dict[str, Any]], Any] = invoke_chaos_hook,
+    sleep: Callable[[float], None] = time.sleep,
+    log: Callable[[str], None] = print,
+) -> Seeding:
+    """Fire the scenario's whole fault plan, in the order the runner fires it.
+
+    Reads ``Scenario.chaos``, never ``chaos_setup``: a plan-declaring scenario
+    leaves the legacy field ``None``, so a dossier reading it directly would
+    seed nothing, report "nothing was seeded", and then lint an un-faulted
+    world as if it were the scenario's — the silent under-report ADR 0037
+    names, in the one tool whose whole job is to read the world honestly.
+
+    Same shape as ``run_scenario``: every setup hook in declared order,
+    stopping at the FIRST failure (a cascade's second hook is not the fault it
+    claims to be if the first never landed), then the plan's ``settle_seconds``
+    wait before anything reads. The wait is here rather than at the caller
+    because it belongs to the plan, and a dossier that probed a fault before it
+    became observable would report a NOT MET precondition that the runner will
+    find met.
+
+    ``teardown`` is deliberately NOT fired: this tool's restore is
+    ``make eval-reset PURGE_IDEMPOTENCY=1`` (step 5), which is authoritative
+    and undoes more than a compensator can. § 2 of the document says so rather
+    than leaving a reader to infer it.
+    """
+    plan = scenario.chaos
+    if not plan.setup:
+        return Seeding(markdown="_(this scenario declares no chaos)_")
+
+    total = len(plan.setup)
+    blocks: list[str] = []
+    sanctioned: set[str] = set()
+    for position, hook in enumerate(plan.setup, start=1):
+        try:
+            result = invoke(url, token, hook.name, dict(hook.arguments))
+        except ChaosInvocationError as err:
+            log(f"DOSSIER: chaos seeding failed — {err}")
+            blocks.append(f"**SEEDING FAILED** — hook {position}/{total} `{hook.name}` — {err}")
+            return Seeding(
+                markdown="\n\n".join(blocks),
+                failed=True,
+                sanctioned_incoherent=frozenset(sanctioned),
+            )
+        # A one-hook plan renders exactly what it rendered before plans
+        # existed: a bare JSON block. The label only appears where there is
+        # more than one reply to tell apart.
+        label = "" if total == 1 else f"**Hook {position}/{total} — `{hook.name}`**\n\n"
+        blocks.append(label + _json_block(result))
+        # The row this hook just wrote, if any. Read off the hook's OWN reply
+        # rather than computed or configured, so the §5.1 exemption can only
+        # ever apply to a row the platform confirmed it created during this
+        # dossier's own seeding.
+        if hook.name in SANCTIONED_INCOHERENT_HOOKS:
+            seeded_id = result.get("job_id") if isinstance(result, dict) else None
+            if isinstance(seeded_id, str) and seeded_id:
+                sanctioned.add(seeded_id)
+
+    if plan.settle_seconds:
+        sleep(plan.settle_seconds)
+    return Seeding(markdown="\n\n".join(blocks), sanctioned_incoherent=frozenset(sanctioned))
+
+
+# --------------------------------------------------------------------------
 # Reset, and the baseline re-audit
 # --------------------------------------------------------------------------
 
@@ -1141,8 +1231,12 @@ def render(
                 ("expected action tools", ", ".join(expectation.expected_action_tools) or "none"),
                 ("max tool calls", str(expectation.max_tool_calls)),
                 (
-                    "chaos hook",
-                    scenario.chaos_setup.name if scenario.chaos_setup else "none declared",
+                    # Every setup hook, in declared order. Never
+                    # ``chaos_setup``: that field is ``None`` on a
+                    # plan-declaring scenario, so this row would read "none
+                    # declared" over a two-fault world (ADR 0037).
+                    "chaos hooks",
+                    ", ".join(f"`{hook.name}`" for hook in scenario.chaos.setup) or "none declared",
                 ),
             ),
         )
@@ -1233,15 +1327,40 @@ def render(
 
     add("## 2. Chaos seeded")
     add("")
-    if scenario.chaos_setup is None:
-        add("This scenario declares no `chaos_setup`. Nothing was seeded.")
+    # The whole plan, read through ``Scenario.chaos``. A plan-declaring
+    # scenario leaves ``chaos_setup`` ``None``, and this section reading that
+    # field would report a two-fault world as seeding nothing (ADR 0037).
+    plan = scenario.chaos
+    if not plan.setup:
+        add("This scenario declares no chaos. Nothing was seeded.")
     else:
-        add(f"Hook `{scenario.chaos_setup.name}`, fired through `invoke_chaos_hook` — the")
+        total = len(plan.setup)
+        hooks = "hook" if total == 1 else "hooks"
+        add(f"{total} setup {hooks}, fired in declared order through `invoke_chaos_hook` — the")
         add("same function `run_scenario` calls, with the same arguments and principal.")
-        add("")
-        add("**Arguments**")
-        add("")
-        add(_json_block(dict(scenario.chaos_setup.arguments)))
+        for position, hook in enumerate(plan.setup, start=1):
+            # The position prefix only earns its place where there is an order
+            # to read: a one-hook plan is every shipped scenario today.
+            place = "" if total == 1 else f"{position}/{total} — "
+            add("")
+            add(f"**{place}`{hook.name}` arguments**")
+            add("")
+            add(_json_block(dict(hook.arguments)))
+        if plan.settle_seconds:
+            add("")
+            add(
+                f"_Settle: {plan.settle_seconds}s waited after the last hook and before "
+                "anything below was read, exactly as the runner waits._"
+            )
+        if plan.teardown:
+            add("")
+            add(
+                "_Teardown declared ("
+                + ", ".join(f"`{hook.name}`" for hook in plan.teardown)
+                + ") and deliberately NOT fired here: this tool restores the world with "
+                "`make eval-reset PURGE_IDEMPOTENCY=1` (§ 6), which is authoritative and "
+                "undoes more than a compensator can._"
+            )
         add("")
         add("**Result**")
         add("")
@@ -1529,35 +1648,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         generated_at = datetime.now(UTC)
         invocation_id = uuid.uuid4().hex[:12]
 
-        seeding = "_(no chaos_setup)_"
-        seeding_failed = False
-        if scenario.chaos_setup is not None:
-            try:
-                result = invoke_chaos_hook(
-                    str(settings.platform_mcp_url),
-                    settings.platform_token.get_secret_value(),
-                    scenario.chaos_setup.name,
-                    dict(scenario.chaos_setup.arguments),
-                )
-                seeding = _json_block(result)
-            except ChaosInvocationError as err:
-                seeding_failed = True
-                seeding = f"**SEEDING FAILED** — {err}"
-                print(f"DOSSIER: chaos seeding failed — {err}")
-
-        # The row this scenario's OWN sanctioned hook just wrote, if any. Read
-        # off the hook's reply rather than computed or configured, so the §5.1
-        # exemption below can only ever apply to a row the platform confirmed
-        # it created during this dossier's own seeding.
-        sanctioned_incoherent: set[str] = set()
-        if (
-            scenario.chaos_setup is not None
-            and scenario.chaos_setup.name in SANCTIONED_INCOHERENT_HOOKS
-            and not seeding_failed
-        ):
-            seeded_id = result.get("job_id") if isinstance(result, dict) else None
-            if isinstance(seeded_id, str) and seeded_id:
-                sanctioned_incoherent.add(seeded_id)
+        # The whole plan, fired the way the runner fires it. ``seed_chaos``
+        # also carries the §5.1 exemption: the row ids come off each hook's
+        # own reply, so the exemption can only ever name a row the platform
+        # confirmed it created during this dossier's own seeding.
+        seeded = seed_chaos(
+            scenario,
+            str(settings.platform_mcp_url),
+            settings.platform_token.get_secret_value(),
+        )
+        seeding = seeded.markdown
+        sanctioned_incoherent = set(seeded.sanctioned_incoherent)
 
         preconditions = [check_precondition(read_client, p) for p in scenario.expected_precondition]
         probes, notes = derive_probes(scenario)
@@ -1608,7 +1709,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(document)
     print(f"\ndossier written: {path}")
 
-    if seeding_failed:
+    if seeded.failed:
         return EXIT_SEEDING
     if reset_code != 0:
         return EXIT_RESET

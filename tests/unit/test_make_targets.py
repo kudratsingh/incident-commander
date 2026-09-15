@@ -222,3 +222,38 @@ class TestSmokeRendersTracesWhenTheRunFails:
                 "render, so a failing run is either reported as a pass or renders "
                 "nothing"
             )
+
+
+class TestEvalResetClearsTheChaosTeardownLatch:
+    """`make eval-reset` finishes the job it starts (ADR 0037, exit 10).
+
+    A teardown failure latches `evals/.chaos-teardown-block.json` and every
+    later `--live` run is refused with exit 10. Clearing it used to be a
+    second command an operator typed from memory, at the one moment they are
+    least likely to — mid-sequence, after something already went wrong. The
+    reset is what actually puts the world back, so the reset is what records
+    that it happened.
+    """
+
+    def test_the_clear_runs_after_the_reset(self) -> None:
+        printed = _make_dry_run("eval-reset")
+        assert "--clear-chaos-block" in printed, (
+            "make eval-reset no longer clears the chaos teardown latch; the block "
+            "then outlives the reset that resolved it and refuses the next live run"
+        )
+        assert printed.index("reset_eval_state.py") < printed.index("--clear-chaos-block"), (
+            "the clear must come AFTER the reset: make abandons a recipe at the "
+            "first failing line, and that ordering is the only thing keeping a "
+            "FAILED reset from clearing the block anyway"
+        )
+
+    def test_a_reset_that_fails_first_never_clears_the_block(self, make_sandbox: Path) -> None:
+        """The direction that matters. The sandbox has no compose file, so the
+        recipe's own guard exits 2 before the reset — and the latch, which says
+        the shared world is still dirty, must survive that."""
+        result, log = _run_in_sandbox(make_sandbox, "eval-reset")
+        assert result.returncode != 0, "the missing-compose guard stopped guarding"
+        assert "--clear-chaos-block" not in log, (
+            "a reset that never ran cleared the teardown latch anyway, which "
+            "unblocks live runs against a world nobody restored"
+        )

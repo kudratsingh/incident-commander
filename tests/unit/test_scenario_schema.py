@@ -8,6 +8,7 @@ from evals.graders.deterministic import ScenarioExpectation
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import (
     ChaosHook,
+    ChaosPlan,
     Scenario,
     _chaos_names_from_snapshot,
     chaos_argument_errors,
@@ -350,3 +351,203 @@ class TestChaosHookArgumentClosure:
                 chaos_argument_errors(scenario.chaos_setup.name, scenario.chaos_setup.arguments)
                 == []
             )
+
+
+class TestChaosPlan:
+    """WP-1.1: many hooks, in order, with their teardown and a settle wait.
+
+    The one-hook world is what all 40 shipped scenarios describe. These
+    assert the composable form validates the same way — same closed name
+    set, same snapshot argument check, on BOTH halves of the plan — because
+    a teardown validated more loosely than a setup is a second, weaker door
+    into the same write+chaos principal.
+    """
+
+    def test_one_hook_plan_validates(self) -> None:
+        plan = ChaosPlan(setup=(ChaosHook(name="saturate_redis"),))
+        assert plan.hook_names == ("saturate_redis",)
+        assert plan.seeds_chaos is True
+        assert plan.teardown == ()
+        assert plan.settle_seconds == 0.0
+
+    def test_two_hook_plan_validates_and_keeps_declared_order(self) -> None:
+        plan = ChaosPlan(
+            setup=(
+                ChaosHook(
+                    name="kill_consumer",
+                    arguments={"consumer_group": "worker-dispatcher", "ttl_seconds": 300},
+                ),
+                ChaosHook(name="create_stale_cache", arguments={"key": "kafka:lag"}),
+            ),
+            teardown=(ChaosHook(name="saturate_redis"),),
+            settle_seconds=5.0,
+        )
+        # Order is the declaration, not a set: a cascade's second fault is
+        # only the fault it claims to be if the first one landed already.
+        assert plan.hook_names == ("kill_consumer", "create_stale_cache", "saturate_redis")
+        assert [hook.name for hook in plan.setup] == ["kill_consumer", "create_stale_cache"]
+
+    def test_unknown_hook_name_in_setup_is_rejected_by_name(self) -> None:
+        with pytest.raises(ValidationError, match="restart_consumer_group"):
+            ChaosPlan(setup=(ChaosHook(name="restart_consumer_group"),))
+
+    def test_unknown_hook_name_in_teardown_is_rejected_by_name(self) -> None:
+        # The teardown half goes through the SAME validator. A closed set on
+        # setup alone would leave the compensator free to name any tool.
+        with pytest.raises(ValidationError, match="list_dlq_messages"):
+            ChaosPlan(
+                setup=(ChaosHook(name="saturate_redis"),),
+                teardown=(ChaosHook(name="list_dlq_messages"),),
+            )
+
+    def test_wrong_argument_type_in_teardown_names_the_hook(self) -> None:
+        with pytest.raises(ValidationError) as excinfo:
+            ChaosPlan(
+                setup=(ChaosHook(name="saturate_redis"),),
+                teardown=(
+                    ChaosHook(
+                        name="kill_consumer",
+                        arguments={"consumer_group": "worker-dispatcher", "ttl_seconds": "300"},
+                    ),
+                ),
+            )
+        message = str(excinfo.value)
+        assert "kill_consumer.ttl_seconds" in message
+        assert "not compatible" in message
+
+    def test_settle_seconds_is_bounded(self) -> None:
+        with pytest.raises(ValidationError):
+            ChaosPlan(setup=(ChaosHook(name="saturate_redis"),), settle_seconds=-1.0)
+        with pytest.raises(ValidationError):
+            ChaosPlan(setup=(ChaosHook(name="saturate_redis"),), settle_seconds=301.0)
+
+    def test_plan_is_frozen_and_forbids_extras(self) -> None:
+        with pytest.raises(ValidationError):
+            ChaosPlan(setup=(ChaosHook(name="saturate_redis"),), settle=1.0)  # type: ignore[call-arg]
+
+
+class TestScenarioChaosNormalization:
+    """A legacy ``chaos_setup`` and a one-hook plan are the same world."""
+
+    def _scenario(self, **extra: Any) -> Scenario:
+        return Scenario(
+            name="s",
+            alert=AlertPayload(source="billing"),
+            expectation=ScenarioExpectation(
+                name="s", expected_terminal_state=IncidentState.ESCALATED
+            ),
+            **extra,
+        )
+
+    def test_no_chaos_normalizes_to_the_empty_plan(self) -> None:
+        # Empty plan, not None: a caller never has to spell "no chaos" twice.
+        scenario = self._scenario()
+        assert scenario.chaos == ChaosPlan()
+        assert scenario.seeds_chaos is False
+
+    def test_legacy_chaos_setup_normalizes_to_a_one_hook_plan(self) -> None:
+        hook = ChaosHook(
+            name="inject_latency",
+            arguments={"consumer_group": "worker-dispatcher", "latency_ms": 2000},
+        )
+        scenario = self._scenario(chaos_setup=hook)
+        assert scenario.chaos == ChaosPlan(setup=(hook,))
+        assert scenario.seeds_chaos is True
+        # No teardown and no settle — exactly what the runner did for a
+        # legacy hook before plans existed.
+        assert scenario.chaos.teardown == ()
+        assert scenario.chaos.settle_seconds == 0.0
+
+    def test_chaos_plan_is_returned_as_declared(self) -> None:
+        plan = ChaosPlan(
+            setup=(ChaosHook(name="saturate_redis"), ChaosHook(name="bad_deploy")),
+            settle_seconds=2.0,
+        )
+        scenario = self._scenario(chaos_plan=plan)
+        assert scenario.chaos is plan
+        assert scenario.seeds_chaos is True
+        assert scenario.chaos_setup is None
+
+    def test_declaring_both_spellings_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="both chaos_setup and chaos_plan"):
+            self._scenario(
+                chaos_setup=ChaosHook(name="saturate_redis"),
+                chaos_plan=ChaosPlan(setup=(ChaosHook(name="bad_deploy"),)),
+            )
+
+    def test_a_plan_with_no_setup_is_rejected(self) -> None:
+        # Teardown-only compensates a fault nobody seeded, and an all-empty
+        # plan reads as "seeds chaos" to a human while seeds_chaos is False.
+        with pytest.raises(ValidationError, match="no setup hooks"):
+            self._scenario(chaos_plan=ChaosPlan(teardown=(ChaosHook(name="saturate_redis"),)))
+
+    def test_a_multi_hook_plan_is_never_smoke_eligible(self) -> None:
+        # The predicate reads seeds_chaos, not chaos_setup — the legacy field
+        # is None here, and a smoke pass admitting this would seed two faults
+        # under the principal the stage exists to prove cannot write.
+        scenario = self._scenario(
+            chaos_plan=ChaosPlan(
+                setup=(ChaosHook(name="saturate_redis"), ChaosHook(name="bad_deploy"))
+            )
+        )
+        assert scenario.smoke_eligible is False
+        assert scenario.in_smoke_pass is False
+
+    def test_chaos_plan_loads_from_yaml_shape(self) -> None:
+        scenario = Scenario.model_validate(
+            {
+                "name": "s",
+                "alert": {"source": "billing"},
+                "expectation": {"name": "s", "expected_terminal_state": "resolved"},
+                "chaos_plan": {
+                    "setup": [
+                        {
+                            "name": "kill_consumer",
+                            "arguments": {"consumer_group": "worker-dispatcher"},
+                        },
+                        {"name": "saturate_redis", "arguments": {"num_keys": 10}},
+                    ],
+                    "teardown": [{"name": "bad_deploy", "arguments": {"label": "restore"}}],
+                    "settle_seconds": 3.5,
+                },
+            }
+        )
+        assert scenario.chaos.hook_names == ("kill_consumer", "saturate_redis", "bad_deploy")
+        assert scenario.chaos.settle_seconds == 3.5
+
+
+class TestShippedScenariosRoundTripToPlans:
+    """Every shipped YAML normalizes to the plan the runner will execute.
+
+    The migration claim, stated over the whole corpus rather than over a
+    sample: no YAML changed, and no scenario's seeding changed either — the
+    plan derived from each one fires exactly the hook the legacy field named,
+    with exactly its arguments.
+    """
+
+    def test_every_scenario_normalizes_without_loss(self) -> None:
+        scenarios = load_scenarios(_SCENARIOS_DIR)
+        assert len(scenarios) >= 40
+        for scenario in scenarios:
+            plan = scenario.chaos
+            if scenario.chaos_setup is None:
+                assert plan == ChaosPlan(), scenario.name
+                assert scenario.seeds_chaos is False, scenario.name
+                continue
+            assert plan.setup == (scenario.chaos_setup,), scenario.name
+            assert plan.teardown == (), scenario.name
+            assert plan.settle_seconds == 0.0, scenario.name
+            assert scenario.seeds_chaos is True, scenario.name
+
+    def test_no_shipped_scenario_declares_a_plan_yet(self) -> None:
+        # The migration is additive and nothing has moved: this is the
+        # statement that the round-trip above covers the WHOLE corpus rather
+        # than the legacy half of a half-migrated one.
+        assert [s.name for s in load_scenarios(_SCENARIOS_DIR) if s.chaos_plan is not None] == []
+
+    def test_seeds_chaos_agrees_with_the_legacy_field_everywhere(self) -> None:
+        # The gates moved from `chaos_setup is not None` to `seeds_chaos`.
+        # Over today's corpus the two must be the same predicate, or the
+        # smoke derivation and the ADR 0020 selection just changed silently.
+        for scenario in load_scenarios(_SCENARIOS_DIR):
+            assert scenario.seeds_chaos is (scenario.chaos_setup is not None), scenario.name

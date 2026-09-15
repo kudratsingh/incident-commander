@@ -213,7 +213,7 @@ class ChaosHook(BaseModel):
         allowed = chaos_tool_names()
         if value not in allowed:
             raise ValueError(
-                f"{value!r} is not a chaos tool. chaos_setup runs under the full "
+                f"{value!r} is not a chaos tool. A chaos hook runs under the full "
                 f"write+chaos principal, so its name is a closed set: "
                 f"{', '.join(sorted(allowed))}. To add a hook, land it on the platform, "
                 f"bump the pinned digest in demo/compose.yml, and re-bless the snapshot "
@@ -227,13 +227,79 @@ class ChaosHook(BaseModel):
         errors = chaos_argument_errors(self.name, self.arguments)
         if errors:
             raise ValueError(
-                f"chaos_setup {self.name!r} arguments disagree with "
+                f"chaos hook {self.name!r} arguments disagree with "
                 f"contracts/platform-tools.snapshot.json: {'; '.join(errors)}. "
                 "Fix the invocation, or — if the platform moved — bump the pinned "
                 "digest in demo/compose.yml and re-bless with `make snapshot` "
                 "(docs/runbook.md). Never hand-edit the snapshot."
             )
         return self
+
+
+class ChaosPlan(BaseModel):
+    """The whole fault a scenario manufactures, and how it is put back.
+
+    One ``chaos_setup`` hook was enough while every scenario's world was one
+    fault. Multi-fault (Level 5) and cascading (Level 6) worlds need more
+    than one, in a DECLARED order — the second hook of a cascade is only
+    meaningful after the first has landed — and every one of them has to say
+    how the world is restored. A plan is that declaration, in the scenario
+    file, where the fault it describes already lives (plan 01 § 4).
+
+    Three fields, and each is a different question:
+
+    * ``setup`` — the hooks that manufacture the world, fired in the order
+      written, under the chaos principal. A failure here means the
+      BENCHMARK WORLD IS INVALID, not that the agent did anything: the
+      runner abandons the scenario ungraded rather than scoring a run
+      against a premise nobody established.
+    * ``teardown`` — the compensators, fired in a ``finally`` so a crashed
+      or killed run still puts the world back. A teardown failure is a
+      different event from an agent failure: the run's grade may be
+      perfectly valid while the SHARED environment is now contaminated, so
+      it is reported separately and blocks further live runs until
+      ``make eval-reset``.
+    * ``settle_seconds`` — how long the fault needs to become observable
+      before preconditions are allowed to look. Chaos is not instantaneous
+      (a killed consumer's lag climbs over the platform's metrics
+      interval), and this is the plan-level wait that precedes the
+      per-probe ``attempts``/``delay_seconds`` polling, not a replacement
+      for it.
+
+    Teardown is not mandatory, and that is deliberate: the accepted model is
+    **compensators where practical, plus a bounded TTL on the hook, plus the
+    authoritative ``make eval-reset``** (plan 05 § A). Most shipped hooks
+    already take ``ttl_seconds``, and several have no compensating tool on
+    the platform at all — ``kill_consumer`` has no ``revive_consumer``. A
+    schema that demanded a teardown tuple would therefore be satisfied by
+    fiction. What the schema CAN guarantee is that a declared teardown is a
+    real, validated chaos invocation, and that it runs.
+
+    Every member — setup and teardown alike — is a ``ChaosHook``, so both go
+    through the same closed-name and snapshot-argument validation. There is
+    no second, weaker validator for the teardown half.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    setup: tuple[ChaosHook, ...] = ()
+    teardown: tuple[ChaosHook, ...] = ()
+    # Bounded so a typo cannot park a paid live run for an hour. The ceiling
+    # is generous next to ``PreconditionProbe.delay_seconds`` (60s per
+    # attempt) because this is ONE wait for the whole plan rather than a
+    # per-attempt one, and a cascade's second-order effect can take minutes
+    # of platform loop ticks to appear.
+    settle_seconds: float = Field(default=0.0, ge=0.0, le=300.0)
+
+    @property
+    def seeds_chaos(self) -> bool:
+        """Whether running this plan touches the platform's chaos surface."""
+        return bool(self.setup)
+
+    @property
+    def hook_names(self) -> tuple[str, ...]:
+        """Every hook this plan fires, setup then teardown, in declared order."""
+        return tuple(hook.name for hook in self.setup + self.teardown)
 
 
 class PreconditionField(FieldComparator):
@@ -346,7 +412,19 @@ class Scenario(BaseModel):
     # Optional chaos hook to fire before the run in live mode. Puts scenario
     # setup in the scenario file instead of in operator memory (see the
     # live-eval noise-source lessons doc, "shared mutable environment").
+    #
+    # LEGACY, and deliberately kept: all 40 shipped scenarios spell their
+    # single fault this way, and ``Scenario`` is ``extra="forbid"``, so
+    # renaming the field would be a 40-YAML migration for no behavioural
+    # gain. It is normalized into a one-hook ``ChaosPlan`` by ``chaos``
+    # below, which is what the runner and every gate read.
     chaos_setup: ChaosHook | None = None
+    # The composable form: many setup hooks in a declared order, their
+    # teardown, and a settle wait. Additive rather than a rename for the
+    # reason above. Declare ONE of ``chaos_setup`` / ``chaos_plan``; the
+    # validator refuses both, because two spellings of the same world would
+    # otherwise silently compose into a third.
+    chaos_plan: ChaosPlan | None = None
     # What must be true of the world before the agent is allowed to start.
     # Live-only: canned runs serve the broken state by construction, so
     # there is nothing to establish. An unmet precondition abandons the run
@@ -374,16 +452,86 @@ class Scenario(BaseModel):
     smoke_exclusion: str | None = Field(default=None, min_length=20)
 
     @property
+    def chaos(self) -> ChaosPlan:
+        """This scenario's fault plan, whichever spelling declared it.
+
+        The ONE reader of ``chaos_setup`` that anything downstream should
+        use. A legacy single hook normalizes to ``ChaosPlan(setup=(hook,))``
+        — same hook, same arguments, no teardown and no settle, which is
+        exactly what the runner did for it before plans existed — and a
+        scenario declaring neither normalizes to the empty plan rather than
+        to ``None``, so a caller never has to spell the "no chaos" case
+        twice.
+
+        Computed rather than stored because ``Scenario`` is frozen and
+        because a stored copy is a second source of truth: a scenario whose
+        ``chaos_setup`` and cached plan could disagree is precisely the
+        drift the ``extra="forbid"`` + validator pair exists to prevent.
+        """
+        if self.chaos_plan is not None:
+            return self.chaos_plan
+        if self.chaos_setup is not None:
+            return ChaosPlan(setup=(self.chaos_setup,))
+        return ChaosPlan()
+
+    @property
+    def seeds_chaos(self) -> bool:
+        """Whether this scenario touches the platform's chaos surface at all.
+
+        The predicate every gate keyed off ``chaos_setup is not None`` should
+        key off instead: the smoke refusal (ADR 0018, exit 6), the
+        one-mutating-scenario refusal (ADR 0020, exit 7), and the
+        ``chaos:invoke`` principal guard. A two-hook plan is chaos-seeding
+        for all three of them, and ``chaos_setup`` is ``None`` on such a
+        scenario — so reading the legacy field directly is how a plan would
+        quietly stop being counted.
+        """
+        return self.chaos.seeds_chaos
+
+    @model_validator(mode="after")
+    def _one_spelling_of_the_fault(self) -> Scenario:
+        """Refuse both spellings at once, and refuse a plan that seeds nothing.
+
+        Both-at-once has no defensible reading: firing ``chaos_setup`` and
+        then the plan's setup composes a world neither declaration
+        describes, and firing only one silently ignores the other.
+
+        A ``chaos_plan`` with an empty ``setup`` is the second refusal. It is
+        reachable two ways and both are mistakes: a teardown-only plan
+        compensates a fault nobody seeded, and an all-empty plan reads as
+        "this scenario seeds chaos" to a human while ``seeds_chaos`` reads
+        False — which would put a scenario the author believed was gated out
+        of the smoke pass straight back into it.
+        """
+        if self.chaos_setup is not None and self.chaos_plan is not None:
+            raise ValueError(
+                f"scenario {self.name!r} declares both chaos_setup and chaos_plan. "
+                "They are two spellings of the same fault: keep the legacy single "
+                "hook, or move it into chaos_plan.setup — never both."
+            )
+        if self.chaos_plan is not None and not self.chaos_plan.setup:
+            raise ValueError(
+                f"scenario {self.name!r} declares a chaos_plan with no setup hooks. "
+                "A plan manufactures a fault; teardown compensates one. Drop the "
+                "plan, or give it the hook(s) that seed the world it describes."
+            )
+        return self
+
+    @property
     def smoke_eligible(self) -> bool:
         """Whether the read-only smoke stage can run and grade this honestly.
 
         The runner's own two selection refusals, not a second opinion about
         what "read-only" means:
 
-        * ``chaos_setup`` — ``--smoke`` refuses the whole run (exit 6, S-03,
-          ADR 0018) if any selected scenario declares one, because chaos
+        * ``seeds_chaos`` — ``--smoke`` refuses the whole run (exit 6, S-03,
+          ADR 0018) if any selected scenario seeds chaos, because chaos
           seeding fires under the full write+chaos ``PLATFORM_TOKEN`` and
           that is precisely the claim the read-only stage exists to disprove.
+          Read through ``seeds_chaos``, not ``chaos_setup``: a two-hook
+          ``chaos_plan`` leaves the legacy field ``None``, and a smoke pass
+          that admitted one would seed two faults under the very principal
+          the stage exists to prove cannot write.
         * ``expected_action_tools`` — a graded Tier-1 write, which the
           read-scoped smoke token 403s by design. Such a scenario is
           guaranteed red here and belongs to the remediation stage under the
@@ -395,7 +543,7 @@ class Scenario(BaseModel):
         ``planner_stops_immediately``) with live reads, and its report is
         read that way. Seeding no chaos and writing nothing is the line.
         """
-        return self.chaos_setup is None and not self.expectation.expected_action_tools
+        return not self.seeds_chaos and not self.expectation.expected_action_tools
 
     @property
     def in_smoke_pass(self) -> bool:
@@ -415,8 +563,8 @@ class Scenario(BaseModel):
         """
         if self.smoke_exclusion is not None and not self.smoke_eligible:
             raise ValueError(
-                f"scenario {self.name!r} sets smoke_exclusion, but it declares "
-                "chaos_setup or expected_action_tools, so the runner already "
+                f"scenario {self.name!r} sets smoke_exclusion, but it seeds "
+                "chaos or declares expected_action_tools, so the runner already "
                 "refuses it from a smoke selection. The hand-written exclusion is "
                 "redundant — drop it and let the predicate speak."
             )

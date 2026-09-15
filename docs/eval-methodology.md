@@ -416,6 +416,116 @@ The gate accepts **full-suite reports only** (A-03):
 
 Gate exit codes are the regression-gate slice of the ADR 0013 contract: 0 = clean full-suite comparison; 1 = gate failed (regression, dropped scenario, dropped dimension, or vacated assertion); 2 = not a comparable input (missing report, filtered report).
 
+## The world audit, the ledger walk, and the baseline assembler
+
+Three pieces that answer "is the world the one we think it is", "what has the
+eval still not validated", and "what does the evidence already on disk say".
+None of them spends anything: the audit reads under the smoke token, the walk
+is prose, and the assembler reads committed archives. No live LLM call is made
+by any of them.
+
+### `make world-audit` — the seeded world, checked before anything is bought
+
+`evals/world_audit.py` reads the demo stack under `PLATFORM_SMOKE_TOKEN` and
+compares it line by line against the seeded baseline in the runbook's pre-run
+checklist: DLQ total 4 with 0 unclassified and 0 fenced rows, 3 active alerts,
+0 redis `chaos:*` keys, `worker-dispatcher` lag 0 with `lag_known: true`, a
+`hot_set` key of 120 bytes, and no `evals.runner` or `traffic_loop` process
+still running. `ROOTS=<job id[,id...]>` adds one check per named chain (present
+and not paused). It prints PASS/FAIL per line plus every DLQ row in full, and
+exits non-zero if any line failed. It refuses to read at all on a principal
+that is not verified read-only, and never falls back to the write token.
+
+Two properties are deliberate. **An unreadable check is a FAIL, not a pass**: a
+`pgrep` or `redis-cli` that could not run returns `None`, which no expected
+value equals — the failure mode this avoids is a broken scan reading as an
+empty world. And **the comparison is type-aware** (`type(observed) is
+type(expected)`), because Python's `False == 0` would let a `lag: false`
+reading satisfy a `lag: 0` expectation, and those are different facts on the
+wire.
+
+The baseline numbers live in exactly one place —
+`evals/world_audit.py`'s `BASELINE_*` constants — and
+`tests/unit/test_world_audit.py::test_baseline_constants_match_runbook` parses
+the runbook's own table and fails if the two disagree. `evals/dossier.py`
+**imports** `audit_baseline`, `BaselineLine`, `chaos_key_count`, `read` and the
+three post-reset constants from this module rather than keeping a second copy,
+and a test asserts the objects are identical, so the dossier's post-reset
+re-audit and the standalone command can never drift apart. The dossier's
+contract is unchanged: it still re-audits the same three lines after its reset.
+`worker-dispatcher` lag is deliberately not part of that post-reset set —
+`get_consumer_lag` answers from a 60-second freshness window, so a reading
+taken straight after a reset can describe the world before it. It is a pre-run
+check, where the operator controls the timing.
+
+### The eval-debt ledger walk
+
+[ADR 0011](ADR/0011-campaign-eval-freeze.md) says the eval-debt ledger
+(`docs/eval-debt.md`) is walked row by row at the post-campaign restart, before
+any new baseline is blessed. The restart happened; the walk is recorded under
+that file's **Corrections** heading, which is append-only — rows are never
+edited, and a correction is added below rather than in place.
+
+Each of the eight rows carries one disposition from a closed vocabulary:
+
+| Disposition | Meaning |
+|---|---|
+| `confirmed` | The row's own observable was met, and the evidence is cited. |
+| `refuted` | The observable was tested and did not hold. |
+| `superseded` | The exact observable no longer describes the current protocol. It does **not** claim the replacement behaviour was proved live. |
+| `open` | The row is not discharged by anything on disk. |
+
+`open` exists because the honest answer for some rows is "the evidence to close
+this was never produced". Rows #102 (the nine-scenario BUDGET observable) and
+#112 are named as un-closable by the workspace gap record
+`G2-shapes-of-absence-12`, which this walk **links** rather than rediscovers;
+row #94 is open for the same reason. Quietly marking such a row confirmed is
+the failure this walk exists to prevent, so a test pins them open.
+
+Row 7 (#112) is read against its **verify semantics**, not its terminal state,
+per the dated 2026-09-08 correction above it: `mark_dlq_permanent` leaves the
+entry in the DLQ with `remediation_hint: human_required`, so success is the job
+id *appearing* in the filtered listing. That half of the observable holds; the
+"terminates RESOLVED" half was superseded by WO-R2-140, which made a verified
+fence escalate by design ([ADR 0026](ADR/0026-a-stabilizer-is-not-a-resolution.md)).
+
+### `make baseline-report` — the assembler
+
+`evals/baseline_report.py` assembles a Phase 0 baseline from evidence that
+already exists: the read-only stage archive `cde5a14485c3` (25/26), the eight
+green live remediation archives (`16ae3c7a4c9d`, `54ab08425f82`, `4753c12f8132`,
+`aeadd5ef3edd`, `3c65c04326d4`, `9949c45145d4`, `2988f414afb4`, `f32f023eaf33`),
+and the newest full offline report. It emits pass rates, per-dimension pass
+rates, tool-call and terminal-state distributions, execution legs, the ledger
+walk by reference, and the exclusions.
+
+Every number is **read from the archives' own `report.json`**; nothing is typed
+in, and `tests/unit/test_baseline_report.py` proves it by perturbing a copied
+fixture and watching the computed numbers move. The assembler never regrades:
+it cross-checks each archive's recorded totals for internal consistency and
+refuses an inconsistent one, then reports what the archive recorded. It also
+refuses an offline input that is filtered, that contains a live leg, or that
+does not cover the current scenario corpus exactly — the corpus size is read
+from the loader, never written down.
+
+Three things it says out loud, because a baseline that leaves them implicit is
+the un-attributable artifact:
+
+- the three scenarios **built, offline-green and never run live** by owner
+  decision — `dlq_mislabeled_replay_safe`, `saga_stuck`, `dlq_mixed_partial` —
+  appear in the exclusions with that reason;
+- `e8404306138c` is excluded as scenario 2's pre-re-derivation pass, superseded
+  by run E `54ab08425f82`. The STATE.md table shows nine live PASS rows for
+  this reason; the baseline names eight;
+- `cde5a14485c3`'s `consumer_lag_missing_group` red is a **real agent finding**
+  ([F-005](../study/findings.md)). The archive's auto-assigned
+  `failure_class: grader-brittleness` is a hint, never a verdict; the override
+  is recorded beside it and the archive itself is never edited.
+
+The model configuration printed in the report is labelled *assembly config*:
+it is today's config, and it is not attributed to archives that predate
+provenance stamping.
+
 ## When live and offline disagree
 
 Live runs can pass while offline runs fail (canned data went stale) or offline can pass while live fails (platform evolved). Both are signals:

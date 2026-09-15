@@ -160,7 +160,8 @@ harness artifacts — see [`docs/lessons/live-eval-sequence-2026-09.md`](lessons
 
 4. **Audit the world against the seeded baseline.** A green reset does not
    prove a clean world — reset only undoes what the eval seeds. Check all
-   four, and expect exactly:
+   baseline conditions with `make world-audit` (read-scoped smoke token, no
+   seeding, reset, or LLM call), and expect exactly:
 
    | Check | Expected |
    |---|---|
@@ -168,6 +169,19 @@ harness artifacts — see [`docs/lessons/live-eval-sequence-2026-09.md`](lessons
    | Active alerts | **3** |
    | Redis `chaos:*` keys | **0** |
    | `worker-dispatcher` lag | **0**, with `lag_known: true` |
+   | DLQ unclassified rows | **0** |
+   | DLQ fenced rows | **0** |
+   | `hot_set` size | **120**, with `exists: true` |
+   | `traffic_loop` / `evals.runner` processes | **0** |
+
+   The command prints each PASS/FAIL and the DLQ rows; any failed or unreadable
+   check exits non-zero. It verifies the smoke principal before reading and
+   never falls back to the write token. `make world-audit ROOTS=<id[,id...]>`
+   also verifies the named chains exist and are not paused. The Redis scan
+   uses `PLATFORM_COMPOSE` (default `demo/compose.yml`) and `redis-cli --scan`.
+   The dossier imports the same three post-reset checks (DLQ total, alerts,
+   chaos keys); lag remains a pre-run check because its cached reading can
+   predate a reset. A green audit is not permission for a live eval.
 
    Anything else is a stop. `lag_known: false` is not "lag 0" — it means the
    metric is unreadable, and a run started on it grades the agent for a

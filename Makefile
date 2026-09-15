@@ -20,6 +20,8 @@
 # their formatting is unaffected either way.
 -include .env
 
+MODEL_ROLE ?= development
+
 help:
 	@echo "Targets:"
 	@echo "  setup            uv sync + install dev dependencies"
@@ -36,6 +38,11 @@ help:
 	@echo "  eval-live        run named scenario(s) against live platform (needs .env);"
 	@echo "                   ONLY=<name[,name...]> REQUIRED, full scenario names (e.g. ONLY=remediate_consumer_lag_success)"
 	@echo "  eval-smoke       read-only smoke pass under the read-scoped smoke token"
+	@echo "  world-audit      FREE (zero-LLM, read-only) audit of the seeded world against"
+	@echo "                   the runbook baseline; exits non-zero on any FAIL."
+	@echo "                   ROOTS=<job id[,id...]> also checks those chains are unpaused"
+	@echo "  baseline-report  assemble the Phase 0 baseline from the committed archives;"
+	@echo "                   reads only, spends nothing, writes nothing. FORMAT: --format"
 	@echo "  world-dossier    FREE (zero-LLM) pre-run reading of one scenario's fault world;"
 	@echo "                   ONLY=<name> REQUIRED, full scenario name. Seeds chaos, reads"
 	@echo "                   every probe the agent will make, lints, resets, re-audits."
@@ -53,6 +60,13 @@ help:
 .PHONY: inventory
 inventory:
 	uv run python -m evals.inventory
+
+.PHONY: world-audit baseline-report
+world-audit:
+	PLATFORM_COMPOSE="$(PLATFORM_COMPOSE)" uv run python -m evals.world_audit --roots "$(ROOTS)"
+
+baseline-report:
+	uv run python -m evals.baseline_report
 
 setup:
 	uv sync --all-groups
@@ -117,7 +131,7 @@ test-e2e:
 	@echo "TODO(phase-0+): compose up incident-platform + agent, inject scenario, assert audit"
 
 eval:
-	uv run python -m evals.runner $(if $(ONLY),--only $(ONLY))
+	uv run python -m evals.runner --model-role "$(MODEL_ROLE)" $(if $(ONLY),--only $(ONLY))
 
 # ONLY=<name>[,<name>...] names the scenario(s) to run, by FULL NAME — a live
 # --only pattern is matched exactly (see the exact-match block in
@@ -146,7 +160,7 @@ eval-live:
 	$(error 'make eval-live' without ONLY= would select the whole suite for a live, paid run; name exactly one scenario: make eval-live ONLY=<scenario_name>)
 else
 eval-live:
-	@EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live --only $(ONLY); \
+	@EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --model-role "$(MODEL_ROLE)" --live --only $(ONLY); \
 	code=$$?; \
 	PYTHONPATH=. uv run python scripts/format_traces.py || true; \
 	echo "JSONL traces: evals/traces/*.jsonl"; \
@@ -211,7 +225,7 @@ eval-smoke:
 	# the same reason: make aborts a recipe on the first non-zero line, so a
 	# FAILING smoke run (the one whose trajectories you actually need) used to
 	# leave only raw JSONL behind. eval-live was fixed; this was not.
-	@EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --live --smoke \
+	@EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --model-role "$(MODEL_ROLE)" --live --smoke \
 		$(if $(SMOKE_ONLY),--only "$(SMOKE_ONLY)"); \
 	code=$$?; \
 	PYTHONPATH=. uv run python scripts/format_traces.py || true; \

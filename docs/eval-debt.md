@@ -43,3 +43,36 @@ overtaken has to be answerable. Rows stay verbatim; corrections go here, dated.
   beside it. Confirm row 7 against the verify semantics, not against the terminal state. See
   [ADR 0026](ADR/0026-a-stabilizer-is-not-a-resolution.md) § "Resolution of the open
   classification".
+
+### Restart walk (2026-09-15)
+
+This is the retrospective stage-1 walk for WO-R3-182, not a baseline blessing.
+The existing partial record is [G2-shapes-of-absence-12 in the private audit-ws
+gap ledger](https://github.com/kudratsingh/audit-ws/blob/main/docs/archive/gaps.json).
+It recorded the absence of a closure mechanism and missing live coverage for
+#102 and #112. Its August evidence cutoff is preserved as history; later
+September evidence is named below. No new live run was made for this walk.
+Dispositions are `confirmed`, `refuted`, `superseded`, or `open`. Superseded
+means the exact original observable no longer describes the current protocol;
+it does not imply the replacement behavior has been proved live. Open means
+the row is not discharged. The assembler reads this table, including evidence.
+
+| Row | PR | Disposition | Observable reviewed | Evidence and limit |
+|---|---|---|---|---|
+| 1 | #94 | open | Live gate ordering and evidence-sourcing accept/reject correctness; unchanged canned suite. | The fresh offline suite covers 41 scenarios, not the historical 37. [cde5a14485c3](../evals/runs/cde5a14485c3/report.json) is 25/26, and [F-005](../study/findings.md#f-005--an-archives-auto-assigned-failure_class-is-a-guess-not-a-verdict) records a real subject-selection defect, not proof of ranking/gate ordering. Aggregate green cannot establish the universal no-false-accept/reject claim; no complete row-specific live review is recorded. |
+| 2 | #96 | superseded | Filtered-report refusal, parse-time ONLY guards, full-suite regression input. | The literal sequence `make eval ONLY=x` then `make eval-reg` now generates a fresh full report before gating (`Makefile`, `eval-reg: eval`); it does not feed the prior filtered report to the gate. The direct gate still refuses filtered input in [test_filtered_latest_is_refused_even_when_green](../tests/unit/test_regression.py), and [test_make_targets.py](../tests/unit/test_make_targets.py) / [test_pre_spend_guards.py](../tests/unit/test_pre_spend_guards.py) cover the Make guards. The original 37-scenario size is historical (the corpus is 41 today); no baseline is blessed here. |
+| 3 | #99 | superseded | Zero input-model drift on 26 shared tools; arbitrary unknown groups reach the platform and return null lag. | The contract is now 30 tools (cmd #213, platform v0.6.3), so the 26-tool rebless scope is superseded. The live null-group leg is observed in [cde5a14485c3 / consumer_lag_null_unknown_state](../evals/runs/cde5a14485c3/trajectories/consumer_lag_null_unknown_state.json): `ledger-consumer` reaches the platform and returns `lag:null`, `lag_known:false`, and its own cache key. This does not retroactively supply the original 26-tool input diff. |
+| 4 | #102 | open | All nine recalibrated remediation scenarios pass BUDGET under six verify polls / one re-probe, at most 13 calls. | [G2-shapes-of-absence-12](https://github.com/kudratsingh/audit-ws/blob/main/docs/archive/gaps.json) already identified missing coverage. The eight selected green remediation archives provide partial evidence only; `remediate_verify_fails` is canned-only and `dlq_mixed_partial` was never run live by owner decision. No nine-scenario live acceptance exists; offline 41/41 cannot discharge it. |
+| 5 | #108 | superseded | Nonzero elapsed/USD meters in report and briefing; no wall/USD exhaustion at 1800 s / $5; canned outcomes unchanged. | [16ae3c7a4c9d trajectory](../evals/runs/16ae3c7a4c9d/trajectories/remediate_consumer_lag_success.json) records `wall_seconds_used=128.118583`, `usd_used="0.145692"`, but actual maxima are 600 s / $1, not the row's old knobs. Historical `report.json` lacks those budget meters; cmd #223 adds them in RunProvenance (ADR 0013 amendment). Nonzero accounting is observed, but the original report/knob claim is superseded rather than inferred from a green BUDGET tool-count grade. |
+| 6 | #111 | confirmed | Live unknown-group response is null with request-derived cache key; null-state scenario escalates. | [cde5a14485c3 trajectory](../evals/runs/cde5a14485c3/trajectories/consumer_lag_null_unknown_state.json) twice records `consumer_group=ledger-consumer`, `lag:null`, `source=unrecognized`, `cache_key=kafka:consumer_lag:ledger-consumer`; its report records ESCALATED and all five dimensions pass. The separate missing-group red remains the real F-005 defect. |
+| 7 | #112 | open | VERIFY semantics only: a marked row remains present with human_required and the judge verifies; RESOLVED is superseded by the correction above. | The old gap record's lack of any live run is overtaken by [2988f414afb4](../evals/runs/2988f414afb4/trajectories/dlq_human_required_escalates.json): the plan asks for presence in the human_required page, the post-action listing contains job `3971a293-3f5b-55eb-b835-649d685801a7` with that hint and a fence timestamp, and the run escalates with all dimensions green. This is supporting VERIFY evidence, not a terminal-state failure. Kept OPEN under the stage-1 addendum's explicit #112 hold; coordinator review must reconcile this later evidence before closure. |
+| 8 | #117 | refuted | Eight migrated scenarios pass structured EVIDENCE; no correct trajectory fails only EVIDENCE and no substring coincidence passes. | The universal no-false-red claim is refuted by [4974811d236f](../evals/runs/4974811d236f/report.json), INC-001: correct filtered verification failed EVIDENCE alone. Cmd #218 repairs the claim shapes; [54ab08425f82](../evals/runs/54ab08425f82/report.json) is the accepted rerun. A later fix does not turn the original observable into a confirmed one. |
+
+**Coordinator decisions still open (O-2/O-3).** The machine regression baseline
+is still the 37-scenario, 2026-07-31 report from cmd #46; the corpus has 41
+scenarios and the gate reports additions without failing them. ADR 0011's
+sunset fired at the post-campaign restart, while its Status line remains
+accepted and the required walk had not been recorded. This section supplies
+the walk, not authority to run `make baseline` or amend that ADR. The owner
+and coordinator settle those actions separately; the old baseline and ADR
+remain unchanged in this packet.

@@ -1,0 +1,24 @@
+{
+  "incident_id": "28dfcd1f-850d-4940-8bf8-e5d56510284b",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=warning fingerprint=consumer_lag_warning group=notifications-consumer",
+  "escalation_reason": "planner stop: mild lag observed; human should decide on urgency",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"notifications-consumer\",\"lag\":500,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:notifications-consumer\"}",
+      "arguments": {
+        "consumer_group": "notifications-consumer"
+      }
+    }
+  ],
+  "findings": "notifications-consumer shows a lag of 500 messages, above the warning threshold but not paging.\n",
+  "recommendation": "Watch the trend for the next 15 minutes; escalate to paging if lag continues to grow.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.00004,
+    "usd": "0.000000"
+  }
+}

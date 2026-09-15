@@ -1,4 +1,6 @@
 name: multi_probe_billing
+family: consumer_lag
+difficulty: single
 description: "Planner probes get_consumer_lag twice \u2014 first to check billing-consumer, then to re-probe after a suspicious low reading \u2014 before stopping with updated confidence. Verifies the investigation\
   \ loop iterates cleanly and budget accounting handles multiple probes.\n"
 tags:

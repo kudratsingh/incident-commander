@@ -1,6 +1,8 @@
 # Info-severity noise on the orders group. Combines noise filter with group variation.
 
 name: noise_info_orders
+family: noise_control
+difficulty: control
 description: >
   Routine info-level ping tagged to orders-consumer. Should be filtered at
   TRIAGE without probing.

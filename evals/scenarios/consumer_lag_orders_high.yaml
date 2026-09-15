@@ -1,4 +1,6 @@
 name: consumer_lag_orders_high
+family: consumer_lag
+difficulty: single
 description: "Paging alert on orders-consumer. Standard probe \u2192 escalate flow, different group than the billing baseline.\n"
 tags:
 - read-only

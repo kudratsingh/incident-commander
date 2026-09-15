@@ -1,4 +1,6 @@
 name: remediate_dlq_backlog_success
+family: dlq
+difficulty: single
 description: 'DLQ depth alert scoped to the `replay_safe` category. That slice holds exactly ONE row — a transient upstream timeout — and beside it sits an UNCLASSIFIED row the `poison_message`
   hook injected, whose error is a schema violation no replay can fix. Correct behaviour is to read the whole queue, read the alerted slice, replay exactly the one transient row, verify the slice is
   empty, resolve, and name the poisoned row in the handoff as what is still there.

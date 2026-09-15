@@ -1,6 +1,8 @@
 # Info-severity noise — also filtered at TRIAGE.
 
 name: noise_info_severity
+family: noise_control
+difficulty: control
 description: >
   Info-level signal from a routine health probe. Should be filtered at TRIAGE
   without incurring a tool call.

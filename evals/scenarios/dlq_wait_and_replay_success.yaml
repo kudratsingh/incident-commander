@@ -1,4 +1,6 @@
 name: dlq_wait_and_replay_success
+family: dlq
+difficulty: single
 # The description used to end "Verify confirms the ids are out of the
 # active DLQ", which is the opposite of what this scenario's own
 # verify_expectation says and of what the platform does: the entries stay

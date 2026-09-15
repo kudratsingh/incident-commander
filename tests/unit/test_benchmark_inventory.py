@@ -1,4 +1,13 @@
-"""The committed inventory must change whenever its source metadata changes."""
+"""The committed inventory must change whenever its source metadata changes.
+
+Since WP-1.4 the family and difficulty columns read the scenario's own
+`family` / `difficulty` (``provisional: false``) and fall back to
+WO-R3-179's rule only where a scenario declares neither. Both halves are
+tested here: the rule still behaves as recorded, and a declared value
+overrides it and flips the flag. The corpus-level claim — that no shipped
+scenario is left on the fallback — lives in
+``tests/unit/test_scenario_metadata.py``.
+"""
 
 from __future__ import annotations
 
@@ -105,14 +114,68 @@ def test_provisional_family_precedence(
 
 @pytest.mark.parametrize(
     ("name", "difficulty"),
-    [("noise_flapping", 0), ("planner_stops_immediately", 0), ("alert_storm", 1), ("example", 1)],
+    [
+        ("noise_flapping", "control"),
+        ("planner_stops_immediately", "control"),
+        ("alert_storm", "single"),
+        ("example", "single"),
+    ],
 )
-def test_provisional_difficulty(tmp_path: Path, name: str, difficulty: int) -> None:
+def test_provisional_difficulty(tmp_path: Path, name: str, difficulty: str) -> None:
+    """The fallback rule, in plan 03 § 3's vocabulary.
+
+    WO-R3-179 spelled these 0 and 1. They are the same two rungs under their
+    real names — which is why 35 of the 41 shipped scenarios promoted with no
+    change of meaning. `alert_storm` is one that did NOT: the rule guesses
+    `single` for it and the scenario declares `noisy`, which is the kind of
+    correction `provisional: false` exists to make visible.
+    """
     _write_scenario(tmp_path, name)
     assert generate_inventory(tmp_path)[0]["difficulty"] == {
         "value": difficulty,
         "provisional": True,
     }
+
+
+def test_a_declared_family_wins_and_stops_being_provisional(tmp_path: Path) -> None:
+    """The authoritative half. A scenario's own word beats the substring rule.
+
+    `dlq_example` matches the `dlq` needle; declaring `workflow` overrides it,
+    and the flag says a human chose the value rather than a rule guessing.
+    """
+    path = _write_scenario(tmp_path, "dlq_example")
+    path.write_text(path.read_text() + "family: workflow\n", encoding="utf-8")
+    assert generate_inventory(tmp_path)[0]["family"] == {
+        "value": "workflow",
+        "provisional": False,
+    }
+
+
+def test_a_declared_difficulty_wins_and_stops_being_provisional(tmp_path: Path) -> None:
+    """The rule would score this `single`; the scenario says `cascading`."""
+    path = _write_scenario(tmp_path, "dlq_example")
+    path.write_text(path.read_text() + "difficulty: cascading\n", encoding="utf-8")
+    assert generate_inventory(tmp_path)[0]["difficulty"] == {
+        "value": "cascading",
+        "provisional": False,
+    }
+
+
+def test_template_seed_and_split_columns_carry_the_legacy_defaults(tmp_path: Path) -> None:
+    """A scenario declaring none of them is its own template, seed 0, dev."""
+    _write_scenario(tmp_path, "solo")
+    row = generate_inventory(tmp_path)[0]
+    assert (row["template_id"], row["seed"], row["benchmark_split"]) == ("solo", 0, "dev")
+
+
+def test_declared_template_seed_and_split_reach_the_row(tmp_path: Path) -> None:
+    path = _write_scenario(tmp_path, "instance_b")
+    path.write_text(
+        path.read_text() + "template_id: shared\nseed: 3\nbenchmark_split: validation\n",
+        encoding="utf-8",
+    )
+    row = generate_inventory(tmp_path)[0]
+    assert (row["template_id"], row["seed"], row["benchmark_split"]) == ("shared", 3, "validation")
 
 
 def test_name_order_and_yml_match_the_loader(tmp_path: Path) -> None:

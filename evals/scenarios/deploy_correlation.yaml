@@ -1,4 +1,6 @@
 name: deploy_correlation
+family: deploy
+difficulty: single
 description: 'Errors started spiking shortly after a service rollout. The planner probes get_deploy_history to check whether a recent deploy correlates in time.
 
   '

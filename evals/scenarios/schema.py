@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 from types import MappingProxyType
@@ -559,6 +560,90 @@ class DiscriminatingProbe(BaseModel):
         return True
 
 
+class ScenarioFamily(StrEnum):
+    """The observable symptom a scenario's world presents, shared across root causes.
+
+    Plan 03 § 2's benchmark unit: *a family shares one observable symptom
+    across worlds with different root causes*. It is the first grouping key
+    every report from Phase 2 onward slices on, which is why it is a closed
+    enum rather than a free string — a report grouped on typo-adjacent
+    strings quietly reports two families where there is one, and nothing in
+    a passing suite says so.
+
+    These members are what the corpus honestly **is** today, promoted from
+    the provisional substring rule WO-R3-179 recorded in
+    ``evals/benchmark_inventory.json`` (docs/eval-methodology.md § Benchmark
+    inventory records the promotion, scenario by scenario, including the
+    five the rule could not place and this packet classified by hand).
+
+    Deliberately **not** here: ``jobs_not_progressing``, ``workflow_stuck``
+    and ``api_latency``. Those are plan 01 § 7's future worlds, and no
+    scenario in this repo manufactures one yet. A family for a world nobody
+    has built is an empty group in every report until its own packet lands,
+    and an empty group that looks like a measured zero is worse than an
+    absent one.
+    """
+
+    CACHE_REDIS = "cache_redis"
+    CONSUMER_LAG = "consumer_lag"
+    DEPLOY = "deploy"
+    DLQ = "dlq"
+    # The harness under test rather than a world: the planner's own control
+    # path (stop on iteration 1) with no fault to diagnose.
+    HARNESS_CONTROL = "harness_control"
+    INCIDENTS = "incidents"
+    NOISE_CONTROL = "noise_control"
+    POSTGRES = "postgres"
+    TOOL_FAULT = "tool_fault"
+    TRACES = "traces"
+    WORKFLOW = "workflow"
+
+
+class ScenarioDifficulty(StrEnum):
+    """How hard the diagnosis is, on plan 03 § 3's closed vocabulary.
+
+    The vocabulary is closed **by the plan**, not by this repo: 03:22 names
+    exactly these nine and no others. Widening it is a plan change, so the
+    enum is the place that says so.
+
+    ``control`` is the level-0 rung of the capability ladder — nothing is
+    wrong, or nothing about a world is being measured at all — and it is the
+    one member whose meaning a reader must not guess at: a control scenario
+    the reports treat as ``single`` inflates every "solved a real fault"
+    number by the size of the control set.
+    """
+
+    CONTROL = "control"
+    SINGLE = "single"
+    AMBIGUOUS = "ambiguous"
+    MULTI_HOP = "multi_hop"
+    NOISY = "noisy"
+    MULTI_FAULT = "multi_fault"
+    CASCADING = "cascading"
+    TEMPORAL = "temporal"
+    TRADEOFF = "tradeoff"
+
+
+class BenchmarkSplit(StrEnum):
+    """Which pool a template belongs to (plan 03 § 4).
+
+    * ``dev`` — visible, run often, prompt tuning allowed.
+    * ``validation`` — strategy version comparisons; changes rare.
+    * ``holdout`` — **never tuned against**.
+
+    The split is a property of the TEMPLATE, never of an instance. Every
+    instance of a held-out template is held out, and a template appears in
+    exactly one split — enforced at load by
+    ``evals.scenarios.loader.load_scenarios``, because an instance-level
+    holdout lets a later SFT stage memorise the template through its
+    siblings, which is exactly what plan 06 D7 rejects.
+    """
+
+    DEV = "dev"
+    VALIDATION = "validation"
+    HOLDOUT = "holdout"
+
+
 class AgentVisibleScenario(BaseModel):
     """Everything about a scenario that reaches the agent under test. The whole list.
 
@@ -607,6 +692,50 @@ class Scenario(BaseModel):
     name: str = Field(min_length=1)
     description: str = ""
     tags: tuple[str, ...] = ()
+    # Stable across every instance of the same template (plan 03 § 2). The
+    # benchmark unit is (template, seed, params): ``name`` identifies the
+    # INSTANCE and keys the run archive, the flat report, the regression
+    # baseline and the drift ledger, so it cannot double as the template
+    # key once one template has two instances.
+    #
+    # Legacy default is the name, filled by ``_template_id_defaults_to_name``
+    # below rather than resolved by a property, so that what the inventory
+    # writes, what the report groups on and what the loader's split check
+    # compares are one concrete value with no second spelling. Today that
+    # makes all 41 shipped scenarios single-instance templates, which is the
+    # honest description of the corpus.
+    template_id: str = ""
+    # Which instance of the template this is. 0 for every legacy scenario:
+    # none of them is generated, so there is exactly one instance and its
+    # seed is the zero one. Instance generation (WP-3.x) is what makes this
+    # move.
+    seed: int = Field(default=0, ge=0)
+    # The observable symptom, and the first key every report groups on.
+    #
+    # Optional on the MODEL and mandatory in the CORPUS, and the split is
+    # deliberate. Making it required here would make an unrelated test
+    # fixture — thirteen call sites build a ``Scenario`` inline, plus every
+    # inline YAML in tests/unit — carry a family it has no opinion about,
+    # which is how a required field turns into a field everybody fills in
+    # with whatever loads. Instead
+    # ``tests/unit/test_scenario_metadata.py::TestEveryScenarioIsClassified``
+    # walks ``evals/scenarios/`` and fails, naming the file, until a real
+    # scenario declares one. ``evals/inventory.py`` falls back to
+    # WO-R3-179's provisional substring rule and flags the row
+    # ``provisional: true`` where a scenario has not declared, so a
+    # half-classified corpus is visible in the manifest rather than absent
+    # from it.
+    family: ScenarioFamily | None = None
+    # How hard the diagnosis is, on plan 03 § 3's closed nine. Optional for
+    # the same reason as ``family``, mandatory in the corpus by the same
+    # test.
+    difficulty: ScenarioDifficulty | None = None
+    # Which pool this scenario's TEMPLATE belongs to. ``dev`` for every
+    # legacy scenario, and nothing is in ``holdout`` yet: a holdout is a
+    # promise never to tune against a template, which is a scope decision
+    # for the user rather than a builder's default (pinned by
+    # ``TestNothingIsHeldOutWithoutADecision``).
+    benchmark_split: BenchmarkSplit = BenchmarkSplit.DEV
     alert: AlertPayload
     expectation: ScenarioExpectation
     # One response per tool (served on every call), or a list consumed in
@@ -702,6 +831,16 @@ class Scenario(BaseModel):
             "name",
             "description",
             "tags",
+            # Benchmark bookkeeping (WP-1.4). Evaluator-only without
+            # exception: `difficulty` is a statement about how hard the
+            # answer is and `family` names the symptom class, so either one
+            # in a prompt narrows the agent's search for free, and
+            # `benchmark_split` would tell it which runs are being scored.
+            "template_id",
+            "seed",
+            "family",
+            "difficulty",
+            "benchmark_split",
             "expectation",
             "canned_llm_responses",
             "use_live_mcp",
@@ -781,6 +920,50 @@ class Scenario(BaseModel):
         quietly stop being counted.
         """
         return self.chaos.seeds_chaos
+
+    @model_validator(mode="before")
+    @classmethod
+    def _template_id_defaults_to_name(cls, payload: Any) -> Any:
+        """A scenario that declares no ``template_id`` is its own template.
+
+        Filled here, before field validation, rather than exposed as a
+        ``template_id or name`` property: the loader's split check, the
+        inventory row and the report's grouping key all compare this value,
+        and a computed fallback beside a stored field is two spellings of
+        one identity — the shape ``chaos`` avoids for ``chaos_setup`` a few
+        fields down, for the same reason.
+
+        Runs on the raw mapping (YAML or constructor kwargs) and leaves
+        anything else alone, so a non-mapping payload still fails with
+        pydantic's own message rather than this one's.
+        """
+        if isinstance(payload, Mapping) and not payload.get("template_id"):
+            name = payload.get("name")
+            if isinstance(name, str) and name:
+                return {**payload, "template_id": name}
+        return payload
+
+    @model_validator(mode="after")
+    def _template_id_is_not_empty(self) -> Scenario:
+        """Belt to ``_template_id_defaults_to_name``'s braces.
+
+        The before-validator fills the field from ``name`` whenever a name
+        is there, and ``name`` is required with ``min_length=1`` — so the
+        only route to an empty template id is a construction that bypassed
+        the before-validator (``model_construct``, a future validator
+        reordering). It is worth one branch: an empty template id makes the
+        loader's split check compare ``""`` to ``""`` across unrelated
+        scenarios, which would read as "one template in two splits" and
+        refuse a corpus that is fine, or — with one split — silently group
+        the whole corpus as a single template in every report.
+        """
+        if not self.template_id:
+            raise ValueError(
+                f"scenario {self.name!r} has an empty template_id. It defaults to the "
+                "scenario name; set it explicitly only to declare that this scenario "
+                "is one instance of a template that has others."
+            )
+        return self
 
     @model_validator(mode="after")
     def _one_spelling_of_the_fault(self) -> Scenario:

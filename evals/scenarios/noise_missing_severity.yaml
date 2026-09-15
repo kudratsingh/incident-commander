@@ -1,6 +1,8 @@
 # Alert with no severity field — defaults to "unknown", TRIAGE filters as noise.
 
 name: noise_missing_severity
+family: noise_control
+difficulty: control
 description: >
   Malformed alert missing the severity field. Should default to "unknown" and
   be filtered at TRIAGE — treats missing signals defensively.

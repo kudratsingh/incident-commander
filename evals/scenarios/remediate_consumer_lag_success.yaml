@@ -1,4 +1,6 @@
 name: remediate_consumer_lag_success
+family: consumer_lag
+difficulty: single
 description: "Stalled-consumer alert (kill-based). Chaos kills worker-dispatcher; the group keeps its Kafka assignment and reports TRUE climbing lag. Agent probes \u2192 confirms saturation \u2192 RemediateAction \u2192 PLANNING picks restart_consumer_group \u2192 REMEDIATING clears the kill flag \u2192 supervisor re-spawns the consumer (~2.4s) \u2192 VERIFYING sees lag draining to 0 \u2192 RESOLVED.\n"
 tags:
 - phase-6

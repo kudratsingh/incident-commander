@@ -1,4 +1,6 @@
 name: consumer_lag_payments_critical
+family: consumer_lag
+difficulty: single
 description: 'Payments consumer lag crosses paging threshold. Verifies the agent parametrizes the probe by the alert''s group field, not a hardcoded value.
 
   '

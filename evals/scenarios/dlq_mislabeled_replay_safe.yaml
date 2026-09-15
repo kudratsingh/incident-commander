@@ -1,4 +1,6 @@
 name: dlq_mislabeled_replay_safe
+family: dlq
+difficulty: ambiguous
 description: 'The classifier lied. A dead-letter row carries `remediation_hint: replay_safe` while its `error_message` is a permanent bad-data fault no replay can fix, and the alert fires on the
   `replay_safe` slice — so the label is what paged the agent. Correct behaviour: read the slice, notice that one row''s error contradicts its own hint, and act on the ERROR. No replay of any kind — a
   category replay would sweep the lie up with the genuine row, and replaying the good row plus fencing the bad one is two actions, which ADR 0008 forbids. ONE `mark_dlq_permanent` on exactly the

@@ -1,4 +1,6 @@
 name: consumer_lag_analytics_critical
+family: consumer_lag
+difficulty: single
 description: "Analytics consumer at critical severity \u2014 worst-tier paging alert. Verifies planner treats critical as a strong prior.\n"
 tags:
 - read-only

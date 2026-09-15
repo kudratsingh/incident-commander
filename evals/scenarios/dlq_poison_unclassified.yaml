@@ -1,4 +1,6 @@
 name: dlq_poison_unclassified
+family: dlq
+difficulty: single
 description: 'A poisoned message reached the dead-letter queue and nothing has classified it: `remediation_hint` is null and the error is a schema violation — a required field missing from the stored
   payload. Correct behaviour is READ, CLASSIFY, FENCE, THEN ESCALATE: read the whole queue (the only read an unclassified row appears in), read that row''s error, conclude no replay can supply a field
   the payload does not carry, fence it with one `mark_dlq_permanent` so no later bulk sweep re-runs it, and hand a human a briefing naming the row, the error, and the fact that the SENDER has to change

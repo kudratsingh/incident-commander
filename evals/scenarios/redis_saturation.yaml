@@ -1,4 +1,6 @@
 name: redis_saturation
+family: cache_redis
+difficulty: single
 description: 'Cache miss spike alert. Planner probes get_redis_health to see whether Redis is degraded or memory-pressured before escalating.
 
   '

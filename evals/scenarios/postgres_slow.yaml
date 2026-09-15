@@ -1,4 +1,6 @@
 name: postgres_slow
+family: postgres
+difficulty: single
 description: 'API latency alert points at the database. Planner probes get_postgres_health to check ping + connection count before escalating.
 
   '

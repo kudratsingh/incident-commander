@@ -1,4 +1,6 @@
 name: dlq_replay_safe_success
+family: dlq
+difficulty: single
 description: "Agent probes list_dlq_messages and sees one entry carrying remediation_hint=replay_safe (the platform's classifier confirmed the consumer can now handle it) beside entries it must not touch. Emits RemediateAction;\
   \ PLANNING picks replay_dlq_by_category with category=replay_safe; VERIFYING probes the same filter and sees the list empty \u2192 RESOLVED.\n"
 tags:

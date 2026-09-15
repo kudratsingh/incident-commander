@@ -2,6 +2,8 @@
 # Tests StopAction on the first LLM call.
 
 name: planner_stops_immediately
+family: harness_control
+difficulty: control
 description: >
   The planner decides the alert is unambiguous enough (or the tools aren't
   useful enough) to skip probing entirely and escalate immediately. Verifies

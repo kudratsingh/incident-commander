@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError
 
-from evals.scenarios.schema import Scenario
+from evals.scenarios.schema import BenchmarkSplit, Scenario
 
 
 class ScenarioLoadError(RuntimeError):
@@ -54,11 +54,27 @@ def load_scenarios(directory: Path) -> list[Scenario]:
     Reported at load, naming both files, because a name collision is a
     property of the directory rather than of either file — neither one is
     wrong on its own, and the error has to say what it collided with.
+
+    The second refusal is the split one, and it is here for exactly the same
+    reason. Plan 03 § 4: *every instance of a held-out template is held out;
+    a template appears in exactly one split*. Splits are by TEMPLATE, never
+    by instance — an instance-level holdout leaves siblings of the held-out
+    template in ``dev``, a later SFT stage trains on those siblings, and the
+    holdout measures memorisation while still calling itself a holdout (what
+    plan 06 D7 rejects). A straddling ``template_id`` is a property of the
+    directory, invisible in either scenario's own file, so nothing but a
+    load-time check over the whole corpus can see it — and it has to be a
+    load ERROR rather than a report footnote, because by the time a report
+    is being read the number it would footnote has already been quoted.
     """
     if not directory.is_dir():
         raise ScenarioLoadError(directory, "not a directory")
     scenarios: list[Scenario] = []
     first_seen: dict[str, Path] = {}
+    # template_id -> the first scenario that claimed it, and the split it
+    # claimed it for. Name and path both, because the error must name the
+    # other scenario a reader has to go and look at.
+    split_claims: dict[str, tuple[BenchmarkSplit, str, Path]] = {}
     for path in sorted(directory.iterdir()):
         if path.suffix.lower() in {".yaml", ".yml"} and path.is_file():
             scenario = load_scenario(path)
@@ -73,5 +89,22 @@ def load_scenarios(directory: Path) -> list[Scenario]:
                     "is a copy.",
                 )
             first_seen[scenario.name] = path
+            claimed_split = split_claims.get(scenario.template_id)
+            if claimed_split is not None and claimed_split[0] is not scenario.benchmark_split:
+                other_split, other_name, other_path = claimed_split
+                raise ScenarioLoadError(
+                    path,
+                    f"template_id {scenario.template_id!r} appears in more than one "
+                    f"benchmark split: {scenario.name!r} ({path.name}) declares "
+                    f"{scenario.benchmark_split.value!r}, and {other_name!r} "
+                    f"({other_path.name}) already declared {other_split.value!r}. "
+                    "Splits are by template, not by instance — every instance of a "
+                    "held-out template is held out (plan 03 § 4), so a template belongs "
+                    "to exactly one split. Move both scenarios into the same split, or "
+                    "give this one its own template_id if it is a different template.",
+                )
+            split_claims.setdefault(
+                scenario.template_id, (scenario.benchmark_split, scenario.name, path)
+            )
             scenarios.append(scenario)
     return scenarios

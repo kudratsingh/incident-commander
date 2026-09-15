@@ -18,6 +18,8 @@ Each scenario is one YAML file under `evals/scenarios/`. Minimum required fields
 
 ```yaml
 name: consumer_lag_high
+family: consumer_lag            # required in the corpus; see Benchmark metadata
+difficulty: single              # required in the corpus; see Benchmark metadata
 alert:
   source: platform.kafka
   severity: high
@@ -44,33 +46,144 @@ Optional fields drive richer grading:
 - `canned_llm_responses: {role: [{...}]}` — canned LLM outputs per role, keyed by `investigation_planner` / `remediation_planner` / `verification_judge` / `briefing_writer` / `briefing_judge`
 - `ground_truth: {incident_count, root_causes, affected_components, causal_chain}` — what was actually wrong. **Evaluator-only; never rendered into a prompt.** See [Hidden ground truth](#hidden-ground-truth-and-the-wall-around-it)
 - `discriminating_probes: [{tool, argument_pattern}]` — the reads that tell this fault apart from the ones it resembles. Evaluator-only for the same reason
+- `template_id: <id>` — the template this scenario is an instance of. Defaults to `name`. Evaluator-only. See [Benchmark metadata](#benchmark-metadata-family-difficulty-and-splits)
+- `seed: 0` — which instance of the template this is. Defaults to `0`. Evaluator-only
+- `benchmark_split: dev | validation | holdout` — which pool the TEMPLATE belongs to. Defaults to `dev`. Evaluator-only
+
 
 ## Benchmark inventory
 
 `make inventory` regenerates `evals/benchmark_inventory.json` from the validated
 scenario models through `evals/scenarios/loader.py`. The inventory covers the
-loader's entire corpus (currently 40 `.yaml` scenarios; `.yml` is also accepted),
+loader's entire corpus (currently 41 `.yaml` scenarios; `.yml` is also accepted),
 sorted by scenario name with stable JSON key order. It records declared live MCP
 and LLM flags, the chaos hook name or null, expected terminal state, expected and
 forbidden action tools, forbidden replay ids/categories, and tags. The flags
 describe scenario capabilities; generating this file runs no scenario and makes
 no platform or LLM call. This is a source manifest, not a run artifact.
 
-Family and difficulty each use `{"value": ..., "provisional": true}` until
-WP-1.4 adds explicit metadata. Family takes the first case-insensitive substring
-match across tags, name and alert source, in this order: `dlq` → `dlq`;
+Since WP-1.4 the inventory also records `template_id`, `seed` and
+`benchmark_split`, and the family and difficulty columns read the scenario's own
+declared values, carrying `{"value": ..., "provisional": false}`. A scenario that
+declares neither still gets a row, from the substring rule below, flagged
+`provisional: true` — so a half-classified corpus is visible in the manifest
+rather than absent from it. Every scenario shipped today declares both, so every
+row today reads `provisional: false`.
+
+The fallback rule, kept because it is what the authoritative values were promoted
+*from*: family takes the first case-insensitive substring match across tags, name
+and alert source, in this order: `dlq` → `dlq`;
 `consumer_lag`/`consumer-lag` → `consumer_lag`; `saga`/`dag` → `workflow`;
 `cache`/`redis` → `cache_redis`; `postgres` → `postgres`; `deploy` → `deploy`;
 `trace` → `traces`; `noise`/`alert_storm` → `noise_control`; `tool_` → `tool_fault`;
-otherwise `uncategorized`. These are provisional legacy groups, not the future
+otherwise `uncategorized`. These are legacy groups, not the future
 B (jobs not progressing), C (workflow stuck), and A (API latency) families.
-Difficulty is 0 for names starting with `noise_` and `planner_stops_immediately`
-(controls), and 1 for everything else (provisionally a single obvious fault).
+Difficulty is `control` for names starting with `noise_` and for
+`planner_stops_immediately`, and `single` for everything else. (WO-R3-179 wrote
+those last two as `0` and `1`; they are the same two rungs under the names plan
+03 § 3 gives them, which is why 30 of the 41 scenarios promoted with no change of
+meaning.)
 
 `tests/unit/test_benchmark_inventory.py` requires every scenario exactly once
 and byte-for-byte equality with a fresh in-memory generation. Adding, removing,
 or renaming a scenario reports the affected names; metadata drift requires
 regeneration too. Commit the regenerated inventory with its source change.
+
+## Benchmark metadata: family, difficulty, and splits
+
+The benchmark's unit is `(template, seed, params)`, not "a scenario"
+(plan 03 § 2). A **family** shares one observable symptom across worlds with
+different root causes. A **template** is a family member with free parameters. An
+**instance** is that template with a seed and concrete params. Today every
+`template_id` equals its scenario name and every `seed` is `0` — 41 hand-written
+worlds, one instance each — which is the honest description of the corpus, and
+the thing instance generation changes.
+
+`name` keys the run archive, the flat report, the regression baseline and the
+known-drift ledger, so it identifies the INSTANCE and cannot double as the
+template key once one template has two instances. That is why `template_id`
+exists as its own field rather than as a naming convention.
+
+**Family** is a closed enum ([ADR 0039](ADR/0039-a-split-is-a-property-of-a-template.md)):
+`cache_redis`, `consumer_lag`, `deploy`, `dlq`, `harness_control`, `incidents`,
+`noise_control`, `postgres`, `tool_fault`, `traces`, `workflow`. Those are what
+the corpus honestly is. `jobs_not_progressing`, `workflow_stuck` and
+`api_latency` are named in plan 01 § 7 and are deliberately **absent** — no
+scenario manufactures one of those worlds yet, and an empty group in a report
+reads as a measured zero.
+
+**Difficulty** is plan 03 § 3's closed nine, verbatim: `control`, `single`,
+`ambiguous`, `multi_hop`, `noisy`, `multi_fault`, `cascading`, `temporal`,
+`tradeoff`. Widening it is a plan change. `control` means nothing is wrong with
+the world, or nothing about a world is being measured — a control counted as
+`single` inflates every "solved a real fault" number by the size of the control
+set.
+
+Both are optional on the model and **mandatory in the corpus**:
+`tests/unit/test_scenario_metadata.py` sweeps `evals/scenarios/` parameterised by
+scenario name, so a new scenario fails by name until it is classified. They are
+not required *fields* because every inline test fixture would then have to invent
+a family it has no opinion about.
+
+### Where the promotion differed from the provisional rule
+
+All 41 scenarios were classified by promoting WO-R3-179's provisional values.
+Thirty took the rule's answer unchanged. These eleven did not, and the table is a
+test (`TestPromotionIsReconciled`) so that the claim stays checkable:
+
+| Scenario | Rule said | Now | Why |
+|---|---|---|---|
+| `incidents_overview` | `uncategorized` | `incidents` | alert scope, probed via incidents |
+| `multi_probe_billing` | `uncategorized` | `consumer_lag` | the alert IS consumer lag |
+| `multi_probe_hypothesis_evolution` | `uncategorized` | `consumer_lag` | the alert IS consumer lag |
+| `remediate_verify_fails` | `uncategorized` | `consumer_lag` | the alert IS consumer lag |
+| `planner_stops_immediately` | `uncategorized` | `harness_control` | no world; the planner's own stop path |
+| `no_fault_healthy_cache` | `single` | `control` | its own header: level-0 control, the world is healthy |
+| `alert_storm` | `single` | `noisy` | many alerts in a window; the distractors are the test |
+| `dlq_mixed_partial` | `single` | `ambiguous` | mixed categories under an alert that names no slice |
+| `dlq_mislabeled_replay_safe` | `single` | `ambiguous` | the hint contradicts the error (ADR 0034) |
+| `saga_stuck` | `single` | `multi_hop` | dag state → the root's own DLQ row → fence |
+| `remediate_runaway_saga_success` | `single` | `multi_hop` | dag state → the root's own DLQ row → replay |
+
+`uncategorized` is not a family. It is the substring rule saying it could not
+tell, which is why those five needed a human.
+
+### Splits are by template, never by instance
+
+- **dev** — visible, run often, prompt tuning allowed.
+- **validation** — strategy version comparisons; changes rare.
+- **holdout** — never tuned against.
+
+**Every instance of a held-out template is held out, and a template appears in
+exactly one split.** `evals/scenarios/loader.py` refuses at load time when one
+`template_id` appears under two splits, naming both scenarios, both files and
+both splits. A load error rather than a report footnote: by the time a footnote
+is read, the number it footnotes has been quoted. Naming both is not politeness
+— neither file is wrong on its own, so an error naming one sends the reader to a
+file that looks correct.
+
+Splitting by instance instead would leave siblings of a held-out template in
+`dev`; a later SFT stage trains on those siblings, and the holdout number then
+measures memorisation while still being labelled a holdout (plan 06 D7).
+
+**Nothing is in `holdout` today, and nothing goes there without the user saying
+so.** A holdout is a standing promise never to tune against those templates,
+which is a scope decision rather than a default. All 41 scenarios are `dev`,
+pinned by `TestNothingIsHeldOutWithoutADecision`.
+
+### The keys travel with the run
+
+`ScenarioOutcome` carries `template_id`, `seed`, `family`, `difficulty` and
+`benchmark_split`, so a report says what a scenario was *when it ran*. Joining a
+report back to `evals/scenarios/` to recover them reads today's classification
+against last month's run, which silently re-labels history every time a scenario
+is reclassified. They default to `None`, meaning "predates the record", which
+every archived report and the committed baseline do — append-only evidence is
+never rewritten (ADR 0013's precedent for `live_mcp` / `live_llm`).
+
+All five are on the evaluator side of [ADR 0038](ADR/0038-the-agents-view-of-a-scenario-is-an-allow-list-projection.md)'s
+partition and reach no prompt: `difficulty` in a prompt narrows the agent's
+search for free, and `benchmark_split` would tell it which runs are scored.
 
 ## Grading dimensions
 

@@ -1,4 +1,6 @@
 name: multi_probe_hypothesis_evolution
+family: consumer_lag
+difficulty: single
 description: 'Two probes: first with modest confidence, second refines to a specific hypothesis. Tests that hypotheses stored on RunState reflect the latest ranked list (not the union across iterations).
 
   '

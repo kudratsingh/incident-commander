@@ -1,4 +1,6 @@
 name: dlq_human_required_escalates
+family: dlq
+difficulty: single
 description: 'DLQ holds a row nothing has classified — a bad-data failure with `remediation_hint: null`. Correct behaviour is READ, CLASSIFY, FENCE, THEN ESCALATE: read the error, conclude that a
   value wrong in the stored payload will re-fail every replay, raise the fence with one mark_dlq_permanent on exactly that row so no later bulk replay re-runs it, and hand a human the briefing naming
   the row and the data error. No replay of anything. The fence is a stabilizer, so the run ends ESCALATED — a fenced row is not a fixed one (ADR 0026, WO-R2-140).

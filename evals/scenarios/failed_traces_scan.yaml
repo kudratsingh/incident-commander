@@ -1,4 +1,6 @@
 name: failed_traces_scan
+family: traces
+difficulty: single
 description: 'Alert says "failure rate elevated" without a specific trace. Planner probes search_traces to find recent failed jobs before escalating.
 
   '

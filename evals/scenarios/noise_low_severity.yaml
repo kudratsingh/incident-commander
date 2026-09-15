@@ -1,6 +1,8 @@
 # Low-severity noise — agent escalates at TRIAGE without a probe.
 
 name: noise_low_severity
+family: noise_control
+difficulty: control
 description: >
   Low-severity signal that shouldn't consume the tool budget. Verifies TRIAGE
   filters noise before INVESTIGATING gets a chance to run.

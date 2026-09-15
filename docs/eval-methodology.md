@@ -522,9 +522,55 @@ the un-attributable artifact:
   `failure_class: grader-brittleness` is a hint, never a verdict; the override
   is recorded beside it and the archive itself is never edited.
 
-The model configuration printed in the report is labelled *assembly config*:
-it is today's config, and it is not attributed to archives that predate
-provenance stamping.
+### The committed Phase 0 baseline
+
+`make baseline-report` prints; `python -m evals.baseline_report --write` commits.
+The written form is two versioned artifacts under `evals/reports/`, both
+resolving through `evals/artifacts.py`:
+
+| Kind | File | What it is |
+|---|---|---|
+| `baseline_report` | `baseline_report.<stamp>.<invocation>.json` | the artifact of record |
+| `baseline_report_md` | `baseline_report.<stamp>.<invocation>.md` | the same document for a human |
+
+They deliberately do **not** use the stem `baseline`. `evals/reports/baseline.json`
+is the *machine regression baseline* that `evals/regression.py` gates against and
+`make baseline` blesses — a different artifact answering a different question,
+and a shared stem would make this family adopt that file as its own oldest
+version.
+
+**The stamp comes from the run, not from the machine that assembled it.** ADR
+0013 attaches a `RunProvenance` record per scenario, so `stamp_of` collapses the
+offline run's records to the single record they all agree on and refuses if they
+do not — two models in one report is not a baseline, it is two. `recorded_at`,
+`scenario` and `budget` legitimately differ row to row and are excluded from
+that agreement check; the report is dated by the run's own `generated_at`, not
+by whichever scenario happened to finish first, and the seeded and used budgets
+are kept per scenario rather than collapsed.
+
+Every remaining provenance field must be present **and answered**.
+`"unknown"` is an honest value inside a run archive — ADR 0013 calls it a claim
+a reader can act on — but a baseline whose stamp says unknown is exactly the
+un-attributable artifact this work exists to prevent, so the writer refuses it
+rather than writing it down.
+
+Only the offline leg carries a stamp. The nine live archives predate cmd #223,
+and the report says so instead of borrowing today's `.env` and presenting it as
+their configuration.
+
+**Regenerable, and tested that way.** Nothing in the document reads the clock or
+the environment: it is a function of the committed archives plus the committed
+offline archive. `test_the_committed_baseline_regenerates_byte_for_byte` runs the
+assembler again over the same inputs and asserts the bytes on disk come back out
+— of both halves. The version stamp and invocation id in the filename come from
+the offline leg's provenance for the same reason, so a regeneration aims at the
+same path and the exclusive-create write refuses instead of replacing it.
+
+**What it does not do.** The report states in its own text that this packet does
+*not* run `make baseline`, and why: the regression baseline is still the
+37-scenario 2026-07-31 report while the corpus is 41, and ADR 0011's status is
+split — its sunset fired at the restart and its Status line still reads
+`accepted`. Re-blessing is a deliberate act, and it is the user's.
 
 ## When live and offline disagree
 

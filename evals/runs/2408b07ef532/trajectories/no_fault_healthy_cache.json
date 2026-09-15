@@ -1,0 +1,159 @@
+{
+  "scenario": "no_fault_healthy_cache",
+  "incident_id": "54ba5442-a9bc-47d8-8c2c-7dcc1eb81d16",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "54ba5442-a9bc-47d8-8c2c-7dcc1eb81d16",
+      "state": "triage",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-15T13:25:50.138139Z",
+      "updated_at": "2026-09-15T13:25:50.138139Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "54ba5442-a9bc-47d8-8c2c-7dcc1eb81d16",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000022,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e8a8fc1c-f35c-4df1-b520-6a2a1a63c5b5",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-15T13:25:50.138161Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-15T13:25:50.138139Z",
+      "updated_at": "2026-09-15T13:25:50.138161Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "54ba5442-a9bc-47d8-8c2c-7dcc1eb81d16",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 2,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000033,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e8a8fc1c-f35c-4df1-b520-6a2a1a63c5b5",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-15T13:25:50.138161Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "08d31739-142f-4469-95ee-7186e24dd6a1",
+          "tool_name": "get_cache_key_info",
+          "arguments": {
+            "key": "cache:jobs:worker-dispatcher:hot_set"
+          },
+          "result_summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"exists\":true,\"type\":\"string\",\"ttl_seconds\":86326,\"size\":120}",
+          "timestamp": "2026-09-15T13:25:50.138172Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8b33b6e7-2ccb-455f-a6bb-4a2bb64ef351",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.8,\"connected_clients\":12,\"used_memory_bytes\":18874368,\"used_memory_human\":\"18.00M\",\"keyspace_hits\":98000,\"keyspace_misses\":2000,\"error\":null}",
+          "timestamp": "2026-09-15T13:25:50.138172Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d5c1a14a-cf24-4765-839a-99e0f07982bf",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "no_fault — the alerted key is there and Redis is serving normally; there is nothing to fix, so no action was taken and the alerting rule is what needs a human.\n"
+          },
+          "result_summary": "planner stop: no_fault — the alerted key is there and Redis is serving normally; there is nothing to fix, so no action was taken and the alerting rule is what needs a human.\n",
+          "timestamp": "2026-09-15T13:25:50.138172Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "no_fault",
+          "name": "healthy-cache-false-positive-page",
+          "confidence": 0.9,
+          "reasoning": "The alerted key is present at its normal size and Redis is healthy at a 98% hit rate; the condition the alert reports is not present.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-15T13:25:50.138139Z",
+      "updated_at": "2026-09-15T13:25:50.138172Z"
+    }
+  ],
+  "invocation_id": "2408b07ef532"
+}

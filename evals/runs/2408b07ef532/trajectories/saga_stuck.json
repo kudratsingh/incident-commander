@@ -1,0 +1,549 @@
+{
+  "scenario": "saga_stuck",
+  "incident_id": "a2873384-16a5-42d2-aa98-46c888b92184",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "a2873384-16a5-42d2-aa98-46c888b92184",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-15T13:25:50.183362Z",
+      "updated_at": "2026-09-15T13:25:50.183362Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "a2873384-16a5-42d2-aa98-46c888b92184",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000034,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "a7047a84-544c-4470-9c9e-5b8feb979d42",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-15T13:25:50.183396Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-15T13:25:50.183362Z",
+      "updated_at": "2026-09-15T13:25:50.183396Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "a2873384-16a5-42d2-aa98-46c888b92184",
+      "state": "planning",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000048,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "a7047a84-544c-4470-9c9e-5b8feb979d42",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-15T13:25:50.183396Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7e94e946-8155-4ecd-ada3-de7527b465ac",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52"
+          },
+          "result_summary": "{\"seed_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"nodes\":[{\"id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"retry_count\":3,\"created_at\":\"2026-09-08T04:10:42.534473Z\"},{\"id\":\"9b9fe94d-a2c5-59d2-b968-e9427908e9f2\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-09-08T04:10:42.534473Z\"},{\"id\":\"677c49dd-9901-5761-a640-f1f9bea65e04\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-09-08T04:10:42.534473Z\"}],\"edges\":[{\"from_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"to_id\":\"9b9fe94d-a2c5-59d2-b968-e9427908e9f2\"},{\"from_id\":\"677c49dd-9901-5761-a640-f1f9bea65e04\",\"to_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-09-15T13:25:50.183410Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "6caa9bee-8837-403e-9333-0a31d076f5df",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":5,\"items\":[{\"id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"type\":\"bulk_api_sync\",\"error_message\":\"SchemaValidationError: payload missing required field 'user_id' (received keys: ['tenant_id', 'action', 'ts'])\",\"retry_count\":3,\"created_at\":\"2026-09-08T04:10:42.534473Z\",\"updated_at\":\"2026-09-08T04:10:42.534473Z\",\"trace_id\":\"11bd9009-9241-54e3-94c8-aa4a81f1be1d\",\"triage\":null,\"remediation_hint\":\"human_required\",\"dead_lettered_at\":null,\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-08T04:01:47.989579Z\",\"updated_at\":\"2026-09-08T04:01:53.989579Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-08T04:01:53.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-09-08T03:57:47.989579Z\",\"updated_at\":\"2026-09-08T03:58:09.989579Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-09-08T03:58:09.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-08T03:44:47.989579Z\",\"updated_at\":\"2026-09-08T03:45:21.989579Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-08T03:45:21.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-08T03:29:47.989579Z\",\"updated_at\":\"2026-09-08T03:30:03.989579Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-08T03:30:03.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-15T13:25:50.183410Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f8423293-fa6a-48d2-8eb3-4d261e2b8b2b",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "the chain's dead-lettered root is classified human_required on a payload that is missing a required field; fence it with mark_dlq_permanent so no later bulk replay re-runs it, then escalate naming the root — no replay tool touches the chain"
+          },
+          "result_summary": "planner handoff to PLANNING: the chain's dead-lettered root is classified human_required on a payload that is missing a required field; fence it with mark_dlq_permanent so no later bulk replay re-runs it, then escalate naming the root — no replay tool touches the chain",
+          "timestamp": "2026-09-15T13:25:50.183410Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "runaway_saga",
+          "name": "stuck_saga_node",
+          "confidence": 0.85,
+          "reasoning": "The root is in dead_letter with retry_count=3 — retries exhausted, and dead_letter is terminal — while its descendant sits in waiting. The resolver promotes a child only when every parent is completed, so this chain will not drain on its own. Its dead-letter row is classified human_required on a SchemaValidationError: the stored payload is missing the required field 'user_id', so a replay re-reads the same bytes and fails identically. The replay that would un-stick this chain is a human's decision, and there is one action worth taking first: fence the root so no later category or bulk replay re-runs a payload that cannot succeed.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-15T13:25:50.183362Z",
+      "updated_at": "2026-09-15T13:25:50.183410Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "a2873384-16a5-42d2-aa98-46c888b92184",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.004049,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "a7047a84-544c-4470-9c9e-5b8feb979d42",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-15T13:25:50.183396Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7e94e946-8155-4ecd-ada3-de7527b465ac",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52"
+          },
+          "result_summary": "{\"seed_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"nodes\":[{\"id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"retry_count\":3,\"created_at\":\"2026-09-08T04:10:42.534473Z\"},{\"id\":\"9b9fe94d-a2c5-59d2-b968-e9427908e9f2\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-09-08T04:10:42.534473Z\"},{\"id\":\"677c49dd-9901-5761-a640-f1f9bea65e04\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-09-08T04:10:42.534473Z\"}],\"edges\":[{\"from_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"to_id\":\"9b9fe94d-a2c5-59d2-b968-e9427908e9f2\"},{\"from_id\":\"677c49dd-9901-5761-a640-f1f9bea65e04\",\"to_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-09-15T13:25:50.183410Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "6caa9bee-8837-403e-9333-0a31d076f5df",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":5,\"items\":[{\"id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"type\":\"bulk_api_sync\",\"error_message\":\"SchemaValidationError: payload missing required field 'user_id' (received keys: ['tenant_id', 'action', 'ts'])\",\"retry_count\":3,\"created_at\":\"2026-09-08T04:10:42.534473Z\",\"updated_at\":\"2026-09-08T04:10:42.534473Z\",\"trace_id\":\"11bd9009-9241-54e3-94c8-aa4a81f1be1d\",\"triage\":null,\"remediation_hint\":\"human_required\",\"dead_lettered_at\":null,\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-08T04:01:47.989579Z\",\"updated_at\":\"2026-09-08T04:01:53.989579Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-08T04:01:53.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-09-08T03:57:47.989579Z\",\"updated_at\":\"2026-09-08T03:58:09.989579Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-09-08T03:58:09.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-08T03:44:47.989579Z\",\"updated_at\":\"2026-09-08T03:45:21.989579Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-08T03:45:21.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-08T03:29:47.989579Z\",\"updated_at\":\"2026-09-08T03:30:03.989579Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-08T03:30:03.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-15T13:25:50.183410Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f8423293-fa6a-48d2-8eb3-4d261e2b8b2b",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "the chain's dead-lettered root is classified human_required on a payload that is missing a required field; fence it with mark_dlq_permanent so no later bulk replay re-runs it, then escalate naming the root — no replay tool touches the chain"
+          },
+          "result_summary": "planner handoff to PLANNING: the chain's dead-lettered root is classified human_required on a payload that is missing a required field; fence it with mark_dlq_permanent so no later bulk replay re-runs it, then escalate naming the root — no replay tool touches the chain",
+          "timestamp": "2026-09-15T13:25:50.183410Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a6780cca-b997-42fd-8a42-f51fd7b3abdc",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "stuck_saga_node"
+          },
+          "result_summary": "plan: mark_dlq_permanent({\"job_id\": \"87f50f4d-ca7e-508e-9820-63c1a24c8f52\", \"reason\": \"The chain root's stored payload is missing the required field 'user_id', so every replay re-reads the same bytes and fails identically; fencing it keeps any later bulk or category replay from re-running it while a human repairs the producer and decides whether to replay the root by id.\\n\"}) then verify via list_dlq_messages",
+          "timestamp": "2026-09-15T13:25:50.187411Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "runaway_saga",
+          "name": "stuck_saga_node",
+          "confidence": 0.85,
+          "reasoning": "The root is in dead_letter with retry_count=3 — retries exhausted, and dead_letter is terminal — while its descendant sits in waiting. The resolver promotes a child only when every parent is completed, so this chain will not drain on its own. Its dead-letter row is classified human_required on a SchemaValidationError: the stored payload is missing the required field 'user_id', so a replay re-reads the same bytes and fails identically. The replay that would un-stick this chain is a human's decision, and there is one action worth taking first: fence the root so no later category or bulk replay re-runs a payload that cannot succeed.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "stuck_saga_node",
+        "action_tool": "mark_dlq_permanent",
+        "action_arguments": {
+          "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52",
+          "reason": "The chain root's stored payload is missing the required field 'user_id', so every replay re-reads the same bytes and fails identically; fencing it keeps any later bulk or category replay from re-running it while a human repairs the producer and decides whether to replay the root by id.\n"
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "limit": 50
+        },
+        "verify_expectation": "The root still appears in the DLQ listing — the mark does not change job.status, the entry stays in the DLQ — now carrying a non-null fenced_at where the pre-action read showed null. The chain itself is expected to be UNCHANGED: the root stays dead_letter and its descendant stays waiting, because a fence stops auto-replay and repairs nothing.\n",
+        "action_rationale": null
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-09-15T13:25:50.183362Z",
+      "updated_at": "2026-09-15T13:25:50.187411Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "a2873384-16a5-42d2-aa98-46c888b92184",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 3,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.006015,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "a7047a84-544c-4470-9c9e-5b8feb979d42",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-15T13:25:50.183396Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7e94e946-8155-4ecd-ada3-de7527b465ac",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52"
+          },
+          "result_summary": "{\"seed_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"nodes\":[{\"id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"retry_count\":3,\"created_at\":\"2026-09-08T04:10:42.534473Z\"},{\"id\":\"9b9fe94d-a2c5-59d2-b968-e9427908e9f2\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-09-08T04:10:42.534473Z\"},{\"id\":\"677c49dd-9901-5761-a640-f1f9bea65e04\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-09-08T04:10:42.534473Z\"}],\"edges\":[{\"from_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"to_id\":\"9b9fe94d-a2c5-59d2-b968-e9427908e9f2\"},{\"from_id\":\"677c49dd-9901-5761-a640-f1f9bea65e04\",\"to_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-09-15T13:25:50.183410Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "6caa9bee-8837-403e-9333-0a31d076f5df",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":5,\"items\":[{\"id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"type\":\"bulk_api_sync\",\"error_message\":\"SchemaValidationError: payload missing required field 'user_id' (received keys: ['tenant_id', 'action', 'ts'])\",\"retry_count\":3,\"created_at\":\"2026-09-08T04:10:42.534473Z\",\"updated_at\":\"2026-09-08T04:10:42.534473Z\",\"trace_id\":\"11bd9009-9241-54e3-94c8-aa4a81f1be1d\",\"triage\":null,\"remediation_hint\":\"human_required\",\"dead_lettered_at\":null,\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-08T04:01:47.989579Z\",\"updated_at\":\"2026-09-08T04:01:53.989579Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-08T04:01:53.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-09-08T03:57:47.989579Z\",\"updated_at\":\"2026-09-08T03:58:09.989579Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-09-08T03:58:09.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-08T03:44:47.989579Z\",\"updated_at\":\"2026-09-08T03:45:21.989579Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-08T03:45:21.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-08T03:29:47.989579Z\",\"updated_at\":\"2026-09-08T03:30:03.989579Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-08T03:30:03.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-15T13:25:50.183410Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f8423293-fa6a-48d2-8eb3-4d261e2b8b2b",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "the chain's dead-lettered root is classified human_required on a payload that is missing a required field; fence it with mark_dlq_permanent so no later bulk replay re-runs it, then escalate naming the root — no replay tool touches the chain"
+          },
+          "result_summary": "planner handoff to PLANNING: the chain's dead-lettered root is classified human_required on a payload that is missing a required field; fence it with mark_dlq_permanent so no later bulk replay re-runs it, then escalate naming the root — no replay tool touches the chain",
+          "timestamp": "2026-09-15T13:25:50.183410Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a6780cca-b997-42fd-8a42-f51fd7b3abdc",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "stuck_saga_node"
+          },
+          "result_summary": "plan: mark_dlq_permanent({\"job_id\": \"87f50f4d-ca7e-508e-9820-63c1a24c8f52\", \"reason\": \"The chain root's stored payload is missing the required field 'user_id', so every replay re-reads the same bytes and fails identically; fencing it keeps any later bulk or category replay from re-running it while a human repairs the producer and decides whether to replay the root by id.\\n\"}) then verify via list_dlq_messages",
+          "timestamp": "2026-09-15T13:25:50.187411Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "07c2d417-a105-4d3b-8824-f41a269fa9a4",
+          "tool_name": "mark_dlq_permanent",
+          "arguments": {
+            "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52",
+            "reason": "The chain root's stored payload is missing the required field 'user_id', so every replay re-reads the same bytes and fails identically; fencing it keeps any later bulk or category replay from re-running it while a human repairs the producer and decides whether to replay the root by id.\n",
+            "idempotency_key": "856e3ee2566cf93e94ba8da8a9ecddd1"
+          },
+          "result_summary": "{\"job_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"previous_hint\":\"human_required\",\"remediation_hint\":\"human_required\",\"already_marked\":true,\"fenced_at\":\"2026-09-08T04:10:42.599650Z\"}",
+          "timestamp": "2026-09-15T13:25:50.189377Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "runaway_saga",
+          "name": "stuck_saga_node",
+          "confidence": 0.85,
+          "reasoning": "The root is in dead_letter with retry_count=3 — retries exhausted, and dead_letter is terminal — while its descendant sits in waiting. The resolver promotes a child only when every parent is completed, so this chain will not drain on its own. Its dead-letter row is classified human_required on a SchemaValidationError: the stored payload is missing the required field 'user_id', so a replay re-reads the same bytes and fails identically. The replay that would un-stick this chain is a human's decision, and there is one action worth taking first: fence the root so no later category or bulk replay re-runs a payload that cannot succeed.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "stuck_saga_node",
+        "action_tool": "mark_dlq_permanent",
+        "action_arguments": {
+          "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52",
+          "reason": "The chain root's stored payload is missing the required field 'user_id', so every replay re-reads the same bytes and fails identically; fencing it keeps any later bulk or category replay from re-running it while a human repairs the producer and decides whether to replay the root by id.\n"
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "limit": 50
+        },
+        "verify_expectation": "The root still appears in the DLQ listing — the mark does not change job.status, the entry stays in the DLQ — now carrying a non-null fenced_at where the pre-action read showed null. The chain itself is expected to be UNCHANGED: the root stays dead_letter and its descendant stays waiting, because a fence stops auto-replay and repairs nothing.\n",
+        "action_rationale": null
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-15T13:25:50.183362Z",
+      "updated_at": "2026-09-15T13:25:50.189377Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "a2873384-16a5-42d2-aa98-46c888b92184",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "saga_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 4,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.00605,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "a7047a84-544c-4470-9c9e-5b8feb979d42",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "0714689d310fdbb012a22b2f61e849d9"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-15T13:25:50.183396Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7e94e946-8155-4ecd-ada3-de7527b465ac",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52"
+          },
+          "result_summary": "{\"seed_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"nodes\":[{\"id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"retry_count\":3,\"created_at\":\"2026-09-08T04:10:42.534473Z\"},{\"id\":\"9b9fe94d-a2c5-59d2-b968-e9427908e9f2\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-09-08T04:10:42.534473Z\"},{\"id\":\"677c49dd-9901-5761-a640-f1f9bea65e04\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-09-08T04:10:42.534473Z\"}],\"edges\":[{\"from_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"to_id\":\"9b9fe94d-a2c5-59d2-b968-e9427908e9f2\"},{\"from_id\":\"677c49dd-9901-5761-a640-f1f9bea65e04\",\"to_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-09-15T13:25:50.183410Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "6caa9bee-8837-403e-9333-0a31d076f5df",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":5,\"items\":[{\"id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"type\":\"bulk_api_sync\",\"error_message\":\"SchemaValidationError: payload missing required field 'user_id' (received keys: ['tenant_id', 'action', 'ts'])\",\"retry_count\":3,\"created_at\":\"2026-09-08T04:10:42.534473Z\",\"updated_at\":\"2026-09-08T04:10:42.534473Z\",\"trace_id\":\"11bd9009-9241-54e3-94c8-aa4a81f1be1d\",\"triage\":null,\"remediation_hint\":\"human_required\",\"dead_lettered_at\":null,\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-08T04:01:47.989579Z\",\"updated_at\":\"2026-09-08T04:01:53.989579Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-08T04:01:53.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-09-08T03:57:47.989579Z\",\"updated_at\":\"2026-09-08T03:58:09.989579Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-09-08T03:58:09.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-08T03:44:47.989579Z\",\"updated_at\":\"2026-09-08T03:45:21.989579Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-08T03:45:21.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-08T03:29:47.989579Z\",\"updated_at\":\"2026-09-08T03:30:03.989579Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-08T03:30:03.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-15T13:25:50.183410Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f8423293-fa6a-48d2-8eb3-4d261e2b8b2b",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "the chain's dead-lettered root is classified human_required on a payload that is missing a required field; fence it with mark_dlq_permanent so no later bulk replay re-runs it, then escalate naming the root — no replay tool touches the chain"
+          },
+          "result_summary": "planner handoff to PLANNING: the chain's dead-lettered root is classified human_required on a payload that is missing a required field; fence it with mark_dlq_permanent so no later bulk replay re-runs it, then escalate naming the root — no replay tool touches the chain",
+          "timestamp": "2026-09-15T13:25:50.183410Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a6780cca-b997-42fd-8a42-f51fd7b3abdc",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "stuck_saga_node"
+          },
+          "result_summary": "plan: mark_dlq_permanent({\"job_id\": \"87f50f4d-ca7e-508e-9820-63c1a24c8f52\", \"reason\": \"The chain root's stored payload is missing the required field 'user_id', so every replay re-reads the same bytes and fails identically; fencing it keeps any later bulk or category replay from re-running it while a human repairs the producer and decides whether to replay the root by id.\\n\"}) then verify via list_dlq_messages",
+          "timestamp": "2026-09-15T13:25:50.187411Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "07c2d417-a105-4d3b-8824-f41a269fa9a4",
+          "tool_name": "mark_dlq_permanent",
+          "arguments": {
+            "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52",
+            "reason": "The chain root's stored payload is missing the required field 'user_id', so every replay re-reads the same bytes and fails identically; fencing it keeps any later bulk or category replay from re-running it while a human repairs the producer and decides whether to replay the root by id.\n",
+            "idempotency_key": "856e3ee2566cf93e94ba8da8a9ecddd1"
+          },
+          "result_summary": "{\"job_id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"previous_hint\":\"human_required\",\"remediation_hint\":\"human_required\",\"already_marked\":true,\"fenced_at\":\"2026-09-08T04:10:42.599650Z\"}",
+          "timestamp": "2026-09-15T13:25:50.189377Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e1e1dddf-47e8-451e-b9e0-9871623a3d5c",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0,
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "{\"total\":5,\"items\":[{\"id\":\"87f50f4d-ca7e-508e-9820-63c1a24c8f52\",\"type\":\"bulk_api_sync\",\"error_message\":\"SchemaValidationError: payload missing required field 'user_id' (received keys: ['tenant_id', 'action', 'ts'])\",\"retry_count\":3,\"created_at\":\"2026-09-08T04:10:42.534473Z\",\"updated_at\":\"2026-09-08T04:10:42.596101Z\",\"trace_id\":\"11bd9009-9241-54e3-94c8-aa4a81f1be1d\",\"triage\":null,\"remediation_hint\":\"human_required\",\"dead_lettered_at\":null,\"fenced_at\":\"2026-09-08T04:10:42.599650Z\",\"fenced_by\":\"service_account:586042d6-f550-4d76-9f4f-a9f291419d1a\",\"extra\":null},{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-08T04:01:47.989579Z\",\"updated_at\":\"2026-09-08T04:01:53.989579Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-08T04:01:53.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-09-08T03:57:47.989579Z\",\"updated_at\":\"2026-09-08T03:58:09.989579Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-09-08T03:58:09.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-08T03:44:47.989579Z\",\"updated_at\":\"2026-09-08T03:45:21.989579Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-08T03:45:21.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-08T03:29:47.989579Z\",\"updated_at\":\"2026-09-08T03:30:03.989579Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-08T03:30:03.989579Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-15T13:25:50.189421Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ea927f0e-4b52-4df6-8990-1db8a4badd7e",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The root still appears in the DLQ listing — the mark does not change job.status, the entry stays in the DLQ — now carrying a non-null fenced_at where the pre-action read showed null. The chain itself is expected to be UNCHANGED: the root stays dead_letter and its descendant stays waiting, because a fence stops auto-replay and repairs nothing.\n",
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "verified: mark_dlq_permanent answered previous_hint=human_required, remediation_hint=human_required, already_marked=true and a fenced_at for 87f50f4d-ca7e-508e-9820-63c1a24c8f52 with the reason recorded, and the verify read shows that row still dead-lettered in the DLQ carrying a non-null fenced_at where the pre-action read showed null. The fence landed and it is attributable. It did not repair the payload, so the root is still dead and the descendant behind it is still waiting.\n",
+          "timestamp": "2026-09-15T13:25:50.189421Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "85220624-22af-4661-b9b2-5eff36143d48",
+          "tool_name": "_remediation_escalate",
+          "arguments": {
+            "from_state": "verifying",
+            "reason": "STABILIZED, NOT RESOLVED. mark_dlq_permanent executed successfully and list_dlq_messages confirmed it landed on 87f50f4d-ca7e-508e-9820-63c1a24c8f52 — this is an escalation by design, not a failed remediation. mark_dlq_permanent is a stabilize-only action: fences one dead-lettered job out of auto-replay — it sets `remediation_hint=human_required` and writes the operator's reason to the audit trail, and the platform's own description says it \"doesn't change job.status — the entry stays in DLQ\". So the job is still dead and its work is still undone: the fence stops a later bulk replay from re-running a poisoned payload, and it fixes nothing about why the payload failed. The bad data, the producer bug or the schema behind it is untouched and a human still has to act. Unlike a pause the fence does not expire, so nothing is on a clock — but 'permanent' describes the fence, not the incident. The underlying fault on 87f50f4d-ca7e-508e-9820-63c1a24c8f52 is unchanged and still needs a human decision on the real fix. Treat the stabilization as a clock, not an outcome.",
+            "attempted_tool": "mark_dlq_permanent",
+            "attempted_arguments": {
+              "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52",
+              "reason": "The chain root's stored payload is missing the required field 'user_id', so every replay re-reads the same bytes and fails identically; fencing it keeps any later bulk or category replay from re-running it while a human repairs the producer and decides whether to replay the root by id.\n"
+            }
+          },
+          "result_summary": "STABILIZED, NOT RESOLVED. mark_dlq_permanent executed successfully and list_dlq_messages confirmed it landed on 87f50f4d-ca7e-508e-9820-63c1a24c8f52 — this is an escalation by design, not a failed remediation. mark_dlq_permanent is a stabilize-only action: fences one dead-lettered job out of auto-replay — it sets `remediation_hint=human_required` and writes the operator's reason to the audit trail, and the platform's own description says it \"doesn't change job.status — the entry stays in DLQ\". So the job is still dead and its work is still undone: the fence stops a later bulk replay from re-running a poisoned payload, and it fixes nothing about why the payload failed. The bad data, the producer bug or the schema behind it is untouched and a human still has to act. Unlike a pause the fence does not expire, so nothing is on a clock — but 'permanent' describes the fence, not the incident. The underlying fault on 87f50f4d-ca7e-508e-9820-63c1a24c8f52 is unchanged and still needs a human decision on the real fix. Treat the stabilization as a clock, not an outcome.",
+          "timestamp": "2026-09-15T13:25:50.189421Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "runaway_saga",
+          "name": "stuck_saga_node",
+          "confidence": 0.85,
+          "reasoning": "The root is in dead_letter with retry_count=3 — retries exhausted, and dead_letter is terminal — while its descendant sits in waiting. The resolver promotes a child only when every parent is completed, so this chain will not drain on its own. Its dead-letter row is classified human_required on a SchemaValidationError: the stored payload is missing the required field 'user_id', so a replay re-reads the same bytes and fails identically. The replay that would un-stick this chain is a human's decision, and there is one action worth taking first: fence the root so no later category or bulk replay re-runs a payload that cannot succeed.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "stuck_saga_node",
+        "action_tool": "mark_dlq_permanent",
+        "action_arguments": {
+          "job_id": "87f50f4d-ca7e-508e-9820-63c1a24c8f52",
+          "reason": "The chain root's stored payload is missing the required field 'user_id', so every replay re-reads the same bytes and fails identically; fencing it keeps any later bulk or category replay from re-running it while a human repairs the producer and decides whether to replay the root by id.\n"
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "limit": 50
+        },
+        "verify_expectation": "The root still appears in the DLQ listing — the mark does not change job.status, the entry stays in the DLQ — now carrying a non-null fenced_at where the pre-action read showed null. The chain itself is expected to be UNCHANGED: the root stays dead_letter and its descendant stays waiting, because a fence stops auto-replay and repairs nothing.\n",
+        "action_rationale": null
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-15T13:25:50.183362Z",
+      "updated_at": "2026-09-15T13:25:50.189421Z"
+    }
+  ],
+  "invocation_id": "2408b07ef532"
+}

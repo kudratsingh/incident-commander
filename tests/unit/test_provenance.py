@@ -581,14 +581,26 @@ class TestArchivedReportsStillParse:
         assert report.closing is None
         assert all(outcome.provenance is None for outcome in report.outcomes)
 
-    def test_every_committed_archive_parses_and_claims_no_role(self) -> None:
-        """Every archive git is TRACKING, which is every one that predates this.
+    def test_every_committed_archive_parses_and_never_claims_what_it_lacks(self) -> None:
+        """Every archive git is TRACKING, each held to the rule its own era set.
 
         Tracked rather than everything on disk: a local offline run writes a
-        fresh, untracked archive into the same directory, and that one does
-        record a role. Asking git which files are committed is what makes
-        "historical evidence" a checkable definition rather than "whatever is
-        in this directory today".
+        fresh, untracked archive into the same directory. Asking git which
+        files are committed is what makes "the evidence this repo ships" a
+        checkable definition rather than "whatever is in this directory
+        today".
+
+        Originally every tracked archive predated provenance, so this asserted
+        that none of them recorded a role. That was a fact about the
+        repository on the day it was written, not the invariant. WO-R3-182
+        commits the offline run its Phase 0 baseline is assembled from, which
+        is stamped, so the fact stopped being true while the invariant did
+        not: **no archive may assert something it does not know.** An
+        unstamped archive must say so rather than let a default speak for it,
+        and a stamped one must be stamped all the way through — a report where
+        only some rows carry provenance can name a model for one scenario and
+        not the next, which is the half-attributable artifact ADR 0013 exists
+        to prevent.
         """
         listed = subprocess.run(
             ["git", "ls-files", "-z", "evals/runs/*/report.json"],  # noqa: S607
@@ -600,8 +612,19 @@ class TestArchivedReportsStillParse:
         assert listed.returncode == 0, f"git ls-files failed: {listed.stderr}"
         archived = [_REPO_ROOT / name for name in listed.stdout.split("\0") if name]
         assert archived, "canary: no committed run archives to check"
+        unstamped = 0
         for path in archived:
             report = RunReport.model_validate_json(path.read_text(encoding="utf-8"))
-            assert report.closing is None, f"{path} predates model roles"
-            assert report.non_closing_reason.startswith("predates")
-            assert all(outcome.provenance is None for outcome in report.outcomes)
+            stamped = [outcome.provenance is not None for outcome in report.outcomes]
+            if not any(stamped):
+                unstamped += 1
+                assert report.closing is None, f"{path} predates model roles"
+                assert report.non_closing_reason.startswith("predates")
+                continue
+            assert all(stamped), f"{path} stamps only some of its outcomes"
+            role = report.outcomes[0].provenance
+            assert role is not None
+            assert report.closing is (role.model_role is ModelRole.BENCHMARK), (
+                f"{path} disagrees with its own rows about whether it closes a phase"
+            )
+        assert unstamped, "canary: the pre-provenance archives stopped being checked"

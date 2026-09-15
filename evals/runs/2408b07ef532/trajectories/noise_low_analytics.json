@@ -1,0 +1,79 @@
+{
+  "scenario": "noise_low_analytics",
+  "incident_id": "e253b2a7-447e-4392-8a2f-f2dbaaffb6e5",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "e253b2a7-447e-4392-8a2f-f2dbaaffb6e5",
+      "state": "triage",
+      "alert": {
+        "source": "platform.canary",
+        "severity": "low",
+        "fingerprint": "canary_blip",
+        "group": "analytics-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-15T13:25:50.143176Z",
+      "updated_at": "2026-09-15T13:25:50.143176Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "e253b2a7-447e-4392-8a2f-f2dbaaffb6e5",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.canary",
+        "severity": "low",
+        "fingerprint": "canary_blip",
+        "group": "analytics-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 25,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000016,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7036e241-e50d-4bb2-9783-1404270f0aa7",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "low",
+            "dedup_key": "6b37874a8b580b0649d3ed658c8802b3"
+          },
+          "result_summary": "severity=low classified as escalated",
+          "timestamp": "2026-09-15T13:25:50.143192Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-15T13:25:50.143176Z",
+      "updated_at": "2026-09-15T13:25:50.143192Z"
+    }
+  ],
+  "invocation_id": "2408b07ef532"
+}

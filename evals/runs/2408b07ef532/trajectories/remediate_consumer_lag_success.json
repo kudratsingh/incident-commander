@@ -1,0 +1,479 @@
+{
+  "scenario": "remediate_consumer_lag_success",
+  "incident_id": "69b25922-5485-4347-84a9-3f47e6339822",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "69b25922-5485-4347-84a9-3f47e6339822",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-15T13:25:50.151928Z",
+      "updated_at": "2026-09-15T13:25:50.151928Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "69b25922-5485-4347-84a9-3f47e6339822",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.00003,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "362675aa-7ae6-4e78-923e-6066c0573cdf",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "94d523891e9a868d3ce95ee9982f3323"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-15T13:25:50.151958Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-15T13:25:50.151928Z",
+      "updated_at": "2026-09-15T13:25:50.151958Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "69b25922-5485-4347-84a9-3f47e6339822",
+      "state": "planning",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000042,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "362675aa-7ae6-4e78-923e-6066c0573cdf",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "94d523891e9a868d3ce95ee9982f3323"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-15T13:25:50.151958Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0bfc2050-5c9b-4dd3-a492-7da117687c79",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":15000,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-09-15T13:25:50.151970Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8f170773-dd59-4803-897a-05f1778a9095",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "consumer_saturation confirmed; restart_consumer_group applies"
+          },
+          "result_summary": "planner handoff to PLANNING: consumer_saturation confirmed; restart_consumer_group applies",
+          "timestamp": "2026-09-15T13:25:50.151970Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.85,
+          "reasoning": "Lag of 15000 and climbing with the group assignment retained is the stalled-consumer signature. Restart clears the kill state and lets the supervisor re-spawn it.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-15T13:25:50.151928Z",
+      "updated_at": "2026-09-15T13:25:50.151970Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "69b25922-5485-4347-84a9-3f47e6339822",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.002708,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "362675aa-7ae6-4e78-923e-6066c0573cdf",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "94d523891e9a868d3ce95ee9982f3323"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-15T13:25:50.151958Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0bfc2050-5c9b-4dd3-a492-7da117687c79",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":15000,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-09-15T13:25:50.151970Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8f170773-dd59-4803-897a-05f1778a9095",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "consumer_saturation confirmed; restart_consumer_group applies"
+          },
+          "result_summary": "planner handoff to PLANNING: consumer_saturation confirmed; restart_consumer_group applies",
+          "timestamp": "2026-09-15T13:25:50.151970Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "25aa67bb-c4b6-47d3-825e-f72378208b4d",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "consumer_saturation"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"worker-dispatcher\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-09-15T13:25:50.154636Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.85,
+          "reasoning": "Lag of 15000 and climbing with the group assignment retained is the stalled-consumer signature. Restart clears the kill state and lets the supervisor re-spawn it.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "consumer_saturation",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_expectation": "After the restart clears the kill flag the supervisor re-spawns the consumer within seconds and the backlog drains: get_consumer_lag drops toward 0. The cached metric may trail the recovery by ~30s, so an early read can still show the old high value.\n",
+        "action_rationale": null
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-09-15T13:25:50.151928Z",
+      "updated_at": "2026-09-15T13:25:50.154636Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "69b25922-5485-4347-84a9-3f47e6339822",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.004968,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "362675aa-7ae6-4e78-923e-6066c0573cdf",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "94d523891e9a868d3ce95ee9982f3323"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-15T13:25:50.151958Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0bfc2050-5c9b-4dd3-a492-7da117687c79",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":15000,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-09-15T13:25:50.151970Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8f170773-dd59-4803-897a-05f1778a9095",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "consumer_saturation confirmed; restart_consumer_group applies"
+          },
+          "result_summary": "planner handoff to PLANNING: consumer_saturation confirmed; restart_consumer_group applies",
+          "timestamp": "2026-09-15T13:25:50.151970Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "25aa67bb-c4b6-47d3-825e-f72378208b4d",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "consumer_saturation"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"worker-dispatcher\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-09-15T13:25:50.154636Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e86a9720-a80f-426a-9746-7b381186890a",
+          "tool_name": "restart_consumer_group",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "idempotency_key": "c35f4f2ef9aa55609a1317af152f9686"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"kill_key_cleared\":true,\"latency_key_cleared\":false,\"group_recognized\":true,\"accepted\":true}",
+          "timestamp": "2026-09-15T13:25:50.156896Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.85,
+          "reasoning": "Lag of 15000 and climbing with the group assignment retained is the stalled-consumer signature. Restart clears the kill state and lets the supervisor re-spawn it.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "consumer_saturation",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_expectation": "After the restart clears the kill flag the supervisor re-spawns the consumer within seconds and the backlog drains: get_consumer_lag drops toward 0. The cached metric may trail the recovery by ~30s, so an early read can still show the old high value.\n",
+        "action_rationale": null
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-15T13:25:50.151928Z",
+      "updated_at": "2026-09-15T13:25:50.156896Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "69b25922-5485-4347-84a9-3f47e6339822",
+      "state": "resolved",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 3,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.005,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "362675aa-7ae6-4e78-923e-6066c0573cdf",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "94d523891e9a868d3ce95ee9982f3323"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-15T13:25:50.151958Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0bfc2050-5c9b-4dd3-a492-7da117687c79",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":15000,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-09-15T13:25:50.151970Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8f170773-dd59-4803-897a-05f1778a9095",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "consumer_saturation confirmed; restart_consumer_group applies"
+          },
+          "result_summary": "planner handoff to PLANNING: consumer_saturation confirmed; restart_consumer_group applies",
+          "timestamp": "2026-09-15T13:25:50.151970Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "25aa67bb-c4b6-47d3-825e-f72378208b4d",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "consumer_saturation"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"worker-dispatcher\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-09-15T13:25:50.154636Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e86a9720-a80f-426a-9746-7b381186890a",
+          "tool_name": "restart_consumer_group",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "idempotency_key": "c35f4f2ef9aa55609a1317af152f9686"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"kill_key_cleared\":true,\"latency_key_cleared\":false,\"group_recognized\":true,\"accepted\":true}",
+          "timestamp": "2026-09-15T13:25:50.156896Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "12bd1322-4da0-463d-b0a2-c542c65ee6bc",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\"}",
+          "timestamp": "2026-09-15T13:25:50.156938Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ffc53ea3-3452-4806-8f5b-3111b1ea4df6",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "After the restart clears the kill flag the supervisor re-spawns the consumer within seconds and the backlog drains: get_consumer_lag drops toward 0. The cached metric may trail the recovery by ~30s, so an early read can still show the old high value.\n",
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "verified: The verify probe reads lag 0 after the restart: the kill flag was cleared (kill_key_cleared=true), the supervisor re-spawned the consumer, and the backlog has drained.\n",
+          "timestamp": "2026-09-15T13:25:50.156938Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.85,
+          "reasoning": "Lag of 15000 and climbing with the group assignment retained is the stalled-consumer signature. Restart clears the kill state and lets the supervisor re-spawn it.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "consumer_saturation",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_expectation": "After the restart clears the kill flag the supervisor re-spawns the consumer within seconds and the backlog drains: get_consumer_lag drops toward 0. The cached metric may trail the recovery by ~30s, so an early read can still show the old high value.\n",
+        "action_rationale": null
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-15T13:25:50.151928Z",
+      "updated_at": "2026-09-15T13:25:50.156938Z"
+    }
+  ],
+  "invocation_id": "2408b07ef532"
+}

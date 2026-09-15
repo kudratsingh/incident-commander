@@ -50,6 +50,10 @@ help:
 	@echo "  baseline         recompute and commit eval baseline (refuses ONLY=)"
 	@echo "  clean            remove build artifacts and caches"
 
+.PHONY: inventory
+inventory:
+	uv run python -m evals.inventory
+
 setup:
 	uv sync --all-groups
 

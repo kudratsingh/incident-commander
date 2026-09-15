@@ -198,7 +198,7 @@ and the run archive's `report.json`. Per run:
 | `platform_image_digest` | read from `demo/compose.yml`'s `platform` service, so it cannot drift from the stack that ran (C-10) |
 | `agent_model`, `model_role` | the resolved id and the role it was resolved from |
 | `judge_model` | `JUDGE_MODEL`, pinned independently as before |
-| `strategy`, `strategy_config` | the approach; WP-0.2 stamps real values, today `"builtin"` and `{}` |
+| `strategy`, `strategy_config` | the `name` and `config` of the `InvestigationStrategy` object the run's planner calls were actually made with — `INFERENCE_STRATEGY`, resolved through the registry by the runner and passed to both the loop and this record (WP-0.2, ADR 0036). `"baseline"` and `{}` today; the placeholder `"builtin"` is gone |
 | `scenario`, `invocation_id`, `recorded_at` | the run's own identity |
 | `execution_mode` | `canned` / `live`, derived from the legs that actually ran (`recorded` arrives with WP-3.3) |
 | `budget` | the run's own `BudgetLedger`: the SEEDED maxima and all four used meters |

@@ -35,6 +35,8 @@ from incident_commander.agent.state import (
     IncidentState,
     RunState,
 )
+from incident_commander.agent.strategies.protocol import InvestigationStrategy, StrategyContext
+from incident_commander.agent.strategies.records import StepSink
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.repair import (
@@ -560,6 +562,21 @@ def _escalate(
 # Phase 2: LLM-driven multi-probe investigation loop.
 
 
+def _control_group() -> InvestigationStrategy:
+    """``baseline``, imported at call time to keep one seam from being a cycle.
+
+    ``strategies.baseline`` imports ``_plan_next_step`` from this module — it
+    has to, the whole point being that the control group calls the existing body
+    rather than a copy of it — so this module cannot import the registry at
+    import time. A function-level import is the smaller price: the alternative
+    is moving the planner body out of the module that owns the loop, in the one
+    packet whose acceptance is that nothing moved.
+    """
+    from incident_commander.agent.strategies.registry import default_strategy
+
+    return default_strategy()
+
+
 def make_llm_investigate(
     mcp_client: MCPClientProtocol,
     llm_client: LLMClientProtocol,
@@ -568,6 +585,8 @@ def make_llm_investigate(
     reprobe_attempts: int = 0,
     reprobe_delay_seconds: float = 0.0,
     sleep: Callable[[float], None] = time.sleep,
+    strategy: InvestigationStrategy | None = None,
+    record_step: StepSink | None = None,
 ) -> Callable[[RunState, datetime], RunState]:
     """Bind clients + model to the Phase 2 INVESTIGATING transition.
 
@@ -583,20 +602,54 @@ def make_llm_investigate(
     contradiction — at most ``reprobe_attempts`` times per tool per run.
     Default 0 preserves canned behavior byte-identically; the runner wires
     it live, where a cached reading can predate the fault entirely.
+
+    ``strategy`` is the inference strategy that makes the one planner call
+    (plan 02 § 4, WP-0.2). ``None`` means the control group — ``baseline``,
+    the current behaviour — resolved through the registry rather than from
+    ``Settings``, because configuration is wired at the edge here: the eval
+    runner resolves ``INFERENCE_STRATEGY`` and passes the strategy in, exactly
+    as it already passes ``model`` and the re-probe knobs. Everything *around*
+    the call — the subject-probe refusal, the ``FIX_MAP`` gate, the 0.7
+    threshold, the ADR-0009 re-probe, ``max_iterations``, ``_execute_probe``
+    and its tier re-check — stays here and is shared by every strategy. That
+    asymmetry is the packet: strategies propose, this loop decides.
+
+    ``record_step`` is where each step's ``StepRecord`` goes. ``None`` means
+    nobody is recording, which is every run today: the tracer is opt-in
+    (``EVAL_TRACE_DIR``) and the ``step`` trace kind lands with WP-2.1, the
+    packet that reads these records. Unrecorded or not, the record is built —
+    a strategy that only produces research data when someone is watching is a
+    strategy whose data cannot be trusted to be about the same run.
     """
+    chosen: Final[InvestigationStrategy] = strategy if strategy is not None else _control_group()
 
     def transition_llm_investigate(run_state: RunState, at: datetime) -> RunState:
         last_probe: ProbeAction | None = None
         reprobes_spent: dict[str, int] = {}
         subject = alert_subject(run_state.alert)
         refusals_spent = 0
-        for _ in range(max_iterations):
+        for iteration in range(max_iterations):
             if run_state.budget.is_exhausted:
                 return _escalate_investigation(run_state, at, "budget exhausted mid-investigation")
 
             prior_hypotheses = run_state.hypotheses
             try:
-                run_state, step = _plan_next_step(run_state, at, llm_client, model)
+                # The third return value is the step's ``StepRecord``. The
+                # strategy has already written it to ``record_step``; it is
+                # returned as well so a caller that wants the record without
+                # installing a sink can have it. This loop does not read it —
+                # research data must not be able to change the run.
+                run_state, step, _ = chosen.plan_next_step(
+                    run_state,
+                    at,
+                    StrategyContext(
+                        llm_client=llm_client,
+                        model=model,
+                        iteration=iteration,
+                        config=chosen.config,
+                        record_step=record_step,
+                    ),
+                )
             except (ValueError, ValidationError, LLMError) as err:
                 # ``_plan_next_step`` accrues on its way out, so a call that
                 # raises accrues nothing — and this is the run's hottest LLM

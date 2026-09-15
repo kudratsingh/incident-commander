@@ -63,6 +63,8 @@ from incident_commander.agent.remediation import (
     make_remediate,
 )
 from incident_commander.agent.state import BudgetLedger, EvidenceEntry, IncidentState, RunState
+from incident_commander.agent.strategies.protocol import InvestigationStrategy
+from incident_commander.agent.strategies.registry import STRATEGIES
 from incident_commander.config import ModelRole, Settings
 from incident_commander.llm.client import LLMClient, LLMClientProtocol, LLMError, preflight_auth
 from incident_commander.llm.fakes import CannedLLMClient
@@ -132,10 +134,6 @@ _COMPOSE_FILE = _REPO_ROOT / "demo" / "compose.yml"
 # ``tests/unit/test_demo_docs.py::test_every_repository_resolves_to_one_ref``
 # rather than re-checked here.
 _PLATFORM_SERVICE: Final[str] = "platform"
-# WP-0.2 stamps the real strategy; until it lands there is exactly one code
-# path through the investigation loop, and naming it is more honest than
-# leaving the field empty and calling a missing value a placeholder.
-_BUILTIN_STRATEGY: Final[str] = "builtin"
 # How many scenario names the non-closing mark spells out before counting the
 # rest (see ``RunReport.non_closing_reason``).
 _NON_CLOSING_NAMES_SHOWN: Final[int] = 5
@@ -271,6 +269,7 @@ def build_provenance(
     execution_mode: ExecutionMode,
     budget: BudgetLedger,
     recorded_at: datetime | None = None,
+    strategy: InvestigationStrategy | None = None,
 ) -> RunProvenance:
     """Assemble one run's provenance record from the run's own inputs.
 
@@ -279,14 +278,23 @@ def build_provenance(
     the ones the configuration documents (ADR 0019's per-scenario cap, and
     the paid-run protocol's .env-only ceilings, both make those different
     numbers).
+
+    ``strategy`` is the object that actually made the run's planner calls
+    (WP-0.2), so the stamped name and config come from the thing that ran
+    rather than from a second read of the configuration. ``None`` is the crash
+    path: a scenario can crash before a strategy is built, and there the
+    configured one is the only honest answer available — the same reasoning the
+    crash row's ``execution_mode`` already uses.
     """
+    configured = STRATEGIES.create(settings.inference_strategy) if strategy is None else strategy
     return RunProvenance(
         commander_revision=commander_revision(),
         platform_image_digest=platform_image_digest(),
         agent_model=settings.agent_model,
         model_role=model_role,
         judge_model=settings.judge_model,
-        strategy=_BUILTIN_STRATEGY,
+        strategy=configured.name,
+        strategy_config=dict(configured.config),
         scenario=scenario_name,
         # "" is how a run with no invocation id reaches here (a direct
         # ``run_scenario`` call; the runner's own entry point always has
@@ -790,11 +798,18 @@ def run_scenario(
         briefing_llm = CannedLLMClient(scenario.canned_llm_responses.get("briefing_writer", []))
         judge_llm = CannedLLMClient(scenario.canned_llm_responses.get("briefing_judge", []))
 
+    # The inference strategy for this run (WP-0.2). Resolved here — the edge
+    # that owns configuration — and passed to both the loop that runs it and the
+    # provenance record that names it, so the two cannot disagree about which
+    # strategy produced the row. An unknown INFERENCE_STRATEGY raises here,
+    # before the first model call and before anything is spent.
+    strategy = STRATEGIES.create(settings.inference_strategy)
     transitions: dict[IncidentState, Transition] = dict(TRANSITIONS)
     transitions[IncidentState.INVESTIGATING] = make_llm_investigate(
         mcp_client,
         investigation_llm,
         model=settings.agent_model,
+        strategy=strategy,
         # Freshness re-probe (ADR 0009) is live-only: canned tool responses
         # are instant-consistent, and a re-probe would consume an extra
         # scripted planner response, breaking every canned scenario.
@@ -960,6 +975,8 @@ def run_scenario(
             # The run's own final ledger: seeded maxima and all four meters.
             budget=final.budget,
             recorded_at=tick(),
+            # The strategy object the loop above actually ran with.
+            strategy=strategy,
         ),
     )
     if tracer is not None:

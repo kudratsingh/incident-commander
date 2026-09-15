@@ -10,6 +10,7 @@ from typing import Final
 from pydantic import AnyHttpUrl, Field, PostgresDsn, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from incident_commander.agent.strategies.names import StrategyName
 from incident_commander.llm.pricing import MODEL_PRICING
 
 # Peak connections one investigation run holds AT ONCE (ADR 0022): the lease
@@ -121,6 +122,23 @@ class Settings(BaseSettings):
     # as it already does for AGENT_MODEL and JUDGE_MODEL.
     development_model: str = _DEFAULT_MODEL_ID
     benchmark_model: str = _DEFAULT_MODEL_ID
+    # Which inference strategy the investigation loop's one planner call runs
+    # (plan 02 § 4, WP-0.2). Env var INFERENCE_STRATEGY — bare, like every
+    # other name here: SettingsConfigDict sets no env_prefix.
+    #
+    # Typed as the enum, not as ``str``, and that is the whole guard: pydantic
+    # refuses an unknown value at construction and names the permitted ones in
+    # the error, so ``INFERENCE_STRATEGY=basline`` cannot start a run that
+    # silently reports a ``baseline`` number (architecture principle 1 — a
+    # value from a fixed set is a StrEnum, not a validated string). Blank means
+    # unset, not empty (``env_ignore_empty``), so it falls back to the default.
+    #
+    # The default is the control group and is pinned by a test on both sides of
+    # the seam (``tests/unit/test_strategies.py``): ``baseline`` is the current
+    # behaviour, the loop the campaign's eight green live runs were made with,
+    # and the strategy every later one is measured against.
+    inference_strategy: StrategyName = StrategyName.BASELINE
+
     # Required with no default (pinned separately for eval stability, per
     # CLAUDE.md). min_length guards direct construction — Settings(
     # judge_model="") — which env_ignore_empty cannot reach; an empty judge

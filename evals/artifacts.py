@@ -119,6 +119,16 @@ KINDS: Final[dict[str, ArtifactKind]] = {
     # same scenario must not overwrite the first. There is no legacy flat
     # name; this family was versioned from its first write.
     "dossier": ArtifactKind(("evals", "reports", "dossiers"), ".md"),
+    # `make baseline-report --write` (evals/baseline_report.py) — the Phase 0
+    # baseline assembled from the committed archives. Two kinds, one stem: the
+    # JSON is the artifact of record and the Markdown is the same document for
+    # a human. Versioned like everything else, and deliberately NOT named
+    # `baseline` — `evals/reports/baseline.json` is the machine REGRESSION
+    # baseline that `evals/regression.py` gates against and `make baseline`
+    # blesses. They answer different questions, and a shared stem would make
+    # this family adopt that file as its own oldest version.
+    "baseline_report": ArtifactKind(("evals", "reports"), ".json", fixed_stem="baseline_report"),
+    "baseline_report_md": ArtifactKind(("evals", "reports"), ".md", fixed_stem="baseline_report"),
 }
 
 

@@ -1,8 +1,12 @@
 """Pinned per-model token prices for the USD budget meter (ADR 0015).
 
 Prices are configuration pinned per ADR 0011; verify against
-docs.claude.com when AGENT_MODEL/JUDGE_MODEL change — the same rule
-CLAUDE.md already applies to the model id strings themselves.
+docs.claude.com when AGENT_MODEL, JUDGE_MODEL, DEVELOPMENT_MODEL or
+BENCHMARK_MODEL change — the same rule CLAUDE.md already applies to the
+model id strings themselves. All four are refused at startup unless the
+id they name has a row below (``config.py::_configured_models_are_priced``),
+so pointing a model role at a new id means adding its four rates here, in
+the same change.
 
 The map is a committed constant, never a runtime lookup: offline eval
 runs must not need network, and a run's reported cost must be

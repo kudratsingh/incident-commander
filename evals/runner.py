@@ -5,16 +5,20 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
 import sys
 import time
 import uuid
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
+from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 from urllib.parse import urlparse
 
+import yaml
 from pydantic import (
     AnyHttpUrl,
     BaseModel,
@@ -22,6 +26,7 @@ from pydantic import (
     PostgresDsn,
     SecretStr,
     ValidationError,
+    model_validator,
 )
 
 from evals import artifacts
@@ -57,8 +62,8 @@ from incident_commander.agent.remediation import (
     make_llm_verify,
     make_remediate,
 )
-from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
-from incident_commander.config import Settings
+from incident_commander.agent.state import BudgetLedger, EvidenceEntry, IncidentState, RunState
+from incident_commander.config import ModelRole, Settings
 from incident_commander.llm.client import LLMClient, LLMClientProtocol, LLMError, preflight_auth
 from incident_commander.llm.fakes import CannedLLMClient
 from incident_commander.llm.repair import (
@@ -117,6 +122,184 @@ _RUNS_DIR = _REPO_ROOT / "evals" / "runs"
 _TRACE_DIR_ENV = "EVAL_TRACE_DIR"
 
 
+_UNKNOWN: Final[str] = "unknown"
+_COMPOSE_FILE = _REPO_ROOT / "demo" / "compose.yml"
+# The compose service that publishes the MCP surface the agent is evaluated
+# through. Its ``image:`` line is where the platform digest is READ FROM, so
+# the recorded digest cannot drift from the stack that ran: there is no second
+# copy to keep in step (C-10). The other two platform services carry the same
+# digest, and that they move together is pinned by
+# ``tests/unit/test_demo_docs.py::test_every_repository_resolves_to_one_ref``
+# rather than re-checked here.
+_PLATFORM_SERVICE: Final[str] = "platform"
+# WP-0.2 stamps the real strategy; until it lands there is exactly one code
+# path through the investigation loop, and naming it is more honest than
+# leaving the field empty and calling a missing value a placeholder.
+_BUILTIN_STRATEGY: Final[str] = "builtin"
+# How many scenario names the non-closing mark spells out before counting the
+# rest (see ``RunReport.non_closing_reason``).
+_NON_CLOSING_NAMES_SHOWN: Final[int] = 5
+
+
+class ExecutionMode(StrEnum):
+    """How the world under a run was produced.
+
+    ``CANNED`` and ``LIVE`` are the two modes that exist today; ``recorded``
+    (a replayed, pinned world) arrives with WP-3.3 and is deliberately not
+    declared here in advance — a mode nothing can produce is a value a reader
+    would have to guess the meaning of.
+    """
+
+    CANNED = "canned"
+    LIVE = "live"
+
+
+class RunProvenance(BaseModel):
+    """Exactly what produced one run: code, world, models, role, budgets.
+
+    ADR 0013 made provenance part of the eval result and answered one
+    question with it — "was this measured against the real system or the
+    canned model of it?". This record extends that same logic to identity:
+    a saved run has to answer "which code, which platform image, which
+    model under which role, which strategy, and what was it allowed to
+    spend?" without anyone reconstructing the invocation's environment
+    afterwards. Before it existed, a report carried no model id, no
+    commander revision, no platform digest and none of the four budget
+    meters, so the Phase 0 baseline would have been un-attributable the day
+    it was written.
+
+    Every string field is populated or explicitly ``"unknown"`` — never
+    omitted and never silently empty. ``unknown`` is a claim a reader can
+    act on ("this ran outside a git checkout"); a missing key is one they
+    have to interpret.
+
+    Attached per scenario rather than once per invocation: a scenario is the
+    unit a leaderboard row, a cost column and a phase report are all built
+    from, so it is the unit that has to be able to name its own model. The
+    duplication across a 40-scenario offline report is a few kilobytes and
+    buys rows that stay attributable when they are read one at a time.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    # --- the code and the world -------------------------------------------
+    # ``git rev-parse HEAD`` of this checkout, or "unknown" outside a repo.
+    commander_revision: str
+    # The platform image digest read out of demo/compose.yml (see above).
+    platform_image_digest: str
+    # --- the models and the role ------------------------------------------
+    agent_model: str
+    model_role: ModelRole
+    judge_model: str
+    # --- the approach -----------------------------------------------------
+    strategy: str
+    strategy_config: dict[str, Any] = {}
+    # --- the run ----------------------------------------------------------
+    scenario: str
+    invocation_id: str
+    recorded_at: datetime
+    execution_mode: ExecutionMode
+    # The run's OWN ledger: max_* are the budgets actually seeded (which are
+    # not the documented defaults — a scenario's declared cap overrides
+    # BUDGET_MAX_TOOL_CALLS per ADR 0019, and the paid-run protocol's
+    # budgets live only in the operator's .env), and the *_used fields are
+    # the four meters ADR 0015 tracks and the report used to drop.
+    budget: BudgetLedger
+
+
+@lru_cache(maxsize=1)
+def commander_revision() -> str:
+    """``git rev-parse HEAD``, or ``"unknown"`` outside a git checkout.
+
+    Recorded, never inferred, and never omitted: a report that cannot name
+    the revision it ran is still a report about *some* revision, and saying
+    so is the honest form of not knowing. Failure is tolerated in every
+    shape it comes in (no git binary, no repository, a broken index) because
+    the alternative is an eval run that cannot start over a metadata read.
+    """
+    try:
+        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            ["git", "rev-parse", "HEAD"],  # noqa: S607 - PATH lookup is intended
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return _UNKNOWN
+    revision = completed.stdout.strip()
+    return revision if completed.returncode == 0 and revision else _UNKNOWN
+
+
+@lru_cache(maxsize=1)
+def platform_image_digest() -> str:
+    """The platform image digest from ``demo/compose.yml``, or ``"unknown"``.
+
+    Read from the compose file rather than from a constant in this repo, so
+    the recorded digest is the one the stack was actually brought up on.
+    A second copy of a pinned digest is a copy that goes stale two releases
+    later (C-10, demo/README.md's inlined digest), and a run whose record
+    names the wrong platform is worse than one that names none.
+    """
+    try:
+        document: object = yaml.safe_load(_COMPOSE_FILE.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return _UNKNOWN
+    if not isinstance(document, dict):
+        return _UNKNOWN
+    services = document.get("services")
+    if not isinstance(services, dict):
+        return _UNKNOWN
+    service = services.get(_PLATFORM_SERVICE)
+    if not isinstance(service, dict):
+        return _UNKNOWN
+    image = service.get("image")
+    if not isinstance(image, str) or "@" not in image:
+        # Not pinned by digest at all. `tests/unit/test_demo_docs.py` refuses
+        # that in CI; here it is reported rather than guessed at.
+        return _UNKNOWN
+    return image.split("@", 1)[1]
+
+
+def build_provenance(
+    scenario_name: str,
+    settings: Settings,
+    *,
+    model_role: ModelRole,
+    invocation_id: str,
+    execution_mode: ExecutionMode,
+    budget: BudgetLedger,
+    recorded_at: datetime | None = None,
+) -> RunProvenance:
+    """Assemble one run's provenance record from the run's own inputs.
+
+    Deliberately takes the ledger rather than reading the settings twice:
+    the budgets in the record must be the ones the run was seeded with, not
+    the ones the configuration documents (ADR 0019's per-scenario cap, and
+    the paid-run protocol's .env-only ceilings, both make those different
+    numbers).
+    """
+    return RunProvenance(
+        commander_revision=commander_revision(),
+        platform_image_digest=platform_image_digest(),
+        agent_model=settings.agent_model,
+        model_role=model_role,
+        judge_model=settings.judge_model,
+        strategy=_BUILTIN_STRATEGY,
+        scenario=scenario_name,
+        # "" is how a run with no invocation id reaches here (a direct
+        # ``run_scenario`` call; the runner's own entry point always has
+        # one). Recorded as "unknown" for the same reason the two reads
+        # above are: an empty string in a provenance field reads like a
+        # value, and it is not one.
+        invocation_id=invocation_id or _UNKNOWN,
+        recorded_at=recorded_at or datetime.now(UTC),
+        execution_mode=execution_mode,
+        budget=budget,
+    )
+
+
 class ScenarioOutcome(BaseModel):
     """One scenario's run + grade, persisted in the aggregate report."""
 
@@ -153,6 +336,13 @@ class ScenarioOutcome(BaseModel):
     live_mcp: bool = False
     live_llm: bool = False
     degraded: bool = False
+    # What produced this row (WP-0.3): code revision, platform digest, model
+    # + role, strategy, seeded budgets and what was spent. ``None`` means
+    # "predates the record", which every archived report and the committed
+    # baseline do — they are append-only evidence and are never rewritten, so
+    # the reader tolerates its absence (ADR 0013's own precedent for
+    # ``live_mcp``/``live_llm`` above).
+    provenance: RunProvenance | None = None
 
 
 class RunReport(BaseModel):
@@ -180,7 +370,78 @@ class RunReport(BaseModel):
     # Which --only filters produced this report, so filtered runs
     # self-describe in latest.json and in the archive. Empty = full suite.
     only_patterns: tuple[str, ...] = ()
+    # Whether this report may be used to CLOSE a phase (plan 03 § 14: "a
+    # phase report generated with any development run in it is marked
+    # non-closing"). Tri-state on the same reasoning as ``degraded_count``
+    # above: ``None`` = predates model roles, deliberately distinct from
+    # ``True`` = "every run in it was made under the benchmark role". The
+    # validator below refuses a report that claims ``True`` while carrying a
+    # development run, so the mark cannot disagree with the rows it
+    # summarizes — it is written into the artifact because artifacts outlive
+    # the scrollback (ADR 0013).
+    closing: bool | None = None
     outcomes: tuple[ScenarioOutcome, ...]
+
+    @property
+    def development_scenarios(self) -> tuple[str, ...]:
+        """Scenarios in this report that ran under the development role."""
+        return tuple(
+            outcome.scenario
+            for outcome in self.outcomes
+            if outcome.provenance is not None
+            and outcome.provenance.model_role is ModelRole.DEVELOPMENT
+        )
+
+    @property
+    def non_closing_reason(self) -> str:
+        """Why this report cannot close a phase, or "" if it can.
+
+        Reported as a sentence rather than a flag because the reader's next
+        question is always "which runs?", and the answer is the list of
+        scenarios that has to be re-run under the benchmark role.
+        """
+        if self.closing is None:
+            return "predates model roles (no run in it records one)"
+        if self.closing:
+            return ""
+        development = self.development_scenarios
+        if development:
+            # Named, but bounded: a full-suite offline run puts 40 names in
+            # this line, and a sentence nobody finishes reading is a mark
+            # nobody acts on. The count is exact; the list is a sample, and
+            # ``development_scenarios`` has all of them for a caller that
+            # needs the rest.
+            shown = ", ".join(development[:_NON_CLOSING_NAMES_SHOWN])
+            remainder = len(development) - _NON_CLOSING_NAMES_SHOWN
+            if remainder > 0:
+                shown = f"{shown} (+{remainder} more)"
+            return (
+                f"{len(development)} run(s) were made under the "
+                f"{ModelRole.DEVELOPMENT.value} model role: {shown}"
+            )
+        return "marked non-closing"
+
+    @model_validator(mode="after")
+    def _closing_cannot_outrank_its_own_rows(self) -> RunReport:
+        """A report may not claim it can close a phase while carrying a
+        development run.
+
+        The one direction that has to be refused. The other direction is
+        legitimate: a report with no development run in it can still be
+        marked non-closing for a reason outside this model (a degraded leg,
+        an incident under investigation). This is the ``degraded_count``
+        lesson applied to a second field — a persisted number that can
+        contradict the rows beneath it is worse than no number at all.
+        """
+        if self.closing and self.development_scenarios:
+            raise ValueError(
+                "closing=True but these runs were made under the "
+                f"{ModelRole.DEVELOPMENT.value} model role: "
+                f"{', '.join(self.development_scenarios)}. A phase report containing a "
+                "development run is non-closing (plan 03 section 14) — re-run them under "
+                "--model-role benchmark rather than marking the report closing."
+            )
+        return self
 
 
 class Trajectory(BaseModel):
@@ -386,12 +647,19 @@ def run_scenario(
     clock: Callable[[], datetime] | None = None,
     mcp_token: str | None = None,
     invocation_id: str = "",
+    model_role: ModelRole = ModelRole.DEVELOPMENT,
 ) -> ScenarioResult:
     """Drive one scenario end-to-end and grade the result.
 
     Uses ``CannedMCPClient`` for tool calls and ``CannedLLMClient`` for both
     the investigation planner and the briefing writer, each with its own
     per-scenario response queue keyed under ``canned_llm_responses``.
+
+    ``model_role`` is recorded, not resolved, here: ``main`` resolves
+    ``settings.agent_model`` from the role before the suite starts, and this
+    is the label that travels with the result so a row can say which of the
+    two roles produced it. It defaults to ``DEVELOPMENT`` because a run that
+    did not say is not a benchmark run.
     """
     tick = clock or (lambda: datetime.now(UTC))
     now = tick()
@@ -424,6 +692,7 @@ def run_scenario(
                 "live_mcp": live_mcp_available,
                 "live_llm": live_llm_available,
                 "model": settings.agent_model,
+                "model_role": model_role.value,
                 "judge_model": settings.judge_model,
             }
         )
@@ -675,6 +944,23 @@ def run_scenario(
         live_llm=live_llm_available,
         degraded=(scenario.use_live_mcp and not live_mcp_available)
         or (scenario.use_live_llm and not live_llm_available),
+        provenance=build_provenance(
+            scenario.name,
+            settings,
+            model_role=model_role,
+            invocation_id=invocation_id,
+            # Derived from what the legs ACTUALLY did, the same two values
+            # the live/canned flags above are derived from — never from the
+            # --live flag, which says what was asked for.
+            execution_mode=(
+                ExecutionMode.LIVE
+                if (live_mcp_available or live_llm_available)
+                else ExecutionMode.CANNED
+            ),
+            # The run's own final ledger: seeded maxima and all four meters.
+            budget=final.budget,
+            recorded_at=tick(),
+        ),
     )
     if tracer is not None:
         tracer.write(
@@ -777,7 +1063,12 @@ def _classify_failure(report: GradeReport, final: RunState | None) -> tuple[str,
 
 
 def _crashed_result(
-    scenario: Scenario, exc: BaseException, invocation_id: str = ""
+    scenario: Scenario,
+    exc: BaseException,
+    invocation_id: str = "",
+    *,
+    settings: Settings | None = None,
+    model_role: ModelRole = ModelRole.DEVELOPMENT,
 ) -> ScenarioResult:
     """Synthesize a failed ScenarioResult when run_scenario raises.
 
@@ -842,6 +1133,44 @@ def _crashed_result(
         # the artifact, and a reader counting live coverage counted wrong.
         live_mcp=scenario.use_live_mcp,
         live_llm=scenario.use_live_llm,
+        # Same reasoning one field up: a crashed row that cannot say which
+        # model and revision it crashed under is a row nobody can act on.
+        # ``settings is None`` only for a direct call from a test that knows
+        # no configuration — there is no model to name, so the record is
+        # absent rather than invented.
+        provenance=(
+            None
+            if settings is None
+            else build_provenance(
+                scenario.name,
+                settings,
+                model_role=model_role,
+                invocation_id=invocation_id,
+                # The DECLARED legs, like the two flags above: a crash can
+                # happen before either leg is chosen, and what the scenario
+                # asked for is the only honest answer available here.
+                execution_mode=(
+                    ExecutionMode.LIVE
+                    if (scenario.use_live_mcp or scenario.use_live_llm)
+                    else ExecutionMode.CANNED
+                ),
+                # The partial ledger when the crash carried one (what the
+                # run had actually spent), else the ledger it would have
+                # been seeded with — never zeros standing in for unknowns.
+                budget=(
+                    partial.budget
+                    if partial is not None
+                    else BudgetLedger(
+                        max_tool_calls=(
+                            scenario.expectation.max_tool_calls or settings.budget_max_tool_calls
+                        ),
+                        max_tokens=settings.budget_max_tokens,
+                        max_wall_seconds=settings.budget_max_seconds,
+                        max_usd=settings.budget_max_usd,
+                    )
+                ),
+            )
+        ),
     )
     # Invariant 9: the evidence a crashed run did produce is still evidence.
     # An empty trajectory under a nil incident id is not "no data", it is
@@ -870,6 +1199,7 @@ def run_all(
     invocation_id: str = "",
     only_patterns: tuple[str, ...] = (),
     on_result: Callable[[ScenarioResult], None] | None = None,
+    model_role: ModelRole = ModelRole.DEVELOPMENT,
 ) -> tuple[RunReport, tuple[Trajectory, ...], tuple[EscalationBriefing, ...]]:
     # run_scenario falls back to canned when env is placeholder; nothing
     # is skipped here. Per-scenario crashes are captured as failed outcomes
@@ -885,11 +1215,18 @@ def run_all(
     for scenario in scenarios:
         try:
             result = run_scenario(
-                scenario, settings, clock, mcp_token=mcp_token, invocation_id=invocation_id
+                scenario,
+                settings,
+                clock,
+                mcp_token=mcp_token,
+                invocation_id=invocation_id,
+                model_role=model_role,
             )
         except Exception as exc:  # noqa: BLE001 — deliberate: don't abort suite
             print(f"  CRASH {scenario.name}: {type(exc).__name__}: {exc}")
-            result = _crashed_result(scenario, exc, invocation_id)
+            result = _crashed_result(
+                scenario, exc, invocation_id, settings=settings, model_role=model_role
+            )
         results.append(result)
         if on_result is not None:
             on_result(result)
@@ -925,6 +1262,10 @@ def run_all(
         # --live gate in main() is pre-run.
         degraded_count=sum(1 for o in outcomes if o.degraded),
         only_patterns=only_patterns,
+        # Derived from the role every row was stamped with, so the console
+        # line, the report and the archive are the same value by
+        # construction — the ``degraded_count`` discipline (finding A-01).
+        closing=model_role is ModelRole.BENCHMARK,
         outcomes=outcomes,
     )
     return report, trajectories, briefings
@@ -1245,6 +1586,18 @@ def _eval_defaults() -> Settings:
 
 def _print_summary(report: RunReport) -> None:
     print(f"scenarios: {report.total}, passed: {report.passed}, failed: {report.failed}")
+    # Printed from the first row's own record, not from the settings this
+    # process happens to hold: the line and the artifact then cannot
+    # disagree, which is the same rule the degraded line below follows.
+    first = next((o.provenance for o in report.outcomes if o.provenance is not None), None)
+    if first is not None:
+        print(
+            f"provenance: {first.agent_model} ({first.model_role.value} role), "
+            f"judge {first.judge_model}, commander {first.commander_revision[:12]}, "
+            f"platform {first.platform_image_digest[:19]}, {first.execution_mode.value}"
+        )
+    if reason := report.non_closing_reason:
+        print(f"NON-CLOSING: this report cannot close a phase — {reason}")
     # Print from the persisted field so the console number and the artifact
     # number are the same value by construction — their divergence (stdout
     # said "degraded", latest.json said nothing) was finding A-01.
@@ -1353,6 +1706,41 @@ def _parse_only(argv: list[str]) -> list[str]:
     return patterns
 
 
+def _parse_model_role(argv: Sequence[str]) -> tuple[ModelRole | None, str]:
+    """The ``--model-role`` selection, or ``(None, refusal)`` explaining why not.
+
+    ``--model-role development`` / ``--model-role benchmark`` (and the
+    ``--model-role=<value>`` spelling), resolving ``AGENT_MODEL`` from
+    ``DEVELOPMENT_MODEL`` or ``BENCHMARK_MODEL`` respectively (plan 02 § 9).
+
+    Two properties are deliberate. The default is ``development``: a run that
+    did not name a role is not a benchmark run, and the expensive mistake is
+    a development run read as a reported number. And an unrecognised value is
+    REFUSED rather than coerced to that default — the precedent is the
+    ``--only`` refusals (a pattern that matched nothing used to run the
+    remainder), because "--model-role benchmrk silently ran development" is
+    the same class of bug as "--only typo silently ran a wider suite".
+
+    Returns a pair rather than "a role or a message": ``ModelRole`` is a
+    ``StrEnum``, so a caller cannot tell a role from a refusal string with
+    ``isinstance`` — the refusal would be read as a selection, which is how
+    the first draft of this made every other refusal in ``main`` unreachable.
+    """
+    raw: str | None = None
+    for i, arg in enumerate(argv):
+        if arg == "--model-role" and i + 1 < len(argv):
+            raw = argv[i + 1]
+        elif arg.startswith("--model-role="):
+            raw = arg.split("=", 1)[1]
+    if raw is None:
+        return ModelRole.DEVELOPMENT, ""
+    try:
+        return ModelRole(raw.strip()), ""
+    except ValueError:
+        roles = ", ".join(role.value for role in ModelRole)
+        return None, f"MODEL ROLE FAIL: --model-role {raw!r} is not one of: {roles}"
+
+
 def _smoke_holdback_reason(scenario: Scenario) -> str:
     """Why the derived smoke pass does not contain ``scenario``.
 
@@ -1403,6 +1791,13 @@ def main() -> int:
             "run the whole suite canned under placeholder settings)"
         )
         return 3
+    # Before the settings load, like the two refusals around it: a mistyped
+    # role must cost nothing, and this parse depends on no environment.
+    model_role, role_refusal = _parse_model_role(sys.argv[1:])
+    if model_role is None:
+        print(role_refusal)
+        print("no scenarios ran, nothing was spent")
+        return 2
     # One identity per invocation, shared by the tracer, the trajectories,
     # the report, and the archive directory — so every artifact this run
     # produces can be joined, and none of them can collide with another
@@ -1446,6 +1841,13 @@ def main() -> int:
         )
         print(f"PREFLIGHT FAIL (env): invalid or missing settings — {fields}")
         return 3
+    # The role resolves the model the run bills, in one place, before any
+    # scenario starts. ``model_copy`` and not a second Settings construction:
+    # the resolved id is already guaranteed priced (the same validator that
+    # guards AGENT_MODEL guards both role settings), and re-reading the
+    # environment here would be a second chance for it to differ.
+    settings = settings.model_copy(update={"agent_model": settings.model_for_role(model_role)})
+    print(f"model role: {model_role.value} → AGENT_MODEL={settings.agent_model}")
     # Live-only, immediately after the settings load and before any spend:
     # surface canned-equivalent probe knobs even on runs that go on to be
     # refused. Never affects exit codes.
@@ -1836,6 +2238,7 @@ def main() -> int:
             invocation_id=invocation_id,
             only_patterns=tuple(only_patterns),
             on_result=_after_scenario,
+            model_role=model_role,
         )
     finally:
         if scan_client is not None:

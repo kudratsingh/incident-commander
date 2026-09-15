@@ -168,6 +168,88 @@ Negative:
 * Operators with a placeholder `.env` lose the (misleading) ability to "try" `--live`
   cheaply; the refusal message tells them exactly which var to fix.
 
+## Amendment 2026-09-15 — provenance also answers "produced by what?" (WP-0.3)
+
+*Status: accepted. Extends this ADR; supersedes nothing in it.*
+
+The decision above answered one provenance question — live or canned — and it answered it well.
+It answered no others, and the gap turned out to be total. A saved run carried no model id, no
+commander revision, no platform image digest, and none of the four budget meters `BudgetLedger`
+had been tracking all along (`tokens`, `usd`, `wall_seconds`, `tool_calls`; ADR 0015). The
+research buildout (plan v2.1) makes every reported number comparable across models and strategies,
+so a report that cannot name the model that produced it is a report no later phase can build on —
+the Phase 0 baseline would be un-attributable the day it is written.
+
+The same sentence that justified this ADR justifies the extension: *a measurement that cannot
+distinguish "measured the real system" from "measured the canned model of it" is not evidence.*
+Neither is a measurement that cannot say which code, which platform, or which model produced it.
+So this is an amendment rather than a parallel scheme: one record, one place, extending the
+existing distinction instead of sitting beside it.
+
+### What is recorded
+
+A single typed record, `evals/runner.py::RunProvenance`, attached to every `ScenarioOutcome`
+(`provenance: RunProvenance | None = None`) and therefore present in both the versioned report
+and the run archive's `report.json`. Per run:
+
+| Field | Source |
+|---|---|
+| `commander_revision` | `git rev-parse HEAD`, or the literal `"unknown"` outside a checkout |
+| `platform_image_digest` | read from `demo/compose.yml`'s `platform` service, so it cannot drift from the stack that ran (C-10) |
+| `agent_model`, `model_role` | the resolved id and the role it was resolved from |
+| `judge_model` | `JUDGE_MODEL`, pinned independently as before |
+| `strategy`, `strategy_config` | the approach; WP-0.2 stamps real values, today `"builtin"` and `{}` |
+| `scenario`, `invocation_id`, `recorded_at` | the run's own identity |
+| `execution_mode` | `canned` / `live`, derived from the legs that actually ran (`recorded` arrives with WP-3.3) |
+| `budget` | the run's own `BudgetLedger`: the SEEDED maxima and all four used meters |
+
+Two of those are deliberate, and both are the "honest number" rule this ADR already applies:
+
+* **`"unknown"`, never omitted.** A field that says "unknown" is a claim a reader can act on; a
+  missing key is one they have to interpret. The same reasoning as `degraded_count=None`.
+* **The ledger's seeded budgets, not the documented ones.** They are different numbers: a
+  scenario's declared cap overrides `BUDGET_MAX_TOOL_CALLS` (ADR 0019), and the paid-run
+  protocol's ceilings live only in the operator's un-committed `.env`. Reporting the documented
+  defaults would describe a run that did not happen.
+
+### The two model roles
+
+`DEVELOPMENT_MODEL` and `BENCHMARK_MODEL` join `AGENT_MODEL` and `JUDGE_MODEL` in `config.py`
+(bare env vars; both default to the id this repo is pinned to, so the roles change what no run
+resolves to until an operator points one elsewhere). `python -m evals.runner --model-role
+{development,benchmark}` resolves `AGENT_MODEL` from one of them before the suite starts, and the
+role travels with every row. Two properties follow the refusal discipline of this ADR:
+
+* the default is `development` — a run that did not name a role is not a benchmark run;
+* an unrecognised value is **refused** (exit 2, nothing runs, nothing is spent) rather than
+  coerced to that default, for the reason `--only` patterns are: a typo that silently widens or
+  relabels a run is the failure mode, not the message.
+
+All four model settings are covered by `_configured_models_are_priced`, so an unpriced role model
+is refused at construction rather than discovered by the meter mid-run (the ADR 0015 hole).
+
+### What the aggregate report does with it
+
+* **A comparison spanning two `agent_model` ids is REFUSED** — `evals/regression.py`, exit 2, the
+  same class as a filtered report ("not a comparable input"), with both ids named. A leaderboard
+  row across two models shows a model change and a behaviour change added together and cannot say
+  which; a warning above a printed table is still a printed table.
+* **A report containing a `development`-role run is MARKED non-closing** — `RunReport.closing`
+  (`True` / `False` / `None` = predates the roles, the `degraded_count` tri-state again), printed
+  by the runner and by the gate. It is a mark, never a gate failure: development runs are the
+  normal way the gate is exercised; they simply cannot close a phase (plan 03 § 14). A model
+  validator refuses a report that claims `closing=True` while carrying a development run, so the
+  mark cannot contradict the rows beneath it.
+
+### What is unchanged
+
+Every refusal above stays exactly as it was. A misconfigured `--live` run still costs zero, there
+is still no `--allow-degraded`-shaped opt-out (`tests/unit/test_guards.py::TestNoOptOut`), and the
+exit-code contract gains no new code — `--model-role` refusals reuse exit 2, and the cross-model
+refusal reuses the gate's existing exit 2. `baseline.json` and every archived report are **not**
+rewritten: both new fields default to "absent/unknown" and parse untouched, which
+`tests/unit/test_provenance.py::TestArchivedReportsStillParse` holds to every committed archive.
+
 ## More information
 
 * Extends [ADR 0004](0004-eval-first-development-and-regression-gating.md) (eval-first +

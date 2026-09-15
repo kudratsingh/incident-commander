@@ -9,15 +9,17 @@ is a schema hook, not a live path.
 
 from __future__ import annotations
 
+import copy
 import typing
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 from pydantic import BaseModel
 
 from evals.dossier import HINT_COHERENT_FAMILIES, error_families
 from evals.graders.deterministic import leaf_claims
+from evals.runner import ScenarioResult, run_scenario
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
 from incident_commander.agent.hypothesis import HypothesisCategory, ReadToolName
@@ -52,6 +54,13 @@ from incident_commander.tools.policies import (
     tools_at_or_below,
 )
 from incident_commander.tools.registry import TOOL_REGISTRY
+
+# Imported rather than retyped: the pre-WP-1.6 enum membership has exactly
+# one home, and a second copy here would be one rename away from exempting a
+# real category from the escalate-only check below. ``_test_settings`` is the
+# same offline-settings factory ``test_negative_control.py`` borrows.
+from tests.unit.test_hypothesis import _ORIGINAL_EIGHT
+from tests.unit.test_runner import _test_settings
 
 # A tool that lands in the registry with no tier decision taken. Named for
 # what the old fall-through made it: `tier_of` returned Tier.READ, so the
@@ -1535,3 +1544,231 @@ class TestHintRoutedToolsMatchTheSuite:
                     f"HINT_ROUTED_TOOLS routes {hint!r} to {tool!r}, which "
                     f"the remediation planner prompt never names."
                 )
+
+
+class TestEveryNewCategoryIsEscalateOnly:
+    """WP-1.6's load-bearing rule, checked rather than promised.
+
+    Nine categories landed at once (plan 02 § 5): the level-0 control's
+    ``NO_FAULT`` plus eight new fault families. The rule attached to them is
+    that **every one starts outside ``FIX_MAP``**, and the reason is the
+    remediate gate: ``investigation.py`` reads ``top.category not in
+    FIX_MAP`` and hands off to PLANNING when the key is there. So a
+    category's arrival in that map is not bookkeeping — it is the moment the
+    taxonomy authorises a Tier-1 write for a whole family of incidents, with
+    no scenario grading what that write does.
+
+    Adding one is therefore a separate, later decision per category, with its
+    own scenario and its own ``TestFixMapMatchesTheSuite`` coverage. This
+    class is what makes "later" enforceable: a category that slips into
+    ``FIX_MAP`` on the side fails here, and the failure names it.
+    """
+
+    @staticmethod
+    def _new_categories() -> list[HypothesisCategory]:
+        """Derived, so the two lists cannot disagree.
+
+        ``_ORIGINAL_EIGHT`` is imported from the enum's own test rather than
+        retyped here: a second hand-maintained copy of the pre-WP-1.6
+        membership would be one rename away from calling an original
+        category "new" and exempting a real one.
+        """
+        return sorted(
+            (c for c in HypothesisCategory if c.name not in _ORIGINAL_EIGHT),
+            key=lambda c: c.name,
+        )
+
+    def test_there_are_new_categories_to_check(self) -> None:
+        """Anti-vacuity canary: an empty selection would report nothing, green."""
+        assert self._new_categories()
+
+    def test_no_fault_is_never_in_fix_map(self) -> None:
+        """Stated on its own because it is the one that can never change.
+
+        The other eight additions are escalate-only *for now* — each is a
+        family whose Tier-1 fix is a later decision. ``NO_FAULT`` is not:
+        there is no action that fixes a healthy world, so an entry for it
+        would route the agent at a tool with nothing to act on.
+        """
+        assert HypothesisCategory.NO_FAULT not in FIX_MAP
+        assert HypothesisCategory.NO_FAULT not in HINT_ROUTED_CATEGORIES
+
+    @pytest.mark.parametrize("category", _new_categories())
+    def test_a_new_category_routes_at_no_tier_1_tool(self, category: HypothesisCategory) -> None:
+        assert category not in FIX_MAP, (
+            f"{category.value!r} was added to FIX_MAP. Every category added "
+            f"after the original eight starts outside it (plan 02 § 5): the "
+            f"remediate gate reads FIX_MAP's keys, so this entry authorises "
+            f"a Tier-1 handoff for every incident that category covers. "
+            f"Promoting one is its own packet — it needs the scenario that "
+            f"grades the action and the TestFixMapMatchesTheSuite coverage "
+            f"that keeps the steer and the forbidden set from drifting apart."
+        )
+        assert category not in HINT_ROUTED_CATEGORIES, (
+            f"{category.value!r} is exempted from the FIX_MAP corpus check as "
+            f"hint-routed, but FIX_MAP does not route it at all. An exemption "
+            f"for a category with no fix describes a routing that does not "
+            f"exist — the same staleness "
+            f"test_hint_routed_categories_are_categories_with_a_fix catches "
+            f"from the other end."
+        )
+
+    def test_fix_map_still_routes_exactly_the_four_it_did(self) -> None:
+        """The other direction: the expansion did not quietly re-route anything.
+
+        ``TestFixMapMatchesTheSuite`` checks that the VALUES agree with the
+        corpus. Nothing checked that the KEY SET stayed put, which is the
+        half a taxonomy packet is able to move by accident.
+        """
+        assert set(FIX_MAP) == {
+            HypothesisCategory.CONSUMER_SATURATION,
+            HypothesisCategory.POISON_MESSAGE,
+            HypothesisCategory.STALE_CACHE,
+            HypothesisCategory.RUNAWAY_SAGA,
+        }
+
+    def test_no_category_falls_in_the_gap_between_the_two_corpus_checks(self) -> None:
+        """The hole WO-R2-140 opened, generalised to the whole taxonomy.
+
+        Two corpus checks steer this suite and each has a scope:
+
+        * ``TestFixMapMatchesTheSuite`` reads ``FIX_MAP`` and is scoped to
+          scenarios expecting ``resolved``;
+        * ``TestHintRoutedToolsMatchTheSuite`` reads ``HINT_ROUTED_TOOLS``
+          and covers the escalate-with-an-action shape the first one skips.
+
+        Between them sits a third possibility that neither mentions and that
+        nine new categories made the common case: a category routed at NO
+        tool at all. For those the steer-vs-forbid question is vacuous —
+        there is no steered tool to collide with a forbidden one — and that
+        is a safe place to be, but only if it is *checked* rather than
+        assumed. Left unchecked it is indistinguishable from the WO-R2-140
+        hole: a category nobody's test selects, quietly acquiring a routing.
+
+        So the taxonomy is partitioned three ways and the partition is
+        asserted to cover every member. A future category that is neither
+        map-routed, nor hint-routed, nor provably routed at nothing cannot
+        exist without failing here.
+        """
+        map_routed = {c for c in FIX_MAP if c not in HINT_ROUTED_CATEGORIES}
+        hint_routed = set(HINT_ROUTED_CATEGORIES)
+        escalate_only = {c for c in HypothesisCategory if c not in FIX_MAP}
+
+        unreached = sorted(
+            c.value for c in HypothesisCategory if c not in map_routed | hint_routed | escalate_only
+        )
+        assert not unreached, (
+            f"categories reached by neither corpus check nor the "
+            f"escalate-only assertion above: {unreached}"
+        )
+        overlap = sorted(c.value for c in escalate_only & (map_routed | hint_routed))
+        assert not overlap, (
+            f"{overlap} is both routed and escalate-only, so the partition "
+            f"says nothing about it. A category in FIX_MAP is not "
+            f"escalate-only; the remediate gate reads exactly that key set."
+        )
+        # And the partition is a statement about a non-empty corpus in every
+        # part: an empty hint-routed set would make the second check vacuous
+        # and this one still green.
+        assert map_routed and hint_routed and escalate_only
+
+
+class TestNoFaultControlScenario:
+    """The level-0 control, end to end: healthy world, NO_FAULT, nothing done.
+
+    ``no_fault_healthy_cache`` is the corpus's first scenario whose correct
+    answer is "nothing is wrong". It is what makes the taxonomy change
+    observable to something other than an enum test: offline runs replay
+    canned planner output and never load a prompt, so the only way a new
+    category can be seen to *work* is a scenario that routes through it.
+
+    The whole assembled chain runs — real runner, real transitions, real
+    grader — for the reason ``test_negative_control.py`` gives: a test that
+    graded a synthetic ``RunState`` would prove the grader works and say
+    nothing about whether the runner would ever hand it that state.
+    """
+
+    _NAME: Final[str] = "no_fault_healthy_cache"
+
+    @classmethod
+    def _scenario(cls) -> Scenario:
+        return next(s for s in load_scenarios(_SCENARIO_DIR) if s.name == cls._NAME)
+
+    @classmethod
+    def _run(cls, scenario: Scenario | None = None) -> ScenarioResult:
+        return run_scenario(scenario if scenario is not None else cls._scenario(), _test_settings())
+
+    def test_the_control_grades_correct(self) -> None:
+        report = self._run().outcome.report
+        failing = sorted(d.dimension.value for d in report.dimensions if not d.passed)
+        assert report.passed, f"the level-0 control no longer passes: {failing}"
+
+    def test_the_run_ends_with_no_fault_ranked_top(self) -> None:
+        """The label is the finding, so the label is what gets asserted.
+
+        ESCALATED alone is the terminal state of every read-only scenario in
+        the tree. What distinguishes this one is the diagnosis it escalated
+        WITH, and until the root-cause grader lands (WP-2.2) no dimension
+        reads it — so it is read here, off the run's own final checkpoint.
+        """
+        result = self._run()
+        final = result.trajectory.checkpoints[-1]
+        assert final.state is IncidentState.ESCALATED
+        assert final.hypotheses[0].category is HypothesisCategory.NO_FAULT
+        # Above the remediate threshold, on purpose: a confident NO_FAULT is
+        # the interesting case, not a hedged one.
+        assert final.hypotheses[0].confidence >= 0.7
+
+    def test_the_control_takes_no_action_at_all(self) -> None:
+        """Level 0's second measurement: the unnecessary action rate.
+
+        Derived from the tier classification rather than read off the YAML,
+        so an eighth Tier-1 tool fails here on the day it lands instead of
+        quietly becoming a legal move in the one scenario whose whole premise
+        is that no tool is.
+        """
+        tier_1 = tools_at_or_below(Tier.TIER_1) - tools_at_or_below(Tier.READ)
+        expectation = self._scenario().expectation
+        assert not expectation.expected_action_tools
+        assert set(expectation.forbidden_action_tools) == tier_1, (
+            f"the control forbids {sorted(expectation.forbidden_action_tools)}; "
+            f"it sanctions no action, so the forbidden set is every Tier-1 "
+            f"tool: {sorted(tier_1)}. Derive it from the sanctioned action, "
+            f"never from the terminal state (LESSONS 2026-09-08, ADR 0033)."
+        )
+        called = {e.tool_name for e in self._run().trajectory.checkpoints[-1].evidence}
+        assert not called & tier_1, f"the control called a Tier-1 tool: {sorted(called & tier_1)}"
+
+    def test_a_confident_no_fault_still_escalates_when_the_planner_says_remediate(self) -> None:
+        """No special case: NO_FAULT ends the run through the gate everything does.
+
+        Plan 02 § 5 says a run whose top hypothesis is ``NO_FAULT`` at or
+        above the threshold emits ``StopAction``. That is a statement about
+        the PROMPT, and the prompt is not loaded offline — so the property
+        that actually holds the line is structural: ``NO_FAULT`` is not in
+        ``FIX_MAP``, and the remediate gate finalizes any category that is
+        not. Sabotaging the canned planner into emitting ``remediate`` at
+        0.95 is how that gets proven rather than asserted, and it proves the
+        stronger thing: the escalation does not depend on the model
+        cooperating.
+        """
+        scenario = self._scenario()
+        responses = copy.deepcopy(dict(scenario.canned_llm_responses))
+        last = responses["investigation_planner"][-1]
+        last["hypotheses"][0]["confidence"] = 0.95
+        last["next_action"] = {"kind": "remediate", "reason": "sabotage: nothing to fix"}
+        sabotaged = scenario.model_copy(update={"canned_llm_responses": responses})
+
+        result = self._run(sabotaged)
+        final = result.trajectory.checkpoints[-1]
+        assert final.state is IncidentState.ESCALATED
+        reasons = " ".join(e.result_summary for e in final.evidence)
+        assert "no_fault" in reasons and "no Tier-1 fix" in reasons, (
+            f"the gate escalated without naming the category or the reason; evidence was: {reasons}"
+        )
+        tier_1 = tools_at_or_below(Tier.TIER_1) - tools_at_or_below(Tier.READ)
+        assert not {e.tool_name for e in final.evidence} & tier_1
+        # And the sabotage still grades green: the scenario's correctness
+        # does not rest on which action the planner emitted, only on the
+        # world being left alone.
+        assert result.outcome.report.passed

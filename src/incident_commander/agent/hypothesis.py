@@ -45,6 +45,21 @@ class HypothesisCategory(StrEnum):
     enum entry here + ``FIX_MAP`` entry + prompt example. Adding an
     observation-only category (something the agent should recognize
     but never auto-fix) is one line — this enum only.
+
+    "One line" is the enum entry; the prompt example is not optional for
+    either shape. A category the planner is never shown is a label it
+    cannot pick, so ``tests/unit/test_prompts_snapshot.py::
+    TestInvestigationPlannerInvariants::test_every_category_has_a_prompt_example``
+    parametrizes over this enum and fails until the new value appears in
+    the planner prompt's table.
+
+    **Every category added after the original eight starts OUTSIDE
+    ``FIX_MAP``** (WP-1.6, plan 02 § 5). Promoting one to an auto-fix is a
+    separate, later decision per category, with its own scenario and its
+    own ``TestFixMapMatchesTheSuite`` coverage — because the remediate gate
+    reads ``top.category not in FIX_MAP``, a category's arrival in that map
+    is the moment it authorises a Tier-1 write. Pinned by
+    ``tests/unit/test_policies.py::TestEveryNewCategoryIsEscalateOnly``.
     """
 
     # Categories with Tier-1 fixes (see FIX_MAP in investigation.py):
@@ -69,6 +84,52 @@ class HypothesisCategory(StrEnum):
     UNKNOWN = "unknown"
     """LLM couldn't classify the root cause into any known category.
     Escalate with the full evidence chain in the briefing."""
+
+    # WP-1.6 (plan 02 § 5). Nine labels the benchmark's new fault families
+    # and its level-0 control need, ALL outside FIX_MAP — see the class
+    # docstring. Appended rather than interleaved so the eight values above
+    # keep their position as well as their spelling: persisted trajectories
+    # and every committed run archive are read back against this enum.
+
+    NO_FAULT = "no_fault"
+    """Nothing is wrong. Every reading the agent took is healthy, so the
+    correct answer is that there is nothing to fix — the level-0 control's
+    label, and the one category that is an answer rather than a fault.
+    Never in FIX_MAP: at or above the remediate threshold it still ends the
+    run through the stop/escalate path, with no action taken."""
+
+    OUTBOX_STALL = "outbox_stall"
+    """The transactional outbox is not draining — rows are written and
+    never dispatched, so downstream sees silence rather than errors."""
+
+    RESOLVER_STALL = "resolver_stall"
+    """A resolver stopped making progress on work it had already claimed;
+    the queue is not the problem, the consumer of it has stopped."""
+
+    SAGA_COORDINATOR_STALL = "saga_coordinator_stall"
+    """The coordinator that advances a multi-step workflow has stopped
+    stepping it — distinct from RUNAWAY_SAGA, where it steps too much."""
+
+    DB_QUERY_LATENCY = "db_query_latency"
+    """Query time on the platform's database has degraded; the work is
+    arriving and being served, only slowly."""
+
+    DB_POOL_SATURATION = "db_pool_saturation"
+    """Every database connection in the pool is checked out, so work waits
+    for a connection rather than for the query."""
+
+    DOWNSTREAM_DEPENDENCY = "downstream_dependency"
+    """An external dependency is failing in a way the circuit breakers can
+    observe — narrower than TRANSIENT_DEPENDENCY, which is the inferred
+    case with no breaker reading behind it."""
+
+    REDIS_SATURATION = "redis_saturation"
+    """Redis itself is the constraint — memory pressure, eviction or
+    connection exhaustion — rather than one stale key (STALE_CACHE)."""
+
+    READ_MODEL_DRIFT = "read_model_drift"
+    """A projected read model disagrees with the write side; what the
+    platform reports and what it stored have diverged."""
 
 
 class Hypothesis(StructuredOutput):

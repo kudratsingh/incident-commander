@@ -694,6 +694,40 @@
     ]
   },
   {
+    "name": "no_fault_healthy_cache",
+    "family": {
+      "value": "cache_redis",
+      "provisional": true
+    },
+    "difficulty": {
+      "value": 1,
+      "provisional": true
+    },
+    "use_live_mcp": false,
+    "use_live_llm": false,
+    "chaos_hook": null,
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [
+      "invalidate_cache_key",
+      "mark_dlq_permanent",
+      "pause_dag",
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids",
+      "replay_dlq_messages",
+      "restart_consumer_group"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "read-only",
+      "control",
+      "no-fault",
+      "cache",
+      "phase-1"
+    ]
+  },
+  {
     "name": "noise_info_orders",
     "family": {
       "value": "noise_control",

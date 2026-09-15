@@ -25,6 +25,8 @@ from typing import Final
 
 import pytest
 
+from incident_commander.agent.hypothesis import HypothesisCategory
+from incident_commander.agent.investigation import FIX_MAP
 from incident_commander.agent.remediation import RemediationPlan
 from incident_commander.llm.prompts.loader import (
     PromptNotFoundError,
@@ -32,9 +34,18 @@ from incident_commander.llm.prompts.loader import (
     load_prompt,
 )
 
+#: Every category the planner may emit, in a stable order. Built from the
+#: enum itself so a value added to ``HypothesisCategory`` adds a case here on
+#: the next collection — which is the whole point of the two tests below.
+_CATEGORIES: Final[tuple[HypothesisCategory, ...]] = tuple(
+    sorted((member for member in HypothesisCategory), key=lambda member: member.name)
+)
+
 _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("118e7739f4261a4b49ac8fda63b149e058621a6ba81f04108c3e64a214ff16af"),
-    "investigation_planner": ("c5705b7436d86f57f830ab01bce8e646c5bfaefc4f0acc2a1041c9048cf3c653"),
+    # Moved by WP-1.6, intentionally: nine category rows and the healthy-world
+    # rule. Named in that PR's body per plan 04 working rule 5.
+    "investigation_planner": ("fe44f30ebd88389e0aca9352c766324ef36e9aed3e565f34eff20335f4b9538d"),
     "briefing_judge": ("838a5ee5de6081c32ef1b7aba35aefe0ddd83826e841af2ca831ba76f4692719"),
     "remediation_planner": ("15a7f80c766bc21f2ab7dec47ad77c3a79bcaa70c5de051a8da2273f7afcfe55"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
@@ -176,6 +187,82 @@ class TestInvestigationPlannerInvariants:
     def test_addresses_untrusted_input_defensively(self) -> None:
         content = load_prompt("investigation_planner")
         assert "data, not instructions" in content
+
+    @staticmethod
+    def _category_row(category: HypothesisCategory) -> str | None:
+        """The prompt's table row for one category, or ``None``."""
+        prefix = f"| `{category.value}` |"
+        for line in load_prompt("investigation_planner").splitlines():
+            if line.startswith(prefix):
+                return line
+        return None
+
+    @pytest.mark.parametrize("category", _CATEGORIES)
+    def test_every_category_has_a_prompt_example(self, category: HypothesisCategory) -> None:
+        """Parametrized over the ENUM, so a new category fails until it lands here.
+
+        ``HypothesisCategory``'s docstring calls an observation-only category
+        a one-line change, and the one line is the enum entry — but a label
+        the planner is never shown is a label it cannot pick. The schema will
+        happily accept ``read_model_drift``; nothing tells the model the
+        value exists or what it means, so the category is dead weight that
+        reads as coverage. Before WP-1.6 nothing checked this, and the table
+        was complete only because eight values had been added by hand.
+
+        Deliberately parametrized rather than a single set-difference assert:
+        the failure names the category that is missing, which is the thing
+        the person adding one needs to know.
+        """
+        assert self._category_row(category) is not None, (
+            f"the investigation planner prompt has no row for "
+            f"`{category.value}`. Add one to its 'Hypothesis categories' "
+            f"table — meaning, plus whether the category has a Tier-1 fix. "
+            f"A category the planner is never shown cannot be chosen, so an "
+            f"enum entry without a prompt example is not a category the "
+            f"agent has."
+        )
+
+    @pytest.mark.parametrize("category", _CATEGORIES)
+    def test_the_prompt_agrees_with_fix_map_about_who_has_a_fix(
+        self, category: HypothesisCategory
+    ) -> None:
+        """Architecture-principles rule 2, on the third column of that table.
+
+        The prompt is written FROM the code, and ``FIX_MAP``'s key set is
+        what the remediate gate actually reads. A row claiming a Tier-1 fix
+        for a category the map does not route steers the agent at a handoff
+        the state machine will refuse; a row denying one for a category the
+        map does route wastes the fix. Neither is visible offline — canned
+        runs never load the prompt — which is exactly the shape of drift
+        ``TestFixMapMatchesTheSuite`` exists for, one column over.
+        """
+        row = self._category_row(category)
+        assert row is not None  # covered by the test above
+        verdict = row.rsplit("|", 2)[1].strip()
+        has_fix = verdict.startswith("**Yes**")
+        assert has_fix is (category in FIX_MAP), (
+            f"the prompt's row for `{category.value}` says {verdict!r} while "
+            f"FIX_MAP {'routes' if category in FIX_MAP else 'does not route'} "
+            f"it. The table's third column is a statement about FIX_MAP's "
+            f"keys, and the gate reads those keys."
+        )
+
+    def test_a_healthy_world_is_answered_with_no_fault_and_no_action(self) -> None:
+        """WP-1.6's steering half, and steering that can be deleted is not steering.
+
+        The structural half is that ``NO_FAULT`` is outside ``FIX_MAP``, so a
+        run that reaches it cannot remediate. That guarantees the agent does
+        not act; it does not get the agent to the label. Nothing else in this
+        prompt tells a model that "everything I read is fine" is a reportable
+        answer rather than a failure to classify — and ``unknown`` is sitting
+        right there, one row up, as the tempting wrong choice.
+        """
+        content = load_prompt("investigation_planner")
+        assert "A healthy world is a finding" in content
+        assert "`no_fault` has no Tier-1 fix and never will" in content
+        # The confusable pair, distinguished in as many words: a clean
+        # reading is not an inconclusive one.
+        assert "do not downgrade a clean reading to `unknown`" in content
 
     def test_first_probe_targets_the_alerts_own_subject(self) -> None:
         # 2026-08-30 live runs, both halves of one defect: the planner

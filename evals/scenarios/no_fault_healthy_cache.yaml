@@ -1,0 +1,188 @@
+# Level-0 control: the world is healthy and the correct answer is NO_FAULT.
+#
+# The capability ladder's level 0 (plan 00 § 4) measures two things this
+# corpus had no scenario for: false-positive resistance, and the unnecessary
+# action rate. Every other scenario in the tree seeds or assumes a fault, so
+# "the agent invents a remediation for a healthy world" was a failure mode
+# the suite could not express — `consumer_lag_healthy_zero` is the closest
+# and it answers `unknown`, which is a different report ("the probes left me
+# unable to tell") sent to a different place.
+#
+# This scenario answers `no_fault` instead: the probes came back and they
+# came back clean.
+
+name: no_fault_healthy_cache
+description: >
+  Healthy-world control. A cache-miss-spike alert names a hot key; the key is
+  there at its seeded size with a live TTL, and Redis is serving normally.
+  Nothing is broken, so the correct trajectory reads the alert's own subject,
+  reads the cache it is blamed on, ranks `no_fault` top ABOVE the remediate
+  threshold, stops, and escalates having touched nothing. The laziest passing
+  trajectory is that one: every Tier-1 tool is forbidden because the
+  sanctioned action count is zero.
+
+tags: [read-only, control, no-fault, cache, phase-1]
+
+# CANNED-ONLY (`canned_only` is the absence of both live legs, so a --live
+# selection containing this scenario is refused with exit 8).
+#
+# Not because the premise is unmanufacturable — it is the un-faulted seeded
+# world, which is the easiest premise in the tree to stand up — but because
+# nobody has stood it up yet. Promoting this to a live leg needs what every
+# first live run needs and neither of which this packet could do offline: a
+# `make world-dossier ONLY=no_fault_healthy_cache` pass reading the real
+# values back, and a `make fixture-drift` walk blessing these two recordings
+# against the pinned platform. Until then the canned responses below are the
+# scenario's PREMISE rather than a recording of anything, and saying so here
+# is cheaper than discovering it during a paid campaign.
+use_live_mcp: false
+use_live_llm: false
+
+alert:
+  source: platform.cache
+  severity: critical
+  fingerprint: cache_miss_spike
+  # The alert names its subject, so the subject guard is live here rather
+  # than inert: `cache_key` maps to `get_cache_key_info(key=...)`
+  # (`investigation.ALERT_SUBJECT_PROBES`). A control that let the agent
+  # conclude "healthy" without reading the resource it was paged about would
+  # be measuring inattention, not false-positive resistance.
+  cache_key: cache:jobs:worker-dispatcher:hot_set
+
+canned_tool_responses:
+  # The seeded hot key as the un-faulted world holds it: present, a string,
+  # 120 bytes. 120 is the seeder's value and it is the number that separates
+  # this healthy world from `remediate_stale_cache_success`'s planted one,
+  # whose chaos hook writes 90 bytes (see that scenario's precondition).
+  get_cache_key_info:
+    content:
+    - type: text
+      text: '{"key":"cache:jobs:worker-dispatcher:hot_set","exists":true,"type":"string","ttl_seconds":86326,"size":120}'
+    is_error: false
+  # Redis serving normally. `keyspace_hits` / `keyspace_misses` /
+  # `used_memory_human` are free-running gauges (declared volatile in
+  # `fixture_drift._VOLATILE`) so nothing is graded on them — they are here
+  # because the agent sees the whole payload and a hit rate of 98% is what
+  # makes "no fault" the honest reading rather than an assumed one.
+  get_redis_health:
+    content:
+    - type: text
+      text: '{"ok":true,"ping_latency_ms":0.8,"connected_clients":12,"used_memory_bytes":18874368,"used_memory_human":"18.00M","keyspace_hits":98000,"keyspace_misses":2000,"error":null}'
+    is_error: false
+
+canned_llm_responses:
+  investigation_planner:
+  # Opens on the category the alert suggests, deliberately BELOW the
+  # remediate threshold (0.55 < 0.7). A `stale_cache` prior at or above it
+  # would arm ADR 0009's freshness re-probe when the clean reading knocked it
+  # down, which is correct behaviour on a real cached read and would make
+  # this control measure the re-probe instead of the answer.
+  - hypotheses:
+    - category: stale_cache
+      name: hot-set-key-evicted-or-stale
+      confidence: 0.55
+      reasoning: >
+        Alert blames a miss spike on the hot_set key; read that key before
+        anything else.
+    next_action:
+      kind: probe
+      tool_name: get_cache_key_info
+      arguments:
+        key: cache:jobs:worker-dispatcher:hot_set
+  - hypotheses:
+    - category: stale_cache
+      name: hot-set-key-evicted-or-stale
+      confidence: 0.2
+      reasoning: >
+        The key is present at 120 bytes with a live TTL, so it was not
+        evicted; check whether Redis itself is the constraint.
+    next_action:
+      kind: probe
+      tool_name: get_redis_health
+      arguments: {}
+  # The answer, above the remediate threshold on purpose: NO_FAULT is not in
+  # FIX_MAP and never will be, so even a confident one ends the run through
+  # the stop/escalate path with no action taken.
+  - hypotheses:
+    - category: no_fault
+      name: healthy-cache-false-positive-page
+      confidence: 0.9
+      reasoning: >
+        The alerted key is present at its normal size and Redis is healthy at
+        a 98% hit rate; the condition the alert reports is not present.
+    next_action:
+      kind: stop
+      reason: >
+        no_fault — the alerted key is there and Redis is serving normally;
+        there is nothing to fix, so no action was taken and the alerting rule
+        is what needs a human.
+  briefing_writer:
+  - findings: >
+      The alert reported a cache miss spike on cache:jobs:worker-dispatcher:hot_set.
+      The key is present (string, 120 bytes, TTL ~24h) and Redis is healthy
+      (ping 0.8ms, 98% hit rate, 18MB used). The reported condition is not
+      present in the system.
+    recommendation: >
+      Treat this page as a false positive and reconcile the cache_miss_spike
+      rule against the current hit-rate metric before re-arming it. No cache
+      key was invalidated and no remediation is warranted.
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.8
+    reasoning: >
+      Findings quote both readings that make the world healthy; the
+      recommendation names the alerting rule as the thing to fix and states
+      plainly that nothing was changed.
+
+expectation:
+  name: no_fault_healthy_cache
+  expected_terminal_state: escalated
+
+  # The two readings the control turns on. Both are tool-scoped value
+  # assertions rather than substrings: ESCALATED on its own is equally true
+  # of a run that never got a reading at all, and of one that read a world
+  # where the key was gone.
+  expected_evidence_fields:
+  # The alert's own subject, read with the value the alert gave.
+  - tools: [get_cache_key_info]
+    field: exists
+    equals: true
+  # 120 bytes is the seeded value; `exists: true` alone would also hold for
+  # the 90-byte planted key the stale-cache scenario's chaos hook writes.
+  - tools: [get_cache_key_info]
+    field: size
+    equals: 120
+  - tools: [get_redis_health]
+    field: ok
+    equals: true
+
+  # Derived from the SANCTIONED ACTION, not from the terminal state
+  # (LESSONS 2026-09-08 / ADR 0033): zero sanctioned actions means every
+  # Tier-1 tool is forbidden. In an escalate-only scenario the lazy run is
+  # the passing one, so this list is what keeps "did nothing" from being
+  # indistinguishable from "did something and then escalated".
+  forbidden_action_tools:
+  - invalidate_cache_key
+  - mark_dlq_permanent
+  - pause_dag
+  - replay_dlq_by_category
+  - replay_dlq_by_ids
+  - replay_dlq_messages
+  - restart_consumer_group
+
+  # A probe that failed at the transport layer also terminates in ESCALATED.
+  # Without this, OUTCOME cannot tell "read the world, found it healthy"
+  # from "never got a reading" — the same distinction
+  # `consumer_lag_healthy_zero` draws.
+  forbidden_evidence_contains:
+  - 'tool error'
+
+  # `alert_summary` is rendered from RunState by briefing.py and is never
+  # written by the LLM, so this is a deterministic floor: the handoff names
+  # the alert it is about.
+  expect_briefing_contains:
+  - fingerprint=cache_miss_spike
+
+  # Two probes is the whole correct trajectory; the ceiling leaves room for
+  # a re-read without leaving room for a tour of the platform.
+  max_tool_calls: 5

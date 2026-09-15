@@ -11,22 +11,80 @@ from incident_commander.agent.hypothesis import (
     StopAction,
 )
 
+#: The eight values the enum shipped with, and their exact spellings. Kept
+#: as a literal table rather than derived, because the thing it protects is
+#: precisely that these strings never move: every committed run archive,
+#: every trajectory and every scenario's `ground_truth.root_causes` is read
+#: back against them. WP-1.6 added nine more and this table did not change.
+_ORIGINAL_EIGHT: dict[str, str] = {
+    "CONSUMER_SATURATION": "consumer_saturation",
+    "POISON_MESSAGE": "poison_message",
+    "STALE_CACHE": "stale_cache",
+    "RUNAWAY_SAGA": "runaway_saga",
+    "TRANSIENT_DEPENDENCY": "transient_dependency",
+    "PERSISTENT_DATA_BUG": "persistent_data_bug",
+    "DEPLOY_REGRESSION": "deploy_regression",
+    "UNKNOWN": "unknown",
+}
+
+#: The nine WP-1.6 additions (plan 02 § 5): the level-0 control's label plus
+#: the eight new fault families' labels. Every one of them is outside
+#: ``FIX_MAP`` — that half is asserted in
+#: ``tests/unit/test_policies.py::TestEveryNewCategoryIsEscalateOnly``,
+#: because it is a statement about routing rather than about the enum.
+_WP_1_6_ADDITIONS: dict[str, str] = {
+    "NO_FAULT": "no_fault",
+    "OUTBOX_STALL": "outbox_stall",
+    "RESOLVER_STALL": "resolver_stall",
+    "SAGA_COORDINATOR_STALL": "saga_coordinator_stall",
+    "DB_QUERY_LATENCY": "db_query_latency",
+    "DB_POOL_SATURATION": "db_pool_saturation",
+    "DOWNSTREAM_DEPENDENCY": "downstream_dependency",
+    "REDIS_SATURATION": "redis_saturation",
+    "READ_MODEL_DRIFT": "read_model_drift",
+}
+
 
 class TestHypothesisCategory:
     def test_enum_values_are_stable(self) -> None:
         # Adding a value is fine; renaming or removing one is a breaking
         # change to persisted trajectories and eval scenarios. If this test
         # fails, coordinate the rename across scenarios + baseline.
-        assert set(HypothesisCategory) == {
-            HypothesisCategory.CONSUMER_SATURATION,
-            HypothesisCategory.POISON_MESSAGE,
-            HypothesisCategory.STALE_CACHE,
-            HypothesisCategory.RUNAWAY_SAGA,
-            HypothesisCategory.TRANSIENT_DEPENDENCY,
-            HypothesisCategory.PERSISTENT_DATA_BUG,
-            HypothesisCategory.DEPLOY_REGRESSION,
-            HypothesisCategory.UNKNOWN,
+        assert {member.name: member.value for member in HypothesisCategory} == {
+            **_ORIGINAL_EIGHT,
+            **_WP_1_6_ADDITIONS,
         }
+
+    @pytest.mark.parametrize(("name", "value"), sorted(_ORIGINAL_EIGHT.items()))
+    def test_an_original_value_is_untouched(self, name: str, value: str) -> None:
+        """WP-1.6's first rule: the existing eight keep their values.
+
+        Asserted per member rather than as one set comparison so a rename
+        names the member it broke. The set test above would go red too, but
+        it would go red for "the enum changed", which is the expected state
+        of affairs every time a category is added.
+        """
+        assert HypothesisCategory[name].value == value
+
+    @pytest.mark.parametrize(("name", "value"), sorted(_WP_1_6_ADDITIONS.items()))
+    def test_a_new_category_exists_with_its_planned_value(self, name: str, value: str) -> None:
+        """The nine labels plan 02 § 5 names, spelled as it names them.
+
+        ``ground_truth.root_causes`` (WP-1.3) and the root-cause grader
+        (WP-2.2) are written against these strings, so a value that drifted
+        from the plan would not fail until a scenario declared it.
+        """
+        assert HypothesisCategory[name].value == value
+
+    def test_no_fault_is_the_only_category_that_is_not_a_fault(self) -> None:
+        """The level-0 control's label, named as its own thing.
+
+        Every other member answers "what is broken". ``NO_FAULT`` answers
+        "nothing is", which is why the capability ladder needs it and why it
+        can never gain a Tier-1 fix: there is nothing for one to act on.
+        """
+        assert HypothesisCategory.NO_FAULT.value == "no_fault"
+        assert HypothesisCategory.NO_FAULT not in set(_ORIGINAL_EIGHT.values())
 
 
 class TestHypothesis:

@@ -1594,18 +1594,31 @@ class TestEvalDefaultsPinned:
 
 
 class TestBaselineBackwardCompat:
-    """The committed pre-schema baseline must keep parsing — append-only evidence
-    is never rewritten; defaults carry the compatibility."""
+    """The committed baseline must parse, and must not claim what it does not know.
 
-    def test_committed_baseline_parses_with_unknown_provenance(self) -> None:
+    Until WO-R3-249 this pinned the *pre-schema* baseline, whose every
+    provenance field was absent and whose compatibility was therefore carried
+    by defaults. That bless replaced it with a stamped 41-scenario report, so
+    the same invariant now asserts the other side of the same rule: a field
+    this run DOES know is answered, not left at the pre-schema default. The
+    invariant is unchanged; only which half of it the committed artifact
+    exercises has flipped.
+    """
+
+    def test_committed_baseline_parses_and_states_what_it_knows(self) -> None:
         baseline_path = Path(__file__).resolve().parents[2] / "evals" / "reports" / "baseline.json"
         report = RunReport.model_validate_json(baseline_path.read_text())
-        assert report.total == 37
-        # None = unknown (pre-schema), NOT 0: the committed baseline was a
-        # 32/37-degraded canned run — claiming 0 would assert a falsehood.
-        assert report.degraded_count is None
+        # The corpus the gate compares against, read off the artifact rather
+        # than hand-written twice.
+        assert report.total == len(report.outcomes) == 41
+        # A NUMBER, not None: the blessed run knows how many scenarios fell
+        # back to canned, so it says so. None is the pre-schema "unknown", and
+        # asserting it here would now be the falsehood this test guards.
+        assert report.degraded_count == 34
         assert report.only_patterns == ()
-        assert all(o.degraded is False for o in report.outcomes)
+        # The roll-up agrees with the rows it is a roll-up of — the shape a
+        # half-stamped report would break.
+        assert sum(o.degraded for o in report.outcomes) == report.degraded_count
 
 
 class TestMainExitCodes:

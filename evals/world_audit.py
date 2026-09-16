@@ -1,7 +1,7 @@
 """Read-only seeded-world audit; the dossier imports the same baseline checks.
 
 No scenario, chaos setup, reset, or LLM is run. The standalone command adds
-pre-run checks to the dossier's unchanged three-line post-reset audit.
+pre-run checks to the dossier's shared post-reset audit.
 """
 
 from __future__ import annotations
@@ -51,6 +51,15 @@ BASELINE_LAG: Final[int] = 0
 BASELINE_HOT_SET_SIZE: Final[int] = 120
 BASELINE_PROCESSES: Final[int] = 0
 HOT_SET_KEY: Final[str] = "cache:jobs:worker-dispatcher:hot_set"
+
+# The failed_traces_scan probe uses this window; its two seeded jobs are
+# rebaselined to 45 and 30 minutes old by make eval-reset. Check identities,
+# not just a count: two unrelated fresh failures cannot stand in for stale
+# fixtures. A unit test pins these to the scenario's probe and canned rows.
+TRACE_PROBE_WINDOW_HOURS: Final[int] = 1
+BASELINE_FAILED_TRACE_IDS: Final[frozenset[str]] = frozenset(
+    {"0e24ca29-1d47-57e9-b898-4d79bb6da981", "edeeb994-56d2-53e6-88fd-8af47e695dbc"}
+)
 
 #: Compose file and service names for the redis key scan. Defaults match the
 #: Makefile's ``PLATFORM_COMPOSE`` so an override in ``.env`` reaches both.
@@ -212,7 +221,43 @@ def audit_baseline(client: MCPClientProtocol) -> list[BaselineLine]:
             count == BASELINE_CHAOS_KEYS,
         )
     )
+    lines.append(_audit_trace_freshness(client))
     return lines
+
+
+def _audit_trace_freshness(client: MCPClientProtocol) -> BaselineLine:
+    # Let the platform apply the same created_at window as the scenario,
+    # avoiding a second clock or timestamp parser in the audit.
+    reading = read(
+        client,
+        _probe(
+            "search_traces",
+            {"status": "failed", "since_hours": TRACE_PROBE_WINDOW_HOURS},
+            "baseline trace freshness",
+        ),
+    )
+    matches = reading.payload.get("matches") if reading.ok and reading.payload else None
+    readable = isinstance(matches, list) and all(
+        isinstance(row, dict) and isinstance(row.get("trace_id"), str) for row in matches
+    )
+    observed = reading.error or "unreadable matches"
+    passed = False
+    if readable:
+        assert isinstance(matches, list)
+        trace_ids = {row["trace_id"] for row in matches}
+        passed = trace_ids == BASELINE_FAILED_TRACE_IDS and len(matches) == len(trace_ids)
+        observed = (
+            f"{len(trace_ids & BASELINE_FAILED_TRACE_IDS)}/{len(BASELINE_FAILED_TRACE_IDS)} "
+            f"seeded traces in {len(matches)} matches"
+        )
+    if not passed:
+        observed += "; restore the seeded world with make eval-reset"
+    return BaselineLine(
+        "seeded failed traces inside probe window",
+        f"{len(BASELINE_FAILED_TRACE_IDS)} seeded traces within {TRACE_PROBE_WINDOW_HOURS} hour(s)",
+        observed,
+        passed,
+    )
 
 
 def process_count() -> tuple[int | None, str]:
@@ -238,7 +283,7 @@ def process_count() -> tuple[int | None, str]:
 def audit_world(
     client: MCPClientProtocol, roots: Sequence[str] = ()
 ) -> tuple[list[BaselineLine], list[dict[str, Any]]]:
-    """The pre-run audit adds checks without changing the dossier's post-reset contract."""
+    """The pre-run audit adds checks to the shared dossier post-reset baseline."""
     lines = audit_baseline(client)
 
     def check(label: str, observed: object, expected: object) -> None:

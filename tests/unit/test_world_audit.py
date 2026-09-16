@@ -15,7 +15,8 @@ from evals import dossier
 from evals import world_audit as audit
 from evals.guards import PrincipalGuardError
 from evals.runner import _eval_defaults
-from incident_commander.tools.mcp_client import ToolResult
+from evals.scenarios.loader import load_scenario
+from incident_commander.tools.mcp_client import MCPError, ToolResult
 
 
 @pytest.fixture
@@ -32,6 +33,12 @@ def world(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         "get_consumer_lag": {"lag": 0, "lag_known": True},
         "get_cache_key_info": {"exists": True, "size": 120},
         "get_dag_state": {"paused": False, "nodes": [{"status": "completed"}]},
+        "search_traces": {
+            "matches": [
+                {"trace_id": "0e24ca29-1d47-57e9-b898-4d79bb6da981"},
+                {"trace_id": "edeeb994-56d2-53e6-88fd-8af47e695dbc"},
+            ]
+        },
     }
     client = Mock()
     client.call_tool.side_effect = lambda tool, args: ToolResult(
@@ -95,6 +102,80 @@ def test_same_baseline_implementation_and_reading_types() -> None:
     assert dossier.BaselineLine is audit.BaselineLine
     assert dossier.chaos_key_count is audit.chaos_key_count
     assert dossier.read is audit.read
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"matches": []},  # aged fixtures: no rows remain inside since_hours=1
+        {"matches": [{"trace_id": "0e24ca29-1d47-57e9-b898-4d79bb6da981"}]},
+        {"matches": [{"trace_id": "unrelated-a"}, {"trace_id": "unrelated-b"}]},
+        {"matches": [{"trace_id": "0e24ca29-1d47-57e9-b898-4d79bb6da981"}] * 2},
+        {"matches": [{"trace_id": []}]},
+        {"matches": [None]},
+        {"matches": "unreadable"},
+        {},
+        None,
+    ],
+)
+def test_stale_or_unreadable_traces_fail_with_reset_instruction(
+    world: dict[str, object], payload: object, capsys: pytest.CaptureFixture[str]
+) -> None:
+    world["search_traces"] = payload
+    assert audit.main([]) == 1
+    output = capsys.readouterr().out
+    assert "[FAIL] seeded failed traces inside probe window" in output
+    assert "make eval-reset" in output
+
+
+def test_fresh_traces_pass_in_shared_dossier_baseline(world: dict[str, object]) -> None:
+    client = Mock()
+    client.call_tool.side_effect = lambda tool, args: ToolResult(
+        content=[{"type": "text", "text": json.dumps(world[tool])}]
+    )
+    lines = dossier.audit_baseline(client)
+    line = next(line for line in lines if line.name == "seeded failed traces inside probe window")
+    assert line.passed
+    client.call_tool.assert_any_call("search_traces", {"status": "failed", "since_hours": 1})
+    world["search_traces"] = {"matches": []}
+    lines = dossier.audit_baseline(client)
+    line = next(line for line in lines if line.name == "seeded failed traces inside probe window")
+    assert not line.passed
+    assert "make eval-reset" in line.observed
+
+
+@pytest.mark.parametrize("transport_error", [False, True])
+def test_failed_trace_read_cannot_pass(world: dict[str, object], transport_error: bool) -> None:
+    def reply(tool: str, args: object) -> ToolResult:
+        if tool == "search_traces" and transport_error:
+            raise MCPError(-32000, "trace read failed")
+        return ToolResult(
+            content=[{"type": "text", "text": json.dumps(world[tool])}],
+            is_error=tool == "search_traces",
+        )
+
+    client = Mock()
+    client.call_tool.side_effect = reply
+    lines = audit.audit_baseline(client)
+    line = next(line for line in lines if line.name == "seeded failed traces inside probe window")
+    assert not line.passed
+    assert "make eval-reset" in line.observed
+
+
+def test_trace_baseline_matches_scenario_probe_and_fixture() -> None:
+    scenario = load_scenario(
+        Path(__file__).resolve().parents[2] / "evals/scenarios/failed_traces_scan.yaml"
+    )
+    result = scenario.canned_tool_responses["search_traces"]
+    assert isinstance(result, ToolResult)
+    payload = json.loads(result.content[0]["text"])
+    assert {row["trace_id"] for row in payload["matches"]} == audit.BASELINE_FAILED_TRACE_IDS
+    planner = scenario.canned_llm_responses["investigation_planner"]
+    assert isinstance(planner, list)
+    assert planner[0]["next_action"]["arguments"] == {
+        "status": "failed",
+        "since_hours": audit.TRACE_PROBE_WINDOW_HOURS,
+    }
 
 
 def test_baseline_constants_match_runbook() -> None:

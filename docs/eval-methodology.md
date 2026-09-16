@@ -338,10 +338,11 @@ make eval-reset PURGE_IDEMPOTENCY=1
 The reset is what actually restores the world, and the recipe's last line — `uv run python -m
 evals.runner --clear-chaos-block` — records that it happened. That clear is the LAST line for a
 reason: make abandons a recipe at the first failing line, so a reset that did not succeed never
-reaches it and the latch survives to refuse the next live run. ADR 0037 shipped these as two
-commands an operator typed in order, because the Makefile belonged to another editor that week; the
-decision it records is unchanged, and the clear still refuses to be a flag on the run it unblocks —
-an assertion bundled into that run is one nobody makes consciously.
+reaches it and the latch survives to refuse the next live run. **No second command is needed after
+a successful reset.** ADR 0037's original two-command detail is superseded by its
+[dated implementation note](ADR/0037-a-scenarios-fault-is-a-plan-and-the-plan-is-put-back.md#superseded-detail--2026-09-15-latch-clearing).
+The decision is unchanged: clearing still happens in a separate runner invocation, never as a flag
+on the live run it unblocks — an assertion bundled into that run is one nobody makes consciously.
 
 The standalone command is still there for the case the recipe cannot cover: a latch left by a run
 against a stack that has since been torn down, where there is nothing to reset.

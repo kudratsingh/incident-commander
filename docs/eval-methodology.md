@@ -696,7 +696,10 @@ same path and the exclusive-create write refuses instead of replacing it.
 *not* run `make baseline`, and why: the regression baseline is still the
 37-scenario 2026-07-31 report while the corpus is 41, and ADR 0011's status is
 split — its sunset fired at the restart and its Status line still reads
-`accepted`. Re-blessing is a deliberate act, and it is the user's.
+`accepted`. Re-blessing is a deliberate act, and it is the user's. That bless has
+since happened — WO-R3-249, on owner decision O-2, ran `make baseline` on `688c00a`
+and committed the 41-scenario baseline the gate reads today — so the paragraph above
+records the Phase 0 packet's own moment rather than the current state of the gate.
 
 ## When live and offline disagree
 

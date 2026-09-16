@@ -1,7 +1,8 @@
 # ADR 0011: Freeze the eval for the fix campaign — suspend invariant 8, ledger the debt
 
-* Status: accepted (time-boxed: in force for the fix-campaign window only; expires by its
-  own sunset clause the moment the post-campaign eval restarts)
+* Status: accepted; sunset fired 2026-08-30, closed by the bless of 2026-09-15
+  (as originally written: time-boxed, in force for the fix-campaign window only, expiring by
+  its own sunset clause the moment the post-campaign eval restarts — see § Closure below)
 * Date: 2026-08-08
 * Decider: Kudrat Singh
 
@@ -201,3 +202,42 @@ by a new one rather than left standing.
   their own decisions; they renumber to next-free-at-landing.
 * Decision source: the maintainer's fix-campaign briefing of 2026-08-08, section 0a ("The
   eval is frozen"), which this ADR enacts in-repo.
+
+## Closure — 2026-09-15 (appended; nothing above this line is edited except the Status line)
+
+The window is over. This section is the record of it closing, added under owner decision
+O-3; every word of the decision above is left as written, because the point of a suspension
+under an ADR is that a later reader finds the original text plus a dated close, not a
+tidied-up version of either.
+
+1. **The sunset fired on 2026-08-30**, when the post-campaign eval restarted. That is the
+   condition the § "Sunset clause" names, and it was met by the restart itself — the first
+   post-campaign run, not by any decision taken afterwards. Between that date and today the
+   Status line still read a bare `accepted`, which is the split this section removes.
+2. **The ledger walk the sunset requires before a bless has been done.** It landed in
+   cmd #227 and lives under [`docs/eval-debt.md`](../eval-debt.md) § "Restart walk
+   (2026-09-15)": all eight rows carry a disposition from the closed vocabulary
+   (`confirmed` / `refuted` / `superseded` / `open`), each with its evidence and the limit of
+   that evidence named. Three rows are still `open` and two are `superseded` in a way that
+   does not claim the replacement behaviour was proved live. That is the honest state of the
+   debt, and the walk records it rather than rounding it up to discharged.
+3. **This PR is the bless** the sunset clause defers to: `make baseline`, run offline and
+   canned on `688c00a` under the development model role, replacing the pre-campaign
+   37-scenario baseline of 2026-07-31 with the 41-scenario baseline of the current corpus.
+   The superseded baseline is retained in git history, not deleted — invariant 9 holds, as
+   § "What the freeze forbids…" promised it would.
+4. **Invariant 8 is in force again from this date.** `make eval-reg` and the canned
+   `eval-regression` job in `.github/workflows/evals.yml` gate every behaviour-surface PR
+   against the blessed baseline, and the surface list in § "Replacement gate" is once more
+   the list invariant 8 itself carries. The three obligations that gate imposed —
+   a `EVAL FROZEN per ADR 0011 — not run; debt row N` line in the PR description, the
+   eval-impact sentence, and a new row appended to the ledger — end here: a
+   behaviour-surface PR from now on carries regression evidence instead of a debt row.
+   [`docs/eval-debt.md`](../eval-debt.md) stays in the repo, append-only, as the closed
+   record of the window; it is not extended.
+
+What this section deliberately does **not** say: that the eight debt rows are all
+discharged, or that the blessed baseline is a benchmark number. It is a development-role
+canned run — `closing: false` in its own provenance — which is the correct input for a
+regression gate and is not a reportable result. A phase-closing number still needs a
+benchmark-role run.

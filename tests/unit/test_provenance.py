@@ -601,12 +601,36 @@ class TestArchivedReportsStillParse:
     in this packet may rewrite one, so the reader has to tolerate the absence
     of every field it adds. A default that made an old artifact assert
     something false would be the honesty failure ADR 0013 was written about.
+
+    Both halves of that rule are now exercised here: unstamped archives must
+    say they do not know, and the committed baseline — stamped by WO-R3-249's
+    bless — must answer every field it does know.
     """
 
-    def test_the_committed_baseline_parses_and_claims_no_role(self) -> None:
+    def test_the_committed_baseline_is_stamped_all_the_way_through(self) -> None:
+        """The committed baseline is now a stamped run, so the rule flips sides.
+
+        This asserted that the baseline claimed no role at all, because the
+        committed one predated provenance entirely. That was a fact about the
+        repository on the day it was written — exactly the kind the sibling
+        test below already had to unlearn once — and WO-R3-249's bless ended
+        it. The invariant did not move: no report asserts what it does not
+        know, and a stamped one is stamped ALL the way through. A report where
+        only some rows carry provenance can name a model for one scenario and
+        not the next, which is the half-attributable artifact ADR 0013 exists
+        to prevent.
+        """
         report = RunReport.model_validate_json(_BASELINE.read_text(encoding="utf-8"))
-        assert report.closing is None
-        assert all(outcome.provenance is None for outcome in report.outcomes)
+        # False, not None: the bless was a development-role run and the
+        # artifact says so. A regression baseline is the right place for one;
+        # a phase-closing number is not.
+        assert report.closing is False
+        provenances = [outcome.provenance for outcome in report.outcomes]
+        assert provenances and all(p is not None for p in provenances)
+        # Stamped all the way through means the rows AGREE, not merely that
+        # each one is present: one model, one role, across all of them.
+        assert {p.model_role for p in provenances if p is not None} == {"development"}
+        assert len({p.agent_model for p in provenances if p is not None}) == 1
 
     def test_every_committed_archive_parses_and_never_claims_what_it_lacks(self) -> None:
         """Every archive git is TRACKING, each held to the rule its own era set.

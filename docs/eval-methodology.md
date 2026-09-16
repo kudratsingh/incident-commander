@@ -179,9 +179,10 @@ pinned by `TestNothingIsHeldOutWithoutADecision`.
 `benchmark_split`, so a report says what a scenario was *when it ran*. Joining a
 report back to `evals/scenarios/` to recover them reads today's classification
 against last month's run, which silently re-labels history every time a scenario
-is reclassified. They default to `None`, meaning "predates the record", which
-every archived report and the committed baseline do — append-only evidence is
-never rewritten (ADR 0013's precedent for `live_mcp` / `live_llm`).
+is reclassified. They default to `None`, meaning "predates the record", for
+older archived reports; append-only evidence is never rewritten (ADR 0013's
+precedent for `live_mcp` / `live_llm`). The committed 41-scenario baseline,
+blessed on 2026-09-15, carries all five keys.
 
 All five are on the evaluator side of [ADR 0038](ADR/0038-the-agents-view-of-a-scenario-is-an-allow-list-projection.md)'s
 partition and reach no prompt: `difficulty` in a prompt narrows the agent's
@@ -458,7 +459,7 @@ How an `--only` pattern is matched depends on the mode. Under `--live` (without 
 
 A bare `--live` — no `--only`, no `--smoke` — is refused with exit 2 before the settings load, and `make eval-live` refuses a missing `ONLY=` at Makefile parse time. Both were added in 2026-09: before that an unfiltered live run was stopped only by the exit-8 canned-only gate below, which is a property of the scenario directory rather than of the invocation.
 
-All fields are defaulted, so pre-schema artifacts (the committed `baseline.json`, archived runs) keep parsing unchanged — append-only evidence is never rewritten; the next deliberate `make baseline` bless picks the fields up. Under `--live` the runner refuses (exit 3, before any scenario runs) any env that would degrade a selected scenario — degraded "live" artifacts can no longer exist.
+All fields are defaulted, so pre-schema archived reports keep parsing unchanged — append-only evidence is never rewritten. The 2026-09-15 bless captured these fields in the committed 41-scenario `baseline.json`, including a `RunProvenance` stamp on every outcome and `degraded_count: 34`; it is an offline, development-role baseline, not a phase-closing benchmark result. Under `--live` the runner refuses (exit 3, before any scenario runs) any env that would degrade a selected scenario — degraded "live" artifacts can no longer exist.
 
 ### The read-only smoke pass
 
@@ -528,6 +529,8 @@ This replaced four "refreshable pointer" files that each run rewrote in place. T
 
 `make eval-reg` runs the full suite offline and compares against `evals/reports/baseline.json`. Behavior-changing PRs that touch prompts, tools, policy tiers, or the pinned model must pass. When a scenario's expectation legitimately shifts (new tool, new prompt, new grader dim), `make baseline` regenerates the baseline — commit the diff so the reviewer sees the metric movement.
 
+The regression gate is back on: the 2026-09-15 bless covers 41 scenarios with provenance stamps and closes [ADR 0011's campaign freeze](ADR/0011-campaign-eval-freeze.md#closure--2026-09-15-appended-nothing-above-this-line-is-edited-except-the-status-line). The baseline records `claude-sonnet-4-6` under the development role. A different `BENCHMARK_MODEL` makes `make eval-reg MODEL_ROLE=benchmark` refuse the comparison (exit 2) until a deliberate benchmark-role re-bless on that model; a cross-model delta is not a regression measurement.
+
 The gate accepts **full-suite reports only** (A-03):
 
 - **Regressions** (baseline pass → latest fail) fail the gate: exit 1.
@@ -538,9 +541,9 @@ The gate accepts **full-suite reports only** (A-03):
   The last two exist because `GradeReport.passed` is an `all()` over the dimensions, so removing a check can only make a scenario *greener*. Against a gate that read scenario pass/fail alone, both edits printed `no changes vs baseline` and exited 0 — the gate reported success in precisely the case it exists to catch. Vacuity is recognised by the grader's own wording (`is_vacuous_detail` in `evals/graders/deterministic.py`), so a dimension that starts passing vacuously under new wording must teach the classifier at the same time.
 - **A filtered report is refused, not diffed**: a `latest.json` whose `only_patterns` is non-empty (produced under `--only`) exits 2 — it is not a comparable input, and the missing scenarios must not read as green. `make eval-reg ONLY=x` and `make baseline ONLY=x` additionally refuse at Makefile parse time, before the `eval` prerequisite could overwrite `latest.json` with a filtered report.
 - **Improvements and new scenarios** never fail the gate (noted for transparency).
-- **Provenance mismatch warns, never gates** (S-14): when `degraded_count` differs between baseline and latest — or is unknown (`None`) on either side, as with the pre-schema committed baseline — the gate prints a `PROVENANCE` line and continues. A pass/fail delta across a canned/live divergence may not be agent change; hard-gating on it is deferred until after the next baseline bless ([ADR 0013](ADR/0013-run-provenance-is-part-of-the-eval-result.md)).
+- **Degradation-count mismatch warns, never gates** (S-14): when `degraded_count` differs between baseline and latest — or is unknown (`None`) in an older report — the gate prints a `PROVENANCE` line and continues. The committed baseline now records this count; the bless did not change this warning-only behavior ([ADR 0013](ADR/0013-run-provenance-is-part-of-the-eval-result.md)). A pass/fail delta across a canned/live divergence may not be agent change. This warning is separate from the hard refusal of comparisons across different agent models.
 
-Gate exit codes are the regression-gate slice of the ADR 0013 contract: 0 = clean full-suite comparison; 1 = gate failed (regression, dropped scenario, dropped dimension, or vacated assertion); 2 = not a comparable input (missing report, filtered report).
+Gate exit codes are the regression-gate slice of the ADR 0013 contract: 0 = clean full-suite comparison; 1 = gate failed (regression, dropped scenario, dropped dimension, or vacated assertion); 2 = not a comparable input (missing report, filtered report, or different agent models).
 
 ## The world audit, the ledger walk, and the baseline assembler
 

@@ -162,3 +162,19 @@ process. A flag that dies with the run protects nothing.
 **Raise from the teardown.** Rejected: on a crashed run it would replace the agent's own
 cause with the janitor's, and on a clean run it would throw away a valid grade to report an
 environment problem. Both facts are kept, side by side.
+
+## Superseded detail — 2026-09-15: latch clearing
+
+The two-command operator sequence under **Decision** and the Makefile limitation under
+**Consequences** describe the implementation at acceptance. PR #233 (WO-R3-245) completed
+the follow-up anticipated above: `make eval-reset PURGE_IDEMPOTENCY=1` now invokes
+`uv run python -m evals.runner --clear-chaos-block` as its final recipe line. A successful
+reset therefore clears the latch automatically; the operator does not run a second command.
+If any earlier reset step fails, make stops before the clear and the latch remains set.
+
+This supersedes that operational detail, not the decision. The clear is still a separate
+runner invocation after restoration, never a flag on the live run it unblocks. The standalone
+`--clear-chaos-block` command remains available for a latch left by a run against a stack
+that has since been torn down, where there is nothing to reset; it does not restore a world.
+See [the runbook](../runbook.md) and
+[the current methodology](../eval-methodology.md#the-two-failure-semantics-and-why-they-are-different).

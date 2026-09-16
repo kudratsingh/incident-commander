@@ -79,6 +79,13 @@ def _settings(**overrides: Any) -> Settings:
         "platform_token": SecretStr("eval"),
         "platform_webhook_secret": SecretStr("eval"),
         "database_url": "postgresql://eval:eval@localhost:5432/eval",
+        # _env_file=None disables dotenv, not exported shell variables.
+        # Seed all four budgets here so sibling provenance tests share the
+        # same controlled input; explicit overrides below still win.
+        "budget_max_tool_calls": 25,
+        "budget_max_tokens": 500_000,
+        "budget_max_seconds": 1_800,
+        "budget_max_usd": Decimal("5.00"),
     }
     defaults.update(overrides)
     return Settings(_env_file=None, **defaults)  # type: ignore[call-arg]
@@ -305,6 +312,26 @@ class TestTheBudgetsAreTheSeededOnes:
     record that reported the documented numbers would describe a run that
     did not happen.
     """
+
+    def test_ambient_budgets_do_not_change_the_test_inputs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for name, value in {
+            "BUDGET_MAX_TOOL_CALLS": "99",
+            "BUDGET_MAX_TOKENS": "200000",
+            "BUDGET_MAX_SECONDS": "600",
+            "BUDGET_MAX_USD": "1.00",
+        }.items():
+            monkeypatch.setenv(name, value)
+        settings = _settings()
+        assert settings.budget_max_tool_calls == 25
+        provenance = _only_provenance(_run(settings=settings))
+        assert provenance.budget.max_tool_calls == 7  # the scenario's own cap
+        assert provenance.budget.max_tokens == 500_000
+        assert provenance.budget.max_wall_seconds == 1_800
+        assert provenance.budget.max_usd == Decimal("5.00")
+        changed = _only_provenance(_run(settings=_settings(budget_max_tokens=123_456)))
+        assert changed.budget.max_tokens == 123_456
 
     def test_changing_a_setting_changes_the_record(self) -> None:
         default = _only_provenance(_run())

@@ -6,7 +6,7 @@ Three defects, one file (WO-R2-89):
   ``$(if ...)``, which tests a value for non-emptiness rather than for truth.
   ``PURGE_IDEMPOTENCY=0`` therefore DELETED the idempotency rows, on the one
   flag in this repo whose whole purpose is to destroy data.
-* ``chaos-*`` and ``traffic`` never put PLATFORM_MCP_URL/PLATFORM_TOKEN/
+* ``chaos-*`` and ``traffic`` never put PLATFORM_MCP_URL/PLATFORM_CHAOS_TOKEN/
   PLATFORM_SMOKE_TOKEN into the child environment, so the seeding step the
   live-eval runbook depends on aborted every time for anyone who kept their
   credentials in ``.env`` — which is what the runbook tells them to do.
@@ -43,7 +43,8 @@ pytestmark = pytest.mark.skipif(shutil.which("make") is None, reason="make not a
 
 # Values a test can look for unambiguously in the fake uv's log.
 _MCP_URL: Final[str] = "http://make-test.invalid:8001/mcp"
-_WRITE_TOKEN: Final[str] = "sa_write_scoped_for_chaos"
+_WRITE_TOKEN: Final[str] = "sa_agent_actions_execute"
+_CHAOS_TOKEN: Final[str] = "sa_evaluator_chaos_invoke"
 _SMOKE_TOKEN: Final[str] = "sa_read_scoped_for_smoke"
 
 # A `uv` that runs nothing: it appends its arguments and the platform
@@ -54,6 +55,7 @@ _FAKE_UV = """#!/bin/sh
   echo "ARGS: $@"
   echo "PLATFORM_MCP_URL=${PLATFORM_MCP_URL-<unset>}"
   echo "PLATFORM_TOKEN=${PLATFORM_TOKEN-<unset>}"
+  echo "PLATFORM_CHAOS_TOKEN=${PLATFORM_CHAOS_TOKEN-<unset>}"
   echo "PLATFORM_SMOKE_TOKEN=${PLATFORM_SMOKE_TOKEN-<unset>}"
 } >> "$FAKE_UV_LOG"
 case "$@" in
@@ -94,6 +96,7 @@ def make_sandbox(tmp_path: Path) -> Path:
     (tmp_path / ".env").write_text(
         f"PLATFORM_MCP_URL={_MCP_URL}\n"
         f"PLATFORM_TOKEN={_WRITE_TOKEN}\n"
+        f"PLATFORM_CHAOS_TOKEN={_CHAOS_TOKEN}\n"
         f"PLATFORM_SMOKE_TOKEN={_SMOKE_TOKEN}\n"
     )
     bin_dir = tmp_path / "bin"
@@ -158,7 +161,7 @@ class TestPurgeIdempotencyGate:
 class TestPlatformCredentialsReachTheScripts:
     """`make chaos-*` and `make traffic` in a shell with only .env present."""
 
-    def test_chaos_targets_receive_the_write_scoped_credentials(self, make_sandbox: Path) -> None:
+    def test_chaos_targets_receive_the_evaluator_credentials(self, make_sandbox: Path) -> None:
         result, log = _run_in_sandbox(make_sandbox, "chaos-kill-consumer")
         assert result.returncode == 0, result.stderr
         assert "chaos_setup.py" in log, "the chaos script was never invoked"
@@ -167,7 +170,15 @@ class TestPlatformCredentialsReachTheScripts:
             "`-include .env` only sets a MAKE variable, so the documented seeding "
             "step aborts before it does anything"
         )
-        assert f"PLATFORM_TOKEN={_WRITE_TOKEN}" in log
+        assert f"PLATFORM_CHAOS_TOKEN={_CHAOS_TOKEN}" in log
+
+    def test_chaos_targets_never_see_the_agent_token(self, make_sandbox: Path) -> None:
+        # Since platform v0.6.5 the agent principal cannot fire a hook at all,
+        # so handing it over would only produce a -32002 whose cause reads like
+        # a broken stack. It is also the credential the agent under test holds,
+        # and a chaos recipe has no business with it.
+        _result, log = _run_in_sandbox(make_sandbox, "chaos-kill-consumer")
+        assert _WRITE_TOKEN not in log
 
     def test_traffic_receives_the_read_scoped_credentials(self, make_sandbox: Path) -> None:
         result, log = _run_in_sandbox(make_sandbox, "traffic")
@@ -184,6 +195,7 @@ class TestPlatformCredentialsReachTheScripts:
         # token would undo that for the sake of a convenience.
         _result, log = _run_in_sandbox(make_sandbox, "traffic")
         assert _WRITE_TOKEN not in log
+        assert _CHAOS_TOKEN not in log
 
     def test_the_credentials_are_not_exported_to_every_target(self, make_sandbox: Path) -> None:
         # The header's reason for having no blanket `export` still holds: the
@@ -191,6 +203,7 @@ class TestPlatformCredentialsReachTheScripts:
         _result, log = _run_in_sandbox(make_sandbox, "trace-report")
         assert "format_traces.py" in log
         assert "PLATFORM_TOKEN=<unset>" in log
+        assert "PLATFORM_CHAOS_TOKEN=<unset>" in log
 
 
 class TestSmokeRendersTracesWhenTheRunFails:

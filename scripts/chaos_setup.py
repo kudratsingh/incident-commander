@@ -23,7 +23,7 @@ walk away and the platform recovers on its own.
 Usage:
 
     export PLATFORM_MCP_URL=http://localhost:8001/mcp
-    export PLATFORM_TOKEN=sa_...           # needs chaos:invoke scope
+    export PLATFORM_CHAOS_TOKEN=sa_...     # the evaluator's chaos:invoke token
     uv run python scripts/chaos_setup.py kill-consumer --group worker-dispatcher
     uv run python scripts/chaos_setup.py poison-message --topic job.submitted
     uv run python scripts/chaos_setup.py saturate-redis --num-keys 5000
@@ -31,14 +31,17 @@ Usage:
     uv run python scripts/chaos_setup.py bad-deploy
     uv run python scripts/chaos_setup.py restore-consumer --group worker-dispatcher
 
-The token needs ``chaos:invoke`` scope. ``bootstrap_agent_token.py`` grants
-it to the agent service account by default; if you are holding an older
-token minted before that, or one narrowed by hand, regenerate with::
+The token needs ``chaos:invoke`` scope, and since platform v0.6.5 that is a
+principal of its own: ``incident-commander-chaos``, printed as
+``PLATFORM_CHAOS_TOKEN`` by ``make bootstrap-token``. The AGENT's
+``PLATFORM_TOKEN`` deliberately does NOT carry the scope and will be refused
+here — the platform withholds the ``chaos.%`` audit rows from principals that
+cannot fire chaos, so an agent token that could seed could also read what was
+seeded (platform ADR 0012, owner decision O-4). If a hook 403s, re-run::
 
-    uv run python scripts/bootstrap_agent_token.py --scope chaos:invoke
+    make bootstrap-token
 
-``--scope`` widens the account rather than replacing its scopes, so the
-read scopes the rest of the eval needs survive the regeneration.
+and paste the ``PLATFORM_CHAOS_TOKEN`` line; do not widen the agent account.
 
 Chaos hooks are only registered when the platform boots with
 ``CHAOS_ENABLED=true``. That's on by default in demo/compose.yml; if
@@ -74,8 +77,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--token",
-        default=os.environ.get("PLATFORM_TOKEN"),
-        help="Bearer token with chaos:invoke scope (default: PLATFORM_TOKEN env).",
+        default=os.environ.get("PLATFORM_CHAOS_TOKEN"),
+        help=(
+            "Bearer token with chaos:invoke scope (default: PLATFORM_CHAOS_TOKEN "
+            "env). NOT the agent's PLATFORM_TOKEN, which no longer carries it."
+        ),
     )
 
     sub = parser.add_subparsers(dest="command", required=True)
@@ -174,11 +180,11 @@ def main() -> int:
 
     if not args.mcp_url or not args.token:
         parser.error(
-            "PLATFORM_MCP_URL and PLATFORM_TOKEN must be set (env or --flag). "
-            "Run `make bootstrap-token` first — or, for a token narrowed "
-            "without chaos scope, `uv run python "
-            "scripts/bootstrap_agent_token.py --scope chaos:invoke` (make "
-            "does not forward the flag)."
+            "PLATFORM_MCP_URL and PLATFORM_CHAOS_TOKEN must be set (env or "
+            "--flag). PLATFORM_CHAOS_TOKEN is the evaluator's own principal "
+            "(incident-commander-chaos, chaos:invoke) and is NOT the agent's "
+            "PLATFORM_TOKEN, which no longer carries that scope: run "
+            "`make bootstrap-token` and paste both printed lines into .env."
         )
 
     client = ChaosClient(args.mcp_url, args.token)

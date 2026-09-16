@@ -86,6 +86,17 @@ def polling_window_seconds(attempts: int, delay_seconds: float) -> float:
     return max(attempts - 1, 0) * delay_seconds
 
 
+class ChaosTokenNotConfigured(RuntimeError):
+    """A seed/reset/chaos path was reached with ``PLATFORM_CHAOS_TOKEN`` unset.
+
+    Its own type, not a bare ``RuntimeError``, because every caller wants the
+    same behaviour — refuse before touching the world, and say the one thing
+    the operator has to do — and because the runner's crash rail buckets
+    exceptions by type. The message is deliberately one line: it is read at
+    the moment a paid run has just refused to start.
+    """
+
+
 class Settings(BaseSettings):
     """Immutable application settings. Constructed once at startup."""
 
@@ -148,6 +159,13 @@ class Settings(BaseSettings):
     # Platform. MCP and REST are separate URLs per platform ADR-0006.
     platform_mcp_url: AnyHttpUrl
     platform_rest_url: AnyHttpUrl
+    # The AGENT's own principal: telemetry:read + incidents:read +
+    # actions:execute, and — since platform v0.6.5 — deliberately NOT
+    # chaos:invoke. The platform withholds the `chaos.%` audit stream from
+    # principals that cannot fire chaos, so an agent token carrying
+    # chaos:invoke can read which fault was injected seconds before its own
+    # alert (platform ADR 0012, owner decision O-4). Minted as
+    # `PLATFORM_TOKEN` by `make bootstrap-token`.
     platform_token: SecretStr
     # Read-scoped twin used by `make eval-smoke` (telemetry:read +
     # incidents:read only). Selected by the runner's --smoke flag rather
@@ -155,6 +173,21 @@ class Settings(BaseSettings):
     # by `-include .env` (PR #62 vs #69), so every "read-scoped" smoke run
     # up to 2026-08-07 actually held write scope. Config beats inheritance.
     platform_smoke_token: SecretStr | None = None
+    # The EVALUATOR's principal: telemetry:read + incidents:read +
+    # chaos:invoke, minted as `PLATFORM_CHAOS_TOKEN` alongside the two
+    # above. Every path that seeds, verifies or tears down a fault world
+    # runs under it; the agent under test never sees it.
+    #
+    # Optional at load time and required at point of use, on purpose. The
+    # agent process, the API, `make test`, every canned eval and the whole
+    # offline suite need no chaos principal at all, and making this required
+    # would refuse to construct Settings for all of them. What must not
+    # happen is a seeding path silently falling back to
+    # ``platform_token``: since v0.6.5 that principal cannot seed, so the
+    # fallback would surface as a mid-run -32002 with the archive already
+    # open (the S-04 shape). ``require_chaos_token`` below is the one
+    # accessor, and it refuses rather than degrades.
+    platform_chaos_token: SecretStr | None = None
     # Principal ids of the two service accounts above, printed by
     # `make bootstrap-token`. They scope the post-stage audit guard to
     # self-owned principals so a neighbouring tenant's legitimate Tier-1
@@ -295,6 +328,29 @@ class Settings(BaseSettings):
         if self.agent_max_concurrent_runs is None:
             return ceiling
         return min(self.agent_max_concurrent_runs, ceiling)
+
+    def require_chaos_token(self) -> str:
+        """The evaluator's ``chaos:invoke`` token, or refuse in one line.
+
+        The only way a seed/reset/chaos path reads
+        ``PLATFORM_CHAOS_TOKEN``. Blank counts as unset (``env_ignore_empty``
+        already makes ``PLATFORM_CHAOS_TOKEN=`` a ``None``, and a
+        whitespace-only value is checked here so a hand-edited ``.env``
+        cannot slip one through) — and neither falls back to
+        ``platform_token``, which since platform v0.6.5 does not carry the
+        scope at all. A fallback would turn a missing credential into a
+        refusal fired mid-run, under the archive, which is exactly the
+        failure S-04 named on the smoke token.
+        """
+        token = self.platform_chaos_token
+        if token is None or not token.get_secret_value().strip():
+            raise ChaosTokenNotConfigured(
+                "PLATFORM_CHAOS_TOKEN is not set in .env, and seeding, resetting or "
+                "verifying a fault world needs the chaos principal (the agent's "
+                "PLATFORM_TOKEN no longer carries chaos:invoke): run "
+                "`make bootstrap-token` and paste both printed lines."
+            )
+        return token.get_secret_value()
 
     def model_for_role(self, role: ModelRole) -> str:
         """The model id a run of ``role`` bills (plan 02 § 9).

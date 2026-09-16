@@ -170,13 +170,23 @@ jobs:
             sleep 10
           done
 
-          # The script prints BOTH tokens in plaintext. Register the masks
-          # BEFORE anything echoes its output: the stack dies with the job but
-          # run logs are forever.
+          # The script prints ALL THREE tokens in plaintext. Register the
+          # masks BEFORE anything echoes its output: the stack dies with the
+          # job but run logs are forever.
           token="$(printf '%s\n' "$out" | sed -n 's/^PLATFORM_TOKEN=//p')"
+          chaos="$(printf '%s\n' "$out" | sed -n 's/^PLATFORM_CHAOS_TOKEN=//p')"
           smoke="$(printf '%s\n' "$out" | sed -n 's/^PLATFORM_SMOKE_TOKEN=//p')"
           if [ -z "$token" ]; then
             echo "bootstrap_agent_token.py printed no PLATFORM_TOKEN line"
+            exit 1
+          fi
+          # The idempotency step below stages its world with kill_consumer,
+          # and since platform v0.6.5 the AGENT principal is refused that hook
+          # on scope. Without this credential those cases would SKIP — a green
+          # contract job asserting nothing about the dedup guarantee ADR 0008
+          # rests on. So an absent chaos token is a hard failure here.
+          if [ -z "$chaos" ]; then
+            echo "bootstrap_agent_token.py printed no PLATFORM_CHAOS_TOKEN line"
             exit 1
           fi
           # The fixture-drift step below reads the platform under the
@@ -188,11 +198,13 @@ jobs:
             exit 1
           fi
           echo "::add-mask::$token"
+          echo "::add-mask::$chaos"
           echo "::add-mask::$smoke"
           printf '%s\n' "$out"
 
           # Masked above, so they are redacted anywhere they could resurface.
           echo "PLATFORM_TOKEN=$token" >> "$GITHUB_ENV"
+          echo "PLATFORM_CHAOS_TOKEN=$chaos" >> "$GITHUB_ENV"
           echo "PLATFORM_SMOKE_TOKEN=$smoke" >> "$GITHUB_ENV"
 
       - name: make test-contract
@@ -243,9 +255,12 @@ jobs:
       # shape the fixture-wait step above already exists to prevent. Nothing
       # reads the stack after this point.
       #
-      # Runs under the write-scoped PLATFORM_TOKEN (actions:execute +
-      # chaos:invoke, minted above), not the read-only smoke token that
-      # test-drift holds.
+      # Runs under TWO of the three principals minted above, not the
+      # read-only smoke token that test-drift holds: the agent's
+      # PLATFORM_TOKEN (actions:execute) replays the Tier-1 calls, and the
+      # evaluator's PLATFORM_CHAOS_TOKEN (chaos:invoke) fires the
+      # kill_consumer hook that stages each case. They were one token until
+      # platform v0.6.5 split them.
       - name: make test-idempotency
         env:
           PLATFORM_MCP_URL: http://localhost:8001/mcp

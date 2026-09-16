@@ -104,8 +104,11 @@ test-drift:
 # and it ran in no CI job until WO-R2-43 wired it here.
 #
 # Its own target, and NOT folded into test-contract, for two reasons that
-# are both about ordering: it needs the WRITE-scoped PLATFORM_TOKEN with
-# chaos:invoke (test-drift deliberately holds the read-only smoke token),
+# are both about ordering: it needs BOTH write credentials — the agent's
+# PLATFORM_TOKEN for the Tier-1 calls it replays and the evaluator's
+# PLATFORM_CHAOS_TOKEN for the chaos hook that sets up the world (one token
+# carried both until platform v0.6.5; test-drift deliberately holds the
+# read-only smoke token) —
 # and it MUTATES the world it runs against — it fires the kill_consumer
 # chaos hook and restarts worker-dispatcher several times. test-contract
 # and test-drift both READ that world, and test-drift compares canned
@@ -281,8 +284,10 @@ trace-report:
 
 # --- Chaos setup helpers (live-eval prep) -------------------------------
 # All wrap scripts/chaos_setup.py. Effects self-clean on TTL. Requires
-# PLATFORM_MCP_URL + PLATFORM_TOKEN (with chaos:invoke scope), which these
-# recipes hand to the child process themselves — see below.
+# PLATFORM_MCP_URL + PLATFORM_CHAOS_TOKEN — the EVALUATOR's principal
+# (incident-commander-chaos, chaos:invoke), not the agent's PLATFORM_TOKEN,
+# which since platform v0.6.5 does not carry that scope. These recipes hand
+# the credential to the child process themselves — see below.
 # See docs/runbook.md for the full workflow.
 
 # The credentials the chaos and traffic scripts read from os.environ.
@@ -299,16 +304,21 @@ trace-report:
 # exactly these targets. The right-hand side is expanded once, from make's
 # own variables, so .env and the ambient environment keep the precedence the
 # rest of this file documents, and nothing widens into unrelated recipes.
-# NOT `PLATFORM_TOKEN=$(PLATFORM_TOKEN) uv run ...`, which would print the
-# write-scoped token to the terminal on every invocation.
+# NOT `PLATFORM_CHAOS_TOKEN=$(PLATFORM_CHAOS_TOKEN) uv run ...`, which would
+# print the credential to the terminal on every invocation.
 #
-# NOTE: this makes PLATFORM_MCP_URL/PLATFORM_TOKEN/PLATFORM_SMOKE_TOKEN
+# NOTE: this makes PLATFORM_MCP_URL/PLATFORM_CHAOS_TOKEN/PLATFORM_SMOKE_TOKEN
 # make-consumed, so the header's caveat now applies to them: make parses
 # .env more naively than dotenv does. Keep these values unquoted in .env.
+#
+# The chaos targets are handed PLATFORM_CHAOS_TOKEN and deliberately NOT
+# PLATFORM_TOKEN: the agent's principal cannot fire a hook since v0.6.5, and
+# handing it over anyway would only produce a -32002 whose cause reads like a
+# broken stack. One credential per role, named at the point of use.
 CHAOS_TARGETS = chaos-help chaos-kill-consumer chaos-poison chaos-saturate \
                 chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job
 $(CHAOS_TARGETS): export PLATFORM_MCP_URL := $(PLATFORM_MCP_URL)
-$(CHAOS_TARGETS): export PLATFORM_TOKEN := $(PLATFORM_TOKEN)
+$(CHAOS_TARGETS): export PLATFORM_CHAOS_TOKEN := $(PLATFORM_CHAOS_TOKEN)
 # traffic_loop.py is read-scoped by construction — it only ever reads lag —
 # so it takes PLATFORM_SMOKE_TOKEN and must never see the write-scoped one.
 traffic: export PLATFORM_MCP_URL := $(PLATFORM_MCP_URL)

@@ -191,10 +191,12 @@ class ChaosHook(BaseModel):
     since the canned tool responses already encode the broken state.
 
     ``name`` is a CLOSED SET, not a free string. Chaos seeding runs under
-    ``settings.platform_token`` — the full write+chaos principal — and
+    the evaluator's chaos principal (``PLATFORM_CHAOS_TOKEN``) and
     ``ChaosClient.call`` forwards the name verbatim as a ``tools/call``, so
-    an unconstrained name lets a scenario YAML execute any platform tool,
-    Tier-1 writes included, under that principal (S-03).
+    an unconstrained name lets a scenario YAML execute any platform tool that
+    principal can reach, under that principal (S-03). It holds no
+    ``actions:execute``, which narrows the blast radius without closing it:
+    every chaos hook is itself a write.
 
     ``arguments`` is closed the same way, against the same snapshot entry's
     ``inputSchema``. The name closure alone left half the invocation
@@ -216,8 +218,8 @@ class ChaosHook(BaseModel):
         allowed = chaos_tool_names()
         if value not in allowed:
             raise ValueError(
-                f"{value!r} is not a chaos tool. A chaos hook runs under the full "
-                f"write+chaos principal, so its name is a closed set: "
+                f"{value!r} is not a chaos tool. A chaos hook runs under the "
+                f"evaluator's chaos principal, so its name is a closed set: "
                 f"{', '.join(sorted(allowed))}. To add a hook, land it on the platform, "
                 f"bump the pinned digest in demo/compose.yml, and re-bless the snapshot "
                 f"with `make snapshot` (docs/runbook.md) — this list is derived from "
@@ -1003,12 +1005,13 @@ class Scenario(BaseModel):
 
         * ``seeds_chaos`` — ``--smoke`` refuses the whole run (exit 6, S-03,
           ADR 0018) if any selected scenario seeds chaos, because chaos
-          seeding fires under the full write+chaos ``PLATFORM_TOKEN`` and
-          that is precisely the claim the read-only stage exists to disprove.
+          seeding fires under the evaluator's ``PLATFORM_CHAOS_TOKEN`` and
+          mutates the shared world, which is precisely the claim the
+          read-only stage exists to disprove.
           Read through ``seeds_chaos``, not ``chaos_setup``: a two-hook
           ``chaos_plan`` leaves the legacy field ``None``, and a smoke pass
-          that admitted one would seed two faults under the very principal
-          the stage exists to prove cannot write.
+          that admitted one would seed two faults into the world the stage
+          exists to prove it did not touch.
         * ``expected_action_tools`` — a graded Tier-1 write, which the
           read-scoped smoke token 403s by design. Such a scenario is
           guaranteed red here and belongs to the remediation stage under the

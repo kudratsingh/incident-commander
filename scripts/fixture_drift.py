@@ -5,7 +5,7 @@
 
 Needs a live platform: ``PLATFORM_MCP_URL`` plus a READ-SCOPED token. It
 prefers ``PLATFORM_SMOKE_TOKEN`` and refuses to fall back to
-``PLATFORM_TOKEN``, which carries write+chaos scope — a drift check has no
+``PLATFORM_TOKEN``, which carries ``actions:execute`` — a drift check has no
 business holding a principal that could mutate the world it is measuring.
 
 Exit codes follow the runner's convention: 0 clean, 1 drift outside the
@@ -135,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "ERROR: PLATFORM_SMOKE_TOKEN is not set (or is empty). This check reads the "
             "live platform and must do so under the read-scoped principal; it will not "
-            "fall back to PLATFORM_TOKEN, which carries write+chaos scope. Run "
+            "fall back to PLATFORM_TOKEN, which carries actions:execute. Run "
             "`make bootstrap-token`.",
             file=sys.stderr,
         )

@@ -20,7 +20,7 @@ So this module makes that reading mechanical, and free:
 
 1. Seed the scenario's ``ChaosPlan`` through the runner's own chaos path —
    every setup hook in declared order, same arguments, same ``ChaosClient``,
-   same write+chaos principal, same settle wait. Not a re-implementation:
+   same chaos principal (``PLATFORM_CHAOS_TOKEN``), same settle wait. Not a re-implementation:
    ``invoke_chaos_hook`` is the function ``run_scenario`` calls, and the plan
    is read through ``Scenario.chaos`` rather than the legacy ``chaos_setup``
    field, which is ``None`` on a plan-declaring scenario (ADR 0037).
@@ -120,7 +120,7 @@ from incident_commander.agent.remediation import (
     SOURCE_ROW_FOR_ACTION,
     VERIFY_PROBE_FOR_ACTION,
 )
-from incident_commander.config import Settings
+from incident_commander.config import ChaosTokenNotConfigured, Settings
 from incident_commander.tools.mcp_client import MCPClientProtocol, make_client
 from incident_commander.tools.policies import RESOURCE_ARG_FIELDS, Tier, tier_of
 from incident_commander.tools.registry import TOOL_REGISTRY
@@ -1207,7 +1207,12 @@ def render(
                 ("commander HEAD", head),
                 ("platform MCP", settings_url),
                 ("read principal", "PLATFORM_SMOKE_TOKEN (read-scoped)"),
-                ("chaos principal", "PLATFORM_TOKEN (the runner's own chaos path)"),
+                (
+                    "chaos principal",
+                    "PLATFORM_CHAOS_TOKEN (the runner's own chaos path; the "
+                    "agent's PLATFORM_TOKEN cannot seed and cannot read that "
+                    "anything was seeded)",
+                ),
                 ("LLM calls", "0 — this module constructs no LLM client"),
                 ("Tier-1 calls", "0 — chaos hook + `make eval-reset` are the only writes"),
                 ("cost", "$0.00"),
@@ -1337,7 +1342,8 @@ def render(
         total = len(plan.setup)
         hooks = "hook" if total == 1 else "hooks"
         add(f"{total} setup {hooks}, fired in declared order through `invoke_chaos_hook` — the")
-        add("same function `run_scenario` calls, with the same arguments and principal.")
+        add("same function `run_scenario` calls, with the same arguments and the same")
+        add("evaluator principal (`PLATFORM_CHAOS_TOKEN`).")
         for position, hook in enumerate(plan.setup, start=1):
             # The position prefix only earns its place where there is an order
             # to read: a one-hook plan is every shipped scenario today.
@@ -1634,6 +1640,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("nothing was seeded")
         return EXIT_PREFLIGHT
 
+    # The chaos principal is resolved BEFORE the read client is built and long
+    # before any hook fires, for the same reason the smoke check above is here:
+    # a credential this tool cannot do its job without is a preflight failure,
+    # not something to discover with a half-seeded fault on the shared world.
+    try:
+        chaos_token = settings.require_chaos_token()
+    except ChaosTokenNotConfigured as err:
+        print(f"DOSSIER FAIL (env): {err}")
+        print("nothing was seeded")
+        return EXIT_PREFLIGHT
+
     read_client = make_client(settings, token=settings.platform_smoke_token.get_secret_value())
     try:
         # Reachability, BEFORE seeding. A stack that cannot answer a listing
@@ -1655,7 +1672,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         seeded = seed_chaos(
             scenario,
             str(settings.platform_mcp_url),
-            settings.platform_token.get_secret_value(),
+            chaos_token,
         )
         seeding = seeded.markdown
         sanctioned_incoherent = set(seeded.sanctioned_incoherent)

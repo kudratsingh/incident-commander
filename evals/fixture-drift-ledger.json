@@ -8,9 +8,9 @@
     "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything"
   },
   "_counts": {
-    "recorded": 46,
+    "recorded": 48,
     "fixture-defect": 0,
-    "explained": 46
+    "explained": 48
   },
   "known_drift": [
     {
@@ -228,6 +228,22 @@
       "kind": "value",
       "context": "post-action",
       "why": "the verify leg re-reads the invalidated key and the fixture records exists=false; the walk probes the world before the deletion, where the key is still present"
+    },
+    {
+      "scenario": "remediate_stale_cache_success",
+      "tool": "get_cache_key_info",
+      "path": "records_found",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "create_stale_cache replaces the hot-set entry with one naming three records the database does not hold, so the fixture's 0 cannot match the un-faulted world the check probes, which answers 3; element 1 disagrees for the post-action reason beside it \u2014 an absent key reports records_found=null"
+    },
+    {
+      "scenario": "remediate_stale_cache_success",
+      "tool": "get_cache_key_info",
+      "path": "records_referenced",
+      "kind": "value",
+      "context": "post-action",
+      "why": "the verify leg re-reads the invalidated key and the fixture records records_referenced=null; the walk probes the world before the deletion, where the key is still there and names three records \u2014 which element 0 records verbatim, so only the post-action element disagrees"
     },
     {
       "scenario": "remediate_stale_cache_success",

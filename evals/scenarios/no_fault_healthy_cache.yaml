@@ -56,10 +56,17 @@ canned_tool_responses:
   # 120 bytes. 120 is the seeder's value and it is the number that separates
   # this healthy world from `remediate_stale_cache_success`'s planted one,
   # whose chaos hook writes 90 bytes (see that scenario's precondition).
+  #
+  # v0.6.8 (plat #209, WO-R3-267) adds the record check, and on this world it
+  # is the strongest "nothing is wrong here" reading there is: the entry names
+  # three job records and the database holds all three (3 / 3), so the copy is
+  # not pointing at anything that has gone away. Verbatim from a live read of
+  # the seeded stack on the v0.6.8 pin, which is why it carries no ledger
+  # entry — the drift walk probes exactly this world and gets exactly this.
   get_cache_key_info:
     content:
     - type: text
-      text: '{"key":"cache:jobs:worker-dispatcher:hot_set","exists":true,"type":"string","ttl_seconds":86326,"size":120}'
+      text: '{"key":"cache:jobs:worker-dispatcher:hot_set","exists":true,"type":"string","ttl_seconds":86326,"size":120,"records_referenced":3,"records_found":3}'
     is_error: false
   # Redis serving normally. `keyspace_hits` / `keyspace_misses` /
   # `used_memory_human` are free-running gauges (declared volatile in
@@ -96,8 +103,10 @@ canned_llm_responses:
       name: hot-set-key-evicted-or-stale
       confidence: 0.2
       reasoning: >
-        The key is present at 120 bytes with a live TTL, so it was not
-        evicted; check whether Redis itself is the constraint.
+        The key is present at 120 bytes with a live TTL and every one of the
+        3 job records it names is in the database, so it was neither evicted
+        nor pointing at records that have gone; check whether Redis itself is
+        the constraint.
     next_action:
       kind: probe
       tool_name: get_redis_health
@@ -110,8 +119,9 @@ canned_llm_responses:
       name: healthy-cache-false-positive-page
       confidence: 0.9
       reasoning: >
-        The alerted key is present at its normal size and Redis is healthy at
-        a 98% hit rate; the condition the alert reports is not present.
+        The alerted key is present at its normal size, all 3 records it names
+        resolve, and Redis is healthy at a 98% hit rate; the condition the
+        alert reports is not present.
     next_action:
       kind: stop
       reason: >
@@ -121,9 +131,10 @@ canned_llm_responses:
   briefing_writer:
   - findings: >
       The alert reported a cache miss spike on cache:jobs:worker-dispatcher:hot_set.
-      The key is present (string, 120 bytes, TTL ~24h) and Redis is healthy
-      (ping 0.8ms, 98% hit rate, 18MB used). The reported condition is not
-      present in the system.
+      The key is present (string, 120 bytes, TTL ~24h), the 3 job records it
+      names are all still in the database, and Redis is healthy (ping 0.8ms,
+      98% hit rate, 18MB used). The reported condition is not present in the
+      system.
     recommendation: >
       Treat this page as a false positive and reconcile the cache_miss_spike
       rule against the current hit-rate metric before re-arming it. No cache

@@ -105,6 +105,41 @@ _JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
         POST_ACTION,
         "same recording, same reason: an absent key reports type=null",
     ),
+    # The two v0.6.8 record-check fields (plat #209, WO-R3-267). They are the
+    # first rows on this fixture where BOTH elements disagree with the walk,
+    # for two different reasons, and the key cannot carry two contexts — so
+    # each `why` names both halves and the context is the one a reader would
+    # come here to find.
+    #
+    # `records_found` is filed post-fault because that is the half that is
+    # about the scenario's premise: element 0 records the SEEDED world, where
+    # the entry names three job records and the database holds none of them
+    # (0), while the walk probes the un-faulted world and gets 3 — the same
+    # mechanism as kill_consumer's lag at the top of this file. Element 1
+    # disagrees as well, and that half is post-action (an absent key reports
+    # null).
+    #
+    # `records_referenced` is filed post-action because only element 1
+    # disagrees: element 0 says 3 and the live un-faulted read says 3, so the
+    # entry names the same three records either way — what the fault changes
+    # is whether they are still there, which is the whole point of the field
+    # pair and the reason this scenario stopped being a coin flip.
+    ("remediate_stale_cache_success", "get_cache_key_info", "records_found", "value"): (
+        POST_FAULT,
+        "create_stale_cache replaces the hot-set entry with one naming three "
+        "records the database does not hold, so the fixture's 0 cannot match "
+        "the un-faulted world the check probes, which answers 3; element 1 "
+        "disagrees for the post-action reason beside it — an absent key "
+        "reports records_found=null",
+    ),
+    ("remediate_stale_cache_success", "get_cache_key_info", "records_referenced", "value"): (
+        POST_ACTION,
+        "the verify leg re-reads the invalidated key and the fixture records "
+        "records_referenced=null; the walk probes the world before the "
+        "deletion, where the key is still there and names three records — "
+        "which element 0 records verbatim, so only the post-action element "
+        "disagrees",
+    ),
     # The `get_dag_state` recordings for the two saga scenarios are one
     # mechanism. Both scenarios now seed their own chain with the
     # `create_stuck_dag` chaos hook (wave-10, on the v0.6.0 pin), and the

@@ -37,3 +37,10 @@ expectation:
   expected_evidence_contains:
     - "classified as escalated"
   max_tool_calls: 0
+
+# No `ground_truth`, deliberately (WO-R3-261). This alert is filtered at TRIAGE on
+# its severity, so the run reaches ESCALATED with zero tool calls and no planner
+# call and never produces a hypothesis ranking. A declared label would fail
+# ROOT_CAUSE for doing exactly the right thing — the grader fails a labelled
+# scenario whose run named no cause — which would be a statement about the grader
+# rather than about the agent. Not graded on diagnosis.

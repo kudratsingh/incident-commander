@@ -640,3 +640,24 @@ expected_precondition:
     equals: 1
   - path: items[].id
     equals: f030f975-974e-5ce3-aa6b-444136507d86
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# `create_bad_data_job` seeds an unclassified row whose error is "ValueError:
+# invalid literal for int() with base 10: 'N/A' in column 'quantity'". A value
+# that is wrong in the stored payload re-fails every replay, and the row sits in
+# the dead-letter queue where it can be fenced — which is why this is
+# `poison_message` and not `persistent_data_bug` (that label is for bad data with
+# no dead-letter row to act on).
+#
+# `poison_message` is this taxonomy's label for a dead-letter-queue incident.
+# The planner prompt defines it as "DLQ entries the platform categorized as
+# replay_safe, wait_and_replay, or human_required", and says outright that a
+# dead-lettered job carrying human_required is this and not persistent_data_bug.
+# The per-row hint chooses the ACTION (the remediation planner routes by hint);
+# it does not change what is wrong.
+ground_truth:
+  incident_count: 1
+  root_causes: [poison_message]
+  affected_components: [dlq, csv_upload]

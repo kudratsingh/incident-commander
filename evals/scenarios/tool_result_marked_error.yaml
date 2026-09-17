@@ -56,3 +56,8 @@ expectation:
   expected_evidence_contains:
     - "is_error=True"
   max_tool_calls: 0
+
+# No `ground_truth`, deliberately (WO-R3-261). This is a tool-failure test: what is
+# under measurement is the loop treating an is_error result as an inconclusive
+# probe rather than parsing it, not a diagnosis. The probe carries no reading, so
+# the world never says what is wrong. Not graded on diagnosis.

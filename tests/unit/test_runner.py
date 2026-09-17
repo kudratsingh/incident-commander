@@ -402,9 +402,13 @@ class TestRunAll:
 
         scenarios = load_scenarios(Path(__file__).resolve().parents[2] / "evals" / "scenarios")
         # Every shipped scenario has canned fallback data, so all of them
-        # run — and pass — in offline mode.
+        # run — and pass — in offline mode. Since WO-R3-261 that includes the
+        # ROOT_CAUSE dimension on the 32 scenarios that declare a ground
+        # truth, so this is now also the statement that no canned planner
+        # misdiagnoses the world its own fixtures serve.
         report, _, _ = run_all(scenarios, _test_settings())
-        assert report.failed == 0
+        failed = sorted(o.scenario for o in report.outcomes if not o.report.passed)
+        assert report.failed == 0, f"scenarios red in the offline suite: {failed}"
         assert report.total >= 10  # taxonomy expansion floor
 
 
@@ -2285,6 +2289,18 @@ class TestScenarioBudgetReachesTheRun:
         report, _, _ = run_all(scenarios, _test_settings())
         failed = [o.scenario for o in report.outcomes if not o.report.passed]
         assert failed == [], f"scenarios red under their own ceiling: {failed}"
+        # Anti-vacuity: a sweep over an empty report is green and says nothing.
+        assert len(report.outcomes) >= 41
+        # The BUDGET dimension is the one a ceiling can move, and it is the
+        # claim this test is actually about — asserted directly so a future
+        # red somewhere else cannot be mistaken for a budget failure.
+        over_budget = [
+            outcome.scenario
+            for outcome in report.outcomes
+            for dimension in outcome.report.dimensions
+            if dimension.dimension is GradeDimension.BUDGET and not dimension.passed
+        ]
+        assert over_budget == [], f"scenarios over their own ceiling: {over_budget}"
 
 
 class _ClosableCanned(CannedMCPClient):

@@ -51,3 +51,8 @@ expectation:
   expected_evidence_contains:
     - "tool error"
   max_tool_calls: 0
+
+# No `ground_truth`, deliberately (WO-R3-261). This is a tool-failure test: what is
+# under measurement is the harness's handling of a -32601 method-not-found, not a
+# diagnosis. No probe ever returns a reading, so the world never says what is
+# wrong. Not graded on diagnosis.

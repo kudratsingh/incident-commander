@@ -32,9 +32,24 @@ canned_tool_responses:
     is_error: false
 canned_llm_responses:
   investigation_planner:
+  # `db_query_latency`, not `transient_dependency` (WO-R3-262).
+  # `transient_dependency` is defined as an EXTERNAL dependency \u2014 SMTP, an
+  # upstream API, a third party \u2014 and the subject here is the platform's own
+  # database. WP-1.6 added db_query_latency and db_pool_saturation for
+  # exactly this world; the script predates them, and its own free-form name
+  # ("db_saturation") already disagreed with the enum beside it.
+  #
+  # Of the two DB labels this is the one the reading supports: the probe
+  # answers ok with a 420ms ping, which is "being served, slowly".
+  # db_pool_saturation means every connection in the pool is checked out, and
+  # 95 active connections arrive with no pool ceiling beside them \u2014 so the
+  # claim "approaching pool saturation" was not established by anything this
+  # probe returned. Both labels escalate, so nothing about the run's shape
+  # turns on the choice; what turns on it is whether the briefing sends the
+  # human to the queries or to the pool.
   - hypotheses:
-    - category: transient_dependency
-      name: db_saturation
+    - category: db_query_latency
+      name: db_query_latency
       confidence: 0.55
       reasoning: 'DB latency alert; probe postgres health for ping + connection stats.
 
@@ -44,16 +59,16 @@ canned_llm_responses:
       tool_name: get_postgres_health
       arguments: {}
   - hypotheses:
-    - category: transient_dependency
-      name: db_saturation
+    - category: db_query_latency
+      name: db_query_latency
       confidence: 0.8
-      reasoning: "Ping is 420ms (slow) with 95 active connections \u2014 approaching pool saturation. DB is degraded but not down.\n"
+      reasoning: "Ping is 420ms against a sub-20ms baseline and the probe still answers ok \u2014 the database is serving, only slowly. 95 active connections is high, but the reading carries no pool ceiling to compare it against, so connection exhaustion is not something this probe establishes.\n"
     next_action:
       kind: stop
       reason: DB degraded; escalate to human for scaling decision
   briefing_writer:
-  - findings: "Postgres ping latency is 420ms (usual baseline < 20ms) with 95 active connections \u2014 the DB is degraded but still responsive.\n"
-    recommendation: 'Check for long-running queries and consider raising the connection pool limit or scaling the DB tier.
+  - findings: "Postgres ping latency is 420ms (usual baseline < 20ms) and the health probe still answers ok \u2014 the DB is degraded but still responsive. It reports 95 active connections; the reading carries no pool ceiling, so whether that is near the limit is not something this probe can say.\n"
+    recommendation: 'Check for long-running queries first, and confirm the 95 active connections against the pool ceiling before treating the pool as the constraint.
 
       '
   briefing_judge:
@@ -89,3 +104,18 @@ expectation:
     field: ping_latency_ms
     is_null: false
   max_tool_calls: 5
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# `get_postgres_health` answers ok: true with ping_latency_ms 420.5 — the
+# database is answering, slowly, which is `db_query_latency`. The neighbouring
+# label `db_pool_saturation` is deliberately NOT used: it means every connection
+# in the pool is checked out, and the fixture reports 95 active connections with
+# no pool ceiling beside them, so saturation cannot be established from this
+# world. `transient_dependency` names an EXTERNAL dependency; this is the
+# platform's own database.
+ground_truth:
+  incident_count: 1
+  root_causes: [db_query_latency]
+  affected_components: [postgres]

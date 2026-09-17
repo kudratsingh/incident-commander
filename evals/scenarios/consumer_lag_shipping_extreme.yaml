@@ -1,7 +1,7 @@
 name: consumer_lag_shipping_extreme
 family: consumer_lag
 difficulty: single
-description: 'Shipping consumer with an extreme lag reading (millions of messages). Verifies large integer handling in the typed output and the planner''s response to clearly-catastrophic evidence.
+description: 'Shipping consumer with an extreme lag reading — 100,000 messages, the largest backlog in the fixture pack. Verifies large integer handling in the typed output and the planner''s response to clearly-catastrophic evidence.
 
   '
 tags:
@@ -49,18 +49,27 @@ canned_llm_responses:
       tool_name: get_consumer_lag
       arguments:
         consumer_group: shipping-consumer
+  # Two corrections here, and they are different faults (WO-R3-262). The
+  # CATEGORY was `unknown` over a reasoning line that describes a stopped
+  # consumer \u2014 which is `consumer_saturation`, "Kafka consumer is behind,
+  # needs restart or scale-up"; there is no separate outage label and the
+  # prompt's rule is to pick the closest. The NUMBER was 2500000, which the
+  # fixture has not served since it was corrected to the platform's seeded
+  # 100000 (see the fixture note above) \u2014 the script and the briefing kept
+  # quoting the old value, so the agent was reasoning about a reading the
+  # world does not contain. The fixture is authoritative; the prose moved.
   - hypotheses:
-    - category: unknown
-      name: consumer_outage
+    - category: consumer_saturation
+      name: consumer_stopped
       confidence: 0.9
-      reasoning: 'Lag of 2500000 is far beyond a slow-consumer explanation; the consumer likely stopped processing entirely.
+      reasoning: 'Lag of 100000 is the largest backlog in the pack and far beyond a slow-consumer explanation; the group has most likely stopped processing rather than fallen behind.
 
         '
     next_action:
       kind: stop
       reason: extreme backlog; escalate for outage response
   briefing_writer:
-  - findings: "shipping-consumer lag reads 2500000 messages \u2014 a magnitude consistent with a stopped consumer rather than slow processing.\n"
+  - findings: "shipping-consumer lag reads 100000 messages \u2014 a magnitude consistent with a stopped consumer rather than slow processing.\n"
     recommendation: 'Check whether shipping-consumer pod is running at all; if it is, check for a deployment or config change in the last hour.
 
       '
@@ -85,3 +94,16 @@ expectation:
     field: lag
     at_least: 50000
   max_tool_calls: 10
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# `get_consumer_lag` reads lag 100000 on shipping-consumer with lag_known true.
+# A consumer that far behind — whether it is slow or has stopped entirely — is
+# `consumer_saturation`, which the planner prompt defines as "Kafka consumer is
+# behind, needs restart or scale-up". The taxonomy has no separate outage label,
+# and the prompt's rule is to pick the closest matching category.
+ground_truth:
+  incident_count: 1
+  root_causes: [consumer_saturation]
+  affected_components: [shipping-consumer]

@@ -32,29 +32,47 @@ canned_tool_responses:
     is_error: false
 canned_llm_responses:
   investigation_planner:
+  # The evolution is the scenario and it is kept in full: two candidates
+  # ranked one way, the top flipping after the second read, the losing
+  # candidate dropping out. What changed (WO-R3-262) is only the CONCLUSION.
+  # The script used to end on "transient producer surge", reasoned from
+  # "repeat reading did not grow further" — but the canned map serves ONE
+  # get_consumer_lag response on every call, so the re-read is the same
+  # fixture by construction and can support no inference about movement at
+  # all. Read the other way it is decisive: a producer surge that had ended
+  # would leave a backlog that DRAINS, and this one does not move, so the
+  # consumer is not keeping up. The byte-identical world in
+  # consumer_lag_payments_critical is scripted consumer_saturation; one world
+  # cannot have two answers.
+  - hypotheses:
+    - category: unknown
+      name: producer_spike
+      confidence: 0.55
+      reasoning: 'Paging alert on payments-consumer with no reading yet. A burst of upstream volume would look exactly like this from the alert alone, so it leads until something separates it from a consumer that has fallen behind.
+
+        '
+    - category: consumer_saturation
+      name: consumer_saturation
+      confidence: 0.45
+      reasoning: 'The other reading of the same alert: the group is behind because it cannot keep up, not because the producer surged.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: payments-consumer
   - hypotheses:
     - category: consumer_saturation
       name: consumer_saturation
-      confidence: 0.5
-      reasoning: 'Paging alert on payments-consumer; multiple causes possible.
+      confidence: 0.6
+      reasoning: 'Lag reads 30000. One reading cannot separate the two candidates — both produce a backlog — but they differ in what happens next: a surge that has passed drains, a consumer that cannot keep up does not. Re-read the same group to find out which.
 
         '
     - category: unknown
       name: producer_spike
-      confidence: 0.4
-      reasoning: 'Elevated lag could also be a temporary producer-side spike.
-
-        '
-    next_action:
-      kind: probe
-      tool_name: get_consumer_lag
-      arguments:
-        consumer_group: payments-consumer
-  - hypotheses:
-    - category: unknown
-      name: producer_spike
-      confidence: 0.65
-      reasoning: 'Probing again shortly after suggests the initial signal reflected a transient producer surge rather than a stuck consumer.
+      confidence: 0.35
+      reasoning: 'Still open, and still the alternative the re-read is there to rule out.
 
         '
     next_action:
@@ -63,26 +81,26 @@ canned_llm_responses:
       arguments:
         consumer_group: payments-consumer
   - hypotheses:
-    - category: unknown
-      name: producer_spike
+    - category: consumer_saturation
+      name: consumer_saturation
       confidence: 0.85
-      reasoning: 'Repeat reading did not grow further; the pattern is a transient producer surge, not a stuck consumer.
+      reasoning: 'The repeat read returns the same 30000: the backlog is not draining. A producer surge that had ended would be shrinking by now, so what is left is the consumer failing to keep up with its assignment.
 
         '
     next_action:
       kind: stop
-      reason: producer-spike hypothesis confident; escalate for observation
+      reason: backlog is static rather than draining; escalate for consumer capacity
   briefing_writer:
-  - findings: 'payments-consumer lag at 30000 messages appears stable rather than growing, most consistent with a transient producer-side surge.
+  - findings: 'payments-consumer lag reads 30000 messages and is unchanged across two reads — not draining, which is what a producer surge that had already passed would be doing.
 
       '
-    recommendation: 'Watch the payments producer''s rate for the next 15 minutes; if it does not drop, page the payments team to investigate upstream volume.
+    recommendation: 'Check whether payments-consumer is processing at all, and at what rate; if it is alive, it is under-provisioned for the current volume and needs a restart or more capacity.
 
       '
   briefing_judge:
   - groundedness: 0.9
     actionability: 0.85
-    reasoning: 'Findings track hypothesis evolution across probes; recommendation gives a concrete 15-minute watch window and named escalation contact.
+    reasoning: 'Findings track hypothesis evolution across probes and say what the second read ruled out; recommendation names two concrete checks.
 
       '
 expectation:
@@ -98,3 +116,16 @@ expectation:
     field: lag
     is_null: false
   max_tool_calls: 5
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# `get_consumer_lag` reads lag 30000 on payments-consumer with lag_known true.
+# One canned response is served on every call, so the re-probe returns the same
+# reading — this is the byte-identical world consumer_lag_payments_critical
+# serves, and it carries the same label. The scenario exercises how a ranking is
+# stored across iterations; it does not manufacture a different fault.
+ground_truth:
+  incident_count: 1
+  root_causes: [consumer_saturation]
+  affected_components: [payments-consumer]

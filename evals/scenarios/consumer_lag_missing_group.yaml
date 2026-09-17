@@ -87,3 +87,16 @@ expectation:
     field: lag
     is_null: true
   max_tool_calls: 5
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# The platform answers lag: null, lag_known: false, source: unrecognized for the
+# group the alert names. The reading came back and it still does not say what is
+# wrong, which is exactly the line the planner prompt draws for `unknown` against
+# `no_fault`. Labelled rather than left out: refusing to read a null as either
+# healthy or saturated is the behaviour this scenario exists to measure.
+ground_truth:
+  incident_count: 1
+  root_causes: [unknown]
+  affected_components: [unknown-consumer]

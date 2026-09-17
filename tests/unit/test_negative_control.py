@@ -92,14 +92,16 @@ def _with_llm(scenario: Scenario, mutate: Any) -> Scenario:
 
 
 def _with_ground_truth(scenario: Scenario, *causes: HypothesisCategory) -> Scenario:
-    """A copy of the scenario carrying the answer key its YAML does not.
+    """A copy of the scenario carrying the answer key, stated at the call site.
 
-    No shipped scenario declares a ``ground_truth`` yet (WO-R3-191), so the
-    ROOT_CAUSE case has to attach one to have anything to grade. It attaches
-    the cause the scenario's world actually manufactures — the sabotage below
-    is still done to the AGENT, not to the answer key, which is what keeps
-    this file's discipline intact: every case here makes the agent do one
-    specific wrong thing.
+    Since WO-R3-261 the subject's YAML declares the same label this is called
+    with, so the copy is now a restatement rather than a back-fill — and it is
+    kept, because the point of a negative control is that the thing being
+    graded is visible in the test rather than resolved from a file. It attaches
+    the cause the scenario's world actually manufactures; the sabotage below is
+    still done to the AGENT, not to the answer key, which is what keeps this
+    file's discipline intact: every case here makes the agent do one specific
+    wrong thing.
 
     Evaluator-only, so attaching it cannot reach the agent: the runner builds
     the run from ``agent_visible()``, an allow-list this field is not on

@@ -188,3 +188,15 @@ expectation:
   # Two probes is the whole correct trajectory; the ceiling leaves room for
   # a re-read without leaving room for a tour of the platform.
   max_tool_calls: 5
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# The level-0 control. The key the alert names is present at its seeded size with
+# a live TTL and Redis is serving normally (98000 hits / 2000 misses), so every
+# reading is healthy and nothing is broken. `no_fault` with incident_count 0 is
+# the only pairing the schema admits, and it is the right one.
+ground_truth:
+  incident_count: 0
+  root_causes: [no_fault]
+  affected_components: ['cache:jobs:worker-dispatcher:hot_set']

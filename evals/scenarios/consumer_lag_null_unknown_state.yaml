@@ -80,3 +80,15 @@ expectation:
     field: lag
     is_null: true
   max_tool_calls: 5
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# Same world as consumer_lag_missing_group on a different group: lag null,
+# lag_known false, source unrecognized. Null is unknown-not-healthy — it carries
+# no magnitude and neither confirms nor excludes saturation — so the honest
+# classification is `unknown`, and `no_fault` would be a false clean bill.
+ground_truth:
+  incident_count: 1
+  root_causes: [unknown]
+  affected_components: [ledger-consumer]

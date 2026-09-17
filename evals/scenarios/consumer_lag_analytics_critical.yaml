@@ -73,3 +73,14 @@ expectation:
     field: lag
     is_null: false
   max_tool_calls: 11
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# `get_consumer_lag` reads lag 50000 on analytics-consumer with lag_known true:
+# the consumer is behind, which is `consumer_saturation`. Escalating is the
+# graded OUTCOME here; the diagnosis is scored independently of it.
+ground_truth:
+  incident_count: 1
+  root_causes: [consumer_saturation]
+  affected_components: [analytics-consumer]

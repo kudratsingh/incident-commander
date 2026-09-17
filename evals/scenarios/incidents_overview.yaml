@@ -127,3 +127,17 @@ expectation:
     field: total
     at_least: 1
   max_tool_calls: 6
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# The probes list three concurrent active incidents — api 5xx at 3.2%, a growing
+# DLQ, and billing-consumer lag over 10k — and nothing in this world says which,
+# if any, causes the others or what is behind any of them. `unknown`, and the
+# useful escalation names all three. incident_count is 3 because the world holds
+# three unrelated incidents, which is a fact about the world rather than about
+# the single label.
+ground_truth:
+  incident_count: 3
+  root_causes: [unknown]
+  affected_components: [api-gateway, dlq, billing-consumer]

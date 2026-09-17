@@ -431,3 +431,20 @@ expected_precondition:
   expect:
   - path: items[].id
     equals: a2412a54-65f0-5258-95ab-5c168a15df64
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# `create_stuck_dag` leaves the chain root in dead_letter with a descendant
+# waiting and the chain not paused. The remediation planner's own "Stuck
+# dependency chains" section files exactly that shape under `runaway_saga` /
+# `stuck_dag`, and FIX_MAP routes it to a replay of the dead-lettered root. The
+# root's DLQ row (UpstreamTimeout, replay_safe) is the evidence that the replay
+# is safe — it is what makes the action legal, not a second fault.
+ground_truth:
+  incident_count: 1
+  root_causes: [runaway_saga]
+  affected_components: [runaway-saga-eval]
+  causal_chain:
+  - root a2412a54 dead-lettered on an upstream timeout after 3 retries
+  - the resolver holds descendant 3e3bd4c1 in waiting behind it

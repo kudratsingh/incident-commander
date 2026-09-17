@@ -599,3 +599,20 @@ expected_precondition:
     is_null: true
   - path: items[].error_message
     equals: 'SchemaValidationError: payload missing required field ''user_id'' (received keys: [''tenant_id'', ''action'', ''ts''])'
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# The same stuck-chain shape as remediate_runaway_saga_success — dead_letter
+# root, waiting descendant, chain not paused — which the remediation planner
+# files under `runaway_saga` / `stuck_dag`. What differs is the root's own row:
+# human_required over a SchemaValidationError, so the sanctioned action is the
+# fence rather than the replay. The hint chooses the action; the world's fault is
+# still the chain its root stopped.
+ground_truth:
+  incident_count: 1
+  root_causes: [runaway_saga]
+  affected_components: [saga-stuck-eval]
+  causal_chain:
+  - root 87f50f4d dead-lettered on a payload missing the required field user_id
+  - the resolver holds descendant 677c49dd in waiting behind it

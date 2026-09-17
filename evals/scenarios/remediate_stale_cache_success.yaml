@@ -58,17 +58,36 @@ canned_tool_responses:
   # well as its investigation probe — so it is a sequence, and each element
   # states a different world.
   #
-  # Element 0 is the pre-remediation read, recorded against the SEEDED
-  # (un-faulted) world the drift check probes: seed_eval_fixtures writes
-  # this key with a 24h TTL, so a fresh stack reads exists=true /
-  # type=string / size=120. `ttl_seconds` is a countdown and is declared
-  # volatile in evals/fixture_drift.py alongside the redis gauges above.
+  # Element 0 is the pre-remediation read. Its SHAPE fields are recorded
+  # against the SEEDED (un-faulted) world the drift check probes:
+  # seed_eval_fixtures writes this key with a 24h TTL, so a fresh stack
+  # reads exists=true / type=string / size=120. `ttl_seconds` is a countdown
+  # and is declared volatile in evals/fixture_drift.py alongside the redis
+  # gauges above.
+  #
+  # Its RECORD CHECK is the faulted world's, and this is the reading the
+  # whole scenario turns on (v0.6.8, plat #209, WO-R3-267). Until v0.6.8 the
+  # four shape fields read identically for a current entry and a stale one,
+  # so nothing the agent could see said "stale" and two live runs on the
+  # same three numbers split on whether to act (green ee183c85429c, red
+  # 648a32f2339d). Now the entry says it names three job records and the
+  # database holds none of them: 3 referenced, 0 found. 120 bytes is what
+  # three job ids in a JSON list weigh, so the recording states one
+  # coherent world — an entry of the seeded shape whose records have gone.
+  # It disagrees with the drift walk's live probe (3 / 3) for the same
+  # reason the consumer-lag fixtures do: the walk reads the world before
+  # the fault is seeded. That is the ledger's declared `post-fault`
+  # context, not a defect to fix.
   #
   # Element 1 is the world AFTER invalidate_cache_key deleted the key, and
-  # it is what every verify poll reads. exists=false with all three shape
-  # fields null is what the platform actually returns for an absent key
-  # (GetCacheKeyInfoOutput: "All three are null when the key does not
-  # exist"). This element drifts against the live probe BY CONSTRUCTION —
+  # it is what every verify poll reads. exists=false with the shape fields
+  # AND both record-check fields null is what the platform actually returns
+  # for an absent key — verified against the live v0.6.8 platform on a key
+  # that does not exist, which answers
+  # `{"exists":false,"type":null,"ttl_seconds":null,"size":null,
+  # "records_referenced":null,"records_found":null}`. Null is not zero: the
+  # platform reports nothing about the records of an entry it does not
+  # have. This element drifts against the live probe BY CONSTRUCTION —
   # the drift walk reads the world before the agent acts, where the key is
   # still there — which is the ledger's declared `post-action` context, not
   # a defect to fix.
@@ -88,11 +107,11 @@ canned_tool_responses:
   get_cache_key_info:
   - content:
     - type: text
-      text: '{"key":"cache:jobs:worker-dispatcher:hot_set","exists":true,"type":"string","ttl_seconds":86326,"size":120}'
+      text: '{"key":"cache:jobs:worker-dispatcher:hot_set","exists":true,"type":"string","ttl_seconds":86326,"size":120,"records_referenced":3,"records_found":0}'
     is_error: false
   - content:
     - type: text
-      text: '{"key":"cache:jobs:worker-dispatcher:hot_set","exists":false,"type":null,"ttl_seconds":null,"size":null}'
+      text: '{"key":"cache:jobs:worker-dispatcher:hot_set","exists":false,"type":null,"ttl_seconds":null,"size":null,"records_referenced":null,"records_found":null}'
     is_error: false
   invalidate_cache_key:
     content:
@@ -128,7 +147,8 @@ canned_llm_responses:
     - category: stale_cache
       name: stale_cache_hot_key
       confidence: 0.85
-      reasoning: 'The named key exists as a 120-byte string with ~24h left on its TTL, so the collapsed hit rate is not a cold cache \u2014 a long-lived hot key is being missed. Invalidating forces a refresh from the source of truth.
+      reasoning: 'The named key exists as a 120-byte string with ~24h left on its TTL, so the collapsed hit rate is not a cold cache. It names 3 job records and the database holds 0 of them, so the
+      entry is a copy of records that are no longer there \u2014 a long-lived hot key serving misses. Invalidating forces a refresh from the source of truth.
 
         '
     next_action:
@@ -154,7 +174,8 @@ canned_llm_responses:
       '
   briefing_writer:
   - findings: 'Redis cache hit rate collapsed to 1.9% (149 hits vs 7862 misses). The alert named a specific hot key (cache:jobs:worker-dispatcher:hot_set); reading it back showed a 120-byte string with
-      ~24h left on its TTL, so the key was live and being missed rather than absent. Invalidating it returned deleted=true, and re-reading the same key confirmed exists=false.
+      ~24h left on its TTL, so the key was live and being missed rather than absent, and the record check said it names 3 job records of which the database holds 0 — the entry was a copy of records
+      that no longer exist. Invalidating it returned deleted=true, and re-reading the same key confirmed exists=false.
 
       '
     recommendation: "If a similar spike recurs on the same key, investigate why it's going stale \u2014 TTL misconfiguration or an upstream write pattern not invalidating properly. Server-wide hit ratio\

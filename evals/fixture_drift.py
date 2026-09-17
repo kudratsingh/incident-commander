@@ -166,6 +166,21 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
     # is no. `exists`, `type` and `size` DO stay guarded: the pack fixes all
     # three for cache:jobs:worker-dispatcher:hot_set, so a recording can
     # match them and must.
+    #
+    # v0.6.8 (plat #209, WO-R3-267) adds `records_referenced` and
+    # `records_found`, and they stay OUT of this set — the opposite call from
+    # the one `get_consumer_lag`'s v0.6.7 fields got, and for the reason that
+    # decides membership rather than by family resemblance. Those were a
+    # clock (`measured_at`), a countdown (`age_seconds`) and a window whose
+    # very emptiness depends on stack uptime (`recent_samples`). These two
+    # are COUNTS OF SEEDED RECORDS: seed_eval_fixtures writes the hot-set
+    # entry as a list of three job ids and seeds those three jobs, so a live
+    # read of a fresh stack answers 3 / 3 every time, and the canned
+    # `no_fault_healthy_cache` recording says 3 / 3 and matches with no
+    # ledger entry at all. A recording can be right about them, so it must
+    # be. Nothing here flaps: the only disagreements left are the two the
+    # ledger records, and both are a fixture describing a LATER world than
+    # the walk can probe (the seeded fault, and the post-delete read).
     "get_cache_key_info": frozenset({"ttl_seconds"}),
     # `items.dead_lettered_at` arrived with the v0.6.0 re-pin (plat #180,
     # R2-53) and is the third clock on this tool, not a new species: the

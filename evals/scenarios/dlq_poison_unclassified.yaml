@@ -447,3 +447,22 @@ expected_precondition:
     equals: 1
   - path: items[].id
     equals: f030f975-974e-5ce3-aa6b-444136507d86
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# The `poison_message` chaos hook publishes an empty payload to job.submitted and
+# the row lands unclassified with "SchemaValidationError: payload missing
+# required field 'job_id' (received keys: [])". No replay can supply a field the
+# payload does not carry — the sender has to change it.
+#
+# `poison_message` is this taxonomy's label for a dead-letter-queue incident.
+# The planner prompt defines it as "DLQ entries the platform categorized as
+# replay_safe, wait_and_replay, or human_required", and says outright that a
+# dead-lettered job carrying human_required is this and not persistent_data_bug.
+# The per-row hint chooses the ACTION (the remediation planner routes by hint);
+# it does not change what is wrong.
+ground_truth:
+  incident_count: 1
+  root_causes: [poison_message]
+  affected_components: [dlq, job.submitted]

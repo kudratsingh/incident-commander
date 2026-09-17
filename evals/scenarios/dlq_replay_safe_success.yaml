@@ -270,3 +270,24 @@ expected_precondition:
     equals: 4
   - path: items[].remediation_hint
     equals: replay_safe
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# The alert names the replay_safe slice, and that slice holds exactly one row:
+# fc8d2a03, an UpstreamTimeout against partner-api.internal that the platform's
+# own triage calls retryable with nothing committed downstream. The incident is
+# that dead-letter row. `transient_dependency` is not used: the prompt reserves
+# this shape — a categorised DLQ entry — for `poison_message`, and the hint is
+# what routes it to an immediate replay.
+#
+# `poison_message` is this taxonomy's label for a dead-letter-queue incident.
+# The planner prompt defines it as "DLQ entries the platform categorized as
+# replay_safe, wait_and_replay, or human_required", and says outright that a
+# dead-lettered job carrying human_required is this and not persistent_data_bug.
+# The per-row hint chooses the ACTION (the remediation planner routes by hint);
+# it does not change what is wrong.
+ground_truth:
+  incident_count: 1
+  root_causes: [poison_message]
+  affected_components: [dlq, bulk_api_sync]

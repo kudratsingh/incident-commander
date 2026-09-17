@@ -195,3 +195,15 @@ expected_precondition:
   expect:
   - path: lag
     at_least: 20
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# `kill_consumer` seeds the fault; the group keeps its Kafka assignment and the
+# canned recent_samples climb 900 → 4100 → 7600 → 11200 → 15000. A consumer that
+# has stopped draining its assignment is `consumer_saturation`, the one category
+# FIX_MAP routes to restart_consumer_group.
+ground_truth:
+  incident_count: 1
+  root_causes: [consumer_saturation]
+  affected_components: [worker-dispatcher]

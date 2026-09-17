@@ -106,3 +106,16 @@ expectation:
     field: matches[].trace_id
     is_null: false
   max_tool_calls: 5
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# `search_traces` returns two failed jobs (report_gen, doc_analysis) and nothing
+# else — no error text, no retry counts, no dependency. The reading came back and
+# still does not say what is wrong, which is `unknown`. The graded behaviour is
+# to name the failed jobs and escalate, not to guess a cause the world never
+# supplied.
+ground_truth:
+  incident_count: 1
+  root_causes: [unknown]
+  affected_components: [job-runner]

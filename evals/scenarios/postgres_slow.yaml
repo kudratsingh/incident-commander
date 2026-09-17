@@ -89,3 +89,18 @@ expectation:
     field: ping_latency_ms
     is_null: false
   max_tool_calls: 5
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# `get_postgres_health` answers ok: true with ping_latency_ms 420.5 — the
+# database is answering, slowly, which is `db_query_latency`. The neighbouring
+# label `db_pool_saturation` is deliberately NOT used: it means every connection
+# in the pool is checked out, and the fixture reports 95 active connections with
+# no pool ceiling beside them, so saturation cannot be established from this
+# world. `transient_dependency` names an EXTERNAL dependency; this is the
+# platform's own database.
+ground_truth:
+  incident_count: 1
+  root_causes: [db_query_latency]
+  affected_components: [postgres]

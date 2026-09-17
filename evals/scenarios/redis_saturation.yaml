@@ -95,3 +95,16 @@ expectation:
     field: used_memory_bytes
     is_null: false
   max_tool_calls: 5
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# 250 connected clients, 1.00G used memory and a hit rate collapsed to 16%
+# (10000 hits / 50000 misses), with no key named anywhere in the scenario.
+# `redis_saturation` is the label for Redis itself being the constraint;
+# `stale_cache` is the one-hot-key case and there is no hot key here — the alert
+# carries no cache_key and the scenario ships no get_cache_key_info fixture.
+ground_truth:
+  incident_count: 1
+  root_causes: [redis_saturation]
+  affected_components: [redis]

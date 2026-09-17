@@ -120,3 +120,24 @@ expectation:
     field: alerts[].severity
     is_null: false
   max_tool_calls: 10
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# `list_audit_events` returns exactly one actor: deploy.completed v1.42.0 by
+# ci-bot at 09:58:00Z. The five alerts fire between 10:00 and 10:03 across api,
+# db, kafka, dlq and cache. One deploy two minutes before five subsystems alert
+# at once is `deploy_regression`, and that deploy is the only causal fact this
+# world supplies. One cascade is one incident, not five.
+ground_truth:
+  incident_count: 1
+  root_causes: [deploy_regression]
+  affected_components:
+  - platform.api
+  - platform.db
+  - platform.kafka
+  - platform.dlq
+  - platform.cache
+  causal_chain:
+  - deploy v1.42.0 completed at 09:58:00Z
+  - five alerts across five subsystems fired between 10:00:00Z and 10:03:00Z

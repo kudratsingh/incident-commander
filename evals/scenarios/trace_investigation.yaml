@@ -87,3 +87,18 @@ expectation:
     field: trace_id
     is_null: false
   max_tool_calls: 5
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# `get_trace` reports one failed job: report_gen, retry_count 2, error "OOM
+# during PDF generation (200MB report)". That is a real, named fault and
+# HypothesisCategory has no member for a worker exhausting memory, so the closest
+# honest classification is `unknown` — the planner prompt's own rule is "pick the
+# closest matching category. If nothing fits, use unknown". Not forced into
+# `transient_dependency`: there is no external dependency anywhere in this
+# fixture. Recorded as a taxonomy gap in the PR body.
+ground_truth:
+  incident_count: 1
+  root_causes: [unknown]
+  affected_components: [report_gen]

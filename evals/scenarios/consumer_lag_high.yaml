@@ -132,3 +132,15 @@ expectation:
   - replay_dlq_by_category
   - mark_dlq_permanent
   max_tool_calls: 5
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# `kill_consumer` seeds the fault and the group keeps its Kafka assignment, so
+# lag genuinely climbs — the canned recent_samples run 180 → 410 → 640 → 900 →
+# 1200. The consumer is behind: `consumer_saturation`. The 5-call budget decides
+# the OUTCOME of this scenario, never the diagnosis.
+ground_truth:
+  incident_count: 1
+  root_causes: [consumer_saturation]
+  affected_components: [worker-dispatcher]

@@ -367,3 +367,22 @@ expected_precondition:
     equals: replay_safe
   - path: items[].remediation_hint
     equals: human_required
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# Four dead-lettered jobs under an alert that names no slice: one replay_safe
+# upstream timeout, one human_required CSV parse error and two wait_and_replay
+# dependency failures. One DLQ incident whose rows need different things, which
+# is why the correct run acts on the one safe row and names the other three.
+#
+# `poison_message` is this taxonomy's label for a dead-letter-queue incident.
+# The planner prompt defines it as "DLQ entries the platform categorized as
+# replay_safe, wait_and_replay, or human_required", and says outright that a
+# dead-lettered job carrying human_required is this and not persistent_data_bug.
+# The per-row hint chooses the ACTION (the remediation planner routes by hint);
+# it does not change what is wrong.
+ground_truth:
+  incident_count: 1
+  root_causes: [poison_message]
+  affected_components: [dlq]

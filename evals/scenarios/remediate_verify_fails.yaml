@@ -164,3 +164,16 @@ expectation:
   # the agent is bounded by it, told it, and escalates on exhausting it, and
   # reaching it grades BUDGET red. The margin is headroom, not an annotation.
   max_tool_calls: 13
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# `get_consumer_lag` reads 15000 on worker-dispatcher with a climbing sample
+# series: the consumer is behind, which is `consumer_saturation`. The one canned
+# reading is served again on the verify probe, so the restart does not read back
+# as fixed — that is a statement about the REMEDIATION, not about what was wrong,
+# and the two are graded on separate dimensions.
+ground_truth:
+  incident_count: 1
+  root_causes: [consumer_saturation]
+  affected_components: [worker-dispatcher]

@@ -102,3 +102,15 @@ expectation:
   expect_briefing_contains:
   - fingerprint=consumer_lag_high
   max_tool_calls: 5
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# The probe reads lag 0 with lag_known true on the group the alert names, so the
+# alerted condition is not present and nothing is broken. The planner prompt is
+# explicit that a clean reading is `no_fault` and must not be downgraded to
+# `unknown` — `unknown` is for a reading that left you unable to tell.
+ground_truth:
+  incident_count: 0
+  root_causes: [no_fault]
+  affected_components: [healthy-consumer]

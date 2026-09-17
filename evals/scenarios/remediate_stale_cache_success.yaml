@@ -290,3 +290,16 @@ expected_precondition:
     equals: true
   - path: size
     equals: 90
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# `create_stale_cache` seeds the hot key the alert names. `get_redis_health`
+# shows the hit rate collapsed (149 hits / 7862 misses) while Redis itself is
+# healthy — 11 clients, 1.59M used — and `get_cache_key_info` shows that one key
+# present with a long TTL. One named key behind a hit-rate collapse is
+# `stale_cache`; `redis_saturation` is the case where Redis is the constraint.
+ground_truth:
+  incident_count: 1
+  root_causes: [stale_cache]
+  affected_components: ['cache:jobs:worker-dispatcher:hot_set']

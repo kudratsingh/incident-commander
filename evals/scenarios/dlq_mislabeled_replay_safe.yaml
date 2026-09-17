@@ -527,3 +527,24 @@ expected_precondition:
   # alerted slice is the mislabelled row plus the genuine one, and nothing else.
   - path: total
     equals: 2
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
+# the chaos hook and the canned fixtures above and never off the canned planner.
+# WO-R3-261.
+# `create_mislabeled_dlq_job(mislabel: true)` seeds row be64a675 carrying
+# remediation_hint replay_safe over an error that is a permanent CSV int-parse
+# failure. ADR 0034: when the hint and the error disagree, the error wins. The
+# lie in the hint is what makes the scenario hard; it is not a second fault, and
+# `read_model_drift` is not reached for — that label is for a projected read
+# model disagreeing with the write side, not for a classifier getting a row wrong.
+#
+# `poison_message` is this taxonomy's label for a dead-letter-queue incident.
+# The planner prompt defines it as "DLQ entries the platform categorized as
+# replay_safe, wait_and_replay, or human_required", and says outright that a
+# dead-lettered job carrying human_required is this and not persistent_data_bug.
+# The per-row hint chooses the ACTION (the remediation planner routes by hint);
+# it does not change what is wrong.
+ground_truth:
+  incident_count: 1
+  root_causes: [poison_message]
+  affected_components: [dlq, csv_upload]

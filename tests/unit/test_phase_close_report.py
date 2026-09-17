@@ -15,15 +15,23 @@ from the rows rather than asserted by whoever ran the assembler.
 WO-R3-195 (WP-2.6) adds three, because there are now two phases in one
 assembler:
 
-* EVERY declared phase regenerates byte for byte, not just the newest. Phase
-  1's document is committed evidence and generalising the assembler must not
-  move a byte of it;
+* EVERY committed document regenerates byte for byte, not just the newest.
+  Phase 1's document is committed evidence and generalising the assembler must
+  not move a byte of it — and so is Phase 2's DRAFT, now that the FINAL has
+  superseded it. ``close.committed_documents()`` pairs each one with the scope
+  it was written from, and this module walks that list;
 * the DRAFT mark is derived from the scope. A scope that still declares a
   pending re-run assembles a DRAFT; the same scope with those archives in
   ``live_legs`` assembles a FINAL. There is no argument that sets it;
 * each phase's artifact is resolved by ITS OWN sweep id. ``artifacts.newest``
   now answers "phase 2", which is right for a reader and wrong for a test
   about phase 1.
+
+The FINAL half of that second point is no longer hypothetical: the owner
+released both re-runs, both came back green, and the two documents differ in
+the way the draft said they would. So the draft-vs-final pair is checked on
+both sides — the draft still says what it owed, the final says it owes nothing,
+and neither one's bytes moved to make the other exist.
 """
 
 from __future__ import annotations
@@ -56,13 +64,36 @@ pytestmark = pytest.mark.skipif(
 PHASES: list[int] = sorted(close.SCOPES)
 
 
+def _document_cases() -> list[tuple[close.PhaseScope, Path, Path]]:
+    """Every committed document beside the scope that produced it.
+
+    Three today: Phase 1, Phase 2's DRAFT and the FINAL that supersedes it.
+    Parametrizing on this rather than on the phase number is what keeps a
+    superseded document under test — the whole point of invariant 9 is that it
+    is still evidence after something newer exists.
+    """
+    return [(scope, halves[0], halves[1]) for scope, halves in close.committed_documents()]
+
+
+def _case_ids() -> list[str]:
+    return [json_path.stem for _, json_path, _ in _document_cases()]
+
+
 def _committed(phase: int) -> dict[str, Any]:
+    """The CURRENT committed document for a phase: the newest version."""
     document: dict[str, Any] = json.loads(close.committed(phase)[0].read_text())
     return document
 
 
 def _rendered(phase: int) -> str:
     return close.committed(phase)[1].read_text()
+
+
+def _superseded(phase: int, index: int = 0) -> tuple[dict[str, Any], str]:
+    """An earlier version of a phase's document, JSON and Markdown."""
+    json_path, md_path = close.committed_versions(phase)[index]
+    document: dict[str, Any] = json.loads(json_path.read_text())
+    return document, md_path.read_text()
 
 
 def _report(invocation_id: str, role: ModelRole, *, predates_roles: bool = False) -> RunReport:
@@ -133,6 +164,35 @@ def test_each_phase_resolves_its_own_artifact_by_its_own_sweep(phase: int) -> No
     assert artifacts.newest("phase_close_report") == close.committed(max(PHASES))[0]
 
 
+def test_every_committed_document_has_a_declared_scope_and_vice_versa() -> None:
+    """The registry that keeps a superseded document regenerable.
+
+    Red before ``COMMITTED_SCOPES``: writing the FINAL left the DRAFT's bytes
+    with nothing in the module that could reproduce them, because ``SCOPES[2]``
+    had moved on. The pairing is asserted rather than assumed, so publishing a
+    version without declaring the scope behind it fails here.
+    """
+    cases = _document_cases()
+    assert len(cases) == len(close.COMMITTED_SCOPES) == 3
+    assert [scope.phase for scope, _, _ in cases] == [1, 2, 2]
+    # Phase 2's two versions are two files, oldest first, and the newest is
+    # what `committed` — and therefore every reader — resolves to.
+    draft_json, final_json = (case[1] for case in cases[1:])
+    assert draft_json != final_json
+    assert close.committed(2)[0] == final_json
+    assert close.COMMITTED_SCOPES[1] is close.PHASE2_DRAFT
+    assert close.COMMITTED_SCOPES[2] is close.PHASE2 is close.SCOPES[2]
+
+
+def test_a_committed_version_with_no_declared_scope_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The guard, exercised: two files and one scope is an error, not a zip."""
+    monkeypatch.setattr(close, "COMMITTED_SCOPES", (close.PHASE1, close.PHASE2))
+    with pytest.raises(ValueError, match="committed version"):
+        close.committed_documents()
+
+
 def test_the_new_kind_does_not_adopt_or_get_adopted_by_its_neighbours(tmp_path: Path) -> None:
     """Three families share ``evals/reports/``; each resolves only its own stem."""
     reports = tmp_path / "evals" / "reports"
@@ -151,11 +211,29 @@ def test_the_new_kind_does_not_adopt_or_get_adopted_by_its_neighbours(tmp_path: 
 
 def test_writing_twice_refuses_rather_than_replacing(tmp_path: Path) -> None:
     """Invariant 9 at the filesystem: a second write raises, never overwrites."""
-    document = _committed(max(PHASES))
-    first = close.write(document, root=tmp_path)
+    scope = close.SCOPES[max(PHASES)]
+    document = _committed(scope.phase)
+    first = close.write(document, scope, root=tmp_path)
     assert all(path.is_file() for path in first)
     with pytest.raises(FileExistsError):
-        close.write(document, root=tmp_path)
+        close.write(document, scope, root=tmp_path)
+
+
+def test_rendering_a_document_against_another_phases_scope_is_refused() -> None:
+    """The markdown carries prose the JSON does not, so the pairing matters.
+
+    Red before ``render_markdown`` took the scope as an argument: it looked the
+    scope up by phase number, which quietly rendered Phase 2's DRAFT with the
+    FINAL's closing paragraph once ``SCOPES[2]`` moved on.
+    """
+    draft = close.assemble(close.REPO_ROOT, close.PHASE2_DRAFT)
+    with pytest.raises(ValueError, match="phase 1"):
+        close.render_markdown(draft, close.PHASE1)
+    # Same phase, different scope: the two documents are told apart by their
+    # own prose, which is exactly what the byte-for-byte test below pins.
+    assert close.render_markdown(draft, close.PHASE2_DRAFT) != close.render_markdown(
+        draft, close.PHASE2
+    )
 
 
 # --------------------------------------------------------------------------
@@ -264,7 +342,7 @@ def test_the_gating_grep_is_reproducible_and_still_finds_nothing(phase: int) -> 
     assert recorded["matching_lines"] == 0
 
 
-@pytest.mark.parametrize(("phase", "trajectories"), [(1, 45), (2, 71)])
+@pytest.mark.parametrize(("phase", "trajectories"), [(1, 45), (2, 73)])
 def test_nothing_the_agent_read_from_the_platform_carries_an_unadjudicated_term(
     phase: int, trajectories: int
 ) -> None:
@@ -327,7 +405,7 @@ def test_the_terms_are_derived_from_the_corpus_not_typed_out() -> None:
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("phase", "live_total", "live_passed"), [(1, 4, 3), (2, 3, 1)])
+@pytest.mark.parametrize(("phase", "live_total", "live_passed"), [(1, 4, 3), (2, 5, 3)])
 def test_the_sweep_section_matches_the_committed_archives(
     phase: int, live_total: int, live_passed: int
 ) -> None:
@@ -356,10 +434,13 @@ def test_the_root_cause_column_appears_only_where_something_was_graded() -> None
     assert (diagnosis["graded"], diagnosis["correct"], diagnosis["of_total"]) == (32, 32, 41)
     assert all(leg["root_cause"]["graded"] == 1 for leg in phase2["live_legs"])
     assert phase2["live_root_cause_on_seeded_legs"] == {
-        "correct": 3,
-        "graded": 3,
+        "correct": 5,
+        "graded": 5,
         "why_only_these": phase2["live_root_cause_on_seeded_legs"]["why_only_these"],
     }
+    # The draft's own number, still 3/3 in the document that reported it.
+    draft, _ = _superseded(2)
+    assert draft["sections"]["sweep_results"]["live_root_cause_on_seeded_legs"]["graded"] == 3
 
 
 def test_the_read_only_pass_reports_the_regrade_and_never_the_withdrawn_figure() -> None:
@@ -569,8 +650,12 @@ def test_wall_time_comes_from_the_traces_because_one_ledger_meter_is_wrong() -> 
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("phase", PHASES)
-def test_the_committed_report_regenerates_byte_for_byte(phase: int) -> None:
+@pytest.mark.parametrize(
+    ("scope", "committed_json", "committed_md"), _document_cases(), ids=_case_ids()
+)
+def test_every_committed_report_regenerates_byte_for_byte(
+    scope: close.PhaseScope, committed_json: Path, committed_md: Path
+) -> None:
     """Every input is committed, so each document is a function of the repo.
 
     If this fails, something the report READ has changed — a judge prompt, the
@@ -579,12 +664,13 @@ def test_the_committed_report_regenerates_byte_for_byte(phase: int) -> None:
 
     Phase 1 is the load-bearing case for WO-R3-195: generalising the assembler
     for a second phase must not move one byte of a document that is already
-    committed evidence.
+    committed evidence. Phase 2's DRAFT is the second such case — a report that
+    has been superseded is still evidence, and the FINAL was not allowed to
+    reach back and change what the draft said about the runs it had.
     """
-    document = close.assemble(close.REPO_ROOT, close.SCOPES[phase])
-    committed_json, committed_md = close.committed(phase)
+    document = close.assemble(close.REPO_ROOT, scope)
     assert close.render_json(document) == committed_json.read_text()
-    assert close.render_markdown(document) == committed_md.read_text()
+    assert close.render_markdown(document, scope) == committed_md.read_text()
 
 
 @pytest.mark.parametrize("phase", PHASES)
@@ -630,7 +716,7 @@ def test_the_draft_mark_is_derived_from_the_scope_not_hand_set() -> None:
     them. There is no argument to ``assemble`` or ``draft_status`` that says
     "this one is final".
     """
-    drafted = close.draft_status(close.PHASE2)
+    drafted = close.draft_status(close.PHASE2_DRAFT)
     assert drafted["status"] == "DRAFT"
     assert len(drafted["pending_reruns"]) == 2
     assert {entry["scenario"] for entry in drafted["pending_reruns"]} == {
@@ -639,20 +725,23 @@ def test_the_draft_mark_is_derived_from_the_scope_not_hand_set() -> None:
     }
     for entry in drafted["pending_reruns"]:
         assert "owner" in entry["blocked_on"]
-        assert entry["supersedes"] in {leg.archive_id for leg in close.PHASE2.live_legs}
+        assert entry["supersedes"] in {leg.archive_id for leg in close.PHASE2_DRAFT.live_legs}
 
     # Phase 1 owes nothing and derives FINAL from the same function.
     assert close.draft_status(close.PHASE1)["status"] == "FINAL"
 
-    # And so does Phase 2 once its two re-runs are in, with no other edit.
-    final = dataclasses.replace(close.PHASE2, pending_reruns=())
-    assert close.draft_status(final)["status"] == "FINAL"
-    assert close.draft_status(final)["pending_reruns"] == []
+    # And so does Phase 2, now that its two re-runs are in and nothing else
+    # about the scope was touched to say so.
+    assert close.draft_status(close.PHASE2)["status"] == "FINAL"
+    assert close.draft_status(close.PHASE2)["pending_reruns"] == []
+    assert close.draft_status(dataclasses.replace(close.PHASE2, pending_reruns=()))["status"] == (
+        "FINAL"
+    )
 
 
-def test_the_committed_phase_2_report_is_a_draft_and_says_what_is_owed() -> None:
-    document = _committed(2)
-    rendered = _rendered(2)
+def test_the_superseded_phase_2_report_is_still_a_draft_and_still_says_what_it_owed() -> None:
+    """The draft is not corrected in place; it is answered by a later document."""
+    document, rendered = _superseded(2)
     assert document["status"] == "DRAFT"
     assert len(document["pending_reruns"]) == 2
     assert "**DRAFT**" in rendered
@@ -664,22 +753,72 @@ def test_the_committed_phase_2_report_is_a_draft_and_says_what_is_owed() -> None
     assert "status" not in _committed(1)
 
 
-def test_the_final_version_is_written_beside_the_draft_not_over_it(tmp_path: Path) -> None:
-    """Invariant 9: adding the re-runs must not aim at the draft's own path.
+def test_the_current_phase_2_report_is_final_and_owes_nothing() -> None:
+    document = _committed(2)
+    rendered = _rendered(2)
+    assert document["status"] == "FINAL"
+    assert document["pending_reruns"] == []
+    assert "**FINAL**" in rendered
+    assert "What is still owed" not in rendered
+    assert "3 of 5" in rendered  # the pass rate it does NOT round up
 
-    The stamp is the newest moment any evidence in scope was written, so a
-    scope with two newer archives in it lands on a new filename. Proven here by
-    moving the draft's own newest timestamp forward and watching the target
-    path change rather than collide.
+
+def test_a_rerun_leg_names_the_leg_it_re_runs_and_the_red_stays_in_the_record() -> None:
+    """Both halves of the same rule.
+
+    A close that replaced its reds with their re-runs would be a selected
+    sample of itself, so the reds stay; and a table with five rows over three
+    scenarios is unreadable unless each re-run says which run it answers.
     """
-    document = close.assemble(close.REPO_ROOT, close.PHASE2)
-    first_json, first_md = close.write(document, root=tmp_path)
-    assert first_json.is_file() and first_md.is_file()
-    with pytest.raises(FileExistsError):
-        close.write(document, root=tmp_path)
+    legs = _committed(2)["sections"]["sweep_results"]["live_legs"]
+    assert [leg["archive"] for leg in legs] == [
+        "759e198cdd27",
+        "648a32f2339d",
+        "fc896b25a09c",
+        "d16aa18dce08",
+        "42c675d9c145",
+    ]
+    reruns = {leg["archive"]: leg["reruns"] for leg in legs if "reruns" in leg}
+    assert reruns.keys() == {"d16aa18dce08", "42c675d9c145"}
+    assert reruns["d16aa18dce08"]["archive"] == "648a32f2339d"
+    assert reruns["42c675d9c145"]["archive"] == "fc896b25a09c"
+    for archive, link in reruns.items():
+        assert link["why"].strip()
+        # The run it re-runs is still a row, and still red.
+        superseded = next(leg for leg in legs if leg["archive"] == link["archive"])
+        assert superseded["passed"] is False
+        assert next(leg for leg in legs if leg["archive"] == archive)["passed"] is True
 
-    later = json.loads(json.dumps(document))
-    later["sections"]["spend_line"]["live_runs"][-1]["run_finished_at"] = "2026-09-18T09:00:00Z"
-    second_json, _ = close.write(later, root=tmp_path)
-    assert second_json != first_json
-    assert first_json.read_text() == close.render_json(document)  # the draft is untouched
+    # A first run carries no link at all, in either phase.
+    assert all(
+        "reruns" not in leg
+        for phase in PHASES
+        for leg in _committed(phase)["sections"]["sweep_results"]["live_legs"]
+        if leg["archive"] not in reruns
+    )
+
+
+def test_the_final_version_was_written_beside_the_draft_not_over_it(tmp_path: Path) -> None:
+    """Invariant 9: adding the re-runs did not aim at the draft's own path.
+
+    The stamp is the newest moment any evidence in scope was written, so the
+    scope with two newer archives in it landed on a new filename. Both files
+    are on disk, they carry the same canned-sweep id and different timestamps,
+    and the draft's bytes are the ones the draft's own scope produces.
+    """
+    (draft_json, draft_md), (final_json, final_md) = close.committed_versions(2)
+    assert draft_json != final_json and draft_md != final_md
+    assert close.PHASE2.canned_sweep in draft_json.name
+    assert close.PHASE2.canned_sweep in final_json.name
+    assert draft_json.name < final_json.name  # the timestamp, and the sort order
+    draft = close.assemble(close.REPO_ROOT, close.PHASE2_DRAFT)
+    assert draft_json.read_text() == close.render_json(draft)
+
+    # And a re-write of either aims at its own path and refuses.
+    for scope in (close.PHASE2_DRAFT, close.PHASE2):
+        document = close.assemble(close.REPO_ROOT, scope)
+        written = close.write(document, scope, root=tmp_path)
+        assert all(path.is_file() for path in written)
+        with pytest.raises(FileExistsError):
+            close.write(document, scope, root=tmp_path)
+    assert len(artifacts.versions("phase_close_report", root=tmp_path)) == 2

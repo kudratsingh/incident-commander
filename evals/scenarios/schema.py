@@ -103,8 +103,53 @@ def chaos_tool_names() -> frozenset[str]:
     return frozenset(chaos_tool_schemas())
 
 
+def resolve_schema_ref(prop: object, schema: Mapping[str, Any]) -> object:
+    """One property with its local ``$ref`` followed into the schema's ``$defs``.
+
+    A closed enum argument reaches the snapshot as ``{"$ref":
+    "#/$defs/Name"}`` with the ``type`` and the ``enum`` list one level
+    down, so a checker reading the property alone sees a schema that
+    declares nothing and therefore admits everything.
+    ``pause_control_loop.loop_name`` (platform v0.6.9) is the first chaos
+    argument shaped that way — before it, every chaos argument declared its
+    type inline — and without this hop ``chaos_argument_errors`` accepted
+    both ``loop_name=1`` and ``loop_name="not_a_loop"`` in silence, leaving
+    a scenario's only argument to fail at live seeding time instead.
+
+    Only local ``#/$defs/<name>`` references are followed, one hop, no
+    remote fetch. The property's own keys win over the definition's, so a
+    per-use ``description`` survives the merge. Anything unresolvable comes
+    back unchanged, which leaves the caller in the same "nothing to check
+    against" posture as before rather than failing on a schema shape.
+    """
+    if not isinstance(prop, dict):
+        return prop
+    branches = prop.get("anyOf")
+    if isinstance(branches, list):
+        merged = dict(prop)
+        merged["anyOf"] = [resolve_schema_ref(branch, schema) for branch in branches]
+        prop = merged
+        if "$ref" not in prop:
+            return prop
+    ref = prop.get("$ref")
+    if not isinstance(ref, str) or not ref.startswith("#/$defs/"):
+        return prop
+    definitions = schema.get("$defs")
+    if not isinstance(definitions, dict):
+        return prop
+    target = definitions.get(ref.removeprefix("#/$defs/"))
+    if not isinstance(target, dict):
+        return prop
+    return {**target, **{k: v for k, v in prop.items() if k != "$ref"}}
+
+
 def json_types_for(prop: object) -> frozenset[str]:
-    """JSON ``type`` names a schema property admits (direct or via ``anyOf``)."""
+    """JSON ``type`` names a schema property admits (direct or via ``anyOf``).
+
+    Pass a property through ``resolve_schema_ref`` first when it may carry a
+    ``$ref``: a reference on its own declares no type, and this returns the
+    empty set for it, which every caller reads as "nothing to check".
+    """
     if not isinstance(prop, dict):
         return frozenset()
     if "type" in prop:
@@ -114,6 +159,40 @@ def json_types_for(prop: object) -> frozenset[str]:
         for branch in prop.get("anyOf", [])
         if isinstance(branch, dict) and "type" in branch
     )
+
+
+def enum_values_for(prop: object) -> tuple[Any, ...] | None:
+    """The closed set of values a resolved property admits, or ``None``.
+
+    ``None`` means the property is not closed and nothing may be asserted
+    about its value — which is also what comes back for a still-unresolved
+    ``$ref``, since the ``enum`` lives in the definition.
+
+    ``anyOf`` is walked, and a branch carrying no ``enum`` returns ``None``
+    rather than the union of the others: the union would be a NARROWER claim
+    than the schema makes, and a check that rejects a legal value is worse
+    than one that passes an illegal one. The single exception is a plain
+    ``{"type": "null"}`` branch — an optional enum is still closed, over its
+    members plus null.
+    """
+    if not isinstance(prop, dict):
+        return None
+    if isinstance(prop.get("enum"), list):
+        return tuple(prop["enum"])
+    branches = prop.get("anyOf")
+    if not isinstance(branches, list) or not branches:
+        return None
+    values: list[Any] = []
+    for branch in branches:
+        if not isinstance(branch, dict):
+            return None
+        if isinstance(branch.get("enum"), list):
+            values.extend(branch["enum"])
+        elif branch.get("type") == "null":
+            values.append(None)
+        else:
+            return None
+    return tuple(values) or None
 
 
 # bool must precede int: bool is a subclass of int, and JSON "integer"
@@ -145,9 +224,14 @@ def chaos_argument_errors(name: str, arguments: Mapping[str, Any]) -> list[str]:
 
     Empty list means the invocation is well formed as far as the committed
     contract can tell. Checks unknown argument names, missing required ones,
-    and primitive value types — a name-and-required-only check would miss a
-    ``ttl_seconds`` integer→string flip, which is the exact shape of the S-18
-    probe in ``tests/unit/test_chaos_schema_alignment.py``.
+    primitive value types, and membership of any closed set — a
+    name-and-required-only check would miss a ``ttl_seconds`` integer→string
+    flip, which is the exact shape of the S-18 probe in
+    ``tests/unit/test_chaos_schema_alignment.py``.
+
+    Each property is resolved through ``resolve_schema_ref`` before it is
+    read, because a ``$ref``'d enum argument declares its type and its
+    members one level down (platform v0.6.9's ``pause_control_loop``).
     """
     schema = chaos_tool_schemas().get(name)
     if schema is None:
@@ -172,11 +256,18 @@ def chaos_argument_errors(name: str, arguments: Mapping[str, Any]) -> list[str]:
     for argument, value in sorted(arguments.items()):
         if argument not in properties:
             continue  # already reported as unknown
-        admitted = json_types_for(properties[argument])
+        resolved = resolve_schema_ref(properties[argument], schema)
+        admitted = json_types_for(resolved)
         if not value_compatible(value, admitted):
             errors.append(
                 f"{name}.{argument}={value!r} ({type(value).__name__}) is not "
                 f"compatible with the snapshot's JSON type(s) {sorted(admitted)}"
+            )
+        admitted_values = enum_values_for(resolved)
+        if admitted_values is not None and value not in admitted_values:
+            errors.append(
+                f"{name}.{argument}={value!r} is not one of the snapshot's "
+                f"closed set {list(admitted_values)}"
             )
     return errors
 

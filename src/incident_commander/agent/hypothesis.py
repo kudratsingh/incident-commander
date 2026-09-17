@@ -175,6 +175,7 @@ ReadToolName = Literal[
     "get_dag_state",
     "get_deploy_history",
     "get_incident",
+    "get_outbox_status",
     "get_postgres_health",
     "get_redis_health",
     "get_trace",

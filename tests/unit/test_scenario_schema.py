@@ -16,7 +16,9 @@ from evals.scenarios.schema import (
     chaos_argument_errors,
     chaos_tool_names,
     chaos_tool_schemas,
+    enum_values_for,
     json_types_for,
+    resolve_schema_ref,
 )
 from incident_commander.agent.hypothesis import HypothesisCategory
 from incident_commander.agent.state import IncidentState
@@ -48,12 +50,22 @@ def _minimal_arguments(hook: str) -> dict[str, Any]:
     JSON type, never hand-listed: a hook that gains a required argument on a
     future platform pin keeps working here, and one whose argument type flips
     fails in ``test_chaos_schema_alignment.py`` where that is the subject.
+
+    Each property is resolved through ``resolve_schema_ref`` first, and a
+    closed set is sampled from its own members rather than from the type
+    table — ``pause_control_loop.loop_name`` (v0.6.9) is a ``$ref``'d enum,
+    so ``"x"`` is the right JSON type and still not a legal value.
     """
     schema = chaos_tool_schemas()[hook]
     properties = schema.get("properties") or {}
     arguments: dict[str, Any] = {}
     for field in schema.get("required") or []:
-        admitted = json_types_for(properties.get(field))
+        resolved = resolve_schema_ref(properties.get(field), schema)
+        members = enum_values_for(resolved)
+        if members:
+            arguments[str(field)] = members[0]
+            continue
+        admitted = json_types_for(resolved)
         # Prefer a non-null sample: `null` is last-resort for a property whose
         # only declared branch is null, and a required field is never that.
         for json_type in sorted(admitted - {"null"}) or sorted(admitted):
@@ -272,6 +284,115 @@ class TestChaosHookClosedSet:
         # would have broken a shipped scenario at load time.
         for name in ("inject_latency", "create_stale_cache", "create_bad_data_job"):
             assert ChaosHook(name=name, arguments=_minimal_arguments(name)).name == name
+
+
+class TestPauseControlLoopIsDeclarable:
+    """v0.6.9's 11th chaos hook, proven declarable without shipping a scenario.
+
+    WP-4.3 is what adds the outbox family; this packet only re-pins. But the
+    closed set is derived from the snapshot at load time, so "a scenario
+    could declare it" is a property of THIS commit and testable here — and
+    the interesting half is the argument, not the name: ``loop_name`` is the
+    first chaos argument the platform expresses as a ``$ref`` into
+    ``$defs``, and before ``resolve_schema_ref`` the checker read a property
+    that declared nothing and so admitted everything.
+
+    No scenario YAML is added. ``test_shipped_scenario_chaos_names_are_all_members``
+    above is the other direction and stays as it is.
+    """
+
+    def test_the_hook_is_in_the_closed_set(self) -> None:
+        assert "pause_control_loop" in chaos_tool_names()
+
+    def test_a_scenario_could_declare_it(self) -> None:
+        hook = ChaosHook(
+            name="pause_control_loop",
+            arguments={"loop_name": "outbox_relay", "ttl_seconds": 120},
+        )
+        assert hook.name == "pause_control_loop"
+        assert hook.arguments["loop_name"] == "outbox_relay"
+
+    def test_ttl_is_optional_and_the_loop_name_is_not(self) -> None:
+        assert ChaosHook(name="pause_control_loop", arguments={"loop_name": "metrics"})
+        with pytest.raises(ValidationError, match="missing required argument"):
+            ChaosHook(name="pause_control_loop", arguments={"ttl_seconds": 60})
+
+    def test_a_loop_name_outside_the_enum_is_rejected(self) -> None:
+        # Before the `$ref` hop this validated, and the scenario failed at
+        # live seeding time with a platform 400 — after the run had started.
+        with pytest.raises(ValidationError, match="closed set"):
+            ChaosHook(name="pause_control_loop", arguments={"loop_name": "not_a_loop"})
+
+    def test_a_loop_name_of_the_wrong_type_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="compatible with the snapshot"):
+            ChaosHook(name="pause_control_loop", arguments={"loop_name": 7})
+
+    def test_every_loop_the_platform_offers_is_declarable(self) -> None:
+        schema = chaos_tool_schemas()["pause_control_loop"]
+        properties = schema["properties"]
+        members = enum_values_for(resolve_schema_ref(properties["loop_name"], schema))
+        assert members is not None
+        # The platform ships eleven background loops (plat #210). Asserted as
+        # a count plus two anchors rather than a copied list: the list belongs
+        # to the snapshot, and a twelfth loop is a platform release, not a
+        # test edit.
+        assert len(members) == 11
+        assert {"outbox_relay", "slo_evaluation"} <= set(members)
+        for loop in members:
+            assert ChaosHook(name="pause_control_loop", arguments={"loop_name": loop})
+
+    def test_the_hook_never_reaches_the_agents_typed_registry(self) -> None:
+        # A chaos tool is seeded by the evaluator under `chaos:invoke`; the
+        # agent's own principal cannot call it and its name must not appear
+        # in the registry the planner picks from (ADR 0012).
+        from incident_commander.tools.registry import TOOL_REGISTRY
+
+        assert "pause_control_loop" not in TOOL_REGISTRY
+
+
+class TestSchemaRefResolution:
+    """``$ref`` is followed exactly one hop, and only into local ``$defs``."""
+
+    def test_a_ref_is_merged_with_the_property_keeping_its_own_keys(self) -> None:
+        schema: dict[str, Any] = {
+            "$defs": {"Loop": {"enum": ["a", "b"], "type": "string", "description": "shared"}},
+            "properties": {"loop": {"$ref": "#/$defs/Loop", "description": "per-use"}},
+        }
+        resolved = resolve_schema_ref(schema["properties"]["loop"], schema)
+        assert resolved == {
+            "enum": ["a", "b"],
+            "type": "string",
+            "description": "per-use",
+        }
+
+    def test_an_unresolvable_ref_comes_back_unchanged(self) -> None:
+        for prop, schema in (
+            ({"$ref": "#/$defs/Missing"}, {"$defs": {}}),
+            ({"$ref": "#/$defs/Loop"}, {}),
+            ({"$ref": "https://example.test/Loop"}, {"$defs": {"Loop": {"type": "string"}}}),
+        ):
+            assert resolve_schema_ref(prop, schema) == prop
+
+    def test_a_property_with_no_ref_is_untouched(self) -> None:
+        prop = {"type": "integer", "maximum": 3600}
+        assert resolve_schema_ref(prop, {}) == prop
+
+    def test_a_ref_inside_anyof_is_resolved(self) -> None:
+        schema = {"$defs": {"Loop": {"enum": ["a"], "type": "string"}}}
+        prop = {"anyOf": [{"$ref": "#/$defs/Loop"}, {"type": "null"}]}
+        resolved = resolve_schema_ref(prop, schema)
+        assert json_types_for(resolved) == frozenset({"string", "null"})
+        assert enum_values_for(resolved) == ("a", None)
+
+    def test_an_unclosed_branch_makes_the_whole_property_unclosed(self) -> None:
+        # The union of the enum branches would be a NARROWER claim than the
+        # schema makes, and a check that rejects a legal value is the worse
+        # failure — so nothing is asserted at all.
+        assert enum_values_for({"anyOf": [{"enum": ["a"]}, {"type": "string"}]}) is None
+
+    def test_a_property_with_no_enum_is_unclosed(self) -> None:
+        assert enum_values_for({"type": "string"}) is None
+        assert enum_values_for(None) is None
 
 
 class TestChaosHookArgumentClosure:
@@ -688,8 +809,11 @@ class TestDiscriminatingProbe:
             DiscriminatingProbe(tool="replay_dlq_by_ids")
 
     def test_an_unregistered_tool_is_rejected(self) -> None:
+        # Was `get_outbox_status`, written when it was the outbox family's
+        # planned-but-absent read tool. Platform v0.6.9 shipped it, so the
+        # case needed a name no release can take from it.
         with pytest.raises(ValidationError, match="not a registered tool"):
-            DiscriminatingProbe(tool="get_outbox_status")
+            DiscriminatingProbe(tool="not_a_platform_tool")
 
     def test_a_broken_pattern_is_a_load_error(self) -> None:
         with pytest.raises(ValidationError, match="not a valid regular expression"):

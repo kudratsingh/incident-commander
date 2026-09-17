@@ -385,6 +385,12 @@ def _fmt_step_record(step: int, r: dict[str, Any]) -> str:
             f"call_id={call.get('call_id') or '(untraced)'}"
         )
     lines.extend(_fmt_selector(r.get("selector")))
+    # Billed candidate sets the schema refused before the accepted one (WP-5.2).
+    # Rendered only when there were any: on every ``baseline`` step and every
+    # step whose first call parsed there were none, and a "Rejected: none" line
+    # on all of them would bury the case a reader is looking for.
+    if rejections := r.get("generation_rejections") or []:
+        lines.append(f"Rejected:      {len(rejections)} billed set(s): {', '.join(rejections)}")
     lines.append("")
     lines.append(f"--- CANDIDATE SET ({len(candidates)}) ---")
     for i, candidate in enumerate(candidates, start=1):

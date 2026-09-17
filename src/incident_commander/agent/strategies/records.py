@@ -232,6 +232,22 @@ class StepRecord:
     #: never reported as if they were — they are a measurement the canned
     #: suite can make.
     planner_context_chars: int | None = None
+    #: Validation classes of the billed calls this step's planner made and had
+    #: rejected before the accepted one — ``duplicate_candidate``,
+    #: ``short_set``, ``ungrounded_evidence`` and so on
+    #: (``strategies/best_of_n_enumerated.rejection_class``). Empty for
+    #: ``baseline`` and for any step whose first call parsed, which is the
+    #: ordinary case.
+    #:
+    #: A second extension beyond plan 02 § 7, added by WP-5.2, and it is a
+    #: measurement rather than a log line: a set the schema refuses is what "the
+    #: model could not enumerate N distinct grounded candidates" looks like in
+    #: the data, it is billed either way (ADR 0035 re-asks once, ADR 0015
+    #: charges both legs), and without it the only trace of it is a token count
+    #: that looks like a large step. The duplicate RATE plan 02 § 11.1 asks for
+    #: is computed from this together with the accepted sets — see
+    #: ``evals/candidate_metrics.py``.
+    generation_rejections: tuple[str, ...] = ()
 
     def as_trace_record(self) -> dict[str, Any]:
         """JSON-safe dict, ready for a tracer.
@@ -262,6 +278,7 @@ class StepRecord:
             "llm_calls": [call.as_record() for call in self.llm_calls],
             "planner_input_tokens": self.planner_input_tokens,
             "planner_context_chars": self.planner_context_chars,
+            "generation_rejections": list(self.generation_rejections),
         }
 
 

@@ -5386,19 +5386,26 @@ class TestTheFinalDiagnosisIsTheTopCandidate:
     def test_a_run_that_never_ranked_anything_has_no_diagnosis(self, run_state: RunState) -> None:
         assert final_diagnosis(run_state) is None
 
-    def test_the_investigation_loop_is_the_only_writer_of_the_ranking(self) -> None:
+    def test_only_a_planner_call_writes_the_ranking(self) -> None:
         """Why ``RunState.hypotheses`` is a sound source for the final diagnosis.
 
         Plan 02 § 11.3 defines the final diagnosis as the top candidate at the
         step that emitted ``remediate`` or ``stop``. ``RunState`` keeps only
-        the LATEST ranking, so reading it is correct only while nothing after
-        the investigation loop rewrites the field. This asserts that
-        structurally rather than by inspection: exactly one assignment to
-        ``hypotheses`` exists in the whole agent package, and it is the
-        planner call inside ``investigation.py``. A future transition that
-        rewrites the ranking fails here, which is the moment the grader would
-        otherwise start scoring a different answer than the one the agent
-        acted on.
+        the LATEST ranking, so reading it is correct only while every write is
+        a planner call and the loop returns from the iteration that emitted
+        one. This asserts that structurally rather than by inspection.
+
+        The permitted writers are the loop's own ``_plan_next_step`` and each
+        inference strategy that makes its own planner call — WP-5.2's
+        ``best_of_n_enumerated`` is the first, because its output schema is not
+        ``InvestigationStep`` and so it cannot go through the loop's call.
+        Every one of them writes the field exactly once, in the ``model_copy``
+        that also accrues that call, which is what keeps "the latest ranking" and
+        "the ranking of the deciding step" the same object.
+
+        A write anywhere else — a later transition, a second write inside one
+        strategy — fails here, which is the moment the grader would otherwise
+        start scoring a different answer than the one the agent acted on.
         """
         package = Path(__file__).resolve().parents[2] / "src" / "incident_commander"
         writers = sorted(
@@ -5406,11 +5413,18 @@ class TestTheFinalDiagnosisIsTheTopCandidate:
             for path in package.rglob("*.py")
             if '"hypotheses":' in path.read_text()
         )
-        assert writers == ["agent/investigation.py"], (
+        permitted = ["agent/investigation.py", "agent/strategies/best_of_n_enumerated.py"]
+        assert writers == permitted, (
             f"the ranking is now written in {writers}; the final diagnosis can no "
             "longer be read off RunState.hypotheses without checking which write "
-            "came last (WO-R3-191, plan 02 § 11.3)."
+            "came last (WO-R3-191, WO-R3-205, plan 02 § 11.3)."
         )
+        for writer in writers:
+            once = (package / writer).read_text().count('"hypotheses":')
+            assert once == 1, (
+                f"{writer} writes the ranking {once} times. One write per planner "
+                "call is what makes the latest ranking the deciding step's."
+            )
 
 
 class TestRootCauseCoverageIsReported:

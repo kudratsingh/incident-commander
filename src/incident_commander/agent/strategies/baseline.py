@@ -27,6 +27,7 @@ from typing import Any, Final
 from incident_commander.agent.hypothesis import InvestigationStep, ProbeAction
 from incident_commander.agent.investigation import _plan_next_step
 from incident_commander.agent.state import RunState
+from incident_commander.agent.strategies.knobs import StrategyKnobs
 from incident_commander.agent.strategies.names import StrategyName
 from incident_commander.agent.strategies.protocol import StrategyContext
 from incident_commander.agent.strategies.records import (
@@ -47,11 +48,22 @@ _NO_CONFIG: Final[Mapping[str, Any]] = MappingProxyType({})
 
 
 class BaselineStrategy:
-    """The one strategy that exists today, and the control every later one is
-    measured against."""
+    """The control group every later strategy is measured against."""
 
     name: str = StrategyName.BASELINE.value
     config: Mapping[str, Any] = _NO_CONFIG
+
+    def __init__(self, knobs: StrategyKnobs | None = None) -> None:
+        """Takes the inference block every registry factory is handed, and reads
+        nothing from it.
+
+        The parameter exists so ``StrategyRegistry`` has one factory shape
+        (``StrategyKnobs -> InvestigationStrategy``) rather than a special case
+        for the strategies with no knobs. ``baseline`` has none to read: it is
+        the current behaviour, and a knob that changed it would make it
+        something else. ``BaselineStrategy()`` therefore still constructs, and
+        behaves identically whatever is passed.
+        """
 
     def plan_next_step(
         self, run_state: RunState, at: datetime, ctx: StrategyContext

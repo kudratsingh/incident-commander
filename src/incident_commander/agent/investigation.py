@@ -30,6 +30,7 @@ from incident_commander.agent.hypothesis import (
     RemediateAction,
     StopAction,
 )
+from incident_commander.agent.planner_context import format_planner_context
 from incident_commander.agent.state import (
     EvidenceEntry,
     IncidentState,
@@ -44,8 +45,8 @@ from incident_commander.llm.repair import (
     call_with_output_repair,
 )
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError, ToolResult
-from incident_commander.tools.policies import Tier, is_cached_read, tier_of, tools_at_or_below
-from incident_commander.tools.registry import TOOL_REGISTRY, description_of
+from incident_commander.tools.policies import Tier, is_cached_read, tier_of
+from incident_commander.tools.registry import TOOL_REGISTRY
 from incident_commander.tools.wire import wire_arguments
 
 _TOOL_NAME: Final[str] = "get_consumer_lag"
@@ -927,7 +928,7 @@ def _plan_next_step(
     # measures what was sent. Re-rendering it afterwards to measure it would
     # be a second render that a future non-deterministic context would
     # silently make a different string from the one the model saw.
-    user_message = _format_planner_context(run_state)
+    user_message = format_planner_context(run_state)
     call = call_with_output_repair(
         llm_client,
         system_prompt=system_prompt,
@@ -1201,7 +1202,8 @@ def _refuse_whole_queue_handoff(
 
     Same shape as ``_refuse_handoff`` and for the same reason: the state stays
     INVESTIGATING, the reason lands in the evidence trail that
-    ``_format_planner_context`` renders into the next planner turn, and the
+    ``planner_context.format_planner_context`` renders into the next planner
+    turn, and the
     planner gets to fix its own omission.
 
     The reason says which call, says what a filtered page is not, and says what
@@ -1251,7 +1253,8 @@ def _refuse_handoff(run_state: RunState, at: datetime, subject: AlertSubject) ->
     Deliberately NOT a terminal transition. The state stays INVESTIGATING and
     the loop continues, so the planner gets to fix its own omission — the
     refusal reason is rendered into the next planner context by
-    ``_format_planner_context`` like any other evidence line. This mirrors the
+    ``planner_context.format_planner_context`` like any other evidence line.
+    This mirrors the
     plan-guard rejections in ``remediation.make_llm_plan``: reject the bad
     output, say precisely what would make it good, let the model try again.
 
@@ -1354,49 +1357,3 @@ def _handoff_to_planning(run_state: RunState, at: datetime, reason: str) -> RunS
             "evidence": (*run_state.evidence, entry),
         }
     )
-
-
-def _format_planner_context(run_state: RunState) -> str:
-    """What the investigation planner is shown.
-
-    The alert, the budget left, the evidence gathered so far, and the
-    read-only probes it may pick from.
-    """
-    remaining_calls = max(run_state.budget.max_tool_calls - run_state.budget.tool_calls_used, 0)
-    remaining_tokens = max(run_state.budget.max_tokens - run_state.budget.tokens_used, 0)
-    lines = [
-        f"Alert: {json.dumps(dict(run_state.alert), sort_keys=True)}",
-        f"Budget remaining: tool_calls={remaining_calls}, tokens={remaining_tokens}",
-        "",
-    ]
-    if run_state.evidence:
-        lines.append("Evidence so far:")
-        for entry in run_state.evidence:
-            lines.append(f"  - [{entry.tool_name}] {entry.result_summary}")
-    else:
-        lines.append("Evidence so far: (none)")
-    lines.append("")
-    # Investigation planner sees read tools only (Tier.READ). Tier-1 tools
-    # are executed by the REMEDIATING transition; the planner emits a
-    # RemediateAction to hand off, it does not call them directly.
-    lines.append("Available tools (read-only probes):")
-    for name in sorted(tools_at_or_below(Tier.READ)):
-        spec = TOOL_REGISTRY[name]
-        schema = spec.input_model.model_json_schema()
-        lines.append(f"  - {name}: {_indented_description(name)}")
-        lines.append(f"    input_schema={json.dumps(schema, sort_keys=True)}")
-    return "\n".join(lines)
-
-
-def _indented_description(tool_name: str) -> str:
-    """Platform-authored tool description, indented for the context block.
-
-    Verbatim from the contract snapshot (see ``registry.description_of``).
-    These are load-bearing: freshness windows, delayed-replay semantics,
-    and observable effects live here, and the planner can only reason
-    about them if it reads them.
-    """
-    text = description_of(tool_name)
-    if not text:
-        return "(no description)"
-    return text.replace("\n", "\n    ")

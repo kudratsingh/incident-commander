@@ -75,9 +75,13 @@ from pathlib import Path
 from typing import Any, Final
 
 from evals import artifacts, regression
+from evals.candidate_metrics import measure, steps_of
 from evals.graders.deterministic import GradeDimension, is_vacuous_detail
 from evals.graders.root_cause import coverage_over
 from evals.runner import RunReport, ScenarioOutcome
+from evals.scenarios.loader import load_scenarios
+from evals.tracing import TraceKind
+from incident_commander.agent.hypothesis import HypothesisCategory
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 
@@ -908,6 +912,149 @@ def _not_measurable(what: str, why: str, requires: Sequence[str]) -> dict[str, A
     }
 
 
+def step_records_in(root: Path, archive: str) -> dict[str, list[dict[str, Any]]]:
+    """Every ``step`` trace record in one archive, by scenario name (WP-5.2).
+
+    An archive's ``traces/<scenario>.jsonl`` holds the per-step research records
+    when the run had ``EVAL_TRACE_DIR`` set; a canned sweep does not, so most
+    archives have no ``traces/`` directory at all and this returns nothing. That
+    absence is why ``_pass_at_k`` below still reports the metric as not
+    measurable over today's scope — the code path exists, and there is no data
+    in scope for it to read.
+
+    Malformed lines are skipped rather than raising. A trace file is append-only
+    evidence written across a run that can be killed mid-line (F-002's cousin),
+    and a half-written last line must not take out a report over ten archives.
+    """
+    found: dict[str, list[dict[str, Any]]] = {}
+    traces = archive_dir(root, archive) / "traces"
+    if not traces.is_dir():
+        return found
+    for path in sorted(traces.glob("*.jsonl")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict) and record.get("kind") == TraceKind.STEP.value:
+                found.setdefault(path.stem, []).append(record)
+    return found
+
+
+def _ground_truths(root: Path) -> dict[str, tuple[HypothesisCategory, ...]]:
+    """Scenario name → declared root causes, for the scenarios that declare any.
+
+    Read from the corpus rather than from an archive: the labels are the
+    evaluator's (ADR 0038) and the archive holds the agent's answers. A scenario
+    that declares none is absent here, and a run of it is *not graded* rather
+    than scored a miss (ADR 0040).
+    """
+    return {
+        scenario.name: scenario.ground_truth.root_causes
+        for scenario in load_scenarios(root / "evals" / "scenarios")
+        if scenario.ground_truth is not None
+    }
+
+
+#: The smallest candidate set this section will report a pass@k over.
+#:
+#: Three live archives in scope already carry ``step`` records — ``baseline``
+#: wrote them, one candidate each — so "no candidate sets exist" stopped being
+#: the reason this section is unmeasurable the moment WP-2.1 landed. The reason
+#: now is sharper and it is this constant: **pass@1 over a one-candidate set is
+#: the ROOT_CAUSE dimension under a second name.** It asks "was the top
+#: diagnosis correct", which the report already answers, and printing it here as
+#: pass@k would put one measurement in the table twice — the same relabelling
+#: the ``calibration`` section refuses when it declines to call the briefing
+#: judge's scores a calibration. pass@k exists to say what ENUMERATION bought,
+#: so it is reported for the arms that enumerate.
+#:
+#: Pinned by ``tests/unit/test_candidate_metrics.py::
+#: TestTheReportSectionScopesItselfToEnumeratingArms``, both ways.
+ENUMERATING_SET_SIZE: Final[int] = 2
+
+
+def _candidate_rows(root: Path, sources: Sequence[Source]) -> list[dict[str, Any]]:
+    """One pass@k row per (archive, scenario) whose trace carries enumerated sets.
+
+    Empty over today's scope: every ``step`` record in it was written by
+    ``baseline``, whose sets hold one candidate — see ``ENUMERATING_SET_SIZE``.
+    The section below therefore still reports itself unmeasurable, and becomes
+    measurable the moment a best-of-N arm's archive enters the scope, without
+    another packet editing this file.
+    """
+    rows: list[dict[str, Any]] = []
+    truths: dict[str, tuple[HypothesisCategory, ...]] | None = None
+    for source in sources:
+        for scenario, records in step_records_in(root, source.archive).items():
+            if truths is None:
+                truths = _ground_truths(root)
+            expected = truths.get(scenario)
+            if expected is None:
+                # No label: not graded, not a miss. Counted nowhere rather than
+                # counted as zero — the mistake INC-003 cost $2.15 to learn.
+                continue
+            metrics = measure(records, expected)
+            if metrics.candidates_generated == 0:
+                continue
+            if max(len(step.candidates) for step in steps_of(records)) < ENUMERATING_SET_SIZE:
+                continue
+            rows.append(
+                {
+                    "archive": source.archive,
+                    "scenario": scenario,
+                    "strategy": metrics.strategy,
+                    "steps": metrics.steps,
+                    "candidates_generated": metrics.candidates_generated,
+                    "pass_at_k": [
+                        {"k": entry.k, "effective_k": entry.effective_k, "hit": entry.hit}
+                        for entry in metrics.pass_at_k
+                    ],
+                    "appeared_at_any_step": metrics.appeared_at_any_step,
+                    "first_appeared_at_iteration": metrics.first_appeared_at_iteration,
+                    "cross_step_duplicate_rate": metrics.cross_step_duplicate_rate,
+                    "within_step_rejection_rate": metrics.within_step_rejection_rate,
+                    "rejections_by_class": dict(metrics.rejections_by_class),
+                }
+            )
+    return rows
+
+
+def _pass_at_k(root: Path, sources: Sequence[Source]) -> dict[str, Any]:
+    """pass@k, appeared-at-any-step and the two duplicate rates (plan 03 § 7.2).
+
+    Measured when an archive in scope persisted per-step candidate sets; the
+    same "not measurable, and here is what it needs" block as before when none
+    did, which is every archive in scope today. Selected@k is absent from both
+    branches for the reason the ``oracle_gap`` section gives: no selector arm
+    has run (plan 02 § 12, Phase 6).
+    """
+    rows = _candidate_rows(root, sources)
+    if not rows:
+        return _not_measurable(
+            "pass@k (plan 03 § 7.2)",
+            "pass@k reads the final-step candidate SET; a committed report carries one graded "
+            "outcome per run and no candidate set at all",
+            ("WP-3.x recorded runs that persist per-step candidate sets (StepRecord, WP-2.1)",),
+        )
+    return {
+        "metric": "pass@k (plan 03 § 7.2)",
+        "measurable": True,
+        "value": {
+            "rows": rows,
+            "selected_at_k": None,
+            "selected_at_k_why": (
+                "no candidate_selector arm has run (plan 02 § 12, Phase 6), so the "
+                "oracle gap has one term and is reported as unmeasurable beside it"
+            ),
+        },
+        "why": "",
+        "requires": [],
+    }
+
+
 def _scenario_level_regressions(sources: Sequence[Source], rows: Sequence[Row]) -> dict[str, Any]:
     """Arm against arm, using the gate's own ``compare`` (WO-R2-79's definition).
 
@@ -1146,12 +1293,7 @@ def assemble(root: Path, archives: Sequence[str] = SCOPE) -> dict[str, Any]:
         "safety_by_strategy": _safety_by_strategy(rows),
         "tokens_vs_accuracy": _tokens_vs_accuracy(rows),
         "tools_vs_accuracy": _tools_vs_accuracy(rows),
-        "pass_at_k_vs_selected_at_k": _not_measurable(
-            "pass@k (plan 03 § 7.2)",
-            "pass@k reads the final-step candidate SET; a committed report carries one graded "
-            "outcome per run and no candidate set at all",
-            ("WP-3.x recorded runs that persist per-step candidate sets (StepRecord, WP-2.1)",),
-        ),
+        "pass_at_k_vs_selected_at_k": _pass_at_k(root, sources),
         "oracle_gap": _not_measurable(
             "oracle_gap@k = pass@k − selected@k (plan 03 § 7.3)",
             "both terms are unavailable for the reason above, and the selector strategy "
@@ -1271,6 +1413,62 @@ def render_difference(difference: dict[str, Any]) -> str:
         f"({difference['reps_left']} vs {difference['reps_right']} runs, paired on "
         f"{difference['paired_on']}), {floor}, {interval}."
     )
+
+
+def _render_candidate_rows(value: dict[str, Any]) -> list[str]:
+    """The pass@k table, when there was a candidate set to compute one from.
+
+    Prints every k that was asked for beside the ``effective_k`` the run could
+    answer, because pass@8 over a 4-candidate set is pass@4 wearing a bigger
+    number, and a table that hid the cap would invite exactly that reading. The
+    two duplicate rates are printed as two columns for the reason
+    ``evals/candidate_metrics.py`` keeps them apart: one is a schema refusal and
+    one is a modelling finding.
+    """
+    ks = [entry["k"] for entry in value["rows"][0]["pass_at_k"]]
+    lines = [
+        f"Selected@k: not available — {value['selected_at_k_why']}.",
+        "",
+    ]
+    lines.extend(
+        _table(
+            (
+                "archive",
+                "scenario",
+                "arm",
+                "steps",
+                "candidates",
+                *(f"pass@{k}" for k in ks),
+                "any step",
+                "dup rate (cross-step)",
+                "refused sets",
+            ),
+            (
+                (
+                    f"`{row['archive']}`",
+                    row["scenario"],
+                    f"`{row['strategy']}`",
+                    str(row["steps"]),
+                    str(row["candidates_generated"]),
+                    *(_pass_cell(entry) for entry in row["pass_at_k"]),
+                    "yes" if row["appeared_at_any_step"] else "no",
+                    _number(row["cross_step_duplicate_rate"]),
+                    _number(row["within_step_rejection_rate"]),
+                )
+                for row in value["rows"]
+            ),
+        )
+    )
+    lines.append("")
+    return lines
+
+
+def _pass_cell(entry: dict[str, Any]) -> str:
+    """One pass@k cell: the verdict, and the cap when k was larger than the set."""
+    if entry["hit"] is None:
+        return "n/a"
+    verdict = "hit" if entry["hit"] else "miss"
+    return verdict if entry["effective_k"] == entry["k"] else f"{verdict} (@{entry['effective_k']})"
 
 
 def render_markdown(document: dict[str, Any]) -> str:
@@ -1480,14 +1678,16 @@ def render_markdown(document: dict[str, Any]) -> str:
 
     for key in ("pass_at_k_vs_selected_at_k", "oracle_gap", "calibration"):
         section = sections[key]
-        lines += [
-            f"## {SECTION_TITLES[key]}",
-            "",
-            f"**Not measurable from this scope.** {section['metric']}: {section['why']}.",
-            "",
-            "Needs: " + "; ".join(section["requires"]) + ".",
-            "",
-        ]
+        lines += [f"## {SECTION_TITLES[key]}", ""]
+        if not section["measurable"]:
+            lines += [
+                f"**Not measurable from this scope.** {section['metric']}: {section['why']}.",
+                "",
+                "Needs: " + "; ".join(section["requires"]) + ".",
+                "",
+            ]
+            continue
+        lines.extend(_render_candidate_rows(section["value"]))
 
     regressions = sections["scenario_level_regressions"]
     lines += [

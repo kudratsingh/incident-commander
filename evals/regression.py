@@ -246,10 +246,11 @@ def _print_closing_status(latest: RunReport) -> None:
 def _print_provenance(baseline: RunReport, latest: RunReport) -> None:
     """Warn-only provenance check (S-14; ADR 0013).
 
-    Deliberately never gates: the committed baseline predates provenance
-    stamping (``degraded_count`` is ``None``), so a hard mismatch gate would
-    fail every comparison until the next bless — an honest warning beats
-    forcing a baseline rewrite. Gating is deferred per ADR 0013.
+    The baseline blessed on 2026-09-15 carries provenance stamps. This
+    check still only warns on differing ``degraded_count`` values, or on
+    older reports that lack the field. Cross-model comparisons are a
+    separate hard refusal in ``cross_model_refusal``; they require a
+    deliberate re-bless, not a warning override.
     """
     if baseline.degraded_count is None or latest.degraded_count is None:
         unknown = "|".join(

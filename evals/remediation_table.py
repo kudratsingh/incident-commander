@@ -1,7 +1,7 @@
 """Refresh the methodology's current claims from validated scenario models.
 
-Only the current-claim column is generated. Historical failures are editorial
-and stay verbatim. Row membership is derived too, so a new scenario cannot be
+Only the current-claim column is generated. Historical failures and the short editorial gloss
+stay verbatim. Row membership is derived too, so a new scenario cannot be
 left out by forgetting to list it; missing rows are added without inventing
 history.
 """
@@ -20,13 +20,13 @@ from evals.scenarios.schema import Scenario
 
 ROOT = Path(__file__).resolve().parents[1]
 HEADING = "### The remediation claim, per scenario"
-HEADER = "| scenario | laziest trajectory that passed before | claim now |"
+HEADER = "| scenario | laziest trajectory that passed before | claim now | editorial summary |"
 
 
 def _code(value: object) -> str:
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
     # Table delimiters and backticks inside a code span still need escaping.
-    return "`" + text.replace("|", "&#124;").replace("`", "&#96;").replace("\n", " ") + "`"
+    return "`" + text.replace("|", r"\|").replace("`", "&#96;").replace("\n", " ") + "`"
 
 
 def _claim(model: BaseModel) -> str:
@@ -75,31 +75,46 @@ def current_claim(scenario: Scenario) -> str:
 
 def table_span(document: str) -> tuple[int, int]:
     """Where the generated table starts and ends inside the methodology document."""
-    start = document.index(HEADER, document.index(HEADING))
-    end = document.index("\n\n", start)
+    start = document.index("| scenario |", document.index(HEADING))
+    end = start
+    for line in document[start:].splitlines(keepends=True):
+        if not line.startswith("|"):
+            break
+        end += len(line)
+    end = len(document[:end].rstrip("\r\n"))
     return start, end
 
 
 def render_table(document: str, scenarios: Sequence[Scenario]) -> str:
-    """Preserve the before column, while deriving row membership and claims."""
+    """Preserve both editorial columns, while deriving membership and claims."""
     start, end = table_span(document)
-    history: dict[str, str] = {}
+    history: dict[str, tuple[str, str]] = {}
     for line in document[start:end].splitlines()[2:]:
-        match = re.fullmatch(r"\| `([^`]+)` \| (.*?) \| (.*?) \|", line)
-        if match is None:
+        cells = re.split(r"(?<!\\)\|", line)[1:-1]
+        if len(cells) not in {3, 4}:
             raise ValueError(f"malformed remediation table row: {line}")
-        name, before, _ = match.groups()
+        name_cell, before, *_ = (cell.strip() for cell in cells)
+        if not re.fullmatch(r"`[^`]+`", name_cell):
+            raise ValueError(f"malformed remediation scenario: {name_cell}")
+        name = name_cell[1:-1]
+        gloss = cells[3].strip() if len(cells) == 4 else "Editorial summary pending review."
         if name in history:
             raise ValueError(f"duplicate remediation table row: {name}")
-        history[name] = before
+        history[name] = (before, gloss)
     selected = {s.name: s for s in scenarios if makes_a_remediation_claim(s)}
     obsolete = history.keys() - selected.keys()
     if obsolete:
         raise ValueError(f"table history needs review for removed scenarios: {sorted(obsolete)}")
-    rows = [HEADER, "|---|---|---|"]
+    rows = [HEADER, "|---|---|---|---|"]
     for name, scenario in sorted(selected.items()):
-        before = history.get(name, "No earlier passing failure recorded in this table.")
-        rows.append(f"| `{name}` | {before} | {current_claim(scenario)} |")
+        before, gloss = history.get(
+            name,
+            (
+                "No earlier passing failure recorded in this table.",
+                "Editorial summary pending review.",
+            ),
+        )
+        rows.append(f"| `{name}` | {before} | {current_claim(scenario)} | {gloss} |")
     return "\n".join(rows)
 
 

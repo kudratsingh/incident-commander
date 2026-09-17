@@ -102,3 +102,36 @@ def test_history_is_not_silently_deleted_if_a_scenario_disappears() -> None:
     document = updated_document((ROOT / "docs/eval-methodology.md").read_text(), scenarios)
     with pytest.raises(ValueError, match="history needs review"):
         updated_document(document, [])
+
+
+@pytest.mark.parametrize("suffix", ["", "\n", "\n## Next section\nText", "\n\nText"])
+def test_table_span_preserves_following_content_without_blank_line(suffix: str) -> None:
+    scenarios = load_scenarios(ROOT / "evals/scenarios")
+    document = (ROOT / "docs/eval-methodology.md").read_text()
+    start, end = table_span(document)
+    isolated = document[:end] + suffix
+    assert table_span(isolated) == (start, end)
+    assert updated_document(isolated, scenarios) == isolated
+
+
+def test_editorial_cells_and_escaped_pipes_survive_regeneration() -> None:
+    scenarios = load_scenarios(ROOT / "evals/scenarios")
+    document = (ROOT / "docs/eval-methodology.md").read_text()
+    start, end = table_span(document)
+    row = document[start:end].splitlines()[2]
+    cells = row.split(" | ")
+    cells[1] = r"Historical A \| B."
+    cells[-1] = r"Editorial A \| B. |"
+    edited = document.replace(row, " | ".join(cells))
+    assert updated_document(edited, scenarios) == edited
+    source = next(s for s in scenarios if s.name == "remediate_stale_cache_success")
+    probe = source.expected_precondition[0]
+    changed = source.model_copy(
+        update={"expected_precondition": (probe.model_copy(update={"arguments": {"key": "a|b"}}),)}
+    )
+    rendered = current_claim(changed)
+    assert r"a\|b" in rendered
+    assert "&#124;" not in rendered
+    replaced = [changed if s.name == changed.name else s for s in scenarios]
+    refreshed = updated_document(edited, replaced)
+    assert updated_document(refreshed, replaced) == refreshed

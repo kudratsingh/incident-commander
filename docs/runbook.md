@@ -15,9 +15,52 @@ PLATFORM_MCP_URL=http://localhost:8001/mcp
 PLATFORM_REST_URL=http://localhost:8000
 PLATFORM_TOKEN=sa_...               # the AGENT's principal; make bootstrap-token
 PLATFORM_CHAOS_TOKEN=sa_...          # the EVALUATOR's (chaos:invoke); same command
+PLATFORM_SMOKE_TOKEN=sa_...          # the read-only twin; same command
 PLATFORM_WEBHOOK_SECRET=<from platform config>
 DATABASE_URL=postgresql://...       # agent's own DB, separate from platform
 ```
+
+### Three principals, and which target uses which
+
+`make bootstrap-token` prints **three** `.env` lines and writes nothing itself — you paste all
+three. They are three different service accounts on the platform, not three copies of one
+credential, and the eval is only honest while they stay apart:
+
+| `.env` variable | Platform account | Scopes | Who uses it |
+|---|---|---|---|
+| `PLATFORM_TOKEN` | `incident-commander` | `telemetry:read`, `incidents:read`, `actions:execute` | the AGENT under test — its MCP client on every `make eval` / `make eval-live` run, and the Tier-1 calls `make test-idempotency` replays |
+| `PLATFORM_CHAOS_TOKEN` | `incident-commander-chaos` | `telemetry:read`, `incidents:read`, `chaos:invoke` | the EVALUATOR — every seed/reset/chaos path: all `make chaos-*` targets, the runner's chaos setup and teardown inside `make eval-live`, `make world-dossier`'s seeding leg, and the hook `make test-idempotency` stages its world with |
+| `PLATFORM_SMOKE_TOKEN` | `incident-commander-smoke` | `telemetry:read`, `incidents:read` | the read-only stage — `make eval-smoke`, `make world-audit`, and `make world-dossier`'s read legs |
+
+Two rules follow from the table, and both are enforced rather than trusted:
+
+- **The agent never holds `chaos:invoke`** (owner decision O-4, platform ADR 0012). Since platform
+  v0.6.5 a principal that can fire the lab is also served the `chaos.%` audit rows, so an agent
+  holding that scope can read which hook was fired against which resource seconds before its own
+  alert — the answer key. `make bootstrap-token` strips the scope from an existing
+  `incident-commander` account and refuses to add it back through the `--scope` flag, and the
+  runner probes for its absence before any spend (exit 4). When a hook is refused for lack of
+  scope the remedy is the chaos token in the row below — never a wider agent account.
+- **The evaluator never holds `actions:execute`.** Remediating is the thing being measured, so the
+  principal that stages the world must not be able to do it.
+
+There is no fallback between them. An unset `PLATFORM_CHAOS_TOKEN` fails loudly, naming the
+variable and this command; it never silently resolves to the agent's token, because that failure
+would surface as a mid-run scope refusal with the run archive already open.
+
+**Nothing needs sourcing into your shell.** Every Python entry point (`make eval`, `eval-live`,
+`eval-smoke`, `world-audit`, `world-dossier`, `eval-reset`) reads `.env` through `Settings`
+(`env_file=".env"`), and the `chaos-*` recipes — whose script reads `os.environ` instead — are
+handed their values by the Makefile's own `export` lines. Keep the values **unquoted** in `.env`:
+make's `-include .env` keeps quotes where dotenv strips them.
+
+The two paths resolve a conflict in opposite directions, which is worth knowing the one time it
+bites you. A token exported in your shell **wins** over `.env` for the `Settings` paths
+(pydantic-settings ranks the environment above the env file), so a stale export is why a freshly
+pasted token can seem not to take. For the `chaos-*` targets `.env` wins instead, because
+`-include .env` sets a *make* variable and the recipe re-exports that — the same precedence that
+let every "read-scoped" smoke run before 2026-08-07 silently hold write scope. When in doubt,
+fix `.env` and clear the export rather than reasoning about which one you are on.
 
 ## Day-to-day commands
 

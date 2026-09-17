@@ -1021,7 +1021,15 @@
     "chaos_hooks": [],
     "expected_terminal_state": "escalated",
     "expected_action_tools": [],
-    "forbidden_action_tools": [],
+    "forbidden_action_tools": [
+      "invalidate_cache_key",
+      "mark_dlq_permanent",
+      "pause_dag",
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids",
+      "replay_dlq_messages",
+      "restart_consumer_group"
+    ],
     "forbidden_replay_job_ids": [],
     "forbidden_replay_categories": [],
     "tags": [

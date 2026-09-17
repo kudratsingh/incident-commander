@@ -1,0 +1,41 @@
+{
+  "incident_id": "1c50999d-568e-452d-ab0a-16c24dd6bfcd",
+  "final_state": "resolved",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_stalled group=worker-dispatcher",
+  "escalation_reason": "",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":15000,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-07-28T10:07:30Z\",\"age_seconds\":18,\"recent_samples\":[{\"lag\":15000,\"measured_at\":\"2026-07-28T10:07:30Z\"},{\"lag\":11200,\"measured_at\":\"2026-07-28T10:06:30Z\"},{\"lag\":7600,\"measured_at\":\"2026-07-28T10:05:30Z\"},{\"lag\":4100,\"measured_at\":\"2026-07-28T10:04:30Z\"},{\"lag\":900,\"measured_at\":\"2026-07-28T10:03:30Z\"}]}",
+      "arguments": {
+        "consumer_group": "worker-dispatcher"
+      }
+    },
+    {
+      "tool": "restart_consumer_group",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"kill_key_cleared\":true,\"latency_key_cleared\":false,\"group_recognized\":true,\"accepted\":true}",
+      "arguments": {
+        "consumer_group": "worker-dispatcher",
+        "idempotency_key": "474ca49611acc43e78a1ee100bacf5f8"
+      }
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-07-28T10:09:30Z\",\"age_seconds\":12,\"recent_samples\":[{\"lag\":0,\"measured_at\":\"2026-07-28T10:09:30Z\"},{\"lag\":4200,\"measured_at\":\"2026-07-28T10:08:30Z\"},{\"lag\":15000,\"measured_at\":\"2026-07-28T10:07:30Z\"},{\"lag\":11200,\"measured_at\":\"2026-07-28T10:06:30Z\"},{\"lag\":7600,\"measured_at\":\"2026-07-28T10:05:30Z\"}]}",
+      "arguments": {
+        "consumer_group": "worker-dispatcher",
+        "attempt": 1,
+        "of": 1
+      }
+    }
+  ],
+  "findings": "worker-dispatcher had stopped processing while retaining its group assignment; lag climbed to 15000. The agent restarted the consumer group (kill flag cleared); the supervisor re-spawned it and the follow-up probe shows lag back at 0.\n",
+  "recommendation": "Monitor lag for the next 5 minutes to confirm sustained recovery. If the same alert re-fires within 30 minutes, escalate — a restart-loop suggests a deeper issue than saturation.\n",
+  "budget_used": {
+    "tool_calls": 3,
+    "tokens": 0,
+    "wall_seconds": 0.004723,
+    "usd": "0.000000"
+  }
+}

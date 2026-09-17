@@ -1,0 +1,29 @@
+{
+  "incident_id": "85bff8fe-cecc-4b8e-bda8-7e107ece6475",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.cache severity=critical fingerprint=cache_miss_spike",
+  "escalation_reason": "planner stop: no_fault — the alerted key is there and Redis is serving normally; there is nothing to fix, so no action was taken and the alerting rule is what needs a human.\n",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_cache_key_info",
+      "summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"exists\":true,\"type\":\"string\",\"ttl_seconds\":86326,\"size\":120}",
+      "arguments": {
+        "key": "cache:jobs:worker-dispatcher:hot_set"
+      }
+    },
+    {
+      "tool": "get_redis_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":0.8,\"connected_clients\":12,\"used_memory_bytes\":18874368,\"used_memory_human\":\"18.00M\",\"keyspace_hits\":98000,\"keyspace_misses\":2000,\"error\":null}",
+      "arguments": {}
+    }
+  ],
+  "findings": "The alert reported a cache miss spike on cache:jobs:worker-dispatcher:hot_set. The key is present (string, 120 bytes, TTL ~24h) and Redis is healthy (ping 0.8ms, 98% hit rate, 18MB used). The reported condition is not present in the system.\n",
+  "recommendation": "Treat this page as a false positive and reconcile the cache_miss_spike rule against the current hit-rate metric before re-arming it. No cache key was invalidated and no remediation is warranted.\n",
+  "budget_used": {
+    "tool_calls": 2,
+    "tokens": 0,
+    "wall_seconds": 0.000035,
+    "usd": "0.000000"
+  }
+}

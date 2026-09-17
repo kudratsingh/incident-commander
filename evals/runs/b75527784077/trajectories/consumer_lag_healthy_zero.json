@@ -1,0 +1,148 @@
+{
+  "scenario": "consumer_lag_healthy_zero",
+  "incident_id": "4f20aeb6-f21f-4ffd-9cea-5613a1423831",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "4f20aeb6-f21f-4ffd-9cea-5613a1423831",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "healthy-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:03:42.839243Z",
+      "updated_at": "2026-09-17T13:03:42.839243Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "4f20aeb6-f21f-4ffd-9cea-5613a1423831",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "healthy-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000041,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "f5038072-7c48-4474-afa8-f4e75247827c",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:03:42.839284Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:03:42.839243Z",
+      "updated_at": "2026-09-17T13:03:42.839284Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "4f20aeb6-f21f-4ffd-9cea-5613a1423831",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "healthy-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000056,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "f5038072-7c48-4474-afa8-f4e75247827c",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:03:42.839284Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a357dd8c-3dd9-4a1f-88b3-6badab04444e",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "healthy-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:healthy-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}",
+          "timestamp": "2026-09-17T13:03:42.839299Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "16ca9248-e396-485e-a320-dd29a6571f8d",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "Reading is healthy and the alerted condition is absent; human should reconcile the alerting rule.\n"
+          },
+          "result_summary": "planner stop: Reading is healthy and the alerted condition is absent; human should reconcile the alerting rule.\n",
+          "timestamp": "2026-09-17T13:03:42.839299Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "no_fault",
+          "name": "alerting_false_positive",
+          "confidence": 0.75,
+          "reasoning": "Lag reads 0 on healthy-consumer with lag_known true, so the alerted condition is not present. Nothing is broken and there is nothing to fix; what needs attention is the paging rule, not the consumer.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:03:42.839243Z",
+      "updated_at": "2026-09-17T13:03:42.839299Z"
+    }
+  ],
+  "invocation_id": "b75527784077"
+}

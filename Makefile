@@ -1,4 +1,4 @@
-.PHONY: traffic demo-destroy help setup check lint types test test-unit test-integration test-contract test-drift test-idempotency fixture-drift fixture-drift-bless test-e2e eval eval-live eval-smoke eval-reg eval-reset world-dossier world-record trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
+.PHONY: traffic demo-destroy help setup check lint types test test-unit test-integration test-contract test-drift test-idempotency fixture-drift fixture-drift-bless test-e2e eval eval-live eval-smoke eval-reg eval-reset world-dossier world-record world-drift trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
 
 # Make does not read .env on its own — only the Python side does, via
 # dotenv. Without this include, a make-level var like PLATFORM_COMPOSE
@@ -60,6 +60,10 @@ help:
 	@echo "                   replay; ONLY=<name> REQUIRED, full scenario name. Same seeding"
 	@echo "                   and lints as world-dossier, and KEEPS every answer keyed by the"
 	@echo "                   wired arguments. Writes evals/recorded_worlds/, then resets"
+	@echo "  world-drift      FREE (zero-LLM) check that a RECORDED world still matches the"
+	@echo "                   live one; WORLD=<recording id|scenario> REQUIRED. Re-reads the"
+	@echo "                   recording's own calls and diffs them with the fixture-drift"
+	@echo "                   walk. Run it before reporting any recorded result. Exit 1 = drift"
 	@echo "  trace-report     render evals/traces/*.jsonl → readable txt files"
 	@echo "  chaos-help       list chaos setup subcommands (kill-consumer, etc.)"
 	@echo "  eval-reg         full offline eval + regression gate vs baseline (refuses ONLY=)"
@@ -353,6 +357,43 @@ else
 # compose file, and make exports nothing by default.
 world-record:
 	PLATFORM_COMPOSE="$(PLATFORM_COMPOSE)" uv run python -m evals.recorder --only $(ONLY)
+endif
+
+# Is a recorded world still the world it was? (evals/world_drift.py, WP-3.3)
+#
+# Re-reads the RECORDING's OWN calls against the live platform under the
+# read-scoped smoke principal and diffs the two with `evals/fixture_drift.py`'s
+# walk, so the fields that legitimately move between two honest observations
+# (`_VOLATILE`: the DLQ clocks, the lag reading's freshness metadata, the redis
+# gauges, the cache TTL) are checked for type and not for value. Zero LLM calls.
+#
+# WORLD is REQUIRED and is a recording's invocation id — the last segment of a
+# filename under evals/recorded_worlds/ — or a scenario's full name for its
+# newest recording. Guarded at parse time here AND inside the module, like
+# `world-record`, because `python -m evals.world_drift` never comes through make.
+#
+# It SEEDS CHAOS when the recording is of a seeded world, and resets afterwards:
+# the live platform does not hold the scenario's fault until its hooks fire, so a
+# check that skipped the seeding would report the whole fault as drift every
+# time. That makes it an operation with a go behind it, never something CI runs.
+#
+# ORDERING, inherited from `test-drift` and for the same reason (see its comment
+# above): a drift check must not run AFTER a mutating check in the same sequence,
+# or it reports that check's mutations as drift. `make test-idempotency` last,
+# always.
+#
+# Exit 1 means the world moved — not that the check failed. Read
+# docs/runbook.md's recorded-mode section before re-recording: the three
+# readings are a platform release, a fixture-pack change, and a dirty world.
+ifndef WORLD
+world-drift:
+	$(error 'make world-drift' without WORLD= has no meaning: a drift check compares ONE recorded world against the live one; name it: make world-drift WORLD=<recording invocation id or scenario name>)
+else
+# PLATFORM_COMPOSE passed explicitly, for the reason world-dossier states: the
+# post-reset baseline re-audit scans redis for `chaos:*` keys through this
+# compose file, and make exports nothing by default.
+world-drift:
+	PLATFORM_COMPOSE="$(PLATFORM_COMPOSE)" uv run python -m evals.world_drift --world $(WORLD)
 endif
 
 # Renders what is not yet rendered (WO-R3-257): a scenario whose newest

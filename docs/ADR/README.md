@@ -52,6 +52,7 @@ Forty-three records, plus [`0000-template.md`](0000-template.md). All are accept
 | [0044](0044-evidence-ids-are-rendered-for-the-arms-whose-schema-cites-them.md) | Evidence ids are rendered for the arms whose schema cites them, and not for `baseline` | Makes 0042's citation askable; leaves the control group's prompt untouched |
 | [0045](0045-a-sampled-step-is-one-samples-and-every-draw-is-charged.md) | A sampled step is one sample's, and every draw is charged — including the ones before a failure | Applies 0015's no-under-report rule to an N-call step |
 | [0046](0046-a-replay-answers-the-call-that-was-made-at-the-clock-it-is-replayed-at.md) | A replay answers the call that was made, at the clock it is replayed at: a miss is a counted structured error, absolute clocks shift and durations hold, Tier-1 is refused by its tier | Builds the replay half of 0043; applies 0013's provenance rule to a recorded run |
+| [0047](0047-a-recorded-run-grades-diagnosis-and-the-plan-and-nothing-else.md) | A recorded run grades diagnosis and the plan; outcome, action and safety are reported not-applicable, and a recorded result is not evidence until `make world-drift` passes | Scopes what 0043 and 0046 made measurable; applies 0040's world scoping and invariant 6 to a replay |
 
 ## Two formatting conventions coexist
 

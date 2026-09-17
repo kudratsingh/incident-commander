@@ -1,0 +1,45 @@
+{
+  "incident_id": "dd2f8753-c72d-419a-82ae-3afd1c50ef41",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.cache severity=critical fingerprint=cache_miss_spike",
+  "escalation_reason": "insufficient tool-call budget for action+verify (remaining=1); escalating without executing",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_redis_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":0.903,\"connected_clients\":11,\"used_memory_bytes\":1692176,\"used_memory_human\":\"1.61M\",\"keyspace_hits\":6020,\"keyspace_misses\":991365,\"error\":null}",
+      "arguments": {}
+    },
+    {
+      "tool": "list_active_alerts",
+      "summary": "{\"total\":3,\"alerts\":[{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-09-17T13:09:13.342757Z\",\"extra_data\":null},{\"id\":\"c6c4e180-f625-53c2-85c2-2d505fec61e5\",\"severity\":\"warning\",\"source\":\"dlq\",\"title\":\"DLQ backlog growing\",\"description\":\"3 send_email jobs dead-lettered in last hour.\",\"fired_at\":\"2026-09-17T13:02:13.342757Z\",\"extra_data\":null},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-09-17T12:52:13.342757Z\",\"extra_data\":null}]}",
+      "arguments": {
+        "severity": null,
+        "limit": 50
+      }
+    },
+    {
+      "tool": "get_deploy_history",
+      "summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T11:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T10:17:13.337886Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-09-17T07:17:13.337886Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-09-16T19:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-09-16T15:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+      "arguments": {
+        "environment": null,
+        "limit": 5
+      }
+    },
+    {
+      "tool": "get_cache_key_info",
+      "summary": "{\"key\":\"cache:hot\",\"exists\":false,\"type\":null,\"ttl_seconds\":null,\"size\":null}",
+      "arguments": {
+        "key": "cache:hot"
+      }
+    }
+  ],
+  "findings": "Redis is healthy and responsive (ping 0.9ms, 11 clients), but the keyspace shows a severe miss-to-hit imbalance (991,365 misses vs 6,020 hits), and the critical hot-key `cache:hot` does not exist in the cache; a prod deploy of v0.4.3 occurred roughly two hours before escalation, coinciding with the miss spike, and no remediation action was attempted as the run exhausted its budget before acting.",
+  "recommendation": "Confirm whether the v0.4.3 deploy (11:17 UTC) introduced a change that invalidated or stopped populating `cache:hot`, and check application logs around that deploy time for eviction or key-naming changes before deciding whether a cache warm-up or rollback is warranted.",
+  "budget_used": {
+    "tool_calls": 4,
+    "tokens": 56659,
+    "wall_seconds": 51.441066,
+    "usd": "0.118432"
+  }
+}

@@ -1,0 +1,175 @@
+{
+  "scenario": "consumer_lag_healthy_zero",
+  "incident_id": "948a4e5c-289c-4d5c-beea-1f1f47851c9c",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "948a4e5c-289c-4d5c-beea-1f1f47851c9c",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "healthy-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:20:53.116637Z",
+      "updated_at": "2026-09-17T13:20:53.116637Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "948a4e5c-289c-4d5c-beea-1f1f47851c9c",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "healthy-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.030195,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c919ce7c-e459-4956-b06f-b80947744f1f",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:20:53.146832Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:20:53.116637Z",
+      "updated_at": "2026-09-17T13:20:53.146832Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "948a4e5c-289c-4d5c-beea-1f1f47851c9c",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "healthy-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 32706,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.030238,
+        "max_usd": "1.00",
+        "usd_used": "0.062271"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c919ce7c-e459-4956-b06f-b80947744f1f",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:20:53.146832Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8cdaf957-2df8-41b2-a480-fe44640c15c0",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "healthy-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:healthy-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}",
+          "timestamp": "2026-09-17T13:20:53.146875Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b54343eb-75ee-4bb4-a86f-eb0fbd65c88d",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 75.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'consumer_saturation' (0.75 >= 0.7); re-probing after 75s before accepting the contradiction",
+          "timestamp": "2026-09-17T13:20:53.146875Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4b579091-ded5-469e-9ea1-c6f98c6329f2",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "healthy-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"healthy-consumer\",\"lag\":0,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:healthy-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}",
+          "timestamp": "2026-09-17T13:20:53.146875Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "eea10a28-b3a6-4704-8f2f-fd8acc68e91d",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "Two readings of healthy-consumer (including a freshness re-probe after 75s) both return lag=0 with lag_known=true. The alerted signal — consumer_lag_high for group 'healthy-consumer' — is not present. This is a false positive; the consumer is healthy and no remediation is warranted. The alerting rule for healthy-consumer should be reviewed."
+          },
+          "result_summary": "planner stop: Two readings of healthy-consumer (including a freshness re-probe after 75s) both return lag=0 with lag_known=true. The alerted signal — consumer_lag_high for group 'healthy-consumer' — is not present. This is a false positive; the consumer is healthy and no remediation is warranted. The alerting rule for healthy-consumer should be reviewed.",
+          "timestamp": "2026-09-17T13:20:53.146875Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "no_fault",
+          "name": "healthy-consumer-lag-zero-confirmed",
+          "confidence": 0.95,
+          "reasoning": "Two independent readings of healthy-consumer lag both return lag=0, lag_known=true — the consumer is fully caught up and the alert is a false positive."
+        },
+        {
+          "category": "unknown",
+          "name": "stale-alert-not-reflecting-current-state",
+          "confidence": 0.05,
+          "reasoning": "The static source means lag is a recorded constant, but two consistent lag=0 readings leave almost no room for doubt."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:20:53.116637Z",
+      "updated_at": "2026-09-17T13:20:53.146875Z"
+    }
+  ],
+  "invocation_id": "0db6fe722f7c"
+}

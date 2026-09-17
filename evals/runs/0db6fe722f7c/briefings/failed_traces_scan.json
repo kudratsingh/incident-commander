@@ -1,0 +1,43 @@
+{
+  "incident_id": "ba915e1f-a20b-4767-8a16-6378f41a0b88",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.jobs severity=critical fingerprint=failure_rate_high",
+  "escalation_reason": "planner stop: Two recently failed jobs have been identified and investigated. Job d034fd34-102d-5f61-8d21-a7dbda5ea895 (doc_analysis) failed with 'pdf extraction failed: file is corrupted' after 2 retries — a permanent bad-input fault with no Tier-1 fix. Job 5967d510-0290-5627-a9db-4e29e3a38e44 (report_gen) failed with 'OOM during PDF generation (200MB report)' after 2 retries — a resource/payload-size issue also not auto-remediable. Both jobs belong to the same user (ee7c82cb-bab6-5780-8590-55b57064cbe3) and represent distinct permanent data/input problems across two job types. Neither has a DLQ row (no dead-letter status observed via trace). No Tier-1 remediation is applicable; escalate to a human with: (1) corrupted PDF input for doc_analysis job d034fd34, (2) oversized 200MB report payload for report_gen job 5967d510, both from user ee7c82cb. The human should investigate whether this user is submitting bad/oversized inputs and whether additional job types are affected.",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "search_traces",
+      "summary": "{\"matches\":[{\"trace_id\":\"edeeb994-56d2-53e6-88fd-8af47e695dbc\",\"job_id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"job_type\":\"doc_analysis\",\"status\":\"failed\",\"created_at\":\"2026-09-17T12:47:13.337884Z\"},{\"trace_id\":\"0e24ca29-1d47-57e9-b898-4d79bb6da981\",\"job_id\":\"5967d510-0290-5627-a9db-4e29e3a38e44\",\"job_type\":\"report_gen\",\"status\":\"failed\",\"created_at\":\"2026-09-17T12:32:13.337884Z\"}]}",
+      "arguments": {
+        "status": "failed",
+        "job_type": null,
+        "since_hours": 2,
+        "limit": 50
+      }
+    },
+    {
+      "tool": "get_trace",
+      "summary": "{\"trace_id\":\"edeeb994-56d2-53e6-88fd-8af47e695dbc\",\"jobs\":[{\"id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"type\":\"doc_analysis\",\"status\":\"failed\",\"user_id\":\"ee7c82cb-bab6-5780-8590-55b57064cbe3\",\"retry_count\":2,\"error_message\":\"pdf extraction failed: file is corrupted\",\"created_at\":\"2026-09-17T12:47:13.337884Z\",\"updated_at\":\"2026-09-17T12:47:23.337884Z\"}],\"audit_events\":[{\"action\":\"job.failed\",\"resource_type\":\"job\",\"resource_id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"principal_type\":\"user\",\"created_at\":\"2026-09-08T02:16:36.672412Z\",\"extra_data\":{\"error_message\":\"pdf extraction failed: file is corrupted\"}}],\"truncated\":false,\"total_jobs\":1,\"total_audit_events\":1}",
+      "arguments": {
+        "trace_id": "edeeb994-56d2-53e6-88fd-8af47e695dbc",
+        "include_audit": true
+      }
+    },
+    {
+      "tool": "get_trace",
+      "summary": "{\"trace_id\":\"0e24ca29-1d47-57e9-b898-4d79bb6da981\",\"jobs\":[{\"id\":\"5967d510-0290-5627-a9db-4e29e3a38e44\",\"type\":\"report_gen\",\"status\":\"failed\",\"user_id\":\"ee7c82cb-bab6-5780-8590-55b57064cbe3\",\"retry_count\":2,\"error_message\":\"OOM during PDF generation (200MB report)\",\"created_at\":\"2026-09-17T12:32:13.337884Z\",\"updated_at\":\"2026-09-17T12:33:52.337884Z\"}],\"audit_events\":[{\"action\":\"job.failed\",\"resource_type\":\"job\",\"resource_id\":\"5967d510-0290-5627-a9db-4e29e3a38e44\",\"principal_type\":\"user\",\"created_at\":\"2026-09-08T02:16:36.672412Z\",\"extra_data\":{\"error_message\":\"OOM during PDF generation (200MB report)\"}}],\"truncated\":false,\"total_jobs\":1,\"total_audit_events\":1}",
+      "arguments": {
+        "trace_id": "0e24ca29-1d47-57e9-b898-4d79bb6da981",
+        "include_audit": true
+      }
+    }
+  ],
+  "findings": "Two failed jobs were traced for user ee7c82cb-bab6-5780-8590-55b57064cbe3: doc_analysis job d034fd34 failed after 2 retries with \"pdf extraction failed: file is corrupted,\" and report_gen job 5967d510 failed after 2 retries with \"OOM during PDF generation (200MB report)\" — both are permanent input/data faults with no applicable Tier-1 remediation and no dead-letter queue entries observed.",
+  "recommendation": "Check whether user ee7c82cb is consistently submitting corrupted PDF inputs and oversized report payloads across other job types, and determine whether the source files need to be rejected or the user notified before additional jobs are queued.",
+  "budget_used": {
+    "tool_calls": 3,
+    "tokens": 45712,
+    "wall_seconds": 0.03549,
+    "usd": "0.096980"
+  }
+}

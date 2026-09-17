@@ -1,0 +1,215 @@
+{
+  "scenario": "incidents_overview",
+  "incident_id": "7e1ab0b6-50f4-4c27-ae83-9561db77d84f",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "7e1ab0b6-50f4-4c27-ae83-9561db77d84f",
+      "state": "triage",
+      "alert": {
+        "source": "platform.api",
+        "severity": "critical",
+        "fingerprint": "elevated_error_rate",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "service": "api-gateway"
+      },
+      "budget": {
+        "max_tool_calls": 6,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:32:30.637323Z",
+      "updated_at": "2026-09-17T13:32:30.637323Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "7e1ab0b6-50f4-4c27-ae83-9561db77d84f",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.api",
+        "severity": "critical",
+        "fingerprint": "elevated_error_rate",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "service": "api-gateway"
+      },
+      "budget": {
+        "max_tool_calls": 6,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.019493,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "6a6d6d4e-c174-475c-909f-dfccd4551e83",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "26fb1911e2d21aa6706bc1edbcfc89f6"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:32:30.656816Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:32:30.637323Z",
+      "updated_at": "2026-09-17T13:32:30.656816Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "7e1ab0b6-50f4-4c27-ae83-9561db77d84f",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.api",
+        "severity": "critical",
+        "fingerprint": "elevated_error_rate",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "service": "api-gateway"
+      },
+      "budget": {
+        "max_tool_calls": 6,
+        "tool_calls_used": 5,
+        "max_tokens": 200000,
+        "tokens_used": 56932,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.019523,
+        "max_usd": "1.00",
+        "usd_used": "0.121195"
+      },
+      "evidence": [
+        {
+          "evidence_id": "6a6d6d4e-c174-475c-909f-dfccd4551e83",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "26fb1911e2d21aa6706bc1edbcfc89f6"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:32:30.656816Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a92c4bc5-cc6c-4b5b-bee3-d61c1b952ec3",
+          "tool_name": "list_active_alerts",
+          "arguments": {
+            "severity": "critical",
+            "limit": 50
+          },
+          "result_summary": "{\"total\":2,\"alerts\":[{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-09-17T13:09:13.342757Z\",\"extra_data\":null},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-09-17T12:52:13.342757Z\",\"extra_data\":null}]}",
+          "timestamp": "2026-09-17T13:32:30.656846Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0d1e95b4-bc9c-4363-bd48-5bf5982cf343",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "billing-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:billing-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}",
+          "timestamp": "2026-09-17T13:32:30.656846Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4400d656-3535-494b-b134-fd547e6a4302",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 20
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T11:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T10:17:13.337886Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-09-17T07:17:13.337886Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-09-16T19:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-09-16T15:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-09-15T13:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-09-17T13:32:30.656846Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2c39301d-0a12-47ad-8d7b-7b7127a40d14",
+          "tool_name": "search_traces",
+          "arguments": {
+            "status": "failed",
+            "job_type": null,
+            "since_hours": 2,
+            "limit": 20
+          },
+          "result_summary": "{\"matches\":[{\"trace_id\":\"edeeb994-56d2-53e6-88fd-8af47e695dbc\",\"job_id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"job_type\":\"doc_analysis\",\"status\":\"failed\",\"created_at\":\"2026-09-17T12:47:13.337884Z\"},{\"trace_id\":\"0e24ca29-1d47-57e9-b898-4d79bb6da981\",\"job_id\":\"5967d510-0290-5627-a9db-4e29e3a38e44\",\"job_type\":\"report_gen\",\"status\":\"failed\",\"created_at\":\"2026-09-17T12:32:13.337884Z\"}]}",
+          "timestamp": "2026-09-17T13:32:30.656846Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0849da9f-a8ca-4d49-814f-1cca3a9d8787",
+          "tool_name": "get_trace",
+          "arguments": {
+            "trace_id": "edeeb994-56d2-53e6-88fd-8af47e695dbc",
+            "include_audit": true
+          },
+          "result_summary": "{\"trace_id\":\"edeeb994-56d2-53e6-88fd-8af47e695dbc\",\"jobs\":[{\"id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"type\":\"doc_analysis\",\"status\":\"failed\",\"user_id\":\"ee7c82cb-bab6-5780-8590-55b57064cbe3\",\"retry_count\":2,\"error_message\":\"pdf extraction failed: file is corrupted\",\"created_at\":\"2026-09-17T12:47:13.337884Z\",\"updated_at\":\"2026-09-17T12:47:23.337884Z\"}],\"audit_events\":[{\"action\":\"job.failed\",\"resource_type\":\"job\",\"resource_id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"principal_type\":\"user\",\"created_at\":\"2026-09-08T02:16:36.672412Z\",\"extra_data\":{\"error_message\":\"pdf extraction failed: file is corrupted\"}}],\"truncated\":false,\"total_jobs\":1,\"total_audit_events\":1}",
+          "timestamp": "2026-09-17T13:32:30.656846Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2dcb108b-7b1d-48e8-b514-0d2457937e25",
+          "tool_name": "_planner_escalate",
+          "arguments": {
+            "reason": "max iterations (5) exceeded"
+          },
+          "result_summary": "max iterations (5) exceeded",
+          "timestamp": "2026-09-17T13:32:30.656846Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "deploy_regression",
+          "name": "v0.4.3-deploy-correlated-with-5xx-and-billing-failures",
+          "confidence": 0.72,
+          "reasoning": "v0.4.3 deployed to prod at 11:17 UTC, ~2 hours before the 5xx alert fired at 13:09; v0.4.2 had a note 'correlated with billing failures', suggesting a pattern of regressions across recent deploys; both failed traces (doc_analysis, report_gen) started after the deploy window."
+        },
+        {
+          "category": "consumer_saturation",
+          "name": "billing-consumer-lag-15k-sustained-20min",
+          "confidence": 0.65,
+          "reasoning": "billing-consumer lag is 15,000 and has been sustained for 20+ minutes per the active Kafka alert, which may be causing upstream API timeouts and contributing to the 5xx rate."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "downstream-service-failure-causing-5xx-and-job-failures",
+          "confidence": 0.3,
+          "reasoning": "Both failed traces (doc_analysis, report_gen) suggest backend job failures that could indicate a downstream dependency issue, but no direct circuit-breaker evidence is available yet."
+        },
+        {
+          "category": "unknown",
+          "name": "unknown-root-cause-multiple-signals",
+          "confidence": 0.1,
+          "reasoning": "Multiple concurrent signals (5xx rate, billing consumer lag, two failed job types) could indicate an unrelated root cause not yet visible."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:32:30.637323Z",
+      "updated_at": "2026-09-17T13:32:30.656846Z"
+    }
+  ],
+  "invocation_id": "0db6fe722f7c"
+}

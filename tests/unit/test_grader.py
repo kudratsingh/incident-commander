@@ -5400,7 +5400,11 @@ class TestTheFinalDiagnosisIsTheTopCandidate:
         ``best_of_n_enumerated``, whose output schema is not
         ``InvestigationStep`` and so cannot go through the loop's call, and
         WP-5.3's ``best_of_n_sampled``, which makes N of them at a temperature
-        the loop's call does not take.
+        the loop's call does not take. WP-6.2's ``candidate_selector`` writes it
+        too, and its write is the one that most needs this guard: it emits the
+        SELECTED candidate as the whole ranking, so "the latest ranking" is the
+        selector's commitment, and a second write anywhere in that strategy
+        would leave the grader reading a diagnosis the run did not act on.
         Every one of them writes the field exactly once, in the ``model_copy``
         that also accrues that call, which is what keeps "the latest ranking" and
         "the ranking of the deciding step" the same object.
@@ -5419,11 +5423,12 @@ class TestTheFinalDiagnosisIsTheTopCandidate:
             "agent/investigation.py",
             "agent/strategies/best_of_n_enumerated.py",
             "agent/strategies/best_of_n_sampled.py",
+            "agent/strategies/candidate_selector.py",
         ]
         assert writers == permitted, (
             f"the ranking is now written in {writers}; the final diagnosis can no "
             "longer be read off RunState.hypotheses without checking which write "
-            "came last (WO-R3-191, WO-R3-205, WO-R3-206, plan 02 § 11.3)."
+            "came last (WO-R3-191, WO-R3-205, WO-R3-206, WO-R3-209, plan 02 § 11.3)."
         )
         for writer in writers:
             once = (package / writer).read_text().count('"hypotheses":')

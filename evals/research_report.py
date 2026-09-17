@@ -67,15 +67,22 @@ import hashlib
 import json
 import random
 from collections import Counter
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Final
 
 from evals import artifacts, regression
-from evals.candidate_metrics import measure, steps_of
+from evals.candidate_metrics import (
+    REPORTED_KS,
+    measure,
+    measure_selection,
+    steps_of,
+    world_key,
+)
 from evals.graders.deterministic import GradeDimension, is_vacuous_detail
 from evals.graders.root_cause import coverage_over
 from evals.runner import RunReport, ScenarioOutcome
@@ -976,14 +983,93 @@ def _ground_truths(root: Path) -> dict[str, tuple[HypothesisCategory, ...]]:
 ENUMERATING_SET_SIZE: Final[int] = 2
 
 
+#: Calibration report id per selector arm, declared rather than discovered.
+#:
+#: Plan 02:243 is categorical: "NO SELECTOR NUMBER IS REPORTED BEFORE ITS
+#: CALIBRATION REPORT EXISTS", and plan 04:169 makes it WP-6.3's acceptance — no
+#: selector number appears in a report without a calibration report id beside it.
+#: This is where that id lives, keyed by the arm it calibrates
+#: (``strategy_config``'s generator plus its N, which is the arm identity plan
+#: 02 § 12 defines).
+#:
+#: **Empty today, which is the correct state**: WP-6.3 has not run, so every
+#: selector number in this document is withheld and says so. Declared as a
+#: constant, the same shape as ``SCOPE`` and ``SUPERSEDED_ROOT_CAUSE`` above,
+#: because the register is a claim a reviewer should see in a diff: adding an id
+#: here is the act of saying "this arm's uncertainty has been calibrated, and
+#: here is the artefact". Deriving it from whatever file happens to be on disk
+#: would make the gate open itself.
+#:
+#: Pinned both ways by ``tests/unit/test_candidate_selector.py::
+#: TestNoSelectorNumberWithoutACalibrationReport``.
+CALIBRATION_REPORTS: Final[Mapping[str, str]] = MappingProxyType({})
+
+
+def calibration_report_for(arm: str) -> str | None:
+    """The calibration report id for one selector arm, or ``None``.
+
+    One reader of the register, so the gate has one spelling and a section cannot
+    accidentally check it a different way.
+    """
+    return CALIBRATION_REPORTS.get(arm)
+
+
+def selector_arm_key(strategy: str, config: Mapping[str, Any]) -> str:
+    """The arm a selector number belongs to: strategy, generator and N.
+
+    Plan 02 § 12's arm is ``(generator, N, selector)``, and the finding that made
+    it explicit is that two different generators under one selector are two arms —
+    a report keyed on the strategy name alone would collapse them into one row and
+    average two oracle gaps that answer different questions.
+    """
+    generator = str(config.get("generator", "")) or "unknown"
+    n = config.get("n", "unknown")
+    return f"{strategy}/{generator}/n={n}"
+
+
+def _outcome_of(source: Source, scenario: str) -> ScenarioOutcome | None:
+    """One scenario's outcome inside one archive's report, or ``None``.
+
+    The world a run happened in and the arm that ran it are both properties of the
+    RUN, not of its trace file, so ``selected@k`` cannot be paired without this.
+    Two things are read off it: ``provenance`` (the execution mode and the arm's
+    stamped config) and, on a recorded run, ``replay["world_fingerprint"]`` — the
+    recording's own identity, which is what makes two archives of one recording a
+    paired comparison (ADR 0049).
+    """
+    for outcome in source.report.outcomes:
+        if outcome.scenario == scenario:
+            return outcome
+    return None
+
+
+def recorded_fingerprint(outcome: ScenarioOutcome) -> str | None:
+    """The recording's identity on a recorded outcome, or ``None``.
+
+    One reader, so the key the report pairs on and the value the runner wrote have
+    one spelling between them. ``None`` for every non-recorded run — the ``replay``
+    row is only present in recorded mode (``runner._replay_record``).
+    """
+    replay = outcome.replay
+    if not isinstance(replay, Mapping):
+        return None
+    fingerprint = replay.get("world_fingerprint")
+    return None if fingerprint is None else str(fingerprint)
+
+
 def _candidate_rows(root: Path, sources: Sequence[Source]) -> list[dict[str, Any]]:
-    """One pass@k row per (archive, scenario) whose trace carries enumerated sets.
+    """One row per (archive, scenario) whose trace carries enumerated sets.
 
     Empty over today's scope: every ``step`` record in it was written by
     ``baseline``, whose sets hold one candidate — see ``ENUMERATING_SET_SIZE``.
-    The section below therefore still reports itself unmeasurable, and becomes
-    measurable the moment a best-of-N arm's archive enters the scope, without
-    another packet editing this file.
+    The sections below therefore still report themselves unmeasurable, and become
+    measurable the moment a best-of-N or selector archive enters the scope,
+    without another packet editing this file.
+
+    Each row carries its ``world`` (WP-6.2). That is what makes ``pass@k`` and
+    ``selected@k`` a PAIRED pair: both are computed off the same run's own steps,
+    in one world, and the oracle-gap section refuses to difference two rows whose
+    worlds differ (``OracleGapAcrossWorlds``).
     """
     rows: list[dict[str, Any]] = []
     truths: dict[str, tuple[HypothesisCategory, ...]] | None = None
@@ -1001,11 +1087,28 @@ def _candidate_rows(root: Path, sources: Sequence[Source]) -> list[dict[str, Any
                 continue
             if max(len(step.candidates) for step in steps_of(records)) < ENUMERATING_SET_SIZE:
                 continue
+            outcome = _outcome_of(source, scenario)
+            if outcome is None or outcome.provenance is None:  # pragma: no cover
+                continue
+            provenance = outcome.provenance
+            world = world_key(
+                scenario=scenario,
+                execution_mode=provenance.execution_mode.value,
+                archive=source.archive,
+                world_fingerprint=recorded_fingerprint(outcome),
+            )
+            selection = measure_selection(records, expected, world=world)
+            arm = selector_arm_key(metrics.strategy, dict(provenance.strategy_config))
             rows.append(
                 {
                     "archive": source.archive,
                     "scenario": scenario,
                     "strategy": metrics.strategy,
+                    # The arm identity plan 02 § 12 defines, and the key the
+                    # calibration register is read with.
+                    "arm": arm,
+                    "world": str(world),
+                    "group": _group_of_scenario(root, scenario),
                     "steps": metrics.steps,
                     "candidates_generated": metrics.candidates_generated,
                     "pass_at_k": [
@@ -1017,22 +1120,77 @@ def _candidate_rows(root: Path, sources: Sequence[Source]) -> list[dict[str, Any
                     "cross_step_duplicate_rate": metrics.cross_step_duplicate_rate,
                     "within_step_rejection_rate": metrics.within_step_rejection_rate,
                     "rejections_by_class": dict(metrics.rejections_by_class),
+                    # --- WP-6.2 -------------------------------------------
+                    "selector_calls": selection.selector_calls,
+                    "selector_decision": selection.decision,
+                    "selected_at_k": [
+                        {
+                            "k": entry.k,
+                            "effective_k": entry.effective_k,
+                            "hit": entry.hit,
+                            "not_scored_because": entry.not_scored_because,
+                        }
+                        for entry in selection.selected_at_k
+                    ],
+                    "oracle_gap_at_k": [
+                        {
+                            "k": entry.k,
+                            "world": str(entry.world),
+                            "pass_hit": entry.pass_hit,
+                            "selected_hit": entry.selected_hit,
+                            "gap": entry.gap,
+                            "not_scored_because": entry.not_scored_because,
+                        }
+                        for entry in selection.oracle_gap
+                    ],
+                    "selector_uncertainty": selection.uncertainty,
+                    "selector_was_right": selection.uncertainty_was_right,
+                    "calibration_report_id": calibration_report_for(arm),
                 }
             )
     return rows
 
 
+def _group_of_scenario(root: Path, scenario: str) -> dict[str, str]:
+    """This scenario's family and difficulty, for the by-group breakdowns.
+
+    Read from the corpus, like ``_ground_truths``, and for the same reason: the
+    grouping is the evaluator's classification. ``unknown`` rather than an
+    omission for a scenario that declares none, so a row is never silently
+    dropped out of a group table.
+    """
+    for candidate in load_scenarios(root / "evals" / "scenarios"):
+        if candidate.name == scenario:
+            return {
+                "family": candidate.family.value if candidate.family else "unknown",
+                "difficulty": (candidate.difficulty.value if candidate.difficulty else "unknown"),
+            }
+    return {"family": "unknown", "difficulty": "unknown"}
+
+
 def _pass_at_k(root: Path, sources: Sequence[Source]) -> dict[str, Any]:
-    """pass@k, appeared-at-any-step and the two duplicate rates (plan 03 § 7.2).
+    """pass@k, appeared-at-any-step, the two duplicate rates, and selected@k.
 
     Measured when an archive in scope persisted per-step candidate sets; the
     same "not measurable, and here is what it needs" block as before when none
-    did, which is every archive in scope today. Selected@k is absent from both
-    branches for the reason the ``oracle_gap`` section gives: no selector arm
-    has run (plan 02 § 12, Phase 6).
+    did, which is every archive in scope today.
+
+    ``selected@k`` sits in the same section as ``pass@k`` rather than in its own,
+    because the whole point of the pair is that both terms come off the same run's
+    own steps in one world — putting them in two sections would be the first step
+    toward differencing two numbers measured somewhere else (plan 03 § 12).
+    It is WITHHELD, row by row, until that arm has a calibration report
+    (plan 02:243) — see ``_selector_number``.
     """
     rows = _candidate_rows(root, sources)
     if not rows:
+        # The metric NAME and every string here are the ones the committed
+        # document already carries, deliberately. This packet adds selected@k to
+        # the measurable branch and must not move a byte of the unmeasurable one:
+        # the research report is versioned evidence (invariant 9), and a
+        # re-render that differs only in a section heading would either rewrite a
+        # committed artefact or spend a new version on a change no reader asked
+        # for. ``tests/unit/test_research_report.py`` pins it both ways.
         return _not_measurable(
             "pass@k (plan 03 § 7.2)",
             "pass@k reads the final-step candidate SET; a committed report carries one graded "
@@ -1040,19 +1198,170 @@ def _pass_at_k(root: Path, sources: Sequence[Source]) -> dict[str, Any]:
             ("WP-3.x recorded runs that persist per-step candidate sets (StepRecord, WP-2.1)",),
         )
     return {
-        "metric": "pass@k (plan 03 § 7.2)",
+        "metric": "pass@k (plan 03 § 7.2) and selected@k (plan 03 § 7.3)",
         "measurable": True,
         "value": {
-            "rows": rows,
-            "selected_at_k": None,
-            "selected_at_k_why": (
-                "no candidate_selector arm has run (plan 02 § 12, Phase 6), so the "
-                "oracle gap has one term and is reported as unmeasurable beside it"
-            ),
+            "rows": [_selector_number(row) for row in rows],
+            "selector_gate": SELECTOR_GATE_RULE,
         },
         "why": "",
         "requires": [],
     }
+
+
+#: The rule every selector number in this document is subject to, in the
+#: document, in its own words. Plan 02:243 and plan 04:169.
+SELECTOR_GATE_RULE: Final[str] = (
+    "plan 02:243 — NO SELECTOR NUMBER IS REPORTED BEFORE ITS CALIBRATION REPORT "
+    "EXISTS. Every selected@k, oracle gap and selector-uncertainty value below is "
+    "withheld unless its arm has an id in research_report.CALIBRATION_REPORTS, and "
+    "each row says which case it is in. An uncalibrated selector's confidence is a "
+    "number whose scale nobody has checked, and an oracle gap read beside it would "
+    "attribute to selection whatever the miscalibration did."
+)
+
+#: What a withheld selector field reads as. A string rather than ``None``, so a
+#: reader of the JSON cannot mistake "this was not reported" for "this was zero"
+#: — the distinction INC-003 turned on one level up.
+WITHHELD: Final[str] = "withheld: no calibration report for this arm (plan 02:243)"
+
+
+def _selector_number(row: dict[str, Any]) -> dict[str, Any]:
+    """One candidate row with its selector fields gated on a calibration report.
+
+    The generation half (``pass@k``, the duplicate rates) is NOT gated: it is a
+    measurement of what the generator produced and has nothing to do with the
+    selector's calibration. Only the fields that are statements about the
+    SELECTOR are withheld, and each one is replaced by a sentence saying so
+    rather than by ``null``.
+    """
+    if row["calibration_report_id"] is not None or row["selector_calls"] == 0:
+        return row
+    return {
+        **row,
+        "selected_at_k": WITHHELD,
+        "oracle_gap_at_k": WITHHELD,
+        "selector_uncertainty": WITHHELD,
+        "selector_was_right": WITHHELD,
+        "selector_decision": WITHHELD,
+    }
+
+
+def _oracle_gap(root: Path, sources: Sequence[Source]) -> dict[str, Any]:
+    """``oracle_gap@k = pass@k − selected@k``, by family and difficulty.
+
+    The headline analysis of the whole buildout (plan 02:241, plan 03 § 7.3): a
+    small gap says generation limits the agent, a large one says selection does.
+
+    Three things make the number honest, and each is a refusal rather than a
+    footnote.
+
+    **It is paired within one world.** Both terms come off one run's own steps, and
+    every row carries the ``WorldKey`` they were measured in. The aggregate below
+    groups rows by world before it differences anything, and a caller that asks
+    for a gap across two worlds gets ``OracleGapAcrossWorlds`` — the refusal
+    exists because INC-003 is what applying one world's expectations to another
+    cost: a live root-cause figure of "61%" that meant nothing.
+
+    **It is gated on a calibration report.** Plan 02:243. Every value here is
+    withheld until the arm has one.
+
+    **It is the EVALUATOR's number.** Nothing in it is computed from anything the
+    agent can read: ``pass@k`` and ``selected@k`` both need the scenario's
+    ``ground_truth``, which is evaluator-only by construction (ADR 0038, ADR 0049)
+    and reaches neither the planner's context nor the selector's. The gap exists
+    only in this file and in ``evals/candidate_metrics.py``, neither of which is
+    importable from ``src/incident_commander``.
+    """
+    rows = [row for row in _candidate_rows(root, sources) if row["selector_calls"] > 0]
+    if not rows:
+        # Byte-identical to what the committed document carries, for the reason
+        # given in ``_pass_at_k``.
+        return _not_measurable(
+            "oracle_gap@k = pass@k − selected@k (plan 03 § 7.3)",
+            "both terms are unavailable for the reason above, and the selector strategy "
+            "(plan 03 § 8) has not run",
+            ("pass@k", "a candidate_selector arm"),
+        )
+    uncalibrated = sorted({row["arm"] for row in rows if row["calibration_report_id"] is None})
+    if uncalibrated:
+        return _not_measurable(
+            "oracle_gap@k = pass@k − selected@k (plan 03 § 7.3)",
+            f"{len(rows)} selector row(s) are in scope and {len(uncalibrated)} arm(s) "
+            f"have no calibration report: {', '.join(uncalibrated)}. " + SELECTOR_GATE_RULE,
+            ("a calibration report id in research_report.CALIBRATION_REPORTS",),
+        )
+    return {
+        "metric": "oracle_gap@k = pass@k − selected@k (plan 03 § 7.3)",
+        "measurable": True,
+        "value": {
+            "rule": SELECTOR_GATE_RULE,
+            "calibration_reports": {row["arm"]: row["calibration_report_id"] for row in rows},
+            "by_world": _gap_by(rows, lambda row: row["world"]),
+            "by_family": _gap_by(rows, lambda row: row["group"]["family"]),
+            "by_difficulty": _gap_by(rows, lambda row: row["group"]["difficulty"]),
+            "uncertainty_vs_correctness": [
+                {
+                    "arm": row["arm"],
+                    "world": row["world"],
+                    "scenario": row["scenario"],
+                    "decision": row["selector_decision"],
+                    "uncertainty": row["selector_uncertainty"],
+                    "was_right": row["selector_was_right"],
+                    "calibration_report_id": row["calibration_report_id"],
+                }
+                for row in rows
+            ],
+        },
+        "why": "",
+        "requires": [],
+    }
+
+
+def _gap_by(
+    rows: Sequence[dict[str, Any]], key: Callable[[dict[str, Any]], str]
+) -> list[dict[str, Any]]:
+    """The gap at each k, grouped, with the paired count that produced it.
+
+    The count travels with the number for the reason plan 03 § 12 gives about
+    every difference in this document: a gap of 1.0 over one paired trial and a
+    gap of 1.0 over fifty are not the same claim, and only one of them is a
+    finding.
+    """
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(key(row), []).append(row)
+    out: list[dict[str, Any]] = []
+    for name, members in sorted(grouped.items()):
+        entry: dict[str, Any] = {"group": name, "paired_runs": len(members), "at_k": []}
+        for k in REPORTED_KS:
+            scored = [
+                gap
+                for row in members
+                for gap in row["oracle_gap_at_k"]
+                if gap["k"] == k and gap["gap"] is not None
+            ]
+            entry["at_k"].append(
+                {
+                    "k": k,
+                    "scored_runs": len(scored),
+                    "pass_at_k": (
+                        None
+                        if not scored
+                        else sum(1 for gap in scored if gap["pass_hit"]) / len(scored)
+                    ),
+                    "selected_at_k": (
+                        None
+                        if not scored
+                        else sum(1 for gap in scored if gap["selected_hit"]) / len(scored)
+                    ),
+                    "oracle_gap": (
+                        None if not scored else sum(gap["gap"] for gap in scored) / len(scored)
+                    ),
+                }
+            )
+        out.append(entry)
+    return out
 
 
 def _scenario_level_regressions(sources: Sequence[Source], rows: Sequence[Row]) -> dict[str, Any]:
@@ -1294,12 +1603,7 @@ def assemble(root: Path, archives: Sequence[str] = SCOPE) -> dict[str, Any]:
         "tokens_vs_accuracy": _tokens_vs_accuracy(rows),
         "tools_vs_accuracy": _tools_vs_accuracy(rows),
         "pass_at_k_vs_selected_at_k": _pass_at_k(root, sources),
-        "oracle_gap": _not_measurable(
-            "oracle_gap@k = pass@k − selected@k (plan 03 § 7.3)",
-            "both terms are unavailable for the reason above, and the selector strategy "
-            "(plan 03 § 8) has not run",
-            ("pass@k", "a candidate_selector arm"),
-        ),
+        "oracle_gap": _oracle_gap(root, sources),
         "calibration": _not_measurable(
             "Brier / ECE / accuracy by confidence bucket (plan 03 § 7.9)",
             "calibration pairs a stated confidence with a correctness verdict; the archives "

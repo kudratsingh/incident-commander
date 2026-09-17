@@ -682,10 +682,30 @@ class TestStrategiesHoldNoExecutionPolicy:
         assert "below threshold" in result.evidence[-1].result_summary
 
     def test_a_strategy_cannot_reach_a_tool_through_its_context(self) -> None:
-        # The context is the whole of a strategy's reach: a model, its own
+        # The context is the whole of a strategy's reach: models, its own
         # settings, a sink. No MCP client, no registry, no run.
+        #
+        # ``selector_llm_client`` (WP-6.2) is a SECOND LLM client and not a
+        # widening of that reach: it is the same kind of thing as
+        # ``llm_client`` — something that answers a structured prompt — and it
+        # exists because the accounting splits on ROLE, so the selector's
+        # tokens have to be metered apart from the planner's. What this test is
+        # for is the other kind of addition: an MCP client, a tool registry, a
+        # tier map or the run itself, any of which would let a strategy act
+        # rather than propose.
         fields = set(StrategyContext.__dataclass_fields__)
-        assert fields == {"llm_client", "model", "iteration", "config", "record_step"}
+        assert fields == {
+            "llm_client",
+            "model",
+            "iteration",
+            "config",
+            "record_step",
+            "selector_llm_client",
+        }
+        assert all("client" not in name or name.endswith("llm_client") for name in fields), (
+            f"a non-LLM client reached StrategyContext: {sorted(fields)}. A "
+            "strategy proposes; the loop acts (ADR 0036)."
+        )
 
 
 class TestTheRunRecordNamesTheStrategy:

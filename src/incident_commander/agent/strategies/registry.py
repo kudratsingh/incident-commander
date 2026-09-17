@@ -21,6 +21,7 @@ from typing import Final
 from incident_commander.agent.strategies.baseline import BaselineStrategy
 from incident_commander.agent.strategies.best_of_n_enumerated import BestOfNEnumeratedStrategy
 from incident_commander.agent.strategies.best_of_n_sampled import BestOfNSampledStrategy
+from incident_commander.agent.strategies.candidate_selector import CandidateSelectorStrategy
 from incident_commander.agent.strategies.knobs import StrategyKnobs
 from incident_commander.agent.strategies.names import StrategyName
 from incident_commander.agent.strategies.protocol import InvestigationStrategy
@@ -98,6 +99,7 @@ STRATEGIES: Final[StrategyRegistry] = StrategyRegistry(
         StrategyName.BASELINE.value: BaselineStrategy,
         StrategyName.BEST_OF_N_ENUMERATED.value: BestOfNEnumeratedStrategy,
         StrategyName.BEST_OF_N_SAMPLED.value: BestOfNSampledStrategy,
+        StrategyName.CANDIDATE_SELECTOR.value: CandidateSelectorStrategy,
     }
 )
 

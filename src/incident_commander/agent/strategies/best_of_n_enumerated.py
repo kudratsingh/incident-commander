@@ -109,11 +109,15 @@ from incident_commander.agent.candidates import (
 from incident_commander.agent.hypothesis import Hypothesis, InvestigationStep, NextAction
 from incident_commander.agent.planner_context import format_planner_context
 from incident_commander.agent.state import RunState
+from incident_commander.agent.strategies.generation import (
+    CandidateGeneration,
+    billed_usage_of,
+    candidate_record_of,
+)
 from incident_commander.agent.strategies.knobs import StrategyKnobs
 from incident_commander.agent.strategies.names import StrategyName
 from incident_commander.agent.strategies.protocol import StrategyContext
 from incident_commander.agent.strategies.records import (
-    CandidateRecord,
     LLMCallRecord,
     StepRecord,
 )
@@ -229,7 +233,24 @@ class BestOfNEnumeratedStrategy:
     def plan_next_step(
         self, run_state: RunState, at: datetime, ctx: StrategyContext
     ) -> tuple[RunState, InvestigationStep, StepRecord]:
-        """One call, N candidates, the top one emitted as an ordinary step.
+        """This arm running alone: generate, record, emit the top candidate's step.
+
+        Expressed in terms of ``generate`` rather than beside it (WP-6.2), so
+        there is exactly one generation path whether or not a selector is
+        composed over this arm. The sink is called here rather than inside
+        ``generate`` for the same reason: under a selector the record that
+        reaches the trace is the one carrying the selector block, and a step
+        must produce one record, not two.
+        """
+        generation = self.generate(run_state, at, ctx)
+        if ctx.record_step is not None:
+            ctx.record_step(generation.record)
+        return generation.run_state, generation.proposed_step, generation.record
+
+    def generate(
+        self, run_state: RunState, at: datetime, ctx: StrategyContext
+    ) -> CandidateGeneration:
+        """One call, N candidates, the top one proposed as an ordinary step.
 
         Exceptions propagate exactly as they do for ``baseline``: the loop's
         ``except (ValueError, ValidationError, LLMError)`` arm charges what the
@@ -272,10 +293,13 @@ class BestOfNEnumeratedStrategy:
                 "updated_at": at,
             }
         )
-        record = self._record(run_state, updated, step, candidates, call, ctx, user_message)
-        if ctx.record_step is not None:
-            ctx.record_step(record)
-        return updated, step, record
+        return CandidateGeneration(
+            run_state=updated,
+            candidates=candidates,
+            proposed_step=step,
+            record=self._record(run_state, updated, step, candidates, call, ctx, user_message),
+            billed_usage=billed_usage_of((call,)),
+        )
 
     def _record(
         self,
@@ -301,25 +325,11 @@ class BestOfNEnumeratedStrategy:
             iteration=ctx.iteration,
             strategy=self.name,
             model=ctx.model,
+            # One call generated every candidate, so every candidate names the
+            # same call. A strategy that generates them in separate calls
+            # (WP-5.3) is where this starts to differ per candidate.
             candidate_set=tuple(
-                CandidateRecord(
-                    candidate_id=candidate.candidate_id,
-                    category=candidate.category,
-                    name=candidate.name,
-                    confidence=candidate.confidence,
-                    evidence_for=tuple(str(ref.evidence_id) for ref in candidate.evidence_for),
-                    evidence_against=tuple(
-                        str(ref.evidence_id) for ref in candidate.evidence_against
-                    ),
-                    proposed_probe=(
-                        candidate.next_probe.tool_name if candidate.next_probe is not None else None
-                    ),
-                    # One call generated every candidate, so every candidate
-                    # names the same call. A strategy that generates them in
-                    # separate calls (WP-5.3) is where this starts to differ
-                    # per candidate.
-                    generation_call_id=result.record_id,
-                )
+                candidate_record_of(candidate, generation_call_id=result.record_id)
                 for candidate in candidates
             ),
             # No selector: this arm generates, it does not select. Plan 02 § 12's

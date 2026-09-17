@@ -89,6 +89,7 @@ from types import MappingProxyType
 from typing import Any, Final
 
 from incident_commander.agent.accounting import accrue_structured_call
+from incident_commander.agent.candidates import DiagnosisCandidate
 from incident_commander.agent.hypothesis import (
     Hypothesis,
     HypothesisCategory,
@@ -97,11 +98,15 @@ from incident_commander.agent.hypothesis import (
 )
 from incident_commander.agent.planner_context import format_planner_context
 from incident_commander.agent.state import RunState
+from incident_commander.agent.strategies.generation import (
+    CandidateGeneration,
+    billed_usage_of,
+    candidate_record_of,
+)
 from incident_commander.agent.strategies.knobs import StrategyKnobs
 from incident_commander.agent.strategies.names import StrategyName
 from incident_commander.agent.strategies.protocol import StrategyContext
 from incident_commander.agent.strategies.records import (
-    CandidateRecord,
     LLMCallRecord,
     StepRecord,
 )
@@ -199,7 +204,21 @@ class BestOfNSampledStrategy:
     def plan_next_step(
         self, run_state: RunState, at: datetime, ctx: StrategyContext
     ) -> tuple[RunState, InvestigationStep, StepRecord]:
-        """Draw N samples, emit the best one's step, record the union.
+        """This arm running alone: draw, record, emit the best sample's step.
+
+        Expressed in terms of ``generate`` (WP-6.2) so there is one draw path
+        whether or not a selector is composed over this arm; see
+        ``strategies/generation.py`` for why the sink is called here.
+        """
+        generation = self.generate(run_state, at, ctx)
+        if ctx.record_step is not None:
+            ctx.record_step(generation.record)
+        return generation.run_state, generation.proposed_step, generation.record
+
+    def generate(
+        self, run_state: RunState, at: datetime, ctx: StrategyContext
+    ) -> CandidateGeneration:
+        """Draw N samples, propose the best one's step, record the union.
 
         The context is rendered **once** and reused for every sample. That is
         what makes them samples of one distribution rather than N answers to N
@@ -221,10 +240,14 @@ class BestOfNSampledStrategy:
                 "updated_at": at,
             }
         )
-        record = self._record(run_state, updated, step, calls, ctx, user_message)
-        if ctx.record_step is not None:
-            ctx.record_step(record)
-        return updated, step, record
+        union = _union_of_tops(calls)
+        return CandidateGeneration(
+            run_state=updated,
+            candidates=tuple(candidate for candidate, _ in union),
+            proposed_step=step,
+            record=self._record(run_state, updated, step, calls, union, ctx, user_message),
+            billed_usage=billed_usage_of(calls),
+        )
 
     def _draw(
         self, user_message: str, ctx: StrategyContext
@@ -265,6 +288,7 @@ class BestOfNSampledStrategy:
         after: RunState,
         step: InvestigationStep,
         calls: Sequence[RepairedCall[InvestigationStep]],
+        union: Sequence[tuple[DiagnosisCandidate, str]],
         ctx: StrategyContext,
         user_message: str,
     ) -> StepRecord:
@@ -278,7 +302,10 @@ class BestOfNSampledStrategy:
         for anyone who summed the column. The four provider counters are
         per-sample and are where the split actually lives.
         """
-        candidates = _union_of_tops(calls)
+        candidates = tuple(
+            candidate_record_of(candidate, generation_call_id=call_id)
+            for candidate, call_id in union
+        )
         delta_tokens = after.budget.tokens_used - before.budget.tokens_used
         delta_usd = after.budget.usd_used - before.budget.usd_used
         return StepRecord(
@@ -368,7 +395,7 @@ def _best_sample(
 
 def _union_of_tops(
     calls: Sequence[RepairedCall[InvestigationStep]],
-) -> tuple[CandidateRecord, ...]:
+) -> tuple[tuple[DiagnosisCandidate, str], ...]:
     """The samples' top hypotheses, deduplicated by ``(category, name)``.
 
     First occurrence wins, so the recorded confidence and the recorded
@@ -377,24 +404,36 @@ def _union_of_tops(
     Returned in confidence-descending order (stable, so agreeing confidences
     keep draw order) to match every other arm's record, where index 0 is the
     emitted diagnosis.
+
+    Each entry is the candidate paired with the trace-record id of the call that
+    drew it. **``DiagnosisCandidate`` rather than ``CandidateRecord`` since
+    WP-6.2**, because a selector composed over this arm needs the whole
+    ``next_probe`` — a record keeps only the tool name, and a probe re-derived
+    from one would lose its arguments. The record is still built from these, by
+    ``generation.candidate_record_of``, so the dedup rule has one implementation.
+
+    Constructed rather than ``model_validate``d: ``DiagnosisCandidate``'s
+    grounding validator lives on ``EvidenceRef``, a sampled candidate cites
+    nothing, and the set-level rules belong to ``CandidateTuple`` — so no ledger
+    binding is needed here and none is faked. A sampled candidate citing no
+    evidence is the honest reading of "a plain ``InvestigationStep`` has no
+    per-hypothesis citation field", the same one ``baseline``'s record makes.
     """
-    seen: dict[tuple[HypothesisCategory, str], CandidateRecord] = {}
+    seen: dict[tuple[HypothesisCategory, str], tuple[DiagnosisCandidate, str]] = {}
     for index, call in enumerate(calls):
         top: Hypothesis = call.result.output.hypotheses[0]
         key = (top.category, top.name)
         if key in seen:
             continue
         action = call.result.output.next_action
-        seen[key] = CandidateRecord(
-            candidate_id=f"sample-{index + 1}",
-            category=top.category,
-            name=top.name,
-            confidence=top.confidence,
-            # A sampled candidate cites no evidence: it came out of a plain
-            # ``InvestigationStep``, which has no per-hypothesis citation field.
-            # Empty is the honest reading of "it did not say" — the same one
-            # ``baseline``'s record makes.
-            proposed_probe=(action.tool_name if isinstance(action, ProbeAction) else None),
-            generation_call_id=call.result.record_id,
+        seen[key] = (
+            DiagnosisCandidate(
+                candidate_id=f"sample-{index + 1}",
+                category=top.category,
+                name=top.name,
+                confidence=top.confidence,
+                next_probe=action if isinstance(action, ProbeAction) else None,
+            ),
+            call.result.record_id,
         )
-    return tuple(sorted(seen.values(), key=lambda candidate: candidate.confidence, reverse=True))
+    return tuple(sorted(seen.values(), key=lambda entry: entry[0].confidence, reverse=True))

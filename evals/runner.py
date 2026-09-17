@@ -78,6 +78,7 @@ from incident_commander.agent.remediation import (
     make_llm_verify,
     make_remediate,
 )
+from incident_commander.agent.selection import SELECTOR_ROLE
 from incident_commander.agent.state import BudgetLedger, EvidenceEntry, IncidentState, RunState
 from incident_commander.agent.strategies.knobs import StrategyKnobs
 from incident_commander.agent.strategies.protocol import InvestigationStrategy
@@ -319,6 +320,7 @@ def strategy_knobs(settings: Settings) -> StrategyKnobs:
     return StrategyKnobs(
         n=settings.best_of_n,
         sample_temperature=settings.sample_temperature,
+        selector_generator=settings.selector_generator.value,
     )
 
 
@@ -1654,6 +1656,7 @@ def run_scenario(
         mcp_client = CannedMCPClient(agent_visible.canned_tool_responses)
 
     investigation_llm: LLMClientProtocol
+    selector_llm: LLMClientProtocol
     remediation_planner_llm: LLMClientProtocol
     verification_judge_llm: LLMClientProtocol
     briefing_llm: LLMClientProtocol
@@ -1665,6 +1668,14 @@ def run_scenario(
         investigation_llm = LLMClient(
             api_key=api_key,
             tracer=tracer.llm_hook("investigation_planner") if tracer else None,
+        )
+        # WP-6.2's new role. Its own underlying client so its trace records
+        # carry its own hook label, exactly like the five above: that label is
+        # what makes the JSONL readable per role, and the selector is the role a
+        # reader of this arm wants to find first.
+        selector_llm = LLMClient(
+            api_key=api_key,
+            tracer=tracer.llm_hook(SELECTOR_ROLE) if tracer else None,
         )
         remediation_planner_llm = LLMClient(
             api_key=api_key,
@@ -1686,6 +1697,7 @@ def run_scenario(
         investigation_llm = CannedLLMClient(
             scenario.canned_llm_responses.get("investigation_planner", [])
         )
+        selector_llm = CannedLLMClient(scenario.canned_llm_responses.get(SELECTOR_ROLE, []))
         remediation_planner_llm = CannedLLMClient(
             scenario.canned_llm_responses.get("remediation_planner", [])
         )
@@ -1728,6 +1740,9 @@ def run_scenario(
     # charged subset and the total side by side.
     accounting = RunAccounting()
     investigation_llm = accounting.meter(investigation_llm, "investigation_planner")
+    # The selector is the AGENT's own cost — it decides the run's diagnosis — so
+    # it is charged to the ledger like the planner and unlike the briefing judge.
+    selector_llm = accounting.meter(selector_llm, SELECTOR_ROLE)
     remediation_planner_llm = accounting.meter(remediation_planner_llm, "remediation_planner")
     verification_judge_llm = accounting.meter(verification_judge_llm, "verification_judge")
     briefing_llm = accounting.meter(briefing_llm, "briefing_writer")
@@ -1751,6 +1766,10 @@ def run_scenario(
         # without ``EVAL_TRACE_DIR`` still writes no trace file — the sink
         # composes, it does not choose.
         record_step=accounting.step_sink(_step_sink(tracer) if tracer is not None else None),
+        # Passed on every run, and read by exactly one arm: the strategies that
+        # make no selector call never touch it, and the one that does refuses
+        # when it is absent rather than borrowing the planner's client.
+        selector_llm_client=selector_llm,
         # Freshness re-probe (ADR 0009) is live-only: canned tool responses
         # are instant-consistent, and a re-probe would consume an extra
         # scripted planner response, breaking every canned scenario.

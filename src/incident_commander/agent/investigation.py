@@ -683,6 +683,7 @@ def make_llm_investigate(
     sleep: Callable[[float], None] = time.sleep,
     strategy: InvestigationStrategy | None = None,
     record_step: StepSink | None = None,
+    selector_llm_client: LLMClientProtocol | None = None,
 ) -> Callable[[RunState, datetime], RunState]:
     """Bind clients + model to the Phase 2 INVESTIGATING transition.
 
@@ -709,6 +710,15 @@ def make_llm_investigate(
     threshold, the ADR-0009 re-probe, ``max_iterations``, ``_execute_probe``
     and its tier re-check — stays here and is shared by every strategy. That
     asymmetry is the packet: strategies propose, this loop decides.
+
+    ``selector_llm_client`` is the client the ``candidate_selector`` role calls
+    through (WP-6.2). A second client rather than a second use of ``llm_client``
+    because the ROLE is what the accounting splits on: the eval runner meters the
+    two as ``investigation_planner`` and ``candidate_selector``, and a selector
+    sharing the planner's wrapper would fold selection's cost into generation's.
+    ``None`` for every arm that makes no selector call, which is every arm but
+    one; the selector strategy refuses rather than falling back, because a
+    fallback would report its tokens under another role's name.
 
     ``record_step`` is where each step's ``StepRecord`` goes. ``None`` means
     nobody is recording, which is every run today: the tracer is opt-in
@@ -745,6 +755,7 @@ def make_llm_investigate(
                         iteration=iteration,
                         config=chosen.config,
                         record_step=record_step,
+                        selector_llm_client=selector_llm_client,
                     ),
                 )
             except (ValueError, ValidationError, LLMError) as err:

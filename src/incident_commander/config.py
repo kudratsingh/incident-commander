@@ -190,6 +190,28 @@ class Settings(BaseSettings):
     # times the bill for one answer — so the default is the value the arm is
     # for, and lowering it is a deliberate experiment.
     sample_temperature: float = Field(default=1.0, ge=0.0, le=1.0)
+    # Which generator supplies the set a ``candidate_selector`` arm decides over
+    # (plan 02 § 12, WP-6.2). Env var SELECTOR_GENERATOR.
+    #
+    # Typed as the enum for the same reason ``inference_strategy`` is: a value
+    # from a fixed set is a StrEnum, not a validated string, and a typo here
+    # would otherwise produce an arm nobody configured. The registry refuses a
+    # name it does not have, and ``CandidateSelectorStrategy`` refuses one that
+    # cannot supply a set — ``baseline`` is the reachable value that cannot: it
+    # considers one diagnosis, so a selector over its set is a billed call whose
+    # only possible answer is the candidate it was handed.
+    #
+    # The default is the ENUMERATED arm because it is the cheap generator: one
+    # call per step at roughly N× output, against the sampled arm's N calls. An
+    # operator who selected a selector arm and forgot this gets the generator
+    # that spends least, which is the same reasoning as ``best_of_n``'s
+    # default of 1.
+    #
+    # Unread by every strategy but ``candidate_selector``. A run that sets it
+    # under another arm is not refused: the value is simply not part of that
+    # arm, and each strategy stamps into the provenance exactly the knobs it
+    # used.
+    selector_generator: StrategyName = StrategyName.BEST_OF_N_ENUMERATED
 
     # --- The selected strategy's budget policy (plan 02 § 8, WP-2.4) -------
     # A strategy that samples eight candidates per planner step spends roughly

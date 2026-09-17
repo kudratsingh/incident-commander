@@ -50,3 +50,14 @@ class StrategyKnobs:
     #: samples (plan 02 § 11.2). ``None`` means "do not send one", which is
     #: what every call in this repo has always done — the provider's default.
     sample_temperature: float | None = None
+    #: Which generator supplies the set a ``candidate_selector`` decides over
+    #: (plan 02 § 12, WP-6.2). A plain ``str`` rather than ``StrategyName``, for
+    #: the reason this module imports nothing from its own package: it has to be
+    #: reachable from the edge without dragging a strategy in behind it. The
+    #: registry resolves it and refuses a name it does not have, so an
+    #: unresolvable value fails at construction with the known names listed.
+    #:
+    #: The default is the ENUMERATED arm, which is the cheap generator: one call
+    #: per step at ~N× output, against the sampled arm's N calls. A caller who
+    #: forgot to configure this gets the arm that spends least.
+    selector_generator: str = "best_of_n_enumerated"

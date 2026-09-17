@@ -114,6 +114,15 @@ SCOPE: Final[tuple[str, ...]] = (
     "759e198cdd27",
     "648a32f2339d",
     "fc896b25a09c",
+    # --- added by the FINAL Phase 2 close (WO-R3-195) ---
+    # The two re-runs of those reds, after their fixes merged: the stale-cache
+    # sensor (platform v0.6.8, commander cmd #269) and ADR 0041's whole-queue
+    # rule (cmd #270). Both green. They sit BESIDE the reds rather than in place
+    # of them — same arm, same scenario, one change between the two runs — so a
+    # per-scenario pairing in this table has two rows for each of them and the
+    # pass rate over the seeded legs is 3 of 5, not 3 of 3.
+    "d16aa18dce08",
+    "42c675d9c145",
 )
 
 #: Archives whose ROOT_CAUSE verdicts have been withdrawn and replaced by a

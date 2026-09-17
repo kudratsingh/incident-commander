@@ -29,9 +29,29 @@ way — pass it with ``--trace-dir``. A run directory with no ``report.json``
 was killed mid-suite (ADR 0017); its slices are still first-class evidence and
 render normally.
 
+**A run adds one file, not thirty-nine (WO-R3-257).** This script is chained
+after the runner in ``make eval-live`` and ``make eval-smoke``, and it used to
+re-render EVERY trace file it could find on every invocation. A live run of
+one scenario therefore wrote 39 human reports: one of the run that had just
+happened, and 38 fresh copies of trajectories nobody had re-run. That is how
+``evals/reports/human/`` reached 765 files for 56 distinct runs — 93% repeats,
+each one a byte-for-byte re-render of an already-rendered invocation, and each
+one permanent, because invariant 9 forbids deleting any of them.
+
+So a bare invocation is now INCREMENTAL. For each trace file it compares the
+newest invocation in the trace against the invocations the scenario's newest
+existing render already covers, and renders only where the two disagree. That
+is both halves of the rule in one test: the scenario that just ran has an
+invocation no render covers, and so does a scenario whose last render was
+somehow missed or lost. Everything else is skipped and says so.
+
+Naming scenarios, ``--invocation``, ``--all`` and ``--force`` are explicit
+requests and always render — an operator asking for a render gets one.
+
 Usage:
-    uv run python scripts/format_traces.py                    # all scenarios
-    uv run python scripts/format_traces.py <scenario> ...     # some scenarios
+    uv run python scripts/format_traces.py                    # what is not yet rendered
+    uv run python scripts/format_traces.py <scenario> ...     # some scenarios, always
+    uv run python scripts/format_traces.py --force            # re-render everything
     uv run python scripts/format_traces.py --all              # every invocation
     uv run python scripts/format_traces.py --invocation <id>  # one invocation
     uv run python scripts/format_traces.py --trace-dir DIR --out-dir DIR
@@ -663,6 +683,79 @@ def render_to(
     )
 
 
+#: The header field ``_fmt_header`` writes for every invocation it renders.
+#: Reading it back is how an existing report answers "which runs are in you?"
+#: — the same question `evidence/build_human_index.py` asks of the same line
+#: in the hub. The alternative, putting the traced invocation in the
+#: FILENAME, was rejected: the id in a report's name is the RENDER's
+#: (``--all`` has no single traced one), and changing that would re-point
+#: every existing file's meaning.
+_INVOCATION_FIELD: Final[str] = "Invocation:"
+
+
+def rendered_invocations(path: Path) -> set[str]:
+    """The invocation ids an existing human report renders.
+
+    Every rendered group writes one ``Invocation:`` header, so a plain scan
+    of the file answers this for a one-group render and an ``--all`` render
+    alike. Unreadable file → the empty set, which reads as "covers nothing"
+    and re-renders. Failing towards a second render is the safe direction:
+    the cost is one file, and the alternative is a run with no readable
+    trajectory.
+    """
+    try:
+        text = path.read_text(errors="replace")
+    except OSError:
+        return set()
+    found: set[str] = set()
+    for line in text.splitlines():
+        if not line.startswith(_INVOCATION_FIELD):
+            continue
+        value = line[len(_INVOCATION_FIELD) :].split()
+        if value:
+            found.add(value[0])
+    return found
+
+
+def newest_invocation(path: Path) -> str | None:
+    """The invocation id of the last attempt in a trace file, or ``None``.
+
+    The tracer is append-only and single-writer, so file order is the
+    chronology and the LAST record belongs to the newest attempt — the same
+    fact ``_group_by_invocation`` relies on to pick what to render. Read
+    from the end so a 39-scenario sweep does not parse every record of every
+    file to decide it has nothing to do; a killed run's truncated final line
+    is skipped exactly as ``_read_records`` skips it.
+    """
+    try:
+        lines = path.read_text(errors="replace").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            return str(record.get("invocation_id") or PRE_INVOCATION_ID)
+    return None
+
+
+def needs_render(path: Path, out_dir: Path) -> bool:
+    """Whether this trace file holds an attempt no existing report covers."""
+    latest = newest_invocation(path)
+    if latest is None:
+        # Nothing parseable in the file. main() still skips it as empty; say
+        # "yes" here so the two never disagree about an unreadable trace.
+        return True
+    existing = artifacts.newest_or_none("human", path.stem, directory=out_dir)
+    if existing is None:
+        return True
+    return latest not in rendered_invocations(existing)
+
+
 def _display(path: Path) -> str:
     try:
         return str(path.relative_to(_REPO_ROOT))
@@ -694,6 +787,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         action="store_true",
         help="render every invocation in the file, oldest first",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="re-render every scenario, including ones whose newest attempt is already rendered",
+    )
     return parser.parse_args(argv)
 
 
@@ -708,6 +806,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         paths = sorted(trace_dir.glob("*.jsonl"))
 
+    # An explicit request always renders; a bare sweep renders only what is
+    # not already covered (see the module docstring). Naming scenarios counts
+    # as explicit, which is what lets the runner or an operator force one
+    # scenario's report without arguing with the skip rule.
+    explicit = bool(args.scenarios or args.force or args.render_all or args.invocation)
+
     # One render session, one stamp and one id, shared by every scenario in
     # this pass: the session's reports sort together and are distinguishable
     # from every earlier session's without reading a single file.
@@ -716,9 +820,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     written = 0
     failed = 0
+    skipped = 0
     for path in paths:
         if not path.exists() or path.stat().st_size == 0:
             print(f"skip {path.name} (missing or empty)")
+            continue
+        if not explicit and not needs_render(path, out_dir):
+            skipped += 1
             continue
         try:
             out = render_to(
@@ -739,7 +847,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"wrote {_display(out)}")
         written += 1
 
-    summary = f"\n{written} trajectory files under {_display(out_dir)}/"
+    summary = f"\n{written} trajectory files under {_display(out_dir)}/<scenario>/"
+    if skipped:
+        summary += (
+            f" ({skipped} scenario(s) skipped — newest attempt already rendered; "
+            "--force re-renders them)"
+        )
     if failed:
         summary += f" ({failed} file(s) failed to render — see the ERROR lines above)"
     print(summary)

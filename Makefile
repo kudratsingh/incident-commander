@@ -164,6 +164,9 @@ eval:
 # exits with the runner's own code. Make aborts a recipe on the first
 # non-zero line, so a FAILING run — the one whose traces you actually need —
 # used to skip format_traces.py and leave only raw JSONL behind.
+# The render is INCREMENTAL since WO-R3-257: it writes the report for the
+# invocation this target just produced and skips the 38 scenarios nobody
+# re-ran. `--force` re-renders everything, deliberately.
 ifndef ONLY
 eval-live:
 	$(error 'make eval-live' without ONLY= would select the whole suite for a live, paid run; name exactly one scenario: make eval-live ONLY=<scenario_name>)
@@ -173,7 +176,7 @@ eval-live:
 	code=$$?; \
 	PYTHONPATH=. uv run python scripts/format_traces.py || true; \
 	echo "JSONL traces: evals/traces/*.jsonl"; \
-	echo "Human-readable trajectories: evals/reports/human/*.txt"; \
+	echo "Human-readable trajectories: evals/reports/human/<scenario>/*.txt"; \
 	exit $$code
 endif
 
@@ -239,7 +242,7 @@ eval-smoke:
 	code=$$?; \
 	PYTHONPATH=. uv run python scripts/format_traces.py || true; \
 	echo "JSONL traces: evals/traces/*.jsonl"; \
-	echo "Human-readable trajectories: evals/reports/human/*.txt"; \
+	echo "Human-readable trajectories: evals/reports/human/<scenario>/*.txt"; \
 	exit $$code
 
 # Fault-world content review, free and zero-LLM (evals/dossier.py).
@@ -266,8 +269,8 @@ eval-smoke:
 #
 # No `@` on the recipe line: the whole document goes to stdout on purpose —
 # the coordinator pastes it into the readiness note. It is also written to
-# evals/reports/dossiers/<scenario>.<stamp>.<invocation_id>.md (create-only,
-# cmd #185's convention).
+# evals/reports/dossiers/<scenario>/<scenario>.<stamp>.<invocation_id>.md
+# (create-only, cmd #185's convention; per-scenario folder since WO-R3-257).
 ifndef ONLY
 world-dossier:
 	$(error 'make world-dossier' without ONLY= has no meaning: a dossier seeds ONE scenario's fault into the shared world and then resets it; name exactly one scenario: make world-dossier ONLY=<scenario_name>)
@@ -284,8 +287,12 @@ world-dossier:
 	PLATFORM_COMPOSE="$(PLATFORM_COMPOSE)" uv run python -m evals.dossier --only $(ONLY)
 endif
 
+# Renders what is not yet rendered (WO-R3-257): a scenario whose newest
+# traced attempt no existing report covers. `make trace-report ARGS=--force`
+# re-renders every scenario, which is a deliberate act — each render is a
+# permanent file (invariant 9).
 trace-report:
-	PYTHONPATH=. uv run python scripts/format_traces.py
+	PYTHONPATH=. uv run python scripts/format_traces.py $(ARGS)
 
 # --- Chaos setup helpers (live-eval prep) -------------------------------
 # All wrap scripts/chaos_setup.py. Effects self-clean on TTL. Requires

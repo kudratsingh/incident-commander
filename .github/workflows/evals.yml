@@ -11,6 +11,10 @@ on:
       - "contracts/platform-tools.snapshot.json"
       - "evals/graders/**"
       - "evals/runner.py"
+      # The gate grades "the newest report", and this file is what
+      # decides which one that is and where it lives (WO-R3-257). A change
+      # here can move the verdict without touching a prompt or a grader.
+      - "evals/artifacts.py"
       - "evals/scenarios/**"
       - "evals/reports/baseline.json"
       - ".github/workflows/evals.yml"

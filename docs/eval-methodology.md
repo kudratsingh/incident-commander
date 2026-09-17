@@ -515,12 +515,20 @@ Every live run writes three coordinated views per scenario:
 evals/traces/<scenario>.jsonl                     ← raw LLM + MCP request/response (append-only)
 evals/trajectories/<scenario>.<stamp>.<inv>.json  ← state-machine checkpoints per transition
 evals/briefings/<scenario>.<stamp>.<inv>.json     ← final human-facing artifact
-evals/reports/human/<scenario>.<stamp>.<inv>.txt  ← readable stepwise render (auto-generated)
-evals/reports/report.<stamp>.<inv>.json           ← aggregate report
-evals/reports/baseline.json                       ← last-blessed baseline (regression gate)
+evals/reports/human/<scenario>/<scenario>.<stamp>.<inv>.txt  ← readable stepwise render
+evals/reports/runs/<YYYY-MM>/report.<stamp>.<inv>.json       ← aggregate report
+evals/reports/baseline.json                                  ← last-blessed baseline (gate)
 ```
 
-The `evals/reports/human/*.txt` files are the fastest path to understand one run — every LLM call is a labeled step with full system prompt, user message, and parsed output.
+The `evals/reports/human/<scenario>/*.txt` files are the fastest path to understand one run — every LLM call is a labeled step with full system prompt, user message, and parsed output.
+
+One folder per scenario, holding the newest render of each distinct run;
+earlier renders of the same run sit in `human/_superseded/<scenario>/`, moved
+rather than deleted. A run adds one file: the renderer used to re-render all
+39 scenarios on every invocation, which is how the folder reached 765 files
+for 56 runs. `evals/reports/README.md` is the ten-line map of the whole
+folder, and `evals/artifacts.py` is the only thing that decides where a file
+goes or which one is current.
 
 ### Step records — what the planner decided, per step
 
@@ -736,8 +744,8 @@ the un-attributable artifact:
 ### The committed Phase 0 baseline
 
 `make baseline-report` prints; `python -m evals.baseline_report --write` commits.
-The written form is two versioned artifacts under `evals/reports/`, both
-resolving through `evals/artifacts.py`:
+The written form is two versioned artifacts under `evals/reports/baseline/`,
+both resolving through `evals/artifacts.py`:
 
 | Kind | File | What it is |
 |---|---|---|

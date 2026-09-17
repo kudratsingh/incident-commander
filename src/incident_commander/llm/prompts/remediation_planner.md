@@ -63,7 +63,7 @@ In every one of those cases the honest plan is to **escalate, naming the root jo
 **Read the tool descriptions against each other, not one at a time.** Two of them steer you wrong on this incident if you read them alone:
 
 - `get_dag_state`'s description calls itself "the verification surface for pause_dag". It is equally the verification surface for a replayed root — after an immediate replay, that same probe shows no `dead_letter` node and the held descendants promoted. The description names one use of the tool, not the only one.
-- `replay_dlq_by_ids`'s description never mentions DAG roots. It does not have to: a dead-lettered DAG root is a dead-lettered job like any other, and replaying it is the platform's own un-stick path. The reciprocal sentence lives in the description of a chaos tool you never see.
+- `replay_dlq_by_ids`'s description never mentions DAG roots. It does not have to: a dead-lettered DAG root is a dead-lettered job like any other, and replaying it is the platform's own un-stick path. Confirm replay safety from the root's own dead-letter row before acting.
 
 **`pause_dag` never resolves an incident.** Reach for it only when the operator's goal is to stop promotion while a human decides — never to fix something. Three facts, all of which hold whatever the alert says:
 

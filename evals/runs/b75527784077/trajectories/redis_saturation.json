@@ -1,0 +1,149 @@
+{
+  "scenario": "redis_saturation",
+  "incident_id": "fb6fd80c-c848-4c10-9816-8ea96e38f3cf",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "fb6fd80c-c848-4c10-9816-8ea96e38f3cf",
+      "state": "triage",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:03:42.948280Z",
+      "updated_at": "2026-09-17T13:03:42.948280Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "fb6fd80c-c848-4c10-9816-8ea96e38f3cf",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000027,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c74dd789-c7e1-4130-a2d8-2df561227781",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:03:42.948307Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:03:42.948280Z",
+      "updated_at": "2026-09-17T13:03:42.948307Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "fb6fd80c-c848-4c10-9816-8ea96e38f3cf",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "service": "redis"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000038,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "c74dd789-c7e1-4130-a2d8-2df561227781",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:03:42.948307Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4675c85a-2c00-43ac-90cc-eb8de621db5e",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":1.2,\"connected_clients\":250,\"used_memory_bytes\":1073741824,\"used_memory_human\":\"1.00G\",\"keyspace_hits\":10000,\"keyspace_misses\":50000,\"error\":null}",
+          "timestamp": "2026-09-17T13:03:42.948318Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4418be45-22d7-47a9-86ef-7a77431e9725",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "Redis-wide pressure confirmed; human should decide on capacity and eviction policy"
+          },
+          "result_summary": "planner stop: Redis-wide pressure confirmed; human should decide on capacity and eviction policy",
+          "timestamp": "2026-09-17T13:03:42.948318Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "redis_saturation",
+          "name": "redis_memory_pressure",
+          "confidence": 0.85,
+          "reasoning": "Hit/miss ratio is 10k/50k (16%) with 1GB in use and 250 connected clients, and ping is healthy. The alert names no key and nothing read here identifies one, so this is Redis itself being the constraint rather than a single stale entry — there is no key to invalidate.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:03:42.948280Z",
+      "updated_at": "2026-09-17T13:03:42.948318Z"
+    }
+  ],
+  "invocation_id": "b75527784077"
+}

@@ -1,0 +1,41 @@
+{
+  "incident_id": "5cc88d86-7191-48d0-8d3e-e243ada1dc1f",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high group=worker-dispatcher",
+  "escalation_reason": "not_verified: The verify probe still shows lag=15000 — the restart action went through but the consumer isn't processing. Deeper issue: the consumer may be crashing on startup or a downstream dependency is blocking it.\n",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":15000,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-07-28T10:07:30Z\",\"age_seconds\":18,\"recent_samples\":[{\"lag\":15000,\"measured_at\":\"2026-07-28T10:07:30Z\"},{\"lag\":11200,\"measured_at\":\"2026-07-28T10:06:30Z\"},{\"lag\":7600,\"measured_at\":\"2026-07-28T10:05:30Z\"},{\"lag\":4100,\"measured_at\":\"2026-07-28T10:04:30Z\"},{\"lag\":900,\"measured_at\":\"2026-07-28T10:03:30Z\"}]}",
+      "arguments": {
+        "consumer_group": "worker-dispatcher"
+      }
+    },
+    {
+      "tool": "restart_consumer_group",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"kill_key_cleared\":true,\"latency_key_cleared\":false,\"group_recognized\":true,\"accepted\":true}",
+      "arguments": {
+        "consumer_group": "worker-dispatcher",
+        "idempotency_key": "d0338985a4ed7b39dac587d34a8cb7fd"
+      }
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":15000,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-07-28T10:07:30Z\",\"age_seconds\":18,\"recent_samples\":[{\"lag\":15000,\"measured_at\":\"2026-07-28T10:07:30Z\"},{\"lag\":11200,\"measured_at\":\"2026-07-28T10:06:30Z\"},{\"lag\":7600,\"measured_at\":\"2026-07-28T10:05:30Z\"},{\"lag\":4100,\"measured_at\":\"2026-07-28T10:04:30Z\"},{\"lag\":900,\"measured_at\":\"2026-07-28T10:03:30Z\"}]}",
+      "arguments": {
+        "consumer_group": "worker-dispatcher",
+        "attempt": 1,
+        "of": 1
+      }
+    }
+  ],
+  "findings": "Restarted worker-dispatcher after seeing lag=15000. Verify probe still shows lag=15000 — the restart did not clear the backlog, so the underlying cause isn't a simple consumer death.\n",
+  "recommendation": "Check the consumer pod's startup logs and downstream dependency health (Postgres, Redis, downstream API). A restart-that-didn't- help suggests the consumer is looping on a persistent error.\n",
+  "budget_used": {
+    "tool_calls": 3,
+    "tokens": 0,
+    "wall_seconds": 0.004686,
+    "usd": "0.000000"
+  }
+}

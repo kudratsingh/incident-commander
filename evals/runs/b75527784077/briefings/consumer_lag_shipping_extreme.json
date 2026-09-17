@@ -1,0 +1,24 @@
+{
+  "incident_id": "8d56c3ad-04c1-48dc-b2b1-c58ed60b7b99",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high group=shipping-consumer",
+  "escalation_reason": "planner stop: extreme backlog; escalate for outage response",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"shipping-consumer\",\"lag\":100000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:shipping-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}",
+      "arguments": {
+        "consumer_group": "shipping-consumer"
+      }
+    }
+  ],
+  "findings": "shipping-consumer lag reads 100000 messages — a magnitude consistent with a stopped consumer rather than slow processing.\n",
+  "recommendation": "Check whether shipping-consumer pod is running at all; if it is, check for a deployment or config change in the last hour.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.000037,
+    "usd": "0.000000"
+  }
+}

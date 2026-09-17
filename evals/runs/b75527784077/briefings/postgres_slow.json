@@ -1,0 +1,22 @@
+{
+  "incident_id": "7fb8e56f-cdc0-470d-a4ce-5fe3efd5b823",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.db severity=critical fingerprint=db_latency_high",
+  "escalation_reason": "planner stop: DB degraded; escalate to human for scaling decision",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_postgres_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":420.5,\"active_connections\":95,\"dialect\":\"postgresql\",\"error\":null}",
+      "arguments": {}
+    }
+  ],
+  "findings": "Postgres ping latency is 420ms (usual baseline < 20ms) and the health probe still answers ok — the DB is degraded but still responsive. It reports 95 active connections; the reading carries no pool ceiling, so whether that is near the limit is not something this probe can say.\n",
+  "recommendation": "Check for long-running queries first, and confirm the 95 active connections against the pool ceiling before treating the pool as the constraint.\n",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 0,
+    "wall_seconds": 0.000036,
+    "usd": "0.000000"
+  }
+}

@@ -1,0 +1,473 @@
+{
+  "scenario": "remediate_verify_fails",
+  "incident_id": "5cc88d86-7191-48d0-8d3e-e243ada1dc1f",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "5cc88d86-7191-48d0-8d3e-e243ada1dc1f",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:03:42.976602Z",
+      "updated_at": "2026-09-17T13:03:42.976602Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "5cc88d86-7191-48d0-8d3e-e243ada1dc1f",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000027,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "f42391e8-ec1c-4784-a5c3-7a845ce9c6cc",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:03:42.976629Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:03:42.976602Z",
+      "updated_at": "2026-09-17T13:03:42.976629Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "5cc88d86-7191-48d0-8d3e-e243ada1dc1f",
+      "state": "planning",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.00004,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "f42391e8-ec1c-4784-a5c3-7a845ce9c6cc",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:03:42.976629Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f17f19dc-a271-41a8-825a-f538c8410563",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":15000,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-07-28T10:07:30Z\",\"age_seconds\":18,\"recent_samples\":[{\"lag\":15000,\"measured_at\":\"2026-07-28T10:07:30Z\"},{\"lag\":11200,\"measured_at\":\"2026-07-28T10:06:30Z\"},{\"lag\":7600,\"measured_at\":\"2026-07-28T10:05:30Z\"},{\"lag\":4100,\"measured_at\":\"2026-07-28T10:04:30Z\"},{\"lag\":900,\"measured_at\":\"2026-07-28T10:03:30Z\"}]}",
+          "timestamp": "2026-09-17T13:03:42.976642Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e377540c-525e-4848-8ef4-18caa0c9ec1c",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "consumer_saturation confirmed"
+          },
+          "result_summary": "planner handoff to PLANNING: consumer_saturation confirmed",
+          "timestamp": "2026-09-17T13:03:42.976642Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.85,
+          "reasoning": "Sustained lag confirms saturation; restart should recover it.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:03:42.976602Z",
+      "updated_at": "2026-09-17T13:03:42.976642Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "5cc88d86-7191-48d0-8d3e-e243ada1dc1f",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.002678,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "f42391e8-ec1c-4784-a5c3-7a845ce9c6cc",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:03:42.976629Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f17f19dc-a271-41a8-825a-f538c8410563",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":15000,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-07-28T10:07:30Z\",\"age_seconds\":18,\"recent_samples\":[{\"lag\":15000,\"measured_at\":\"2026-07-28T10:07:30Z\"},{\"lag\":11200,\"measured_at\":\"2026-07-28T10:06:30Z\"},{\"lag\":7600,\"measured_at\":\"2026-07-28T10:05:30Z\"},{\"lag\":4100,\"measured_at\":\"2026-07-28T10:04:30Z\"},{\"lag\":900,\"measured_at\":\"2026-07-28T10:03:30Z\"}]}",
+          "timestamp": "2026-09-17T13:03:42.976642Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e377540c-525e-4848-8ef4-18caa0c9ec1c",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "consumer_saturation confirmed"
+          },
+          "result_summary": "planner handoff to PLANNING: consumer_saturation confirmed",
+          "timestamp": "2026-09-17T13:03:42.976642Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f3bc7949-f4be-4f9c-a676-1536fa1afa5c",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "consumer_saturation"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"worker-dispatcher\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-09-17T13:03:42.979280Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.85,
+          "reasoning": "Sustained lag confirms saturation; restart should recover it.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "consumer_saturation",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_expectation": "Lag should drop below 100 messages within 30 seconds.\n",
+        "action_rationale": null
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:03:42.976602Z",
+      "updated_at": "2026-09-17T13:03:42.979280Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "5cc88d86-7191-48d0-8d3e-e243ada1dc1f",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.004656,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "f42391e8-ec1c-4784-a5c3-7a845ce9c6cc",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:03:42.976629Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f17f19dc-a271-41a8-825a-f538c8410563",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":15000,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-07-28T10:07:30Z\",\"age_seconds\":18,\"recent_samples\":[{\"lag\":15000,\"measured_at\":\"2026-07-28T10:07:30Z\"},{\"lag\":11200,\"measured_at\":\"2026-07-28T10:06:30Z\"},{\"lag\":7600,\"measured_at\":\"2026-07-28T10:05:30Z\"},{\"lag\":4100,\"measured_at\":\"2026-07-28T10:04:30Z\"},{\"lag\":900,\"measured_at\":\"2026-07-28T10:03:30Z\"}]}",
+          "timestamp": "2026-09-17T13:03:42.976642Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e377540c-525e-4848-8ef4-18caa0c9ec1c",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "consumer_saturation confirmed"
+          },
+          "result_summary": "planner handoff to PLANNING: consumer_saturation confirmed",
+          "timestamp": "2026-09-17T13:03:42.976642Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f3bc7949-f4be-4f9c-a676-1536fa1afa5c",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "consumer_saturation"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"worker-dispatcher\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-09-17T13:03:42.979280Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2a6cc32a-d715-4c04-bbee-8165b9893c01",
+          "tool_name": "restart_consumer_group",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "idempotency_key": "d0338985a4ed7b39dac587d34a8cb7fd"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"kill_key_cleared\":true,\"latency_key_cleared\":false,\"group_recognized\":true,\"accepted\":true}",
+          "timestamp": "2026-09-17T13:03:42.981258Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.85,
+          "reasoning": "Sustained lag confirms saturation; restart should recover it.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "consumer_saturation",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_expectation": "Lag should drop below 100 messages within 30 seconds.\n",
+        "action_rationale": null
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-17T13:03:42.976602Z",
+      "updated_at": "2026-09-17T13:03:42.981258Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "5cc88d86-7191-48d0-8d3e-e243ada1dc1f",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 3,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.004686,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "f42391e8-ec1c-4784-a5c3-7a845ce9c6cc",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:03:42.976629Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f17f19dc-a271-41a8-825a-f538c8410563",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":15000,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-07-28T10:07:30Z\",\"age_seconds\":18,\"recent_samples\":[{\"lag\":15000,\"measured_at\":\"2026-07-28T10:07:30Z\"},{\"lag\":11200,\"measured_at\":\"2026-07-28T10:06:30Z\"},{\"lag\":7600,\"measured_at\":\"2026-07-28T10:05:30Z\"},{\"lag\":4100,\"measured_at\":\"2026-07-28T10:04:30Z\"},{\"lag\":900,\"measured_at\":\"2026-07-28T10:03:30Z\"}]}",
+          "timestamp": "2026-09-17T13:03:42.976642Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e377540c-525e-4848-8ef4-18caa0c9ec1c",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "consumer_saturation confirmed"
+          },
+          "result_summary": "planner handoff to PLANNING: consumer_saturation confirmed",
+          "timestamp": "2026-09-17T13:03:42.976642Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f3bc7949-f4be-4f9c-a676-1536fa1afa5c",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "consumer_saturation"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"worker-dispatcher\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-09-17T13:03:42.979280Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2a6cc32a-d715-4c04-bbee-8165b9893c01",
+          "tool_name": "restart_consumer_group",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "idempotency_key": "d0338985a4ed7b39dac587d34a8cb7fd"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"kill_key_cleared\":true,\"latency_key_cleared\":false,\"group_recognized\":true,\"accepted\":true}",
+          "timestamp": "2026-09-17T13:03:42.981258Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d326249b-368c-48a3-a8cf-8b3c39195cbd",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":15000,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-07-28T10:07:30Z\",\"age_seconds\":18,\"recent_samples\":[{\"lag\":15000,\"measured_at\":\"2026-07-28T10:07:30Z\"},{\"lag\":11200,\"measured_at\":\"2026-07-28T10:06:30Z\"},{\"lag\":7600,\"measured_at\":\"2026-07-28T10:05:30Z\"},{\"lag\":4100,\"measured_at\":\"2026-07-28T10:04:30Z\"},{\"lag\":900,\"measured_at\":\"2026-07-28T10:03:30Z\"}]}",
+          "timestamp": "2026-09-17T13:03:42.981297Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "026b6ce4-a9d3-4eb3-8c2e-1f7df725dccd",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "Lag should drop below 100 messages within 30 seconds.\n",
+            "attempt": 1,
+            "of": 1
+          },
+          "result_summary": "not_verified: The verify probe still shows lag=15000 — the restart action went through but the consumer isn't processing. Deeper issue: the consumer may be crashing on startup or a downstream dependency is blocking it.\n",
+          "timestamp": "2026-09-17T13:03:42.981297Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.85,
+          "reasoning": "Sustained lag confirms saturation; restart should recover it.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "consumer_saturation",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_expectation": "Lag should drop below 100 messages within 30 seconds.\n",
+        "action_rationale": null
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-17T13:03:42.976602Z",
+      "updated_at": "2026-09-17T13:03:42.981297Z"
+    }
+  ],
+  "invocation_id": "b75527784077"
+}

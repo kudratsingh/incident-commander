@@ -82,6 +82,25 @@ evals/reports/human/*
 evals/reports/dossiers/*
 !evals/reports/dossiers/.gitkeep
 
+# `make world-record` output (WP-3.1, evals/recorder.py) is deliberately NOT
+# ignored, and it is the one family here that a run does not produce: a
+# recording is a FIXTURE a later run is executed against, not an output of one.
+# WP-3.2's replay client and WP-3.3's `--mode recorded` cannot run in a fresh
+# clone or a fresh worktree without it, and a benchmark whose world exists only
+# on the machine that recorded it is not a benchmark anyone can reproduce. Same
+# rule and same reason as `evals/runs/` below, and the same precedent as the
+# committed canned-sweep archives and the baseline/phase-close reports.
+#
+# So there is no pattern for them, exactly as there is none for the versioned
+# `evals/reports/report.*.json`: new recordings land UNTRACKED AND VISIBLE, and
+# committing one is a decision a person makes rather than one this file makes
+# for them. They are not small — a recording holds the full ToolResult of every
+# read the agent might make — so commit the ones a reported result rests on, not
+# every experiment. `audit-ws/evidence/sync.sh` mirrors the folder into the
+# private workspace either way. (`.gitkeep` keeps the folder in a clone that
+# carries no recording, because CLAUDE.md's layout tree names the path and
+# tests/unit/test_docs_env_vars.py checks that every named path exists.)
+
 # The chaos-teardown latch (ADR 0037, evals/runner.py). Operational state
 # with two transitions — a teardown compensator failed; an operator reset the
 # world — and per-checkout by definition. Ignored so it can never be committed

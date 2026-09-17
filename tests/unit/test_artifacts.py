@@ -348,6 +348,12 @@ class TestTheLayoutIsOneFamilyPerFolder:
         "dossier": ("evals", "reports", "dossiers", "consumer_lag_pass"),
         "trajectory": ("evals", "trajectories"),
         "briefing": ("evals", "briefings"),
+        # WP-3.1, and the one family deliberately OUTSIDE `evals/reports/`: a
+        # recording is an input a later run is executed against, not a document
+        # somebody reads. Its ground-truth sibling shares the folder on purpose
+        # (`tests/unit/test_recorder.py` owns why).
+        "recorded_world": ("evals", "recorded_worlds", "consumer_lag_pass"),
+        "recorded_world_truth": ("evals", "recorded_worlds", "consumer_lag_pass"),
     }
 
     @staticmethod

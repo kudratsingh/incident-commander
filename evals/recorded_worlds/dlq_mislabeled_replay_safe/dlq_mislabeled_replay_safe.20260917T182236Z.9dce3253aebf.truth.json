@@ -1,0 +1,35 @@
+{
+  "absent_reason": null,
+  "applies": true,
+  "ground_truth": {
+    "affected_components": [
+      "dlq",
+      "csv_upload"
+    ],
+    "causal_chain": [],
+    "incident_count": 1,
+    "root_causes": [
+      "poison_message"
+    ]
+  },
+  "provenance": {
+    "commander_head": "62efe8f",
+    "invocation_id": "9dce3253aebf",
+    "platform_mcp_url": "http://localhost:8001/mcp",
+    "read_principal": "PLATFORM_SMOKE_TOKEN (read-scoped)",
+    "recorded_at": "2026-09-17T18:22:36.986730+00:00"
+  },
+  "recording": "dlq_mislabeled_replay_safe.20260917T182236Z.9dce3253aebf.json",
+  "scenario": "dlq_mislabeled_replay_safe",
+  "schema_version": 1,
+  "why_this_file_is_separate": "ADR 0038: the wall around the answer key is structural. The replay client loads the recording through `recorder.load_recording`, which takes one path and has no way to reach this file; `RecordedWorld` forbids extra keys, so a ground truth cannot ride inside a recording either. Pinned by tests/unit/test_recorder.py.",
+  "world": {
+    "chaos_hooks": [
+      "create_mislabeled_dlq_job"
+    ],
+    "chaos_seeded": true,
+    "label": "the live platform with `dlq_mislabeled_replay_safe`'s fault plan seeded (1 hook(s): `create_mislabeled_dlq_job`), settled 0.0s, read under the read-scoped principal",
+    "live_mcp": true,
+    "settle_seconds": 0.0
+  }
+}

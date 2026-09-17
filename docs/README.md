@@ -17,7 +17,7 @@ One line per document, so you can find the right one without opening five.
 
 | Document | What it answers |
 |---|---|
-| [ADR/](ADR/) | Why the agent is shaped the way it is. [ADR/README.md](ADR/README.md) indexes all 42 with their statuses and records which record later amended which |
+| [ADR/](ADR/) | Why the agent is shaped the way it is. [ADR/README.md](ADR/README.md) indexes all 43 with their statuses and records which record later amended which |
 
 ## History — read as a record, not as current state
 

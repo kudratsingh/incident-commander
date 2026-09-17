@@ -257,6 +257,36 @@ KINDS: Final[dict[str, ArtifactKind]] = {
     "regrade_report_md": ArtifactKind(
         ("evals", "reports"), ".md", fixed_stem="regrade_report", folder="regrades"
     ),
+    # `make world-record ONLY=<scenario>` (evals/recorder.py, WP-3.1) — one
+    # zero-LLM reading of one seeded fault world, keyed by the WIRED arguments
+    # the agent's own client sends, for a replay platform to answer from.
+    #
+    # NOT under `evals/reports/`: a recording is not a document somebody reads,
+    # it is an INPUT a later run is executed against, and the reports tree is
+    # for the other thing. Divergence D2 is why it is here at all rather than
+    # at the hand-built path plan 04:110 names — `KINDS` is a closed registry,
+    # so an unregistered family cannot be resolved by `newest()` and its writes
+    # would not be exclusive-create. Both matter: a second recording of one
+    # scenario must not replace the first (invariant 9), and every reader must
+    # take the newest through the one resolver.
+    #
+    # One folder per scenario, like `dossier` and `human`: a corpus that gets
+    # re-recorded on every platform release accumulates versions per scenario
+    # much faster than a report family does, and the per-scenario folder is
+    # what keeps `recorded_worlds/` navigable when it holds hundreds.
+    "recorded_world": ArtifactKind(("evals", "recorded_worlds"), ".json", grouping="scenario"),
+    # The evaluator's answer key for the world beside it (ADR 0040 / ADR 0038):
+    # a SIBLING file, so the replay path can load a recording without being
+    # able to reach the ground truth through it. The suffix carries `.truth`
+    # ahead of the extension, which keeps the two families disjoint by name —
+    # `<scenario>.<stamp>.<id>.truth.json` does not parse as a version of the
+    # kind above (its "stamp" segment would be the invocation id), and
+    # `<scenario>.<stamp>.<id>.json` does not end in `.truth.json`. Pinned by
+    # `tests/unit/test_recorder.py`, because "the replay never loads it" is the
+    # property, not the intention.
+    "recorded_world_truth": ArtifactKind(
+        ("evals", "recorded_worlds"), ".truth.json", grouping="scenario"
+    ),
 }
 
 

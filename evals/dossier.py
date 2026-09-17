@@ -52,6 +52,16 @@ half-seeded fault.
 
 **Free.** Zero tokens, zero spend. That is the whole point: the check that
 would have saved the rem-4 run costs nothing, so there is no reason to skip it.
+
+**The world recorder is built on this module** (``evals/recorder.py``,
+WP-3.1). ``make world-record`` seeds the same plan through ``seed_chaos``,
+establishes the same premise through ``check_precondition``, derives its calls
+from ``derive_probes`` and runs the same three lints over what came back — and
+then keeps the answers instead of only printing them. Everything the two share
+lives here and is imported there, so a recorded world and a dossier of the same
+scenario cannot disagree about which reads the agent is expected to make. The
+one thing the recorder needs and a dossier does not is ``read_result``, the
+same read loop with the ``ToolResult`` still attached (divergence F3).
 """
 
 from __future__ import annotations
@@ -108,6 +118,9 @@ from evals.world_audit import (
 )
 from evals.world_audit import (
     read as read,
+)
+from evals.world_audit import (
+    read_result as read_result,
 )
 from incident_commander.agent.investigation import (
     ALERT_SUBJECT_PROBES,
@@ -1554,7 +1567,14 @@ def _head() -> str:
     return done.stdout.strip() or "unknown"
 
 
-def _select(only: Sequence[str], scenarios: Sequence[Scenario]) -> tuple[Scenario | None, int]:
+def _select(
+    only: Sequence[str],
+    scenarios: Sequence[Scenario],
+    *,
+    label: str = "DOSSIER",
+    noun: str = "dossier",
+    command: str = "world-dossier",
+) -> tuple[Scenario | None, int]:
     """The ONLY guard, in the shape ``evals/runner.py`` uses for a live run.
 
     Three refusals, all exit 2 and all before anything touches the platform:
@@ -1562,22 +1582,28 @@ def _select(only: Sequence[str], scenarios: Sequence[Scenario]) -> tuple[Scenari
     name. The last one prints the did-you-mean list the runner prints, because
     the failure it prevents is the same one: a substring silently widens a
     selection, and this selection SEEDS CHAOS INTO A SHARED WORLD.
+
+    The three vocabulary arguments exist because ``evals/recorder.py`` needs
+    exactly this guard for exactly this reason, and an operator who typed
+    ``make world-record`` must not be answered with "DOSSIER FAIL … try
+    make world-dossier". Defaults are the dossier's own words, so its output is
+    byte-identical to what it printed before they existed; sharing the guard
+    rather than copying it is what keeps the two commands refusing the same
+    things (WO-R3-196).
     """
     if not only:
         print(
-            "DOSSIER FAIL: --only <scenario_name> is required. A dossier seeds the "
+            f"{label} FAIL: --only <scenario_name> is required. A {noun} seeds the "
             "scenario's chaos hook into the shared eval world and then resets it; "
             "there is no meaningful 'all scenarios' form of that."
         )
-        print(
-            "Name exactly one scenario, e.g. make world-dossier ONLY=remediate_dlq_backlog_success"
-        )
+        print(f"Name exactly one scenario, e.g. make {command} ONLY=remediate_dlq_backlog_success")
         print("nothing was seeded")
         return None, EXIT_SELECTION
     if len(only) > 1:
         print(
-            f"DOSSIER FAIL: {len(only)} scenarios named ({', '.join(only)}). One "
-            "dossier seeds one fault into one shared world; two would interleave "
+            f"{label} FAIL: {len(only)} scenarios named ({', '.join(only)}). One "
+            f"{noun} seeds one fault into one shared world; two would interleave "
             "their faults and neither reading would be about the scenario you ran."
         )
         print("nothing was seeded")
@@ -1586,9 +1612,9 @@ def _select(only: Sequence[str], scenarios: Sequence[Scenario]) -> tuple[Scenari
     known = {s.name: s for s in scenarios}
     if wanted not in known:
         near = sorted(name for name in known if wanted in name)
-        print(f"DOSSIER FAIL: {wanted!r} is not a scenario name.")
+        print(f"{label} FAIL: {wanted!r} is not a scenario name.")
         print(
-            "A dossier selects by full scenario name, exactly as a live run does — "
+            f"A {noun} selects by full scenario name, exactly as a live run does — "
             "a substring silently widens the selection."
         )
         if near:

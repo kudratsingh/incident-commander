@@ -1,0 +1,577 @@
+{
+  "scenario": "remediate_stale_cache_success",
+  "incident_id": "b540457e-2bac-4621-8a24-c9e94e9f0062",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "b540457e-2bac-4621-8a24-c9e94e9f0062",
+      "state": "triage",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T17:47:06.208705Z",
+      "updated_at": "2026-09-17T17:47:06.208705Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "b540457e-2bac-4621-8a24-c9e94e9f0062",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.063338,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "8cfc3317-51b2-4871-a663-f0f2137afcc0",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T17:47:06.272043Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T17:47:06.208705Z",
+      "updated_at": "2026-09-17T17:47:06.272043Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "b540457e-2bac-4621-8a24-c9e94e9f0062",
+      "state": "planning",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 33757,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.063408,
+        "max_usd": "1.00",
+        "usd_used": "0.088642"
+      },
+      "evidence": [
+        {
+          "evidence_id": "8cfc3317-51b2-4871-a663-f0f2137afcc0",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T17:47:06.272043Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e7ca5358-5156-41e7-bdf8-201518d8fac6",
+          "tool_name": "get_cache_key_info",
+          "arguments": {
+            "key": "cache:jobs:worker-dispatcher:hot_set"
+          },
+          "result_summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"exists\":true,\"type\":\"string\",\"ttl_seconds\":593,\"size\":90,\"records_referenced\":3,\"records_found\":0}",
+          "timestamp": "2026-09-17T17:47:06.272113Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7ddda853-e765-4e13-81fb-efef43cbd585",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.573,\"connected_clients\":12,\"used_memory_bytes\":1783136,\"used_memory_human\":\"1.70M\",\"keyspace_hits\":10254,\"keyspace_misses\":1542385,\"error\":null}",
+          "timestamp": "2026-09-17T17:47:06.272113Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "832aa030-4bd4-40eb-9cf3-b602cbd9e643",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The cache key 'cache:jobs:worker-dispatcher:hot_set' exists but references 3 records with 0 found in the database — it is a dangling/stale cache entry pointing at non-existent records, directly causing the cache_miss_spike. This is a confirmed stale_cache condition with confidence 0.82, and the Tier-1 fix (invalidate_cache_key) should be applied."
+          },
+          "result_summary": "planner handoff to PLANNING: The cache key 'cache:jobs:worker-dispatcher:hot_set' exists but references 3 records with 0 found in the database — it is a dangling/stale cache entry pointing at non-existent records, directly causing the cache_miss_spike. This is a confirmed stale_cache condition with confidence 0.82, and the Tier-1 fix (invalidate_cache_key) should be applied.",
+          "timestamp": "2026-09-17T17:47:06.272113Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "cache-jobs-worker-dispatcher-hot_set-records-not-found",
+          "confidence": 0.82,
+          "reasoning": "The cache key exists with a valid TTL and references 3 records, but records_found=0 means the cached data points at records that no longer exist in the database, causing cache misses on every lookup — exactly matching the 'cache_miss_spike' fingerprint."
+        },
+        {
+          "category": "redis_saturation",
+          "name": "redis-keyspace-miss-ratio-critically-high",
+          "confidence": 0.55,
+          "reasoning": "Redis health shows 1,542,385 keyspace misses vs 10,254 hits — an extremely high miss ratio — though the server itself is healthy (low memory, low latency), suggesting the root cause is stale/dangling cache entries rather than Redis infrastructure saturation."
+        },
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-consumer-lag-contributing-to-cache-misses",
+          "confidence": 0.25,
+          "reasoning": "A lagging worker-dispatcher consumer could be failing to populate or refresh the hot_set cache, but the alert is from platform.cache, not Kafka, making this a secondary hypothesis."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-invalidated-cache-records",
+          "confidence": 0.2,
+          "reasoning": "A deploy that deleted or migrated job records could leave the cached hot_set referencing now-gone records, but no deploy evidence has been collected yet."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T17:47:06.208705Z",
+      "updated_at": "2026-09-17T17:47:06.272113Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "b540457e-2bac-4621-8a24-c9e94e9f0062",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 52145,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 28.4738,
+        "max_usd": "1.00",
+        "usd_used": "0.153767"
+      },
+      "evidence": [
+        {
+          "evidence_id": "8cfc3317-51b2-4871-a663-f0f2137afcc0",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T17:47:06.272043Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e7ca5358-5156-41e7-bdf8-201518d8fac6",
+          "tool_name": "get_cache_key_info",
+          "arguments": {
+            "key": "cache:jobs:worker-dispatcher:hot_set"
+          },
+          "result_summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"exists\":true,\"type\":\"string\",\"ttl_seconds\":593,\"size\":90,\"records_referenced\":3,\"records_found\":0}",
+          "timestamp": "2026-09-17T17:47:06.272113Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7ddda853-e765-4e13-81fb-efef43cbd585",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.573,\"connected_clients\":12,\"used_memory_bytes\":1783136,\"used_memory_human\":\"1.70M\",\"keyspace_hits\":10254,\"keyspace_misses\":1542385,\"error\":null}",
+          "timestamp": "2026-09-17T17:47:06.272113Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "832aa030-4bd4-40eb-9cf3-b602cbd9e643",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The cache key 'cache:jobs:worker-dispatcher:hot_set' exists but references 3 records with 0 found in the database — it is a dangling/stale cache entry pointing at non-existent records, directly causing the cache_miss_spike. This is a confirmed stale_cache condition with confidence 0.82, and the Tier-1 fix (invalidate_cache_key) should be applied."
+          },
+          "result_summary": "planner handoff to PLANNING: The cache key 'cache:jobs:worker-dispatcher:hot_set' exists but references 3 records with 0 found in the database — it is a dangling/stale cache entry pointing at non-existent records, directly causing the cache_miss_spike. This is a confirmed stale_cache condition with confidence 0.82, and the Tier-1 fix (invalidate_cache_key) should be applied.",
+          "timestamp": "2026-09-17T17:47:06.272113Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "3e818fec-b2ae-4dd8-ab65-afdcff9c8462",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "cache-jobs-worker-dispatcher-hot_set-records-not-found"
+          },
+          "result_summary": "plan: invalidate_cache_key({\"key\": \"cache:jobs:worker-dispatcher:hot_set\"}) then verify via get_cache_key_info",
+          "timestamp": "2026-09-17T17:47:34.682505Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "cache-jobs-worker-dispatcher-hot_set-records-not-found",
+          "confidence": 0.82,
+          "reasoning": "The cache key exists with a valid TTL and references 3 records, but records_found=0 means the cached data points at records that no longer exist in the database, causing cache misses on every lookup — exactly matching the 'cache_miss_spike' fingerprint."
+        },
+        {
+          "category": "redis_saturation",
+          "name": "redis-keyspace-miss-ratio-critically-high",
+          "confidence": 0.55,
+          "reasoning": "Redis health shows 1,542,385 keyspace misses vs 10,254 hits — an extremely high miss ratio — though the server itself is healthy (low memory, low latency), suggesting the root cause is stale/dangling cache entries rather than Redis infrastructure saturation."
+        },
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-consumer-lag-contributing-to-cache-misses",
+          "confidence": 0.25,
+          "reasoning": "A lagging worker-dispatcher consumer could be failing to populate or refresh the hot_set cache, but the alert is from platform.cache, not Kafka, making this a secondary hypothesis."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-invalidated-cache-records",
+          "confidence": 0.2,
+          "reasoning": "A deploy that deleted or migrated job records could leave the cached hot_set referencing now-gone records, but no deploy evidence has been collected yet."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "cache-jobs-worker-dispatcher-hot_set-records-not-found",
+        "action_tool": "invalidate_cache_key",
+        "action_arguments": {
+          "key": "cache:jobs:worker-dispatcher:hot_set"
+        },
+        "verify_tool": "get_cache_key_info",
+        "verify_arguments": {
+          "key": "cache:jobs:worker-dispatcher:hot_set"
+        },
+        "verify_expectation": "The key no longer exists — get_cache_key_info returns exists=false, confirming the stale dangling entry has been evicted and subsequent lookups will force a fresh population from the database.",
+        "action_rationale": null
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T17:47:06.208705Z",
+      "updated_at": "2026-09-17T17:47:34.682505Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "b540457e-2bac-4621-8a24-c9e94e9f0062",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 52145,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 34.046783,
+        "max_usd": "1.00",
+        "usd_used": "0.153767"
+      },
+      "evidence": [
+        {
+          "evidence_id": "8cfc3317-51b2-4871-a663-f0f2137afcc0",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T17:47:06.272043Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e7ca5358-5156-41e7-bdf8-201518d8fac6",
+          "tool_name": "get_cache_key_info",
+          "arguments": {
+            "key": "cache:jobs:worker-dispatcher:hot_set"
+          },
+          "result_summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"exists\":true,\"type\":\"string\",\"ttl_seconds\":593,\"size\":90,\"records_referenced\":3,\"records_found\":0}",
+          "timestamp": "2026-09-17T17:47:06.272113Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7ddda853-e765-4e13-81fb-efef43cbd585",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.573,\"connected_clients\":12,\"used_memory_bytes\":1783136,\"used_memory_human\":\"1.70M\",\"keyspace_hits\":10254,\"keyspace_misses\":1542385,\"error\":null}",
+          "timestamp": "2026-09-17T17:47:06.272113Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "832aa030-4bd4-40eb-9cf3-b602cbd9e643",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The cache key 'cache:jobs:worker-dispatcher:hot_set' exists but references 3 records with 0 found in the database — it is a dangling/stale cache entry pointing at non-existent records, directly causing the cache_miss_spike. This is a confirmed stale_cache condition with confidence 0.82, and the Tier-1 fix (invalidate_cache_key) should be applied."
+          },
+          "result_summary": "planner handoff to PLANNING: The cache key 'cache:jobs:worker-dispatcher:hot_set' exists but references 3 records with 0 found in the database — it is a dangling/stale cache entry pointing at non-existent records, directly causing the cache_miss_spike. This is a confirmed stale_cache condition with confidence 0.82, and the Tier-1 fix (invalidate_cache_key) should be applied.",
+          "timestamp": "2026-09-17T17:47:06.272113Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "3e818fec-b2ae-4dd8-ab65-afdcff9c8462",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "cache-jobs-worker-dispatcher-hot_set-records-not-found"
+          },
+          "result_summary": "plan: invalidate_cache_key({\"key\": \"cache:jobs:worker-dispatcher:hot_set\"}) then verify via get_cache_key_info",
+          "timestamp": "2026-09-17T17:47:34.682505Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "63a0364c-99ac-47c7-b0d2-9672734bebab",
+          "tool_name": "invalidate_cache_key",
+          "arguments": {
+            "key": "cache:jobs:worker-dispatcher:hot_set",
+            "idempotency_key": "761d5fa265401105162ec214a7dca1f5"
+          },
+          "result_summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"deleted\":true}",
+          "timestamp": "2026-09-17T17:47:40.255488Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "cache-jobs-worker-dispatcher-hot_set-records-not-found",
+          "confidence": 0.82,
+          "reasoning": "The cache key exists with a valid TTL and references 3 records, but records_found=0 means the cached data points at records that no longer exist in the database, causing cache misses on every lookup — exactly matching the 'cache_miss_spike' fingerprint."
+        },
+        {
+          "category": "redis_saturation",
+          "name": "redis-keyspace-miss-ratio-critically-high",
+          "confidence": 0.55,
+          "reasoning": "Redis health shows 1,542,385 keyspace misses vs 10,254 hits — an extremely high miss ratio — though the server itself is healthy (low memory, low latency), suggesting the root cause is stale/dangling cache entries rather than Redis infrastructure saturation."
+        },
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-consumer-lag-contributing-to-cache-misses",
+          "confidence": 0.25,
+          "reasoning": "A lagging worker-dispatcher consumer could be failing to populate or refresh the hot_set cache, but the alert is from platform.cache, not Kafka, making this a secondary hypothesis."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-invalidated-cache-records",
+          "confidence": 0.2,
+          "reasoning": "A deploy that deleted or migrated job records could leave the cached hot_set referencing now-gone records, but no deploy evidence has been collected yet."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "cache-jobs-worker-dispatcher-hot_set-records-not-found",
+        "action_tool": "invalidate_cache_key",
+        "action_arguments": {
+          "key": "cache:jobs:worker-dispatcher:hot_set"
+        },
+        "verify_tool": "get_cache_key_info",
+        "verify_arguments": {
+          "key": "cache:jobs:worker-dispatcher:hot_set"
+        },
+        "verify_expectation": "The key no longer exists — get_cache_key_info returns exists=false, confirming the stale dangling entry has been evicted and subsequent lookups will force a fresh population from the database.",
+        "action_rationale": null
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-17T17:47:06.208705Z",
+      "updated_at": "2026-09-17T17:47:40.255488Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "b540457e-2bac-4621-8a24-c9e94e9f0062",
+      "state": "resolved",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 53626,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 34.088465,
+        "max_usd": "1.00",
+        "usd_used": "0.155624"
+      },
+      "evidence": [
+        {
+          "evidence_id": "8cfc3317-51b2-4871-a663-f0f2137afcc0",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T17:47:06.272043Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e7ca5358-5156-41e7-bdf8-201518d8fac6",
+          "tool_name": "get_cache_key_info",
+          "arguments": {
+            "key": "cache:jobs:worker-dispatcher:hot_set"
+          },
+          "result_summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"exists\":true,\"type\":\"string\",\"ttl_seconds\":593,\"size\":90,\"records_referenced\":3,\"records_found\":0}",
+          "timestamp": "2026-09-17T17:47:06.272113Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7ddda853-e765-4e13-81fb-efef43cbd585",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.573,\"connected_clients\":12,\"used_memory_bytes\":1783136,\"used_memory_human\":\"1.70M\",\"keyspace_hits\":10254,\"keyspace_misses\":1542385,\"error\":null}",
+          "timestamp": "2026-09-17T17:47:06.272113Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "832aa030-4bd4-40eb-9cf3-b602cbd9e643",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The cache key 'cache:jobs:worker-dispatcher:hot_set' exists but references 3 records with 0 found in the database — it is a dangling/stale cache entry pointing at non-existent records, directly causing the cache_miss_spike. This is a confirmed stale_cache condition with confidence 0.82, and the Tier-1 fix (invalidate_cache_key) should be applied."
+          },
+          "result_summary": "planner handoff to PLANNING: The cache key 'cache:jobs:worker-dispatcher:hot_set' exists but references 3 records with 0 found in the database — it is a dangling/stale cache entry pointing at non-existent records, directly causing the cache_miss_spike. This is a confirmed stale_cache condition with confidence 0.82, and the Tier-1 fix (invalidate_cache_key) should be applied.",
+          "timestamp": "2026-09-17T17:47:06.272113Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "3e818fec-b2ae-4dd8-ab65-afdcff9c8462",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "cache-jobs-worker-dispatcher-hot_set-records-not-found"
+          },
+          "result_summary": "plan: invalidate_cache_key({\"key\": \"cache:jobs:worker-dispatcher:hot_set\"}) then verify via get_cache_key_info",
+          "timestamp": "2026-09-17T17:47:34.682505Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "63a0364c-99ac-47c7-b0d2-9672734bebab",
+          "tool_name": "invalidate_cache_key",
+          "arguments": {
+            "key": "cache:jobs:worker-dispatcher:hot_set",
+            "idempotency_key": "761d5fa265401105162ec214a7dca1f5"
+          },
+          "result_summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"deleted\":true}",
+          "timestamp": "2026-09-17T17:47:40.255488Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "1739cfcc-f124-42d7-a356-ef1916a6a7db",
+          "tool_name": "get_cache_key_info",
+          "arguments": {
+            "key": "cache:jobs:worker-dispatcher:hot_set",
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"exists\":false,\"type\":null,\"ttl_seconds\":null,\"size\":null,\"records_referenced\":null,\"records_found\":null}",
+          "timestamp": "2026-09-17T17:47:40.297355Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "60a4b24f-871b-456c-8e88-b2ae3ac97b39",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The key no longer exists — get_cache_key_info returns exists=false, confirming the stale dangling entry has been evicted and subsequent lookups will force a fresh population from the database.",
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "verified: Remediation deleted the cache key (deleted=true), and verify probe confirms the key no longer exists (exists=false), matching the expected behavior that stale entries have been evicted and fresh database lookups will occur.",
+          "timestamp": "2026-09-17T17:47:40.297355Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "cache-jobs-worker-dispatcher-hot_set-records-not-found",
+          "confidence": 0.82,
+          "reasoning": "The cache key exists with a valid TTL and references 3 records, but records_found=0 means the cached data points at records that no longer exist in the database, causing cache misses on every lookup — exactly matching the 'cache_miss_spike' fingerprint."
+        },
+        {
+          "category": "redis_saturation",
+          "name": "redis-keyspace-miss-ratio-critically-high",
+          "confidence": 0.55,
+          "reasoning": "Redis health shows 1,542,385 keyspace misses vs 10,254 hits — an extremely high miss ratio — though the server itself is healthy (low memory, low latency), suggesting the root cause is stale/dangling cache entries rather than Redis infrastructure saturation."
+        },
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-consumer-lag-contributing-to-cache-misses",
+          "confidence": 0.25,
+          "reasoning": "A lagging worker-dispatcher consumer could be failing to populate or refresh the hot_set cache, but the alert is from platform.cache, not Kafka, making this a secondary hypothesis."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-invalidated-cache-records",
+          "confidence": 0.2,
+          "reasoning": "A deploy that deleted or migrated job records could leave the cached hot_set referencing now-gone records, but no deploy evidence has been collected yet."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "cache-jobs-worker-dispatcher-hot_set-records-not-found",
+        "action_tool": "invalidate_cache_key",
+        "action_arguments": {
+          "key": "cache:jobs:worker-dispatcher:hot_set"
+        },
+        "verify_tool": "get_cache_key_info",
+        "verify_arguments": {
+          "key": "cache:jobs:worker-dispatcher:hot_set"
+        },
+        "verify_expectation": "The key no longer exists — get_cache_key_info returns exists=false, confirming the stale dangling entry has been evicted and subsequent lookups will force a fresh population from the database.",
+        "action_rationale": null
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-17T17:47:06.208705Z",
+      "updated_at": "2026-09-17T17:47:40.297355Z"
+    }
+  ],
+  "invocation_id": "d16aa18dce08"
+}

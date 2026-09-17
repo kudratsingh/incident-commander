@@ -1086,7 +1086,9 @@ Exit codes: `0` no drift, `1` drift, `2` selection refusal, `3` preflight, `4` p
 2. the fixture pack changed — same answer;
 3. the world was left dirty by something else — `make eval-reset PURGE_IDEMPOTENCY=1`, then run the check again.
 
-If the drift check and `make fixture-drift` disagree, re-run `make fixture-drift` first and compare its numbers — the recorded caution in `context/INDEX.md` applies here unchanged.
+A fourth reading, found on the v0.6.9 re-pin (WO-R3-201): **the world's own history moved, and no reset undoes that.** All four of WP-3.1's committed recordings reported drift about two hours after they were taken, on a freshly reset world, and every one of the 217–262 disagreements was in exactly two tools — `list_audit_events` (its `total` had grown 3,770 → 3,946, so the 50-row page returns different rows) and `search_traces` (job and trace ids, re-seeded by the resets in between). Not one disagreement touched a field v0.6.9 changed, which is what says the platform release was not the cause: v0.6.9 added two tools and moved no existing schema, and no recording contains a call to either. Every read the harness itself makes is an audit event, so this reading appears on its own, without anyone touching the platform. Tell it apart by asking which tools the disagreements are in: a release moves the tool whose schema moved, while history moves the audit listing and the trace ids and nothing else.
+
+If the drift check and `make fixture-drift` disagree, re-run `make fixture-drift` first and compare its numbers — the recorded caution in `context/INDEX.md` applies here unchanged. On the v0.6.9 pin they disagreed exactly this way and both were right: `make fixture-drift` read `0 new / 0 stale` (the canned pack is not the audit log) while all four recordings drifted.
 
 Two fingerprints are printed either way. `recorder.world_fingerprint` is exact, so it moves for every platform clock; the verdict is the walk, which knows which of those movements are honest. "The documents differ and nothing meaningful moved" is the normal, healthy outcome.
 
@@ -1116,12 +1118,16 @@ For deeper introspection, the newest `evals/trajectories/<scenario>.<stamp>.<inv
 ## Contract-test target (constraint in force)
 
 **Run contract tests ONLY against the pinned demo stack.** The pin is
-v0.6.3 by index digest (`sha256:683949544d9a…`) and the committed snapshot
-carries its **30** tools, blessed from that stack with the full 4-scope
-service-account token. The count moved for the first time since v0.5.0:
-plat #199 added `create_mislabeled_dlq_job`.
+v0.6.9 by index digest (`sha256:b85e3f0bf607…`) and the committed snapshot
+carries its **32** tools, blessed from that stack with the full 4-scope
+service-account token. v0.6.9 is the first bump since v0.5.0 to move the
+count, and it moved it by two at once: `get_outbox_status` (an agent-facing
+read tool) and `pause_control_loop` (a lab hook). v0.6.4 through v0.6.8 all
+held at 30 — they changed descriptions and added optional response fields,
+which is a contract delta with no count change, and is why the count is
+never the check.
 
-The rule outlives the v0.4.9 → v0.5.0 → v0.6.0 → v0.6.1 → v0.6.2 → v0.6.3 bumps that motivated it: platform
+The rule outlives the v0.4.9 → v0.5.0 → v0.6.0 → … → v0.6.9 bumps that motivated it: platform
 master moves ahead of whatever tag is pinned, so a contract check against
 a master-built dev stack can fail **by design**. That is master drift, not
 drift in the pinned artifact, and it must never trigger a snapshot rebless
@@ -1140,7 +1146,7 @@ and on `main` until the other half lands. Bless the new snapshot locally
 from the new pinned stack, then commit the compose bump, the snapshot, and
 any registry realignment together.
 
-Platform ships a new digest → four steps on the agent side:
+Platform ships a new digest → five steps on the agent side:
 
 1. Update `demo/compose.yml` — **all THREE platform-code services**
    (`migrate`, `platform`, `api`) and the prose that names the version:
@@ -1224,6 +1230,30 @@ Platform ships a new digest → four steps on the agent side:
      index**, so a sequenced fixture whose two elements disagree for two
      different reasons still gets one line and one context. Say both halves in
      the `why` and file it under the one a reader would come looking for.
+
+   A pin that adds a tool with no canned fixture anywhere needs nothing here:
+   the walk checks the fixtures that exist, so `make fixture-drift` reads
+   `0 new / 0 stale` and the ledger does not move (v0.6.9's
+   `get_outbox_status`, WO-R3-201). Record the live readings in the PR anyway
+   and say which fields are volatile, because whoever writes the first fixture
+   inherits that decision and a wrong one flaps the ledger (the v0.6.7
+   lesson).
+5. Re-pin the planner's tool listing, which is the OTHER prompt the agent
+   reads:
+   ```bash
+   uv run pytest tests/unit/test_planner_context.py
+   ```
+   `test_prompts_snapshot.py` pins every file under `llm/prompts/`, and the
+   tool block is in none of them — `planner_context.format_tool_block()`
+   assembles it from the typed tool registry, the tier map, and the
+   platform's own descriptions in the snapshot, so it moves when the PINNED
+   IMAGE moves.
+   `tests/unit/test_planner_context.py` holds it to a sha256 and prints the new
+   one on failure. Update the hash, and say in the PR body what moved: a new
+   read tool, a tool the platform re-described, or a tier reclassification are
+   the three legitimate causes. v0.6.9 grew it 16,689 → 21,420 characters on
+   one added read tool; v0.6.7 and v0.6.8 each moved a description with
+   nothing to notice it, which is why this step exists.
 
 ## Connection pool and run capacity ([ADR 0022](ADR/0022-connection-pool-sizing-and-the-run-concurrency-ceiling.md))
 

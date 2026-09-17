@@ -66,6 +66,7 @@ _READ_TOOLS: Final[frozenset[str]] = frozenset(
         "get_dag_state",
         "get_deploy_history",
         "get_incident",
+        "get_outbox_status",
         "get_postgres_health",
         "get_redis_health",
         "get_trace",
@@ -322,6 +323,11 @@ RESOURCE_ARG_FIELDS: Final[dict[str, frozenset[str]]] = {
     "get_dag_state": frozenset({"job_id"}),
     "get_deploy_history": frozenset(),
     "get_incident": frozenset({"id"}),
+    # Takes no arguments at all, so there is nothing that could name a
+    # resource. Declared empty rather than omitted: the entry is the record
+    # that the question was asked (ADR 0003's posture — silence is never an
+    # answer here).
+    "get_outbox_status": frozenset(),
     "get_postgres_health": frozenset(),
     "get_redis_health": frozenset(),
     "get_trace": frozenset({"trace_id"}),

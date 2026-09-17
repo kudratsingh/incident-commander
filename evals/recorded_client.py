@@ -128,6 +128,21 @@ SHIFTED_CLOCK_FIELDS: Final[Mapping[str, frozenset[str]]] = {
         }
     ),
     "list_incidents": frozenset({"incidents.fired_at", "incidents.resolved_at"}),
+    # The outbox reading as of v0.6.9 (plat #211). Five clocks, and one of them
+    # is not the platform's: `measured_at` and the three event timestamps are
+    # the database server's, while `relay_last_tick_at` is recorded by the
+    # worker process on ITS clock. They shift by the same rigid offset anyway,
+    # because the alternative is a recording whose relay ticked after the
+    # reading that observed it.
+    "get_outbox_status": frozenset(
+        {
+            "measured_at",
+            "oldest_unpublished_at",
+            "newest_unpublished_at",
+            "last_publish_at",
+            "relay_last_tick_at",
+        }
+    ),
     "search_traces": frozenset({"matches.created_at"}),
 }
 
@@ -156,6 +171,26 @@ HELD_DURATION_FIELDS: Final[Mapping[str, frozenset[str]]] = {
     "get_cache_key_info": frozenset({"ttl_seconds"}),
     "get_consumer_lag": frozenset({"age_seconds"}),
     "get_dag_state": frozenset({"paused_expires_in_seconds"}),
+    # v0.6.9 spells its durations `_age_s`, `_s` and `seconds_since_…` rather
+    # than `_seconds`, which is why the coverage test's walk now recognises all
+    # three spellings — five real durations were invisible to it on the suffix
+    # alone, and a judgement nothing can see is not a judgement.
+    #
+    # Four of these are reading-relative like the three above. The fifth,
+    # `relay_tick_interval_s`, is not relative to anything: it is how often the
+    # relay is CONFIGURED to run. It is here because held is still the right
+    # answer for it — a recorded configuration value is not a countdown and not
+    # a clock — and leaving it out would have read as an oversight rather than
+    # as a decision.
+    "get_outbox_status": frozenset(
+        {
+            "oldest_unpublished_age_s",
+            "newest_unpublished_age_s",
+            "seconds_since_last_publish",
+            "relay_heartbeat_age_s",
+            "relay_tick_interval_s",
+        }
+    ),
 }
 
 

@@ -228,6 +228,58 @@ class RedisHealthOutput(BaseModel):
     error: str | None = None
 
 
+# --- get_outbox_status (read) --------------------------------------------
+#
+# v0.6.9 (plat #211, WO-R3-201). A READ tool under `telemetry:read` over the
+# transactional outbox — the handoff queue between the platform's database
+# and Kafka. That is NOT consumer lag: rows here are committed and waiting
+# to be PUBLISHED, while `get_consumer_lag` measures what has been published
+# and not yet consumed. Zero arguments, nothing cached, nothing paged: the
+# platform answers from one query at call time and returns counts and
+# timestamps, never rows, so there is no entry in
+# `policies.CACHED_READ_FRESHNESS_SECONDS` and no `limit` to get wrong.
+#
+# All FOURTEEN fields are mirrored, including the nine optional ones. The
+# model is `extra="ignore"` like every other output model here, which means
+# an unmirrored field would be dropped with no error and no failing test —
+# the v0.6.2 lesson (cmd #206), where a claim became unsatisfiable because
+# the evidence never reached the run state. What keeps the mirror honest is
+# `tests/unit/test_registry_matches_snapshot.py`, which holds this schema to
+# exact equality with the snapshot's `outputSchema`.
+#
+# Null means "nothing to report" on every nullable field, and never zero:
+# `relay_heartbeat_age_s` null is a relay the platform cannot account for
+# (read `relay_heartbeat_known` / `relay_heartbeat_unknown_reason`), not a
+# relay that has just run; the four unpublished timestamps and ages are null
+# exactly when `unpublished_count` is 0, which is the healthy case; and
+# `last_publish_at` null means nothing of this tenant's has ever been
+# delivered. `unpublished_past_attempt_limit` counts rows INSIDE
+# `unpublished_count`, not beside it.
+
+
+class GetOutboxStatusOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    # Field order follows the snapshot's `properties` because Pydantic emits
+    # `required` in declaration order and the mirror test compares that list
+    # element by element.
+    measured_at: datetime
+    unpublished_count: int
+    oldest_unpublished_at: datetime | None = None
+    oldest_unpublished_age_s: float | None = None
+    newest_unpublished_at: datetime | None = None
+    newest_unpublished_age_s: float | None = None
+    unpublished_past_attempt_limit: int
+    last_publish_at: datetime | None = None
+    seconds_since_last_publish: float | None = None
+    # Recorded by the worker process on ITS clock, unlike everything above:
+    # the age compares two hosts and carries whatever skew is between them.
+    relay_last_tick_at: datetime | None = None
+    relay_heartbeat_age_s: float | None = None
+    relay_heartbeat_known: bool
+    relay_heartbeat_unknown_reason: str | None = None
+    relay_tick_interval_s: float
+
+
 # --- get_trace + search_traces ------------------------------------------
 
 
@@ -776,6 +828,7 @@ TOOL_REGISTRY: Final[dict[str, ToolSpec]] = {
         "get_deploy_history", GetDeployHistoryInput, GetDeployHistoryOutput
     ),
     "get_incident": ToolSpec("get_incident", GetIncidentInput, GetIncidentOutput),
+    "get_outbox_status": ToolSpec("get_outbox_status", _EmptyInput, GetOutboxStatusOutput),
     "get_postgres_health": ToolSpec("get_postgres_health", _EmptyInput, PostgresHealthOutput),
     "get_redis_health": ToolSpec("get_redis_health", _EmptyInput, RedisHealthOutput),
     "get_trace": ToolSpec("get_trace", GetTraceInput, GetTraceOutput),

@@ -535,8 +535,22 @@ class TestTheClockIsRebased:
         )
 
 
+def _is_duration_name(name: str) -> bool:
+    """Does this field name say "a number of seconds"?
+
+    Three spellings, all of them the platform's: ``ttl_seconds`` and
+    ``age_seconds`` (v0.6.0 onward), ``relay_heartbeat_age_s`` and
+    ``relay_tick_interval_s`` (v0.6.9's outbox reading), and
+    ``seconds_since_last_publish`` (same tool, the quantity in front). The
+    suffix ``_seconds`` alone was the original rule and it left five real
+    durations on ``get_outbox_status`` invisible to the coverage check below,
+    which is the one thing this test exists to prevent.
+    """
+    return name.endswith(("_seconds", "_s")) or name.startswith("seconds_")
+
+
 def _time_fields(model: type[BaseModel], prefix: str = "") -> tuple[set[str], set[str]]:
-    """Every datetime path and every ``*_seconds`` number path in one output model.
+    """Every datetime path and every duration-named number path in one output model.
 
     A local walk rather than an import: what is being checked is the module's
     hand-written table, and a shared helper would make the test and the table
@@ -553,7 +567,7 @@ def _time_fields(model: type[BaseModel], prefix: str = "") -> tuple[set[str], se
                 nested_clocks, nested_durations = _time_fields(annotation, f"{path}.")
                 clocks |= nested_clocks
                 durations |= nested_durations
-            elif annotation in (int, float) and name.endswith("_seconds"):
+            elif annotation in (int, float) and _is_duration_name(name):
                 durations.add(path)
     return clocks, durations
 

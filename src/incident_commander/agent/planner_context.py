@@ -107,7 +107,25 @@ def format_planner_context(run_state: RunState, *, show_evidence_ids: bool = Fal
     # Investigation planner sees read tools only (Tier.READ). Tier-1 tools
     # are executed by the REMEDIATING transition; the planner emits a
     # RemediateAction to hand off, it does not call them directly.
-    lines.append("Available tools (read-only probes):")
+    lines.append(format_tool_block())
+    return "\n".join(lines)
+
+
+def format_tool_block() -> str:
+    """The read-only probe listing, exactly as the planner is shown it.
+
+    Split out of ``format_planner_context`` so it can be pinned on its own:
+    it is the one part of the planner's page that depends on NOTHING about
+    the run — only on ``TOOL_REGISTRY``, the tier map, and the platform
+    descriptions in ``contracts/platform-tools.snapshot.json``. That makes it
+    a second prompt surface beside ``llm/prompts/*.md``, and one that moves
+    when the pinned platform image moves rather than when anyone edits a
+    file. ``tests/unit/test_planner_context.py`` pins it by hash for the same
+    reason ``test_prompts_snapshot.py`` pins the authored prompts: a
+    load-bearing string the model reads should not be able to change without
+    a reviewer seeing it in the diff.
+    """
+    lines = ["Available tools (read-only probes):"]
     for name in sorted(tools_at_or_below(Tier.READ)):
         spec = TOOL_REGISTRY[name]
         schema = spec.input_model.model_json_schema()

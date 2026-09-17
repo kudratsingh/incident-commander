@@ -1024,6 +1024,178 @@
       "is_idempotent": false
     },
     {
+      "name": "get_outbox_status",
+      "description": "Read how the platform's transactional outbox is delivering: how many events are committed and still waiting to reach Kafka, how long they have been waiting, when one was last delivered, and when the relay that delivers them last ran.\nWHAT THIS MEASURES. Every job state change is written to the database together with an outbox row in one transaction; a background relay polls those rows and publishes them to Kafka. A growing number of waiting rows therefore means writes are landing and delivery is not keeping up with them — the queue between the database and the broker, which is not the same queue as consumer lag.\nFRESHNESS AND WHICH CLOCK. Nothing here is cached. The counts and timestamps come from one query run at call time, and `measured_at` is the database server's clock at that moment; every `*_age_s` and `seconds_since_*` value is that clock minus the timestamp beside it, so an age and its timestamp can never disagree. One exception worth knowing: `relay_last_tick_at` is recorded by the worker process on ITS clock, so `relay_heartbeat_age_s` compares two hosts and carries whatever skew is between them — treat a few seconds either way there as noise.\nNO PAGING, NOTHING CAPPED. This tool returns counts and timestamps, never rows. There is no `limit`, no `offset`, nothing is truncated, and `unpublished_count` is an exact count of every waiting event rather than a page of them. It takes no arguments.\nSCOPE. The counts and timestamps cover your own tenant's events only. The relay is a single process serving every tenant, so `relay_last_tick_at` and `relay_heartbeat_age_s` are platform-wide: they say whether the relay is running at all, not whether it is getting to your tenant.\nONE CALL SHOWS WHETHER THE QUEUE IS DRAINING. `oldest_unpublished_age_s` and `newest_unpublished_age_s` bracket the backlog in a single reading. A relay that is keeping up leaves an oldest age within a few multiples of `relay_tick_interval_s`. An oldest age far above that while the newest is fresh means events are arriving and not leaving — visible without waiting and without a second call. Because the query is live rather than read from a cache, a second call a few seconds later is genuine new evidence.\nWHAT A HEALTHY OUTBOX LOOKS LIKE. `unpublished_count` at or near 0; `oldest_unpublished_age_s` null or within a few multiples of `relay_tick_interval_s`; `relay_heartbeat_age_s` a small number of seconds. One healthy reading looks alarming and is not: on a platform with little traffic `last_publish_at` can be hours old while `unpublished_count` is 0, which means nothing was submitted, not that delivery stopped. Read `last_publish_at` together with `unpublished_count`, never on its own.\nWHAT AN OLD RELAY PASS DOES AND DOES NOT PROVE. A `relay_heartbeat_age_s` far above `relay_tick_interval_s` means the relay has not completed a pass in that long. It does not say why, and it is not by itself a delivery problem: an old pass with `unpublished_count: 0` means nothing is waiting, so nothing is being harmed. The pair is the finding — a backlog that is aging AND a relay that has not run.\nUNKNOWN IS NULL, NEVER 0. `relay_heartbeat_known: false` with both `relay_last_tick_at` and `relay_heartbeat_age_s` null means the platform has no pass to report; `relay_heartbeat_unknown_reason` says which case it is. That is missing information — evidence of neither a running relay nor a stopped one. The unpublished timestamps and their ages are null exactly when `unpublished_count` is 0, which is the healthy case rather than a gap: there is no oldest row because there are no rows. `last_publish_at` is null when no event of yours has ever been delivered.\nDELIVERED MEANS DELIVERED. `last_publish_at` reports successful deliveries only. A row the relay abandoned is marked internally in a way that would otherwise look like a delivery, and it is excluded here, so this timestamp never reports a giving-up as a publish. `unpublished_past_attempt_limit` is the other half of that story: those rows are inside `unpublished_count` and will not be retried.\nWHAT THIS TOOL CANNOT SEE. It reads the database's handoff queue and the relay's own record of its last pass, and nothing else. It says nothing about whether Kafka retained what was published, nothing about consumers reading from Kafka (`get_consumer_lag` is that reading), and a delivery recorded here is the relay's own account of a successful publish, not an acknowledgement from anything downstream.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "GetOutboxStatusInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "measured_at": {
+            "description": "When this reading was taken — ISO-8601, UTC, the database server's clock. Every age below is this time minus the timestamp beside it.",
+            "format": "date-time",
+            "title": "Measured At",
+            "type": "string"
+          },
+          "unpublished_count": {
+            "description": "Events committed to the database and not yet delivered to Kafka, for your tenant. An exact count of all of them, not a page. 0 means the queue is empty right now, which is the healthy steady state.",
+            "title": "Unpublished Count",
+            "type": "integer"
+          },
+          "oldest_unpublished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "When the longest-waiting undelivered event was committed. `null` exactly when `unpublished_count` is 0 — there is no oldest row because there are no rows.",
+            "title": "Oldest Unpublished At"
+          },
+          "oldest_unpublished_age_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How long the longest-waiting undelivered event has been waiting, in seconds. This is the number that says whether delivery is behind: compare it with `relay_tick_interval_s`. `null` exactly when `unpublished_count` is 0.",
+            "title": "Oldest Unpublished Age S"
+          },
+          "newest_unpublished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "When the most recently committed undelivered event was committed. `null` exactly when `unpublished_count` is 0.",
+            "title": "Newest Unpublished At"
+          },
+          "newest_unpublished_age_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Age of the most recently committed undelivered event, in seconds. Read it with `oldest_unpublished_age_s`: a small value here beside a large one there means events are still arriving while none are leaving. `null` exactly when `unpublished_count` is 0.",
+            "title": "Newest Unpublished Age S"
+          },
+          "unpublished_past_attempt_limit": {
+            "description": "How many of `unpublished_count` have already been tried the maximum number of times and will not be tried again. They are inside the total, not beside it. A backlog made entirely of these will not drain however healthy the relay is; one where this is 0 drains as soon as delivery resumes.",
+            "title": "Unpublished Past Attempt Limit",
+            "type": "integer"
+          },
+          "last_publish_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "When an event of yours was last successfully delivered to Kafka. Counts successful deliveries only — an event the relay gave up on is never reported here. `null` when no event of yours has ever been delivered.",
+            "title": "Last Publish At"
+          },
+          "seconds_since_last_publish": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How long ago `last_publish_at` was, in seconds. `null` exactly when `last_publish_at` is null. On its own this proves nothing: it is equally large on a stalled platform and on a quiet one. Read it with `unpublished_count`.",
+            "title": "Seconds Since Last Publish"
+          },
+          "relay_last_tick_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "When the relay last completed a pass over the queue, as the relay itself recorded it on the worker's clock. It records a pass whether or not there was anything to deliver, so a fresh value here on an empty queue means the relay is running and idle. `null` when the platform has no record to report — see `relay_heartbeat_unknown_reason`.",
+            "title": "Relay Last Tick At"
+          },
+          "relay_heartbeat_age_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How long ago the relay last completed a pass, in seconds. `null` exactly when `relay_last_tick_at` is null, which means unknown — never 0, because a 0 would read as a relay that had just run. Clamped at 0 at the other end: a recorded time later than `measured_at` means the worker's and the database's clocks disagree, and is reported as 0 rather than as a negative age.",
+            "title": "Relay Heartbeat Age S"
+          },
+          "relay_heartbeat_known": {
+            "description": "True when `relay_last_tick_at` is a real record, including one that is very old — an old pass is a finding, not a missing reading. False when the platform has nothing to report, which is missing information and evidence of neither a running nor a stopped relay.",
+            "title": "Relay Heartbeat Known",
+            "type": "boolean"
+          },
+          "relay_heartbeat_unknown_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why the relay pass time is unknown, in plain words. `null` exactly when `relay_heartbeat_known` is true.",
+            "title": "Relay Heartbeat Unknown Reason"
+          },
+          "relay_tick_interval_s": {
+            "description": "How often the relay is configured to look at the queue, in seconds. This is the yardstick for the two numbers above: an `oldest_unpublished_age_s` or `relay_heartbeat_age_s` within a few multiples of it is normal, and one hundreds of times larger is not.",
+            "title": "Relay Tick Interval S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "measured_at",
+          "unpublished_count",
+          "unpublished_past_attempt_limit",
+          "relay_heartbeat_known",
+          "relay_tick_interval_s"
+        ],
+        "title": "GetOutboxStatusOutput",
+        "type": "object"
+      },
+      "required_scope": "telemetry:read",
+      "is_idempotent": false
+    },
+    {
       "name": "get_postgres_health",
       "description": "Ping the primary database and read a small set of activity stats. Falls back cleanly on non-Postgres backends (SQLite in tests) — the `dialect` field tells the agent what it looked at.\nFRESHNESS: live probe, measured at call time.",
       "inputSchema": {
@@ -2388,6 +2560,115 @@
       },
       "required_scope": "actions:execute",
       "is_idempotent": true
+    },
+    {
+      "name": "pause_control_loop",
+      "description": "[chaos: single_loop] Pause one of the worker's background loops by setting a Redis flag the loop reads once per iteration; it does no work while the flag is set and resumes by itself when the flag expires after `ttl_seconds` (default 300). One loop only: the worker process, its Kafka consumer groups and the other loops are unaffected. `loop_name` is a closed set; `tick_interval_seconds` in the result says how long the loop takes to notice. Use `kill_consumer` for a Kafka consumer group.",
+      "inputSchema": {
+        "$defs": {
+          "ControlLoopName": {
+            "description": "One background loop inside the worker process.",
+            "enum": [
+              "outbox_relay",
+              "delayed_retry_promote",
+              "dlq_replay_promote",
+              "resume_unblocked_waiting",
+              "stale_pending_backstop",
+              "stale_running_sweep",
+              "lease_renewal",
+              "slo_evaluation",
+              "metrics",
+              "digest",
+              "idempotency_reaper"
+            ],
+            "title": "ControlLoopName",
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "loop_name": {
+            "$ref": "#/$defs/ControlLoopName",
+            "description": "Which background loop to pause. Closed set — anything else is rejected as an invalid argument. The eight Kafka consumer groups are not here: use kill_consumer for those."
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "description": "How long the pause flag stays set. The loop resumes by itself on the first iteration after it expires — nothing has to be called. Default 5 minutes.",
+            "maximum": 3600,
+            "minimum": 1,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "loop_name"
+        ],
+        "title": "PauseControlLoopInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {
+          "ControlLoopName": {
+            "description": "One background loop inside the worker process.",
+            "enum": [
+              "outbox_relay",
+              "delayed_retry_promote",
+              "dlq_replay_promote",
+              "resume_unblocked_waiting",
+              "stale_pending_backstop",
+              "stale_running_sweep",
+              "lease_renewal",
+              "slo_evaluation",
+              "metrics",
+              "digest",
+              "idempotency_reaper"
+            ],
+            "title": "ControlLoopName",
+            "type": "string"
+          }
+        },
+        "properties": {
+          "loop_name": {
+            "$ref": "#/$defs/ControlLoopName"
+          },
+          "pause_key": {
+            "title": "Pause Key",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "title": "Ttl Seconds",
+            "type": "integer"
+          },
+          "tick_interval_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nominal seconds between this loop's iterations, as configured right now, or null when the loop is not iterating at all (SLO evaluation with its interval set to 0). The pause takes effect on the loop's next iteration, so a ttl_seconds smaller than this expires before the loop ever reads the flag.",
+            "title": "Tick Interval Seconds"
+          },
+          "accepted": {
+            "description": "True if the pause flag was set. This does not confirm the loop has stopped — that happens on its next iteration, at most tick_interval_seconds away.",
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "loop_name",
+          "pause_key",
+          "ttl_seconds",
+          "tick_interval_seconds",
+          "accepted"
+        ],
+        "title": "PauseControlLoopOutput",
+        "type": "object"
+      },
+      "required_scope": "chaos:invoke",
+      "is_idempotent": false
     },
     {
       "name": "pause_dag",

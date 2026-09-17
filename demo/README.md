@@ -23,7 +23,11 @@ see [Running an eval against it](#running-an-eval-against-it) below.
   to test against, skip `make demo` entirely and point `PLATFORM_MCP_URL` at it.
 - `.env` with `PLATFORM_TOKEN=sa_...` (a service-account token issued by the
   platform). If you don't have one yet, `make bootstrap-token` against a
-  running stack mints one and prints the `.env` lines to copy. Idempotent.
+  running stack mints it and prints the `.env` lines to copy. Idempotent.
+  It prints all three principals in one pass — `PLATFORM_TOKEN` (the agent
+  under test), `PLATFORM_CHAOS_TOKEN` (the evaluator, the only one that may
+  fire a lab hook) and `PLATFORM_SMOKE_TOKEN` (read-only). Bringing the stack
+  up needs none of them; seeding a fault world needs the chaos one.
 - No Anthropic API key is needed to bring the stack up — it costs nothing and
   spends no tokens.
 
@@ -113,18 +117,21 @@ stack boot fails CI rather than surfacing the next time someone runs the demo.
 
 ## Running an eval against it
 
-**The eval is currently frozen** (ADR 0011: no eval runs of any kind until the
-campaign's fixes are merged, the platform cuts its next release, and the
-commander re-pins to it). Until that lifts, bringing the stack up is a
-bring-up, full stop.
+`make demo` brings the stack up and stops. It does not run an eval, and
+deliberately so: the embedded `evals.runner --live` batch it used to trigger was
+untraced, ran against a healthy no-chaos platform, and produced correct
+escalations that read as failures in the summary.
 
-`make demo` never ran the eval anyway, and deliberately so: the embedded
-`evals.runner --live` batch it used to trigger was untraced, ran against a
-healthy no-chaos platform, and produced correct escalations that read as
-failures in the summary. When the freeze lifts, live eval is its own deliberate
-procedure — smoke pass first, then one remediation scenario at a time with a
-reset between. That protocol lives in
-[docs/runbook.md](../docs/runbook.md#live-eval-protocol-post-hardening).
+Live eval is its own deliberate procedure — smoke pass first, then one
+remediation scenario at a time with a reset between. That protocol lives in
+[docs/runbook.md](../docs/runbook.md#live-eval-protocol-post-hardening) and is
+meant to be followed exactly; a live run spends real money.
+
+(The campaign eval freeze that used to be described here — ADR 0011, no eval
+runs of any kind until the campaign's fixes merged and the commander re-pinned —
+**closed on 2026-09-15**, when the regression baseline was blessed over the
+current 41-scenario corpus. The gate is back on. [ADR 0011](../docs/ADR/0011-campaign-eval-freeze.md)
+carries the closure.)
 
 For reference, how scenarios choose their data source:
 

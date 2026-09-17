@@ -1,0 +1,55 @@
+# Architecture decision records
+
+Any decision that constrains future work gets a record here, before or with the pull request that implements it. An accepted ADR is never rewritten: when a decision moves, a later ADR amends or supersedes it and both stay on the shelf, so the reasoning that was true at the time is still readable.
+
+Thirty-nine records, plus [`0000-template.md`](0000-template.md). All are accepted. The column that repays reading is the last one — it is where a decision has since been narrowed, extended or replaced.
+
+| # | Decision | Later movement |
+|---|---|---|
+| [0001](0001-external-client-architecture.md) | Deploy the commander as an external client of the platform | — |
+| [0002](0002-hand-rolled-state-machine.md) | Hand-rolled state machine for the agent loop instead of LangGraph | — |
+| [0003](0003-platform-enforced-tier-policy.md) | Enforce Tier-1 remediation authorization on the platform, not the agent | Corrected 2026-08-30 where the tier paragraph was aspirational |
+| [0004](0004-eval-first-development-and-regression-gating.md) | Build the eval harness before the behaviour; gate PRs against a committed baseline | — |
+| [0005](0005-hypothesis-and-action-schema-tightening.md) | Hypothesis and action schema tightening | — |
+| [0006](0006-verification-is-a-polling-window.md) | Verification is a bounded polling window, not an instant read | — |
+| [0007](0007-transport-errors-are-domain-errors.md) | Wrap all transport failures as domain errors at the client boundary | — |
+| [0008](0008-single-attempt-remediation.md) | Single-attempt remediation — delete the VERIFYING → PLANNING retry edge | Retry-with-reinvestigation is deferred, by design |
+| [0009](0009-investigation-freshness-reprobe.md) | A cached-read contradiction gets a fresh re-probe before the hypothesis dies | — |
+| [0010](0010-scenario-owned-dlq-fixtures.md) | Scenario-owned DLQ fixtures — the inter-scenario baseline is an empty DLQ | Platform shipped its half (`seed_dlq_messages`) |
+| [0011](0011-campaign-eval-freeze.md) | Freeze the eval for the fix campaign; suspend invariant 8 and ledger the debt | **Closed.** The sunset fired 2026-08-30 and the bless of 2026-09-15 ended it. The gate is back on |
+| [0012](0012-dependency-pinning-via-committed-lockfile.md) | Dependency pinning via the committed `uv.lock` | — |
+| [0013](0013-run-provenance-is-part-of-the-eval-result.md) | Run provenance is part of the eval result | — |
+| [0014](0014-webhook-signature-v2.md) | Webhook signature scheme v2 and replay-window semantics | The v2 scheme itself is **superseded by 0023**; the header, skew and duplicate-suppression decisions stand |
+| [0015](0015-wall-clock-and-usd-budget-meters.md) | Wall-clock and USD budget meters: accrual anchors, a pinned price map, total-volume token semantics | — |
+| [0016](0016-incident-identity-and-single-flight.md) | Incident identity, the single-flight lease, and crash-resume semantics | — |
+| [0017](0017-eval-run-archive-lifecycle.md) | The run archive is written incrementally, and `report.json` is its completion marker | — |
+| [0018](0018-exit-code-6-chaos-refused-under-smoke.md) | The runner's exit-code contract is 0–6; exit 6 is chaos seeding refused under `--smoke` | Extended by 0020 (exit 7) and 0037 (exits 9 and 10) |
+| [0019](0019-scenario-cap-is-the-runtime-ceiling.md) | A scenario's `max_tool_calls` is the run's runtime ceiling, not only its grading cap | — |
+| [0020](0020-one-mutating-scenario-per-live-invocation.md) | One state-mutating scenario per live invocation; exit 7 refuses the rest | — |
+| [0021](0021-run-archives-are-locked-by-the-filesystem.md) | Run archives are locked by the filesystem, not by discipline | — |
+| [0022](0022-connection-pool-sizing-and-the-run-concurrency-ceiling.md) | Connection-pool sizing and the run-concurrency ceiling | — |
+| [0023](0023-nonce-bound-webhook-signatures.md) | Nonce-bound webhook signatures, and refusing a reused nonce | Supersedes the v2-scheme half of 0014 |
+| [0024](0024-plan-arguments-name-their-resource.md) | A remediation plan must name its resource on both legs | **Extended by 0025**, which narrows the resource-free verify hatch |
+| [0025](0025-a-verify-leg-must-observe-the-action.md) | A verify leg must be able to observe the action | Extends 0024 |
+| [0026](0026-a-stabilizer-is-not-a-resolution.md) | A stabilizer is not a resolution | One consequence **superseded by 0033** (2026-09-08) |
+| [0027](0027-read-the-row-before-you-replay-it.md) | Read the row before you replay it | — |
+| [0028](0028-read-the-category-before-you-replay-it.md) | Read the category before you replay it | — |
+| [0029](0029-a-delay-is-derived-from-evidence-and-graded.md) | A delay is derived from evidence, and it is graded | — |
+| [0030](0030-a-refused-plan-is-re-asked-with-the-candidates.md) | A plan refused for a mis-transcribed id is re-asked with the candidates | — |
+| [0031](0031-an-alerted-dlq-category-is-the-incident.md) | An alerted DLQ category is the incident, and the alert says which | — |
+| [0032](0032-the-action-must-address-the-alerts-subject.md) | The action must address the alert's subject, and "unclassified" is a subject | — |
+| [0033](0033-a-human-required-chain-root-is-fenced-then-escalated.md) | A `human_required` chain root is fenced, then escalated | Supersedes one consequence of 0026 |
+| [0034](0034-when-the-hint-and-the-error-disagree-the-error-wins.md) | When a row's hint and its error disagree, the error wins — and that stays a prompt rule | — |
+| [0035](0035-a-parse-failure-of-our-own-output-is-a-harness-event.md) | A parse failure of the agent's own structured output is a harness event, not a model failure | — |
+| [0036](0036-the-planner-call-is-the-only-strategy-seam.md) | The planner call is the only strategy seam — strategies propose, the loop decides | — |
+| [0037](0037-a-scenarios-fault-is-a-plan-and-the-plan-is-put-back.md) | A scenario's fault is a plan, and the plan is put back; exits 9 and 10 | Extends 0018's exit-code contract |
+| [0038](0038-the-agents-view-of-a-scenario-is-an-allow-list-projection.md) | The agent's view of a scenario is an allow-list projection | — |
+| [0039](0039-a-split-is-a-property-of-a-template.md) | A split is a property of a template, and the loader enforces it | — |
+
+## Two formatting conventions coexist
+
+Most records carry `* Status: accepted` as a bullet on line 3, MADR style. Records 0019, 0020, 0037, 0038 and 0039 use YAML front matter with a `status:` key and a numbered H1. Both are fine; a reader looking for the status should check both places. Records 0029, 0033 and 0034 carry no machine-readable status field at all — they are accepted, and adding the line is a tidy-up worth doing next time one of them is opened.
+
+## Writing one
+
+Take the next number, state the status in the header, and say what was decided, what was rejected, and what the decision costs. Link the pull request that implements it. After merge the file is not edited — amend it from a new record and link both ways.

@@ -32,12 +32,12 @@ from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, get_args, get_origin
 
 import pytest
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, BaseModel
 
-from evals import artifacts, recorder, runner, world_drift
+from evals import artifacts, fixture_drift, recorder, runner, world_drift
 from evals.graders.deterministic import (
     GradeDimension,
     is_not_applicable_detail,
@@ -651,6 +651,334 @@ class TestTheDriftCheck:
         assert "nothing was seeded" in capsys.readouterr().out
         assert world_drift.main(["--world", "deadbeefcafe"]) == 2
         assert "matches no recording" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# History is not state (WO-R3-271, ADR 0050)
+# --------------------------------------------------------------------------
+#
+# The payloads below are the committed recordings' own shapes, trimmed to one
+# row. ``_LATER_*`` is the same live stack read again after the harness has
+# made a few hundred more reads and the world has been reset: the audit total
+# has grown, the 50-row page holds different rows, and every job and trace id
+# has been re-minted. Nothing about the scenario's fault moved.
+
+_AUDIT: Final[dict[str, Any]] = {
+    "total": 3770,
+    "events": [
+        {
+            "id": "9012dfce-59d4-4575-bf35-898b8012db1b",
+            "action": "agent.tool_invoked",
+            "principal_type": "service_account",
+            "principal_id": "d6bd0ef1-9a9d-490e-aae6-1bdb8868e349",
+            "resource_type": "mcp_tool",
+            "resource_id": "list_active_alerts",
+            "request_id": "cb248aab-dace-4ff1-a6a7-35152dffbff3",
+            "created_at": "2026-09-17T18:22:17.252988Z",
+            "extra_data": {
+                "outcome": "success",
+                "arguments": {"limit": 50, "severity": None},
+                "tool_name": "list_active_alerts",
+                "latency_ms": 2.436,
+                "scope_used": "incidents:read",
+            },
+        }
+    ],
+}
+
+_LATER_AUDIT: Final[dict[str, Any]] = {
+    "total": 3946,
+    "events": [
+        {
+            "id": "3c1f0e8a-77b0-4c2d-9a11-6d5a0b9e4f21",
+            "action": "job.replayed",
+            "principal_type": "service_account",
+            "principal_id": "ab4d21c7-0e55-4a9b-bb31-77f0d6a1c908",
+            "resource_type": "job",
+            "resource_id": "fa9e1c44-7d21-4b60-9a02-1e7c6b8d5f33",
+            "request_id": "7d1a44c9-2b5e-4f80-90aa-c1b2d3e4f5a6",
+            "created_at": "2026-09-17T20:41:02.118904Z",
+            "extra_data": {
+                "outcome": "success",
+                "arguments": {"job_ids": ["fa9e1c44-7d21-4b60-9a02-1e7c6b8d5f33"]},
+                "tool_name": "replay_dlq_by_ids",
+                "latency_ms": 41.902,
+                "scope_used": "jobs:write",
+            },
+        }
+    ],
+}
+
+_TRACES: Final[dict[str, Any]] = {
+    "matches": [
+        {
+            "trace_id": "c5ca46c1-f4dd-5021-8be4-130143553096",
+            "job_id": "f7e2990f-ef64-470e-ac1b-c26f7970551b",
+            "job_type": "report_gen",
+            "status": "dead_letter",
+            "created_at": "2026-09-17T18:17:40.112004Z",
+        }
+    ]
+}
+
+_LATER_TRACES: Final[dict[str, Any]] = {
+    "matches": [
+        {
+            # Re-minted by the reset between the two readings. Same fault.
+            "trace_id": "0b1d9f77-6c34-4e52-8ab0-2f17c4d9e601",
+            "job_id": "51ab7d20-9e18-4c77-b6f3-0d2a8e5c1b44",
+            "job_type": "report_gen",
+            "status": "dead_letter",
+            "created_at": "2026-09-17T20:38:11.554210Z",
+        }
+    ]
+}
+
+_LAG: Final[dict[str, Any]] = {
+    "consumer_group": "worker-dispatcher",
+    "lag": 33,
+    "lag_known": True,
+    "source": "live",
+    "cache_key": "kafka:consumer_lag:worker-dispatcher",
+    "measured_at": "2026-09-17T18:22:14.335555Z",
+    "age_seconds": 2,
+    "recent_samples": [{"lag": 33, "measured_at": "2026-09-17T18:22:14.335555Z"}],
+}
+
+
+def _drift(
+    tool: str,
+    recorded: Mapping[str, Any],
+    live: Mapping[str, Any],
+    *,
+    scenario: Scenario | None = None,
+    arguments: Mapping[str, Any] | None = None,
+) -> list[Any]:
+    """One recorded call against one live answer to the same call."""
+    raw = dict(arguments or {})
+    world = _synthetic_world(_call(tool, raw, recorded))
+    return world_drift.drift_between(world, [_call(tool, raw, live)], scenario=scenario)
+
+
+def _model_paths(model: type[Any], prefix: str = "") -> set[str]:
+    """Every field path of one output model, lists flattened, nested models descended.
+
+    A local walk rather than an import, for the reason
+    ``test_recorded_client.py::_time_fields`` gives: what is under test is the
+    module's hand-written table, and a shared derivation would make the test and
+    the table two views of one function instead of a check on it.
+    """
+    paths: set[str] = set()
+    for name, field in model.model_fields.items():
+        path = f"{prefix}{name}"
+        paths.add(path)
+        for annotation in _unwrap_annotation(field.annotation):
+            if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+                paths |= _model_paths(annotation, f"{path}.")
+    return paths
+
+
+def _unwrap_annotation(annotation: Any) -> list[Any]:
+    """Every concrete type inside an annotation — ``tuple[X, ...] | None`` → ``[X, None]``."""
+    found: list[Any] = []
+    stack = [annotation]
+    while stack:
+        current = stack.pop()
+        if get_origin(current) is None:
+            found.append(current)
+        else:
+            stack.extend(get_args(current))
+    return found
+
+
+class TestHistoryIsNotState:
+    """WO-R3-271 — a recorded audit log and recorded ids are HISTORY, not state.
+
+    `make world-drift` exited 1 on all four committed recordings two hours after
+    they were taken, on a freshly reset world, 217–262 disagreements each, and
+    every one of them inside `list_audit_events` (its `total` grows with every
+    harness read, because reads ARE audit events) or `search_traces` (ids are
+    re-minted by every reset). No reset undoes history, so under ADR 0047 § 5 no
+    recording could ever pass its own drift check — and a check that can only
+    ever fail is a check nobody will read.
+
+    RED BEFORE: `git stash` the `_HISTORY` table and the `shape_only` argument
+    and every test in this class that asserts "not drift" fails with the counts
+    the re-pin builder saw; the four that assert "still drift" pass before and
+    after, which is what makes them the safety net rather than decoration.
+    """
+
+    # -- the noise that made the check unpassable ---------------------------
+
+    def test_a_grown_audit_total_is_not_drift(self) -> None:
+        """`total` counts every action the platform ever took, reads included."""
+        assert _drift("list_audit_events", _AUDIT, dict(_AUDIT, total=3946)) == []
+
+    def test_a_rewritten_audit_page_is_not_drift(self) -> None:
+        """The newest 50 rows are whatever ran last. Nothing puts them back."""
+        assert _drift("list_audit_events", _AUDIT, _LATER_AUDIT) == []
+
+    def test_a_re_minted_trace_id_is_not_drift(self) -> None:
+        """A reset deletes the fixture rows and seeds new ones with new ids."""
+        assert _drift("search_traces", _TRACES, _LATER_TRACES) == []
+
+    def test_the_committed_recordings_history_churn_is_forgiven(self) -> None:
+        """The real measurement, offline: two honest reads of one live stack.
+
+        `remediate_dlq_backlog_success` and `dlq_backlog` were recorded five
+        minutes apart against the same platform, so their shared calls are two
+        observations whose only *history* difference is the 293 reads in
+        between. Before this change the walk reported 164 disagreements inside
+        `list_audit_events` and 94 inside `search_traces`' two id columns.
+        """
+        recorded = recorder.load_recording(_recording("remediate_dlq_backlog_success"))
+        later = recorder.load_recording(_recording("dlq_backlog"))
+        shared = set(recorded.keys) & set(later.keys)
+        drifts = world_drift.drift_between(
+            recorded, [call for call in later.calls if call.key in shared]
+        )
+        assert [d for d in drifts if d.tool == "list_audit_events"] == []
+        assert {d.path for d in drifts if d.tool == "search_traces"} == {
+            "matches[].job_type[]",
+            "matches[].status[]",
+        }
+
+    # -- the safety net: a real drift still fails --------------------------
+
+    def test_a_changed_dlq_row_is_still_drift(self) -> None:
+        """The order's proof. `list_dlq_messages` is not a history tool."""
+        moved = json.loads(json.dumps(_DLQ))
+        moved["items"][0]["remediation_hint"] = "human_required"
+        drifts = _drift("list_dlq_messages", _DLQ, moved)
+        assert [d.path for d in drifts] == ["items[].remediation_hint[]"]
+
+    def test_a_changed_lag_reading_is_still_drift(self) -> None:
+        """The order's other proof. `lag` is the whole point of the lag scenarios."""
+        drifts = _drift(
+            "get_consumer_lag", _LAG, dict(_LAG, lag=0), arguments={"consumer_group": "x"}
+        )
+        assert [(d.path, d.kind) for d in drifts] == [("lag", "value")]
+
+    def test_a_changed_trace_status_is_still_drift(self) -> None:
+        """The ids are history; the fault signature in the same rows is not."""
+        healed = json.loads(json.dumps(_LATER_TRACES))
+        healed["matches"][0]["status"] = "completed"
+        drifts = _drift("search_traces", _TRACES, healed)
+        assert [d.path for d in drifts] == ["matches[].status[]"]
+
+    def test_an_empty_live_audit_log_is_still_drift(self) -> None:
+        """`events` itself is NOT forgiven, so a listing that lost its rows shows."""
+        drifts = _drift("list_audit_events", _AUDIT, {"total": 3946, "events": []})
+        assert [(d.path, d.kind) for d in drifts] == [("events[]", "no_live_rows")]
+
+    def test_a_field_the_audit_listing_stopped_returning_is_still_drift(self) -> None:
+        """The key-set diff runs before the forgiveness and is untouched."""
+        thinner = json.loads(json.dumps(_AUDIT))
+        del thinner["events"][0]["resource_id"]
+        drifts = _drift("list_audit_events", _AUDIT, thinner)
+        assert [(d.path, d.kind) for d in drifts] == [("events[].resource_id", "canned_only_field")]
+
+    def test_an_audit_id_that_changed_type_is_still_drift(self) -> None:
+        """Shape is what a recording may still claim about a history path."""
+        retyped = json.loads(json.dumps(_AUDIT))
+        retyped["events"][0]["id"] = 4471
+        drifts = _drift("list_audit_events", _AUDIT, retyped)
+        assert [(d.path, d.kind) for d in drifts] == [("events[].id", "type")]
+
+    # -- the rows a scenario's claims depend on ----------------------------
+
+    def test_a_claim_on_a_forgiven_path_is_re_checked(self, scenarios: dict[str, Scenario]) -> None:
+        """`failed_traces_scan` grades `search_traces.matches[].trace_id is_null false`.
+
+        A re-minted id still satisfies it, so this is not drift — but the check
+        has ASKED, which is what keeps the forgiveness from being blind.
+        """
+        scenario = scenarios["failed_traces_scan"]
+        assert world_drift.rechecked_claims(scenario) != ()
+        assert _drift("search_traces", _TRACES, _LATER_TRACES, scenario=scenario) == []
+
+    def test_a_claim_that_no_longer_holds_is_drift(self, scenarios: dict[str, Scenario]) -> None:
+        """The live world stopped satisfying what the scenario grades on."""
+        scenario = scenarios["failed_traces_scan"]
+        drifts = _drift("search_traces", _TRACES, {"matches": []}, scenario=scenario)
+        kinds = {d.kind for d in drifts}
+        assert world_drift.KIND_HISTORY_CLAIM in kinds
+
+    def test_a_scenario_with_no_claim_on_a_history_tool_recheck_nothing(
+        self, scenarios: dict[str, Scenario]
+    ) -> None:
+        assert world_drift.rechecked_claims(scenarios["dlq_backlog"]) == ()
+
+    # -- it cannot become a blanket exemption ------------------------------
+
+    def test_every_history_path_is_a_real_field_of_that_tools_output_model(self) -> None:
+        """A typo, or a path the platform dropped, is a failing test not a wider hole."""
+        for tool, paths in world_drift._HISTORY.items():
+            assert tool in TOOL_REGISTRY, tool
+            modelled = _model_paths(TOOL_REGISTRY[tool].output_model)
+            assert set(paths) <= modelled, (tool, sorted(set(paths) - modelled))
+
+    def test_no_tool_is_exempted_wholesale(self) -> None:
+        """A strict subset, always: a whole tool forgiven is the blanket exemption."""
+        for tool, paths in world_drift._HISTORY.items():
+            modelled = _model_paths(TOOL_REGISTRY[tool].output_model)
+            assert set(paths) < modelled, tool
+
+    def test_the_declared_set_is_pinned(self) -> None:
+        """Widening it is a reviewed edit to this list, never a side effect."""
+        assert {tool: set(paths) for tool, paths in world_drift._HISTORY.items()} == {
+            "list_audit_events": {
+                "total",
+                "events.id",
+                "events.action",
+                "events.principal_type",
+                "events.principal_id",
+                "events.resource_type",
+                "events.resource_id",
+                "events.extra_data",
+            },
+            "get_trace": {
+                "audit_events.action",
+                "audit_events.principal_type",
+                "audit_events.resource_type",
+                "audit_events.resource_id",
+                "audit_events.extra_data",
+            },
+            "search_traces": {"matches.trace_id", "matches.job_id"},
+        }
+
+    def test_every_history_path_says_why(self) -> None:
+        for tool, paths in world_drift._HISTORY.items():
+            for path, reason in paths.items():
+                assert len(reason) > 40, (tool, path)
+
+    def test_the_canned_fixture_walk_is_untouched(self) -> None:
+        """`make test-drift` compares canned fixtures and must not be widened.
+
+        The history table lives in `world_drift`, and `fixture_drift.compare`'s
+        new argument defaults to nothing, so the canned walk sees exactly what
+        it saw before: a grown audit total is still drift over there.
+        """
+        call = fixture_drift.CannedCall(
+            scenario="synthetic", tool="list_audit_events", arguments={}, payload=_AUDIT
+        )
+        drifts = fixture_drift.compare(call, dict(_AUDIT, total=3946))
+        assert [(d.path, d.kind) for d in drifts] == [("total", "value")]
+
+    def test_the_report_says_what_it_forgave(self) -> None:
+        """A clean walk must never be readable as "we looked at everything"."""
+        world = _synthetic_world(_call("list_audit_events", {}, _AUDIT))
+        live = world.model_copy(update={"calls": (_call("list_audit_events", {}, _LATER_AUDIT),)})
+        report = world_drift.build_report(
+            world="aaaabbbbcccc",
+            recording_path=Path("evals/recorded_worlds/x/x.json"),
+            recording=world,
+            live_world=live,
+        )
+        assert report.clean is True
+        rendered = world_drift.render(report)
+        assert "history" in rendered.lower()
+        assert "list_audit_events" in rendered
 
 
 class TestTheDriftCheckIsAStepSomebodyTakes:

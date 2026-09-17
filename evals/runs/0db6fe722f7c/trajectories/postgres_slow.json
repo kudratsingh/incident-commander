@@ -1,0 +1,161 @@
+{
+  "scenario": "postgres_slow",
+  "incident_id": "16f9e854-330c-4f74-b021-91b7954c5d8e",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "16f9e854-330c-4f74-b021-91b7954c5d8e",
+      "state": "triage",
+      "alert": {
+        "source": "platform.db",
+        "severity": "critical",
+        "fingerprint": "db_latency_high",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "service": "postgres"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:36:07.341224Z",
+      "updated_at": "2026-09-17T13:36:07.341224Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "16f9e854-330c-4f74-b021-91b7954c5d8e",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.db",
+        "severity": "critical",
+        "fingerprint": "db_latency_high",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "service": "postgres"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.034142,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "52923eb7-21e5-4541-90da-f107c82f0d8f",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "9500a4098745bb22ab4fd3543d6145bb"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:36:07.375366Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:36:07.341224Z",
+      "updated_at": "2026-09-17T13:36:07.375366Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "16f9e854-330c-4f74-b021-91b7954c5d8e",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.db",
+        "severity": "critical",
+        "fingerprint": "db_latency_high",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "service": "postgres"
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 21817,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.034188,
+        "max_usd": "1.00",
+        "usd_used": "0.043117"
+      },
+      "evidence": [
+        {
+          "evidence_id": "52923eb7-21e5-4541-90da-f107c82f0d8f",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "9500a4098745bb22ab4fd3543d6145bb"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:36:07.375366Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0b352a09-55b1-4ced-a9ef-f75d880aae7c",
+          "tool_name": "get_postgres_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":1.641,\"active_connections\":1,\"dialect\":\"postgresql\",\"error\":null}",
+          "timestamp": "2026-09-17T13:36:07.375412Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2b13df46-2ad3-422b-b411-e83d716e5c5c",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "Postgres health is fully clean: ping latency 1.6ms, 1 active connection, no errors reported. The alerted signal (db_latency_high) is not present in the current live reading. This appears to be a false positive or a transient spike that has already recovered. No Tier-1 auto-remediation is warranted. Recommend a human reviews the alerting threshold and whether a brief latency spike genuinely occurred — deploy history and trace search could be follow-up steps if the human wants to characterise the event, but there is nothing actionable for the autonomous agent to do."
+          },
+          "result_summary": "planner stop: Postgres health is fully clean: ping latency 1.6ms, 1 active connection, no errors reported. The alerted signal (db_latency_high) is not present in the current live reading. This appears to be a false positive or a transient spike that has already recovered. No Tier-1 auto-remediation is warranted. Recommend a human reviews the alerting threshold and whether a brief latency spike genuinely occurred — deploy history and trace search could be follow-up steps if the human wants to characterise the event, but there is nothing actionable for the autonomous agent to do.",
+          "timestamp": "2026-09-17T13:36:07.375412Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "no_fault",
+          "name": "db-latency-alert-false-positive",
+          "confidence": 0.75,
+          "reasoning": "Postgres health check shows ping latency of 1.6ms, only 1 active connection, and no errors — the database appears fully healthy right now."
+        },
+        {
+          "category": "db_query_latency",
+          "name": "transient-db-latency-spike-now-recovered",
+          "confidence": 0.2,
+          "reasoning": "The alert fired for high DB latency but the current health probe is clean; a transient spike may have already resolved."
+        },
+        {
+          "category": "db_pool_saturation",
+          "name": "db-pool-saturation-cleared",
+          "confidence": 0.05,
+          "reasoning": "Pool saturation could cause latency spikes, but 1 active connection strongly argues against this."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:36:07.341224Z",
+      "updated_at": "2026-09-17T13:36:07.375412Z"
+    }
+  ],
+  "invocation_id": "0db6fe722f7c"
+}

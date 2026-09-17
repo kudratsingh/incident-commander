@@ -1,0 +1,16 @@
+{
+  "incident_id": "d73924ef-5558-420c-99e8-f2f3a79c6e93",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.healthcheck severity=info fingerprint=health_ping group=unknown",
+  "escalation_reason": "severity=info classified as escalated",
+  "attempted_action": null,
+  "investigation_trail": [],
+  "findings": "No probes were run before escalation — the run ended immediately because the alert carried severity=info, which was classified directly as an escalation condition without any investigation steps being taken.",
+  "recommendation": "Review the raw alert from source=platform.healthcheck (fingerprint=health_ping) directly to determine whether this health-check signal represents a genuine issue, and verify whether the severity=info escalation classification rule is correctly configured for this alert group.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.01861,
+    "usd": "0"
+  }
+}

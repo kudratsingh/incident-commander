@@ -1,0 +1,191 @@
+{
+  "scenario": "failed_traces_scan",
+  "incident_id": "ba915e1f-a20b-4767-8a16-6378f41a0b88",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "ba915e1f-a20b-4767-8a16-6378f41a0b88",
+      "state": "triage",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "critical",
+        "fingerprint": "failure_rate_high",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "service": "job-runner",
+        "description": "Job failure rate elevated over the last hour, across more than one job type. No single job is implicated and the alert carries no job id — the only record of WHICH recent jobs failed, and of what each one was doing, is the per-job execution history. Establish which jobs failed recently before escalating; an escalation that cannot name them is not actionable."
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:31:37.974406Z",
+      "updated_at": "2026-09-17T13:31:37.974406Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ba915e1f-a20b-4767-8a16-6378f41a0b88",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "critical",
+        "fingerprint": "failure_rate_high",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "service": "job-runner",
+        "description": "Job failure rate elevated over the last hour, across more than one job type. No single job is implicated and the alert carries no job id — the only record of WHICH recent jobs failed, and of what each one was doing, is the per-job execution history. Establish which jobs failed recently before escalating; an escalation that cannot name them is not actionable."
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.035445,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "6d393db7-37c1-4934-aee9-8672d7f0586d",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "38d0c5c473912ed3319c1240cf61351e"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:31:38.009851Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:31:37.974406Z",
+      "updated_at": "2026-09-17T13:31:38.009851Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ba915e1f-a20b-4767-8a16-6378f41a0b88",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "critical",
+        "fingerprint": "failure_rate_high",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "service": "job-runner",
+        "description": "Job failure rate elevated over the last hour, across more than one job type. No single job is implicated and the alert carries no job id — the only record of WHICH recent jobs failed, and of what each one was doing, is the per-job execution history. Establish which jobs failed recently before escalating; an escalation that cannot name them is not actionable."
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 45712,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.03549,
+        "max_usd": "1.00",
+        "usd_used": "0.096980"
+      },
+      "evidence": [
+        {
+          "evidence_id": "6d393db7-37c1-4934-aee9-8672d7f0586d",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "38d0c5c473912ed3319c1240cf61351e"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:31:38.009851Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e9ebcd04-75c7-4b19-a4be-225864085c71",
+          "tool_name": "search_traces",
+          "arguments": {
+            "status": "failed",
+            "job_type": null,
+            "since_hours": 2,
+            "limit": 50
+          },
+          "result_summary": "{\"matches\":[{\"trace_id\":\"edeeb994-56d2-53e6-88fd-8af47e695dbc\",\"job_id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"job_type\":\"doc_analysis\",\"status\":\"failed\",\"created_at\":\"2026-09-17T12:47:13.337884Z\"},{\"trace_id\":\"0e24ca29-1d47-57e9-b898-4d79bb6da981\",\"job_id\":\"5967d510-0290-5627-a9db-4e29e3a38e44\",\"job_type\":\"report_gen\",\"status\":\"failed\",\"created_at\":\"2026-09-17T12:32:13.337884Z\"}]}",
+          "timestamp": "2026-09-17T13:31:38.009896Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "44f0432d-be98-466d-b994-ad7677effae7",
+          "tool_name": "get_trace",
+          "arguments": {
+            "trace_id": "edeeb994-56d2-53e6-88fd-8af47e695dbc",
+            "include_audit": true
+          },
+          "result_summary": "{\"trace_id\":\"edeeb994-56d2-53e6-88fd-8af47e695dbc\",\"jobs\":[{\"id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"type\":\"doc_analysis\",\"status\":\"failed\",\"user_id\":\"ee7c82cb-bab6-5780-8590-55b57064cbe3\",\"retry_count\":2,\"error_message\":\"pdf extraction failed: file is corrupted\",\"created_at\":\"2026-09-17T12:47:13.337884Z\",\"updated_at\":\"2026-09-17T12:47:23.337884Z\"}],\"audit_events\":[{\"action\":\"job.failed\",\"resource_type\":\"job\",\"resource_id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"principal_type\":\"user\",\"created_at\":\"2026-09-08T02:16:36.672412Z\",\"extra_data\":{\"error_message\":\"pdf extraction failed: file is corrupted\"}}],\"truncated\":false,\"total_jobs\":1,\"total_audit_events\":1}",
+          "timestamp": "2026-09-17T13:31:38.009896Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a9b315c3-d5cb-4048-a003-80c8bc355e51",
+          "tool_name": "get_trace",
+          "arguments": {
+            "trace_id": "0e24ca29-1d47-57e9-b898-4d79bb6da981",
+            "include_audit": true
+          },
+          "result_summary": "{\"trace_id\":\"0e24ca29-1d47-57e9-b898-4d79bb6da981\",\"jobs\":[{\"id\":\"5967d510-0290-5627-a9db-4e29e3a38e44\",\"type\":\"report_gen\",\"status\":\"failed\",\"user_id\":\"ee7c82cb-bab6-5780-8590-55b57064cbe3\",\"retry_count\":2,\"error_message\":\"OOM during PDF generation (200MB report)\",\"created_at\":\"2026-09-17T12:32:13.337884Z\",\"updated_at\":\"2026-09-17T12:33:52.337884Z\"}],\"audit_events\":[{\"action\":\"job.failed\",\"resource_type\":\"job\",\"resource_id\":\"5967d510-0290-5627-a9db-4e29e3a38e44\",\"principal_type\":\"user\",\"created_at\":\"2026-09-08T02:16:36.672412Z\",\"extra_data\":{\"error_message\":\"OOM during PDF generation (200MB report)\"}}],\"truncated\":false,\"total_jobs\":1,\"total_audit_events\":1}",
+          "timestamp": "2026-09-17T13:31:38.009896Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2b16a127-e6d8-4014-923a-83535d625873",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "Two recently failed jobs have been identified and investigated. Job d034fd34-102d-5f61-8d21-a7dbda5ea895 (doc_analysis) failed with 'pdf extraction failed: file is corrupted' after 2 retries — a permanent bad-input fault with no Tier-1 fix. Job 5967d510-0290-5627-a9db-4e29e3a38e44 (report_gen) failed with 'OOM during PDF generation (200MB report)' after 2 retries — a resource/payload-size issue also not auto-remediable. Both jobs belong to the same user (ee7c82cb-bab6-5780-8590-55b57064cbe3) and represent distinct permanent data/input problems across two job types. Neither has a DLQ row (no dead-letter status observed via trace). No Tier-1 remediation is applicable; escalate to a human with: (1) corrupted PDF input for doc_analysis job d034fd34, (2) oversized 200MB report payload for report_gen job 5967d510, both from user ee7c82cb. The human should investigate whether this user is submitting bad/oversized inputs and whether additional job types are affected."
+          },
+          "result_summary": "planner stop: Two recently failed jobs have been identified and investigated. Job d034fd34-102d-5f61-8d21-a7dbda5ea895 (doc_analysis) failed with 'pdf extraction failed: file is corrupted' after 2 retries — a permanent bad-input fault with no Tier-1 fix. Job 5967d510-0290-5627-a9db-4e29e3a38e44 (report_gen) failed with 'OOM during PDF generation (200MB report)' after 2 retries — a resource/payload-size issue also not auto-remediable. Both jobs belong to the same user (ee7c82cb-bab6-5780-8590-55b57064cbe3) and represent distinct permanent data/input problems across two job types. Neither has a DLQ row (no dead-letter status observed via trace). No Tier-1 remediation is applicable; escalate to a human with: (1) corrupted PDF input for doc_analysis job d034fd34, (2) oversized 200MB report payload for report_gen job 5967d510, both from user ee7c82cb. The human should investigate whether this user is submitting bad/oversized inputs and whether additional job types are affected.",
+          "timestamp": "2026-09-17T13:31:38.009896Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "persistent_data_bug",
+          "name": "corrupted-pdf-and-oom-report-gen-failures-bad-input-data",
+          "confidence": 0.82,
+          "reasoning": "Both failed jobs show permanent, input-data-specific errors: job d034fd34 failed with 'pdf extraction failed: file is corrupted' (bad input file, not a transient fault) after 2 retries, and job 5967d510 failed with 'OOM during PDF generation (200MB report)' after 2 retries — both are reproducible data/payload issues with no dead-letter rows yet visible, spanning two job types (doc_analysis, report_gen) from the same user."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-correlating-with-elevated-failure-rate",
+          "confidence": 0.2,
+          "reasoning": "A deploy could have introduced a regression affecting PDF processing across job types, but no deploy evidence has been checked yet."
+        },
+        {
+          "category": "unknown",
+          "name": "multi-job-type-failure-cause-undetermined",
+          "confidence": 0.1,
+          "reasoning": "The alert spans more than one job type; underlying cause could be systemic if more failing jobs are present beyond the two sampled."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:31:37.974406Z",
+      "updated_at": "2026-09-17T13:31:38.009896Z"
+    }
+  ],
+  "invocation_id": "0db6fe722f7c"
+}

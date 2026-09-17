@@ -1,0 +1,39 @@
+{
+  "incident_id": "ecefcb3b-54da-4ce4-8db8-97d094869f1c",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high group=ledger-consumer",
+  "escalation_reason": "planner stop: Both probes of get_consumer_lag for 'ledger-consumer' returned lag_known=false with source=unrecognized — this consumer group is not registered in the platform's known groups (worker-dispatcher, billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer). The platform cannot report lag for it, so the alerted signal cannot be confirmed or cleared programmatically. A deploy regression is plausible (v0.4.3 deployed today; v0.4.2 was previously noted as correlated with billing failures), but rollback requires human sign-off. With 1 tool call remaining and no path to confirming consumer saturation, this must escalate to a human: (1) verify whether 'ledger-consumer' is a known/registered consumer group, (2) investigate whether the v0.4.3 deploy introduced a regression that caused the alert, and (3) review the alerting rule to determine if the group name is misconfigured.",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"ledger-consumer\",\"lag\":null,\"lag_known\":false,\"source\":\"unrecognized\",\"cache_key\":\"kafka:consumer_lag:ledger-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}",
+      "arguments": {
+        "consumer_group": "ledger-consumer"
+      }
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"ledger-consumer\",\"lag\":null,\"lag_known\":false,\"source\":\"unrecognized\",\"cache_key\":\"kafka:consumer_lag:ledger-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}",
+      "arguments": {
+        "consumer_group": "ledger-consumer"
+      }
+    },
+    {
+      "tool": "get_deploy_history",
+      "summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T11:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T10:17:13.337886Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-09-17T07:17:13.337886Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-09-16T19:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-09-16T15:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-09-15T13:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+      "arguments": {
+        "environment": null,
+        "limit": 10
+      }
+    }
+  ],
+  "findings": "Both probes of get_consumer_lag for 'ledger-consumer' returned lag_known=false with source=unrecognized, meaning the platform does not recognize this consumer group (known groups are worker-dispatcher, billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, and healthy-consumer), so the alerted lag signal cannot be confirmed or cleared; separately, deploy history shows v0.4.3 was pushed to prod today at 11:17 UTC, and v0.4.2 was previously noted as correlated with billing failures.",
+  "recommendation": "First confirm whether 'ledger-consumer' is a legitimately registered Kafka consumer group or a misconfigured alert rule targeting a nonexistent group, then cross-reference the v0.4.3 prod deploy timing against the alert onset to determine if today's release introduced the regression.",
+  "budget_used": {
+    "tool_calls": 3,
+    "tokens": 44554,
+    "wall_seconds": 0.029925,
+    "usd": "0.091034"
+  }
+}

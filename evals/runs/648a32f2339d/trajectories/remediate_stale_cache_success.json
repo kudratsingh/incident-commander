@@ -1,0 +1,211 @@
+{
+  "scenario": "remediate_stale_cache_success",
+  "incident_id": "15b635f7-1274-4a7b-b1c1-670bc9053de0",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "15b635f7-1274-4a7b-b1c1-670bc9053de0",
+      "state": "triage",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T15:06:04.277893Z",
+      "updated_at": "2026-09-17T15:06:04.277893Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "15b635f7-1274-4a7b-b1c1-670bc9053de0",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.057194,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "07b374da-4c59-4d8d-8c4e-75fc62fa3e54",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T15:06:04.335087Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T15:06:04.277893Z",
+      "updated_at": "2026-09-17T15:06:04.335087Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "15b635f7-1274-4a7b-b1c1-670bc9053de0",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.cache",
+        "severity": "critical",
+        "fingerprint": "cache_miss_spike",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "cache_key": "cache:jobs:worker-dispatcher:hot_set"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 5,
+        "max_tokens": 200000,
+        "tokens_used": 55907,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.057253,
+        "max_usd": "1.00",
+        "usd_used": "0.135919"
+      },
+      "evidence": [
+        {
+          "evidence_id": "07b374da-4c59-4d8d-8c4e-75fc62fa3e54",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "6c9dc81af337232b5b5abbfcbdc493b2"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T15:06:04.335087Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "c63708ba-409d-4a23-9b78-b0fcd83e55a0",
+          "tool_name": "get_cache_key_info",
+          "arguments": {
+            "key": "cache:jobs:worker-dispatcher:hot_set"
+          },
+          "result_summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"exists\":true,\"type\":\"string\",\"ttl_seconds\":593,\"size\":90}",
+          "timestamp": "2026-09-17T15:06:04.335146Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "24091fa8-5887-4420-b07d-f06fbb1ef61d",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.649,\"connected_clients\":11,\"used_memory_bytes\":1763040,\"used_memory_human\":\"1.68M\",\"keyspace_hits\":9855,\"keyspace_misses\":1193604,\"error\":null}",
+          "timestamp": "2026-09-17T15:06:04.335146Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "6abb08af-e36e-4984-8441-037887f3494b",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-09-17T15:05:56.714029Z\",\"age_seconds\":34,\"recent_samples\":[{\"lag\":0,\"measured_at\":\"2026-09-17T15:05:56.714029Z\"},{\"lag\":0,\"measured_at\":\"2026-09-17T15:04:56.323105Z\"}]}",
+          "timestamp": "2026-09-17T15:06:04.335146Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "90f452c9-973b-4c65-8d54-110caaf81c42",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 10
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T13:04:52.740918Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T12:04:52.740918Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-09-17T09:04:52.740918Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-09-16T21:04:52.740918Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-09-16T17:04:52.740918Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-09-15T15:04:52.740918Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-09-17T15:06:04.335146Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d9f58881-9192-4d45-8643-abbfa64c234a",
+          "tool_name": "search_traces",
+          "arguments": {
+            "status": "failed",
+            "job_type": "worker-dispatcher",
+            "since_hours": 4,
+            "limit": 20
+          },
+          "result_summary": "{\"matches\":[]}",
+          "timestamp": "2026-09-17T15:06:04.335146Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "13409005-31ad-4d33-94fa-9bbe04031f6c",
+          "tool_name": "_planner_escalate",
+          "arguments": {
+            "reason": "max iterations (5) exceeded"
+          },
+          "result_summary": "max iterations (5) exceeded",
+          "timestamp": "2026-09-17T15:06:04.335146Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "stale_cache",
+          "name": "cache-miss-spike-hot-set-key-worker-dispatcher",
+          "confidence": 0.55,
+          "reasoning": "The alert fingerprint is 'cache_miss_spike' on the hot_set key, and Redis shows 1,193,604 keyspace misses vs 9,855 hits — an extremely poor hit rate suggesting the hot set key is not serving cache hits effectively despite existing."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "v0.4.3-deploy-correlated-with-cache-miss-spike",
+          "confidence": 0.3,
+          "reasoning": "v0.4.3 was deployed to prod at 13:04 today and v0.4.2 had notes 'correlated with billing failures', suggesting recent deploys have introduced regressions; the cache miss spike could be caused by a code change altering cache key usage patterns."
+        },
+        {
+          "category": "redis_saturation",
+          "name": "redis-keyspace-miss-ratio-extreme",
+          "confidence": 0.1,
+          "reasoning": "Redis memory is low (1.68M) and the miss ratio is extremely high (99.2%), but ping latency and connected clients look healthy, so full saturation is less likely than a key-specific issue."
+        },
+        {
+          "category": "unknown",
+          "name": "cache-miss-root-cause-unclear",
+          "confidence": 0.05,
+          "reasoning": "The key exists with a valid TTL and size, so a simple eviction is not the cause — the root is not yet determined."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T15:06:04.277893Z",
+      "updated_at": "2026-09-17T15:06:04.335146Z"
+    }
+  ],
+  "invocation_id": "648a32f2339d"
+}

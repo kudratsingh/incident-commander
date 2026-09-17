@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -21,6 +21,8 @@ from evals.graders.deterministic import (
     is_vacuous_detail,
     leaf_claims,
 )
+from evals.graders.root_cause import coverage_over, final_diagnosis, score_root_cause
+from evals.runner import RunReport, ScenarioOutcome, _print_summary, root_cause_coverage
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
 from incident_commander.agent.briefing import (
@@ -28,6 +30,7 @@ from incident_commander.agent.briefing import (
     EscalationBriefing,
     ProbeSummary,
 )
+from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 from incident_commander.config import polling_window_seconds
 from incident_commander.tools.policies import Tier, tools_at_or_below
@@ -940,8 +943,10 @@ class TestAggregate:
         report = grade(run, exp)
         assert report.passed is True
         assert report.scenario == "happy"
-        # OUTCOME, EVIDENCE, BUDGET, ACTION, SAFETY (Phase 6 additions).
-        assert len(report.dimensions) == 5
+        # OUTCOME, EVIDENCE, BUDGET, ACTION, SAFETY (Phase 6 additions),
+        # ROOT_CAUSE (WP-2.2). Every dimension is emitted for every scenario,
+        # graded or vacuous — see TestRootCauseDimension.
+        assert len(report.dimensions) == 6
 
     def test_any_dimension_fails_report_fails(self, run_state: RunState, now: datetime) -> None:
         run = _with_terminal(run_state, IncidentState.RESOLVED)
@@ -4930,4 +4935,387 @@ class TestReplayNowScenariosForbidASchedule:
                 grade(run, _dlq_scenario("dlq_replay_safe_success")), GradeDimension.EVIDENCE
             ).passed
             is True
+        )
+
+
+# ---------------------------------------------------------------------------
+# ROOT_CAUSE (WP-2.2, plan 03 § 7.1)
+#
+# The dimension that scores what the agent CONCLUDED rather than what it did,
+# and the only one that reads a ``Scenario``-side answer key (ADR 0038). Three
+# properties are asserted here and nowhere else:
+#
+# * it is independent of OUTCOME — a run can resolve the incident and still
+#   have named the wrong fault, which is the finding the whole buildout is
+#   about;
+# * a scenario with no ground truth grades VACUOUSLY in the shape
+#   ``is_vacuous_detail`` matches, or the regression gate's vacated-assertion
+#   check silently stops covering this dimension;
+# * a run that produced no ranking at all FAILS rather than passing. Silence
+#   is not a diagnosis, and "nothing was asserted" and "nothing was said" are
+#   different facts.
+
+
+def _ranked(*categories: HypothesisCategory) -> tuple[Hypothesis, ...]:
+    """A ranking, most-confident first.
+
+    Confidences descend so ``InvestigationStep``'s schema-boundary re-sort
+    (B-07) would leave this order untouched — the fixture says the same thing
+    the agent's own output says.
+    """
+    return tuple(
+        Hypothesis(
+            category=category,
+            name=f"{category.value}-suspected",
+            confidence=0.9 - 0.1 * index,
+            reasoning="fixture",
+        )
+        for index, category in enumerate(categories)
+    )
+
+
+def _diagnosed(
+    run_state: RunState,
+    state: IncidentState,
+    *categories: HypothesisCategory,
+) -> RunState:
+    return run_state.model_copy(update={"state": state, "hypotheses": _ranked(*categories)})
+
+
+_RESOLVES = ScenarioExpectation(name="rc", expected_terminal_state=IncidentState.RESOLVED)
+
+
+class TestRootCauseDimension:
+    def test_no_ground_truth_grades_vacuously(self, run_state: RunState) -> None:
+        """All 41 shipped scenarios are this case, so it is the load-bearing one."""
+        run = _diagnosed(run_state, IncidentState.RESOLVED, HypothesisCategory.POISON_MESSAGE)
+        result = _dim(grade(run, _RESOLVES), GradeDimension.ROOT_CAUSE)
+        assert result.passed is True
+        assert is_vacuous_detail(result.detail), (
+            f"ROOT_CAUSE's unasserted detail {result.detail!r} is not in the shape "
+            "is_vacuous_detail matches, so the regression gate can no longer tell a "
+            "real root-cause pass from the absence of a claim (deterministic.py:67-91)"
+        )
+
+    def test_the_right_diagnosis_passes(self, run_state: RunState) -> None:
+        run = _diagnosed(run_state, IncidentState.RESOLVED, HypothesisCategory.POISON_MESSAGE)
+        result = _dim(
+            grade(run, _RESOLVES, ground_truth=(HypothesisCategory.POISON_MESSAGE,)),
+            GradeDimension.ROOT_CAUSE,
+        )
+        assert result.passed is True
+        assert "exact match" in result.detail
+        assert not is_vacuous_detail(result.detail), (
+            "a real root-cause pass must be distinguishable from an unasserted one"
+        )
+
+    def test_a_run_that_resolves_on_the_wrong_diagnosis_reds_ROOT_CAUSE_only(
+        self, run_state: RunState
+    ) -> None:
+        """WP-2.2's headline case: OUTCOME pass, ROOT_CAUSE fail.
+
+        The agent fixed the incident and reached RESOLVED while naming a
+        fault that was not the one the scenario manufactured. Before this
+        dimension existed the two runs — right fix for the right reason, and
+        right fix for the wrong reason — were the same green row.
+        """
+        run = _diagnosed(run_state, IncidentState.RESOLVED, HypothesisCategory.STALE_CACHE)
+        report = grade(run, _RESOLVES, ground_truth=(HypothesisCategory.POISON_MESSAGE,))
+        assert _dim(report, GradeDimension.OUTCOME).passed is True
+        root_cause = _dim(report, GradeDimension.ROOT_CAUSE)
+        assert root_cause.passed is False
+        assert "stale_cache" in root_cause.detail and "poison_message" in root_cause.detail
+        assert report.passed is False, "the roll-up is the conjunction of every dimension"
+
+    def test_the_verdict_does_not_move_with_the_terminal_state(self, run_state: RunState) -> None:
+        """Independence, asserted directly rather than inferred from one case.
+
+        The same diagnosis against the same ground truth grades the same way
+        whether the run resolved, escalated or failed. If this ever couples,
+        the dimension stops being a second measurement and becomes a second
+        spelling of OUTCOME.
+        """
+        verdicts = {
+            state: _dim(
+                grade(
+                    _diagnosed(run_state, state, HypothesisCategory.POISON_MESSAGE),
+                    ScenarioExpectation(name="rc", expected_terminal_state=state),
+                    ground_truth=(HypothesisCategory.POISON_MESSAGE,),
+                ),
+                GradeDimension.ROOT_CAUSE,
+            ).passed
+            for state in (
+                IncidentState.RESOLVED,
+                IncidentState.ESCALATED,
+                IncidentState.FAILED,
+            )
+        }
+        assert set(verdicts.values()) == {True}, verdicts
+
+    def test_a_run_with_no_ranking_fails_rather_than_passing(self, run_state: RunState) -> None:
+        """A ground truth was asserted and the agent never named anything."""
+        run = _with_terminal(run_state, IncidentState.ESCALATED)
+        assert run.hypotheses == ()
+        result = _dim(
+            grade(run, _RESOLVES, ground_truth=(HypothesisCategory.POISON_MESSAGE,)),
+            GradeDimension.ROOT_CAUSE,
+        )
+        assert result.passed is False
+        assert not is_vacuous_detail(result.detail)
+        assert "no root cause" in result.detail
+
+    def test_only_the_top_candidate_is_the_diagnosis(self, run_state: RunState) -> None:
+        """Ranking the right answer SECOND is not diagnosing it.
+
+        The rest of a ranking is what the agent considered and rejected.
+        Counting it would pay for hedging, and "correct anywhere in the
+        candidate set" is pass@k — a separate metric (plan 03 § 7.2).
+        """
+        run = _diagnosed(
+            run_state,
+            IncidentState.RESOLVED,
+            HypothesisCategory.STALE_CACHE,
+            HypothesisCategory.POISON_MESSAGE,
+        )
+        assert (
+            _dim(
+                grade(run, _RESOLVES, ground_truth=(HypothesisCategory.POISON_MESSAGE,)),
+                GradeDimension.ROOT_CAUSE,
+            ).passed
+            is False
+        )
+
+
+class TestNoFaultControls:
+    """The level-0 control: nothing is wrong and saying so is the right answer."""
+
+    _CONTROL = (HypothesisCategory.NO_FAULT,)
+
+    def test_stopping_with_NO_FAULT_on_top_passes(self, run_state: RunState) -> None:
+        run = _diagnosed(run_state, IncidentState.ESCALATED, HypothesisCategory.NO_FAULT)
+        assert (
+            _dim(
+                grade(
+                    run,
+                    ScenarioExpectation(
+                        name="control", expected_terminal_state=IncidentState.ESCALATED
+                    ),
+                    ground_truth=self._CONTROL,
+                ),
+                GradeDimension.ROOT_CAUSE,
+            ).passed
+            is True
+        )
+
+    def test_naming_a_fault_in_a_healthy_world_fails(self, run_state: RunState) -> None:
+        run = _diagnosed(run_state, IncidentState.ESCALATED, HypothesisCategory.CONSUMER_SATURATION)
+        result = _dim(
+            grade(
+                run,
+                ScenarioExpectation(
+                    name="control", expected_terminal_state=IncidentState.ESCALATED
+                ),
+                ground_truth=self._CONTROL,
+            ),
+            GradeDimension.ROOT_CAUSE,
+        )
+        assert result.passed is False
+        assert "no_fault" in result.detail
+
+    def test_UNKNOWN_is_not_NO_FAULT(self, run_state: RunState) -> None:
+        """ "I could not classify it" and "there is nothing to classify" differ.
+
+        Both end the run the same way — neither category is in ``FIX_MAP`` —
+        so OUTCOME cannot separate them and only this dimension can.
+        """
+        run = _diagnosed(run_state, IncidentState.ESCALATED, HypothesisCategory.UNKNOWN)
+        assert (
+            _dim(
+                grade(
+                    run,
+                    ScenarioExpectation(
+                        name="control", expected_terminal_state=IncidentState.ESCALATED
+                    ),
+                    ground_truth=self._CONTROL,
+                ),
+                GradeDimension.ROOT_CAUSE,
+            ).passed
+            is False
+        )
+
+
+class TestMultiFaultScoring:
+    """Exact-set, precision, recall and F1 on a hand-built two-cause world.
+
+    No shipped scenario declares two causes, so the arithmetic is asserted
+    directly on ``score_root_cause`` rather than through a YAML that does not
+    exist. The partial-credit case is the one that matters: a single-diagnosis
+    strategy that names ONE of the two real causes is not simply wrong, and
+    precision 1.00 / recall 0.50 is the sentence that says so.
+    """
+
+    _TWO = (HypothesisCategory.POISON_MESSAGE, HypothesisCategory.DB_POOL_SATURATION)
+
+    def test_one_of_two_is_partial_credit_not_a_pass(self) -> None:
+        score = score_root_cause((HypothesisCategory.POISON_MESSAGE,), self._TWO)
+        assert score.exact_set is False
+        assert score.precision == pytest.approx(1.0)
+        assert score.recall == pytest.approx(0.5)
+        assert score.f1 == pytest.approx(2 / 3)
+        assert score.matched == (HypothesisCategory.POISON_MESSAGE,)
+
+    def test_naming_neither_scores_zero_across_the_board(self) -> None:
+        score = score_root_cause((HypothesisCategory.STALE_CACHE,), self._TWO)
+        assert score.exact_set is False
+        assert (score.precision, score.recall, score.f1) == (0.0, 0.0, 0.0)
+
+    def test_naming_both_is_the_exact_set(self) -> None:
+        score = score_root_cause(reversed(self._TWO), self._TWO)
+        assert score.exact_set is True
+        assert (score.precision, score.recall, score.f1) == (1.0, 1.0, 1.0)
+
+    def test_a_superset_loses_precision_and_fails(self) -> None:
+        """Naming every category would otherwise buy perfect recall."""
+        score = score_root_cause((*self._TWO, HypothesisCategory.STALE_CACHE), self._TWO)
+        assert score.exact_set is False
+        assert score.recall == pytest.approx(1.0)
+        assert score.precision == pytest.approx(2 / 3)
+
+    def test_an_empty_diagnosis_is_not_perfectly_precise(self) -> None:
+        """The convention that keeps silence from outscoring a wrong answer."""
+        score = score_root_cause((), self._TWO)
+        assert (score.precision, score.recall, score.f1) == (0.0, 0.0, 0.0)
+
+    def test_the_single_fault_case_degenerates_to_an_exact_match(self) -> None:
+        one = (HypothesisCategory.POISON_MESSAGE,)
+        assert score_root_cause(one, one).exact_set is True
+        assert score_root_cause((HypothesisCategory.STALE_CACHE,), one).exact_set is False
+
+    def test_the_description_is_not_mistaken_for_a_vacuous_detail(self) -> None:
+        """Every rendered score must stay outside is_vacuous_detail's shape."""
+        for predicted in ((), (HypothesisCategory.POISON_MESSAGE,), self._TWO):
+            detail = score_root_cause(predicted, self._TWO).describe()
+            assert not is_vacuous_detail(detail), detail
+
+
+class TestTheFinalDiagnosisIsTheTopCandidate:
+    def test_it_reads_the_latest_ranking(self, run_state: RunState) -> None:
+        run = _diagnosed(
+            run_state,
+            IncidentState.RESOLVED,
+            HypothesisCategory.POISON_MESSAGE,
+            HypothesisCategory.STALE_CACHE,
+        )
+        top = final_diagnosis(run)
+        assert top is not None
+        assert top.category is HypothesisCategory.POISON_MESSAGE
+
+    def test_a_run_that_never_ranked_anything_has_no_diagnosis(self, run_state: RunState) -> None:
+        assert final_diagnosis(run_state) is None
+
+    def test_the_investigation_loop_is_the_only_writer_of_the_ranking(self) -> None:
+        """Why ``RunState.hypotheses`` is a sound source for the final diagnosis.
+
+        Plan 02 § 11.3 defines the final diagnosis as the top candidate at the
+        step that emitted ``remediate`` or ``stop``. ``RunState`` keeps only
+        the LATEST ranking, so reading it is correct only while nothing after
+        the investigation loop rewrites the field. This asserts that
+        structurally rather than by inspection: exactly one assignment to
+        ``hypotheses`` exists in the whole agent package, and it is the
+        planner call inside ``investigation.py``. A future transition that
+        rewrites the ranking fails here, which is the moment the grader would
+        otherwise start scoring a different answer than the one the agent
+        acted on.
+        """
+        package = Path(__file__).resolve().parents[2] / "src" / "incident_commander"
+        writers = sorted(
+            path.relative_to(package).as_posix()
+            for path in package.rglob("*.py")
+            if '"hypotheses":' in path.read_text()
+        )
+        assert writers == ["agent/investigation.py"], (
+            f"the ranking is now written in {writers}; the final diagnosis can no "
+            "longer be read off RunState.hypotheses without checking which write "
+            "came last (WO-R3-191, plan 02 § 11.3)."
+        )
+
+
+class TestRootCauseCoverageIsReported:
+    """The acceptance number: how much of the suite is graded on diagnosis.
+
+    Counted from the rows of a report, so it can be computed over the
+    committed baseline and every archived report — all of which predate the
+    dimension and are never rewritten (invariant 9).
+    """
+
+    def test_a_suite_with_no_ground_truth_reports_not_measured(self) -> None:
+        coverage = coverage_over([(False, True), (False, True)], total=2)
+        assert coverage.graded == 0
+        assert coverage.accuracy is None
+        assert "not measured" in coverage.describe()
+        assert "0 of 2" in coverage.describe()
+
+    def test_accuracy_is_over_the_graded_rows_not_the_whole_suite(self) -> None:
+        coverage = coverage_over(
+            [(True, True), (True, False), (False, True), (False, True)], total=4
+        )
+        assert (coverage.graded, coverage.correct) == (2, 2 - 1)
+        assert coverage.accuracy == pytest.approx(0.5)
+        assert "1/2 correct (50%)" in coverage.describe()
+        assert "2 of 4" in coverage.describe()
+
+    def test_the_run_summary_prints_it(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """The number reaches whoever ran the suite, not just a test.
+
+        The denominator is the corpus the loader produced — ``RunReport.total``
+        — never a literal: the plan's acceptance line still says 37 and the
+        directory holds 41 (divergence J1).
+        """
+        report = RunReport(
+            generated_at=datetime(2026, 9, 17, tzinfo=UTC),
+            total=1,
+            passed=1,
+            failed=0,
+            outcomes=(
+                ScenarioOutcome(
+                    scenario="s",
+                    final_state=IncidentState.RESOLVED,
+                    tool_calls_used=1,
+                    report=GradeReport(
+                        scenario="s",
+                        passed=True,
+                        dimensions=(
+                            DimensionResult(
+                                dimension=GradeDimension.ROOT_CAUSE,
+                                passed=True,
+                                detail="diagnosed poison_message; ground truth "
+                                "poison_message — exact match (precision 1.00, "
+                                "recall 1.00, F1 1.00)",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        assert (
+            root_cause_coverage(report).describe()
+            == "root cause: 1/1 correct (100%) over 1 of 1 scenario(s) carrying a ground truth"
+        )
+        _print_summary(report)
+        assert "root cause: 1/1 correct" in capsys.readouterr().out
+
+    def test_the_shipped_corpus_declares_no_ground_truth_yet(self) -> None:
+        """The honest baseline: coverage is 0, and the report must say so.
+
+        Back-filling a guessed ground truth onto 41 scenarios that were
+        written without one would manufacture the very number this packet
+        exists to measure (``Scenario.ground_truth``'s own note). When a
+        scenario declares one, this test changes with it.
+        """
+        shipped = _shipped()
+        graded = [s.name for s in shipped if s.root_cause_graded]
+        assert len(shipped) == 41, "the corpus size is read from the loader, never a literal"
+        assert graded == [], (
+            f"{graded} now declare a ground truth — update this test and report the "
+            "new root-cause accuracy in the PR body."
         )

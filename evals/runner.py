@@ -38,8 +38,10 @@ from evals.graders.deterministic import (
     GradeDimension,
     GradeReport,
     grade,
+    is_vacuous_detail,
 )
 from evals.graders.llm_judge import JudgeScore, judge_briefing
+from evals.graders.root_cause import RootCauseCoverage, coverage_over
 from evals.guards import (
     AuditWindowScan,
     PrincipalGuardError,
@@ -1347,7 +1349,20 @@ def run_scenario(
                 # (llm/fakes.py) and never goes through _parse, so the raw
                 # pydantic error is still reachable.
                 briefing_error = f"briefing enrichment failed: {err}"
-        report = grade(final, scenario.expectation, briefing=briefing)
+        report = grade(
+            final,
+            scenario.expectation,
+            briefing=briefing,
+            # The answer key, read straight off the scenario here and nowhere
+            # else. The run above was built from ``agent_visible()`` (ADR
+            # 0038), so this is the first and only point where the two sides
+            # of the trust boundary meet — after the agent is finished.
+            # ``None`` when the scenario declares no ground truth, which
+            # grades ROOT_CAUSE vacuously rather than red.
+            ground_truth=(
+                None if scenario.ground_truth is None else scenario.ground_truth.root_causes
+            ),
+        )
         judge_score: JudgeScore | None = None
         judge_error: str | None = None
         if scenario.use_live_llm or (
@@ -2082,6 +2097,30 @@ def _eval_defaults() -> Settings:
     )
 
 
+def root_cause_coverage(report: RunReport) -> RootCauseCoverage:
+    """How many of this report's rows were graded on diagnosis, and how many were right.
+
+    WP-2.2's acceptance number. Derived from the rows rather than stored on
+    ``RunReport``, which is what lets it be computed over the committed
+    ``baseline.json`` and over every archived report — all of them predate
+    the dimension, and evidence is never rewritten (invariant 9). The
+    denominator is the corpus the loader actually produced, never a literal:
+    the plan's acceptance line still says 37 and the directory holds 41.
+
+    "Graded" is a scenario whose ROOT_CAUSE detail is substantive. Reusing
+    ``is_vacuous_detail`` rather than re-deriving the condition keeps this
+    number and the regression gate's vacated-assertion check reading the
+    same signal — if one moves, both move.
+    """
+    verdicts = [
+        (not is_vacuous_detail(dimension.detail), dimension.passed)
+        for outcome in report.outcomes
+        for dimension in outcome.report.dimensions
+        if dimension.dimension is GradeDimension.ROOT_CAUSE
+    ]
+    return coverage_over(verdicts, total=report.total)
+
+
 def _print_summary(report: RunReport) -> None:
     print(f"scenarios: {report.total}, passed: {report.passed}, failed: {report.failed}")
     if report.ungraded:
@@ -2121,6 +2160,7 @@ def _print_summary(report: RunReport) -> None:
             f"judge: {report.judge_useful_count}/{report.judged_count} useful, "
             f"mean overall {report.judge_mean_overall:.2f}"
         )
+    print(root_cause_coverage(report).describe())
     for outcome in report.outcomes:
         mark = "PASS" if outcome.report.passed else "FAIL"
         judge_hint = ""

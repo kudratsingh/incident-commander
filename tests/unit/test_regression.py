@@ -407,6 +407,65 @@ class TestCoverageLossWithoutRedScenarios:
         result = compare(baseline, baseline)
         assert not result.gate_failed
 
+    def test_root_cause_joining_the_grader_does_not_gate_the_committed_baseline(
+        self,
+    ) -> None:
+        """WO-R3-191's gate question, asked against the real baseline.
+
+        The committed baseline was blessed before ``GradeDimension.ROOT_CAUSE``
+        existed, so every one of its rows carries five dimensions and every
+        fresh row now carries six. That is coverage GROWING, and the gate must
+        read it as such: ``dropped_dimensions`` is ``baseline - latest``, so a
+        new dimension is invisible to it, and ``vacated_assertions`` only walks
+        the intersection. No shipped scenario declares a ground truth, so every
+        new dimension is a vacuous pass and no roll-up moves either.
+
+        Asserted on the committed artifact rather than a synthetic pair
+        because the artifact is what ``make eval-reg`` actually gates against,
+        and its 41 rows are what a spurious "dropped dimension" would name.
+        """
+        baseline = regression._load_report(
+            Path(__file__).resolve().parents[2] / "evals" / "reports" / "baseline.json"
+        )
+        assert baseline.outcomes, "the committed baseline is empty"
+        assert not any(
+            dimension.dimension is GradeDimension.ROOT_CAUSE
+            for outcome in baseline.outcomes
+            for dimension in outcome.report.dimensions
+        ), "the baseline already carries ROOT_CAUSE — this test has served its purpose"
+
+        latest = baseline.model_copy(
+            update={
+                "outcomes": tuple(
+                    outcome.model_copy(
+                        update={
+                            "report": outcome.report.model_copy(
+                                update={
+                                    "dimensions": (
+                                        *outcome.report.dimensions,
+                                        DimensionResult(
+                                            dimension=GradeDimension.ROOT_CAUSE,
+                                            passed=True,
+                                            detail="no ground truth set",
+                                        ),
+                                    )
+                                }
+                            )
+                        }
+                    )
+                    for outcome in baseline.outcomes
+                )
+            }
+        )
+        result = compare(baseline, latest)
+        assert result.dropped_dimensions == (), (
+            "the gate read a NEW dimension as a dropped one; re-blessing the baseline "
+            "would hide real coverage loss behind that re-bless"
+        )
+        assert result.regressions == ()
+        assert result.vacated_assertions == ()
+        assert not result.gate_failed
+
 
 class TestVacuityClassifier:
     """``is_vacuous_detail`` reads the grader's own wording — pin both sides."""

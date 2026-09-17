@@ -43,6 +43,8 @@ class ProbeError:
 
 @dataclass(frozen=True)
 class ProbeResult:
+    """What one probing run checked, what it could not, and what it found."""
+
     drifts: tuple[Drift, ...]
     errors: tuple[ProbeError, ...]
     checked: int

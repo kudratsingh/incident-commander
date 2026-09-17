@@ -1132,6 +1132,7 @@ def _json_block(payload: object) -> str:
 
 
 def _table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
+    """A Markdown table, or a placeholder when there is nothing to show."""
     if not rows:
         return "_(none)_"
     out = ["| " + " | ".join(headers) + " |", "|" + "---|" * len(headers)]
@@ -1142,6 +1143,7 @@ def _table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
 
 
 def _findings_block(findings: Sequence[Finding]) -> str:
+    """The findings as a bullet list, or a line saying there were none."""
     if not findings:
         return "_No findings._"
     return "\n".join(f"- **{f.kind}** — {f.subject}\n  {f.detail}" for f in findings)
@@ -1192,6 +1194,7 @@ def render(
     reset_output: str,
     baseline: Sequence[BaselineLine],
 ) -> str:
+    """Assemble the whole dossier document from everything that was seeded, read and reset."""
     expectation = scenario.expectation
     out: list[str] = []
     add = out.append
@@ -1534,6 +1537,7 @@ def render(
 
 
 def _head() -> str:
+    """The commander's short git revision, or ``unknown`` if it cannot be read."""
     try:
         # Fixed argv, never a shell string: nothing here interpolates a
         # scenario name or any other caller-supplied text into a command.
@@ -1597,6 +1601,7 @@ def _select(only: Sequence[str], scenarios: Sequence[Scenario]) -> tuple[Scenari
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Seed one scenario's fault, read the world it made, reset it, and write the dossier."""
     parser = argparse.ArgumentParser(
         prog="python -m evals.dossier",
         description="Free, zero-LLM fault-world content review for one scenario.",

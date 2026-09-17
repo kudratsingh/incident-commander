@@ -80,6 +80,7 @@ class ComparisonResult:
 
     @property
     def gate_failed(self) -> bool:
+        """A regression or any coverage loss fails the gate."""
         return self.has_regressions or self.has_coverage_loss
 
 
@@ -147,6 +148,7 @@ def _load_report(path: Path) -> RunReport:
 
 
 def _print_comparison(result: ComparisonResult) -> None:
+    """Print the diff, section by section, or say nothing changed."""
     if result.regressions:
         print(f"REGRESSIONS ({len(result.regressions)}):")
         for name in result.regressions:
@@ -268,6 +270,7 @@ def _print_provenance(baseline: RunReport, latest: RunReport) -> None:
 
 
 def main() -> int:
+    """Resolve the newest report, refuse anything not comparable, diff it, and set the exit code."""
     if not _BASELINE.exists():
         print(f"baseline not found at {_BASELINE}", file=sys.stderr)
         return 2

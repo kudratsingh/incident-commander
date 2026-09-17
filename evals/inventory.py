@@ -67,6 +67,8 @@ class ClassifiedValue(TypedDict):
 
 
 class InventoryRow(TypedDict):
+    """One manifest row: a scenario's identity, its classification, and its grading claims."""
+
     name: str
     template_id: str
     seed: int
@@ -168,6 +170,7 @@ def render_inventory(rows: list[InventoryRow]) -> str:
 
 
 def main() -> None:
+    """Regenerate the committed manifest from the scenario corpus."""
     rows = generate_inventory()
     INVENTORY_PATH.write_text(render_inventory(rows), encoding="utf-8")
     print(f"Wrote {len(rows)} scenarios to {INVENTORY_PATH}")

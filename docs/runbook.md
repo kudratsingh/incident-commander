@@ -143,7 +143,7 @@ prefix of a longer name still selects itself alone — exact match wins — so
 `--smoke` and offline `make eval ONLY=` keep substring matching (`SMOKE_ONLY`
 is a documented substring override, and neither path spends or shares state).
 
-Trace files land in `evals/traces/*.jsonl`; the formatter turns them into readable stepwise trajectories in `evals/reports/human/*.txt`.
+Trace files land in `evals/traces/*.jsonl`; the formatter turns them into readable stepwise trajectories in `evals/reports/human/<scenario>/*.txt` — one folder per scenario, and one new file per run, not one per scenario per run (WO-R3-257). `evals/reports/README.md` maps the whole folder.
 
 **Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 41 (~34 live: 23 read-only, 11 remediation) is ~$1.70 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
 
@@ -253,7 +253,7 @@ harness artifacts — see [`docs/lessons/live-eval-sequence-2026-09.md`](lessons
    evidence claims — under the read-scoped smoke token, prints every output in
    full, lints what it read, then `make eval-reset PURGE_IDEMPOTENCY=1` and
    re-audits the baseline in step 4's table. Output goes to stdout and to
-   `evals/reports/dossiers/<scenario>.<stamp>.<invocation_id>.md`.
+   `evals/reports/dossiers/<scenario>/<scenario>.<stamp>.<invocation_id>.md`.
 
    **Then read it.** Every field, and of each fact ask: *does this support the
    behaviour the scenario expects, or contradict it?* Paste the dossier and
@@ -500,9 +500,9 @@ make eval-live ONLY=dlq_mixed_partial             && make eval-reset PURGE_IDEMP
 # lessons doc's third bucket, "shared mutable environment".
 ```
 
-Every `make eval-live` invocation writes JSONL traces to `evals/traces/` and renders per-scenario human reports to `evals/reports/human/*.txt` (via the `format_traces.py` step chained into the target).
+Every `make eval-live` invocation writes JSONL traces to `evals/traces/` and renders a human report to `evals/reports/human/<scenario>/*.txt` (via the `format_traces.py` step chained into the target). It renders **only** the invocation that just ran, plus any scenario whose newest attempt has no report yet; `make trace-report ARGS=--force` re-renders the whole corpus, which is a deliberate act because every render is permanent.
 
-A filtered run (`ONLY=...`) writes its own report file and **can no longer feed the gate or the baseline**: the report self-describes via `only_patterns` (ADR 0013), `make eval-reg` exits 2 when the newest report is a filtered one, and `make eval-reg ONLY=x` / `make baseline ONLY=x` refuse at Makefile parse time before anything runs (A-03 — `study/runs.jsonl` records a full-suite report lost to a later filtered run). That specific loss is now impossible: reports are versioned (`evals/reports/report.<stamp>.<invocation_id>.json`) and never overwritten, so the earlier full-suite report is still on disk. The gate resolves the **newest** one via `evals/artifacts.py` and prints which file it graded; the archive under `evals/runs/<invocation_id>/` remains the durable per-run record.
+A filtered run (`ONLY=...`) writes its own report file and **can no longer feed the gate or the baseline**: the report self-describes via `only_patterns` (ADR 0013), `make eval-reg` exits 2 when the newest report is a filtered one, and `make eval-reg ONLY=x` / `make baseline ONLY=x` refuse at Makefile parse time before anything runs (A-03 — `study/runs.jsonl` records a full-suite report lost to a later filtered run). That specific loss is now impossible: reports are versioned (`evals/reports/runs/<YYYY-MM>/report.<stamp>.<invocation_id>.json`) and never overwritten, so the earlier full-suite report is still on disk. The gate resolves the **newest** one via `evals/artifacts.py` and prints which file it graded; the archive under `evals/runs/<invocation_id>/` remains the durable per-run record.
 
 `make eval-reset` shells into the platform app via `docker compose -f $PLATFORM_COMPOSE exec $PLATFORM_SERVICE`. `PLATFORM_COMPOSE` defaults to `demo/compose.yml` — **this repo's own demo stack**, the one `make demo` brings up — and `PLATFORM_SERVICE` defaults to the `api` container in it (both demo services share one database, and `api` is the REST app that owns seeding). Point them at a sibling `incident-platform` checkout only if that is genuinely the stack under test, either per-invocation or once in `.env` (the Makefile `-include .env`s it, so a non-default layout is a one-time setup rather than a flag you have to remember on every call). On success — and only on success, since make abandons a recipe at the first failing line — the recipe's last line also clears the chaos teardown latch (`--clear-chaos-block`, ADR 0037; see "Teardown failed" under the exit codes below), so a blocked stack is unblocked by the command that actually put it back.
 

@@ -47,6 +47,32 @@ TRAIL_HEADING: Final = "Investigation trail:"
 NO_TRAIL_LINE: Final = "No probes were run before escalation."
 
 
+def trail_of(evidence: Sequence[EvidenceEntry]) -> tuple[ProbeSummary, ...]:
+    """The probes out of a run's evidence ledger, for any reader of the trail.
+
+    The projection half of what ``render_trail`` renders, extracted by WP-6.1
+    because the ``candidate_selector`` is a third reader of the same evidence
+    and the packet's rule is that a new reader gets the rule through the same
+    code, not a copy of it (INC-002). ``render_briefing`` below builds its
+    trail from this, so the briefing writer, the briefing judge and the
+    selector are shown one projection of one ledger.
+
+    Bookkeeping markers are underscore-prefixed by convention and no registry
+    tool name is, so the filter is structural: a new evidence writer cannot
+    drift out of a hand-maintained exclusion list. ``evals/graders/deterministic.py``
+    filters the same way.
+    """
+    return tuple(
+        ProbeSummary(
+            tool=entry.tool_name,
+            summary=entry.result_summary,
+            arguments=dict(entry.arguments),
+        )
+        for entry in evidence
+        if not entry.tool_name.startswith("_")
+    )
+
+
 def render_trail(trail: Sequence[ProbeSummary]) -> list[str]:
     """The investigation-trail block, as both LLM readers are shown it.
 
@@ -126,25 +152,13 @@ def render_briefing(run_state: RunState) -> EscalationBriefing:
         alert_summary=_render_alert_summary(run_state),
         escalation_reason=_escalation_reason(terminal_marker),
         attempted_action=_attempted_action(terminal_marker),
-        investigation_trail=tuple(
-            ProbeSummary(
-                tool=entry.tool_name,
-                summary=entry.result_summary,
-                arguments=dict(entry.arguments),
-            )
-            # Bookkeeping markers are underscore-prefixed by convention; no
-            # registry tool name is. Filtering structurally (the grader does
-            # the same, evals/graders/deterministic.py) means a new evidence
-            # writer cannot drift out of a hand-maintained exclusion list.
-            #
-            # The filter is right about the trail and used to be wrong about
-            # the *reason*: the escalation marker is the only carrier of why
-            # the agent gave up, so filtering it here deleted that line from
-            # the handoff entirely. It is read back out above into its own
-            # field instead of being smuggled into the trail as a fake probe.
-            for entry in run_state.evidence
-            if not entry.tool_name.startswith("_")
-        ),
+        # ``trail_of`` holds the filter, shared with every other reader of this
+        # ledger. The filter is right about the trail and used to be wrong
+        # about the *reason*: the escalation marker is the only carrier of why
+        # the agent gave up, so filtering it here deleted that line from the
+        # handoff entirely. It is read back out above into its own field
+        # instead of being smuggled into the trail as a fake probe.
+        investigation_trail=trail_of(run_state.evidence),
         findings="",
         recommendation="",
         budget_used={

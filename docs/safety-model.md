@@ -257,6 +257,50 @@ its first check having done nothing, which looks exactly like the policy working
 dimensions have always been `ge=1`; `BUDGET_MAX_USD` accepted `0` until WO-R2-87 and is now `> 0`
 (fractions such as `0.50` remain valid — the refusal is of zero, not of small).
 
+### A strategy may be funded differently, and two dimensions never are
+
+The ceilings above are what the *control group* runs on. An inference strategy that samples eight
+candidates per planner step spends roughly eight times the tokens and eight times the dollars on the
+same incident, and metered against those ceilings it would not produce a cost/quality data point —
+it would exhaust a budget mid-investigation and escalate, and the report would read that as the
+strategy failing rather than as the budget declining to fund it.
+
+So the strategy `INFERENCE_STRATEGY` selects declares what it may spend, as a ratio of the ceilings
+above:
+
+| Knob | Default | Scales |
+|---|---|---|
+| `TOKEN_BUDGET_MULTIPLIER` | 1 | `BUDGET_MAX_TOKENS`, floored to whole tokens |
+| `USD_BUDGET_MULTIPLIER` | 1 | `BUDGET_MAX_USD`, in `Decimal` throughout |
+| `MAX_ITERATIONS_OVERRIDE` | unset | the investigation loop's 5-iteration cap |
+
+A ratio rather than an absolute, because the absolute numbers differ per invocation: the paid
+protocol's budgets live in the operator's `.env`, not in this repo, and a multiplier means the same
+thing under either set.
+
+The multipliers are applied **once**, where `agent/factory.py::start_run` seeds the ledger. A second
+site that scaled a budget would fail no behavioural test — both would look correct — and every cost
+number in every report would quietly mean two different things, so `tests/unit/test_budgets.py`
+reads the source and refuses one.
+
+Two dimensions are never multiplied. **Tool calls** are what the strategies compete on: probing the
+world is the behaviour under study, and funding one strategy's extra probes would measure its budget
+instead. That same number is also the scenario's grading cap ([ADR 0019](ADR/0019-scenario-cap-is-the-runtime-ceiling.md)),
+so scaling it would move the bar every scenario is graded against. **Wall seconds** have no
+multiplier at all — a strategy that needs longer gets it from `BUDGET_MAX_SECONDS`, for the whole
+invocation and in plain sight.
+
+The zero rule above extends to the multipliers, because a multiplier is a new way to reach zero:
+directly, or by rounding (0.001 of a 100-token budget is no tokens). Either is refused at `Settings`
+construction, naming the dimension and the two variables that produced it — `start_run` has ignored
+a `max_tool_calls` of `0` for exactly this reason since ADR 0019, and tokens and dollars had no such
+guard.
+
+**BUDGET is reported beside correctness, never folded into it.** A run that is correct and over the
+*baseline* budget is a point on the cost/quality frontier, not a failure: the BUDGET dimension grades
+the tool-call cap, which no multiplier touches, and the run's four meters — seeded ceilings and
+amounts used — travel in its provenance record, per scenario.
+
 ### Billed work is charged on every path, not just the happy one
 
 ADR 0015's rule is one-directional — the meter may over-report, never under-report — and the four token counters on a response cannot honor it alone, because they describe the one attempt that came back. Four paths used to bill the platform and charge the run nothing:

@@ -150,6 +150,51 @@ class Settings(BaseSettings):
     # and the strategy every later one is measured against.
     inference_strategy: StrategyName = StrategyName.BASELINE
 
+    # --- The selected strategy's budget policy (plan 02 § 8, WP-2.4) -------
+    # A strategy that samples eight candidates per planner step spends roughly
+    # eight times the tokens and eight times the dollars of the control group
+    # on the same incident. Metered against the fleet ceilings it would not
+    # produce a cost/quality data point — it would run out of budget mid-
+    # investigation and escalate, and the report would read that as the
+    # STRATEGY failing rather than as the budget refusing to fund it.
+    #
+    # So a strategy declares what it is allowed to spend, relative to the
+    # budget the control group ran on, and the declaration is applied exactly
+    # once: where ``agent/factory.py::start_run`` seeds the ledger. These are
+    # the knobs for the strategy ``INFERENCE_STRATEGY`` selects — one strategy
+    # runs per invocation, so one block of knobs describes it.
+    #
+    # Three things these deliberately do NOT scale:
+    #
+    # * **Tool calls.** Probing the world is the thing the strategies compete
+    #   on (02 § 8). A strategy given more probes would be measured on its
+    #   budget rather than on its reasoning, and the same number is the
+    #   scenario's grading cap (ADR 0019), so scaling it would move the bar
+    #   every scenario in the suite is graded against.
+    # * **Wall seconds.** No wall multiplier is declared. A strategy that
+    #   needs longer gets it by raising BUDGET_MAX_SECONDS for the whole
+    #   invocation — a visible operator act, recorded in the run's provenance
+    #   like any other budget.
+    # * **The control group.** Both default to 1, so ``baseline`` seeds the
+    #   ledger this repo already seeded, field for field
+    #   (``tests/unit/test_budgets.py::TestBaselineIsBitForBitUnchanged``).
+    #
+    # Relative to the budgets THIS PROCESS is configured with, which are not
+    # the paid protocol's (1.00 USD / 25 calls / 200000 tokens / 600 s): those
+    # live only in the operator's un-committed ``.env`` (divergence D7). A
+    # multiplier is a ratio for exactly that reason — it means the same thing
+    # whichever ceilings the invocation was handed.
+    token_budget_multiplier: Decimal = Field(default=Decimal("1"), ge=Decimal("0"))
+    usd_budget_multiplier: Decimal = Field(default=Decimal("1"), ge=Decimal("0"))
+    # How many investigation-loop iterations the strategy may take, overriding
+    # ``agent/investigation.py``'s default of 5. Unset means the default, which
+    # is what ``baseline`` runs on.
+    #
+    # ``ge=1`` for the reason the multipliers are bounded away from zero below:
+    # a loop allowed no iterations returns without ranking a hypothesis, and
+    # the run escalates having investigated nothing.
+    max_iterations_override: int | None = Field(default=None, ge=1)
+
     # Required with no default (pinned separately for eval stability, per
     # CLAUDE.md). min_length guards direct construction — Settings(
     # judge_model="") — which env_ignore_empty cannot reach; an empty judge
@@ -329,6 +374,27 @@ class Settings(BaseSettings):
             return ceiling
         return min(self.agent_max_concurrent_runs, ceiling)
 
+    @property
+    def seeded_max_tokens(self) -> int:
+        """The token ceiling one run is seeded with, multiplier applied.
+
+        Floored to whole tokens: no fraction of one can be spent, so none is
+        granted. Flooring rather than rounding also keeps the refusal below
+        honest — rounding up would hide a multiplier that produces a budget of
+        nothing behind a budget of one.
+        """
+        return int(Decimal(self.budget_max_tokens) * self.token_budget_multiplier)
+
+    @property
+    def seeded_max_usd(self) -> Decimal:
+        """The dollar ceiling one run is seeded with, multiplier applied.
+
+        Decimal throughout, never a float intermediate: ADR 0015 keeps binary
+        rounding noise out of the cost the briefing renders, and a ceiling
+        computed in float would put it back at the seed.
+        """
+        return self.budget_max_usd * self.usd_budget_multiplier
+
     def require_chaos_token(self) -> str:
         """The evaluator's ``chaos:invoke`` token, or refuse in one line.
 
@@ -448,6 +514,55 @@ class Settings(BaseSettings):
                 f"{self.db_ingest_reserved_connections} reserved, {_CONNECTIONS_PER_RUN} "
                 "connections per run). Raise DB_POOL_SIZE/DB_MAX_OVERFLOW to lift the "
                 "ceiling, or lower the bound."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _multipliers_seed_a_budget_that_can_be_spent(self) -> Settings:
+        """Refuse a strategy multiplier that seeds a budget of nothing.
+
+        ``agent/factory.py::start_run`` already ignores a ``max_tool_calls``
+        of 0, and its docstring says why: ``BudgetLedger.is_exhausted`` is
+        ``used >= max``, so a zero ledger is **born exhausted**. The run
+        escalates on its first budget check, before TRIAGE has classified the
+        alert, having done none of the work it exists to do — and the outcome
+        is indistinguishable from a ceiling working exactly as designed.
+
+        The tokens and dollars dimensions have no such guard, and a multiplier
+        is a new way to reach zero on both: directly (a multiplier of 0) or by
+        rounding (0.001 of a 100-token budget is no tokens). Refused here
+        rather than clamped, and refused at construction rather than at the
+        seed, on the same reasoning as ``_configured_models_are_priced``:
+        nothing is in flight yet, so the honest answer to "what budget am I
+        about to run under?" is to demand a usable one rather than to invent
+        one the operator did not ask for.
+
+        Wall seconds are absent because nothing scales them — see the
+        multiplier block above.
+        """
+        degenerate: list[str] = []
+        if self.seeded_max_tokens < 1:
+            degenerate.append(
+                f"TOKEN_BUDGET_MULTIPLIER={self.token_budget_multiplier} applied to "
+                f"BUDGET_MAX_TOKENS={self.budget_max_tokens} seeds a token budget of "
+                f"{self.seeded_max_tokens}"
+            )
+        if self.seeded_max_usd <= 0:
+            degenerate.append(
+                f"USD_BUDGET_MULTIPLIER={self.usd_budget_multiplier} applied to "
+                f"BUDGET_MAX_USD={self.budget_max_usd} seeds a dollar budget of "
+                f"{self.seeded_max_usd}"
+            )
+        if degenerate:
+            # Both in one message, like the unpriced-model refusal: fixing
+            # them one restart at a time is the shape that wastes an
+            # afternoon.
+            raise ValueError(
+                f"{'; '.join(degenerate)}. A ledger seeded at zero is born exhausted "
+                "(BudgetLedger.is_exhausted compares used >= max), so the run would "
+                "escalate before TRIAGE having investigated nothing — which reads in "
+                "the report exactly like a budget ceiling working as intended. Raise "
+                "the multiplier, or raise the budget it multiplies."
             )
         return self
 

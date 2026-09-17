@@ -99,6 +99,23 @@ def start_run(
     makes no tool call", which is a claim about the outcome and is graded
     post-hoc by the BUDGET dimension; it is not a runtime ceiling that this
     ledger can express.
+
+    This is also the one place a strategy's budget multipliers are applied
+    (plan 02 § 8, WP-2.4). ``settings.seeded_max_tokens`` and
+    ``settings.seeded_max_usd`` are the configured ceilings already scaled by
+    ``TOKEN_BUDGET_MULTIPLIER`` / ``USD_BUDGET_MULTIPLIER``; both are 1 for
+    ``baseline``, so the control group's ledger is unchanged. A second site
+    that scaled a budget would fail no behavioural test — both would look
+    right — and every cost number in every report would quietly mean two
+    different things, so ``tests/unit/test_budgets.py`` reads the source and
+    refuses one.
+
+    Two dimensions are pointedly seeded raw. The tool-call ceiling is what
+    the strategies compete on and is also the scenario's grading cap (ADR
+    0019), so multiplying it would both fund one strategy's extra probing and
+    move the bar it is graded against. Wall seconds have no multiplier at
+    all: a strategy that needs longer gets it from ``BUDGET_MAX_SECONDS``,
+    for the whole invocation and in plain sight.
     """
     return RunState(
         incident_id=incident_id or uuid4(),
@@ -106,9 +123,9 @@ def start_run(
         alert=dict(alert),
         budget=BudgetLedger(
             max_tool_calls=max_tool_calls or settings.budget_max_tool_calls,
-            max_tokens=settings.budget_max_tokens,
+            max_tokens=settings.seeded_max_tokens,
             max_wall_seconds=settings.budget_max_seconds,
-            max_usd=settings.budget_max_usd,
+            max_usd=settings.seeded_max_usd,
         ),
         created_at=at,
         updated_at=at,

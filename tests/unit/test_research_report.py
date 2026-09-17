@@ -491,6 +491,8 @@ def test_scenario_level_regressions_exclude_the_filtered_runs() -> None:
         "759e198cdd27",
         "648a32f2339d",
         "fc896b25a09c",
+        "d16aa18dce08",
+        "42c675d9c145",
     }
     assert [(c["baseline_side"], c["latest_side"]) for c in section["comparisons"]] == [
         ("2408b07ef532", "32ae38f6b38b"),

@@ -16,15 +16,18 @@ Produced here, consumed by WP-2.1. Three properties are load-bearing:
   the schema already asks for, and the short ``reasoning`` field on each
   hypothesis, only.
 
-One field the plan's schema names is still ``None`` here: ``elapsed_ms``, the
-wall time of a call, because nothing in ``llm/client.py`` times one and a
-fabricated duration is worse than an absent one. ``None`` says "not measured"
-where a zero would read as a measurement.
-
-WP-2.1 filled the rest. ``_plan_next_step`` now returns a ``PlannerCall``
+WP-2.1 filled the plan's schema. ``_plan_next_step`` returns a ``PlannerCall``
 beside the state and the step, so the four token counters, the call's own
 trace-record id and the size of the context the planner was handed are
 measured where they are visible instead of left at zero.
+
+``elapsed_ms`` was the last field still ``None``, because nothing in
+``llm/client.py`` timed a call and a fabricated duration is worse than an
+absent one. WO-R3-260 made the client time its own logical calls, so the
+number is now carried out on ``PlannerCall`` like the rest. ``None`` still
+means "not measured" and is still reachable: a fake client that does not time
+itself says so rather than reporting a zero a reader would take for a
+sub-millisecond call.
 """
 
 from __future__ import annotations
@@ -74,6 +77,12 @@ class PlannerCall:
     #: is a real number on a canned run, where the fake client bills nothing
     #: and every provider-reported counter above is honestly zero.
     context_chars: int = 0
+    #: Wall time of the call that PARSED, as the client measured it — the same
+    #: bucket as the four counters above, and for the same reason: a repair's
+    #: first, billed-and-rejected leg is a separate logical call with its own
+    #: duration, and adding the two would report one latency for two calls.
+    #: ``None`` when the client does not time itself.
+    elapsed_ms: int | None = None
 
     @property
     def context_tokens(self) -> int:
@@ -171,8 +180,13 @@ class LLMCallRecord:
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
     call_id: str = ""
-    #: Wall time of the call. ``None`` here: nothing in ``llm/client.py`` times
-    #: a call today, and a fabricated duration is worse than an absent one.
+    #: Wall time of the call that parsed, measured by the client across its
+    #: whole retry loop (``LLMResult.elapsed_ms``). It belongs with the four
+    #: counters above, not with the ledger delta: both describe the accepted
+    #: call, and neither can see a billed re-ask before it.
+    #:
+    #: ``None`` means not measured — a client that does not time itself, which
+    #: is every canned run. A zero would read as a sub-millisecond call.
     elapsed_ms: int | None = None
 
     def as_record(self) -> dict[str, Any]:

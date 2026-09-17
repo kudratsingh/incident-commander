@@ -1,15 +1,19 @@
 from datetime import datetime
+from decimal import Decimal
+from typing import cast
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
+from incident_commander.agent.accounting import RunAccounting
 from incident_commander.agent.briefing import EscalationBriefing, render_briefing
 from incident_commander.agent.briefing_enrichment import (
     BriefingContent,
     enrich_briefing,
 )
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
-from incident_commander.llm.fakes import CannedLLMClient
+from incident_commander.llm.client import LLMOutputError, LLMResult, LLMUsage
+from incident_commander.llm.fakes import CannedLLMClient, CannedUsage
 from incident_commander.llm.repair import OutputRepairExhausted
 
 
@@ -39,7 +43,9 @@ class TestEnrichBriefing:
             ]
         )
         briefing = _briefing_with_probe(run_state, now)
-        enriched = enrich_briefing(briefing, client, model="claude-sonnet-4-6")
+        enriched, _ = enrich_briefing(
+            briefing, client, model="claude-sonnet-4-6", budget=run_state.budget
+        )
         assert "billing" in enriched.findings
         assert "consumer" in enriched.recommendation
 
@@ -48,7 +54,7 @@ class TestEnrichBriefing:
     ) -> None:
         client = CannedLLMClient([{"findings": "a finding", "recommendation": "a rec"}])
         briefing = _briefing_with_probe(run_state, now)
-        enriched = enrich_briefing(briefing, client, model="m")
+        enriched, _ = enrich_briefing(briefing, client, model="m", budget=run_state.budget)
         assert enriched.incident_id == briefing.incident_id
         assert enriched.alert_summary == briefing.alert_summary
         assert enriched.investigation_trail == briefing.investigation_trail
@@ -59,7 +65,7 @@ class TestEnrichBriefing:
     ) -> None:
         client = CannedLLMClient([{"findings": "f", "recommendation": "r"}])
         briefing = _briefing_with_probe(run_state, now)
-        enrich_briefing(briefing, client, model="m")
+        enrich_briefing(briefing, client, model="m", budget=run_state.budget)
         assert len(client.calls) == 1
         _, user_message = client.calls[0]
         assert "get_consumer_lag" in user_message
@@ -70,7 +76,7 @@ class TestEnrichBriefing:
             [{"findings": "no probes ran", "recommendation": "check the raw alert"}]
         )
         briefing = render_briefing(run_state.model_copy(update={"state": IncidentState.ESCALATED}))
-        enrich_briefing(briefing, client, model="m")
+        enrich_briefing(briefing, client, model="m", budget=run_state.budget)
         _, user_message = client.calls[0]
         assert "No probes were run" in user_message
 
@@ -95,7 +101,7 @@ class TestEnrichBriefing:
                 ),
             }
         )
-        enrich_briefing(render_briefing(run), client, model="m")
+        enrich_briefing(render_briefing(run), client, model="m", budget=run_state.budget)
         _, user_message = client.calls[0]
         assert "lag unchanged after restart" in user_message
         # Safety: the writer must not recommend re-firing an action that
@@ -119,7 +125,7 @@ class TestEnrichBriefing:
         )
         briefing = _briefing_with_probe(run_state, now)
         with pytest.raises(OutputRepairExhausted):
-            enrich_briefing(briefing, client, model="m")
+            enrich_briefing(briefing, client, model="m", budget=run_state.budget)
         assert len(client.calls) == 2
         assert not client.has_remaining
 
@@ -133,7 +139,7 @@ class TestEnrichBriefing:
             ]
         )
         briefing = _briefing_with_probe(run_state, now)
-        enriched = enrich_briefing(briefing, client, model="m")
+        enriched, _ = enrich_briefing(briefing, client, model="m", budget=run_state.budget)
         assert enriched.findings == "one replay_safe row left"
         assert len(client.calls) == 2
 
@@ -166,7 +172,7 @@ class TestServiceAndEvalPathParity:
     ) -> None:
         client = CannedLLMClient([{"findings": "a finding", "recommendation": "a rec"}])
         service_path = _briefing_with_probe(run_state, now)
-        eval_path = enrich_briefing(service_path, client, model="m")
+        eval_path, _ = enrich_briefing(service_path, client, model="m", budget=run_state.budget)
 
         assert set(service_path.model_dump()) == set(eval_path.model_dump())
         differing = {
@@ -205,3 +211,147 @@ class TestServiceAndEvalPathParity:
         assert briefing.attempted_action.tool == "restart_consumer_group"
         assert briefing.findings == ""
         assert briefing.recommendation == ""
+
+
+class _BillsThenSucceeds:
+    """Fails validation once, billing for it, then answers.
+
+    ``CannedLLMClient`` raises its ``ValidationError`` before it builds an
+    ``LLMResult``, so a canned repair costs nothing and cannot show whether
+    both legs are charged. A real rejected reply was generated and billed
+    (``LLMOutputError`` carries its usage), which is the case ADR 0035 says
+    must not look cheap.
+    """
+
+    def __init__(self, usage: LLMUsage, output: BriefingContent) -> None:
+        self._usage = usage
+        self._output = output
+        self.calls = 0
+
+    def call[T: BaseModel](
+        self,
+        system_prompt: str,
+        user_message: str,
+        output_model: type[T],
+        model: str,
+        max_tokens: int = 4096,
+        *,
+        repair_of: str | None = None,
+    ) -> LLMResult[T]:
+        self.calls += 1
+        if self.calls == 1:
+            raise LLMOutputError("findings was empty", usage=self._usage, record_id="rec-1")
+        return self._usage.with_output(
+            cast(T, self._output), stop_reason="tool_use", record_id="rec-2"
+        )
+
+
+class TestTheBriefingWriterIsChargedToTheRunLedger:
+    """WO-R3-260, amending ADR 0015 § 4.
+
+    The briefing writer buys prose the AGENT hands a human, on the agent's own
+    model. ADR 0015 left it out of ``BudgetLedger`` because a ceiling cannot
+    gate a call that happens after the last budget check — true, and it
+    answered the wrong question. The ledger is the run's meter as well as its
+    ceiling, and leaving one call out made every cost-per-run number undercount
+    the agent by exactly one call, on every run, in the same direction.
+
+    So: metered, never gating. The evaluator's briefing judge stays out, and
+    that line is about whose money a call is, not when it happened.
+    """
+
+    def _billing_client(self, **usage: int) -> CannedLLMClient:
+        return CannedLLMClient(
+            [{"findings": "lag stayed high", "recommendation": "page the owner"}],
+            usage=CannedUsage(**usage),
+        )
+
+    def test_the_call_moves_the_ledger(self, run_state: RunState, now: datetime) -> None:
+        client = self._billing_client(input_tokens=900, output_tokens=120, cache_read_tokens=80)
+        _briefing, ledger = enrich_briefing(
+            _briefing_with_probe(run_state, now),
+            client,
+            model="claude-sonnet-4-6",
+            budget=run_state.budget,
+        )
+        # ADR 0015's token VOLUME: every class, cache included.
+        assert ledger.tokens_used == run_state.budget.tokens_used + 1_100
+        assert ledger.usd_used > run_state.budget.usd_used
+
+    def test_the_ledger_it_was_given_is_not_mutated(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # The caller holds the graded run's ledger. Enrichment returning a new
+        # one is what lets the runner keep the graded number and the metered
+        # number apart without copying anything by hand.
+        before = run_state.budget
+        _briefing, ledger = enrich_briefing(
+            _briefing_with_probe(run_state, now),
+            self._billing_client(input_tokens=500),
+            model="claude-sonnet-4-6",
+            budget=before,
+        )
+        assert before.tokens_used == 0
+        assert ledger is not before
+
+    def test_a_repair_charges_both_legs(self, run_state: RunState, now: datetime) -> None:
+        """ADR 0035's rule, applied here too: a re-ask that only charged the
+        run when it worked would make the failure look free."""
+        usage = LLMUsage(input_tokens=400, output_tokens=50)
+        client = _BillsThenSucceeds(
+            usage, BriefingContent(findings="lag stayed high", recommendation="page the owner")
+        )
+        _briefing, ledger = enrich_briefing(
+            _briefing_with_probe(run_state, now),
+            client,
+            model="claude-sonnet-4-6",
+            budget=run_state.budget,
+        )
+        assert client.calls == 2
+        assert ledger.tokens_used == 900
+
+    def test_it_is_metered_but_never_gating(self, run_state: RunState, now: datetime) -> None:
+        """The whole of "post-terminal cost does not gate", as a test.
+
+        The ledger handed in is already exhausted — a run that spent its last
+        token reaching a terminal state. Enrichment still runs, still returns
+        the enriched briefing, and still charges. Nothing here consults
+        ``is_exhausted``, and that is the point: the gate lives in the loop,
+        which has already stopped.
+        """
+        spent = run_state.budget.model_copy(
+            update={"tokens_used": run_state.budget.max_tokens, "usd_used": Decimal("5.00")}
+        )
+        assert spent.is_exhausted
+        briefing, ledger = enrich_briefing(
+            _briefing_with_probe(run_state, now),
+            self._billing_client(input_tokens=1_000),
+            model="claude-sonnet-4-6",
+            budget=spent,
+        )
+        assert briefing.findings == "lag stayed high"
+        assert ledger.tokens_used == spent.tokens_used + 1_000
+
+    def test_the_charged_split_reconciles_with_what_it_charged(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The property the report's ``reconciled`` column states.
+
+        Ledger total == accounting total, with the briefing call inside BOTH.
+        Built from the same ``LLMUsage`` object by the same two functions, so
+        it is an equality rather than a tolerance — and if the runner ever
+        meters this role as the evaluator's spend again, this is where it
+        fails rather than in a live report nobody re-reads.
+        """
+        accounting = RunAccounting()
+        metered = accounting.meter(
+            self._billing_client(input_tokens=900, output_tokens=120), "briefing_writer"
+        )
+        _briefing, ledger = enrich_briefing(
+            _briefing_with_probe(run_state, now),
+            metered,
+            model="claude-sonnet-4-6",
+            budget=run_state.budget,
+        )
+        assert accounting.charged_tokens_used == 1_020
+        assert accounting.reconciles_with(ledger)

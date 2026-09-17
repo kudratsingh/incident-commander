@@ -56,7 +56,7 @@ from evals.preconditions import unmet
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import ChaosHook, ChaosPlan, Scenario
 from evals.tracing import JsonlTracer, TraceKind, tracer_for
-from incident_commander.agent.accounting import RunAccounting
+from incident_commander.agent.accounting import RunAccounting, accrue_llm_error
 from incident_commander.agent.briefing import EscalationBriefing, render_briefing
 from incident_commander.agent.briefing_enrichment import enrich_briefing
 from incident_commander.agent.factory import start_run
@@ -345,10 +345,12 @@ class RoleAccounting(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     role: str
-    # Whether this role's calls reached the run's own BudgetLedger. The
-    # briefing judge and the briefing writer are billed AFTER the run reaches
-    # a terminal state and are not metered by it, so a reconciliation that
-    # folded them in would fail on every run — see RunAccountingRecord below.
+    # Whether this role's calls reached the run's own BudgetLedger. False for
+    # the EVALUATOR's roles only: the briefing judge grades the run and is not
+    # part of it, so folding it in would fail the reconciliation on every run.
+    # The briefing writer is also billed after the terminal state and IS
+    # charged (WO-R3-260) — it is the agent's own prose, and whose money a
+    # call is decides this flag, not when the call happened.
     charged_to_ledger: bool
     calls: int
     input_tokens: int
@@ -773,6 +775,13 @@ class ScenarioCrash(Exception):
         # and a crash row that cannot name it leaves the cost columns a lower
         # bound that reads like a measurement.
         self.accounting: RunAccounting | None = None
+        # The ledger that spend was charged to, when the run reached a
+        # terminal state before dying. It is NOT ``final.budget``: the
+        # briefing writer's post-terminal call is charged after the last
+        # checkpoint is written (WO-R3-260), so reconciling against the
+        # checkpoint would report a disagreement that is an artefact of
+        # which object was read, not of anything the run got wrong.
+        self.ledger: BudgetLedger | None = None
 
     @property
     def final(self) -> RunState | None:
@@ -1389,18 +1398,28 @@ def run_scenario(
     # derive a split from (divergence D1).
     #
     # ``charged_to_ledger`` is declared HERE because this is the only place
-    # that knows it. Both post-run roles are billed and neither reaches
-    # ``BudgetLedger``: ``enrich_briefing`` runs after the state machine has
-    # reached a terminal state, and the briefing judge is the evaluator's own
-    # spend, not the agent's. They are recorded either way — a billed call
-    # missing from the record is the under-report ADR 0015 exists to prevent
-    # — and kept out of the reconciliation, which is a statement about the
-    # ledger.
+    # that knows it, and the line it draws is WHOSE money a call is — not when
+    # the call happened. Both post-run roles are billed after the state machine
+    # has reached a terminal state, and they part company there:
+    #
+    # * ``briefing_writer`` is the AGENT's own cost. It writes the handoff the
+    #   agent hands a human, on the agent's model, and until WO-R3-260 it
+    #   reached no ledger at all — so every cost-per-run number undercounted
+    #   the agent by exactly one call per run. It is charged (ADR 0015 § 4 as
+    #   amended): metered because it is the agent's spend, and never a gate
+    #   because there is no budget check left after a terminal state.
+    # * ``briefing_judge`` is the EVALUATOR's own cost. It grades the run and
+    #   is not part of it, so it stays out of the ledger and out of the
+    #   reconciliation.
+    #
+    # Both are recorded either way — a billed call missing from the record is
+    # the under-report ADR 0015 exists to prevent — and the report carries the
+    # charged subset and the total side by side.
     accounting = RunAccounting()
     investigation_llm = accounting.meter(investigation_llm, "investigation_planner")
     remediation_planner_llm = accounting.meter(remediation_planner_llm, "remediation_planner")
     verification_judge_llm = accounting.meter(verification_judge_llm, "verification_judge")
-    briefing_llm = accounting.meter(briefing_llm, "briefing_writer", charged_to_ledger=False)
+    briefing_llm = accounting.meter(briefing_llm, "briefing_writer")
     judge_llm = accounting.meter(judge_llm, "briefing_judge", charged_to_ledger=False)
 
     # The inference strategy for this run (WP-0.2). Resolved here — the edge
@@ -1481,6 +1500,11 @@ def run_scenario(
     # it died — see ScenarioCrash.
     checkpointer = InMemoryCheckpointer()
     run: RunState | None = None
+    # Same reason, one field further: the post-terminal briefing charge is not
+    # in any checkpoint, so a crash AFTER enrichment (a grader raising, say)
+    # would otherwise reconcile a split containing the briefing call against a
+    # ledger that predates it, and report a false ``COST UNRECONCILED``.
+    run_ledger: BudgetLedger | None = None
     try:
         # The scenario's declared cap IS the run's tool-call ceiling (ADR
         # 0019), not just the number it is graded against afterwards. Before
@@ -1512,10 +1536,28 @@ def run_scenario(
         # still makes no LLM call of its own; it reads a finished object.
         briefing = render_briefing(final)
         briefing_error: str | None = None
+        # The run's ledger AFTER the post-terminal briefing call is charged to
+        # it (WO-R3-260). It is kept beside ``final`` and never put back on it:
+        # ``grade`` below reads ``final`` and the BUDGET dimension is graded
+        # from it, so a post-terminal charge that reached the graded state
+        # would be a ceiling deciding an outcome the agent had already
+        # finished. Metered, never gating — ADR 0015 § 4 as amended, made true
+        # by which object holds the number rather than by everyone remembering
+        # not to check it.
+        run_ledger = final.budget
         if scenario.use_live_llm or (briefing_canned is not None and briefing_canned.has_remaining):
             try:
-                briefing = enrich_briefing(briefing, briefing_llm, model=settings.agent_model)
+                briefing, run_ledger = enrich_briefing(
+                    briefing, briefing_llm, model=settings.agent_model, budget=run_ledger
+                )
             except (LLMError, ValidationError) as err:
+                # Charge what the failed call already billed, exactly as the
+                # investigation loop does with the same helper. A briefing
+                # writer that raised after generating is billed work, and the
+                # metering wrapper above has already recorded it — leaving the
+                # ledger alone here would break the reconciliation on precisely
+                # the run that cost money for nothing.
+                run_ledger = accrue_llm_error(run_ledger, err, settings.agent_model)
                 # Enrichment is a decoration on the run, same as the judge
                 # below. Losing the briefing writer must not void it (ADR
                 # 0007: a crashed scenario is an eval-infrastructure bug by
@@ -1581,6 +1623,10 @@ def run_scenario(
         # only place this can reach a report, and a crashed run's spend
         # is spend (invariant 9 one layer down).
         crash.accounting = accounting
+        # And the ledger that spend was charged to, when the run got far
+        # enough to have one. ``None`` falls back to the last checkpoint,
+        # which is the right answer for a crash before the terminal state.
+        crash.ledger = run_ledger
         # Re-raise carrying the run's own history, so the crash row reports
         # what the scenario actually spent instead of a hardcoded zero.
         raise crash from exc
@@ -1592,6 +1638,10 @@ def run_scenario(
     # After the run, before the row that reports it: the outcome carries
     # ``teardown_error``, so the teardown has to have happened by now.
     teardown_error = _tear_down()
+    # ``run_ledger`` is bound the moment the loop returns, and this path is
+    # only reached when it did. The fallback makes that a fact the type
+    # checker can see rather than one a reader has to trace.
+    reported_ledger = final.budget if run_ledger is None else run_ledger
     failure_class, failure_class_detail = _classify_failure(report, final)
     outcome = ScenarioOutcome(
         scenario=scenario.name,
@@ -1624,15 +1674,23 @@ def run_scenario(
                 if (live_mcp_available or live_llm_available)
                 else ExecutionMode.CANNED
             ),
-            # The run's own final ledger: seeded maxima and all four meters.
-            budget=final.budget,
+            # The run's own final ledger: seeded maxima and all four meters —
+            # and, since WO-R3-260, the briefing writer's post-terminal call,
+            # which is the agent's cost and belongs in the number a reader
+            # takes for "what this run spent". The graded ``final.budget`` is
+            # the same object up to that one charge; the difference is exactly
+            # the metered-but-not-gating spend.
+            budget=reported_ledger,
             recorded_at=tick(),
             # The strategy object the loop above actually ran with.
             strategy=strategy,
         ),
         # What it cost, by role and by planner step, reconciled against the
-        # same ledger the provenance above carries (WP-2.3).
-        accounting=build_accounting(accounting, final.budget),
+        # same ledger the provenance above carries (WP-2.3). It has to be the
+        # same one: the charged split now includes ``briefing_writer``, so
+        # reconciling against the pre-briefing ledger would report every run
+        # with an enriched briefing as unreconciled.
+        accounting=build_accounting(accounting, reported_ledger),
     )
     if tracer is not None:
         tracer.write(
@@ -1800,10 +1858,14 @@ def _crashed_result(
     # practice: every LLM call the agent makes is inside a transition, and a
     # transition that ran left a checkpoint behind it.
     crash_accounting = exc.accounting if isinstance(exc, ScenarioCrash) else None
+    # The crash's own ledger when it reached a terminal state, else the last
+    # checkpoint's. The two differ by exactly the post-terminal briefing
+    # charge, and the split being reconciled here contains it.
+    crash_ledger = exc.ledger if isinstance(exc, ScenarioCrash) else None
     accounting = (
         None
         if crash_accounting is None or partial is None
-        else build_accounting(crash_accounting, partial.budget)
+        else build_accounting(crash_accounting, crash_ledger or partial.budget)
     )
     outcome = ScenarioOutcome(
         scenario=scenario.name,

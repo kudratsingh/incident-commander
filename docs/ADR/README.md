@@ -20,7 +20,7 @@ Thirty-nine records, plus [`0000-template.md`](0000-template.md). All are accept
 | [0012](0012-dependency-pinning-via-committed-lockfile.md) | Dependency pinning via the committed `uv.lock` | — |
 | [0013](0013-run-provenance-is-part-of-the-eval-result.md) | Run provenance is part of the eval result | — |
 | [0014](0014-webhook-signature-v2.md) | Webhook signature scheme v2 and replay-window semantics | The v2 scheme itself is **superseded by 0023**; the header, skew and duplicate-suppression decisions stand |
-| [0015](0015-wall-clock-and-usd-budget-meters.md) | Wall-clock and USD budget meters: accrual anchors, a pinned price map, total-volume token semantics | — |
+| [0015](0015-wall-clock-and-usd-budget-meters.md) | Wall-clock and USD budget meters: accrual anchors, a pinned price map, total-volume token semantics | Sub-decision 2 amended by WO-R2-118 (an unpriced model id is refused at construction); sub-decision 4 amended 2026-09-17 by WO-R3-260 — the briefing WRITER is charged to the ledger, metered and never gating. The judge stays outside |
 | [0016](0016-incident-identity-and-single-flight.md) | Incident identity, the single-flight lease, and crash-resume semantics | — |
 | [0017](0017-eval-run-archive-lifecycle.md) | The run archive is written incrementally, and `report.json` is its completion marker | — |
 | [0018](0018-exit-code-6-chaos-refused-under-smoke.md) | The runner's exit-code contract is 0–6; exit 6 is chaos seeding refused under `--smoke` | Extended by 0020 (exit 7) and 0037 (exits 9 and 10) |

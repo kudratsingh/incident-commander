@@ -786,10 +786,11 @@ def _plan_next_step(
     escalated on the first failure before this change.
 
     The third return value is the call's own measurements — token counters,
-    trace-record id, the size of the context it was handed (WP-2.1). They are
-    visible only here, and a ``StepRecord`` built without them carries a
-    ``None`` where a number belongs. Nothing in the loop reads it: research
-    data must not be able to change the run.
+    trace-record id, the size of the context it was handed (WP-2.1) and how
+    long the client waited for it (WO-R3-260). They are visible only here, and
+    a ``StepRecord`` built without them carries a ``None`` where a number
+    belongs. Nothing in the loop reads it: research data must not be able to
+    change the run.
     """
     system_prompt = load_prompt("investigation_planner")
     # Bound to a local rather than passed inline because the step record
@@ -820,6 +821,11 @@ def _plan_next_step(
         cache_read_tokens=result.cache_read_tokens,
         cache_creation_tokens=result.cache_creation_tokens,
         context_chars=len(system_prompt) + len(user_message),
+        # The client's own measurement of the call that parsed, carried out
+        # rather than taken again here: a second stopwatch around this
+        # function would also time the accrual and the model_copy below, and
+        # report them as time the model spent.
+        elapsed_ms=result.elapsed_ms,
     )
     return updated, result.output, measured
 

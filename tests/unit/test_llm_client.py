@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -9,6 +10,7 @@ import pytest
 from pydantic import BaseModel
 
 from incident_commander.llm.client import LLMClient, LLMError, preflight_auth
+from incident_commander.llm.fakes import CannedLLMClient
 
 
 class _SampleOutput(BaseModel):
@@ -686,3 +688,99 @@ class TestPreflightWrapsEverySdkError:
         monkeypatch.setattr(anthropic, "Anthropic", lambda **_kw: sdk)
         with pytest.raises(LLMError, match="auth preflight failed: HTTP 401"):
             preflight_auth("sk-test")
+
+
+class TestTheClientTimesItsOwnCalls:
+    """WO-R3-260: ``LLMResult.elapsed_ms`` — the last plan-02 field left null.
+
+    ``StepRecord.llm_calls[].elapsed_ms`` sat at ``None`` on every run since
+    WP-2.1, with an honest comment saying nothing timed a call. Nothing did:
+    the only duration the client produced was a per-attempt
+    ``duration_seconds`` written into a trace file, which the offline suite
+    never writes and no record could read.
+
+    The measurement is of the LOGICAL call — every retried attempt and every
+    backoff sleep inside it — because that is the latency the loop waited out.
+    A per-attempt number would report a call that spent two 5xx retries and a
+    sleep as however long its last, successful leg took.
+    """
+
+    def _clock(self, *readings: float) -> Callable[[], float]:
+        """A clock that returns each reading once, then holds the last.
+
+        Holding rather than raising: the number of ``self._clock()`` reads per
+        call is an implementation detail (the tracer takes its own), and a test
+        that pins it would fail on an unrelated change to tracing.
+        """
+        ticks = list(readings)
+
+        def read() -> float:
+            return ticks.pop(0) if len(ticks) > 1 else ticks[0]
+
+        return read
+
+    def test_a_call_reports_how_long_it_took(self) -> None:
+        sdk = MagicMock()
+        sdk.messages.create.return_value = _tool_use_message({"label": "ok", "confidence": 0.9})
+        client = LLMClient(api_key="test", client=sdk, clock=self._clock(10.0, 10.25, 11.5))
+        result = client.call(
+            system_prompt="s",
+            user_message="u",
+            output_model=_SampleOutput,
+            model="claude-sonnet-4-6",
+        )
+        # 10.0 at entry, 11.5 when the parsed result is built: 1.5 s.
+        assert result.elapsed_ms == 1500
+
+    def test_the_retried_attempts_and_the_backoff_are_inside_the_number(self) -> None:
+        response = MagicMock()
+        response.status_code = 503
+        response.headers = {}
+        err = anthropic.APIStatusError(message="upstream", response=response, body=None)
+        sdk = MagicMock()
+        sdk.messages.create.side_effect = [
+            err,
+            _tool_use_message({"label": "ok", "confidence": 1.0}),
+        ]
+        client = LLMClient(
+            api_key="test",
+            max_attempts=3,
+            retry_base_delay=0.0,
+            sleep=lambda _s: None,
+            client=sdk,
+            # entry 0.0; first attempt's error trace at 4.0; second attempt
+            # starts at 9.0 and the result is built at 12.0.
+            clock=self._clock(0.0, 4.0, 9.0, 12.0),
+        )
+        result = client.call(
+            system_prompt="s",
+            user_message="u",
+            output_model=_SampleOutput,
+            model="claude-sonnet-4-6",
+        )
+        assert result.elapsed_ms == 12_000
+
+    def test_a_sub_millisecond_call_reports_zero_not_none(self) -> None:
+        """``0`` is a measurement; ``None`` is the absence of one. A client
+        that times itself must never say "not measured"."""
+        sdk = MagicMock()
+        sdk.messages.create.return_value = _tool_use_message({"label": "ok", "confidence": 0.9})
+        client = LLMClient(api_key="test", client=sdk, clock=self._clock(1.0, 1.0, 1.0))
+        result = client.call(
+            system_prompt="s",
+            user_message="u",
+            output_model=_SampleOutput,
+            model="claude-sonnet-4-6",
+        )
+        assert result.elapsed_ms == 0
+
+    def test_a_client_that_does_not_time_itself_says_not_measured(self) -> None:
+        """The canned client reports ``None``, and that is the honest answer:
+        a fake's duration is a property of the test machine, not of a call."""
+        result = CannedLLMClient([{"label": "ok", "confidence": 0.5}]).call(
+            system_prompt="s",
+            user_message="u",
+            output_model=_SampleOutput,
+            model="claude-sonnet-4-6",
+        )
+        assert result.elapsed_ms is None

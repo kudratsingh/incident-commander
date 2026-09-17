@@ -24,6 +24,7 @@ from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Final
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
@@ -42,6 +43,7 @@ from incident_commander.agent.strategies.registry import (
     default_strategy,
 )
 from incident_commander.config import Settings
+from incident_commander.llm.client import LLMClient, LLMClientProtocol
 from incident_commander.llm.fakes import CannedLLMClient, CannedUsage
 from incident_commander.tools.mcp_client import ToolResult
 
@@ -136,7 +138,7 @@ def _investigating(run_state: RunState) -> RunState:
 
 
 def _context(
-    llm: CannedLLMClient,
+    llm: LLMClientProtocol,
     *,
     iteration: int = 0,
     sink: list[StepRecord] | None = None,
@@ -351,6 +353,76 @@ class TestBaselineEmitsOneCandidatePerStep:
         )
         assert state.schema_version == 3
         assert "candidate" not in state.model_dump(mode="json")
+
+
+class TestTheStepRecordCarriesTheCallsOwnDuration:
+    """WO-R3-260: ``StepRecord.llm_calls[].elapsed_ms``, which was always null.
+
+    WP-2.1 filled every other field on the record from the planner call's own
+    report and left this one at ``None``, because nothing in ``llm/client.py``
+    timed a call. The client times its logical calls now, so the strategy's
+    job is to carry the number through — and nothing more. A stopwatch around
+    ``plan_next_step`` would also time the accrual and the ``model_copy``
+    beside it, and report them as time the model spent.
+    """
+
+    def _live_shaped_client(self, payload: dict[str, Any], *, took_seconds: float) -> LLMClient:
+        """A real ``LLMClient`` over a stubbed SDK — the live path, offline.
+
+        Deliberately not a ``CannedLLMClient``: this measurement only exists
+        on the client that makes real calls, so a fake that reported one would
+        prove the record's plumbing against a number the live path never
+        produces.
+        """
+        block = MagicMock()
+        block.type = "tool_use"
+        block.name = "record_output"
+        block.input = payload
+        response = MagicMock()
+        response.content = [block]
+        response.stop_reason = "tool_use"
+        response.usage.input_tokens = 11
+        response.usage.output_tokens = 7
+        response.usage.cache_creation_input_tokens = 0
+        response.usage.cache_read_input_tokens = 3
+        sdk = MagicMock()
+        sdk.messages.create.return_value = response
+        readings = [0.0, took_seconds]
+        return LLMClient(
+            api_key="test",
+            client=sdk,
+            clock=lambda: readings.pop(0) if len(readings) > 1 else readings[0],
+        )
+
+    def test_a_live_shaped_call_lands_on_the_record(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        llm = self._live_shaped_client(_stop_payload(), took_seconds=2.75)
+        _state, _step, record = BaselineStrategy().plan_next_step(
+            _investigating(run_state), now, _context(llm)
+        )
+        assert record.llm_calls[0].elapsed_ms == 2_750
+
+    def test_it_survives_serialisation_as_a_number(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # The record's only consumer is a JSONL trace file. A field filled in
+        # memory and dropped on the way out is the same null one layer later.
+        llm = self._live_shaped_client(_stop_payload(), took_seconds=0.42)
+        _state, _step, record = BaselineStrategy().plan_next_step(
+            _investigating(run_state), now, _context(llm)
+        )
+        written = json.loads(json.dumps(record.as_trace_record()))
+        assert written["llm_calls"][0]["elapsed_ms"] == 420
+
+    def test_a_canned_run_still_says_not_measured(self, run_state: RunState, now: datetime) -> None:
+        """``None``, not ``0``. The canned client does not time itself, and a
+        zero would read as a sub-millisecond model call in every offline
+        record the suite has ever written."""
+        _state, _step, record = BaselineStrategy().plan_next_step(
+            _investigating(run_state), now, _context(CannedLLMClient([_stop_payload()]))
+        )
+        assert record.llm_calls[0].elapsed_ms is None
 
 
 class TestTheRegistryRefusesWhatItDoesNotKnow:

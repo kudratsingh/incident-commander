@@ -45,6 +45,17 @@ _PREFLIGHT_TIMEOUT: Final[httpx.Timeout] = httpx.Timeout(30.0, connect=5.0)
 _MAX_RETRY_AFTER_SECONDS: Final[float] = 60.0
 
 
+def elapsed_ms_of(seconds: float) -> int:
+    """Whole milliseconds, never negative. ``0`` is a measurement, not a gap.
+
+    One definition, here rather than beside each caller, because there are two:
+    this client times the logical call it makes, and ``agent/accounting.py``
+    times the same call from outside its metering wrapper. Two roundings of the
+    same quantity is how a latency column stops agreeing with itself.
+    """
+    return max(round(seconds * 1000), 0)
+
+
 @dataclass(frozen=True, kw_only=True)
 class LLMUsage:
     """What one logical ``call`` billed — including work that never came back.
@@ -79,13 +90,14 @@ class LLMUsage:
         return self.discarded_attempts * self.discarded_max_tokens
 
     def with_output[T: BaseModel](
-        self, output: T, stop_reason: str, record_id: str = ""
+        self, output: T, stop_reason: str, record_id: str = "", elapsed_ms: int | None = None
     ) -> LLMResult[T]:
         """Promote a usage record to a full result once parsing has succeeded."""
         return LLMResult(
             output=output,
             stop_reason=stop_reason,
             record_id=record_id,
+            elapsed_ms=elapsed_ms,
             input_tokens=self.input_tokens,
             output_tokens=self.output_tokens,
             cache_creation_tokens=self.cache_creation_tokens,
@@ -143,6 +155,15 @@ class LLMResult[T: BaseModel](LLMUsage):
     stop_reason: str
     #: Trace-record id this call was written under, or "" when untraced.
     record_id: str = ""
+    #: Wall time of the whole logical call that produced this result —
+    #: every retried attempt and every backoff sleep inside it included,
+    #: because that is the latency the loop actually waited out.
+    #:
+    #: ``None`` means **not measured**, and only a fake can report it: a
+    #: client that does not time its calls says so rather than reporting a
+    #: zero a reader would take for a sub-millisecond call. ``LLMClient``
+    #: always fills it.
+    elapsed_ms: int | None = None
 
 
 class LLMClientProtocol(Protocol):
@@ -185,6 +206,7 @@ class LLMClient:
         sleep: Callable[[float], None] = time.sleep,
         client: anthropic.Anthropic | None = None,
         tracer: Callable[[dict[str, Any]], None] | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._client = client or anthropic.Anthropic(
             api_key=api_key,
@@ -195,6 +217,11 @@ class LLMClient:
         self._retry_base_delay = retry_base_delay
         self._sleep = sleep
         self._tracer = tracer
+        # Injectable for the same reason ``sleep`` is: a duration measured
+        # against the real monotonic clock cannot be asserted on, so without
+        # this seam the one test that could pin ``elapsed_ms`` to a number
+        # would have to assert ">= 0" and pass against a broken measurement.
+        self._clock = clock
 
     def call[T: BaseModel](
         self,
@@ -211,7 +238,15 @@ class LLMClient:
         The model must answer through a single forced tool whose schema is the
         output model, so nothing here parses free text. Transient failures are
         retried; every attempt, successful or not, reaches the tracer.
+
+        ``elapsed_ms`` on the result is measured from HERE, across the whole
+        retry loop, not from the attempt that returned: a logical call that
+        spent two 5xx attempts and a backoff sleep before succeeding took all
+        of that time, and a per-attempt duration would report the loop's worst
+        latency as its fastest leg. The per-attempt ``duration_seconds`` the
+        tracer already writes is the other number and stays what it was.
         """
+        call_started = self._clock()
         request_body: dict[str, Any] = {
             "model": model,
             "max_tokens": max_tokens,
@@ -251,7 +286,7 @@ class LLMClient:
                     "attempt": attempt,
                     "terminal": terminal,
                     "output_model": output_model.__name__,
-                    "duration_seconds": time.monotonic() - started,
+                    "duration_seconds": self._clock() - started,
                     **_repair_keys(record_id, repair_of),
                 }
             )
@@ -263,7 +298,7 @@ class LLMClient:
         # ``repair_of`` has to name the exact record whose payload failed.
         record_id = ""
         for attempt in range(self._max_attempts):
-            started = time.monotonic()
+            started = self._clock()
             record_id = uuid.uuid4().hex[:12]
             # `attempt` doubles as the count of attempts already billed and
             # thrown away: on attempt 2, two responses have been discarded.
@@ -325,12 +360,16 @@ class LLMClient:
                         "request": request_body,
                         "response": response.model_dump(mode="json"),
                         "output_model": output_model.__name__,
-                        "duration_seconds": time.monotonic() - started,
+                        "duration_seconds": self._clock() - started,
                         **_repair_keys(record_id, repair_of),
                     }
                 try:
                     result = self._parse(
-                        response, output_model, _usage_of(response, discarded), record_id
+                        response,
+                        output_model,
+                        _usage_of(response, discarded),
+                        record_id,
+                        elapsed_ms_of(self._clock() - call_started),
                     )
                 except LLMError:
                     if trace is not None:
@@ -358,7 +397,12 @@ class LLMClient:
         ) from last_exc
 
     def _parse[T: BaseModel](
-        self, response: Message, output_model: type[T], usage: LLMUsage, record_id: str = ""
+        self,
+        response: Message,
+        output_model: type[T],
+        usage: LLMUsage,
+        record_id: str = "",
+        elapsed_ms: int | None = None,
     ) -> LLMResult[T]:
         """Pull the forced tool-use block out of the response and validate it."""
         for block in response.content:
@@ -378,7 +422,9 @@ class LLMClient:
                         usage=usage,
                         record_id=record_id,
                     ) from err
-                return usage.with_output(output, response.stop_reason or "unknown", record_id)
+                return usage.with_output(
+                    output, response.stop_reason or "unknown", record_id, elapsed_ms
+                )
         # Billed and unreturned. This is the max_tokens-truncation case:
         # the model generated a full response, the platform charged for it,
         # and there is no `record_output` block to parse. Raising without

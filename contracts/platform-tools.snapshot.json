@@ -498,7 +498,7 @@
     },
     {
       "name": "get_consumer_lag",
-      "description": "Read the last-emitted Kafka consumer lag for one of the platform's consumer groups. Known consumer groups: worker-dispatcher, billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer.\nFRESHNESS: cached in Redis, never a live Kafka query, and the refresh behaviour differs per group — read `source` on the response before reasoning about change over time.\n  - `worker-dispatcher` (source: live) is refreshed by a background loop every ~60s with a 90s TTL. Measured behaviour: after a fault begins the cached value catches up within ~60s; after a recovery it keeps reading the old high value for ~30s before dropping. Treat any single reading as up to a minute stale, in either direction. This is the only group whose lag moves, and so the only one where watching lag grow or drain is a valid way to observe a change.\n  - The other seven (source: static) report a recorded constant that nothing refreshes. Re-reading one after an action returns the same number — that is the expected behaviour, not evidence the action failed, and lag on these groups will never be seen to grow.\nA STALLED CONSUMER STILL REPORTS LAG. A consumer that has stopped processing keeps its Kafka assignment, so this metric goes on reporting its real and climbing lag rather than going null — rising lag is the expected signal of a stall, not absence of data.\nUNKNOWN IS NOT ZERO. `lag_known: false` with `lag: null` means the platform could not determine lag (nothing recorded for the group, unknown group, consumer not started, no partition assignment, or the query errored). It is deliberately not reported as 0, because a fabricated 0 would read as healthy. A measured `lag: 0` with `lag_known: true` is the opposite finding — the group is caught up. Never treat a null as a zero.\n`source: static` with `lag_known: false` means a value that should be recorded for this group is absent — an environment problem to report, not a fault to diagnose.\nNeither a number nor a null proves liveness. Consumer-group membership is the authoritative check — a group holds its assignment and keeps reporting accurate lag for minutes after its consumer stops, without being evicted.",
+      "description": "Read the last-emitted Kafka consumer lag for one of the platform's consumer groups. Known consumer groups: worker-dispatcher, billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer.\nFRESHNESS: cached in Redis, never a live Kafka query, and the refresh behaviour differs per group — read `source` on the response before reasoning about change over time.\n  - `worker-dispatcher` (source: live) is refreshed by a background loop every ~60s with a 90s TTL. Measured behaviour: after a fault begins the cached value catches up within ~60s; after a recovery it keeps reading the old high value for ~30s before dropping. Treat any single reading as up to a minute stale, in either direction. This is the only group whose lag moves, and so the only one where watching lag grow or drain is a valid way to observe a change.\n  - The other seven (source: static) report a recorded constant that nothing refreshes. Re-reading one after an action returns the same number — that is the expected behaviour, not evidence the action failed, and lag on these groups will never be seen to grow.\nONE CALL SHOWS THE TREND. Every response carries `measured_at` (when this number was measured), `age_seconds` (how old it is), and `recent_samples` — the last few measurements, newest first, each with its own time, the current one included. Compare those samples to decide whether lag is climbing, draining or flat. That comparison is the evidence; a second call is not, because a new measurement is taken only about every 60s. Two calls a few seconds apart therefore return the SAME number with the SAME `measured_at`, and that repetition means 'not re-measured yet', never 'not moving' — reading sooner cannot show change that has not been measured. If you need a genuinely newer number than the one in front of you, it exists once `age_seconds` passes ~60; until then this response already contains every reading the platform has. On the seven groups reporting a recorded constant, `measured_at` and `age_seconds` are null and `recent_samples` is empty: a constant was never measured at a moment, so it has no time and no history. `recent_samples` can also be empty for worker-dispatcher when nothing has been recorded yet — an empty list is missing history, not a flat line.\nA STALLED CONSUMER STILL REPORTS LAG. A consumer that has stopped processing keeps its Kafka assignment, so this metric goes on reporting its real and climbing lag rather than going null — rising lag is the expected signal of a stall, not absence of data.\nUNKNOWN IS NOT ZERO. `lag_known: false` with `lag: null` means the platform could not determine lag (nothing recorded for the group, unknown group, consumer not started, no partition assignment, or the query errored). It is deliberately not reported as 0, because a fabricated 0 would read as healthy. A measured `lag: 0` with `lag_known: true` is the opposite finding — the group is caught up. Never treat a null as a zero.\n`source: static` with `lag_known: false` means a value that should be recorded for this group is absent — an environment problem to report, not a fault to diagnose.\nNeither a number nor a null proves liveness. Consumer-group membership is the authoritative check — a group holds its assignment and keeps reporting accurate lag for minutes after its consumer stops, without being evicted.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -513,6 +513,30 @@
         "type": "object"
       },
       "outputSchema": {
+        "$defs": {
+          "LagSample": {
+            "description": "One past measurement of the same group's lag.",
+            "properties": {
+              "lag": {
+                "description": "Messages the group was behind when this sample was taken.",
+                "title": "Lag",
+                "type": "integer"
+              },
+              "measured_at": {
+                "description": "When this sample was measured — ISO-8601, UTC, the platform's clock.",
+                "format": "date-time",
+                "title": "Measured At",
+                "type": "string"
+              }
+            },
+            "required": [
+              "lag",
+              "measured_at"
+            ],
+            "title": "LagSample",
+            "type": "object"
+          }
+        },
         "properties": {
           "consumer_group": {
             "title": "Consumer Group",
@@ -549,6 +573,41 @@
             "description": "Diagnostic — the Redis key the value was read from.",
             "title": "Cache Key",
             "type": "string"
+          },
+          "measured_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "When the `lag` above was measured — ISO-8601, UTC. `null` when the platform holds no measurement time for this number: a group reporting a recorded constant has none (it was never measured at a moment), and neither does a reading whose measurement time was not recorded or no longer matches the current value. Never a guess — a null here means unknown, and the number in `lag` is still the current one.",
+            "title": "Measured At"
+          },
+          "age_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How long ago `measured_at` was, in whole seconds. `null` exactly when `measured_at` is null. A new measurement is taken about every 60s, so below ~60 this reading is the newest one that exists and re-reading returns the same number.",
+            "title": "Age Seconds"
+          },
+          "recent_samples": {
+            "description": "The last few measurements for this group, newest first, the current one included. Comparing them is how to tell a climbing lag from a flat one without waiting. Empty for a group reporting a recorded constant (nothing measures it), and empty for the continuously-refreshed group when no window has been recorded yet — an empty list is absence of history, never evidence the lag is steady.",
+            "items": {
+              "$ref": "#/$defs/LagSample"
+            },
+            "title": "Recent Samples",
+            "type": "array"
           }
         },
         "required": [

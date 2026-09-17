@@ -46,6 +46,14 @@ class GetConsumerLagInput(BaseModel):
     consumer_group: str = Field(default="worker-dispatcher")
 
 
+class LagSample(BaseModel):
+    """One past measurement of a group's lag (v0.6.7, plat #204)."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    lag: int
+    measured_at: datetime
+
+
 class GetConsumerLagOutput(BaseModel):
     # v0.6.0 (plat #166, R2-17): `lag_known` and `source` end the ambiguity
     # that let `consumer_lag_high` assert a threshold against a null. `lag`
@@ -53,12 +61,29 @@ class GetConsumerLagOutput(BaseModel):
     # `lag_known` before comparing. `source` says whether the number can
     # move: only `live` is refreshed (~60s), `static` is a recorded
     # constant, `unrecognized` is a group the platform does not know.
+    #
+    # v0.6.7 (plat #204, WO-R3-254): the reading carries its time.
+    # `measured_at` is when THIS number was measured and `age_seconds` how
+    # long ago, both null when the platform holds no measurement time (the
+    # seven static groups always, and a live read whose value has no
+    # recorded time). `recent_samples` is the last few measurements,
+    # newest first, the current one included — the trend is readable from
+    # one call, which a second call inside the ~60s refresh window cannot
+    # show. Empty for a static group, and empty for the live group when no
+    # window has been recorded yet: absence of history, never a flat line.
+    #
+    # The three are OPTIONAL in the snapshot (not in `required`), so this
+    # model still parses a v0.6.5 response; `lag`/`lag_known` remain the
+    # fields every consumer in this repo reads.
     model_config = ConfigDict(extra="ignore", frozen=True)
     consumer_group: str
     lag: int | None
     lag_known: bool
     source: Literal["live", "static", "unrecognized"]
     cache_key: str
+    measured_at: datetime | None = None
+    age_seconds: int | None = None
+    recent_samples: list[LagSample] = Field(default_factory=list)
 
 
 # --- get_dag_state -------------------------------------------------------

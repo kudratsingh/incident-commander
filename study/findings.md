@@ -1099,8 +1099,7 @@ red-before/green-after test.
 ## F-015 — Grader drift: a verify claim written for one trajectory shape graded the correct trajectory red
 
 **Date:** 2026-09-08 (paid run `4974811d236f`, `remediate_dlq_backlog_success` run D, ≈$0.13).
-Recorded as **[INC-001](../../context/INCIDENTS.md)** in the workspace incident ledger, class
-**grader drift**.
+Recorded as **INC-001** in the workspace incident ledger, class **grader drift**.
 
 **What happened.** The agent did the right thing, in the best shape the scenario allows, in four
 tool calls: read the whole dead-letter queue (five rows, the poisoned `eb798430…` among them), read
@@ -1186,7 +1185,7 @@ WO-R2-170's scope, not this PR's.
 ## F-016 — A rule given to the writer and not to its judge is half a rule
 
 **Date:** 2026-09-08 (paid run `54ab08425f82`, `remediate_dlq_backlog_success` run E, GREEN).
-Recorded as **[INC-002](../../context/INCIDENTS.md)** in the workspace incident ledger, class
+Recorded as **INC-002** in the workspace incident ledger, class
 **grader drift (soft grader)**. Fix: WO-R2-178.
 
 **What happened.** Run E passed all five deterministic dimensions and the briefing was honest in

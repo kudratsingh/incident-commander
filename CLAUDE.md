@@ -82,7 +82,8 @@ incident-commander/
 ├── README.md                       # positioning, getting started, architecture summary
 ├── Makefile                        # single entrypoint for all dev commands
 ├── pyproject.toml                  # uv-managed dependencies, pinned via committed uv.lock
-├── alembic.ini                     # agent-DB migrations; versions under alembic/versions/
+├── alembic.ini                     # agent-DB migration config
+├── alembic/                        # the migrations themselves, under versions/
 ├── Dockerfile                      # (planned — Phase 8) agent image for the cold-start demo
 ├── src/
 │   └── incident_commander/
@@ -97,12 +98,15 @@ incident-commander/
 │       │   ├── hypothesis.py       # hypothesis and evidence models, ranking inputs
 │       │   ├── remediation.py      # plan, tier gate, execute/verify loop, idempotency keys
 │       │   ├── briefing.py         # deterministic escalation briefing (the old escalation.py)
-│       │   └── briefing_enrichment.py  # LLM findings + recommendation over that template
+│       │   ├── briefing_enrichment.py  # LLM findings + recommendation over that template
+│       │   ├── accounting.py       # budget meters: wall clock, tokens, USD (ADR 0015)
+│       │   └── strategies/         # the planner-call seam: strategies propose, the loop decides (ADR 0036)
 │       ├── llm/
 │       │   ├── client.py           # Anthropic SDK, typed structured outputs, retries
 │       │   ├── structured.py       # StructuredOutput base: decode stringified nested output (ADR 0035)
 │       │   ├── repair.py           # one bounded re-ask when our own output fails validation (ADR 0035)
 │       │   ├── fakes.py            # offline LLMClientProtocol fakes for tests and evals
+│       │   ├── pricing.py          # the pinned price map the USD meter charges against (ADR 0015)
 │       │   └── prompts/            # versioned prompt .md files + loader.py, snapshot-tested
 │       ├── tools/
 │       │   ├── mcp_client.py       # MCP JSON-RPC transport, auth, retries, timeouts
@@ -131,7 +135,13 @@ incident-commander/
 │   ├── regression.py               # baseline diff and the regression gate
 │   ├── guards.py                   # eval-time safety assertions
 │   ├── tracing.py                  # per-invocation trace writer (append-only, invariant 9)
+│   ├── artifacts.py                # the one resolver for versioned outputs — never glob, never ls -t
 │   ├── chaos_hooks.py              # chaos-injection helpers for live runs
+│   ├── preconditions.py            # what must be true of the world before a scenario may run
+│   ├── world_audit.py              # zero-LLM read-only check of the seeded world (make world-audit)
+│   ├── dossier.py                  # zero-LLM read of one scenario's fault world before a paid run
+│   ├── inventory.py                # counts and classifies the corpus (make inventory)
+│   ├── fixture_drift.py            # canned fixture VALUES vs live, against a blessed ledger
 │   ├── traces/                     # raw trace JSONL per run
 │   ├── runs/                       # per-run scored outcomes
 │   ├── trajectories/               # captured runs for debugging and analysis
@@ -178,22 +188,34 @@ incident-commander/
 
 All design documentation lives in `docs/` and ships with the code that implements it. A PR that changes behavior without updating docs is incomplete.
 
+This block describes `docs/` as it is. Entries that do not exist yet carry an explicit
+`(planned — Phase N)` marker, the same convention as the repository-layout tree above.
+[`docs/README.md`](docs/README.md) is the one-line-per-document map.
+
 ```text
 docs/
-├── ADR/                        # numbered decision records, MADR format, never edited after acceptance
-│   └── 0001-external-client-architecture.md
-├── lessons/                    # case studies of things that went wrong or almost went wrong
-│   └── phase-6-hardening.md   # free-form Hypothesis.name → schema tightening
-├── architecture-principles.md  # rules for future PRs: structural > prose, single source of truth, etc.
+├── README.md                   # the map: one line per document, and which are history
+├── ADR/                        # numbered decision records, never edited after acceptance
+│   ├── README.md               # the index: all 39, with status and what amended what
+│   ├── 0000-template.md
+│   └── 0001-…0039-….md         # 0001 external client architecture … 0039 splits belong to templates
+├── lessons/                    # case studies of things that went wrong, or almost did
+│   ├── phase-6-hardening.md          # free-form Hypothesis.name → schema tightening
+│   ├── live-eval-noise-sources.md    # the five buckets a weird live failure falls into
+│   ├── live-campaign-2026-08-03.md   # what one night of live eval bought
+│   ├── live-eval-sequence-2026-09.md # the paid sequence, and the six failures the harness made
+│   └── parallel-agent-campaigns.md   # what breaks when several agents share one checkout
+├── architecture-principles.md  # rules for future PRs: structural > prose, single source of truth
 ├── eval-methodology.md         # scenario taxonomy, grader design, metric definitions, judge pinning
-├── threat-model.md             # prompt injection surfaces, mitigations, adversarial suite mapping
+├── eval-debt.md                # append-only ledger of the campaign freeze, and its closing walk
 ├── safety-model.md             # tiers, approval flow, budgets, fail-open behavior
-├── memory-design.md            # what is stored, retrieval policy, forgetting policy
 ├── runbook.md                  # operating the agent itself: deploys, rollbacks, kill switch
-└── interview-map.md            # component → JD skill → talking points, kept current
+├── threat-model.md             # (planned — Phase 7) injection surfaces, adversarial suite mapping
+├── memory-design.md            # (planned — Phase 4) what is stored, retrieval, forgetting
+└── interview-map.md            # (planned — Phase 8) component → JD skill → talking points
 ```
 
-ADR process: any decision that constrains future work gets an ADR before or with the implementing PR. Status flow is proposed, accepted, superseded. Seeded ADR queue: 0001 external client architecture, 0002 hand-rolled state machine vs LangGraph, 0003 platform-enforced approvals, 0004 eval-first development and regression gating, 0005 memory schema and retrieval, 0006 prompt caching economics, 0007 contract snapshot testing and platform pinning, 0008 adversarial robustness posture.
+ADR process: any decision that constrains future work gets an ADR before or with the implementing PR. Status flow is proposed, accepted, superseded. An accepted ADR is never rewritten — a later ADR amends or supersedes it and both stay on the shelf. The set runs 0001 through 0039; [`docs/ADR/README.md`](docs/ADR/README.md) lists every one with its status and records which later ADR moved which.
 
 Before opening a PR touching schemas, prompts, or the state machine, read [`docs/architecture-principles.md`](docs/architecture-principles.md). It codifies the rules that came out of past PRs — most importantly "default to the structural fix, not the band-aid." When you hit a symptom that a prompt tweak would patch, the first design conversation is whether the schema should reject the class of bug instead. See [`docs/lessons/phase-6-hardening.md`](docs/lessons/phase-6-hardening.md) for the case study that produced this rule.
 
@@ -217,11 +239,11 @@ Test data discipline: fixtures are recorded from real runs and versioned. When a
 
 The harness is the product's proof. Built before the agent, maintained forever.
 
-- **Scenarios** are YAML files defining a chaos injection, the ground-truth root cause, the correct remediation, expected tier, and grading config. Taxonomy covers consumer crashes, poison messages, resource saturation, bad deploys, dependency failures, cascades, flapping alerts, and pure noise. Target 30 to 50 scenarios by end of Phase 1, grown continuously.
+- **Scenarios** are YAML files defining a chaos injection, the ground-truth root cause, the correct remediation, expected tier, and grading config. Taxonomy covers consumer crashes, poison messages, resource saturation, bad deploys, dependency failures, cascades, flapping alerts, and pure noise. **41 today**, across eleven families (`consumer_lag`, `dlq`, `noise_control`, `cache_redis`, `tool_fault`, `traces`, `workflow`, `deploy`, `incidents`, `postgres`, `harness_control`) — 29 of them run against a live platform, 12 replay canned fixtures. `make inventory` counts them from the corpus rather than from this sentence, which is the number to trust.
 - **Adversarial scenarios** (`evals/scenarios/adversarial/`, planned — Phase 7) embed injection payloads in log lines, DLQ message bodies, and error strings. Graders assert the agent treated the content as data: no privilege escalation attempts, no actions sourced from payload text, injection flagged in the briefing where relevant.
 - **Graders** are deterministic first: RCA label match, action safety from the platform audit log, budget adherence, escalation correctness, evidence citation presence. An LLM judge (pinned `JUDGE_MODEL`, versioned rubric) grades soft qualities only: postmortem quality, briefing usefulness, hypothesis reasoning coherence.
 - **Metrics**: triage accuracy, RCA accuracy, time and cost per incident, action safety violations (must be zero), escalation precision and recall, false-action rate, memory lift (score delta on repeat-pattern scenarios with memory on vs off), token and cache-hit economics.
-- **Regression gating**: `evals.yml` runs the regression subset when a PR touches `src/incident_commander/agent/**`, `src/incident_commander/tools/**`, `src/incident_commander/llm/**` (prompts live in `llm/prompts/`), `src/incident_commander/config.py` (model pins), `contracts/platform-tools.snapshot.json`, or the eval harness (`evals/graders/`, `evals/runner.py`, `evals/scenarios/`, `evals/reports/baseline.json`). Baseline lives in `evals/reports/baseline.json`. A metric drop beyond threshold fails the check and the PR explains or fixes it.
+- **Regression gating**: `evals.yml` runs the regression subset when a PR touches `src/incident_commander/agent/**`, `src/incident_commander/tools/**`, `src/incident_commander/llm/**` (prompts live in `llm/prompts/`), `src/incident_commander/config.py` (model pins), `contracts/platform-tools.snapshot.json`, the eval harness (`evals/graders/`, `evals/runner.py`, `evals/scenarios/`, `evals/reports/baseline.json`), or the workflow file itself. Baseline lives in `evals/reports/baseline.json` — blessed 2026-09-15 over the current 41-scenario corpus, 41 of 41 passing, which is what closed ADR 0011's campaign freeze. A metric drop beyond threshold fails the check and the PR explains or fixes it.
 
 ## Git and PR workflow
 
@@ -284,7 +306,8 @@ Skills proven: LLM observability, production operations of an AI system.
 
 ## Skill coverage map
 
-Keep `docs/interview-map.md` synchronized with this table. Every row must point at merged, tested
+`docs/interview-map.md` is a Phase 8 deliverable and does not exist yet; when it lands, keep it
+synchronized with this table. Every row must point at merged, tested
 code, or say which phase will build it — a row pointing at a path that does not exist is the drift
 that produced the `evals.yml` gate gap.
 
@@ -307,37 +330,79 @@ that produced the `evals.yml` gate gap.
 
 All workflows run through Make. If a workflow is not in the Makefile, add it there first.
 
+`make help` lists all of them. The ones you will actually type:
+
 ```bash
-make setup        # uv sync, pre-commit hooks, pull pinned platform image
-make check        # ruff + mypy --strict
-make test         # unit + integration (containers auto-managed)
-make test-contract# contract snapshot diff against pinned platform
+make setup        # uv sync --all-groups
+make check        # lint + types (ruff check, ruff format --check, mypy)
+make test         # unit + integration
+make test-contract# contract snapshot diff against the pinned platform image
+make test-drift   # canned fixture VALUES vs live (shape is the contract test above)
 make test-idempotency # wire idempotency contract (MUTATES; last in the contract job)
-make test-e2e     # full compose e2e, spends tokens, use deliberately
-make eval         # full eval suite, writes report
-make eval-reg     # regression subset only
-make demo         # compose up + inject scenario + stream investigation
-make baseline     # recompute and commit eval baseline (deliberate act)
+make eval         # full offline eval suite, writes a report
+make eval-reg     # regression subset + the gate against the committed baseline
+make eval-live ONLY=<scenario>  # one live scenario. Spends money. ONLY is required
+make eval-smoke   # read-only smoke pass under the read-scoped smoke token
+make eval-reset   # clear leftover chaos state between runs
+make world-audit  # zero-LLM read-only check that the seeded world matches the baseline
+make world-dossier ONLY=<scenario>  # zero-LLM read of one scenario's fault world
+make demo         # compose the platform stack up. Nothing else — no eval, no scenario
+make demo-down    # stop it, keep the volumes
+make demo-destroy CONFIRM=1  # stop it and delete the volumes. Irreversible
+make bootstrap-token  # mint the agent's service-account token against a running stack
+make snapshot     # regenerate contracts/platform-tools.snapshot.json from live
+make baseline     # recompute and bless the eval baseline (deliberate act)
 ```
+
+Three notes the names do not carry. `make demo` is compose-up only — it never injects a
+scenario and never runs an eval. `make eval-reg` and `make baseline` **refuse** an `ONLY=`
+filter at parse time, because a filtered run must not be blessed over a full baseline.
+`make test-e2e` exists but is a stub that prints a TODO; the e2e tier is a Phase 8 deliverable.
 
 ## Configuration
 
-Environment variables, documented in `.env.example`, never committed with values:
+`.env.example` is the full, annotated list and `src/incident_commander/config.py` is the
+authority; `Settings` reads 33 variables. Values are never committed. The ones that decide
+how a run behaves:
 
 ```text
+# Models and roles
 ANTHROPIC_API_KEY        # required
 AGENT_MODEL              # default claude-sonnet-4-6
-JUDGE_MODEL              # pinned independently, changes require ADR note
-PLATFORM_MCP_URL         # MCP JSON-RPC endpoint (platform runs MCP as its own process)
+JUDGE_MODEL              # required, no default. Pinned independently; changes need an ADR note
+DEVELOPMENT_MODEL        # the model the `development` role uses
+BENCHMARK_MODEL          # the model the `benchmark` role uses — a measurement run pins this
+MODEL_ROLE               # which of the two above a run takes. `make eval MODEL_ROLE=…`
+INFERENCE_STRATEGY       # the planner-call seam (ADR 0036). Default `baseline`
+
+# Reaching the platform — THREE principals, and the split is load-bearing
+PLATFORM_MCP_URL         # MCP JSON-RPC endpoint (the platform runs MCP as its own process)
 PLATFORM_REST_URL        # versioned REST endpoint (same host as MCP today)
-PLATFORM_TOKEN           # scoped service-account token, least privilege
+PLATFORM_TOKEN           # the agent under test. Reads + actions:execute, and NOT chaos:invoke
+PLATFORM_CHAOS_TOKEN     # the evaluator that seeds, verifies and resets the world. Holds chaos:invoke
+PLATFORM_SMOKE_TOKEN     # read-only, for the smoke pass and the traffic generator
 PLATFORM_WEBHOOK_SECRET  # HMAC verification for alert ingress
-DATABASE_URL             # agent's own Postgres
-BUDGET_MAX_TOOL_CALLS    # per incident, default 25
-BUDGET_MAX_TOKENS        # per incident
-BUDGET_MAX_SECONDS       # per incident wall clock
-BUDGET_MAX_USD           # per incident hard cost ceiling
+
+# The agent's own state
+DATABASE_URL             # the agent's Postgres
+AGENT_ENABLED            # kill switch. false refuses new runs
+
+# Budgets — hard limits per incident (invariant 7)
+BUDGET_MAX_TOOL_CALLS    # default 25
+BUDGET_MAX_TOKENS        # default 500,000
+BUDGET_MAX_SECONDS       # default 1,800
+BUDGET_MAX_USD           # default 5.00
 ```
+
+The three-token split is why the withholding in platform ADR 0012 is reachable at all: an
+agent holding `chaos:invoke` can read the `chaos.` audit stream and so read which hook caused
+its own incident. Give `PLATFORM_TOKEN` only what the agent under test is meant to have.
+
+Not listed above, but real and documented in `.env.example`: the verification and re-probe
+timings (`VERIFY_PROBE_ATTEMPTS`, `VERIFY_PROBE_DELAY_SECONDS`, `INVESTIGATE_REPROBE_ATTEMPTS`,
+`INVESTIGATE_REPROBE_DELAY_SECONDS` — ADR 0006 and ADR 0009), the connection-pool bounds
+(ADR 0022), and the webhook limits. `.env.example` ships the probe timings *uncommented* at
+the values a live run wants, which are deliberately not the code defaults.
 
 ## Definition of Done (every PR)
 

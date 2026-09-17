@@ -74,6 +74,7 @@ halves live in ``KINDS``:
     evals/reports/runs/<YYYY-MM>/report.<stamp>.<id>.json
     evals/reports/baseline/baseline_report.<stamp>.<id>.{json,md}
     evals/reports/phase-close/phase_close_report.<stamp>.<id>.{json,md}
+    evals/reports/research/research_report.<stamp>.<id>.{json,md}
     evals/reports/dossiers/<scenario>/<scenario>.<stamp>.<id>.md
     evals/reports/human/<scenario>/<scenario>.<stamp>.<id>.txt
     evals/reports/human/_superseded/<scenario>/…     ← repeat renders of one run
@@ -224,6 +225,22 @@ KINDS: Final[dict[str, ArtifactKind]] = {
     ),
     "phase_close_report_md": ArtifactKind(
         ("evals", "reports"), ".md", fixed_stem="phase_close_report", folder="phase-close"
+    ),
+    # `make research-report --write` (evals/research_report.py) — the aggregate
+    # research report plan 03 § 15 defines: one leaderboard per model, grouped
+    # by the seven keys of WP-2.5, every difference beside its paired-trial
+    # count. Two kinds, one stem, one sub-folder, exactly as the two pairs
+    # above, and for the same reason they each got their own stem rather than
+    # riding on `report`: `newest("report")` is what the runner, the trace
+    # formatter and the regression gate resolve, and an aggregate filed under
+    # that stem would start answering "which run was last?" with a document
+    # that is not a run. This one summarises MANY runs; that is a different
+    # question, so it gets a different stem and its own `research/` folder.
+    "research_report": ArtifactKind(
+        ("evals", "reports"), ".json", fixed_stem="research_report", folder="research"
+    ),
+    "research_report_md": ArtifactKind(
+        ("evals", "reports"), ".md", fixed_stem="research_report", folder="research"
     ),
 }
 

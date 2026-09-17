@@ -45,6 +45,10 @@ help:
 	@echo "                   reads only, spends nothing, writes nothing. FORMAT: --format"
 	@echo "  phase-close-report  assemble the phase-close report (plan 03 section 14) from the"
 	@echo "                   committed archives; reads only, spends nothing. --write persists it"
+	@echo "  research-report  assemble the aggregate research report (plan 03 section 15) from the"
+	@echo "                   committed archives: one leaderboard per model, grouped by the seven"
+	@echo "                   WP-2.5 keys, every difference beside its paired-trial count."
+	@echo "                   Reads only, spends nothing. --write persists it; --scan lists scope"
 	@echo "  world-dossier    FREE (zero-LLM) pre-run reading of one scenario's fault world;"
 	@echo "                   ONLY=<name> REQUIRED, full scenario name. Seeds chaos, reads"
 	@echo "                   every probe the agent will make, lints, resets, re-audits."
@@ -64,7 +68,7 @@ help:
 inventory:
 	uv run python -m evals.inventory
 
-.PHONY: world-audit baseline-report phase-close-report
+.PHONY: world-audit baseline-report phase-close-report research-report
 world-audit:
 	PLATFORM_COMPOSE="$(PLATFORM_COMPOSE)" uv run python -m evals.world_audit --roots "$(ROOTS)"
 
@@ -73,6 +77,9 @@ baseline-report:
 
 phase-close-report:
 	uv run python -m evals.phase_close_report
+
+research-report:
+	uv run python -m evals.research_report
 
 setup:
 	uv sync --all-groups

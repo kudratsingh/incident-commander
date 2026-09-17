@@ -1568,6 +1568,50 @@ Every failed live-eval run gets bucketed *before* any code is opened:
 
 Skipping this step and jumping to code is how the seven-run cascade started.
 
+## The aggregate research report
+
+`make research-report` (`evals/research_report.py`) assembles the report plan 03 § 15 defines,
+from committed run archives only. It runs no eval, makes no LLM or platform call, and reads
+nothing that a re-bless or a scenario edit can move — so `--write` produces a versioned artifact
+under `evals/reports/research/` that a test regenerates byte for byte. Four rules in it are worth
+knowing before you read one.
+
+**One model per table, and it refuses rather than footnotes.** If the archives in scope name two
+`agent_model` ids, the assembler raises and names both, and the CLI exits 2 with nothing else
+printed. The rule and its wording are the regression gate's (`evals/regression.py::model_refusal`),
+because a delta across two models is a model change and a behaviour change added together, and no
+table can say which. Two model roles over the *same* model id are fine, and that is what the
+current scope is.
+
+**Every difference carries its paired-trial count.** A difference is a record — two arms, two
+values, the delta, how many scenarios were present in both arms, a fixed-seed paired bootstrap CI,
+and whether the pair count reached plan 03 § 10's floor of ~100 paired trials. Everything below the
+floor says so on its own line. Arms are paired only when they differ in exactly one of strategy,
+model role and execution mode; two arms apart in two keys are listed as not compared, with the keys
+named, because a delta between them has more than one candidate cause.
+
+**Seven grouping keys, read off the row.** strategy, scenario, template_id, family, difficulty,
+benchmark_split, execution_mode (`regression.GROUPING_KEYS`). They come off the row as it was
+written — never from today's scenario YAML, which would re-label a 2026-08 run with a 2026-09
+classification. A row that does not carry a key groups under `unknown`; it is a bucket, not a drop,
+because a dropped row takes its pass or fail out of the totals with it.
+
+**The scope is pinned by archive id**, and the report says what it cannot say. A scan of
+`evals/runs/` would restate a finished phase's numbers every time an unrelated archive merged; a
+later phase adds its archives to `SCOPE` and writes a *new* version beside the old one (invariant
+9). `--scan` lists the committed archives that carry provenance and are not in scope. What is
+missing is written into the artifact's `limits`: today that is one strategy, one model, one rep per
+live scenario, no recorded-world mode, and — the one that matters most — no root-cause number,
+because ROOT_CAUSE and the ground-truth labels both landed after every archive in scope was
+written.
+
+One nuance the report is careful about: a failed SAFETY dimension is not automatically a safety
+violation. SAFETY grades two rules at once — "did the agent touch something forbidden?" and "was
+the sanctioned action aimed at the right resource?" — and a run that escalated without acting fails
+the second while being incapable of failing the first. The forbidden-action rate of plan 03 § 7.7
+counts only the first, and every SAFETY failure is listed with its own detail so the split can be
+checked.
+
 ## What eval doesn't cover (yet)
 
 - **Adversarial robustness** — Phase 7. Injection payloads in log lines, DLQ bodies, trace metadata.

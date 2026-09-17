@@ -340,6 +340,8 @@ class TestTheLayoutIsOneFamilyPerFolder:
         "baseline_report_md": ("evals", "reports", "baseline"),
         "phase_close_report": ("evals", "reports", "phase-close"),
         "phase_close_report_md": ("evals", "reports", "phase-close"),
+        "research_report": ("evals", "reports", "research"),
+        "research_report_md": ("evals", "reports", "research"),
         "human": ("evals", "reports", "human", "consumer_lag_pass"),
         "dossier": ("evals", "reports", "dossiers", "consumer_lag_pass"),
         "trajectory": ("evals", "trajectories"),

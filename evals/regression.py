@@ -29,6 +29,11 @@ an ``all()`` over the dimensions, so deleting a check can only make the
 roll-up greener — a gate that reads pass/fail alone reports "no changes"
 in exactly the case it exists to catch.
 
+Three things here are shared rather than gate-only, and each is imported by
+``evals/research_report.py`` (WP-2.5) rather than copied: ``compare`` (what a
+scenario-level regression IS), ``model_refusal`` (why two models may not share
+a table), and ``GROUPING_KEYS`` (which rows may be set beside which).
+
 Exit codes — the gate's slice of the ADR 0013 contract: 0 = comparable
 full-suite input with no regressions and no coverage loss; 1 = gate failed
 (regression, dropped scenario, dropped dimension, or vacated assertion);
@@ -38,8 +43,10 @@ full-suite input with no regressions and no coverage loss; 1 = gate failed
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 from evals import artifacts
 from evals.graders.deterministic import DimensionResult, is_vacuous_detail
@@ -53,6 +60,60 @@ _BASELINE = _REPO_ROOT / "evals" / "reports" / "baseline.json"
 # copied reports directory would otherwise gate against whichever file the
 # filesystem happened to touch last.
 _REPORTS_DIR = _REPO_ROOT / "evals" / "reports"
+
+#: The seven keys a result may be grouped by (plan 04 WP-2.5, 03 § 15), in the
+#: order the workplan names them. They live here rather than in the report that
+#: prints them because they answer the same question ``compare`` below answers —
+#: *which rows may be set beside which* — and a second list of grouping keys
+#: somewhere else would be a second answer. ``strategy`` and ``execution_mode``
+#: come off the row's provenance; the middle five come off the row itself
+#: (``ScenarioOutcome``, WP-1.4), never off today's scenario YAML: re-deriving a
+#: 2026-08 run's family from the corpus as it stands now would silently re-label
+#: history.
+GROUPING_KEYS: Final[tuple[str, ...]] = (
+    "strategy",
+    "scenario",
+    "template_id",
+    "family",
+    "difficulty",
+    "benchmark_split",
+    "execution_mode",
+)
+
+#: What a grouping key reads as when the row does not carry it. Archived
+#: reports predate WP-1.4's metadata and ADR 0013's provenance, and both are
+#: append-only, so "unknown" is a permanent value of these keys rather than a
+#: transitional one. It is a bucket, not a drop: a row that fell out of the
+#: grouping would take its pass or fail out of the totals with it.
+UNKNOWN_GROUP: Final[str] = "unknown"
+
+
+def grouping_values(outcome: ScenarioOutcome) -> dict[str, str]:
+    """The seven grouping keys of one row, every value a string.
+
+    Numbers and enums are rendered here rather than by each caller so that two
+    readers cannot disagree about whether ``seed`` 0 and ``"0"`` are the same
+    group. ``None`` becomes ``UNKNOWN_GROUP`` for the reason given above it.
+    """
+    provenance = outcome.provenance
+    values = {
+        "strategy": provenance.strategy if provenance else None,
+        "scenario": outcome.scenario,
+        "template_id": outcome.template_id,
+        "family": outcome.family,
+        "difficulty": outcome.difficulty,
+        "benchmark_split": outcome.benchmark_split,
+        "execution_mode": provenance.execution_mode.value if provenance else None,
+    }
+    return {
+        key: UNKNOWN_GROUP if value in (None, "") else str(value) for key, value in values.items()
+    }
+
+
+def group_key(outcome: ScenarioOutcome) -> tuple[str, ...]:
+    """``grouping_values`` as a tuple in ``GROUPING_KEYS`` order — a dict key."""
+    values = grouping_values(outcome)
+    return tuple(values[key] for key in GROUPING_KEYS)
 
 
 @dataclass(frozen=True)
@@ -184,7 +245,7 @@ def _print_comparison(result: ComparisonResult) -> None:
         print("no changes vs baseline")
 
 
-def _models_in(report: RunReport) -> frozenset[str]:
+def models_in(report: RunReport) -> frozenset[str]:
     """Every ``agent_model`` id the report's rows name, ignoring the unknown.
 
     A row with no provenance predates the record (the committed baseline and
@@ -198,34 +259,49 @@ def _models_in(report: RunReport) -> frozenset[str]:
     )
 
 
-def cross_model_refusal(baseline: RunReport, latest: RunReport) -> str | None:
-    """Why these two reports cannot share a table, or ``None`` if they can.
+def model_refusal(sides: Mapping[str, frozenset[str]], *, remedy: str) -> str | None:
+    """Why these named sides cannot share a table, or ``None`` if they can.
 
     A leaderboard row is a claim about one model. Put two models' runs on it
     and every delta it shows — a regression, an improvement, a token count —
     is unattributable: the reader cannot tell a behaviour change from a model
     change, which is precisely the class of untrue statement about the agent
     that ``INCIDENTS.md`` exists to record after the fact. So this REFUSES
-    (exit 2, "not a comparable input") instead of warning: a warning above a
-    printed table is still a printed table.
+    instead of warning: a warning above a printed table is still a printed
+    table.
 
-    Both ids are named in the message, because the next action depends on
-    which side is wrong — re-run ``latest`` under the baseline's model, or
-    re-bless the baseline on the new one.
+    Every model id is named, and so is the side that carries it, because the
+    next action depends on which side is wrong. ``remedy`` is the one sentence
+    that differs between callers — the gate re-runs or re-blesses, the
+    aggregate report splits its scope — and it is the caller's because this
+    module must not guess what the reader is holding.
+
+    Taken out of ``cross_model_refusal`` for WP-2.5: the aggregate research
+    report has to refuse a mixed scope on exactly the same grounds, over N
+    archives rather than two reports, and a second copy of this rule would be
+    a second definition of what a comparable table is.
     """
-    models = _models_in(baseline) | _models_in(latest)
+    models = frozenset[str]().union(*sides.values()) if sides else frozenset[str]()
     if len(models) < 2:
         return None
     where = "; ".join(
-        f"{name}: {', '.join(sorted(_models_in(report))) or 'unknown'}"
-        for name, report in (("baseline", baseline), ("latest", latest))
+        f"{name}: {', '.join(sorted(found)) or 'unknown'}" for name, found in sides.items()
     )
     return (
         f"two agent models in one comparison: {', '.join(sorted(models))} ({where}). "
         "A leaderboard row holds one model — a delta across two is a model change "
-        "and a behaviour change added together, and the table cannot say which. "
-        "Re-run the new report under the other model, or re-bless the baseline on "
-        "this one via 'make baseline'."
+        f"and a behaviour change added together, and the table cannot say which. {remedy}"
+    )
+
+
+def cross_model_refusal(baseline: RunReport, latest: RunReport) -> str | None:
+    """The gate's half of ``model_refusal``: baseline vs latest, exit 2."""
+    return model_refusal(
+        {"baseline": models_in(baseline), "latest": models_in(latest)},
+        remedy=(
+            "Re-run the new report under the other model, or re-bless the baseline on "
+            "this one via 'make baseline'."
+        ),
     )
 
 

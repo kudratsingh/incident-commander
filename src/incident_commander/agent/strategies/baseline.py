@@ -133,6 +133,11 @@ class BaselineStrategy:
                     cache_read_tokens=call.cache_read_tokens,
                     cache_creation_tokens=call.cache_creation_tokens,
                     call_id=call.record_id,
+                    # Filled since WO-R3-260, from the client's own stopwatch.
+                    # ``None`` here is still a real answer — a canned client
+                    # does not time itself — and it is the strategy's job to
+                    # carry the measurement through, never to invent one.
+                    elapsed_ms=call.elapsed_ms,
                 ),
             ),
             planner_input_tokens=call.context_tokens,

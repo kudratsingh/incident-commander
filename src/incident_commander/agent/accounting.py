@@ -32,7 +32,13 @@ from pydantic import BaseModel
 
 from incident_commander.agent.state import BudgetLedger
 from incident_commander.agent.strategies.records import StepRecord, StepSink
-from incident_commander.llm.client import LLMClientProtocol, LLMError, LLMResult, LLMUsage
+from incident_commander.llm.client import (
+    LLMClientProtocol,
+    LLMError,
+    LLMResult,
+    LLMUsage,
+    elapsed_ms_of,
+)
 from incident_commander.llm.pricing import cost_of
 from incident_commander.llm.repair import RepairedCall
 
@@ -113,12 +119,17 @@ def accrue_structured_call(
 def _elapsed_ms(seconds: float) -> int:
     """Whole milliseconds, never negative. ``0`` is a measurement, not a gap.
 
-    Unlike ``StepRecord``'s ``elapsed_ms``, which is ``None`` because nothing
-    in ``llm/client.py`` times a call, this number is taken around the call
-    itself — so a canned call that really did take under half a millisecond
-    reports ``0`` and means it.
+    ``llm/client.py``'s own definition, used rather than repeated: since
+    WO-R3-260 the client times its logical calls too (``LLMResult.elapsed_ms``)
+    and a second rounding here would let the two latency columns disagree by a
+    millisecond for no reason a reader could explain.
+
+    This number is taken around the call from OUTSIDE the client, so it covers
+    every client — including the canned one, which does not time itself. A
+    canned call that really did take under half a millisecond reports ``0``
+    and means it.
     """
-    return max(round(seconds * 1000), 0)
+    return elapsed_ms_of(seconds)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -140,9 +151,12 @@ class LLMCallAccounting:
     role: str
     model: str
     #: Whether this role's calls reach ``BudgetLedger``. False for the
-    #: evaluator's own spend — the briefing judge grades the run and is not
-    #: part of it — which is why the reconciliation reads only the charged
-    #: subset and the report still reports both.
+    #: EVALUATOR's own spend and nothing else: the briefing judge grades the
+    #: run and is not part of it. Everything the agent itself buys is charged,
+    #: the briefing writer included since WO-R3-260 — it runs after the
+    #: terminal state, so it is metered and never gates (ADR 0015 § 4, as
+    #: amended). That is why the reconciliation reads only the charged subset
+    #: and the report still reports both.
     charged_to_ledger: bool = True
     input_tokens: int = 0
     output_tokens: int = 0

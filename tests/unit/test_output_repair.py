@@ -432,7 +432,7 @@ class TestTheBriefingWriter:
             ]
         )
         briefing = _briefing(run_state)
-        enriched = enrich_briefing(briefing, llm, model="m")
+        enriched, _ = enrich_briefing(briefing, llm, model="m", budget=run_state.budget)
         assert enriched.findings == "one row left"
         assert len(llm.calls) == 2
 
@@ -444,7 +444,7 @@ class TestTheBriefingWriter:
         )
         briefing = _briefing(run_state)
         with pytest.raises(OutputRepairExhausted):
-            enrich_briefing(briefing, llm, model="m")
+            enrich_briefing(briefing, llm, model="m", budget=run_state.budget)
         assert len(llm.calls) == 2
 
 

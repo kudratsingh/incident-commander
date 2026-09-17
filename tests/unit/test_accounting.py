@@ -603,11 +603,72 @@ class TestTheRunReportCarriesTheAccounting:
         ]
         assert [role.calls for role in accounting.by_role] == [2, 1]
 
-    def test_the_evaluator_s_own_spend_is_marked_as_such(self) -> None:
+    def test_the_agents_own_post_terminal_spend_is_charged(self) -> None:
+        """WO-R3-260: the briefing writer is the agent's cost, so it is charged.
+
+        The flag separates whose money a call is, not when the call happened.
+        ``briefing_writer`` writes the handoff the agent gives a human, on the
+        agent's model, after the terminal state — metered, and never a gate,
+        because the loop that could be gated has already stopped. The only
+        ``False`` left belongs to the evaluator (see the judge below).
+        """
         accounting = self._outcome().accounting
         assert accounting is not None
         charged = {role.role: role.charged_to_ledger for role in accounting.by_role}
-        assert charged == {"investigation_planner": True, "briefing_writer": False}
+        assert charged == {"investigation_planner": True, "briefing_writer": True}
+
+    def test_only_the_evaluators_own_role_stays_out_of_the_ledger(self) -> None:
+        """The judge grades the run; it is not part of it.
+
+        The same scenario with a briefing judge scripted. Two post-terminal
+        roles, one line between them, and the line is ownership: the writer is
+        the agent's, the judge is ours.
+        """
+        scenario = _accounted_scenario()
+        judged = scenario.model_copy(
+            update={
+                "canned_llm_responses": {
+                    **scenario.canned_llm_responses,
+                    "briefing_judge": [
+                        {
+                            "groundedness": 0.9,
+                            "actionability": 0.8,
+                            "reasoning": "names the group and the lag",
+                        }
+                    ],
+                }
+            }
+        )
+        accounting = run_scenario(judged, _eval_settings()).outcome.accounting
+        assert accounting is not None
+        charged = {role.role: role.charged_to_ledger for role in accounting.by_role}
+        assert charged == {
+            "investigation_planner": True,
+            "briefing_writer": True,
+            "briefing_judge": False,
+        }
+        # And it still reconciles: an uncharged role must be outside BOTH
+        # sides of the equality, never added to one of them.
+        assert accounting.reconciled is True
+
+    def test_the_post_terminal_charge_does_not_reach_the_graded_run(self) -> None:
+        """Metered, never gating — the runner's half of ADR 0015 § 4's amendment.
+
+        The briefing writer's charge lands on the ledger the row REPORTS, and
+        not on the ``RunState`` the grader reads. The BUDGET dimension grades
+        the agent's own run; a post-terminal charge deciding it would be a
+        ceiling applied to work the agent had already finished.
+        """
+        outcome = self._outcome()
+        budget = next(d for d in outcome.report.dimensions if d.dimension.value == "budget")
+        assert budget.passed
+        assert outcome.provenance is not None
+        # The canned writer bills nothing, so the two numbers agree here. What
+        # is pinned is that the row's ledger is the one the briefing call was
+        # charged to and the tool-call meter is untouched by it.
+        assert outcome.provenance.budget.tool_calls_used == outcome.tool_calls_used == 1
+        assert outcome.accounting is not None
+        assert outcome.accounting.ledger_tokens_used == outcome.provenance.budget.tokens_used
 
     def test_the_tool_calls_and_wall_time_come_from_the_ledger(self) -> None:
         outcome = self._outcome()
@@ -675,6 +736,43 @@ class TestTheRunReportCarriesTheAccounting:
         assert record.tool_calls == 3
         assert record.reconciled is True
         assert [role.role for role in record.by_role] == ["investigation_planner"]
+
+    def test_a_crash_after_the_briefing_reconciles_against_the_charged_ledger(self) -> None:
+        """WO-R3-260: the post-terminal charge is in no checkpoint.
+
+        A run that reached its terminal state, bought its briefing, and then
+        died in the grader has a charged split containing that call and a last
+        checkpoint written before it. Reconciling the two would print
+        ``COST UNRECONCILED`` over a run where nothing disagreed — so the
+        crash carries the ledger it charged, and the checkpoint is the
+        fallback for a crash that never got that far.
+        """
+        accounting = RunAccounting()
+        for role in ("investigation_planner", "briefing_writer"):
+            accounting.record_call(
+                LLMCallAccounting.of(
+                    role=role,
+                    model=_MODEL,
+                    usage=LLMUsage(input_tokens=1_000, output_tokens=200),
+                    elapsed_ms=120,
+                )
+            )
+        checkpoint = _investigating(
+            _ledger().model_copy(update={"tokens_used": 1_200, "usd_used": Decimal("0.006")}),
+            datetime(2026, 9, 17, tzinfo=UTC),
+        )
+        crash = ScenarioCrash(RuntimeError("grader blew up"), (checkpoint,))
+        crash.accounting = accounting
+        crash.ledger = checkpoint.budget.model_copy(
+            update={"tokens_used": 2_400, "usd_used": Decimal("0.012")}
+        )
+        record = _crashed_result(
+            _accounted_scenario(), crash, settings=_eval_settings()
+        ).outcome.accounting
+        assert record is not None
+        assert record.charged_tokens_used == 2_400
+        assert record.ledger_tokens_used == 2_400
+        assert record.reconciled is True
 
 
 class TestTheSummaryPrintsTheBill:

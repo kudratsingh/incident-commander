@@ -23,7 +23,9 @@ from __future__ import annotations
 
 from pydantic import ConfigDict, Field
 
+from incident_commander.agent.accounting import accrue_structured_call
 from incident_commander.agent.briefing import EscalationBriefing, render_trail
+from incident_commander.agent.state import BudgetLedger
 from incident_commander.llm.client import LLMClientProtocol
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.repair import call_with_output_repair
@@ -43,13 +45,34 @@ def enrich_briefing(
     briefing: EscalationBriefing,
     llm_client: LLMClientProtocol,
     model: str,
-) -> EscalationBriefing:
-    """Return a new briefing with ``findings`` and ``recommendation`` filled by an LLM.
+    *,
+    budget: BudgetLedger,
+) -> tuple[EscalationBriefing, BudgetLedger]:
+    """The briefing with ``findings`` and ``recommendation`` filled by an LLM,
+    and the run ledger with what that cost added to it.
 
-    Gets the same one bounded repair as the two planners (ADR 0035). There is
-    no ``BudgetLedger`` to charge here — enrichment runs after the run reaches
-    a terminal state and is outside the run ledger by ADR 0015 §4 — so the
-    repair's cost is visible where the rest of this call's cost is: the trace.
+    Gets the same one bounded repair as the two planners (ADR 0035), and both
+    legs are accrued the same way they are (``accrue_structured_call``).
+
+    **This is the agent's own cost and it is metered** (WO-R3-260, ADR 0015 § 4
+    as amended). It is written prose the handoff carries, bought with the
+    agent's model on the agent's behalf, and leaving it out made every
+    cost-per-run comparison undercount the agent by exactly one call. It is
+    **never a gate**: enrichment runs after the state machine has reached a
+    terminal state, so there is no ``is_exhausted`` check left for a ceiling to
+    trip, and the caller keeps this ledger beside the graded run rather than
+    putting it back on ``RunState`` — a post-terminal charge that reached the
+    graded state would be a budget dimension deciding an outcome the agent had
+    already finished.
+
+    Returning the ledger rather than taking a mutable one is the same shape
+    ``investigation._plan_next_step`` uses: the charge is visible in the
+    caller's own code, so a call site that forgets it is a type error rather
+    than a silent under-report.
+
+    On a raised call — a transport failure, or a repair that exhausted — the
+    caller charges what the failure itself billed with ``accrue_llm_error``,
+    exactly as the investigation loop does. Nothing is swallowed here.
     """
     call = call_with_output_repair(
         llm_client,
@@ -58,12 +81,13 @@ def enrich_briefing(
         output_model=BriefingContent,
         model=model,
     )
-    return briefing.model_copy(
+    enriched = briefing.model_copy(
         update={
             "findings": call.result.output.findings,
             "recommendation": call.result.output.recommendation,
         }
     )
+    return enriched, accrue_structured_call(budget, call, model)
 
 
 def _format_context(briefing: EscalationBriefing) -> str:

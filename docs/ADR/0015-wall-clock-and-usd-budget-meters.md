@@ -139,6 +139,9 @@ through the post-terminal path is exactly the scope creep this ADR declines. The
 in the trace files. If per-invocation total cost (run + briefing) is wanted later, it belongs in
 the eval report's own accounting, not in `BudgetLedger`.
 
+**Amended 2026-09-17 by WO-R3-260, for the briefing WRITER only. See the amendment at the end of
+this record.** The judge's half of this decision is unchanged and is now the whole of it.
+
 ### Why the alternatives lose
 
 **Amend invariant 7 (option 1).** This is the option that saves a day, and it is the wrong trade.
@@ -201,3 +204,85 @@ Related: ADR 0002 (hand-rolled state machine — the loop this meter lives in, a
 that makes `created_at` durable), ADR 0006 (verification is a polling window — the VERIFYING
 budget exemption this change inherits), CLAUDE.md invariant 7 (unchanged), and
 `docs/safety-model.md` §Budgets (its "Enforced by" column becomes true with this change).
+
+## Amendment, 2026-09-17 — post-terminal cost is metered, and still never gates (WO-R3-260)
+
+This amends sub-decision 4 for the briefing **writer**. Nothing above is rewritten; the reasoning
+that was true in August is still readable, and this section says which half of it stopped being
+the right answer and why.
+
+### What changed
+
+`evals/runner.py` now charges the `briefing_writer` role to the run's `BudgetLedger`.
+`enrich_briefing` takes the ledger and returns the ledger it charged, and the runner keeps that
+value beside the graded `RunState` rather than putting it back on it. The briefing **judge** stays
+outside, exactly as sub-decision 4 says.
+
+The rule this settles, in one line: **a ledger is a meter as well as a ceiling, and the two
+questions have different answers after a terminal state.** Metered, never gating.
+
+### Why the original answer was wrong in one half
+
+Sub-decision 4 asked "can a ceiling gate this call?", answered no — correctly — and then treated
+that as the answer to "should this call reach the ledger?". They are different questions, and the
+run's own ledger is where both live.
+
+The consequence was one-directional and it accumulated. Every run buys exactly one briefing-writer
+call, so every cost-per-run figure the harness produced undercounted the agent by one call, always
+in the same direction. For a baseline-only world that is a rounding error nobody acts on. For the
+strategy comparisons Phases 5 and 6 exist to make it is a bias: two arms whose real difference is
+a fraction of a call are compared after both have had a call removed, and the arm with fewer
+planner steps carries the larger relative error. WP-2.3 made that visible — it recorded the call
+with `charged_to_ledger: false` — and recording a gap is not closing one.
+
+"Its cost is visible in the trace files" was also less true than it read. A trace file exists only
+when `EVAL_TRACE_DIR` is set, which the whole offline suite does not set, so for every canned run
+the briefing writer's cost was visible nowhere at all.
+
+### Why it does not gate, and why that is structural rather than a promise
+
+`enrich_briefing` runs after `run_to_completion` has returned. There is no `is_exhausted` check
+left between it and the end of the run: the only reader of that predicate is `agent/loop.py`, and
+the loop has stopped. So the charge cannot change what the run did.
+
+That much was already true, and "nothing currently reads it" is the kind of guarantee that decays.
+The safeguard is which object holds the number. The runner keeps the post-terminal ledger in a
+local (`run_ledger`) and **never** writes it back onto the terminal `RunState`:
+
+* `grade(final, …)` reads `final`, so the BUDGET dimension is graded on the ledger the agent
+  finished with. A post-terminal charge deciding a dimension would be a ceiling applied to work
+  the agent had already completed — and, since `BUDGET_MAX_TOKENS` is a real bound, a big enough
+  briefing could otherwise turn a green run red for something the agent did after it was done.
+* `RunState` is a checkpoint (ADR 0002). A ledger mutated after the terminal state would be a
+  checkpoint written after the run ended, and a resumed run would read a budget it never spent.
+
+The provenance row and the accounting row on the report carry `run_ledger`, because that is the
+honest answer to "what did this run cost". The difference between the two numbers is exactly the
+metered-but-not-gating spend.
+
+### Consequences
+
+* `RunAccounting.reconciles_with` still holds, with the briefing call inside **both** sides: the
+  charged split and the ledger are built from the same `LLMUsage` objects by the same two
+  functions. The one legitimate divergence named in sub-decision 3's code (`repair._sum_usage`
+  carrying `discarded_max_tokens` as a maximum) is unchanged and now reachable on this path too,
+  in the same direction — the ledger over-reports, never under.
+* A failed enrichment is charged as well. The runner calls `accrue_llm_error` in the `except` arm,
+  the same helper the investigation loop uses, so a briefing writer that generated, billed and
+  then raised is not free.
+* `charged_to_ledger` now means what its name says: whose money a call is. `false` is the
+  **evaluator's** spend and nothing else. That is a narrower and more defensible line than "after
+  the terminal state", which put the agent's own prose on the evaluator's side of the ledger.
+* No canned outcome moves. `CannedLLMClient` reports zero usage by default, so the charge is zero
+  on the whole offline suite and `make eval-reg` reads `no changes vs baseline`. The number moves
+  on live runs, which is the point.
+* The revisit trigger above — "a decision to meter post-terminal briefing spend, which would need
+  its own accounting surface rather than an extension of `BudgetLedger`" — is answered, and
+  answered differently than it guessed. No new surface was needed. Keeping the post-terminal
+  ledger out of `RunState` is what the trigger was really protecting, and a returned value does
+  that without a second meter to reconcile against the first.
+
+Related, same work order: `LLMResult.elapsed_ms`. The client now times its own logical calls, so
+`StepRecord.llm_calls[].elapsed_ms` carries a real duration instead of the `None` WP-2.1 left
+there. It is a measurement, not a meter — nothing gates on it — and `None` still means "not
+measured", which is what a client that does not time itself honestly reports.

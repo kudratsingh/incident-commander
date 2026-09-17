@@ -5304,18 +5304,23 @@ class TestRootCauseCoverageIsReported:
         _print_summary(report)
         assert "root cause: 1/1 correct" in capsys.readouterr().out
 
-    def test_the_shipped_corpus_declares_no_ground_truth_yet(self) -> None:
-        """The honest baseline: coverage is 0, and the report must say so.
+    def test_the_shipped_corpus_reports_partial_root_cause_coverage(self) -> None:
+        """Coverage is 32 of 41, and the report must say so rather than round it.
 
-        Back-filling a guessed ground truth onto 41 scenarios that were
-        written without one would manufacture the very number this packet
-        exists to measure (``Scenario.ground_truth``'s own note). When a
-        scenario declares one, this test changes with it.
+        It was 0 of 41 until WO-R3-261, and the number moving is the packet's
+        whole point — but it did NOT move to 41. Nine scenarios carry a
+        recorded decision not to grade them on diagnosis (the tool-failure
+        tests, the harness control, the noise controls), because none of them
+        produces a diagnosis: a label there would fail the dimension for
+        correct behaviour. Coverage that reads 32/41 and says so is the honest
+        report; 41/41 bought by labelling worlds that have no answer would not
+        be.
         """
         shipped = _shipped()
         graded = [s.name for s in shipped if s.root_cause_graded]
         assert len(shipped) == 41, "the corpus size is read from the loader, never a literal"
-        assert graded == [], (
-            f"{graded} now declare a ground truth — update this test and report the "
-            "new root-cause accuracy in the PR body."
+        assert len(graded) == 32, (
+            f"{len(graded)} of {len(shipped)} scenarios declare a ground truth — update "
+            "this test, ``tests/unit/test_ground_truth_corpus.py``'s record and the "
+            "root-cause accuracy reported in the PR body together."
         )

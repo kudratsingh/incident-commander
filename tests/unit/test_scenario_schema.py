@@ -738,11 +738,15 @@ class TestTheGraderSideCanReadTheAnswerKey:
     def test_coverage_is_reportable_over_the_whole_corpus(self) -> None:
         corpus = load_scenarios(_SCENARIOS_DIR)
         graded = [s.name for s in corpus if s.root_cause_graded]
-        # None yet, by design: the fields land before the scenarios that use
-        # them (WP-1.6 opened the taxonomy; the families follow). The number
-        # is what WP-2.2's report prints, and it starts honest at zero rather
-        # than back-filled with a guess.
-        assert graded == []
+        # 32 of 41 since WO-R3-261, which wrote a decision for every scenario
+        # from the world it manufactures. The other nine are recorded
+        # abstentions rather than omissions — the tool-failure tests, the
+        # harness control and the noise controls, none of which produces a
+        # diagnosis to grade. WHICH scenarios, and why each one, is pinned by
+        # ``tests/unit/test_ground_truth_corpus.py``; what this asserts is only
+        # that the predicate the report is built from can still be computed
+        # over the whole corpus and is no longer vacuous.
+        assert len(graded) == 32
         assert len(corpus) >= 41
 
 

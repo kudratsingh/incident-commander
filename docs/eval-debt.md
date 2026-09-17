@@ -1,15 +1,5 @@
 # Eval-debt ledger
 
-> **Closed — this is a historical record, not the current protocol (2026-09-15).**
-> The campaign eval freeze ([ADR 0011](ADR/0011-campaign-eval-freeze.md)) ended when the
-> regression baseline was blessed over the current 41-scenario corpus. **Invariant 8 is back
-> in force**: a PR that touches a behaviour surface runs `make eval-reg` before it merges,
-> and `.github/workflows/evals.yml` gates it. Nothing new is appended below. The rows are
-> kept because the "Restart walk" section at the bottom is where each one was dispositioned,
-> and that walk is the answer to what the first post-freeze eval actually validated.
->
-> Everything from here down is written in the present tense of the freeze. Read it that way.
-
 During the campaign eval freeze
 ([ADR 0011](ADR/0011-campaign-eval-freeze.md)), behavior-surface PRs merge without
 pre-merge eval evidence. This ledger is where each one records its debt.

@@ -1,0 +1,148 @@
+{
+  "scenario": "consumer_lag_shipping_extreme",
+  "incident_id": "79bdc3c1-1e19-42af-a6de-bbf5075cf715",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "79bdc3c1-1e19-42af-a6de-bbf5075cf715",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "shipping-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T10:35:49.371317Z",
+      "updated_at": "2026-09-17T10:35:49.371317Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "79bdc3c1-1e19-42af-a6de-bbf5075cf715",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "shipping-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000038,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "edc0ea8b-f381-488e-a06e-4b876a12472a",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T10:35:49.371355Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T10:35:49.371317Z",
+      "updated_at": "2026-09-17T10:35:49.371355Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "79bdc3c1-1e19-42af-a6de-bbf5075cf715",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "shipping-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000053,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "edc0ea8b-f381-488e-a06e-4b876a12472a",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T10:35:49.371355Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "047ee5a2-de0a-4422-87fa-cca5449c2637",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "shipping-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"shipping-consumer\",\"lag\":100000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:shipping-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}",
+          "timestamp": "2026-09-17T10:35:49.371370Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "6a09b35f-1179-490c-b15c-36e4dd96ab76",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "extreme backlog; escalate for outage response"
+          },
+          "result_summary": "planner stop: extreme backlog; escalate for outage response",
+          "timestamp": "2026-09-17T10:35:49.371370Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "unknown",
+          "name": "consumer_outage",
+          "confidence": 0.9,
+          "reasoning": "Lag of 2500000 is far beyond a slow-consumer explanation; the consumer likely stopped processing entirely.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T10:35:49.371317Z",
+      "updated_at": "2026-09-17T10:35:49.371370Z"
+    }
+  ],
+  "invocation_id": "32ae38f6b38b"
+}

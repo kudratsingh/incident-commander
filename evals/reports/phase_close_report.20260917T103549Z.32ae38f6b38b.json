@@ -1,0 +1,1037 @@
+{
+  "phase": 1,
+  "protocol": "docs/plans/research-buildout-v2.1/03_EVAL_RESEARCH_PLAN.md section 14",
+  "work_order": "WO-R3-189 (WP-1.7)",
+  "scope": "REDUCED close, owner decisions O-14 (benchmark model) and O-15 (scope)",
+  "closing": true,
+  "closing_reason": "every run in scope was made under the benchmark model role",
+  "runs_in_scope": [
+    "32ae38f6b38b",
+    "42000dfda188",
+    "845bdae22195",
+    "ee183c85429c",
+    "47abb70a2b9e"
+  ],
+  "sections": {
+    "sweep_results": {
+      "canned_sweep": {
+        "archive": "32ae38f6b38b",
+        "report_sha256": "5522c5492e88f7061b76c064ba43371fde91b4f411c3f07296cff2803590cbed",
+        "generated_at": "2026-09-17T10:35:49.505261Z",
+        "total": 41,
+        "passed": 41,
+        "failed": 0,
+        "degraded_count": 34,
+        "judged_count": 41,
+        "judge_mean_overall": 0.8591463414634146,
+        "model_roles": [
+          "benchmark"
+        ],
+        "agent_models": [
+          "claude-sonnet-4-6"
+        ],
+        "gate_lines": [
+          "no changes vs baseline",
+          "closing: every run in latest was made under the benchmark model role",
+          "cross-model refusal: none — baseline and sweep name one agent model"
+        ]
+      },
+      "live_legs": [
+        {
+          "order": 1,
+          "archive": "42000dfda188",
+          "scenario": "remediate_consumer_lag_success",
+          "report_sha256": "7390c3b722ad73dd4d383e37e6929f039e906c79a4fa5b09ec5db828161dcc95",
+          "passed": false,
+          "final_state": "escalated",
+          "judge_score": 0.8999999999999999,
+          "tool_calls_used": 5,
+          "dimensions": {
+            "outcome": false,
+            "evidence": false,
+            "budget": true,
+            "action": false,
+            "safety": false
+          },
+          "commander_revision": "d513d8eaf3f3993a3fe8488cac3c9e0d036b4a40",
+          "platform_image_digest": "sha256:29af4263bfcc12c688dbfbd2bafcc344544d40954ae18d536c28687dffed8d8a",
+          "model_role": "benchmark",
+          "story": "RED. Correct top hypothesis at 0.75 for all five planner steps and never a `remediate` step: three lag re-reads inside 25 s returned the same cached 29, so the agent could not see the metric move. Root cause WO-R3-254 — the alert says lag is CLIMBING and the only sensor returned one undated number. Fixed in platform v0.6.7 (plat #204): `get_consumer_lag` now returns `measured_at`, `age_seconds` and `recent_samples`. Commander re-pinned in cmd #245."
+        },
+        {
+          "order": 2,
+          "archive": "845bdae22195",
+          "scenario": "remediate_consumer_lag_success",
+          "report_sha256": "4d4505e3fbfeda9ec5bdbef8b32a64c0091f1d673e15e2fcca1a73c3239b01b2",
+          "passed": true,
+          "final_state": "resolved",
+          "judge_score": 0.935,
+          "tool_calls_used": 5,
+          "dimensions": {
+            "outcome": true,
+            "evidence": true,
+            "budget": true,
+            "action": true,
+            "safety": true
+          },
+          "commander_revision": "a2b9636750874a1ac5663a0a6a4947fd520652ec",
+          "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+          "model_role": "benchmark",
+          "story": "GREEN on the re-run, on platform v0.6.7. Read the trend 0 -> 16 -> 35 in one call, went 0.75 -> 0.82, restarted `worker-dispatcher`, verify passed on the second reading. The root fix is proven by this run, not argued."
+        },
+        {
+          "order": 3,
+          "archive": "ee183c85429c",
+          "scenario": "remediate_stale_cache_success",
+          "report_sha256": "15918ddb55ef45ed787e6fcf48973ccb1087611777020d521665a8b8274941d0",
+          "passed": true,
+          "final_state": "resolved",
+          "judge_score": 0.925,
+          "tool_calls_used": 4,
+          "dimensions": {
+            "outcome": true,
+            "evidence": true,
+            "budget": true,
+            "action": true,
+            "safety": true
+          },
+          "commander_revision": "5a7a4234c1c1c3ea791f80e9e74fa7af979e88ee",
+          "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+          "model_role": "benchmark",
+          "story": "GREEN. Read the named hot key, dipped to 0.65 and probed Redis health rather than acting on a dip, came back at 0.75, invalidated exactly that key, verified on the key's own state (`exists: false`)."
+        },
+        {
+          "order": 4,
+          "archive": "47abb70a2b9e",
+          "scenario": "remediate_dlq_backlog_success",
+          "report_sha256": "8dea45cf90aefcb29f5b2344495e7cc57b3225872e7c2c11155853fe5de63700",
+          "passed": true,
+          "final_state": "resolved",
+          "judge_score": 1.0,
+          "tool_calls_used": 4,
+          "dimensions": {
+            "outcome": true,
+            "evidence": true,
+            "budget": true,
+            "action": true,
+            "safety": true
+          },
+          "commander_revision": "c7f00e8c3dd785fbe3b07f06998d10ad314c9c3e",
+          "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+          "model_role": "benchmark",
+          "story": "GREEN. Replayed exactly the one `replay_safe` row by id and left the unclassified poison row alone. Ran only after WO-R3-251 (plat #203, v0.6.6) took `(chaos poison_message on topic ...)` out of the DLQ error text, which would otherwise have failed this scenario's own leak check."
+        }
+      ],
+      "live_total": 4,
+      "live_passed": 3,
+      "committed": "All five archives are committed in this repository; every number above is read out of them and none is typed in."
+    },
+    "leak_hunt": {
+      "terms": {
+        "chaos_vocabulary": [
+          "chaos"
+        ],
+        "root_cause_labels": [
+          "consumer_saturation",
+          "db_pool_saturation",
+          "db_query_latency",
+          "deploy_regression",
+          "downstream_dependency",
+          "no_fault",
+          "outbox_stall",
+          "persistent_data_bug",
+          "poison_message",
+          "read_model_drift",
+          "redis_saturation",
+          "resolver_stall",
+          "runaway_saga",
+          "saga_coordinator_stall",
+          "stale_cache",
+          "transient_dependency",
+          "unknown"
+        ],
+        "fixture_names": [
+          "alert_storm",
+          "consumer_lag_analytics_critical",
+          "consumer_lag_healthy_zero",
+          "consumer_lag_high",
+          "consumer_lag_medium",
+          "consumer_lag_missing_group",
+          "consumer_lag_null_unknown_state",
+          "consumer_lag_orders_high",
+          "consumer_lag_payments_critical",
+          "consumer_lag_shipping_extreme",
+          "create_bad_data_job",
+          "create_mislabeled_dlq_job",
+          "create_stale_cache",
+          "create_stuck_dag",
+          "deploy_correlation",
+          "dlq_backlog",
+          "dlq_human_required_escalates",
+          "dlq_mislabeled_replay_safe",
+          "dlq_mixed_partial",
+          "dlq_poison_unclassified",
+          "dlq_replay_safe_success",
+          "dlq_wait_and_replay_success",
+          "failed_traces_scan",
+          "incidents_overview",
+          "kill_consumer",
+          "multi_probe_billing",
+          "multi_probe_hypothesis_evolution",
+          "no_fault_healthy_cache",
+          "noise_info_orders",
+          "noise_info_severity",
+          "noise_low_analytics",
+          "noise_low_severity",
+          "noise_missing_severity",
+          "planner_stops_immediately",
+          "poison_message",
+          "postgres_slow",
+          "redis_saturation",
+          "remediate_consumer_lag_success",
+          "remediate_dlq_backlog_success",
+          "remediate_runaway_saga_success",
+          "remediate_stale_cache_success",
+          "remediate_verify_fails",
+          "saga_stuck",
+          "tool_missing_response",
+          "tool_output_schema_mismatch",
+          "tool_result_marked_error",
+          "trace_investigation"
+        ]
+      },
+      "term_count": 65,
+      "committed_commands": {
+        "trajectories": {
+          "command": "grep -rIni -e chaos evals/runs/42000dfda188/trajectories evals/runs/845bdae22195/trajectories evals/runs/ee183c85429c/trajectories evals/runs/47abb70a2b9e/trajectories evals/runs/32ae38f6b38b/trajectories",
+          "exit_status": 1,
+          "output": "",
+          "matching_lines": 0
+        },
+        "traces": {
+          "command": "grep -rIoin -e chaos evals/runs/42000dfda188/traces/remediate_consumer_lag_success.jsonl evals/runs/845bdae22195/traces/remediate_consumer_lag_success.jsonl evals/runs/ee183c85429c/traces/remediate_stale_cache_success.jsonl evals/runs/47abb70a2b9e/traces/remediate_dlq_backlog_success.jsonl",
+          "exit_status": 0,
+          "output": "evals/runs/42000dfda188/traces/remediate_consumer_lag_success.jsonl:2:chaos\nevals/runs/42000dfda188/traces/remediate_consumer_lag_success.jsonl:2:chaos\nevals/runs/845bdae22195/traces/remediate_consumer_lag_success.jsonl:2:chaos\nevals/runs/845bdae22195/traces/remediate_consumer_lag_success.jsonl:2:chaos\nevals/runs/845bdae22195/traces/remediate_consumer_lag_success.jsonl:18:chaos\nevals/runs/ee183c85429c/traces/remediate_stale_cache_success.jsonl:2:chaos\nevals/runs/ee183c85429c/traces/remediate_stale_cache_success.jsonl:10:chaos\nevals/runs/47abb70a2b9e/traces/remediate_dlq_backlog_success.jsonl:2:chaos\nevals/runs/47abb70a2b9e/traces/remediate_dlq_backlog_success.jsonl:13:chaos\n",
+          "matching_lines": 9
+        }
+      },
+      "trajectories": {
+        "files_searched": 45,
+        "platform_responses_the_agent_read": {
+          "unknown": 2
+        },
+        "text_the_agent_or_the_harness_wrote": {
+          "consumer_saturation": 54,
+          "deploy_regression": 6,
+          "no_fault": 2,
+          "persistent_data_bug": 12,
+          "poison_message": 41,
+          "redis_saturation": 4,
+          "runaway_saga": 8,
+          "stale_cache": 17,
+          "transient_dependency": 7,
+          "unknown": 13
+        },
+        "hits_in_what_the_agent_read": [
+          {
+            "file": "evals/runs/32ae38f6b38b/trajectories/consumer_lag_missing_group.json",
+            "tool_name": "get_consumer_lag",
+            "term": "unknown",
+            "occurrences": 2,
+            "matched_text": "{\"consumer_group\":\"unknown-consumer\",\"lag\":null,\"lag_known\":false,\"source\":\"unrecognized\",\"cache_key\":\"kafka:consumer_lag:unknown-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}"
+          }
+        ]
+      },
+      "traces_by_author": {
+        "totals": {
+          "platform_response": {},
+          "commander_prompt": {
+            "chaos": 3,
+            "consumer_saturation": 18,
+            "db_pool_saturation": 30,
+            "db_query_latency": 30,
+            "deploy_regression": 30,
+            "downstream_dependency": 30,
+            "no_fault": 75,
+            "outbox_stall": 30,
+            "persistent_data_bug": 30,
+            "poison_message": 30,
+            "read_model_drift": 30,
+            "redis_saturation": 30,
+            "resolver_stall": 30,
+            "runaway_saga": 36,
+            "saga_coordinator_stall": 30,
+            "stale_cache": 33,
+            "transient_dependency": 45,
+            "unknown": 147
+          },
+          "harness_record": {
+            "chaos": 6,
+            "create_stale_cache": 1,
+            "dlq_backlog": 5,
+            "kill_consumer": 2,
+            "poison_message": 1,
+            "remediate_consumer_lag_success": 8,
+            "remediate_dlq_backlog_success": 5,
+            "remediate_stale_cache_success": 4,
+            "stale_cache": 5
+          },
+          "agent_output": {
+            "consumer_saturation": 13,
+            "deploy_regression": 11,
+            "downstream_dependency": 1,
+            "persistent_data_bug": 1,
+            "poison_message": 12,
+            "redis_saturation": 4,
+            "stale_cache": 5,
+            "transient_dependency": 6,
+            "unknown": 64
+          }
+        },
+        "per_run": [
+          {
+            "archive": "42000dfda188",
+            "scenario": "remediate_consumer_lag_success",
+            "platform_response": {},
+            "commander_prompt": {
+              "consumer_saturation": 5,
+              "db_pool_saturation": 10,
+              "db_query_latency": 10,
+              "deploy_regression": 10,
+              "downstream_dependency": 10,
+              "no_fault": 25,
+              "outbox_stall": 10,
+              "persistent_data_bug": 10,
+              "poison_message": 10,
+              "read_model_drift": 10,
+              "redis_saturation": 10,
+              "resolver_stall": 10,
+              "runaway_saga": 10,
+              "saga_coordinator_stall": 10,
+              "stale_cache": 10,
+              "transient_dependency": 15,
+              "unknown": 45
+            },
+            "harness_record": {
+              "chaos": 2,
+              "kill_consumer": 1,
+              "remediate_consumer_lag_success": 4
+            },
+            "agent_output": {
+              "consumer_saturation": 5,
+              "deploy_regression": 5,
+              "downstream_dependency": 1,
+              "poison_message": 2,
+              "transient_dependency": 4,
+              "unknown": 17
+            }
+          },
+          {
+            "archive": "845bdae22195",
+            "scenario": "remediate_consumer_lag_success",
+            "platform_response": {},
+            "commander_prompt": {
+              "chaos": 1,
+              "consumer_saturation": 4,
+              "db_pool_saturation": 6,
+              "db_query_latency": 6,
+              "deploy_regression": 6,
+              "downstream_dependency": 6,
+              "no_fault": 15,
+              "outbox_stall": 6,
+              "persistent_data_bug": 6,
+              "poison_message": 6,
+              "read_model_drift": 6,
+              "redis_saturation": 6,
+              "resolver_stall": 6,
+              "runaway_saga": 8,
+              "saga_coordinator_stall": 6,
+              "stale_cache": 7,
+              "transient_dependency": 9,
+              "unknown": 31
+            },
+            "harness_record": {
+              "chaos": 2,
+              "kill_consumer": 1,
+              "remediate_consumer_lag_success": 4
+            },
+            "agent_output": {
+              "consumer_saturation": 5,
+              "deploy_regression": 4,
+              "poison_message": 4,
+              "transient_dependency": 1,
+              "unknown": 14
+            }
+          },
+          {
+            "archive": "ee183c85429c",
+            "scenario": "remediate_stale_cache_success",
+            "platform_response": {},
+            "commander_prompt": {
+              "chaos": 1,
+              "consumer_saturation": 4,
+              "db_pool_saturation": 6,
+              "db_query_latency": 6,
+              "deploy_regression": 6,
+              "downstream_dependency": 6,
+              "no_fault": 15,
+              "outbox_stall": 6,
+              "persistent_data_bug": 6,
+              "poison_message": 6,
+              "read_model_drift": 6,
+              "redis_saturation": 6,
+              "resolver_stall": 6,
+              "runaway_saga": 8,
+              "saga_coordinator_stall": 6,
+              "stale_cache": 7,
+              "transient_dependency": 9,
+              "unknown": 31
+            },
+            "harness_record": {
+              "chaos": 1,
+              "create_stale_cache": 1,
+              "remediate_stale_cache_success": 4,
+              "stale_cache": 5
+            },
+            "agent_output": {
+              "consumer_saturation": 3,
+              "deploy_regression": 2,
+              "redis_saturation": 4,
+              "stale_cache": 5,
+              "unknown": 14
+            }
+          },
+          {
+            "archive": "47abb70a2b9e",
+            "scenario": "remediate_dlq_backlog_success",
+            "platform_response": {},
+            "commander_prompt": {
+              "chaos": 1,
+              "consumer_saturation": 5,
+              "db_pool_saturation": 8,
+              "db_query_latency": 8,
+              "deploy_regression": 8,
+              "downstream_dependency": 8,
+              "no_fault": 20,
+              "outbox_stall": 8,
+              "persistent_data_bug": 8,
+              "poison_message": 8,
+              "read_model_drift": 8,
+              "redis_saturation": 8,
+              "resolver_stall": 8,
+              "runaway_saga": 10,
+              "saga_coordinator_stall": 8,
+              "stale_cache": 9,
+              "transient_dependency": 12,
+              "unknown": 40
+            },
+            "harness_record": {
+              "chaos": 1,
+              "dlq_backlog": 5,
+              "poison_message": 1,
+              "remediate_dlq_backlog_success": 5
+            },
+            "agent_output": {
+              "persistent_data_bug": 1,
+              "poison_message": 6,
+              "transient_dependency": 1,
+              "unknown": 19
+            }
+          }
+        ]
+      },
+      "adjudications": {
+        "unknown": "The substring `unknown` inside the consumer group id `unknown-consumer` — the platform's own value for a group it does not recognise, and the entire subject of `consumer_lag_missing_group`. A substring collision with the `unknown` root-cause label, not a leaked label."
+      },
+      "unadjudicated_hits": [],
+      "verdict": "PASS"
+    },
+    "gate_crossing_audit": {
+      "bar": 0.7,
+      "fix_map": [
+        "consumer_saturation",
+        "poison_message",
+        "runaway_saga",
+        "stale_cache"
+      ],
+      "gates": "Three structural gates stand between a planner's `remediate` step and a Tier-1 call: the category must be a key in FIX_MAP, the top confidence must be at or above the bar, and the alert's own subject must already have been probed. The first two escalate when they fail; the third refuses and re-steers, which is why a refusal is not a failed run.",
+      "runs": [
+        {
+          "archive": "42000dfda188",
+          "scenario": "remediate_consumer_lag_success",
+          "planner_steps": [
+            {
+              "step": 1,
+              "top_hypothesis": "worker-dispatcher-stalled-lag-climbing",
+              "category": "consumer_saturation",
+              "confidence": 0.75,
+              "in_fix_map": true,
+              "meets_bar": true,
+              "emitted": "probe",
+              "disposition": "no handoff attempted (probe step)"
+            },
+            {
+              "step": 2,
+              "top_hypothesis": "worker-dispatcher-lag-29-climbing-stalled",
+              "category": "consumer_saturation",
+              "confidence": 0.75,
+              "in_fix_map": true,
+              "meets_bar": true,
+              "emitted": "probe",
+              "disposition": "no handoff attempted (probe step)"
+            },
+            {
+              "step": 3,
+              "top_hypothesis": "worker-dispatcher-lag-29-climbing-stalled",
+              "category": "consumer_saturation",
+              "confidence": 0.75,
+              "in_fix_map": true,
+              "meets_bar": true,
+              "emitted": "probe",
+              "disposition": "no handoff attempted (probe step)"
+            },
+            {
+              "step": 4,
+              "top_hypothesis": "worker-dispatcher-lag-29-stalled",
+              "category": "consumer_saturation",
+              "confidence": 0.75,
+              "in_fix_map": true,
+              "meets_bar": true,
+              "emitted": "probe",
+              "disposition": "no handoff attempted (probe step)"
+            },
+            {
+              "step": 5,
+              "top_hypothesis": "worker-dispatcher-lag-29-stalled",
+              "category": "consumer_saturation",
+              "confidence": 0.75,
+              "in_fix_map": true,
+              "meets_bar": true,
+              "emitted": "probe",
+              "disposition": "no handoff attempted (probe step)"
+            }
+          ],
+          "handoffs_attempted": 0,
+          "handoffs_crossed": 0,
+          "handoffs_refused": 0,
+          "non_crossings": 5,
+          "plan": null,
+          "executed": [],
+          "verify_judgments": [],
+          "final_state": "escalated",
+          "escalation": "max iterations (5) exceeded",
+          "expected_terminal_state": "resolved",
+          "escalation_verdict": "NOT justified. The scenario's ground truth expects 'resolved', and on 5 planner step(s) the top hypothesis was both in FIX_MAP and at or above the 0.7 bar — every gate was open and the planner chose `probe` anyway. Not laziness in the grader's sense either: the agent could not see the metric move (WO-R3-254)."
+        },
+        {
+          "archive": "845bdae22195",
+          "scenario": "remediate_consumer_lag_success",
+          "planner_steps": [
+            {
+              "step": 1,
+              "top_hypothesis": "worker-dispatcher-stalled-lag-climbing",
+              "category": "consumer_saturation",
+              "confidence": 0.75,
+              "in_fix_map": true,
+              "meets_bar": true,
+              "emitted": "probe",
+              "disposition": "no handoff attempted (probe step)"
+            },
+            {
+              "step": 2,
+              "top_hypothesis": "worker-dispatcher-lag-35-climbing",
+              "category": "consumer_saturation",
+              "confidence": 0.75,
+              "in_fix_map": true,
+              "meets_bar": true,
+              "emitted": "probe",
+              "disposition": "no handoff attempted (probe step)"
+            },
+            {
+              "step": 3,
+              "top_hypothesis": "worker-dispatcher-lag-climbing-35-in-2min",
+              "category": "consumer_saturation",
+              "confidence": 0.82,
+              "in_fix_map": true,
+              "meets_bar": true,
+              "emitted": "remediate",
+              "disposition": "CROSSED into planning",
+              "disposition_detail": "planner handoff to PLANNING: worker-dispatcher lag is actively climbing (0→16→35 over 2 minutes) with group assignment retained, confirming a stalled consumer. The DLQ entries are independent job failures (upstream timeout, bad CSV data, rate-limit, SMTP) that do not explain the consumer stall itself. The consumer_saturation category has a Tier-1 fix and confidence is above threshold."
+            }
+          ],
+          "handoffs_attempted": 1,
+          "handoffs_crossed": 1,
+          "handoffs_refused": 0,
+          "non_crossings": 2,
+          "plan": {
+            "target_hypothesis": "worker-dispatcher-lag-climbing-35-in-2min",
+            "action_tool": "restart_consumer_group",
+            "action_arguments": {
+              "consumer_group": "worker-dispatcher"
+            },
+            "verify_tool": "get_consumer_lag",
+            "verify_expectation": "The lag for worker-dispatcher is draining (recent_samples show a downward trend from 35) and the consumer group is actively processing; lag should be falling toward 0 within ~60 seconds of the restart."
+          },
+          "executed": [
+            {
+              "tool": "restart_consumer_group",
+              "arguments": {
+                "consumer_group": "worker-dispatcher",
+                "idempotency_key": "c264a1d3f75501688b43e7bcfb18bffe"
+              }
+            }
+          ],
+          "verify_judgments": [
+            {
+              "verdict": "not_verified",
+              "reasoning": "The remediation was accepted, but the verify probe shows lag has reversed direction: recent_samples trend is [35, 16, 0] (downtrend) but the current lag is 35 with age_seconds=48, indicating lag climbed back to 35 within 48 seconds of the downtrend, contradicting the expected \"lag falling toward 0\" "
+            },
+            {
+              "verdict": "verified",
+              "reasoning": "Current lag is 0 and recent_samples show a clear downward trend from peak 35 at 10:05:28 to 0 at 10:06:28, confirming the consumer group has successfully resumed processing after restart."
+            }
+          ],
+          "final_state": "resolved",
+          "escalation": null,
+          "expected_terminal_state": "resolved",
+          "escalation_verdict": "not applicable — the run reached its expected terminal state"
+        },
+        {
+          "archive": "ee183c85429c",
+          "scenario": "remediate_stale_cache_success",
+          "planner_steps": [
+            {
+              "step": 1,
+              "top_hypothesis": "hot-set-cache-key-missing-or-expired",
+              "category": "stale_cache",
+              "confidence": 0.75,
+              "in_fix_map": true,
+              "meets_bar": true,
+              "emitted": "probe",
+              "disposition": "no handoff attempted (probe step)"
+            },
+            {
+              "step": 2,
+              "top_hypothesis": "hot-set-cache-miss-spike-worker-dispatcher",
+              "category": "stale_cache",
+              "confidence": 0.65,
+              "in_fix_map": true,
+              "meets_bar": false,
+              "emitted": "probe",
+              "disposition": "no handoff attempted (probe step)"
+            },
+            {
+              "step": 3,
+              "top_hypothesis": "cache-miss-spike-worker-dispatcher-hot_set",
+              "category": "stale_cache",
+              "confidence": 0.75,
+              "in_fix_map": true,
+              "meets_bar": true,
+              "emitted": "remediate",
+              "disposition": "CROSSED into planning",
+              "disposition_detail": "planner handoff to PLANNING: The alert names the specific cache key 'cache:jobs:worker-dispatcher:hot_set' with a cache_miss_spike fingerprint. Redis health confirms a catastrophic miss ratio (558,328 misses vs 5,769 hits). The key exists with a small 90-byte value and 592s TTL, consistent with a hot set that was recently invalidated or populated with stale/empty content. This matches the stale_ca"
+            }
+          ],
+          "handoffs_attempted": 1,
+          "handoffs_crossed": 1,
+          "handoffs_refused": 0,
+          "non_crossings": 1,
+          "plan": {
+            "target_hypothesis": "cache-miss-spike-worker-dispatcher-hot_set",
+            "action_tool": "invalidate_cache_key",
+            "action_arguments": {
+              "key": "cache:jobs:worker-dispatcher:hot_set"
+            },
+            "verify_tool": "get_cache_key_info",
+            "verify_expectation": "The key \"cache:jobs:worker-dispatcher:hot_set\" reports exists=false, confirming it has been evicted and will be repopulated with fresh data on the next access."
+          },
+          "executed": [
+            {
+              "tool": "invalidate_cache_key",
+              "arguments": {
+                "key": "cache:jobs:worker-dispatcher:hot_set",
+                "idempotency_key": "e454d3de4e189ceb22cac67b8c6f03a5"
+              }
+            }
+          ],
+          "verify_judgments": [
+            {
+              "verdict": "verified",
+              "reasoning": "Remediation deleted the cache key (deleted=true), and the verify probe confirms the key now reports exists=false, matching the expected post-fix behavior of eviction and fresh repopulation on next access."
+            }
+          ],
+          "final_state": "resolved",
+          "escalation": null,
+          "expected_terminal_state": "resolved",
+          "escalation_verdict": "not applicable — the run reached its expected terminal state"
+        },
+        {
+          "archive": "47abb70a2b9e",
+          "scenario": "remediate_dlq_backlog_success",
+          "planner_steps": [
+            {
+              "step": 1,
+              "top_hypothesis": "dlq-depth-warning-replay-safe-messages",
+              "category": "poison_message",
+              "confidence": 0.7,
+              "in_fix_map": true,
+              "meets_bar": true,
+              "emitted": "probe",
+              "disposition": "no handoff attempted (probe step)"
+            },
+            {
+              "step": 2,
+              "top_hypothesis": "mixed-dlq-5-rows-replay-safe-wait-human-unclassified",
+              "category": "poison_message",
+              "confidence": 0.92,
+              "in_fix_map": true,
+              "meets_bar": true,
+              "emitted": "remediate",
+              "disposition": "REFUSED and re-steered",
+              "disposition_detail": "handoff refused: this incident's alert names remediation_hint='replay_safe', and no probe in the evidence trail has read it. Call list_dlq_messages with remediation_hint='replay_safe' before remediating. A call to list_dlq_messages that did not carry that exact value does not count — an unfiltered or default-filled read observes something else. Other incidents, alerts, and DLQ entries visible in t"
+            },
+            {
+              "step": 3,
+              "top_hypothesis": "dlq-replay-safe-slice-upstream-timeout",
+              "category": "poison_message",
+              "confidence": 0.85,
+              "in_fix_map": true,
+              "meets_bar": true,
+              "emitted": "probe",
+              "disposition": "no handoff attempted (probe step)"
+            },
+            {
+              "step": 4,
+              "top_hypothesis": "replay-safe-bulk-api-sync-upstream-timeout",
+              "category": "poison_message",
+              "confidence": 0.95,
+              "in_fix_map": true,
+              "meets_bar": true,
+              "emitted": "remediate",
+              "disposition": "CROSSED into planning",
+              "disposition_detail": "planner handoff to PLANNING: The alerted slice (remediation_hint='replay_safe') contains exactly one row: fc8d2a03-23b3-5371-9acb-46443c73baa5, a bulk_api_sync job that failed with UpstreamTimeout. The triage confirms the call is idempotent, no partial write survived, and a fresh attempt is the entire remedy. Error text is consistent with a transient upstream issue — not a permanent data fault — s"
+            }
+          ],
+          "handoffs_attempted": 2,
+          "handoffs_crossed": 1,
+          "handoffs_refused": 1,
+          "non_crossings": 2,
+          "plan": {
+            "target_hypothesis": "replay-safe-bulk-api-sync-upstream-timeout",
+            "action_tool": "replay_dlq_by_ids",
+            "action_arguments": {
+              "job_ids": [
+                "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+              ]
+            },
+            "verify_tool": "list_dlq_messages",
+            "verify_expectation": "The replay_safe filtered listing returns empty (total: 0), confirming that fc8d2a03-23b3-5371-9acb-46443c73baa5 has been removed from the DLQ and is no longer dead-lettered."
+          },
+          "executed": [
+            {
+              "tool": "replay_dlq_by_ids",
+              "arguments": {
+                "job_ids": [
+                  "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+                ],
+                "idempotency_key": "8e8515d503c983c01c9575cf4f8ff519",
+                "delay_seconds": null
+              }
+            }
+          ],
+          "verify_judgments": [
+            {
+              "verdict": "verified",
+              "reasoning": "The remediation replayed 1 job (fc8d2a03-23b3-5371-9acb-46443c73baa5) successfully with ok=true, and the verify probe confirms the DLQ is now empty with total=0, matching the expected behavior."
+            }
+          ],
+          "final_state": "resolved",
+          "escalation": null,
+          "expected_terminal_state": "resolved",
+          "escalation_verdict": "not applicable — the run reached its expected terminal state"
+        }
+      ],
+      "totals": {
+        "planner_steps": 15,
+        "handoffs_attempted": 4,
+        "handoffs_crossed": 3,
+        "handoffs_refused": 1,
+        "non_crossings": 10,
+        "escalations": 1
+      }
+    },
+    "budget_profile_diff": {
+      "diff": "null",
+      "why_null": "Owner decision O-14 keeps BENCHMARK_MODEL at `claude-sonnet-4-6`, which is also DEVELOPMENT_MODEL. Both roles resolve to the same model id, so a benchmark-vs-development token or tool-call diff is not small — it is definitionally zero, and printing a table of zeroes would read like a measurement. What can be reported is the profile itself, per run, so the next phase (or the next model) has something to diff against.",
+      "per_run": [
+        {
+          "archive": "42000dfda188",
+          "scenario": "remediate_consumer_lag_success",
+          "llm_calls_total": 7,
+          "llm_calls_by_role": {
+            "briefing_judge": 1,
+            "briefing_writer": 1,
+            "investigation_planner": 5
+          },
+          "planner_iterations": 5,
+          "mcp_calls_in_trace": 12,
+          "agent_tool_calls_billed": 5,
+          "tokens_used": 57094,
+          "max_tokens": 200000,
+          "max_tool_calls": 13,
+          "wall_seconds_used": 90.232063,
+          "max_wall_seconds": 600,
+          "budget_tripped": false
+        },
+        {
+          "archive": "845bdae22195",
+          "scenario": "remediate_consumer_lag_success",
+          "llm_calls_total": 8,
+          "llm_calls_by_role": {
+            "briefing_judge": 1,
+            "briefing_writer": 1,
+            "investigation_planner": 3,
+            "remediation_planner": 1,
+            "verification_judge": 2
+          },
+          "planner_iterations": 3,
+          "mcp_calls_in_trace": 14,
+          "agent_tool_calls_billed": 5,
+          "tokens_used": 55622,
+          "max_tokens": 200000,
+          "max_tool_calls": 13,
+          "wall_seconds_used": 155.613375,
+          "max_wall_seconds": 600,
+          "budget_tripped": false
+        },
+        {
+          "archive": "ee183c85429c",
+          "scenario": "remediate_stale_cache_success",
+          "llm_calls_total": 7,
+          "llm_calls_by_role": {
+            "briefing_judge": 1,
+            "briefing_writer": 1,
+            "investigation_planner": 3,
+            "remediation_planner": 1,
+            "verification_judge": 1
+          },
+          "planner_iterations": 3,
+          "mcp_calls_in_trace": 5,
+          "agent_tool_calls_billed": 4,
+          "tokens_used": 52636,
+          "max_tokens": 200000,
+          "max_tool_calls": 13,
+          "wall_seconds_used": 35.335445,
+          "max_wall_seconds": 600,
+          "budget_tripped": false
+        },
+        {
+          "archive": "47abb70a2b9e",
+          "scenario": "remediate_dlq_backlog_success",
+          "llm_calls_total": 8,
+          "llm_calls_by_role": {
+            "briefing_judge": 1,
+            "briefing_writer": 1,
+            "investigation_planner": 4,
+            "remediation_planner": 1,
+            "verification_judge": 1
+          },
+          "planner_iterations": 4,
+          "mcp_calls_in_trace": 6,
+          "agent_tool_calls_billed": 4,
+          "tokens_used": 68283,
+          "max_tokens": 200000,
+          "max_tool_calls": 13,
+          "wall_seconds_used": 51.840843,
+          "max_wall_seconds": 600,
+          "budget_tripped": false
+        }
+      ],
+      "budget_trips": [],
+      "caps_note": "Every run stayed inside every cap. `mcp_calls_in_trace` counts more calls than `agent_tool_calls_billed` because the runner's own precondition poll and the post-action verify probe are on the wire but are not the agent's budget."
+    },
+    "judge_calibration": {
+      "reruns_required": 0,
+      "why": "Plan 03 section 9 requires a calibration rerun for every judge the phase TOUCHED. Phase 1 touched no judge prompt and no rubric. The one judge-side change in the phase is WO-R2-174 (cmd #243), which gave the verification judge and the eval briefing judge the same bounded output repair the three planner call sites already had: one re-ask on OUR OWN malformed output, same cap, same wrapper. It changes what happens when a reply fails schema validation, not what the judge is asked or how its answer is scored — and the canned sweep shows it: all 41 rows judged, judge mean identical to the blessed baseline to the last digit.",
+      "judge_model": "claude-haiku-4-5",
+      "judge_prompts_unchanged": {
+        "briefing_judge.md": "838a5ee5de6081c32ef1b7aba35aefe0ddd83826e841af2ca831ba76f4692719",
+        "verification_judge.md": "6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"
+      },
+      "evidence": "`git log <phase0 baseline>..HEAD -- src/incident_commander/llm/prompts/` is empty; the only commit under `evals/graders/` is cmd #243 and it touches `evals/graders/llm_judge.py` alone."
+    },
+    "baseline_delta": {
+      "phase0_baseline_cited_by_id": "baseline_report.20260915T132421Z.ad634a458e5e",
+      "phase0_baseline_resolved_by_artifacts_newest": "baseline_report.20260915T132550Z.2408b07ef532.json",
+      "phase0_baseline_offline_leg": "2408b07ef532",
+      "blessed_baseline_generated_at": "2026-09-16T02:05:48.215098Z",
+      "comparisons": [
+        {
+          "against": "blessed regression baseline (evals/reports/baseline.json, cmd #238)",
+          "baseline_invocation_id": "079a463db4b8",
+          "baseline_sha256": "7f55bb9a7481fa18fec277ce5603a0c165cee6a24ac0965a9c5a798ab0585408",
+          "regressions": [],
+          "improvements": [],
+          "new_scenarios": [],
+          "dropped_scenarios": [],
+          "dropped_dimensions": [],
+          "vacated_assertions": [],
+          "row_level_differences": [],
+          "judge_mean_delta": 0.0,
+          "degraded_count_delta": 0
+        },
+        {
+          "against": "Phase 0 baseline offline leg (2408b07ef532)",
+          "baseline_invocation_id": "2408b07ef532",
+          "baseline_sha256": "d3b8cd15699a2cf76384ba7cfa4eab782cd6789b5ab8eb0425e15ef241055476",
+          "regressions": [],
+          "improvements": [],
+          "new_scenarios": [],
+          "dropped_scenarios": [],
+          "dropped_dimensions": [],
+          "vacated_assertions": [],
+          "row_level_differences": [],
+          "judge_mean_delta": 0.0,
+          "degraded_count_delta": 0
+        }
+      ],
+      "unexplained_movement": [],
+      "verdict": "Zero movement, on both baselines and on every axis the gate measures: no regression, no improvement, no new or dropped scenario, no dropped dimension, no vacated assertion, and not one of the 41 rows differs in pass/fail, terminal state, tool-call count, per-dimension result or judge score. There is therefore no unexplained movement to block the phase. Read honestly, that is a statement about the CANNED corpus: the same fixtures replayed through the same graders under the same model id give the same answer, which is what a regression baseline is for. It is not evidence about the live world; the live legs are.",
+      "cost_per_scenario_note": "Cost per scenario cannot move against either baseline: both baselines and this sweep are canned runs, and a canned run makes no billable call — every row's `usd_used` is 0.000000 on both sides. The live cost numbers are in section 7."
+    },
+    "spend_line": {
+      "live_runs": [
+        {
+          "order": 1,
+          "archive": "42000dfda188",
+          "scenario": "remediate_consumer_lag_success",
+          "usd": "0.134020",
+          "agent_loop_wall_seconds": 90.232,
+          "run_started_at": "2026-09-17T08:00:36.800716+00:00",
+          "run_finished_at": "2026-09-17T08:03:14.790472+00:00",
+          "start_to_finish_seconds": 157.99,
+          "tokens": 57094
+        },
+        {
+          "order": 2,
+          "archive": "845bdae22195",
+          "scenario": "remediate_consumer_lag_success",
+          "usd": "0.157086",
+          "agent_loop_wall_seconds": 155.613,
+          "run_started_at": "2026-09-17T10:03:41.342427+00:00",
+          "run_finished_at": "2026-09-17T10:06:51.353076+00:00",
+          "start_to_finish_seconds": 190.011,
+          "tokens": 55622
+        },
+        {
+          "order": 3,
+          "archive": "ee183c85429c",
+          "scenario": "remediate_stale_cache_success",
+          "usd": "0.153772",
+          "agent_loop_wall_seconds": 35.335,
+          "run_started_at": "2026-09-17T10:21:06.400956+00:00",
+          "run_finished_at": "2026-09-17T10:21:50.824885+00:00",
+          "start_to_finish_seconds": 44.424,
+          "tokens": 52636
+        },
+        {
+          "order": 4,
+          "archive": "47abb70a2b9e",
+          "scenario": "remediate_dlq_backlog_success",
+          "usd": "0.190176",
+          "agent_loop_wall_seconds": 51.841,
+          "run_started_at": "2026-09-17T10:31:50.328261+00:00",
+          "run_finished_at": "2026-09-17T10:32:56.753112+00:00",
+          "start_to_finish_seconds": 66.425,
+          "tokens": 68283
+        }
+      ],
+      "live_total_usd": "0.635054",
+      "live_total_agent_loop_seconds": 333.021,
+      "live_total_start_to_finish_seconds": 458.849,
+      "canned_sweep": {
+        "archive": "32ae38f6b38b",
+        "usd": "0.000000",
+        "wall_seconds": 0.081,
+        "note": "Free by construction: a canned run replays recorded tool responses through a canned LLM client, so nothing billable leaves the machine. The wall figure is the sum of the 41 rows' own ledgers, not the operator's clock."
+      },
+      "against_plan_03_section_11": [
+        {
+          "planned": "remediation scenario: ~$0.10-0.20, 2-3 min with reset",
+          "actual": "4 live remediation runs, $0.635054 total, mean $0.158764 per run; 115 s mean start to finish. Inside the band on cost; faster than the band on time because the band includes the world reset, which is operator wall clock and not in any archive."
+        },
+        {
+          "planned": "phase-close sweep (~40 scenarios x 3 reps): ~$15 per phase, +$5 live",
+          "actual": "$0.635054. The reduction is decision O-15, not an underspend: recorded mode does not exist until Phase 3, so the 41-scenario sweep ran canned and free; three remediation scenarios ran live at one rep instead of twelve at three; and there was no read-only live stage."
+        },
+        {
+          "planned": "per-scenario budget: 1.00 USD / 25 calls / 200 000 tokens / 600 s",
+          "actual": "No cap was approached. Highest USD 0.190176 of 1.00; highest tokens 68 283 of 200 000; highest tool calls 5 of the 13 these scenarios seed (the scenario cap is tighter than plan 03's 25); highest wall 155.6 s of 600."
+        }
+      ],
+      "campaign_context": "The closed live-eval campaign cost about $7.20 in total. This close adds $0.635054 to that."
+    }
+  },
+  "deviations": [
+    {
+      "id": "D1",
+      "what": "Reduced scope (owner decision O-15, 2026-09-16).",
+      "detail": "Plan 03 section 14 step 1 asks for every scenario touched or added in the phase in recorded mode at 3 reps, plus live for every scenario with a remediation leg. What ran: all 41 scenarios canned at 1 rep, and 3 of the 12 remediation-leg scenarios live at 1 rep - one per injected-fault family (kill_consumer, create_stale_cache, poison_message). There was no separate read-only live stage."
+    },
+    {
+      "id": "D2",
+      "what": "Recorded-world mode does not exist yet.",
+      "detail": "It arrives in Phase 3 (WP-3.1). Phase 1 therefore cannot run 'recorded mode, 3 reps' and does not pretend to: the sweep leg is canned. Saying so is the point - a silent substitution would make every later phase's comparison unreadable."
+    },
+    {
+      "id": "D3",
+      "what": "Live run 1's world reset was not the runbook's exact chain.",
+      "detail": "The runbook chains `make eval-live ... && make eval-reset`, so the reset runs only if the run succeeded. The wrapper used for run 1 (archive 42000dfda188) reset unconditionally. Disclosed to the owner at the time; runs 2, 3 and 4 used the exact chain. No evidence was lost - the archive was written before the reset - but the deviation is recorded rather than smoothed over."
+    },
+    {
+      "id": "D4",
+      "what": "No live scenario fires `bad_deploy`, so owner decision O-8 is not informed.",
+      "detail": "O-8 asks whether renaming `bad_deploy`'s alert source breaks `make eval-reset` (the reset predicate matches `source LIKE 'chaos:%'`). Nothing in this close exercises that path, so this close says nothing about it. O-8 stays open."
+    },
+    {
+      "id": "D5",
+      "what": "The Phase 0 baseline artifact exists twice; this report names both.",
+      "detail": "WO-R3-189 cites `baseline_report.20260915T132421Z.ad634a458e5e`. That file is on disk in the main checkout but was never committed, and it sorts 89 seconds OLDER than its committed twin, so `artifacts.newest('baseline_report')` resolves the other one. Section 6 reads the committed, resolver-visible artifact and names both ids; their recorded numbers are identical (41/41, judge mean 0.8591463414634146, degraded 34), so the delta is the same either way."
+    }
+  ],
+  "follow_ups": [
+    {
+      "id": "WO-R3-253",
+      "what": "Prose gloss for the generated remediation table (from WO-R2-177).",
+      "status": "open"
+    },
+    {
+      "id": "WO-R3-255",
+      "what": "The commander's own remediation-planner prompt says '...lives in the description of a chaos tool you never see'. It is our text, not the platform's, and it names no fault - but it is the last `chaos` token on the agent's side of the boundary.",
+      "status": "open"
+    },
+    {
+      "id": "O-8",
+      "what": "`bad_deploy`'s alert source vs the reset predicate — untouched by this close.",
+      "status": "open"
+    }
+  ],
+  "incidents_row_filed": false,
+  "incidents_row_reason": "No grader or judge drift was found. The one red run graded RED on OUTCOME with the agent's own trajectory agreeing — it never emitted `remediate` and never acted — so the grader was right and `context/INCIDENTS.md` (which records the times the EVALUATION was wrong about the agent) gets no row. The cause was the agent plus a sensor that could not show time passing, and it is filed as WO-R3-254 with the platform fix already shipped.",
+  "no_runs_were_made_to_produce_this": "Zero live invocations and zero LLM calls produced this document. Every number was read out of a committed archive; the only thing executed is the `grep` in section 2.",
+  "claims": {
+    "does_claim": [
+      "The 41-scenario canned corpus passes under the benchmark model role and moves nothing against either baseline.",
+      "On three live remediation scenarios, one per injected-fault family, the agent found the fault, crossed the remediation gate on a hypothesis that was in FIX_MAP and above the 0.7 bar, acted once on the right resource, and verified it.",
+      "WP-1.5's acceptance holds on live evidence: no platform tool response any of these runs read contains `chaos`, any root-cause label, or any fixture name.",
+      "The one live red of this phase is understood, root-caused to a sensor that could not show time passing, fixed in platform v0.6.7, and re-run green."
+    ],
+    "does_not_claim": [
+      "That the agent is stable on these scenarios. One rep is one sample of a trajectory; the 2026-08-31 green on scenario 1 turned red on the same model, and the difference was an accident of confidence (LESSONS, 2026-09-17).",
+      "That the remaining nine remediation-leg scenarios behave the same way live. They were not run in this phase.",
+      "That the eight live greens of the earlier campaign say anything about the leak. They ran under the OLD all-scope agent token; they show the corpus runs live and nothing more.",
+      "Anything about `bad_deploy` or owner decision O-8.",
+      "That the phase's spend of $0.635054 is comparable to plan 03 section 11's ~$20 phase-close row. It is a different, smaller sweep."
+    ]
+  }
+}

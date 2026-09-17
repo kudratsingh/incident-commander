@@ -129,6 +129,24 @@ KINDS: Final[dict[str, ArtifactKind]] = {
     # this family adopt that file as its own oldest version.
     "baseline_report": ArtifactKind(("evals", "reports"), ".json", fixed_stem="baseline_report"),
     "baseline_report_md": ArtifactKind(("evals", "reports"), ".md", fixed_stem="baseline_report"),
+    # `make phase-close-report --write` (evals/phase_close_report.py) — the
+    # report plan 03 § 14 requires before a phase may be called closed. Two
+    # kinds, one stem, exactly as the baseline pair above: the JSON is the
+    # artifact of record and the Markdown is the same document for a human.
+    #
+    # It needs its own entry rather than riding on `report`: that family's
+    # stem is `report`, so a phase-close report filed under it would sort
+    # into the same list as every per-run aggregate and `newest("report")`
+    # — which the runner, the trace formatter and `make baseline-report` all
+    # call — would start resolving to a phase-close document instead of a
+    # run. One phase produces one of these; one run produces one of those;
+    # they are different questions and they get different stems.
+    "phase_close_report": ArtifactKind(
+        ("evals", "reports"), ".json", fixed_stem="phase_close_report"
+    ),
+    "phase_close_report_md": ArtifactKind(
+        ("evals", "reports"), ".md", fixed_stem="phase_close_report"
+    ),
 }
 
 

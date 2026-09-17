@@ -1,0 +1,158 @@
+{
+  "scenario": "multi_probe_hypothesis_evolution",
+  "incident_id": "2ad2deb1-b5a8-4a6c-8184-7124c5bc9fb3",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "2ad2deb1-b5a8-4a6c-8184-7124c5bc9fb3",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "payments-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T10:35:49.440885Z",
+      "updated_at": "2026-09-17T10:35:49.440885Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "2ad2deb1-b5a8-4a6c-8184-7124c5bc9fb3",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "payments-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000022,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "2aa28cb9-60cd-4f1e-9945-6bf84757e02c",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T10:35:49.440907Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T10:35:49.440885Z",
+      "updated_at": "2026-09-17T10:35:49.440907Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "2ad2deb1-b5a8-4a6c-8184-7124c5bc9fb3",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "payments-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 2,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000033,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "2aa28cb9-60cd-4f1e-9945-6bf84757e02c",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T10:35:49.440907Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dc091241-b715-40e3-8ba2-ca31485dd39a",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "payments-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"payments-consumer\",\"lag\":30000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:payments-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}",
+          "timestamp": "2026-09-17T10:35:49.440918Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d158e63a-5b37-448b-a24f-14fbe033cb04",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "payments-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"payments-consumer\",\"lag\":30000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:payments-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}",
+          "timestamp": "2026-09-17T10:35:49.440918Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "db6ac14b-be77-4555-9a7e-24676a6dd22a",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "producer-spike hypothesis confident; escalate for observation"
+          },
+          "result_summary": "planner stop: producer-spike hypothesis confident; escalate for observation",
+          "timestamp": "2026-09-17T10:35:49.440918Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "unknown",
+          "name": "producer_spike",
+          "confidence": 0.85,
+          "reasoning": "Repeat reading did not grow further; the pattern is a transient producer surge, not a stuck consumer.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T10:35:49.440885Z",
+      "updated_at": "2026-09-17T10:35:49.440918Z"
+    }
+  ],
+  "invocation_id": "32ae38f6b38b"
+}

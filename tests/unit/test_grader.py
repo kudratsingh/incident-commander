@@ -21,7 +21,13 @@ from evals.graders.deterministic import (
     is_vacuous_detail,
     leaf_claims,
 )
-from evals.graders.root_cause import coverage_over, final_diagnosis, score_root_cause
+from evals.graders.root_cause import (
+    coverage_over,
+    final_diagnosis,
+    label_describes_this_world,
+    not_graded_detail,
+    score_root_cause,
+)
 from evals.runner import RunReport, ScenarioOutcome, _print_summary, root_cause_coverage
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
@@ -5144,6 +5150,173 @@ class TestNoFaultControls:
         )
 
 
+# ---------------------------------------------------------------------------
+# INC-003 (WO-R3-265): a ground truth is a statement about ONE world
+#
+# The labels were read off each scenario's canned fixtures. `make eval-smoke`
+# runs those same scenarios against the UNSEEDED live stack, where most of
+# those faults do not exist — so on 2026-09-17 the paid read-only pass
+# (`0db6fe722f7c`) graded `postgres_slow` red for saying `no_fault` about a
+# database that answered in 1.6 ms, and reported a live root-cause accuracy of
+# 61% that is a statement about nothing.
+#
+# Three properties below, and the middle one is the whole fix:
+#
+# * the world the run was in decides whether the label applies — canned runs
+#   (the fixtures the label was read from) and live runs that seeded the
+#   scenario's own fault are graded; a live run that seeded nothing is not;
+# * "not graded" is VACUOUS, not green: it passes the dimension the way an
+#   unasserted one does, in the shape `is_vacuous_detail` matches, so the
+#   coverage line and the regression gate both stop counting it as a verdict;
+# * the rule is one predicate (`label_describes_this_world`), because the
+#   runner and the offline re-grader have to answer it the same way or the
+#   re-grade of a paid archive would not be the grade the runner would give.
+
+
+class TestGroundTruthIsScopedToItsWorld:
+    """INC-003: the label applies to the world it was read from, and no other."""
+
+    #: `postgres_slow`'s label, read off a canned 420 ms ping.
+    _LABEL = (HypothesisCategory.DB_QUERY_LATENCY,)
+    _ESCALATES = ScenarioExpectation(
+        name="postgres_slow", expected_terminal_state=IncidentState.ESCALATED
+    )
+
+    def _the_archived_shape(self, run_state: RunState) -> RunState:
+        """What the agent actually did in `0db6fe722f7c`: said nothing is wrong."""
+        return _diagnosed(run_state, IncidentState.ESCALATED, HypothesisCategory.NO_FAULT)
+
+    def _root_cause(
+        self, run: RunState, *, world_matches_ground_truth: bool = True
+    ) -> DimensionResult:
+        return _dim(
+            grade(
+                run,
+                self._ESCALATES,
+                ground_truth=self._LABEL,
+                world_matches_ground_truth=world_matches_ground_truth,
+            ),
+            GradeDimension.ROOT_CAUSE,
+        )
+
+    def test_a_canned_run_is_graded_against_the_label(self, run_state: RunState) -> None:
+        """The canned fixtures ARE the world the label was read from."""
+        result = self._root_cause(
+            self._the_archived_shape(run_state), world_matches_ground_truth=True
+        )
+        assert result.passed is False
+        assert "db_query_latency" in result.detail
+        assert not is_vacuous_detail(result.detail)
+
+    def test_a_live_run_that_seeded_its_own_fault_is_graded(self, run_state: RunState) -> None:
+        """A seeded live world is the label's world: the three remediation legs."""
+        assert label_describes_this_world(live_mcp=True, chaos_seeded=True) is True, (
+            "a scenario that plants its own fault is measured against its own label"
+        )
+        graded = self._root_cause(
+            _diagnosed(run_state, IncidentState.ESCALATED, HypothesisCategory.DB_QUERY_LATENCY),
+            world_matches_ground_truth=True,
+        )
+        assert graded.passed is True
+        assert not is_vacuous_detail(graded.detail)
+
+    def test_a_live_run_with_no_seeded_fault_is_not_graded(self, run_state: RunState) -> None:
+        """The seven false reds of `0db6fe722f7c`, in one assertion."""
+        result = self._root_cause(
+            self._the_archived_shape(run_state), world_matches_ground_truth=False
+        )
+        assert result.passed is True, (
+            "a run the label does not describe must be VACUOUS, not red — grading it "
+            "is INC-003 itself"
+        )
+        assert result.detail.startswith(
+            "not graded: the label describes a world this run did not have"
+        ), result.detail
+
+    def test_the_not_graded_detail_is_vacuous_to_every_reader(self, run_state: RunState) -> None:
+        """Vacuous, so the coverage line and the gate stop counting it as a verdict.
+
+        A not-graded pass that read as substantive would restate INC-003 one
+        layer up: the accuracy denominator would keep the row, and 61% would
+        come back as "20 of 27 correct" instead.
+        """
+        result = self._root_cause(
+            self._the_archived_shape(run_state), world_matches_ground_truth=False
+        )
+        assert is_vacuous_detail(result.detail), result.detail
+
+    def test_the_detail_names_the_label_it_did_not_apply(self, run_state: RunState) -> None:
+        """A reader of the archive can still see which label was held back."""
+        result = self._root_cause(
+            self._the_archived_shape(run_state), world_matches_ground_truth=False
+        )
+        assert "db_query_latency" in result.detail
+
+    def test_a_correct_diagnosis_in_the_wrong_world_is_not_graded_either(
+        self, run_state: RunState
+    ) -> None:
+        """The rule is about the WORLD, never about whether the row would pass.
+
+        Keeping the greens and dropping the reds would buy back the same
+        invalid number with a friendlier sign.
+        """
+        result = self._root_cause(
+            _diagnosed(run_state, IncidentState.ESCALATED, HypothesisCategory.DB_QUERY_LATENCY),
+            world_matches_ground_truth=False,
+        )
+        assert result.passed is True
+        assert is_vacuous_detail(result.detail)
+        assert "exact match" not in result.detail
+
+    def test_a_scenario_with_no_label_keeps_its_own_wording(self, run_state: RunState) -> None:
+        """Two different absences: no label at all, and a label about another world."""
+        no_label = _dim(
+            grade(
+                self._the_archived_shape(run_state),
+                self._ESCALATES,
+                world_matches_ground_truth=False,
+            ),
+            GradeDimension.ROOT_CAUSE,
+        )
+        assert no_label.detail == "no ground truth set"
+
+    def test_grading_is_the_default_so_an_isolated_call_site_is_unchanged(
+        self, run_state: RunState
+    ) -> None:
+        """~30 call sites grade a run in isolation; all of them are canned."""
+        assert self._root_cause(self._the_archived_shape(run_state)).passed is False
+
+    @pytest.mark.parametrize(
+        ("live_mcp", "chaos_seeded", "expected"),
+        [
+            (False, False, True),  # canned: the fixtures the label was read from
+            (False, True, True),  # a canned run of a chaos-declaring scenario
+            (True, True, True),  # live, and the scenario planted its own fault
+            (True, False, False),  # live against an unseeded world — INC-003
+        ],
+    )
+    def test_the_world_rule_is_one_predicate(
+        self, live_mcp: bool, chaos_seeded: bool, expected: bool
+    ) -> None:
+        """The runner and the offline re-grader read this, and nothing else."""
+        assert label_describes_this_world(live_mcp=live_mcp, chaos_seeded=chaos_seeded) is expected
+
+    def test_the_whole_smoke_pass_is_the_unseeded_case(self) -> None:
+        """Why this is not a corner case: no smoke scenario can ever seed a fault.
+
+        `Scenario.in_smoke_pass` requires `not seeds_chaos`, so every live row
+        of every smoke pass — today's and every future one — is the world the
+        label does not describe. The canned rows in the pass are unaffected.
+        """
+        smoke = [s for s in _shipped() if s.in_smoke_pass]
+        assert smoke, "the smoke pass derived nothing; this test lost its subject"
+        assert all(not s.seeds_chaos for s in smoke)
+        assert any(s.use_live_mcp and s.root_cause_graded for s in smoke), (
+            "no live, labelled scenario is in the smoke pass — INC-003 could not recur, "
+            "and this fix would have nothing to protect"
+        )
+
+
 class TestMultiFaultScoring:
     """Exact-set, precision, recall and F1 on a hand-built two-cause world.
 
@@ -5303,6 +5476,67 @@ class TestRootCauseCoverageIsReported:
         )
         _print_summary(report)
         assert "root cause: 1/1 correct" in capsys.readouterr().out
+
+    def test_not_graded_rows_are_counted_and_named_separately(self) -> None:
+        """INC-003's reporting half: "not asked" and "asked elsewhere" differ.
+
+        Both are outside the accuracy denominator, and a reader of a live
+        smoke report needs to know which one happened — "nine scenarios
+        declare no label" is a fact about the corpus, "seven labels describe a
+        world this run did not have" is a fact about the run.
+        """
+        coverage = coverage_over(
+            [(True, True), (True, False), (False, True), (False, True)],
+            total=4,
+            world_mismatch=2,
+        )
+        assert (coverage.graded, coverage.correct, coverage.not_graded_world) == (2, 1, 2)
+        described = coverage.describe()
+        assert "1/2 correct (50%)" in described
+        assert "2 not graded" in described
+        assert "a world" in described
+
+    def test_a_pass_that_graded_nothing_says_which_absence_it_was(self) -> None:
+        """The `make eval-smoke` shape after the fix: every label held back."""
+        coverage = coverage_over([(False, True)] * 3, total=3, world_mismatch=3)
+        assert coverage.accuracy is None
+        described = coverage.describe()
+        assert "not measured" in described
+        assert "3 not graded" in described
+
+    def test_the_run_summary_prints_the_not_graded_count(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Counted from the rows' own details, so the console cannot disagree."""
+        report = RunReport(
+            generated_at=datetime(2026, 9, 17, tzinfo=UTC),
+            total=1,
+            passed=1,
+            failed=0,
+            outcomes=(
+                ScenarioOutcome(
+                    scenario="postgres_slow",
+                    final_state=IncidentState.ESCALATED,
+                    tool_calls_used=1,
+                    live_mcp=True,
+                    report=GradeReport(
+                        scenario="postgres_slow",
+                        passed=True,
+                        dimensions=(
+                            DimensionResult(
+                                dimension=GradeDimension.ROOT_CAUSE,
+                                passed=True,
+                                detail=not_graded_detail("db_query_latency"),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        coverage = root_cause_coverage(report)
+        assert (coverage.graded, coverage.not_graded_world) == (0, 1)
+        _print_summary(report)
+        assert "1 not graded" in capsys.readouterr().out
 
     def test_the_shipped_corpus_reports_partial_root_cause_coverage(self) -> None:
         """Coverage is 32 of 41, and the report must say so rather than round it.

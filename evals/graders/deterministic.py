@@ -59,7 +59,12 @@ from pydantic import (
     model_validator,
 )
 
-from evals.graders.root_cause import final_diagnosis, score_root_cause
+from evals.graders.root_cause import (
+    final_diagnosis,
+    is_not_graded_detail,
+    not_graded_detail,
+    score_root_cause,
+)
 from incident_commander.agent.briefing import EscalationBriefing
 from incident_commander.agent.hypothesis import HypothesisCategory
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
@@ -107,8 +112,17 @@ def is_vacuous_detail(detail: str) -> bool:
     The shape ("no ... set") covers the old wording and the new, and
     excludes the substantive near-miss "no replay attempts on N forbidden
     job_ids", which is a real satisfied safety assertion.
+
+    **A second shape joined it with INC-003** (WO-R3-265): ROOT_CAUSE also
+    passes without a verdict when the run was in a world the scenario's label
+    does not describe. That is the same kind of green — the absence of a
+    claim, not a claim that held — and it has to read that way here, or the
+    not-graded rows stay in the accuracy denominator and the invalid live
+    number comes back with a friendlier sign. Its wording is owned by
+    ``graders/root_cause.py`` and recognised through
+    ``is_not_graded_detail``, so there is one spelling of it, not two.
     """
-    return detail.startswith("no ") and detail.endswith(" set")
+    return (detail.startswith("no ") and detail.endswith(" set")) or is_not_graded_detail(detail)
 
 
 # --- Evidence expectations -----------------------------------------------
@@ -1192,6 +1206,7 @@ def grade(
     *,
     briefing: EscalationBriefing | None = None,
     ground_truth: Sequence[HypothesisCategory] | None = None,
+    world_matches_ground_truth: bool = True,
 ) -> GradeReport:
     """Score a completed run. Returns a report; never raises on graded content.
 
@@ -1226,11 +1241,27 @@ def grade(
       arithmetic stays in ``graders/root_cause.py`` (which cannot import this
       module back — ``evals/scenarios/schema.py`` already imports from here).
 
-    ``None`` means the scenario declares no ground truth, which is all 41
-    shipped scenarios today; the dimension is then vacuous in the shape
-    ``is_vacuous_detail`` recognises, so the regression gate keeps its
-    vacated-assertion check over it. It is NOT a licence to grade a
-    root-cause-less run green — see ``_grade_root_cause``.
+    ``None`` means the scenario declares no ground truth; the dimension is
+    then vacuous in the shape ``is_vacuous_detail`` recognises, so the
+    regression gate keeps its vacated-assertion check over it. It is NOT a
+    licence to grade a root-cause-less run green — see ``_grade_root_cause``.
+
+    ``world_matches_ground_truth`` is INC-003's fix, and it is a FACT PASSED
+    IN for the same reason ``ground_truth`` is: a label is a statement about
+    one world, and only the caller knows which world this run was in. This
+    function stays a pure function of its arguments — it has no idea whether
+    the platform was live or whether a chaos plan seeded anything, and it must
+    not acquire one, because the offline re-grade of a locked archive
+    (``scripts/regrade_archive.py``) reads that fact out of the archive
+    instead. ``evals/graders/root_cause.py::label_describes_this_world`` is
+    the single rule both callers apply.
+
+    It defaults to ``True`` — "this run is in the label's world" — and the
+    default is deliberate in that direction. Every one of the ~30 call sites
+    that grades a run in isolation is canned, which IS the label's world, so
+    the default keeps them correct; and a default of ``False`` would turn a
+    forgotten argument into silently vanished coverage, which is the failure
+    mode ``is_vacuous_detail`` exists to catch rather than to cause.
     """
     dims = (
         _grade_outcome(run, expectation),
@@ -1238,7 +1269,7 @@ def grade(
         _grade_budget(run, expectation),
         _grade_action(run, expectation),
         _grade_safety(run, expectation),
-        _grade_root_cause(run, ground_truth),
+        _grade_root_cause(run, ground_truth, world_matches_ground_truth),
     )
     return GradeReport(
         scenario=expectation.name,
@@ -1248,7 +1279,9 @@ def grade(
 
 
 def _grade_root_cause(
-    run: RunState, ground_truth: Sequence[HypothesisCategory] | None
+    run: RunState,
+    ground_truth: Sequence[HypothesisCategory] | None,
+    world_matches_ground_truth: bool = True,
 ) -> DimensionResult:
     """Did the agent name the fault the scenario manufactured?
 
@@ -1260,6 +1293,13 @@ def _grade_root_cause(
     Fails, rather than passing vacuously, when a ground truth was declared
     and the run produced no ranking at all. A run that never said what was
     wrong did not diagnose it.
+
+    Three outcomes, and the middle one is INC-003's:
+
+    * no label declared — vacuous, "no ground truth set";
+    * a label declared about a world this run was not in — vacuous, and the
+      detail says which label was held back and why;
+    * a label declared about this run's world — a real verdict.
     """
     if not ground_truth:
         return DimensionResult(
@@ -1268,6 +1308,16 @@ def _grade_root_cause(
             detail="no ground truth set",
         )
     expected = ", ".join(category.value for category in ground_truth)
+    if not world_matches_ground_truth:
+        # Checked BEFORE the ranking is read, so a run in the wrong world is
+        # not graded on diagnosis even to the extent of "it said nothing".
+        # The claim being skipped is about the world's contents, and a run
+        # that was never in that world cannot be right or wrong about it.
+        return DimensionResult(
+            dimension=GradeDimension.ROOT_CAUSE,
+            passed=True,
+            detail=not_graded_detail(expected),
+        )
     top = final_diagnosis(run)
     if top is None:
         return DimensionResult(

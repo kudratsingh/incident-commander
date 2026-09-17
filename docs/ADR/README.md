@@ -2,7 +2,7 @@
 
 Any decision that constrains future work gets a record here, before or with the pull request that implements it. An accepted ADR is never rewritten: when a decision moves, a later ADR amends or supersedes it and both stay on the shelf, so the reasoning that was true at the time is still readable.
 
-Thirty-nine records, plus [`0000-template.md`](0000-template.md). All are accepted. The column that repays reading is the last one — it is where a decision has since been narrowed, extended or replaced.
+Forty records, plus [`0000-template.md`](0000-template.md). All are accepted. The column that repays reading is the last one — it is where a decision has since been narrowed, extended or replaced.
 
 | # | Decision | Later movement |
 |---|---|---|
@@ -45,10 +45,11 @@ Thirty-nine records, plus [`0000-template.md`](0000-template.md). All are accept
 | [0037](0037-a-scenarios-fault-is-a-plan-and-the-plan-is-put-back.md) | A scenario's fault is a plan, and the plan is put back; exits 9 and 10 | Extends 0018's exit-code contract |
 | [0038](0038-the-agents-view-of-a-scenario-is-an-allow-list-projection.md) | The agent's view of a scenario is an allow-list projection | — |
 | [0039](0039-a-split-is-a-property-of-a-template.md) | A split is a property of a template, and the loader enforces it | — |
+| [0040](0040-a-ground-truth-is-a-statement-about-one-world.md) | A ground truth is a statement about one world; a grader that cannot establish that world reports "not graded" | Scopes 0038's answer key; does not change it |
 
 ## Two formatting conventions coexist
 
-Most records carry `* Status: accepted` as a bullet on line 3, MADR style. Records 0019, 0020, 0037, 0038 and 0039 use YAML front matter with a `status:` key and a numbered H1. Both are fine; a reader looking for the status should check both places. Records 0029, 0033 and 0034 carry no machine-readable status field at all — they are accepted, and adding the line is a tidy-up worth doing next time one of them is opened.
+Most records carry `* Status: accepted` as a bullet on line 3, MADR style. Records 0019, 0020, 0037, 0038, 0039 and 0040 use YAML front matter with a `status:` key and a numbered H1. Both are fine; a reader looking for the status should check both places. Records 0029, 0033 and 0034 carry no machine-readable status field at all — they are accepted, and adding the line is a tidy-up worth doing next time one of them is opened.
 
 ## Writing one
 

@@ -19,7 +19,9 @@ import json
 import os
 import stat
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Final
 
 import pytest
 
@@ -35,6 +37,17 @@ from scripts.migrate_reports_layout import (
 _RENDER = (
     "##########\nINCIDENT TRAJECTORY: {scenario}\n##########\n\nInvocation:    {inv} (1 of 1)\n"
 )
+
+# File flags are macOS/BSD only and typeshed says so, so the uchg assertions
+# reach them through one guarded name — the same shape as the script under
+# test, and as tests/unit/test_runner.py's archive-lock tests. CI is Linux:
+# this is None there, the uchg test skips, and the chmod assertions still run.
+_CHFLAGS: Final[Callable[[Path, int], None] | None] = getattr(os, "chflags", None)
+
+
+def _flags(path: Path) -> int:
+    """``st_flags`` where the platform has it, else 0."""
+    return int(getattr(path.stat(), "st_flags", 0))
 
 
 def _report(root: Path, stamp: str, invocation: str) -> Path:
@@ -322,21 +335,27 @@ class TestLocks:
             mode = stat.S_IMODE(path.stat().st_mode)
             assert not mode & stat.S_IWUSR, f"{path} came back writable"
 
-    @pytest.mark.skipif(not hasattr(os, "chflags"), reason="no chflags on this platform")
+    @pytest.mark.skipif(_CHFLAGS is None, reason="no file flags on this platform")
     def test_a_uchg_file_is_unlocked_moved_and_re_flagged(self, tmp_path: Path) -> None:
-        """macOS ``uchg`` refuses a rename outright, so it must come off and go back."""
+        """macOS ``uchg`` refuses a rename outright, so it must come off and go back.
+
+        Skipped where there are no file flags. The mode half of the lock is
+        covered by the test above, which runs everywhere — that is the half CI
+        exercises, and it is the one that has to hold on Linux.
+        """
+        assert _CHFLAGS is not None  # guarded by the skipif above
         root = _tree(tmp_path)
         target = root / "report.20260907T062014Z.aaaaaaaa0001.json"
         os.chmod(target, 0o444)
-        os.chflags(target, stat.UF_IMMUTABLE)
+        _CHFLAGS(target, stat.UF_IMMUTABLE)
         try:
             assert main(["--root", str(root), "--manifest", str(tmp_path / "m.json")]) == EXIT_OK
             moved = root / "runs" / "2026-09" / target.name
             assert moved.is_file()
-            assert moved.stat().st_flags & stat.UF_IMMUTABLE, "the lock was not put back"
+            assert _flags(moved) & stat.UF_IMMUTABLE, "the lock was not put back"
         finally:
             for path in root.rglob("*"):
-                os.chflags(path, 0)
+                _CHFLAGS(path, 0)
                 os.chmod(path, 0o644 if path.is_file() else 0o755)
 
 

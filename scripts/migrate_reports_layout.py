@@ -64,7 +64,7 @@ import stat
 import subprocess
 import sys
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -314,12 +314,35 @@ def plan(root: Path) -> Plan:
 
 # --- unlocking, moving, relocking ----------------------------------------
 
-_IMMUTABLE: Final[int] = getattr(stat, "UF_IMMUTABLE", 0)
+_IMMUTABLE: Final[int] = stat.UF_IMMUTABLE
+
+#: ``os.chflags`` on the platforms that have file flags (macOS and the BSDs),
+#: and ``None`` everywhere else. Linux has no file flags at all — typeshed
+#: declares neither the function nor ``stat_result.st_flags`` — and CI is
+#: Linux, so both halves are reached through one guarded name rather than
+#: written out at four call sites.
+#:
+#: The degraded behaviour is the honest one and not a special case: a platform
+#: with no flags reports every file's flags as 0, so "is it immutable?" is
+#: always False, nothing is unlocked, nothing is re-flagged, and modes are
+#: still saved and restored exactly. That is the same floor ADR 0021 accepts
+#: for the archive lock, which this mirrors.
+_CHFLAGS: Final[Callable[[Path, int], None] | None] = getattr(os, "chflags", None)
+
+
+def _file_flags(info: os.stat_result) -> int:
+    """``st_flags`` where the platform has it, else 0 — see ``_CHFLAGS``."""
+    return int(getattr(info, "st_flags", 0))
 
 
 @dataclass(frozen=True)
 class LockState:
-    """A path's mode and flags exactly as they were found."""
+    """A path's mode and flags exactly as they were found.
+
+    ``flags`` is 0 on a platform without file flags, which makes every
+    immutability test below False without any of them needing to ask what
+    platform this is.
+    """
 
     mode: int
     flags: int
@@ -327,7 +350,7 @@ class LockState:
 
 def _state(path: Path) -> LockState:
     info = path.stat()
-    return LockState(mode=stat.S_IMODE(info.st_mode), flags=getattr(info, "st_flags", 0))
+    return LockState(mode=stat.S_IMODE(info.st_mode), flags=_file_flags(info))
 
 
 def _unlock(path: Path) -> LockState:
@@ -338,9 +361,9 @@ def _unlock(path: Path) -> LockState:
     should let the move fail on its own terms with a real error.
     """
     original = _state(path)
-    if _IMMUTABLE and original.flags & _IMMUTABLE:
+    if _CHFLAGS is not None and original.flags & _IMMUTABLE:
         with contextlib.suppress(OSError):
-            os.chflags(path, original.flags & ~_IMMUTABLE)
+            _CHFLAGS(path, original.flags & ~_IMMUTABLE)
     if not original.mode & stat.S_IWUSR:
         with contextlib.suppress(OSError):
             os.chmod(path, original.mode | stat.S_IWUSR)
@@ -351,9 +374,9 @@ def _relock(path: Path, original: LockState) -> None:
     """Put the mode and the flags back, in that order (flags last, or chmod fails)."""
     with contextlib.suppress(OSError):
         os.chmod(path, original.mode)
-    if _IMMUTABLE and original.flags & _IMMUTABLE:
+    if _CHFLAGS is not None and original.flags & _IMMUTABLE:
         with contextlib.suppress(OSError):
-            os.chflags(path, original.flags)
+            _CHFLAGS(path, original.flags)
 
 
 def _git_mv(root: Path, move: Move) -> None:

@@ -124,6 +124,7 @@ class MCPClient:
         self.close()
 
     def list_tools(self) -> list[dict[str, Any]]:
+        """Every tool the platform advertises; an unexpected shape reads as none at all."""
         result = self._call("tools/list", {})
         tools = result.get("tools", [])
         return list(tools) if isinstance(tools, list) else []
@@ -135,6 +136,7 @@ class MCPClient:
         *,
         timeout_seconds: float | None = None,
     ) -> ToolResult:
+        """Invoke one platform tool and return its result; the call is traced either way."""
         started = time.monotonic()
         args_dict = dict(arguments)
         try:
@@ -183,6 +185,7 @@ class MCPClient:
         *,
         timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
+        """One JSON-RPC round trip, retrying transient failures, returning the result object."""
         body = {
             "jsonrpc": "2.0",
             "id": next(self._ids),

@@ -206,6 +206,12 @@ class LLMClient:
         *,
         repair_of: str | None = None,
     ) -> LLMResult[T]:
+        """Make one structured-output call and return the parsed output with what it billed.
+
+        The model must answer through a single forced tool whose schema is the
+        output model, so nothing here parses free text. Transient failures are
+        retried; every attempt, successful or not, reaches the tracer.
+        """
         request_body: dict[str, Any] = {
             "model": model,
             "max_tokens": max_tokens,
@@ -354,6 +360,7 @@ class LLMClient:
     def _parse[T: BaseModel](
         self, response: Message, output_model: type[T], usage: LLMUsage, record_id: str = ""
     ) -> LLMResult[T]:
+        """Pull the forced tool-use block out of the response and validate it."""
         for block in response.content:
             if block.type == "tool_use" and block.name == _STRUCTURED_TOOL_NAME:
                 try:

@@ -22,6 +22,7 @@ class MaxStepsExceededError(RuntimeError):
 
 
 def _escalate(run_state: RunState, reason: str, at: datetime) -> RunState:
+    """End the run at ESCALATED, with the reason recorded on the evidence ledger."""
     entry = EvidenceEntry(
         tool_name="_escalate",
         arguments={"reason": reason},

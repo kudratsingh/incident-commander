@@ -19,6 +19,7 @@ class PostgresCheckpointer:
         self._engine = engine
 
     def load(self, incident_id: UUID) -> RunState | None:
+        """The newest snapshot for this incident, or ``None`` if none was ever written."""
         with self._engine.connect() as conn:
             row = conn.execute(
                 text(

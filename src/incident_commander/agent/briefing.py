@@ -212,6 +212,7 @@ def _attempted_action(marker: EvidenceEntry | None) -> AttemptedAction | None:
 
 
 def _render_alert_summary(run_state: RunState) -> str:
+    """One line naming the alert: where it came from, how bad it is, and what it points at."""
     alert = run_state.alert
     source = str(alert.get("source", "unknown"))
     severity = str(alert.get("severity", "unknown"))

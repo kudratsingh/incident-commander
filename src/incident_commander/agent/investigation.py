@@ -543,6 +543,7 @@ def _parse_output(model: type[BaseModel], content: list[dict[str, Any]]) -> Base
 def _escalate(
     run_state: RunState, at: datetime, reason: str, arguments: dict[str, Any]
 ) -> RunState:
+    """End the probe leg at ESCALATED, filing the reason under the marker tool name."""
     entry = EvidenceEntry(
         tool_name=_ESCALATION_MARKER,
         arguments=arguments,
@@ -1107,6 +1108,11 @@ def _handoff_to_planning(run_state: RunState, at: datetime, reason: str) -> RunS
 
 
 def _format_planner_context(run_state: RunState) -> str:
+    """What the investigation planner is shown.
+
+    The alert, the budget left, the evidence gathered so far, and the
+    read-only probes it may pick from.
+    """
     remaining_calls = max(run_state.budget.max_tool_calls - run_state.budget.tool_calls_used, 0)
     remaining_tokens = max(run_state.budget.max_tokens - run_state.budget.tokens_used, 0)
     lines = [

@@ -67,6 +67,11 @@ def enrich_briefing(
 
 
 def _format_context(briefing: EscalationBriefing) -> str:
+    """What the briefing writer is shown.
+
+    How the run ended, why it stopped, any Tier-1 action already attempted,
+    the investigation trail, and the budget it spent.
+    """
     lines = [
         f"Incident {briefing.incident_id}",
         f"Final state: {briefing.final_state.value}",

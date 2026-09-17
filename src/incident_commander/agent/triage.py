@@ -13,6 +13,7 @@ _NOISE_SEVERITIES: Final[frozenset[str]] = frozenset({"info", "low", "unknown"})
 
 
 def _severity(alert: Mapping[str, object]) -> str:
+    """The alert's severity in lower case; anything missing or unreadable is ``unknown``."""
     raw = alert.get("severity")
     return raw.lower() if isinstance(raw, str) else "unknown"
 

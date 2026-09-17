@@ -2242,6 +2242,11 @@ def _load_plan(run_state: RunState) -> RemediationPlan | None:
 
 
 def _format_plan_context(run_state: RunState, top_hypothesis_name: str) -> str:
+    """What the remediation planner is shown.
+
+    The alert, the ranked hypotheses, the evidence trail, the tools it may
+    pick from, and any refusal of the plan it last proposed.
+    """
     hypotheses_dump = json.dumps([h.model_dump() for h in run_state.hypotheses], indent=2)
     # Refusals are pulled OUT of the evidence dump and rendered whole at the
     # end. Two reasons, and the first is not stylistic: evidence lines are
@@ -2650,6 +2655,7 @@ def make_llm_verify(
 
 
 def _tool_context_block(name: str) -> str:
+    """One tool's entry in a planner prompt: its platform description and input schema."""
     description = description_of(name) or "(no description)"
     schema = json.dumps(TOOL_REGISTRY[name].input_model.model_json_schema())
     indented = description.replace("\n", "\n    ")
@@ -2701,6 +2707,7 @@ def _format_verify_context(
 
 
 def _summarize_output(output_model: type[BaseModel], content: list[dict[str, Any]]) -> str:
+    """A tool result read through its output model and dumped back to compact JSON."""
     for block in content:
         if block.get("type") == "text" and isinstance(block.get("text"), str):
             payload = json.loads(block["text"])

@@ -1245,6 +1245,328 @@ class TestDlqCategoryIsTheAlertSubject:
 # the list held five cases for five entries by coincidence, not by
 # construction, so a sixth entry could have shipped with no case here and
 # nothing would have said so.
+class TestWholeQueueBeforeDlqAction:
+    """ADR 0041: a dead-letter handoff needs the whole queue in evidence.
+
+    Live run ``fc896b25a09c`` (`remediate_dlq_backlog_success`, Phase 2 close
+    leg 3, 2026-09-17) is what these pin, and the honest description of it is
+    that nothing it DID was wrong. It read the alerted slice
+    ``list_dlq_messages(remediation_hint="replay_safe")``, found the one
+    transient row, replayed it by id, verified the slice was empty and
+    resolved. Outcome, action, safety and root cause all passed and the judge
+    scored it 1.00. It never listed the queue unfiltered, so it never saw the
+    unclassified poison row sitting beside the row it replayed — it was safe
+    because the poison row happened not to be in the slice, which is luck
+    rather than conduct.
+
+    ``47abb70a2b9e``, the same scenario in the same world on the same morning,
+    read the whole queue first and then the slice. Same world, same model, two
+    trajectories: exactly the shape of thing that belongs in the harness rather
+    than in a hope about sampling.
+
+    Note which guard steered which. ADR 0031's subject guard demands the
+    alerted SLICE and is satisfied by a filtered page — it fired on
+    ``47abb70a2b9e`` and sent it from the whole queue to the slice. This guard
+    is its mirror: it demands the whole page and is not satisfied by any
+    filtered one. A run needs both reads, and until now one of them was
+    optional.
+    """
+
+    def test_the_filtered_slice_alone_does_not_admit_the_handoff(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Run ``fc896b25a09c``'s trajectory exactly. This is the red-before.
+
+        The same two canned steps reached PLANNING before this guard existed,
+        because the subject guard was satisfied the moment the alerted slice
+        was read.
+        """
+        llm = CannedLLMClient(
+            [
+                _probe_step("list_dlq_messages", {"remediation_hint": "replay_safe"}),
+                _remediate_step(),
+            ]
+        )
+        mcp = _multi_tool_mcp()
+        transition = make_llm_investigate(mcp, llm, model="m")
+        result = transition(
+            run_state.model_copy(
+                update={
+                    "state": IncidentState.INVESTIGATING,
+                    "alert": _dlq_alert("replay_safe"),
+                }
+            ),
+            now,
+        )
+
+        assert result.state is not IncidentState.PLANNING
+        refusals = [e for e in result.evidence if e.tool_name == "_handoff_refused_unlisted_queue"]
+        assert len(refusals) == 1
+        assert "unfiltered" in refusals[0].result_summary
+        assert "list_dlq_messages()" in refusals[0].result_summary
+        # The subject guard is silent: the alerted slice WAS read.
+        assert not [e for e in result.evidence if e.tool_name == "_handoff_refused"]
+
+    def test_positive_control_the_whole_queue_read_admits_the_handoff(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Run ``47abb70a2b9e``'s trajectory: whole queue, then the slice."""
+        llm = CannedLLMClient(
+            [
+                _probe_step("list_dlq_messages", {}),
+                _probe_step("list_dlq_messages", {"remediation_hint": "replay_safe"}),
+                _remediate_step(),
+            ]
+        )
+        transition = make_llm_investigate(_multi_tool_mcp(), llm, model="m")
+        result = transition(
+            run_state.model_copy(
+                update={
+                    "state": IncidentState.INVESTIGATING,
+                    "alert": _dlq_alert("replay_safe"),
+                }
+            ),
+            now,
+        )
+
+        assert result.state is IncidentState.PLANNING
+        assert not [e for e in result.evidence if e.tool_name == "_handoff_refused_unlisted_queue"]
+
+    def test_the_refusal_steers_once_and_the_planner_recovers(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Refused, told which call, reads the queue, hands off. One refusal."""
+        llm = CannedLLMClient(
+            [
+                _probe_step("list_dlq_messages", {"remediation_hint": "replay_safe"}),
+                _remediate_step(),
+                _probe_step("list_dlq_messages", {}),
+                _remediate_step(),
+            ]
+        )
+        mcp = _multi_tool_mcp()
+        transition = make_llm_investigate(mcp, llm, model="m")
+        result = transition(
+            run_state.model_copy(
+                update={
+                    "state": IncidentState.INVESTIGATING,
+                    "alert": _dlq_alert("replay_safe"),
+                }
+            ),
+            now,
+        )
+
+        assert result.state is IncidentState.PLANNING
+        assert (
+            len([e for e in result.evidence if e.tool_name == "_handoff_refused_unlisted_queue"])
+            == 1
+        )
+        assert len([e for e in result.evidence if e.tool_name == "_planner_remediate"]) == 1
+        assert ("list_dlq_messages", "remediation_hint") in [
+            (name, "remediation_hint") for name, args in mcp.calls if args.get("remediation_hint")
+        ]
+
+    def test_a_second_refusal_escalates_naming_the_missing_read(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """One steer, then the run ends rather than asking a third time.
+
+        The budget is ONE here where the subject guard's is two, and the
+        difference is the call being asked for: ``list_dlq_messages()`` takes
+        no argument a planner can get wrong, so a second identical ask buys
+        nothing the briefing would not rather have.
+        """
+        llm = CannedLLMClient(
+            [
+                _probe_step("list_dlq_messages", {"remediation_hint": "replay_safe"}),
+                _remediate_step(),
+                _remediate_step(),
+                _remediate_step(),
+            ]
+        )
+        transition = make_llm_investigate(_multi_tool_mcp(), llm, model="m")
+        result = transition(
+            run_state.model_copy(
+                update={
+                    "state": IncidentState.INVESTIGATING,
+                    "alert": _dlq_alert("replay_safe"),
+                }
+            ),
+            now,
+        )
+
+        assert result.state is IncidentState.ESCALATED
+        stops = [e for e in result.evidence if e.tool_name == "_planner_stop"]
+        assert len(stops) == 1
+        assert "without ever reading the dead-letter queue unfiltered" in stops[0].result_summary
+        assert "poison_message" in stops[0].result_summary
+
+    def test_budget_exhaustion_during_the_re_steer_escalates_cleanly(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The steer costs nothing, so the run that cannot afford the read says so.
+
+        A refusal spends no tool call, but the planner turn that earned it
+        spends tokens. So a run that is refused on its last affordable turn is
+        steered, continues, and meets the top-of-loop budget check before it
+        can make the read — it escalates on the budget, with the steer in
+        evidence saying what it was going to be asked to do. Never silently,
+        and never by handing off to the remediation the guard just refused.
+        """
+        # Two planner calls at 1000/1000 spend 4000 tokens; the ceiling is
+        # crossed by the second, which is the call the guard refuses.
+        llm = CannedLLMClient(
+            [
+                _probe_step("list_dlq_messages", {"remediation_hint": "replay_safe"}),
+                _remediate_step(),
+                _remediate_step(),
+            ],
+            usage=CannedUsage(input_tokens=1000, output_tokens=1000),
+        )
+        transition = make_llm_investigate(_multi_tool_mcp(), llm, model="claude-sonnet-4-6")
+        result = transition(
+            run_state.model_copy(
+                update={
+                    "state": IncidentState.INVESTIGATING,
+                    "alert": _dlq_alert("replay_safe"),
+                    "budget": run_state.budget.model_copy(update={"max_tokens": 3000}),
+                }
+            ),
+            now,
+        )
+
+        assert result.state is IncidentState.ESCALATED
+        assert [e for e in result.evidence if e.tool_name == "_handoff_refused_unlisted_queue"], (
+            "the steer is recorded even when the run cannot afford to act on it"
+        )
+        escalations = [e for e in result.evidence if e.tool_name == "_planner_escalate"]
+        assert escalations and "budget exhausted" in escalations[-1].result_summary
+
+    def test_a_job_type_filtered_listing_does_not_count(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The other filter on the same call, and it narrows just as much."""
+        llm = CannedLLMClient(
+            [
+                _probe_step("list_dlq_messages", {"job_type": "csv_upload"}),
+                _remediate_step(),
+            ]
+        )
+        transition = make_llm_investigate(_multi_tool_mcp(), llm, model="m")
+        result = transition(
+            run_state.model_copy(
+                update={"state": IncidentState.INVESTIGATING, "alert": _dlq_alert(None)}
+            ),
+            now,
+        )
+
+        assert result.state is not IncidentState.PLANNING
+        assert [e for e in result.evidence if e.tool_name == "_handoff_refused_unlisted_queue"]
+
+    def test_a_paged_unfiltered_listing_counts(self, run_state: RunState, now: datetime) -> None:
+        """Paging is how a long queue is read, not a way of reading less of it."""
+        llm = CannedLLMClient(
+            [
+                _probe_step("list_dlq_messages", {"limit": 50, "offset": 50}),
+                _remediate_step(),
+            ]
+        )
+        transition = make_llm_investigate(_multi_tool_mcp(), llm, model="m")
+        result = transition(
+            run_state.model_copy(
+                update={"state": IncidentState.INVESTIGATING, "alert": _dlq_alert(None)}
+            ),
+            now,
+        )
+
+        assert result.state is IncidentState.PLANNING
+        assert not [e for e in result.evidence if e.tool_name == "_handoff_refused_unlisted_queue"]
+
+    def test_the_guard_is_inert_for_a_category_that_reaches_no_dlq_action(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """A consumer-lag handoff has no queue to read whole.
+
+        ``DLQ_ACTING_CATEGORIES`` is derived from the routing maps, so this is
+        the case that says the derivation excludes as well as includes: a run
+        that restarts a consumer group is not asked to open the dead-letter
+        queue first.
+        """
+        llm = CannedLLMClient(
+            [
+                _probe_step(
+                    "get_consumer_lag",
+                    {"consumer_group": "billing"},
+                    category="consumer_saturation",
+                ),
+                _remediate_step("consumer_saturation"),
+            ]
+        )
+        transition = make_llm_investigate(_multi_tool_mcp(group="billing"), llm, model="m")
+        result = transition(_investigating(run_state), now)
+
+        assert result.state is IncidentState.PLANNING
+        assert not [e for e in result.evidence if e.tool_name == "_handoff_refused_unlisted_queue"]
+
+    def test_a_dead_lettered_chain_root_needs_the_queue_too(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """`runaway_saga` routes at `replay_dlq_by_ids`, so it is in scope.
+
+        The saga family reaches the dead-letter queue through `FIX_MAP` rather
+        than through the hint routing, and the rule is the same: the row being
+        replayed is a dead-letter row, and what sits beside it is what the
+        briefing has to be able to name.
+        """
+        llm = CannedLLMClient(
+            [
+                _probe_step(
+                    "list_dlq_messages",
+                    {"remediation_hint": "human_required"},
+                    category="runaway_saga",
+                ),
+                _remediate_step("runaway_saga"),
+            ]
+        )
+        transition = make_llm_investigate(_multi_tool_mcp(), llm, model="m")
+        result = transition(
+            run_state.model_copy(
+                update={"state": IncidentState.INVESTIGATING, "alert": _dlq_alert(None)}
+            ),
+            now,
+        )
+
+        assert result.state is not IncidentState.PLANNING
+        assert [e for e in result.evidence if e.tool_name == "_handoff_refused_unlisted_queue"]
+
+    def test_the_refusal_spends_no_tool_call_budget_and_is_a_marker(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Bookkeeping, not a probe — the repo-wide underscore convention."""
+        llm = CannedLLMClient(
+            [
+                _probe_step("list_dlq_messages", {"remediation_hint": "replay_safe"}),
+                _remediate_step(),
+                _remediate_step(),
+            ]
+        )
+        transition = make_llm_investigate(_multi_tool_mcp(), llm, model="m")
+        result = transition(
+            run_state.model_copy(
+                update={
+                    "state": IncidentState.INVESTIGATING,
+                    "alert": _dlq_alert("replay_safe"),
+                }
+            ),
+            now,
+        )
+
+        markers = [e for e in result.evidence if e.tool_name == "_handoff_refused_unlisted_queue"]
+        assert markers and all(e.tool_name.startswith("_") for e in markers)
+        # One probe, and the refusal added nothing to the meter.
+        assert result.budget.tool_calls_used == 1
+
+
 _MAPPED_FIELD_CASES: list[tuple[dict[str, Any], tuple[str, str, str]]] = [
     (
         {"group": "orders-consumer"},

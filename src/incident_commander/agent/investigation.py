@@ -62,6 +62,11 @@ _TOOL_NAME: Final[str] = "get_consumer_lag"
 # result as its last entry, so a recognizer that accepted non-underscore
 # markers would report that probe's JSON as the reason the agent gave up.
 _ESCALATION_MARKER: Final[str] = "_investigate_escalate"
+# The bookkeeping marker for ADR 0041's refusal. Distinct from
+# `_handoff_refused` (ADR 0031/0032's subject refusal) rather than reusing it:
+# a run can collect one of each, they say different things to the planner, and
+# a grader or a briefing reader has to be able to tell which read was missing.
+_WHOLE_QUEUE_REFUSED_MARKER: Final[str] = "_handoff_refused_unlisted_queue"
 _DEFAULT_MAX_ITERATIONS: Final[int] = 5
 _REMEDIATE_CONFIDENCE_THRESHOLD: Final[float] = 0.7
 
@@ -74,6 +79,19 @@ _REMEDIATE_CONFIDENCE_THRESHOLD: Final[float] = 0.7
 # remaining iterations to arrive at the generic "max iterations exceeded"
 # throws away the one diagnosis worth putting in the briefing.
 _MAX_SUBJECT_PROBE_REFUSALS: Final[int] = 2
+
+# How many times one investigation may have its remediate handoff refused for
+# never having read the dead-letter queue whole (ADR 0041) before the run
+# escalates instead.
+#
+# ONE, where the sibling above is two, and the asymmetry is the point. The
+# subject refusal names a value the planner has to get right — a consumer
+# group, a cache key, a category — so a second ask can land where the first
+# was misread. This one names a call with no arguments to get wrong:
+# `list_dlq_messages()`. A planner that re-emits `remediate` after being told
+# once to make that call is not going to make it on the second ask, and the
+# run has a better answer to give the human than a third identical refusal.
+_MAX_WHOLE_QUEUE_REFUSALS: Final[int] = 1
 
 
 # Single source of truth for category → Tier-1 tool routing.
@@ -248,6 +266,82 @@ HINT_ROUTED_TOOLS: Final[dict[str, frozenset[str]]] = {
 # hint and error text rather than from anything a scenario declares about
 # itself.
 CONTRADICTED_HINT_TOOLS: Final[frozenset[str]] = frozenset({"mark_dlq_permanent"})
+
+
+# The read that shows a dead-letter row, and the two arguments that narrow it.
+#
+# Both are the commander's own names for the platform's call, held here rather
+# than imported because `remediation.py` imports THIS module and not the other
+# way round. That is not a licence to let them drift:
+# `tests/unit/test_policies.py::TestWholeQueueReadBeforeDlqAction` pins the
+# tool name against `remediation.DLQ_ROW_SOURCE.tool_name` and the filter set
+# against every `ListingScope.read_field` in `SOURCE_LISTING_FOR_ACTION`, so a
+# third filter added on the platform side lands loudly instead of quietly
+# widening what counts as "the whole queue".
+DLQ_LISTING_TOOL: Final[str] = "list_dlq_messages"
+
+# `limit` and `offset` are deliberately NOT here. They page a listing; they do
+# not select a slice of it, so a paged whole-queue read is still a whole-queue
+# read (the same reading `SOURCE_LISTING_FOR_ACTION`'s scopes take of them).
+DLQ_LISTING_FILTERS: Final[frozenset[str]] = frozenset({"remediation_hint", "job_type"})
+
+
+# Every Tier-1 tool that replays or fences a dead-letter row.
+#
+# Declared rather than derived, and the reason is worth stating because the
+# obvious derivation is wrong. `SOURCE_ROW_FOR_ACTION` and
+# `SOURCE_LISTING_FOR_ACTION` between them name `list_dlq_messages` for the
+# three replays — but `mark_dlq_permanent` is DELIBERATELY inert in both
+# (WO-R2-144: fencing is the conservative direction, so acting on an unread
+# row cannot cause the harm those guards exist to prevent). Deriving from them
+# would therefore silently drop the fence, which is half of what ADR 0041 is
+# about. So the set is written down, and
+# `tests/unit/test_policies.py::TestWholeQueueReadBeforeDlqAction` fails if it
+# ever stops being a superset of what those two maps tie to the dead-letter
+# listing — a replay tool shipped tomorrow cannot slip past by silence.
+DLQ_ACTION_TOOLS: Final[frozenset[str]] = frozenset(
+    {
+        "replay_dlq_by_ids",
+        "replay_dlq_by_category",
+        "replay_dlq_messages",
+        "mark_dlq_permanent",
+    }
+)
+
+
+def _dlq_acting_categories() -> frozenset[HypothesisCategory]:
+    """Hypothesis categories whose Tier-1 route can reach a dead-letter action.
+
+    Derived from the two maps above it rather than hand-listed, because the
+    handoff is where this has to be decided and a handoff knows only the top
+    hypothesis's CATEGORY — the specific tool is the remediation planner's
+    choice, made a state later. So the question the guard can actually ask is
+    "could this handoff end in a dead-letter action?", and the honest answer is
+    the union of everywhere the category can route:
+
+    * `FIX_MAP[category]` — the one tool a map-routed category steers at;
+    * every tool in `HINT_ROUTED_TOOLS` for a category in
+      `HINT_ROUTED_CATEGORIES`, whose specific tool comes from the row's own
+      hint and so is not knowable here at all.
+
+    Today that is `POISON_MESSAGE` (hint-routed, every route a DLQ action) and
+    `RUNAWAY_SAGA` (`FIX_MAP` → `replay_dlq_by_ids`, the dead-lettered chain
+    root). `CONSUMER_SATURATION` and `STALE_CACHE` reach no dead-letter tool
+    and the guard stays inert on them, which is right: there is no queue to
+    read whole.
+    """
+    hint_routed = frozenset(tool for tools in HINT_ROUTED_TOOLS.values() for tool in tools)
+    acting = set()
+    for category, mapped_tool in FIX_MAP.items():
+        reachable = {mapped_tool}
+        if category in HINT_ROUTED_CATEGORIES:
+            reachable |= hint_routed
+        if reachable & DLQ_ACTION_TOOLS:
+            acting.add(category)
+    return frozenset(acting)
+
+
+DLQ_ACTING_CATEGORIES: Final[frozenset[HypothesisCategory]] = _dlq_acting_categories()
 
 
 class SubjectMatch(StrEnum):
@@ -629,6 +723,7 @@ def make_llm_investigate(
         reprobes_spent: dict[str, int] = {}
         subject = alert_subject(run_state.alert)
         refusals_spent = 0
+        whole_queue_refusals_spent = 0
         for iteration in range(max_iterations):
             if run_state.budget.is_exhausted:
                 return _escalate_investigation(run_state, at, "budget exhausted mid-investigation")
@@ -743,6 +838,41 @@ def make_llm_investigate(
                         )
                     refusals_spent += 1
                     run_state = _refuse_handoff(run_state, at, subject)
+                    continue
+                # Fourth structural guard, and the mirror image of the third
+                # (ADR 0041): you may not replay or fence PART of a dead-letter
+                # queue nobody has read WHOLE. The guard above demands the
+                # alerted slice; this one demands the page that shows what is
+                # sitting beside it. Both, or the run acted on a queue it only
+                # half looked at.
+                #
+                # After the subject check rather than before it, so a run
+                # missing both reads is told about its own incident first. The
+                # two refusals then arrive in the order a careful operator
+                # would make the calls.
+                #
+                # Refuses rather than escalates, for the same reason the third
+                # guard does: the run is not over and the missing call is one
+                # the planner can still make. This is also the only place it
+                # CAN be made — a plan-time refusal would name a read the
+                # remediation planner has no way to perform, since PLANNING
+                # proposes actions and never probes.
+                if top.category in DLQ_ACTING_CATEGORIES and not _whole_queue_listed(run_state):
+                    if whole_queue_refusals_spent >= _MAX_WHOLE_QUEUE_REFUSALS:
+                        return _finalize(
+                            run_state,
+                            at,
+                            (
+                                f"planner emitted remediate "
+                                f"{whole_queue_refusals_spent + 1} times for "
+                                f"{top.category.value!r} without ever reading the "
+                                f"dead-letter queue unfiltered; a replay or fence "
+                                f"decided from a filtered page is a decision taken "
+                                f"without seeing the rows it leaves behind; escalating"
+                            ),
+                        )
+                    whole_queue_refusals_spent += 1
+                    run_state = _refuse_whole_queue_handoff(run_state, at, top.category)
                     continue
                 return _handoff_to_planning(run_state, at, action.reason)
 
@@ -1021,6 +1151,98 @@ def _alert_subject_probed(run_state: RunState, subject: AlertSubject) -> bool:
         if narrowed == subject.value:
             return True
     return False
+
+
+def _whole_queue_listed(run_state: RunState) -> bool:
+    """True when this run read the dead-letter queue with no slice filter on it.
+
+    ADR 0041's whole check, and it is deliberately a statement about the CALL
+    rather than about the rows that came back. Two reasons, both structural:
+
+    * a probe that failed never reaches the ledger — ``_execute_probe``
+      escalates on ``MCPError``, ``is_error`` and a parse failure before it
+      writes an entry — so every ``list_dlq_messages`` entry in evidence is a
+      reading that parsed;
+    * the rule is about what the agent LOOKED at, which is the thing the agent
+      controls. A queue that emptied between the read and the action is the
+      world's timing, and refusing over it would red a careful run — the same
+      reasoning ``SOURCE_LISTING_FOR_ACTION`` gives for grading coverage
+      rather than row presence.
+
+    "Unfiltered" is judged exactly as ``remediation._scope_value`` judges it,
+    and it has to be: a missing key, an explicit JSON ``null`` (what
+    ``wire_arguments`` writes for every unset optional filter, so the wired
+    arguments on the ledger are full of them), a non-string and a
+    whitespace-only string are the four ways a call declined to narrow. Paging
+    is not narrowing — ``limit`` and ``offset`` are not in
+    ``DLQ_LISTING_FILTERS`` — so a run that walked the queue a page at a time
+    has read it whole, which is what the platform's own pagination makes the
+    only way to read a long queue at all.
+    """
+    for entry in run_state.evidence:
+        if entry.tool_name != DLQ_LISTING_TOOL:
+            continue
+        if any(_narrowed_on(entry.arguments, field) for field in DLQ_LISTING_FILTERS):
+            continue
+        return True
+    return False
+
+
+def _narrowed_on(arguments: Mapping[str, Any], field: str) -> bool:
+    """Whether one call narrowed on one filter argument."""
+    value = arguments.get(field)
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _refuse_whole_queue_handoff(
+    run_state: RunState, at: datetime, category: HypothesisCategory
+) -> RunState:
+    """Refuse a dead-letter handoff and steer the planner at the whole-queue read.
+
+    Same shape as ``_refuse_handoff`` and for the same reason: the state stays
+    INVESTIGATING, the reason lands in the evidence trail that
+    ``_format_planner_context`` renders into the next planner turn, and the
+    planner gets to fix its own omission.
+
+    The reason says which call, says what a filtered page is not, and says what
+    the read is FOR — a planner told only "read the queue" after it has already
+    called ``list_dlq_messages`` once will re-read the page it already has.
+    That is the failure mode ADR 0031 hit from the other direction and wrote
+    into its own refusal text.
+
+    Underscore-prefixed marker, per the repo-wide convention: the briefing's
+    evidence trail and the grader's "tools called" set both exclude it, and it
+    spends no tool-call budget.
+    """
+    reason = (
+        f"handoff refused: this run is about to take a dead-letter action "
+        f"(top hypothesis category {category.value!r}), and nothing in the "
+        f"evidence trail has read the dead-letter queue unfiltered. Call "
+        f"{DLQ_LISTING_TOOL}() with no "
+        f"{' and no '.join(sorted(DLQ_LISTING_FILTERS))} filter before "
+        f"remediating — paging it with limit/offset is fine. A listing narrowed "
+        f"to one category or one job type does not count: it cannot show the "
+        f"rows that sit beside the ones you are acting on, and a row the "
+        f"platform has not classified carries no category at all, so no "
+        f"filtered page selects it. Read the whole queue once, then act on the "
+        f"slice you were paged for and name the rest in the briefing."
+    )
+    entry = EvidenceEntry(
+        tool_name=_WHOLE_QUEUE_REFUSED_MARKER,
+        arguments={
+            "category": category.value,
+            "required_tool": DLQ_LISTING_TOOL,
+            "required_unfiltered_arguments": sorted(DLQ_LISTING_FILTERS),
+        },
+        result_summary=reason,
+        timestamp=at,
+    )
+    return run_state.model_copy(
+        update={
+            "evidence": (*run_state.evidence, entry),
+            "updated_at": at,
+        }
+    )
 
 
 def _refuse_handoff(run_state: RunState, at: datetime, subject: AlertSubject) -> RunState:

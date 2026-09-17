@@ -58,7 +58,10 @@ from evals.tracing import JsonlTracer, TraceKind, tracer_for
 from incident_commander.agent.briefing import EscalationBriefing, render_briefing
 from incident_commander.agent.briefing_enrichment import enrich_briefing
 from incident_commander.agent.factory import start_run
-from incident_commander.agent.investigation import make_llm_investigate
+from incident_commander.agent.investigation import (
+    _DEFAULT_MAX_ITERATIONS,
+    make_llm_investigate,
+)
 from incident_commander.agent.loop import run_to_completion
 from incident_commander.agent.orchestrator import TRANSITIONS, Transition
 from incident_commander.agent.remediation import (
@@ -1255,6 +1258,17 @@ def run_scenario(
         # scripted planner response, breaking every canned scenario.
         reprobe_attempts=(settings.investigate_reprobe_attempts if live_mcp_available else 0),
         reprobe_delay_seconds=settings.investigate_reprobe_delay_seconds,
+        # WP-2.4's third knob, wired here because this is its only consumer
+        # (WO-R3-256): a strategy that needs more or fewer planner steps than
+        # the loop's default says so through ``MAX_ITERATIONS_OVERRIDE``, and
+        # until this line the setting configured nothing. Unset means the
+        # loop's own default, named rather than re-declared — a second copy of
+        # the number here would drift from the one the loop actually enforces.
+        max_iterations=(
+            _DEFAULT_MAX_ITERATIONS
+            if settings.max_iterations_override is None
+            else settings.max_iterations_override
+        ),
     )
     # Phase 6 remediation loop: PLANNING → REMEDIATING → VERIFYING. Each
     # role gets its own LLM client so canned queues stay role-partitioned
@@ -1657,17 +1671,27 @@ def _crashed_result(
                 # The partial ledger when the crash carried one (what the
                 # run had actually spent), else the ledger it would have
                 # been seeded with — never zeros standing in for unknowns.
+                #
+                # "Would have been seeded with" is asked of the seed itself
+                # (WO-R3-256). This used to be a second copy of ``start_run``'s
+                # body, and it had already drifted: WP-2.4 made the token and
+                # dollar ceilings per-strategy multiples of the configured
+                # ones, the copy went on reading the configured ones, and under
+                # a non-1.0 multiplier a crash row named budgets no run would
+                # ever have had. One seam — the same argument WP-2.4 makes for
+                # the multipliers themselves, and the reason
+                # ``tests/unit/test_budgets.py`` reads the source to keep the
+                # scaled ceilings out of every file but ``config.py`` and
+                # ``factory.py``.
                 budget=(
                     partial.budget
                     if partial is not None
-                    else BudgetLedger(
-                        max_tool_calls=(
-                            scenario.expectation.max_tool_calls or settings.budget_max_tool_calls
-                        ),
-                        max_tokens=settings.budget_max_tokens,
-                        max_wall_seconds=settings.budget_max_seconds,
-                        max_usd=settings.budget_max_usd,
-                    )
+                    else start_run(
+                        scenario.agent_visible().alert,
+                        settings,
+                        datetime.now(UTC),
+                        max_tool_calls=scenario.expectation.max_tool_calls,
+                    ).budget
                 ),
             )
         ),

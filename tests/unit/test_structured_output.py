@@ -45,6 +45,7 @@ from incident_commander.agent.hypothesis import (
     StopAction,
 )
 from incident_commander.agent.remediation import RemediationPlan, VerificationJudgment
+from incident_commander.agent.selection import SelectionResult
 from incident_commander.llm.structured import (
     TRAILING_DELIMITERS,
     StructuredOutput,
@@ -63,6 +64,12 @@ RECORD_OUTPUT_MODELS: Final[tuple[type[StructuredOutput], ...]] = (
     VerificationJudgment,
     BriefingContent,
     JudgeScore,
+    # WP-6.1's new role. Listed here rather than only in the selector's own
+    # suite because this is the file that cross-checks the list against the
+    # source, and a model reaching ``record_output`` without
+    # ``StructuredOutput`` is a model whose nested fields are back to
+    # escalating a run over their wrapping.
+    SelectionResult,
 )
 
 # Verbatim evidence, not sample data: the two long lines below are the exact

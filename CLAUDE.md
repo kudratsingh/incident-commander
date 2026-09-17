@@ -98,6 +98,7 @@ incident-commander/
 │       │   ├── hypothesis.py       # hypothesis and evidence models, ranking inputs
 │       │   ├── candidates.py       # candidate diagnoses: grounded evidence refs (ADR 0042)
 │       │   ├── planner_context.py  # what the planner is shown — one renderer, every strategy
+│       │   ├── selection.py       # candidate_selector: SelectionResult, its context, its call (ADR 0048)
 │       │   ├── remediation.py      # plan, tier gate, execute/verify loop, idempotency keys
 │       │   ├── briefing.py         # deterministic escalation briefing (the old escalation.py)
 │       │   ├── briefing_enrichment.py  # LLM findings + recommendation over that template
@@ -203,9 +204,9 @@ This block describes `docs/` as it is. Entries that do not exist yet carry an ex
 docs/
 ├── README.md                   # the map: one line per document, and which are history
 ├── ADR/                        # numbered decision records, never edited after acceptance
-│   ├── README.md               # the index: all 47, with status and what amended what
+│   ├── README.md               # the index: all 48, with status and what amended what
 │   ├── 0000-template.md
-│   └── 0001-…0047-….md         # 0001 external client architecture … 0047 a recorded run grades diagnosis and the plan
+│   └── 0001-…0048-….md         # 0001 external client architecture … 0048 a selector is constrained by its schema
 ├── lessons/                    # case studies of things that went wrong, or almost did
 │   ├── phase-6-hardening.md          # free-form Hypothesis.name → schema tightening
 │   ├── live-eval-noise-sources.md    # the five buckets a weird live failure falls into
@@ -222,7 +223,7 @@ docs/
 └── interview-map.md            # (planned — Phase 8) component → JD skill → talking points
 ```
 
-ADR process: any decision that constrains future work gets an ADR before or with the implementing PR. Status flow is proposed, accepted, superseded. An accepted ADR is never rewritten — a later ADR amends or supersedes it and both stay on the shelf. The set runs 0001 through 0047; [`docs/ADR/README.md`](docs/ADR/README.md) lists every one with its status and records which later ADR moved which.
+ADR process: any decision that constrains future work gets an ADR before or with the implementing PR. Status flow is proposed, accepted, superseded. An accepted ADR is never rewritten — a later ADR amends or supersedes it and both stay on the shelf. The set runs 0001 through 0048; [`docs/ADR/README.md`](docs/ADR/README.md) lists every one with its status and records which later ADR moved which.
 
 Before opening a PR touching schemas, prompts, or the state machine, read [`docs/architecture-principles.md`](docs/architecture-principles.md). It codifies the rules that came out of past PRs — most importantly "default to the structural fix, not the band-aid." When you hit a symptom that a prompt tweak would patch, the first design conversation is whether the schema should reject the class of bug instead. See [`docs/lessons/phase-6-hardening.md`](docs/lessons/phase-6-hardening.md) for the case study that produced this rule.
 

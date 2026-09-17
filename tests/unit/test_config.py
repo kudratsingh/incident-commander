@@ -8,7 +8,13 @@ from typing import Any
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from incident_commander.config import ModelRole, Settings, get_settings, settings_env_var_names
+from incident_commander.config import (
+    ChaosTokenNotConfigured,
+    ModelRole,
+    Settings,
+    get_settings,
+    settings_env_var_names,
+)
 from incident_commander.llm.pricing import MODEL_PRICING
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -49,6 +55,7 @@ _DOCUMENTED_ENV_VARS = frozenset(
         "INVESTIGATE_REPROBE_DELAY_SECONDS",
         "JUDGE_MODEL",
         "PLATFORM_AGENT_PRINCIPAL_ID",
+        "PLATFORM_CHAOS_TOKEN",
         "PLATFORM_MCP_URL",
         "PLATFORM_REST_URL",
         "PLATFORM_SMOKE_PRINCIPAL_ID",
@@ -406,3 +413,54 @@ class TestGetSettings:
         second = get_settings()
         assert first is second
         get_settings.cache_clear()
+
+
+class TestTheChaosPrincipalIsSeparateAndRequiredAtUse:
+    """`PLATFORM_CHAOS_TOKEN`: optional to load, mandatory at the point of use.
+
+    Platform v0.6.5 split one four-scope principal into two (owner decision
+    O-4). The agent's `PLATFORM_TOKEN` lost `chaos:invoke`, because the
+    platform withholds the `chaos.%` audit rows from principals that cannot
+    fire chaos and that filter is inert while one token holds every scope.
+    The evaluator's token is a second credential, and these pin the two
+    properties that make the split safe to depend on: an absent value never
+    blocks the offline world, and a seeding path never silently degrades to
+    the agent's token (the S-04 shape, one level up).
+    """
+
+    def test_it_is_optional_at_load(self, valid_kwargs: dict[str, Any]) -> None:
+        # The agent process, the API and the whole canned suite have no chaos
+        # principal and must still construct.
+        settings = _settings(**valid_kwargs)
+        assert settings.platform_chaos_token is None
+
+    def test_it_is_a_secret_and_never_reprs(self, valid_kwargs: dict[str, Any]) -> None:
+        settings = _settings(**valid_kwargs, platform_chaos_token="sa_chaos")
+        assert isinstance(settings.platform_chaos_token, SecretStr)
+        assert settings.require_chaos_token() == "sa_chaos"
+        assert "sa_chaos" not in repr(settings)
+
+    @pytest.mark.parametrize("unset", [None, "", "   "])
+    def test_unset_or_blank_refuses_rather_than_falling_back(
+        self, valid_kwargs: dict[str, Any], unset: str | None
+    ) -> None:
+        # Blank is UNSET, not "use the default", and the default it must not
+        # reach for is platform_token — which cannot seed anything since
+        # v0.6.5, so the fallback would surface as a scope refusal fired
+        # mid-run with the archive already open.
+        overrides = {} if unset is None else {"platform_chaos_token": unset}
+        settings = _settings(**valid_kwargs, **overrides)
+        with pytest.raises(ChaosTokenNotConfigured) as exc:
+            settings.require_chaos_token()
+        message = str(exc.value)
+        assert "PLATFORM_CHAOS_TOKEN" in message
+        assert "make bootstrap-token" in message
+        assert settings.platform_token.get_secret_value() not in message
+
+    def test_the_refusal_is_one_line(self, valid_kwargs: dict[str, Any]) -> None:
+        # Read at the moment a run has just refused to start: the operator
+        # needs the variable and the command, on one line, not a traceback.
+        settings = _settings(**valid_kwargs)
+        with pytest.raises(ChaosTokenNotConfigured) as exc:
+            settings.require_chaos_token()
+        assert "\n" not in str(exc.value)

@@ -13,10 +13,54 @@ Required keys:
 ANTHROPIC_API_KEY=sk-ant-api03-...
 PLATFORM_MCP_URL=http://localhost:8001/mcp
 PLATFORM_REST_URL=http://localhost:8000
-PLATFORM_TOKEN=sa_...               # minted with make bootstrap-token
+PLATFORM_TOKEN=sa_...               # the AGENT's principal; make bootstrap-token
+PLATFORM_CHAOS_TOKEN=sa_...          # the EVALUATOR's (chaos:invoke); same command
+PLATFORM_SMOKE_TOKEN=sa_...          # the read-only twin; same command
 PLATFORM_WEBHOOK_SECRET=<from platform config>
 DATABASE_URL=postgresql://...       # agent's own DB, separate from platform
 ```
+
+### Three principals, and which target uses which
+
+`make bootstrap-token` prints **three** `.env` lines and writes nothing itself — you paste all
+three. They are three different service accounts on the platform, not three copies of one
+credential, and the eval is only honest while they stay apart:
+
+| `.env` variable | Platform account | Scopes | Who uses it |
+|---|---|---|---|
+| `PLATFORM_TOKEN` | `incident-commander` | `telemetry:read`, `incidents:read`, `actions:execute` | the AGENT under test — its MCP client on every `make eval` / `make eval-live` run, and the Tier-1 calls `make test-idempotency` replays |
+| `PLATFORM_CHAOS_TOKEN` | `incident-commander-chaos` | `telemetry:read`, `incidents:read`, `chaos:invoke` | the EVALUATOR — every seed/reset/chaos path: all `make chaos-*` targets, the runner's chaos setup and teardown inside `make eval-live`, `make world-dossier`'s seeding leg, and the hook `make test-idempotency` stages its world with |
+| `PLATFORM_SMOKE_TOKEN` | `incident-commander-smoke` | `telemetry:read`, `incidents:read` | the read-only stage — `make eval-smoke`, `make world-audit`, and `make world-dossier`'s read legs |
+
+Two rules follow from the table, and both are enforced rather than trusted:
+
+- **The agent never holds `chaos:invoke`** (owner decision O-4, platform ADR 0012). Since platform
+  v0.6.5 a principal that can fire the lab is also served the `chaos.%` audit rows, so an agent
+  holding that scope can read which hook was fired against which resource seconds before its own
+  alert — the answer key. `make bootstrap-token` strips the scope from an existing
+  `incident-commander` account and refuses to add it back through the `--scope` flag, and the
+  runner probes for its absence before any spend (exit 4). When a hook is refused for lack of
+  scope the remedy is the chaos token in the row below — never a wider agent account.
+- **The evaluator never holds `actions:execute`.** Remediating is the thing being measured, so the
+  principal that stages the world must not be able to do it.
+
+There is no fallback between them. An unset `PLATFORM_CHAOS_TOKEN` fails loudly, naming the
+variable and this command; it never silently resolves to the agent's token, because that failure
+would surface as a mid-run scope refusal with the run archive already open.
+
+**Nothing needs sourcing into your shell.** Every Python entry point (`make eval`, `eval-live`,
+`eval-smoke`, `world-audit`, `world-dossier`, `eval-reset`) reads `.env` through `Settings`
+(`env_file=".env"`), and the `chaos-*` recipes — whose script reads `os.environ` instead — are
+handed their values by the Makefile's own `export` lines. Keep the values **unquoted** in `.env`:
+make's `-include .env` keeps quotes where dotenv strips them.
+
+The two paths resolve a conflict in opposite directions, which is worth knowing the one time it
+bites you. A token exported in your shell **wins** over `.env` for the `Settings` paths
+(pydantic-settings ranks the environment above the env file), so a stale export is why a freshly
+pasted token can seem not to take. For the `chaos-*` targets `.env` wins instead, because
+`-include .env` sets a *make* variable and the recipe re-exports that — the same precedence that
+let every "read-scoped" smoke run before 2026-08-07 silently hold write scope. When in doubt,
+fix `.env` and clear the export rather than reasoning about which one you are on.
 
 ## Day-to-day commands
 
@@ -55,13 +99,13 @@ make chaos-saturate
 make chaos-bad-deploy
 ```
 
-Each hook self-cleans on TTL (5–10 minutes). Chaos setup requires the platform booted with `CHAOS_ENABLED=true` (default in `demo/compose.yml`) and a token with `chaos:invoke` scope.
+Each hook self-cleans on TTL (5–10 minutes). Chaos setup requires the platform booted with `CHAOS_ENABLED=true` (default in `demo/compose.yml`) and the **evaluator's** token — `PLATFORM_CHAOS_TOKEN`, the `incident-commander-chaos` principal. The agent's `PLATFORM_TOKEN` is refused here on purpose: since platform v0.6.5 it does not carry `chaos:invoke`, because a principal that can fire the lab can also read the lab's audit rows (platform ADR 0012, owner decision O-4).
 
-`PLATFORM_MCP_URL` and `PLATFORM_TOKEN` in `.env` are enough — the `chaos-*` recipes hand them to the script themselves (WO-R2-89). Until then they did not: make's `-include .env` sets a *make* variable, the script reads `os.environ`, and nothing bridged the two, so every one of these targets aborted with "PLATFORM_MCP_URL and PLATFORM_TOKEN must be set (env or --flag)" no matter how correct your `.env` was. Because make now expands these values, keep them **unquoted** in `.env` (make keeps the quotes; dotenv strips them).
+`PLATFORM_MCP_URL` and `PLATFORM_CHAOS_TOKEN` in `.env` are enough — the `chaos-*` recipes hand them to the script themselves (WO-R2-89). Until then they did not: make's `-include .env` sets a *make* variable, the script reads `os.environ`, and nothing bridged the two, so every one of these targets aborted with "PLATFORM_MCP_URL and PLATFORM_CHAOS_TOKEN must be set (env or --flag)" no matter how correct your `.env` was. Because make now expands these values, keep them **unquoted** in `.env` (make keeps the quotes; dotenv strips them).
 
-If your service-account token was minted without chaos scope, regenerate:
+If a hook is refused for lack of scope, re-mint and re-paste both lines — do **not** try to widen the agent account, which the bootstrap refuses for exactly this reason:
 ```bash
-uv run python scripts/bootstrap_agent_token.py --scope chaos:invoke
+make bootstrap-token
 ```
 
 ### 2. Run the live eval
@@ -269,8 +313,14 @@ harness artifacts — see [`docs/lessons/live-eval-sequence-2026-09.md`](lessons
 # pre-completion compose — no consumers, no consumer_lag scenarios.
 make demo
 
-# `bootstrap-token` PRINTS the tokens. It does not write .env, and nothing
+# `bootstrap-token` PRINTS the tokens — THREE of them, one per principal:
+# PLATFORM_TOKEN (the agent: reads + actions:execute, no chaos:invoke),
+# PLATFORM_CHAOS_TOKEN (the evaluator: reads + chaos:invoke, the credential
+# every seed/reset/chaos path uses) and PLATFORM_SMOKE_TOKEN (reads only).
+# It does not write .env, and nothing
 # downstream reads its stdout — YOU paste the printed values into .env.
+# Paste all three: one value in two variables gives you either a runner that
+# cannot seed or an agent that can read the lab, and neither names itself.
 # Skipping the paste fails later with an auth error that reads like a
 # scope problem. And note what invalidates them: `docker compose down -v`
 # destroys the database they were minted against, so every previously
@@ -660,7 +710,7 @@ the degradation is now recorded in the report (`degraded_count` in
 | 1 | ≥1 scenario failed (regression gate: regression detected, or a baseline scenario dropped from latest) |
 | 2 | the selection is not one the runner will spend on. Four cases: an unrecognised `--model-role` value (refused before the settings load — a typo must not be read as the default role); `--live` with no `--only` and no `--smoke` (an unfiltered live run is the whole suite against one shared platform — refused before the settings load, and `make eval-live` refuses the same thing at Makefile parse time); an `--only` pattern matched no scenario — *any* single dead pattern, not only a wholly empty selection, since a dead pattern is a renamed scenario dropping silently out of the run; or, under `--live`, an `--only` pattern that is not a full scenario name — the refusal lists the scenarios it would have substring-matched, because a widened live selection slips past the ADR 0020 gate whenever only one of the matches mutates (regression gate: missing report; a filtered `--only` `latest.json`; or a comparison spanning two `agent_model` ids — all refused as gate input) |
 | 3 | preflight/env failure: `--smoke` without `--live`, degraded `--live` env, invalid or missing settings, missing smoke token, LLM auth preflight failure |
-| 4 | principal guard: the token is not the one the selection needs — the smoke token holds more than read scope, or a remediation selection lacks `actions:execute`, or a chaos-seeding selection lacks `chaos:invoke` (each guard probes only the scope its half of the selection needs, and each fails closed on any probe outcome that is neither a scope refusal nor an argument-validation refusal) |
+| 4 | principal guard: a token is not the one its role needs — the smoke token holds more than read scope, a remediation selection's `PLATFORM_TOKEN` lacks `actions:execute` **or still carries `chaos:invoke`** (the agent must be blind to the lab), or a chaos-seeding selection's `PLATFORM_CHAOS_TOKEN` lacks `chaos:invoke` (each guard probes only the scope its half of the selection needs, and each fails closed on any probe outcome that is neither a scope refusal nor an argument-validation refusal) |
 | 5 | post-stage audit failed, was unreadable, or was inconclusive |
 | 6 | `--smoke` selected a scenario that declares `chaos_setup` — a read-only stage does not seed chaos |
 | 7 | `--live` selected more than one state-mutating scenario — nothing resets the shared platform between them (ADR 0020) |
@@ -695,11 +745,12 @@ its report is read that way.
 
 ### A smoke selection may not seed chaos (S-03)
 
-`chaos_setup` is fired by the runner under `PLATFORM_TOKEN` — the full
-write+chaos principal — because chaos needs `chaos:invoke`, which the
-read-scoped smoke token does not carry. That is fine on a `--live`
+`chaos_setup` is fired by the runner under `PLATFORM_CHAOS_TOKEN` — the
+evaluator's own principal, the only one that carries `chaos:invoke` since
+platform v0.6.5. Seeding therefore mutates the shared world on any run that
+reaches it, whatever the agent's token can do. That is fine on a `--live`
 remediation run and wrong during `--smoke`, whose entire purpose is to
-prove the stage is read-only. So `--smoke` now refuses, with **exit 6**,
+prove the stage changed nothing. So `--smoke` now refuses, with **exit 6**,
 before preflight or any spend, if any *selected* scenario is outside the
 derived smoke set — that is, if it declares `chaos_setup`, declares
 `expected_action_tools`, or carries a `smoke_exclusion`. The refusal names
@@ -722,8 +773,14 @@ through the `--only` override, which is the channel it was always for.
 
 The mirror of that rule on the `--live` side: a selection that *does*
 declare `chaos_setup` is checked, before any spend, for the scope it needs
-to seed — `chaos:invoke`, probed with a deliberately invalid
-`inject_latency` call, exit 4 on refusal. The write guard could not cover
+to seed — `chaos:invoke` on `PLATFORM_CHAOS_TOKEN`, probed with a
+deliberately invalid `inject_latency` call, exit 4 on refusal. The same
+probe is fired at the AGENT's token with the opposite expectation: it must
+be REFUSED on scope, because a token that can seed is a token the platform
+serves the `chaos.%` audit rows to, and an agent that can read which hook
+fired against which resource is not being measured on anything. An unset
+`PLATFORM_CHAOS_TOKEN` is an exit-3 preflight failure, not a fallback to
+the agent's token. The write guard could not cover
 this: it is keyed on `expected_action_tools`, and a scenario that mutates
 the platform solely through `chaos_setup` declares none, so it used to run
 unguarded and discovered its wrong token inside `run_scenario` — hook
@@ -737,11 +794,13 @@ load time against the chaos tools in
 `contracts/platform-tools.snapshot.json` (selected by the platform's
 `[chaos: ...]` description prefix). A scenario YAML naming any other tool
 — a Tier-1 write, say — is rejected at load instead of being forwarded
-verbatim as a `tools/call` under the full principal. New hooks become
+verbatim as a `tools/call` under the chaos principal. New hooks become
 legal via a platform release + digest bump + `make snapshot`, never by
-hand-editing a list. Re-tokening chaos onto a dedicated lower-privilege
-principal is deliberately out of scope: it is a platform-side scope
-design change, not a commander one.
+hand-editing a list. (Re-tokening chaos onto its own principal was out of
+scope when this paragraph was written; platform v0.6.5 did it — the chaos
+account holds the two read scopes plus `chaos:invoke` and no
+`actions:execute`, which narrows the blast radius of a bad hook name
+without closing it, since every chaos hook is itself a write.)
 
 The hook's **arguments** are closed the same way, against the same
 snapshot entry's `inputSchema`: unknown argument names, missing required
@@ -749,7 +808,7 @@ ones, and flipped primitive types are all rejected when the YAML loads.
 Every chaos `inputSchema` declares `additionalProperties: false`, so each
 of those is a guaranteed `ChaosInvocationError` live — and seeding runs
 *before* the agent starts, which means the failure used to land
-mid-campaign, after the platform had been touched under the write
+mid-campaign, after the platform had been touched under the chaos
 principal and after run startup was already paid for. Both halves of an
 invocation now fail in the same place, for free, at load time. When this
 rejection fires the fix is in the scenario YAML, or — if the platform

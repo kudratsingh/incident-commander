@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
 from evals.guards import (
+    _AGENT_FORBIDDEN_SCOPE,
     _CHAOS_PROBE_ARGS,
     _CHAOS_PROBE_TOOL,
     _PROBE_ARGS,
     _PROBE_TOOL,
     AuditWindowScan,
     PrincipalGuardError,
+    assert_chaos_blind_principal,
     assert_chaos_capable_principal,
     assert_no_tier1_successes,
     assert_read_only_principal,
@@ -37,6 +39,41 @@ class _Client:
         if isinstance(self._behavior, Exception):
             raise self._behavior
         return self._behavior
+
+
+class _ByTool:
+    """One answer per tool name, because the agent guard now asks two things.
+
+    ``assert_write_capable_principal`` fires a Tier-1 probe and then a chaos
+    probe, and the pass condition is OPPOSITE for the two: the Tier-1 call must
+    be refused on its arguments (the scope let it through) and the chaos call
+    must be refused on scope (the scope did not). ``_Client``'s single fixed
+    answer cannot express a principal that is one and not the other, which is
+    precisely the principal the split creates.
+    """
+
+    def __init__(self, behavior: dict[str, ToolResult | Exception]) -> None:
+        self._behavior = behavior
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def call_tool(
+        self, name: str, arguments: Any, *, timeout_seconds: float | None = None
+    ) -> ToolResult:
+        self.calls.append((name, dict(arguments)))
+        try:
+            behavior = self._behavior[name]
+        except KeyError:  # pragma: no cover - a test wired the wrong tool
+            raise AssertionError(f"no behavior configured for {name!r}") from None
+        if isinstance(behavior, Exception):
+            raise behavior
+        return behavior
+
+
+#: The principal the split is meant to produce: can act, cannot seed.
+_SPLIT_AGENT: Final[dict[str, ToolResult | Exception]] = {
+    _PROBE_TOOL: MCPError(-32602, "invalid tool arguments"),
+    _CHAOS_PROBE_TOOL: MCPError(-32002, "missing required scope: chaos:invoke"),
+}
 
 
 class TestReadOnlyGuard:
@@ -431,11 +468,14 @@ class TestWriteCapablePrincipal:
         with pytest.raises(PrincipalGuardError, match="lacks\\s+actions:execute"):
             assert_write_capable_principal(client)
 
-    def test_an_argument_refusal_passes_the_guard(self) -> None:
-        # Scope check passed, arguments rejected — nothing executed, and the
-        # principal is demonstrably able to act.
-        client = _Client(MCPError(-32602, "invalid tool arguments"))
+    def test_an_argument_refusal_plus_a_chaos_scope_refusal_passes(self) -> None:
+        # The post-v0.6.5 agent principal, and the ONLY passing shape: the
+        # Tier-1 scope check passed and rejected the arguments (so it can act,
+        # and nothing executed), while the chaos hook was refused on scope (so
+        # the platform withholds the chaos audit rows from it).
+        client = _ByTool(dict(_SPLIT_AGENT))
         assert_write_capable_principal(client)  # no raise
+        assert [name for name, _ in client.calls] == [_PROBE_TOOL, _CHAOS_PROBE_TOOL]
 
     def test_a_successful_probe_fails_loudly(self) -> None:
         # A deliberately invalid Tier-1 call must never be accepted. If it
@@ -459,6 +499,24 @@ class TestWriteCapablePrincipal:
         assert_read_only_principal(scope_refused)  # passes
         with pytest.raises(PrincipalGuardError):
             assert_write_capable_principal(scope_refused)  # fails
+
+    def test_a_token_that_can_also_seed_chaos_fails_the_guard(self) -> None:
+        """The leak, caught before a single model call.
+
+        A principal that passes BOTH probes on arguments is the pre-v0.6.5
+        four-scope token: it can act, and because it can fire the lab the
+        platform serves it the `chaos.%` audit rows. Every diagnosis claim on
+        such a run is unfalsifiable, so the guard refuses it as hard as it
+        refuses a token that cannot act at all.
+        """
+        client = _ByTool(
+            {
+                _PROBE_TOOL: MCPError(-32602, "invalid tool arguments"),
+                _CHAOS_PROBE_TOOL: MCPError(-32602, "latency_ms: not an integer"),
+            }
+        )
+        with pytest.raises(PrincipalGuardError, match="chaos:invoke"):
+            assert_write_capable_principal(client)
 
     def test_a_vanished_probe_tool_fails_closed(self) -> None:
         """ "Tool not found" is not proof that the principal can act.
@@ -490,6 +548,89 @@ class TestWriteCapablePrincipal:
         # The probe only distinguishes the scopes because it needs
         # actions:execute. A read tool would be refused by neither token.
         assert tier_of(_PROBE_TOOL) is Tier.TIER_1
+
+
+class TestChaosBlindPrincipal:
+    """The negative half of the split: the AGENT must not be able to seed.
+
+    This guard is not about blast radius. The platform hides every ``chaos.%``
+    audit row from principals without ``chaos:invoke``
+    (``hidden_audit_action_prefixes``), so the scope is a read of the answer
+    key: ``list_audit_events`` returns the hook name and its arguments,
+    stamped seconds before the alert the agent is investigating. The filter is
+    inert unless the agent's token genuinely lacks the scope, and this is what
+    "genuinely" means here — asserted at the point of use, against the live
+    platform, exactly like its three siblings (F-001).
+    """
+
+    def test_a_scope_refusal_passes(self) -> None:
+        client = _Client(MCPError(-32002, "missing required scope: chaos:invoke"))
+        assert_chaos_blind_principal(client)  # no raise
+        assert client.calls[0][0] == _CHAOS_PROBE_TOOL
+
+    def test_an_argument_refusal_means_the_scope_is_carried_and_fails(self) -> None:
+        # The signature of the pre-split four-scope token: the handler got
+        # PAST the scope check and rejected our deliberately invalid hook
+        # arguments. Nothing was seeded, and the principal is wrong anyway.
+        client = _Client(MCPError(-32602, "latency_ms: Input should be a valid integer"))
+        with pytest.raises(PrincipalGuardError, match="chaos:invoke"):
+            assert_chaos_blind_principal(client)
+
+    def test_a_successful_probe_fails_loudest(self) -> None:
+        client = _Client(ToolResult(content=[{"type": "text", "text": "{}"}]))
+        with pytest.raises(PrincipalGuardError, match="chaos:invoke"):
+            assert_chaos_blind_principal(client)
+
+    def test_an_unexpected_error_fails_closed(self) -> None:
+        # A probe that never reached the handler proves nothing either way,
+        # and an unverified control is an unmet precondition.
+        client = _Client(RuntimeError("connection reset"))
+        with pytest.raises(PrincipalGuardError, match="Failing closed"):
+            assert_chaos_blind_principal(client)
+
+    def test_a_missing_chaos_tool_fails_closed(self) -> None:
+        # CHAOS_ENABLED=false: the hook is not registered, so the refusal says
+        # nothing about the token. Passing here would make the guard vacuously
+        # green on a stack where chaos is simply switched off — the shape that
+        # made the write guard vacuous when its probe tool vanished.
+        client = _Client(MCPError(-32601, f"Unknown tool: {_CHAOS_PROBE_TOOL}"))
+        with pytest.raises(PrincipalGuardError, match="Failing closed"):
+            assert_chaos_blind_principal(client)
+
+    def test_the_message_names_the_credential_to_fix(self) -> None:
+        # Read at the moment a live run has refused to start. The remedy is
+        # re-minting, not widening: `make bootstrap-token` refuses to grant
+        # the agent this scope at all.
+        client = _Client(MCPError(-32602, "invalid arguments"))
+        with pytest.raises(PrincipalGuardError) as exc:
+            assert_chaos_blind_principal(client)
+        message = str(exc.value)
+        assert "PLATFORM_CHAOS_TOKEN" in message
+        assert "make bootstrap-token" in message
+
+    def test_it_probes_the_scope_the_platform_filter_keys_on(self) -> None:
+        # The guard is only a leak check because this string is the same one
+        # the platform's audit filter tests for. A different scope here would
+        # make it a tidiness check.
+        assert _AGENT_FORBIDDEN_SCOPE == "chaos:invoke"
+
+    def test_the_two_chaos_guards_are_exact_opposites(self) -> None:
+        """One platform response, two verdicts — one per principal.
+
+        The agent's token and the evaluator's token are graded by the same
+        probe with inverted expectations, which is what makes "these are two
+        different principals" a checkable claim rather than a configuration
+        convention.
+        """
+        scope_refused = _Client(MCPError(-32002, "missing required scope: chaos:invoke"))
+        assert_chaos_blind_principal(scope_refused)  # the agent: correct
+        with pytest.raises(PrincipalGuardError):
+            assert_chaos_capable_principal(scope_refused)  # the runner: wrong
+
+        args_refused = _Client(MCPError(-32602, "latency_ms: not an integer"))
+        assert_chaos_capable_principal(args_refused)  # the runner: correct
+        with pytest.raises(PrincipalGuardError):
+            assert_chaos_blind_principal(args_refused)  # the agent: wrong
 
 
 class TestChaosCapablePrincipal:

@@ -13,10 +13,24 @@ introspection endpoint, no platform change required.
 
 Each stage asserts the scope it actually needs, and only that one:
 ``assert_read_only_principal`` (smoke: must NOT carry ``actions:execute``),
-``assert_write_capable_principal`` (remediation: must carry it), and
-``assert_chaos_capable_principal`` (any selection that seeds a fault: must
-carry ``chaos:invoke``). Asking about the wrong scope is its own bug — it
-refuses runs that are entitled to proceed and passes runs that are not.
+``assert_write_capable_principal`` (remediation: must carry it, and must NOT
+carry ``chaos:invoke``), and ``assert_chaos_capable_principal`` (the
+evaluator's own client, on any selection that seeds a fault: must carry
+``chaos:invoke``). Asking about the wrong scope is its own bug — it refuses
+runs that are entitled to proceed and passes runs that are not.
+
+Since platform v0.6.5 the agent principal is asserted in BOTH directions, and
+the negative half is the load-bearing one for the eval's honesty. The platform
+withholds the ``chaos.%`` audit rows from principals that cannot fire chaos
+(``app/services/operator_audit.py::hidden_audit_action_prefixes``, keyed on
+``chaos:invoke``), so an agent token carrying that scope reads
+``kill_consumer(worker-dispatcher)`` out of ``list_audit_events`` seconds
+before its own alert — the answer key, in the tool surface, at no cost. That
+filter is inert unless the agent's token genuinely lacks the scope, and
+"genuinely" is the word this module exists for: the configuration said
+read-only for four months of runs that were not (F-001). So the same
+negative-probe shape that proves the smoke token cannot write now proves the
+agent token cannot seed.
 """
 
 from __future__ import annotations
@@ -80,6 +94,13 @@ _CHAOS_PROBE_ARGS: Final[dict[str, Any]] = {
     "consumer_group": "",
     "latency_ms": "not-a-latency",
 }
+
+# The scope the AGENT principal must never carry (owner decision O-4). Named
+# once, here, because two facts depend on it being the same string: the
+# negative probe ``assert_write_capable_principal`` fires, and the platform's
+# own ``hidden_audit_action_prefixes`` predicate, which is what makes holding
+# it a leak rather than merely a wider grant.
+_AGENT_FORBIDDEN_SCOPE: Final[str] = "chaos:invoke"
 # Derived from the tier map, never hand-copied. A second list of Tier-1
 # names would be one more mirror to drift out of sync — the same defect
 # issue #79 tracks for ReadToolName, and the same class as the audit
@@ -119,31 +140,17 @@ def assert_read_only_principal(client: MCPClientProtocol) -> None:
     Safe by construction: the handler's scope check precedes argument
     parsing, so the malformed payload cannot execute under either token.
     """
-    try:
-        result = client.call_tool(_PROBE_TOOL, _PROBE_ARGS)
-    except MCPError as err:
-        if err.code == _SCOPE_REFUSAL_CODE and "scope" in str(err).lower():
-            return
-        raise PrincipalGuardError(
-            "read-only guard: expected a scope refusal from the negative "
-            f"probe, got MCPError {err.code}: {err}. The token appears to "
-            "carry actions:execute — refusing to run smoke scenarios under "
-            "a write-capable principal."
-        ) from err
-    except Exception as err:  # noqa: BLE001 — fail closed, deliberately
-        # Transport blip, unknown response shape, anything at all: an
-        # unverified guard is an unmet precondition, not a warning. A
-        # safety check that shrugs on an unexpected error is the bypass
-        # F-001 is about.
-        raise PrincipalGuardError(
-            "read-only guard: could not verify the principal "
-            f"({type(err).__name__}: {err}). Failing closed — the run does "
-            "not proceed on an unverified control."
-        ) from err
-    raise PrincipalGuardError(
-        "read-only guard: the negative probe was NOT refused on scope "
-        f"(result: {str(result)[:200]}). The token carries write scope — "
-        "refusing to run smoke scenarios under a write-capable principal."
+    _assert_scope_absent(
+        client,
+        label="read-only guard",
+        probe_tool=_PROBE_TOOL,
+        probe_args=_PROBE_ARGS,
+        scope="actions:execute",
+        carried_consequence=(
+            "which is write scope — refusing to run smoke scenarios under a "
+            "write-capable principal. Use PLATFORM_SMOKE_TOKEN, not "
+            "PLATFORM_TOKEN."
+        ),
     )
 
 
@@ -178,6 +185,17 @@ def assert_write_capable_principal(client: MCPClientProtocol) -> None:
     Safe by construction, same as its mirror: the handler's scope check
     precedes argument parsing, so the malformed payload cannot execute under
     either token.
+
+    **Two probes since platform v0.6.5**, because "the right principal for the
+    remediation stage" is now two claims and one of them is about what the
+    token must NOT be able to do. After the carried-scope probe above, a
+    second negative probe fires a chaos hook with deliberately invalid
+    arguments and requires a SCOPE refusal: the agent must not hold
+    ``chaos:invoke``, or the platform serves it the ``chaos.%`` audit rows and
+    every diagnosis claim on the run is unfalsifiable (owner decision O-4,
+    platform ADR 0012's 2026-09-15 amendment). Anything that could have
+    executed fails the guard; the probe itself seeds nothing under either
+    token, exactly like the malformed Tier-1 payload above.
     """
     _assert_scope_carried(
         client,
@@ -194,6 +212,46 @@ def assert_write_capable_principal(client: MCPClientProtocol) -> None:
         unreached_hint=(
             f"Most likely {_PROBE_TOOL} no longer exists on the platform, or "
             "the handler errored before the scope check."
+        ),
+    )
+    assert_chaos_blind_principal(client)
+
+
+def assert_chaos_blind_principal(client: MCPClientProtocol) -> None:
+    """Hard-fail unless the AGENT's token genuinely lacks ``chaos:invoke``.
+
+    The negative half of the two-principal split, and the one the eval's
+    honesty rests on. The platform hides every ``chaos.%`` audit row from
+    principals that cannot fire chaos, so this scope is not merely a wider
+    grant on the agent — it is a read of the answer key: ``list_audit_events``
+    returns the hook name and its arguments, stamped seconds before the alert
+    the agent is investigating (divergence G3; platform ADR 0012's 2026-09-15
+    amendment; owner decision O-4).
+
+    Called by ``assert_write_capable_principal`` — the remediation stage's
+    agent client — and separately by the runner for a live selection that
+    seeds chaos without declaring a Tier-1 action, because that selection has
+    an agent in it too and the leak does not care whether anything was
+    remediated.
+
+    Safe by construction, like every probe here: the hook's arguments are
+    invalid against its own committed ``inputSchema``, and the platform's scope
+    check precedes argument parsing, so nothing is seeded under either token.
+    """
+    _assert_scope_absent(
+        client,
+        label="agent chaos-blindness guard",
+        probe_tool=_CHAOS_PROBE_TOOL,
+        probe_args=_CHAOS_PROBE_ARGS,
+        scope=_AGENT_FORBIDDEN_SCOPE,
+        carried_consequence=(
+            "so the platform will serve it the chaos.% audit rows — the agent "
+            "can read which hook was fired against which resource seconds "
+            "before its own alert, and no diagnosis on this run means "
+            "anything. This is PLATFORM_CHAOS_TOKEN pasted into "
+            "PLATFORM_TOKEN, or an incident-commander account the bootstrap "
+            "has not re-scoped yet: run `make bootstrap-token` and paste the "
+            "PLATFORM_TOKEN line it prints."
         ),
     )
 
@@ -216,6 +274,11 @@ def assert_chaos_capable_principal(client: MCPClientProtocol) -> None:
     would refuse a chaos-only token that can seed perfectly well, and pass a
     write token that cannot seed at all. Same negative-probe shape, aimed at
     the scope the selection actually needs.
+
+    Since platform v0.6.5 this runs on the EVALUATOR's client
+    (``PLATFORM_CHAOS_TOKEN``), not the agent's. The two are different
+    principals on purpose, and the pair of guards says so from both sides: the
+    agent's token must fail this probe, and the runner's must pass it.
     """
     _assert_scope_carried(
         client,
@@ -225,14 +288,86 @@ def assert_chaos_capable_principal(client: MCPClientProtocol) -> None:
         scope="chaos:invoke",
         refusal_consequence=(
             "so the selected scenario would start, seed nothing, and crash "
-            "on ChaosInvocationError with the run already under way. Mint a "
-            "token with --scope chaos:invoke (docs/runbook.md)."
+            "on ChaosInvocationError with the run already under way. This is "
+            "the evaluator's own principal: run `make bootstrap-token` and "
+            "paste the PLATFORM_CHAOS_TOKEN line it prints."
         ),
         unreached_hint=(
             f"Most likely the platform was booted with CHAOS_ENABLED=false, "
             f"so {_CHAOS_PROBE_TOOL} is not registered at all — in which case "
             "seeding cannot work either."
         ),
+    )
+
+
+def _assert_scope_absent(
+    client: MCPClientProtocol,
+    *,
+    label: str,
+    probe_tool: str,
+    probe_args: dict[str, Any],
+    scope: str,
+    carried_consequence: str,
+) -> None:
+    """Shared body of the two negative guards: prove one scope is NOT carried.
+
+    The mirror of ``_assert_scope_carried``, and shared for the same reason:
+    the fail-open bug that made the write guard vacuous — passing on any
+    non-scope error — is the bug a second hand-written copy reintroduces.
+
+    Every outcome fails except the scope refusal, but they do not all fail for
+    the same REASON, and saying which is the difference between a message an
+    operator can act on and one that sends them to the wrong file:
+
+    * ``-32002`` naming a scope → the platform refused on scope. Pass.
+    * an argument refusal (``-32602``) → the scope check let the call through
+      and the arguments were rejected. The token CARRIES the scope.
+    * anything else — a vanished tool (``-32601``), an internal error, a
+      transport code, an unexpected exception → the probe never reached
+      argument validation, so it proves nothing either way. Fail closed. This
+      branch is the one that matters when chaos is simply switched off
+      (``CHAOS_ENABLED=false``): reporting that as "the token carries
+      chaos:invoke" would send the reader to re-mint a credential that was
+      never the problem.
+    * success → the malformed payload was accepted, so the probe is no longer
+      safe to fire and the token evidently carries the scope.
+    """
+    try:
+        result = client.call_tool(probe_tool, probe_args)
+    except MCPError as err:
+        if err.code == _SCOPE_REFUSAL_CODE and "scope" in str(err).lower():
+            return
+        if err.code in _ARGUMENT_REFUSAL_CODES:
+            raise PrincipalGuardError(
+                f"{label}: the negative probe on {probe_tool} was refused on its "
+                f"ARGUMENTS (MCPError {err.code}: {err}), which means the scope "
+                f"check passed. The token carries {scope}, {carried_consequence}"
+            ) from err
+        raise PrincipalGuardError(
+            f"{label}: the negative probe on {probe_tool} failed with MCPError "
+            f"{err.code}: {err} — neither the scope refusal "
+            f"({_SCOPE_REFUSAL_CODE}) this probe is built to elicit nor the "
+            "argument-validation refusal "
+            f"({', '.join(str(c) for c in sorted(_ARGUMENT_REFUSAL_CODES))}) "
+            "that would prove the opposite. It never reached argument "
+            f"validation, so it proves nothing about {scope}. Failing closed — "
+            "the run does not proceed on an unverified control."
+        ) from err
+    except Exception as err:  # noqa: BLE001 — fail closed, deliberately
+        # Transport blip, unknown response shape, anything at all: an
+        # unverified guard is an unmet precondition, not a warning. A
+        # safety check that shrugs on an unexpected error is the bypass
+        # F-001 is about.
+        raise PrincipalGuardError(
+            f"{label}: could not verify the principal "
+            f"({type(err).__name__}: {err}). Failing closed — the run does "
+            "not proceed on an unverified control."
+        ) from err
+    raise PrincipalGuardError(
+        f"{label}: the negative probe on {probe_tool} SUCCEEDED "
+        f"(result: {str(result)[:200]}). A deliberately invalid call must never "
+        f"be accepted, and it was not refused on scope: the token carries "
+        f"{scope}, {carried_consequence}"
     )
 
 

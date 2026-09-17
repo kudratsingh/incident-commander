@@ -43,6 +43,7 @@ from evals.graders.llm_judge import JudgeScore, judge_briefing
 from evals.guards import (
     AuditWindowScan,
     PrincipalGuardError,
+    assert_chaos_blind_principal,
     assert_chaos_capable_principal,
     assert_no_tier1_successes,
     assert_read_only_principal,
@@ -66,7 +67,7 @@ from incident_commander.agent.remediation import (
 from incident_commander.agent.state import BudgetLedger, EvidenceEntry, IncidentState, RunState
 from incident_commander.agent.strategies.protocol import InvestigationStrategy
 from incident_commander.agent.strategies.registry import STRATEGIES
-from incident_commander.config import ModelRole, Settings
+from incident_commander.config import ChaosTokenNotConfigured, ModelRole, Settings
 from incident_commander.llm.client import LLMClient, LLMClientProtocol, LLMError, preflight_auth
 from incident_commander.llm.fakes import CannedLLMClient
 from incident_commander.llm.repair import (
@@ -818,16 +819,29 @@ def _invoke_plan_hook(
 ) -> ChaosHookRecord:
     """Fire one hook under the chaos principal and record what happened.
 
-    Never raises: both callers want the record, and they disagree about what
-    a failure MEANS — a failed setup abandons the scenario, a failed teardown
-    lets the graded run stand and latches the environment dirty. Deciding
-    that here would put both policies in the wrong place.
+    "The chaos principal" is a literal second credential since platform
+    v0.6.5: ``PLATFORM_CHAOS_TOKEN``, the ``incident-commander-chaos`` service
+    account. It used to be ``settings.platform_token`` — the agent's own token,
+    which then carried ``chaos:invoke`` — and that is exactly why the
+    platform's chaos-audit filter was inert: the principal that seeded the
+    fault was the principal being graded, so ``list_audit_events`` handed the
+    agent the hook name and its arguments (divergence G3, owner decision O-4).
+
+    Never raises for a hook failure: both callers want the record, and they
+    disagree about what a failure MEANS — a failed setup abandons the
+    scenario, a failed teardown lets the graded run stand and latches the
+    environment dirty. Deciding that here would put both policies in the wrong
+    place. A MISSING chaos credential is not that kind of failure and is not
+    recorded as one: ``require_chaos_token`` raises, because nothing was
+    attempted and no world was touched, and a run that silently recorded
+    "seeding failed" would send the reader to the platform.
     """
     record = ChaosHookRecord(phase=phase, name=hook.name, arguments=dict(hook.arguments))
+    chaos_token = settings.require_chaos_token()
     try:
         result = invoke_chaos_hook(
             str(settings.platform_mcp_url),
-            settings.platform_token.get_secret_value(),
+            chaos_token,
             hook.name,
             dict(hook.arguments),
         )
@@ -901,11 +915,22 @@ def _teardown_chaos_plan(
     stopping at the first failure would skip compensators that might still
     have worked. Every hook gets its turn, and the caller decides what a
     failure means.
+
+    ``ChaosTokenNotConfigured`` is the one non-hook failure that can reach
+    here, and it is turned into the same combined text rather than raised, for
+    the reason the paragraph above gives: this is the janitor. A run that
+    reached teardown with no chaos credential cannot compensate anything, so
+    the right outcome is the dirty-world latch the caller writes from this
+    text, not an exception that replaces the run's own cause.
     """
     records: list[ChaosHookRecord] = []
     failures: list[str] = []
     for hook in plan.teardown:
-        record = _invoke_plan_hook(scenario, hook, settings, tracer, phase="teardown")
+        try:
+            record = _invoke_plan_hook(scenario, hook, settings, tracer, phase="teardown")
+        except ChaosTokenNotConfigured as err:
+            failures.append(f"{hook.name}: {err}")
+            continue
         records.append(record)
         if not record.ok:
             failures.append(f"{hook.name}: {record.error}")
@@ -2215,8 +2240,9 @@ def _smoke_holdback_reason(scenario: Scenario) -> str:
             else f"declares a chaos_plan seeding {len(scenario.chaos.setup)} hook(s)"
         )
         causes.append(
-            f"{declared} (seeding fires under the full write+chaos "
-            "principal, which is the claim --smoke exists to disprove)"
+            f"{declared} (seeding fires under the evaluator's chaos principal, "
+            "which mutates the shared world — the claim --smoke exists to "
+            "disprove is that this stage changes nothing)"
         )
     if scenario.expectation.expected_action_tools:
         causes.append(
@@ -2470,9 +2496,12 @@ def main() -> int:
         print(f"filter --only={only_patterns} → {len(scenarios)} scenario(s)")
     if smoke:
         # A read-only stage runs the DERIVED smoke set and nothing else.
-        # run_scenario fires chaos_setup under settings.platform_token — the
-        # full write+chaos principal — which is exactly the claim --smoke
-        # exists to disprove. The #80 principal guard only inspects the AGENT
+        # run_scenario fires chaos_setup under the evaluator's chaos principal
+        # (PLATFORM_CHAOS_TOKEN) regardless of --smoke, so seeding mutates the
+        # shared world during the stage whose whole claim is that it changes
+        # nothing. A read-scoped AGENT token does not prevent it — the seeding
+        # never used that credential, and since v0.6.5 it could not.
+        # The #80 principal guard only inspects the AGENT
         # client's token and the exit-5 post-stage audit sees the write after
         # it lands, so the only prevention is refusing the selection outright,
         # here: after --only (the reachable channel, since SMOKE_ONLY is
@@ -2663,28 +2692,61 @@ def main() -> int:
     )
     chaos_guard_required = live_platform and any(s.seeds_chaos for s in scenarios)
     if write_guard_required or chaos_guard_required:
-        # One client, both probes: in a live non-smoke run `mcp_token` is None,
-        # so this is `settings.platform_token` — the same principal
-        # `run_scenario` fires `chaos_setup` under.
+        # TWO clients, because there are now two principals (platform v0.6.5,
+        # owner decision O-4). The agent's client is `mcp_token` — None on a
+        # live non-smoke run, so `settings.platform_token`, the credential
+        # `run_scenario` hands the agent — and `assert_write_capable_principal`
+        # asks both halves of the question about it: it must be able to act,
+        # and it must NOT be able to seed (a token that can seed can read the
+        # chaos audit rows, which is the answer key). The chaos client is
+        # `PLATFORM_CHAOS_TOKEN`, the credential `chaos_setup` actually fires
+        # under, and it is guarded where it is used rather than where it is
+        # configured — the whole lesson of evals/guards.py.
+        #
+        # The chaos credential is resolved HERE, before the archive exists and
+        # before a single model call, so an unset PLATFORM_CHAOS_TOKEN costs
+        # one refusal instead of a scenario crash mid-invocation.
+        try:
+            chaos_token = settings.require_chaos_token() if chaos_guard_required else None
+        except ChaosTokenNotConfigured as err:
+            print(f"PREFLIGHT FAIL (env): {err}")
+            print("no scenarios ran, nothing was spent")
+            return 3
         try:
             guard_client = make_client(settings, token=mcp_token)
             try:
                 if write_guard_required:
+                    # Carries actions:execute AND lacks chaos:invoke.
                     assert_write_capable_principal(guard_client)
-                if chaos_guard_required:
-                    assert_chaos_capable_principal(guard_client)
+                else:
+                    # A chaos-only selection declares no Tier-1 action, so
+                    # there is no write scope to assert — but there is still an
+                    # agent, and the leak does not care whether anything was
+                    # remediated. Asserted here rather than left to the write
+                    # guard it does not run.
+                    assert_chaos_blind_principal(guard_client)
             finally:
                 guard_client.close()
+            if chaos_token is not None:
+                chaos_guard_client = make_client(settings, token=chaos_token)
+                try:
+                    assert_chaos_capable_principal(chaos_guard_client)
+                finally:
+                    chaos_guard_client.close()
         except PrincipalGuardError as err:
             print(f"PRINCIPAL GUARD FAIL: {err}")
             print("no scenarios ran, nothing was spent")
             return 4
         if write_guard_required:
             print("principal guard: token can act (negative probe refused on arguments, not scope)")
+        print(
+            "principal guard: agent token cannot seed chaos (chaos probe refused "
+            "on scope), so the platform withholds the chaos audit rows from it"
+        )
         if chaos_guard_required:
             print(
-                "principal guard: token can seed chaos (negative probe refused "
-                "on arguments, not scope)"
+                "principal guard: PLATFORM_CHAOS_TOKEN can seed chaos (negative probe "
+                "refused on arguments, not scope)"
             )
 
     # Create the archive directory BEFORE the suite runs: from here on every

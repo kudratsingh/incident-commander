@@ -149,12 +149,22 @@ On the next re-pin, re-check this section against the platform's
 ``backend/app/mcp/protocol.py`` and ``handlers.py`` rather than trusting
 the date on it. (Done for v0.6.0 — see the header note.)
 
+**Two principals since platform v0.6.5**
+
+The Tier-1 calls this file replays run under the AGENT's ``PLATFORM_TOKEN``
+(``actions:execute``); the ``kill_consumer`` hook that stages the world runs
+under the EVALUATOR's ``PLATFORM_CHAOS_TOKEN`` (``chaos:invoke``). One token
+carried both until the split, and the split is not cosmetic here: the agent
+principal is now REFUSED ``kill_consumer`` on scope, so a file that kept
+firing the hook under it would report every chaos-dependent case as a skip —
+green, and covering nothing.
+
 **Skipping**
 
-The live classes require ``PLATFORM_MCP_URL`` + ``PLATFORM_TOKEN`` with
-``chaos:invoke`` scope. They skip cleanly without them. Local dev:
-``make bootstrap-token`` (the service account it mints carries
-``actions:execute`` + ``chaos:invoke``) then ``make test-idempotency``.
+The live classes require ``PLATFORM_MCP_URL`` + ``PLATFORM_TOKEN``; the cases
+that stage a world also require ``PLATFORM_CHAOS_TOKEN``. They skip cleanly
+without them. Local dev: ``make bootstrap-token`` (it mints all three
+principals) then ``make test-idempotency``.
 """
 
 from __future__ import annotations
@@ -286,10 +296,16 @@ def _chaos_or_skip(client: httpx.Client, url: str, hook: str, args: dict[str, An
     breakage. Skipping on ``-32002`` is what the guard always meant.
 
     Note the tension this creates and accept it deliberately: a skip here
-    is invisible, and CI's token DOES carry ``chaos:invoke``
-    (``scripts/bootstrap_agent_token.py``), so a skip in the contract job
-    means the token was minted wrong. That is a job-configuration
-    regression worth noticing rather than something to fail this test on.
+    is invisible, and the client passed in is the CHAOS client, whose token
+    ``scripts/bootstrap_agent_token.py`` mints with ``chaos:invoke``, so a
+    skip in the contract job means the token was minted wrong or the wrong
+    credential reached this fixture. That is a job-configuration regression
+    worth noticing rather than something to fail this test on. It is also
+    why the chaos fixture skips loudly on an ABSENT
+    ``PLATFORM_CHAOS_TOKEN`` rather than reusing ``PLATFORM_TOKEN``: the
+    agent principal cannot fire a hook at all since v0.6.5, so falling back
+    would turn every one of these cases into exactly the invisible skip
+    this paragraph is about.
     """
     body = {
         "jsonrpc": "2.0",
@@ -328,6 +344,36 @@ def live_client() -> Iterator[httpx.Client]:
 
 
 @pytest.fixture(scope="module")
+def chaos_client() -> Iterator[httpx.Client]:
+    """The EVALUATOR's client: the only principal that can seed a world.
+
+    Separate from ``live_client`` because they are separate service accounts
+    (``incident-commander`` and ``incident-commander-chaos``), and the whole
+    point of the split is that neither can do the other's job: the agent
+    cannot fire a hook, and the chaos principal holds no ``actions:execute``
+    to replay a Tier-1 call with.
+    """
+    if not _live_env_available():
+        pytest.skip("PLATFORM_MCP_URL and PLATFORM_TOKEN required")
+    token = os.getenv("PLATFORM_CHAOS_TOKEN", "")
+    if not token.strip():
+        pytest.skip(
+            "PLATFORM_CHAOS_TOKEN required to stage this case: since platform "
+            "v0.6.5 chaos:invoke is its own principal and PLATFORM_TOKEN cannot "
+            "fire a hook. Run `make bootstrap-token`."
+        )
+    client = httpx.Client(
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        timeout=15.0,
+    )
+    yield client
+    client.close()
+
+
+@pytest.fixture(scope="module")
 def mcp_url() -> str:
     return os.environ["PLATFORM_MCP_URL"]
 
@@ -336,10 +382,11 @@ class TestIdempotencyCache:
     """Prove the wire bytes we send match what the platform expects for dedup."""
 
     def test_same_key_same_bytes_replays_from_cache(
-        self, live_client: httpx.Client, mcp_url: str
+        self, live_client: httpx.Client, chaos_client: httpx.Client, mcp_url: str
     ) -> None:
-        # Set kill flag so the first restart has something to clear.
-        _chaos_or_skip(live_client, mcp_url, "kill_consumer", {"consumer_group": _CONSUMER_GROUP})
+        # Set kill flag so the first restart has something to clear. Fired
+        # under the CHAOS principal; the replay below is the agent's.
+        _chaos_or_skip(chaos_client, mcp_url, "kill_consumer", {"consumer_group": _CONSUMER_GROUP})
 
         key = _fresh_key()
         args = {"consumer_group": _CONSUMER_GROUP, "idempotency_key": key}
@@ -418,14 +465,14 @@ class TestIdempotencyCache:
         )
 
     def test_same_key_reordered_args_is_still_a_cache_hit(
-        self, live_client: httpx.Client, mcp_url: str
+        self, live_client: httpx.Client, chaos_client: httpx.Client, mcp_url: str
     ) -> None:
         # JSON keys are order-independent semantically but the raw bytes
         # differ. If the platform hashes over parsed args (order-
         # independent) we get a cache hit; if it hashes over raw bytes we
         # get a 409. This test DOCUMENTS which — the assertion is the
         # spec, not the reverse.
-        _chaos_or_skip(live_client, mcp_url, "kill_consumer", {"consumer_group": _CONSUMER_GROUP})
+        _chaos_or_skip(chaos_client, mcp_url, "kill_consumer", {"consumer_group": _CONSUMER_GROUP})
         key = _fresh_key()
 
         first_args = {"consumer_group": _CONSUMER_GROUP, "idempotency_key": key}

@@ -116,6 +116,11 @@ def _test_settings(**overrides: Any) -> Settings:
         "platform_mcp_url": "https://eval.local",
         "platform_rest_url": "https://eval.local",
         "platform_token": SecretStr("eval"),
+        # The evaluator's principal. Present by default because seeding a
+        # scenario's chaos plan now refuses without it (platform v0.6.5), and
+        # a fixture that omitted it would make every plan test fail on the
+        # credential rather than on the thing it is about.
+        "platform_chaos_token": SecretStr("eval-chaos"),
         "platform_webhook_secret": SecretStr("eval"),
         "database_url": "postgresql://eval:eval@localhost:5432/eval",
     }
@@ -1383,7 +1388,8 @@ _REAL_LOOKING_LIVE_ENV = {
     "JUDGE_MODEL": "claude-haiku-4-5",
     "PLATFORM_MCP_URL": "http://real.host:8001/mcp",
     "PLATFORM_REST_URL": "http://real.host:8000",
-    "PLATFORM_TOKEN": "sa_full_scope",
+    "PLATFORM_TOKEN": "sa_agent_reads_and_acts",
+    "PLATFORM_CHAOS_TOKEN": "sa_evaluator_chaos_invoke",
     "PLATFORM_SMOKE_TOKEN": "sa_smoke_read_only",
     "PLATFORM_WEBHOOK_SECRET": "whsec_test",
     "DATABASE_URL": "postgresql://eval:eval@localhost:5432/eval",
@@ -1488,8 +1494,29 @@ class _StubGuardClient:
         return None
 
 
+def _split_agent_probe(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """One client that answers as the post-v0.6.5 AGENT principal.
+
+    Used where a test patches ``make_client`` itself rather than going through
+    ``_stub_principal_probe``: the Tier-1 probe is refused on its arguments
+    (the token can act) and the chaos probe on scope (it cannot seed).
+    """
+    probe = _ClosableCanned({})
+
+    def _call_tool(name: str, _arguments: Any, **_kw: Any) -> Any:
+        if name == guards_module._CHAOS_PROBE_TOOL:
+            raise MCPError(-32002, "missing required scope: chaos:invoke")
+        raise MCPError(-32602, "invalid tool arguments")
+
+    monkeypatch.setattr(probe, "call_tool", _call_tool)
+    return probe
+
+
 def _stub_principal_probe(
-    monkeypatch: pytest.MonkeyPatch, behavior: Exception | None = None
+    monkeypatch: pytest.MonkeyPatch,
+    behavior: Exception | None = None,
+    *,
+    agent_chaos_behavior: Exception | None = None,
 ) -> list[str]:
     """Give main()'s principal guards a local probe client.
 
@@ -1504,19 +1531,43 @@ def _stub_principal_probe(
     the deliberately invalid probe arguments were rejected, which is what both
     the write and the chaos guard require to let a run proceed.
 
+    One exception, and it is the token split (platform v0.6.5): the client
+    built for the AGENT answers the CHAOS probe with a scope refusal, because
+    the agent principal must not be able to seed — a token that can fire the
+    lab is served the lab's audit rows. Which client is which is read off the
+    token ``make_client`` was handed, exactly as the runner distinguishes
+    them. ``agent_chaos_behavior`` overrides that half for the tests that are
+    about it.
+
     Returns the list of probe tool names as they are called, so a test can
     assert WHICH scope was probed and not merely that something was.
     """
     probed: list[str] = []
     error = behavior if behavior is not None else MCPError(-32602, "invalid tool arguments")
+    blind = (
+        agent_chaos_behavior
+        if agent_chaos_behavior is not None
+        else MCPError(-32002, "missing required scope: chaos:invoke")
+    )
 
-    def _call_tool(name: str, _arguments: Any, **_kw: Any) -> Any:
-        probed.append(name)
-        raise error
+    def _make(settings: Any, *_a: Any, token: str | None = None, **_kw: Any) -> Any:
+        chaos_secret = getattr(settings, "platform_chaos_token", None)
+        is_chaos_client = chaos_secret is not None and token == chaos_secret.get_secret_value()
+        probe = _ClosableCanned({})
 
-    probe = _ClosableCanned({})
-    monkeypatch.setattr(probe, "call_tool", _call_tool)
-    monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: probe)
+        def _call_tool(name: str, _arguments: Any, **_k: Any) -> Any:
+            probed.append(name)
+            # The agent's client answers the chaos probe with a SCOPE refusal
+            # by default — the post-v0.6.5 principal, and the only shape that
+            # passes assert_chaos_blind_principal.
+            if not is_chaos_client and name == guards_module._CHAOS_PROBE_TOOL:
+                raise blind
+            raise error
+
+        monkeypatch.setattr(probe, "call_tool", _call_tool)
+        return probe
+
+    monkeypatch.setattr(runner_module, "make_client", _make)
     return probed
 
 
@@ -3426,16 +3477,36 @@ class TestLiveRemediationGuardsTheWriteScope:
         assert self._main(monkeypatch, tmp_path, probe) == 4
         assert "nothing was spent" in capsys.readouterr().out
 
-    def test_a_write_capable_token_proceeds(
+    def test_a_write_capable_token_that_cannot_seed_proceeds(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
+        # The post-v0.6.5 agent principal: the Tier-1 probe is refused on its
+        # arguments (it can act) and the chaos probe is refused on scope (it
+        # cannot seed, so the platform withholds the chaos audit rows).
+        assert self._main(monkeypatch, tmp_path, _split_agent_probe(monkeypatch)) != 4
+
+    def test_a_token_that_can_also_seed_chaos_is_refused_before_any_spend(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The leak this whole packet closes, caught at the guard.
+
+        A principal refused on ARGUMENTS by both probes is the pre-split
+        four-scope token: it can act, and because it can fire the lab the
+        platform serves it `list_audit_events` rows naming the hook and its
+        arguments seconds before the alert. Every diagnosis claim on such a
+        run is unfalsifiable, so it is refused as hard as a token that cannot
+        act at all — before the archive exists and before a model call.
+        """
         probe = _ClosableCanned({})
         monkeypatch.setattr(
             probe,
             "call_tool",
             lambda *a, **k: (_ for _ in ()).throw(MCPError(-32602, "invalid tool arguments")),
         )
-        assert self._main(monkeypatch, tmp_path, probe) != 4
+        assert self._main(monkeypatch, tmp_path, probe) == 4
+        out = capsys.readouterr().out
+        assert "nothing was spent" in out
+        assert "chaos:invoke" in out
 
     def test_a_read_only_live_selection_is_not_guarded(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -3535,7 +3606,13 @@ class TestLiveChaosSeedingGuardsTheChaosScope:
 
         monkeypatch.setattr(runner_module, "assert_write_capable_principal", _never)
         _, probed = self._main(monkeypatch, tmp_path, [self._chaos_only()])
-        assert probed == [guards_module._CHAOS_PROBE_TOOL]
+        # The SAME hook, fired twice at two principals with opposite
+        # expectations: the agent's token must be refused on scope, the
+        # evaluator's must get past it. A chaos-only scenario has an agent in
+        # it too, and the audit leak does not care that nothing was remediated
+        # — so the blindness probe is not skipped just because the write guard
+        # is.
+        assert probed == [guards_module._CHAOS_PROBE_TOOL, guards_module._CHAOS_PROBE_TOOL]
 
     def test_a_scenario_that_both_seeds_and_acts_is_probed_for_both(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -3549,7 +3626,13 @@ class TestLiveChaosSeedingGuardsTheChaosScope:
             }
         )
         _, probed = self._main(monkeypatch, tmp_path, [both])
-        assert probed == [guards_module._PROBE_TOOL, guards_module._CHAOS_PROBE_TOOL]
+        # Three probes, two principals: the agent must be able to act and
+        # unable to seed; the evaluator must be able to seed.
+        assert probed == [
+            guards_module._PROBE_TOOL,
+            guards_module._CHAOS_PROBE_TOOL,
+            guards_module._CHAOS_PROBE_TOOL,
+        ]
 
     def test_a_selection_that_seeds_nothing_is_not_chaos_guarded(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

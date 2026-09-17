@@ -1,0 +1,622 @@
+{
+  "scenario": "remediate_dlq_backlog_success",
+  "incident_id": "aa4d50f2-0b6d-4e6b-96a7-43709e51b6a2",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "aa4d50f2-0b6d-4e6b-96a7-43709e51b6a2",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "remediation_hint": "replay_safe",
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T17:48:30.491531Z",
+      "updated_at": "2026-09-17T17:48:30.491531Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "aa4d50f2-0b6d-4e6b-96a7-43709e51b6a2",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "remediation_hint": "replay_safe",
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.100319,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e0d233e2-0a91-4101-9e8a-3961c4e8222c",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T17:48:30.591850Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T17:48:30.491531Z",
+      "updated_at": "2026-09-17T17:48:30.591850Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "aa4d50f2-0b6d-4e6b-96a7-43709e51b6a2",
+      "state": "planning",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "remediation_hint": "replay_safe",
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 49642,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.100388,
+        "max_usd": "1.00",
+        "usd_used": "0.105534"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e0d233e2-0a91-4101-9e8a-3961c4e8222c",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T17:48:30.591850Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "484f6b8a-ee1f-4834-9dcf-767731e28bc0",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":5,\"items\":[{\"id\":\"eb798430-c3ad-5a44-b7d7-d15ab54d3f76\",\"type\":\"bulk_api_sync\",\"error_message\":\"SchemaValidationError: payload missing required field 'job_id' (received keys: []) — rejected on attempt 3/3 and the failure has not been categorised (topic 'job.submitted': rejected by schema validation; producer must correct the payload)\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:48:30.503547Z\",\"updated_at\":\"2026-09-17T17:48:30.503547Z\",\"trace_id\":null,\"triage\":null,\"remediation_hint\":null,\"dead_lettered_at\":null,\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:39:52.809513Z\",\"updated_at\":\"2026-09-17T17:39:58.809513Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-17T17:39:58.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:35:52.809513Z\",\"updated_at\":\"2026-09-17T17:36:14.809513Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-09-17T17:36:14.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:22:52.809513Z\",\"updated_at\":\"2026-09-17T17:23:26.809513Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T17:23:26.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:07:52.809513Z\",\"updated_at\":\"2026-09-17T17:08:08.809513Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T17:08:08.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-17T17:48:30.591919Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "129e6168-730a-4d2c-8e9a-09b9e83d3f31",
+          "tool_name": "_handoff_refused",
+          "arguments": {
+            "alert_field": "remediation_hint",
+            "required_tool": "list_dlq_messages",
+            "required_argument": "remediation_hint",
+            "required_value": "replay_safe"
+          },
+          "result_summary": "handoff refused: this incident's alert names remediation_hint='replay_safe', and no probe in the evidence trail has read it. Call list_dlq_messages with remediation_hint='replay_safe' before remediating. A call to list_dlq_messages that did not carry that exact value does not count — an unfiltered or default-filled read observes something else. Other incidents, alerts, and DLQ entries visible in the evidence are context, not this incident's subject — remediating one of those leaves the alerted signal unexplained.",
+          "timestamp": "2026-09-17T17:48:30.591919Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "79623527-b22f-4c50-b377-5f0dab8830c2",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": "replay_safe",
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":1,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:39:52.809513Z\",\"updated_at\":\"2026-09-17T17:39:58.809513Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-17T17:39:58.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-17T17:48:30.591919Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "109f8713-d61e-4107-9859-f700f4f9dfb8",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The alert names remediation_hint='replay_safe'. The filtered read (list_dlq_messages with remediation_hint='replay_safe') found exactly one row: fc8d2a03-23b3-5371-9acb-46443c73baa5 (bulk_api_sync, UpstreamTimeout against partner-api.internal). The error is transient — no partial write, idempotent call — triage is_retryable=true (confidence 0.88), hint is replay_safe, and the error text does not describe a permanent fault. The full unfiltered queue was also read first and shows the other rows (human_required, wait_and_replay, and one unclassified) which will be named in the briefing for human follow-up. Replaying the replay_safe row now is safe and directly addresses the alerted signal."
+          },
+          "result_summary": "planner handoff to PLANNING: The alert names remediation_hint='replay_safe'. The filtered read (list_dlq_messages with remediation_hint='replay_safe') found exactly one row: fc8d2a03-23b3-5371-9acb-46443c73baa5 (bulk_api_sync, UpstreamTimeout against partner-api.internal). The error is transient — no partial write, idempotent call — triage is_retryable=true (confidence 0.88), hint is replay_safe, and the error text does not describe a permanent fault. The full unfiltered queue was also read first and shows the other rows (human_required, wait_and_replay, and one unclassified) which will be named in the briefing for human follow-up. Replaying the replay_safe row now is safe and directly addresses the alerted signal.",
+          "timestamp": "2026-09-17T17:48:30.591919Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "replay-safe-dlq-upstream-timeout-bulk-api-sync",
+          "confidence": 0.92,
+          "reasoning": "The filtered `replay_safe` slice contains exactly one row (fc8d2a03): a bulk_api_sync job that timed out against partner-api.internal; the error is transient (no partial write, idempotent call), triage confirms is_retryable=true with confidence 0.88, and the remediation_hint is replay_safe — all evidence supports a safe replay."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "partner-api-internal-upstream-timeout",
+          "confidence": 0.55,
+          "reasoning": "The root cause of the replay_safe row is an upstream timeout from partner-api.internal, which may still be degraded; however the incident is the DLQ entry, not a live dependency outage."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T17:48:30.491531Z",
+      "updated_at": "2026-09-17T17:48:30.591919Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "aa4d50f2-0b6d-4e6b-96a7-43709e51b6a2",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "remediation_hint": "replay_safe",
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 68162,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 41.006269,
+        "max_usd": "1.00",
+        "usd_used": "0.140372"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e0d233e2-0a91-4101-9e8a-3961c4e8222c",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T17:48:30.591850Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "484f6b8a-ee1f-4834-9dcf-767731e28bc0",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":5,\"items\":[{\"id\":\"eb798430-c3ad-5a44-b7d7-d15ab54d3f76\",\"type\":\"bulk_api_sync\",\"error_message\":\"SchemaValidationError: payload missing required field 'job_id' (received keys: []) — rejected on attempt 3/3 and the failure has not been categorised (topic 'job.submitted': rejected by schema validation; producer must correct the payload)\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:48:30.503547Z\",\"updated_at\":\"2026-09-17T17:48:30.503547Z\",\"trace_id\":null,\"triage\":null,\"remediation_hint\":null,\"dead_lettered_at\":null,\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:39:52.809513Z\",\"updated_at\":\"2026-09-17T17:39:58.809513Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-17T17:39:58.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:35:52.809513Z\",\"updated_at\":\"2026-09-17T17:36:14.809513Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-09-17T17:36:14.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:22:52.809513Z\",\"updated_at\":\"2026-09-17T17:23:26.809513Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T17:23:26.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:07:52.809513Z\",\"updated_at\":\"2026-09-17T17:08:08.809513Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T17:08:08.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-17T17:48:30.591919Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "129e6168-730a-4d2c-8e9a-09b9e83d3f31",
+          "tool_name": "_handoff_refused",
+          "arguments": {
+            "alert_field": "remediation_hint",
+            "required_tool": "list_dlq_messages",
+            "required_argument": "remediation_hint",
+            "required_value": "replay_safe"
+          },
+          "result_summary": "handoff refused: this incident's alert names remediation_hint='replay_safe', and no probe in the evidence trail has read it. Call list_dlq_messages with remediation_hint='replay_safe' before remediating. A call to list_dlq_messages that did not carry that exact value does not count — an unfiltered or default-filled read observes something else. Other incidents, alerts, and DLQ entries visible in the evidence are context, not this incident's subject — remediating one of those leaves the alerted signal unexplained.",
+          "timestamp": "2026-09-17T17:48:30.591919Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "79623527-b22f-4c50-b377-5f0dab8830c2",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": "replay_safe",
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":1,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:39:52.809513Z\",\"updated_at\":\"2026-09-17T17:39:58.809513Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-17T17:39:58.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-17T17:48:30.591919Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "109f8713-d61e-4107-9859-f700f4f9dfb8",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The alert names remediation_hint='replay_safe'. The filtered read (list_dlq_messages with remediation_hint='replay_safe') found exactly one row: fc8d2a03-23b3-5371-9acb-46443c73baa5 (bulk_api_sync, UpstreamTimeout against partner-api.internal). The error is transient — no partial write, idempotent call — triage is_retryable=true (confidence 0.88), hint is replay_safe, and the error text does not describe a permanent fault. The full unfiltered queue was also read first and shows the other rows (human_required, wait_and_replay, and one unclassified) which will be named in the briefing for human follow-up. Replaying the replay_safe row now is safe and directly addresses the alerted signal."
+          },
+          "result_summary": "planner handoff to PLANNING: The alert names remediation_hint='replay_safe'. The filtered read (list_dlq_messages with remediation_hint='replay_safe') found exactly one row: fc8d2a03-23b3-5371-9acb-46443c73baa5 (bulk_api_sync, UpstreamTimeout against partner-api.internal). The error is transient — no partial write, idempotent call — triage is_retryable=true (confidence 0.88), hint is replay_safe, and the error text does not describe a permanent fault. The full unfiltered queue was also read first and shows the other rows (human_required, wait_and_replay, and one unclassified) which will be named in the briefing for human follow-up. Replaying the replay_safe row now is safe and directly addresses the alerted signal.",
+          "timestamp": "2026-09-17T17:48:30.591919Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dc6c44ca-c0dd-451a-8b15-60ff23f2d0ce",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "replay-safe-dlq-upstream-timeout-bulk-api-sync"
+          },
+          "result_summary": "plan: replay_dlq_by_ids({\"job_ids\": [\"fc8d2a03-23b3-5371-9acb-46443c73baa5\"]}) then verify via list_dlq_messages",
+          "timestamp": "2026-09-17T17:49:11.497800Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "replay-safe-dlq-upstream-timeout-bulk-api-sync",
+          "confidence": 0.92,
+          "reasoning": "The filtered `replay_safe` slice contains exactly one row (fc8d2a03): a bulk_api_sync job that timed out against partner-api.internal; the error is transient (no partial write, idempotent call), triage confirms is_retryable=true with confidence 0.88, and the remediation_hint is replay_safe — all evidence supports a safe replay."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "partner-api-internal-upstream-timeout",
+          "confidence": 0.55,
+          "reasoning": "The root cause of the replay_safe row is an upstream timeout from partner-api.internal, which may still be degraded; however the incident is the DLQ entry, not a live dependency outage."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "replay-safe-dlq-upstream-timeout-bulk-api-sync",
+        "action_tool": "replay_dlq_by_ids",
+        "action_arguments": {
+          "job_ids": [
+            "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+          ]
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "replay_safe"
+        },
+        "verify_expectation": "The replay_safe filtered listing returns 0 items (total: 0), meaning job fc8d2a03-23b3-5371-9acb-46443c73baa5 has left the DLQ and is no longer dead-lettered.",
+        "action_rationale": "The filtered list_dlq_messages call with remediation_hint='replay_safe' returned exactly one row: fc8d2a03-23b3-5371-9acb-46443c73baa5, a bulk_api_sync job that failed with UpstreamTimeout against partner-api.internal after 30s. The error is transient (no partial write, idempotent POST), triage confirms is_retryable=true with confidence 0.88, and remediation_hint is replay_safe. No delay is required — the hint is replay_safe, not wait_and_replay, and the error is a timeout (not a rate-limit or refused connection with an explicit retry-after window)."
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T17:48:30.491531Z",
+      "updated_at": "2026-09-17T17:49:11.497800Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "aa4d50f2-0b6d-4e6b-96a7-43709e51b6a2",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "remediation_hint": "replay_safe",
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 68162,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 51.381143,
+        "max_usd": "1.00",
+        "usd_used": "0.140372"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e0d233e2-0a91-4101-9e8a-3961c4e8222c",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T17:48:30.591850Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "484f6b8a-ee1f-4834-9dcf-767731e28bc0",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":5,\"items\":[{\"id\":\"eb798430-c3ad-5a44-b7d7-d15ab54d3f76\",\"type\":\"bulk_api_sync\",\"error_message\":\"SchemaValidationError: payload missing required field 'job_id' (received keys: []) — rejected on attempt 3/3 and the failure has not been categorised (topic 'job.submitted': rejected by schema validation; producer must correct the payload)\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:48:30.503547Z\",\"updated_at\":\"2026-09-17T17:48:30.503547Z\",\"trace_id\":null,\"triage\":null,\"remediation_hint\":null,\"dead_lettered_at\":null,\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:39:52.809513Z\",\"updated_at\":\"2026-09-17T17:39:58.809513Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-17T17:39:58.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:35:52.809513Z\",\"updated_at\":\"2026-09-17T17:36:14.809513Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-09-17T17:36:14.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:22:52.809513Z\",\"updated_at\":\"2026-09-17T17:23:26.809513Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T17:23:26.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:07:52.809513Z\",\"updated_at\":\"2026-09-17T17:08:08.809513Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T17:08:08.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-17T17:48:30.591919Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "129e6168-730a-4d2c-8e9a-09b9e83d3f31",
+          "tool_name": "_handoff_refused",
+          "arguments": {
+            "alert_field": "remediation_hint",
+            "required_tool": "list_dlq_messages",
+            "required_argument": "remediation_hint",
+            "required_value": "replay_safe"
+          },
+          "result_summary": "handoff refused: this incident's alert names remediation_hint='replay_safe', and no probe in the evidence trail has read it. Call list_dlq_messages with remediation_hint='replay_safe' before remediating. A call to list_dlq_messages that did not carry that exact value does not count — an unfiltered or default-filled read observes something else. Other incidents, alerts, and DLQ entries visible in the evidence are context, not this incident's subject — remediating one of those leaves the alerted signal unexplained.",
+          "timestamp": "2026-09-17T17:48:30.591919Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "79623527-b22f-4c50-b377-5f0dab8830c2",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": "replay_safe",
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":1,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:39:52.809513Z\",\"updated_at\":\"2026-09-17T17:39:58.809513Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-17T17:39:58.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-17T17:48:30.591919Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "109f8713-d61e-4107-9859-f700f4f9dfb8",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The alert names remediation_hint='replay_safe'. The filtered read (list_dlq_messages with remediation_hint='replay_safe') found exactly one row: fc8d2a03-23b3-5371-9acb-46443c73baa5 (bulk_api_sync, UpstreamTimeout against partner-api.internal). The error is transient — no partial write, idempotent call — triage is_retryable=true (confidence 0.88), hint is replay_safe, and the error text does not describe a permanent fault. The full unfiltered queue was also read first and shows the other rows (human_required, wait_and_replay, and one unclassified) which will be named in the briefing for human follow-up. Replaying the replay_safe row now is safe and directly addresses the alerted signal."
+          },
+          "result_summary": "planner handoff to PLANNING: The alert names remediation_hint='replay_safe'. The filtered read (list_dlq_messages with remediation_hint='replay_safe') found exactly one row: fc8d2a03-23b3-5371-9acb-46443c73baa5 (bulk_api_sync, UpstreamTimeout against partner-api.internal). The error is transient — no partial write, idempotent call — triage is_retryable=true (confidence 0.88), hint is replay_safe, and the error text does not describe a permanent fault. The full unfiltered queue was also read first and shows the other rows (human_required, wait_and_replay, and one unclassified) which will be named in the briefing for human follow-up. Replaying the replay_safe row now is safe and directly addresses the alerted signal.",
+          "timestamp": "2026-09-17T17:48:30.591919Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dc6c44ca-c0dd-451a-8b15-60ff23f2d0ce",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "replay-safe-dlq-upstream-timeout-bulk-api-sync"
+          },
+          "result_summary": "plan: replay_dlq_by_ids({\"job_ids\": [\"fc8d2a03-23b3-5371-9acb-46443c73baa5\"]}) then verify via list_dlq_messages",
+          "timestamp": "2026-09-17T17:49:11.497800Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f569fdcb-d971-4806-89ef-48ce8ffaab69",
+          "tool_name": "replay_dlq_by_ids",
+          "arguments": {
+            "job_ids": [
+              "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+            ],
+            "idempotency_key": "b7e13fd1542c3baf23023e223434c506",
+            "delay_seconds": null
+          },
+          "result_summary": "{\"requested\":1,\"replayed\":1,\"scheduled\":0,\"failed\":0,\"results\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"ok\":true,\"error\":null,\"scheduled\":false,\"execute_at\":null}]}",
+          "timestamp": "2026-09-17T17:49:21.872674Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "replay-safe-dlq-upstream-timeout-bulk-api-sync",
+          "confidence": 0.92,
+          "reasoning": "The filtered `replay_safe` slice contains exactly one row (fc8d2a03): a bulk_api_sync job that timed out against partner-api.internal; the error is transient (no partial write, idempotent call), triage confirms is_retryable=true with confidence 0.88, and the remediation_hint is replay_safe — all evidence supports a safe replay."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "partner-api-internal-upstream-timeout",
+          "confidence": 0.55,
+          "reasoning": "The root cause of the replay_safe row is an upstream timeout from partner-api.internal, which may still be degraded; however the incident is the DLQ entry, not a live dependency outage."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "replay-safe-dlq-upstream-timeout-bulk-api-sync",
+        "action_tool": "replay_dlq_by_ids",
+        "action_arguments": {
+          "job_ids": [
+            "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+          ]
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "replay_safe"
+        },
+        "verify_expectation": "The replay_safe filtered listing returns 0 items (total: 0), meaning job fc8d2a03-23b3-5371-9acb-46443c73baa5 has left the DLQ and is no longer dead-lettered.",
+        "action_rationale": "The filtered list_dlq_messages call with remediation_hint='replay_safe' returned exactly one row: fc8d2a03-23b3-5371-9acb-46443c73baa5, a bulk_api_sync job that failed with UpstreamTimeout against partner-api.internal after 30s. The error is transient (no partial write, idempotent POST), triage confirms is_retryable=true with confidence 0.88, and remediation_hint is replay_safe. No delay is required — the hint is replay_safe, not wait_and_replay, and the error is a timeout (not a rate-limit or refused connection with an explicit retry-after window)."
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-17T17:48:30.491531Z",
+      "updated_at": "2026-09-17T17:49:21.872674Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "aa4d50f2-0b6d-4e6b-96a7-43709e51b6a2",
+      "state": "resolved",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "remediation_hint": "replay_safe",
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 69704,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 51.442397,
+        "max_usd": "1.00",
+        "usd_used": "0.142370"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e0d233e2-0a91-4101-9e8a-3961c4e8222c",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T17:48:30.591850Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "484f6b8a-ee1f-4834-9dcf-767731e28bc0",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":5,\"items\":[{\"id\":\"eb798430-c3ad-5a44-b7d7-d15ab54d3f76\",\"type\":\"bulk_api_sync\",\"error_message\":\"SchemaValidationError: payload missing required field 'job_id' (received keys: []) — rejected on attempt 3/3 and the failure has not been categorised (topic 'job.submitted': rejected by schema validation; producer must correct the payload)\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:48:30.503547Z\",\"updated_at\":\"2026-09-17T17:48:30.503547Z\",\"trace_id\":null,\"triage\":null,\"remediation_hint\":null,\"dead_lettered_at\":null,\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:39:52.809513Z\",\"updated_at\":\"2026-09-17T17:39:58.809513Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-17T17:39:58.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:35:52.809513Z\",\"updated_at\":\"2026-09-17T17:36:14.809513Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-09-17T17:36:14.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:22:52.809513Z\",\"updated_at\":\"2026-09-17T17:23:26.809513Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T17:23:26.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:07:52.809513Z\",\"updated_at\":\"2026-09-17T17:08:08.809513Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T17:08:08.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-17T17:48:30.591919Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "129e6168-730a-4d2c-8e9a-09b9e83d3f31",
+          "tool_name": "_handoff_refused",
+          "arguments": {
+            "alert_field": "remediation_hint",
+            "required_tool": "list_dlq_messages",
+            "required_argument": "remediation_hint",
+            "required_value": "replay_safe"
+          },
+          "result_summary": "handoff refused: this incident's alert names remediation_hint='replay_safe', and no probe in the evidence trail has read it. Call list_dlq_messages with remediation_hint='replay_safe' before remediating. A call to list_dlq_messages that did not carry that exact value does not count — an unfiltered or default-filled read observes something else. Other incidents, alerts, and DLQ entries visible in the evidence are context, not this incident's subject — remediating one of those leaves the alerted signal unexplained.",
+          "timestamp": "2026-09-17T17:48:30.591919Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "79623527-b22f-4c50-b377-5f0dab8830c2",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": "replay_safe",
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":1,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-17T17:39:52.809513Z\",\"updated_at\":\"2026-09-17T17:39:58.809513Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-17T17:39:58.809513Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-17T17:48:30.591919Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "109f8713-d61e-4107-9859-f700f4f9dfb8",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The alert names remediation_hint='replay_safe'. The filtered read (list_dlq_messages with remediation_hint='replay_safe') found exactly one row: fc8d2a03-23b3-5371-9acb-46443c73baa5 (bulk_api_sync, UpstreamTimeout against partner-api.internal). The error is transient — no partial write, idempotent call — triage is_retryable=true (confidence 0.88), hint is replay_safe, and the error text does not describe a permanent fault. The full unfiltered queue was also read first and shows the other rows (human_required, wait_and_replay, and one unclassified) which will be named in the briefing for human follow-up. Replaying the replay_safe row now is safe and directly addresses the alerted signal."
+          },
+          "result_summary": "planner handoff to PLANNING: The alert names remediation_hint='replay_safe'. The filtered read (list_dlq_messages with remediation_hint='replay_safe') found exactly one row: fc8d2a03-23b3-5371-9acb-46443c73baa5 (bulk_api_sync, UpstreamTimeout against partner-api.internal). The error is transient — no partial write, idempotent call — triage is_retryable=true (confidence 0.88), hint is replay_safe, and the error text does not describe a permanent fault. The full unfiltered queue was also read first and shows the other rows (human_required, wait_and_replay, and one unclassified) which will be named in the briefing for human follow-up. Replaying the replay_safe row now is safe and directly addresses the alerted signal.",
+          "timestamp": "2026-09-17T17:48:30.591919Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dc6c44ca-c0dd-451a-8b15-60ff23f2d0ce",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "replay-safe-dlq-upstream-timeout-bulk-api-sync"
+          },
+          "result_summary": "plan: replay_dlq_by_ids({\"job_ids\": [\"fc8d2a03-23b3-5371-9acb-46443c73baa5\"]}) then verify via list_dlq_messages",
+          "timestamp": "2026-09-17T17:49:11.497800Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f569fdcb-d971-4806-89ef-48ce8ffaab69",
+          "tool_name": "replay_dlq_by_ids",
+          "arguments": {
+            "job_ids": [
+              "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+            ],
+            "idempotency_key": "b7e13fd1542c3baf23023e223434c506",
+            "delay_seconds": null
+          },
+          "result_summary": "{\"requested\":1,\"replayed\":1,\"scheduled\":0,\"failed\":0,\"results\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"ok\":true,\"error\":null,\"scheduled\":false,\"execute_at\":null}]}",
+          "timestamp": "2026-09-17T17:49:21.872674Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "9f6b3ba4-9142-4426-9d70-dc9c5fb54985",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": "replay_safe",
+            "limit": 50,
+            "offset": 0,
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "{\"total\":0,\"items\":[]}",
+          "timestamp": "2026-09-17T17:49:21.934029Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "6d827189-85bb-4f14-863b-8c81758080f6",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The replay_safe filtered listing returns 0 items (total: 0), meaning job fc8d2a03-23b3-5371-9acb-46443c73baa5 has left the DLQ and is no longer dead-lettered.",
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "verified: The verify probe returned total: 0 with an empty items list, confirming that job fc8d2a03-23b3-5371-9acb-46443c73baa5 has been successfully replayed and removed from the DLQ, matching the expected post-fix behavior.",
+          "timestamp": "2026-09-17T17:49:21.934029Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "replay-safe-dlq-upstream-timeout-bulk-api-sync",
+          "confidence": 0.92,
+          "reasoning": "The filtered `replay_safe` slice contains exactly one row (fc8d2a03): a bulk_api_sync job that timed out against partner-api.internal; the error is transient (no partial write, idempotent call), triage confirms is_retryable=true with confidence 0.88, and the remediation_hint is replay_safe — all evidence supports a safe replay."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "partner-api-internal-upstream-timeout",
+          "confidence": 0.55,
+          "reasoning": "The root cause of the replay_safe row is an upstream timeout from partner-api.internal, which may still be degraded; however the incident is the DLQ entry, not a live dependency outage."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "replay-safe-dlq-upstream-timeout-bulk-api-sync",
+        "action_tool": "replay_dlq_by_ids",
+        "action_arguments": {
+          "job_ids": [
+            "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+          ]
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {
+          "remediation_hint": "replay_safe"
+        },
+        "verify_expectation": "The replay_safe filtered listing returns 0 items (total: 0), meaning job fc8d2a03-23b3-5371-9acb-46443c73baa5 has left the DLQ and is no longer dead-lettered.",
+        "action_rationale": "The filtered list_dlq_messages call with remediation_hint='replay_safe' returned exactly one row: fc8d2a03-23b3-5371-9acb-46443c73baa5, a bulk_api_sync job that failed with UpstreamTimeout against partner-api.internal after 30s. The error is transient (no partial write, idempotent POST), triage confirms is_retryable=true with confidence 0.88, and remediation_hint is replay_safe. No delay is required — the hint is replay_safe, not wait_and_replay, and the error is a timeout (not a rate-limit or refused connection with an explicit retry-after window)."
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-17T17:48:30.491531Z",
+      "updated_at": "2026-09-17T17:49:21.934029Z"
+    }
+  ],
+  "invocation_id": "42c675d9c145"
+}

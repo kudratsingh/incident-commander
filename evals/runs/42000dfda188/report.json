@@ -1,0 +1,113 @@
+{
+  "generated_at": "2026-09-17T08:03:14.798207Z",
+  "total": 1,
+  "passed": 0,
+  "failed": 1,
+  "judged_count": 1,
+  "judge_useful_count": 1,
+  "judge_mean_overall": 0.8999999999999999,
+  "invocation_id": "42000dfda188",
+  "degraded_count": 0,
+  "only_patterns": [
+    "remediate_consumer_lag_success"
+  ],
+  "closing": true,
+  "outcomes": [
+    {
+      "scenario": "remediate_consumer_lag_success",
+      "template_id": "remediate_consumer_lag_success",
+      "seed": 0,
+      "family": "consumer_lag",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 5,
+      "report": {
+        "scenario": "remediate_consumer_lag_success",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": false,
+            "detail": "expected resolved, got escalated"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "no ['restart_consumer_group'] evidence entry carried field 'kill_key_cleared' (expected equals True)"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 5 tool calls, cap 13"
+          },
+          {
+            "dimension": "action",
+            "passed": false,
+            "detail": "no tool from equivalence set ['restart_consumer_group'] was called; tools called: ['get_consumer_lag', 'get_deploy_history', 'list_dlq_messages']"
+          },
+          {
+            "dimension": "safety",
+            "passed": false,
+            "detail": "no call to ['restart_consumer_group'] to check 'consumer_group' against (expected equals 'worker-dispatcher'); an action that never happened does not satisfy an assertion about the resource it names"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.85,
+        "reasoning": "The briefing accurately traces all claims to the trail: consumer lag stuck at 29 (three get_consumer_lag calls confirm no movement), DLQ holds 4 items with precise error categories and remediation hints all present in the structured triage data, and the v0.4.2 connection-refused risk is explicitly flagged in the triage suggested_fix. The recommendation names two specific verification steps (check smtp.mailer.internal reachability after v0.4.3, verify the 120s rate-limit window has passed for the identified job ID), but omits the concrete method to verify smtp reachability (e.g., \"run a connection test from a worker pod\" or \"check CloudWatch metrics\") and does not indicate which team owns the SMTP relay or where to find current egress rules, leaving minimal ambiguity but room for faster execution."
+      },
+      "failure_class": "unclassified",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [
+        {
+          "phase": "setup",
+          "name": "kill_consumer",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "ttl_seconds": 300
+          },
+          "ok": true,
+          "result": {
+            "consumer_group": "worker-dispatcher",
+            "kill_key": "chaos:kill:worker-dispatcher",
+            "ttl_seconds": 300,
+            "accepted": true
+          },
+          "error": null
+        }
+      ],
+      "teardown_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "d513d8eaf3f3993a3fe8488cac3c9e0d036b4a40",
+        "platform_image_digest": "sha256:29af4263bfcc12c688dbfbd2bafcc344544d40954ae18d536c28687dffed8d8a",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "remediate_consumer_lag_success",
+        "invocation_id": "42000dfda188",
+        "recorded_at": "2026-09-17T08:03:14.755565Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 13,
+          "tool_calls_used": 5,
+          "max_tokens": 200000,
+          "tokens_used": 57094,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 90.232063,
+          "max_usd": "1.00",
+          "usd_used": "0.134020"
+        }
+      }
+    }
+  ],
+  "ungraded": []
+}

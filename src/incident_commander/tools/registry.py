@@ -547,6 +547,18 @@ class GetCacheKeyInfoInput(BaseModel):
 
 
 class GetCacheKeyInfoOutput(BaseModel):
+    # v0.6.8 (plat #209, WO-R3-267): the reading says whether the records
+    # the entry names still exist. `records_referenced` is how many job
+    # records the entry is meant to name, `records_found` how many of those
+    # the caller's tenant holds at call time. Fewer found than referenced
+    # means the copy points at records the platform does not have; equal
+    # counts mean every reference resolves, which is not a claim that the
+    # copied fields are current. Both are null exactly together, when the
+    # platform cannot work out what the entry refers to — null is not zero,
+    # and 0 is an entry that names no records at all.
+    #
+    # Both are OPTIONAL in the snapshot (not in `required`), so this model
+    # still parses a v0.6.7 response.
     model_config = ConfigDict(extra="ignore", frozen=True)
     key: str
     exists: bool
@@ -556,6 +568,8 @@ class GetCacheKeyInfoOutput(BaseModel):
     type: str | None = None
     ttl_seconds: int | None = None
     size: int | None = None
+    records_referenced: int | None = None
+    records_found: int | None = None
 
 
 class InvalidateCacheKeyInput(BaseModel):

@@ -1,6 +1,6 @@
 # Live demo: full platform footprint sufficient for remediation eval.
 #
-# Pinned to the incident-platform v0.6.7 release by digest so the agent's
+# Pinned to the incident-platform v0.6.8 release by digest so the agent's
 # contract expectations don't shift under us. Every platform-code service
 # below uses the SAME pinned digest. Bump the digest whenever the platform
 # ships a new release and rerun `make eval-live` to catch drift.
@@ -132,7 +132,7 @@ services:
     # One-shot schema migration, mirroring the dev compose's migrate
     # service: with two app-code services (mcp + api) neither should
     # race `alembic upgrade head` at boot.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.7@sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.8@sha256:ed98be599f93718a21b210724cb2d871cc2eb1bd634fdf3609889ced20882fc5
     platform: linux/amd64
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
@@ -144,16 +144,9 @@ services:
     restart: "no"
 
   platform:
-    # incident-platform v0.6.7 (INDEX digest published by the platform
+    # incident-platform v0.6.8 (INDEX digest published by the platform
     # release, confirmed with `docker buildx imagetools inspect` — the
     # top-level `Digest:`, not a per-platform child manifest).
-    #
-    # What v0.6.6 changed (plat #203, WO-R3-251): the synthetic DLQ row the
-    # `poison_message` hook writes no longer names the hook in its error
-    # text. The suffix that read `(chaos poison_message on topic '<topic>')`
-    # now reads `(topic '<topic>': rejected by schema validation; producer
-    # must correct the payload)` — the same fault described in the
-    # platform's own words. Response text only; no schema change.
     #
     # What v0.6.7 changed (plat #204, WO-R3-254): `get_consumer_lag` now
     # carries the time of the reading — `measured_at`, `age_seconds`, and
@@ -161,13 +154,22 @@ services:
     # its own time) — plus a description paragraph saying how to read a
     # trend from one call and why a re-read inside the ~60s refresh window
     # returns the same number. The seven static groups report null/null/[].
-    # This is the ONLY tool whose schema or description moved, so the
-    # contract snapshot changes in exactly one tool on this bump.
+    #
+    # What v0.6.8 changed (plat #209, WO-R3-267): `get_cache_key_info` now
+    # says whether the records the entry names still exist —
+    # `records_referenced` (how many job records the entry is meant to name)
+    # and `records_found` (how many of those the caller's tenant holds now)
+    # — plus a `THE RECORD CHECK` description paragraph. A healthy seeded
+    # hot set reads 3 / 3; after the stale-cache hook it reads 3 / 0. Both
+    # are null when the platform cannot tell what the entry refers to, and
+    # null is not zero. This is the ONLY tool whose schema or description
+    # moved, so the contract snapshot changes in exactly one tool on this
+    # bump.
     # Do not switch to `:latest` — the whole point of pinning by digest is
     # that a platform-side prompt or schema change can't shift agent
     # behavior without an explicit bump here.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.7@sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4
-    # v0.6.7 is an OCI index, but it still lists linux/amd64 ONLY (plus an
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.8@sha256:ed98be599f93718a21b210724cb2d871cc2eb1bd634fdf3609889ced20882fc5
+    # v0.6.8 is an OCI index, but it still lists linux/amd64 ONLY (plus an
     # attestation manifest) — being an index is not the same as being
     # multi-arch, and this one is not. On Apple Silicon this runs under
     # Rosetta (slower cold start, correct output) — REQUIRED there; without
@@ -271,7 +273,7 @@ services:
     # Env copied deliberately from the dev compose's `app` service
     # (drift between services is platform bug #69's class); minio/jaeger
     # endpoints omitted with the services (see header note).
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.7@sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.8@sha256:ed98be599f93718a21b210724cb2d871cc2eb1bd634fdf3609889ced20882fc5
     platform: linux/amd64
     ports:
       - "${DEMO_API_HOST_PORT:-8000}:8000"

@@ -418,7 +418,7 @@
     },
     {
       "name": "get_cache_key_info",
-      "description": "Inspect one Redis cache key: existence, remaining TTL, value type, and size. Returns shape only — never the cached value, so tenant-scoped cache contents are not exposed.\nRestricted to the platform-owned cache namespaces ['cache:', 'jobs:cache:', 'kafka:consumer_lag:', 'read_model:'] — the same prefixes `invalidate_cache_key` may delete — so a suspect cache entry can be checked before remediation and confirmed gone after. Keys outside these namespaces are refused (`cache_key_forbidden`), as are tenant-scoped keys belonging to another tenant. Exact key only: this tool cannot enumerate keys, match patterns, or read arbitrary Redis state.\nFRESHNESS: live probe, measured at call time.",
+      "description": "Inspect one Redis cache key: existence, remaining TTL, value type, size, and whether the records it refers to still exist. Returns shape only — never the cached value, so tenant-scoped cache contents are not exposed.\nRestricted to the platform-owned cache namespaces ['cache:', 'jobs:cache:', 'kafka:consumer_lag:', 'read_model:'] — the same prefixes `invalidate_cache_key` may delete — so a suspect cache entry can be checked before remediation and confirmed gone after. Keys outside these namespaces are refused (`cache_key_forbidden`), as are tenant-scoped keys belonging to another tenant. Exact key only: this tool cannot enumerate keys, match patterns, or read arbitrary Redis state.\nTHE RECORD CHECK. Entries in these namespaces are copies of job records the database holds. `records_referenced` is how many job records this entry is meant to name — the items in its stored list, or the single job its key names. `records_found` is how many of those the database has right now, in your own tenant. Fewer found than referenced means this copy points at records the platform does not have; equal counts mean every reference resolves, which is not a claim that the copied fields are current. Both are null when the platform could not work out what records the entry refers to — null is not zero.\nFRESHNESS: live probe, measured at call time; the record check queries the database on every call.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -484,6 +484,32 @@
             "default": null,
             "description": "Value size: bytes (STRLEN) for string keys, element count for list / set / zset / hash / stream keys. `null` when the key does not exist.",
             "title": "Size"
+          },
+          "records_referenced": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How many job records this entry is meant to name — the items in its stored list, or the single job its key names. `null` when the platform could not work out what records the entry refers to (a counter, a collection type, an unreadable value, or a list too long to check), and `null` when the key does not exist. Not a synonym for 0: 0 means an entry that names no records at all.",
+            "title": "Records Referenced"
+          },
+          "records_found": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How many of those the database holds right now, in your own tenant, looked up at call time. Below `records_referenced` means this cached copy points at records the platform does not have. Equal to it means every reference resolves — which is not a claim that the copied fields are current. `null` exactly when `records_referenced` is null.",
+            "title": "Records Found"
           }
         },
         "required": [

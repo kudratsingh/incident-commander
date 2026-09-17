@@ -77,6 +77,7 @@ from incident_commander.agent.remediation import (
     make_remediate,
 )
 from incident_commander.agent.state import BudgetLedger, EvidenceEntry, IncidentState, RunState
+from incident_commander.agent.strategies.knobs import StrategyKnobs
 from incident_commander.agent.strategies.protocol import InvestigationStrategy
 from incident_commander.agent.strategies.records import StepRecord, StepSink
 from incident_commander.agent.strategies.registry import STRATEGIES
@@ -290,6 +291,26 @@ def platform_image_digest() -> str:
     return image.split("@", 1)[1]
 
 
+def strategy_knobs(settings: Settings) -> StrategyKnobs:
+    """The inference block the selected strategy is built with (WP-5.2).
+
+    This is the edge configuration is wired at: nothing under
+    ``src/incident_commander/agent/`` reads ``Settings``, so N and the sampling
+    temperature reach a strategy from here or not at all. One function, called by
+    both places that build a strategy — the run itself and the provenance record
+    — so the arm that ran and the arm the artifact names cannot be built from
+    different knobs.
+
+    The budget multipliers are deliberately absent: they are read in
+    ``config.py`` and applied once, where ``agent/factory.py::start_run`` seeds
+    the ledger (``tests/unit/test_budgets.py::TestNoOtherCallSiteScalesABudget``
+    refuses a second reader). A BUDGET result for an N-arm is read beside the
+    ``n`` the strategy stamps and the seeded ledger already in the provenance
+    record.
+    """
+    return StrategyKnobs(n=settings.best_of_n)
+
+
 def build_provenance(
     scenario_name: str,
     settings: Settings,
@@ -316,7 +337,11 @@ def build_provenance(
     configured one is the only honest answer available — the same reasoning the
     crash row's ``execution_mode`` already uses.
     """
-    configured = STRATEGIES.create(settings.inference_strategy) if strategy is None else strategy
+    configured = (
+        STRATEGIES.create(settings.inference_strategy, strategy_knobs(settings))
+        if strategy is None
+        else strategy
+    )
     return RunProvenance(
         commander_revision=commander_revision(),
         platform_image_digest=platform_image_digest(),
@@ -1456,7 +1481,7 @@ def run_scenario(
     # provenance record that names it, so the two cannot disagree about which
     # strategy produced the row. An unknown INFERENCE_STRATEGY raises here,
     # before the first model call and before anything is spent.
-    strategy = STRATEGIES.create(settings.inference_strategy)
+    strategy = STRATEGIES.create(settings.inference_strategy, strategy_knobs(settings))
     transitions: dict[IncidentState, Transition] = dict(TRANSITIONS)
     transitions[IncidentState.INVESTIGATING] = make_llm_investigate(
         mcp_client,

@@ -19,8 +19,16 @@ from collections.abc import Callable, Mapping
 from typing import Final
 
 from incident_commander.agent.strategies.baseline import BaselineStrategy
+from incident_commander.agent.strategies.best_of_n_enumerated import BestOfNEnumeratedStrategy
+from incident_commander.agent.strategies.knobs import StrategyKnobs
 from incident_commander.agent.strategies.names import StrategyName
 from incident_commander.agent.strategies.protocol import InvestigationStrategy
+
+#: What a registry entry is: something that turns one inference block into one
+#: strategy object. Every factory takes the block, including the ones with
+#: nothing to read from it — one shape, so ``create`` needs no special case and
+#: a strategy that grows a knob needs no registry change.
+StrategyFactory = Callable[[StrategyKnobs], InvestigationStrategy]
 
 
 class UnknownStrategyError(ValueError):
@@ -48,25 +56,32 @@ class StrategyRegistry:
     in a 40-scenario suite.
     """
 
-    def __init__(self, factories: Mapping[str, Callable[[], InvestigationStrategy]]) -> None:
-        self._factories: dict[str, Callable[[], InvestigationStrategy]] = dict(factories)
+    def __init__(self, factories: Mapping[str, StrategyFactory]) -> None:
+        self._factories: dict[str, StrategyFactory] = dict(factories)
 
     @property
     def names(self) -> tuple[str, ...]:
         """The registered names, sorted — a stable list for error messages."""
         return tuple(sorted(self._factories))
 
-    def create(self, name: str) -> InvestigationStrategy:
+    def create(self, name: str, knobs: StrategyKnobs | None = None) -> InvestigationStrategy:
         """Build the strategy ``name`` refers to, or raise ``UnknownStrategyError``.
 
         ``str(name)`` rather than ``name``: a ``StrategyName`` member is a
         ``str`` subclass and hashes the same, and the lookup should not care
         which of the two a caller has.
+
+        ``knobs`` is the inference block the strategy is built with (N, the
+        sampling temperature, the budget ratio the arm was funded at). ``None``
+        means the defaults, which are the control group's — so a caller that
+        forgot to pass configuration gets ``baseline``'s shape rather than an
+        arm it did not choose. ``evals/runner.py`` is the caller that fills it,
+        from ``Settings``, because configuration is wired at the edge here.
         """
         factory = self._factories.get(str(name))
         if factory is None:
             raise UnknownStrategyError(str(name), self.names)
-        strategy = factory()
+        strategy = factory(knobs if knobs is not None else StrategyKnobs())
         if strategy.name != str(name):
             # A factory registered under the wrong key would stamp one name in
             # the provenance record while running another — the one way this
@@ -75,10 +90,13 @@ class StrategyRegistry:
         return strategy
 
 
-#: The registry the application uses. One entry, and adding the next one is
-#: this line plus a ``StrategyName`` member plus the strategy itself.
+#: The registry the application uses. Adding the next strategy is one line
+#: here plus a ``StrategyName`` member plus the strategy itself.
 STRATEGIES: Final[StrategyRegistry] = StrategyRegistry(
-    {StrategyName.BASELINE.value: BaselineStrategy}
+    {
+        StrategyName.BASELINE.value: BaselineStrategy,
+        StrategyName.BEST_OF_N_ENUMERATED.value: BestOfNEnumeratedStrategy,
+    }
 )
 
 

@@ -149,6 +149,27 @@ class Settings(BaseSettings):
     # behaviour, the loop the campaign's eight green live runs were made with,
     # and the strategy every later one is measured against.
     inference_strategy: StrategyName = StrategyName.BASELINE
+    # How many candidate diagnoses a best-of-N strategy generates per planner
+    # step (plan 02 § 11, WP-5.2). Env var BEST_OF_N.
+    #
+    # The default is 1, not 4 or 8, and that is the same decision the strategy
+    # default is: N=1 is the control group's shape, so an operator who selected
+    # a best-of-N arm and forgot to set N gets one candidate and a report that
+    # says so, rather than eight times the bill and a number they think came
+    # from somewhere else.
+    #
+    # Plan 02 § 11.3 reports pass@k for N ∈ {1, 2, 4, 8}; the upper bound here
+    # is the largest of those. It is a spend guard rather than a law of the
+    # design — BEST_OF_N=64 would multiply every planner output by 64 on an
+    # unattended run — and raising it is a deliberate config change that comes
+    # with re-pricing the cost table (03 § 11, decision C12), not an
+    # improvisation mid-sweep.
+    #
+    # Unread by ``baseline``, which has no candidates to enumerate. A run that
+    # sets it under ``INFERENCE_STRATEGY=baseline`` is not refused: the value is
+    # simply not part of that arm, and the strategy stamps into the run's
+    # provenance exactly the knobs it actually used.
+    best_of_n: int = Field(default=1, ge=1, le=8)
 
     # --- The selected strategy's budget policy (plan 02 § 8, WP-2.4) -------
     # A strategy that samples eight candidates per planner step spends roughly

@@ -49,6 +49,7 @@ Forty-three records, plus [`0000-template.md`](0000-template.md). All are accept
 | [0041](0041-read-the-whole-queue-before-you-replay-part-of-it.md) | Read the whole queue before you replay part of it — an unfiltered DLQ listing is required before any replay or fence | Adds to 0031's subject rule; does not change it |
 | [0042](0042-a-candidates-evidence-reference-is-resolved-by-a-validator.md) | A candidate's evidence reference is resolved by a validator, against a ledger bound at the seam | Keeps 0035's repair path reachable; mirrors 0005's schema choices |
 | [0043](0043-a-recording-is-keyed-by-what-the-agent-sends.md) | A recorded world is keyed by the WIRED arguments the agent sends, and its ground truth is a sibling file the replay cannot reach | Applies 0038's projection and 0040's world scoping to a recording |
+| [0044](0044-evidence-ids-are-rendered-for-the-arms-whose-schema-cites-them.md) | Evidence ids are rendered for the arms whose schema cites them, and not for `baseline` | Makes 0042's citation askable; leaves the control group's prompt untouched |
 
 ## Two formatting conventions coexist
 

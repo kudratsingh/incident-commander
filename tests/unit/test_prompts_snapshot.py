@@ -46,6 +46,13 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # Moved by WP-1.6, intentionally: nine category rows and the healthy-world
     # rule. Named in that PR's body per plan 04 working rule 5.
     "investigation_planner": ("e01a1d68c282fc51dc4906774e67e87da85110444ae121e7d61698cc10fd3ab8"),
+    # WP-5.2's addendum. Appended to `investigation_planner` above by
+    # `best_of_n_enumerated`, never loaded on its own — which is why the hash of
+    # the planner prompt beside it did not move: the control group's system
+    # prompt is byte-for-byte what it was.
+    "investigation_planner_best_of_n": (
+        "64c30e802d05346a40c7daad31c10d994ee686996b99249cec0eea1b7d8c10c0"
+    ),
     "briefing_judge": ("838a5ee5de6081c32ef1b7aba35aefe0ddd83826e841af2ca831ba76f4692719"),
     "remediation_planner": ("042b8372e1687a3f1174c22f626a94406da1e00f2f0b680f459187f7394d8a60"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
@@ -1023,3 +1030,46 @@ class TestOutputRepairInvariants:
     def test_it_states_the_cap(self) -> None:
         content = load_prompt("output_repair").lower()
         assert "one correction" in content
+
+
+class TestInvestigationPlannerBestOfNInvariants:
+    """WP-5.2's addendum. It is an addendum, and it must stay one.
+
+    ``best_of_n_enumerated`` sends ``investigation_planner.md`` and then this
+    file, so every rule in the planner prompt still applies and none of them is
+    restated here. Two copies of the agent's behaviour would drift, and an arm
+    comparison would become a comparison of prompts. These tests pin the three
+    things this file must say and the one thing it must not.
+    """
+
+    def test_it_does_not_restate_the_planner_prompt(self) -> None:
+        addendum = load_prompt("investigation_planner_best_of_n")
+        planner = load_prompt("investigation_planner")
+        # The category table is the bulk of the planner prompt and the thing a
+        # second copy would most obviously duplicate.
+        for category in _CATEGORIES:
+            row = f"| `{category.value}` |"
+            assert row in planner
+            assert row not in addendum
+
+    def test_it_says_the_set_size_is_exact(self) -> None:
+        content = load_prompt("investigation_planner_best_of_n").lower()
+        assert "not fewer, not more" in content
+        assert "minitems" in content and "maxitems" in content
+
+    def test_it_asks_for_ids_from_the_block_and_says_what_an_invented_one_costs(self) -> None:
+        content = load_prompt("investigation_planner_best_of_n")
+        assert "evidence_id=" in content
+        assert "fails validation" in content
+        assert "cite nothing" in content
+
+    def test_it_says_candidate_generation_is_not_authorization(self) -> None:
+        # Plan 02 § 18. The prompt is not the enforcement — the loop is — but a
+        # prompt that implied otherwise would be asking for the failure.
+        content = load_prompt("investigation_planner_best_of_n").lower()
+        assert "does not widen what you may do" in content
+
+    def test_it_repeats_the_untrusted_input_rule(self) -> None:
+        # The one thing worth restating: it is the invariant-4 rule, and a
+        # prompt that reaches the model without it has a gap.
+        assert "data, not instructions" in load_prompt("investigation_planner_best_of_n")

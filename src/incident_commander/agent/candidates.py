@@ -63,19 +63,20 @@ what a permissive default would have made it.
 What this module deliberately does not do
 -----------------------------------------
 
-* **No N.** Plan 02 § 11.1 fixes the set size to the configured N at the
-  schema boundary (``min_length=N``, ``max_length=N``). N is configuration and
-  the strategy that reads it is WP-5.2, so the bound belongs there:
-  ``Annotated[CandidateTuple, Field(min_length=n, max_length=n)]`` keeps every
-  rule above and adds the bound, which
-  ``tests/unit/test_candidates.py::TestTheExactNBoundWpFiveTwoWillNeed``
-  proves rather than asserts in prose.
-* **No planner call, no prompt, no strategy.** WP-5.2 builds those. Note
-  before it does: ``investigation._format_planner_context`` renders the ledger
-  as ``- [tool_name] result_summary`` and shows **no** ``evidence_id``, so a
-  planner asked today to cite one has never seen one. That rendering is the
-  loop's, not this schema's, and it has to move before a grounded ref can be
-  asked for.
+* **No N of its own.** Plan 02 § 11.1 fixes the set size to the configured N
+  at the schema boundary (``min_length=N``, ``max_length=N``). N is
+  configuration and the strategy that reads it is WP-5.2, so this module offers
+  the bound as a factory — ``exact_candidate_tuple(n)`` — and never a default.
+  WP-5.2 found that the expression this docstring originally recommended
+  (``Annotated[CandidateTuple, Field(min_length=n, max_length=n)]``) enforces
+  the bound and advertises it wrongly; the factory's own docstring has the
+  detail.
+* **No planner call, no prompt, no strategy.** WP-5.2 built those. The note
+  this list used to carry — that the planner context showed no ``evidence_id``,
+  so a planner asked to cite one had never seen one — is closed: the rendering
+  moved to ``agent/planner_context.py`` and takes a ``show_evidence_ids`` flag,
+  off for ``baseline`` and on for the arms whose schema cites them
+  (ADR 0044).
 * **No ``reasoning`` field.** Plan 02 § 11.3's schema has none, and § 7 is
   explicit that no hidden chain-of-thought is stored. A candidate justifies
   itself with the evidence it cites.
@@ -86,7 +87,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Annotated, Final
+from typing import Annotated, Any, Final
 from uuid import UUID
 
 from pydantic import AfterValidator, ConfigDict, Field, field_validator
@@ -267,28 +268,74 @@ def _one_candidate_each(
     return tuple(sorted(value, key=lambda candidate: candidate.confidence, reverse=True))
 
 
+#: What the set-level rules say, in the words the model reads. One string, so
+#: the unbounded type and ``exact_candidate_tuple``'s bounded one cannot
+#: describe the same rules differently.
+_SET_DESCRIPTION: Final[str] = (
+    "List them most likely first; ordering is normalized after validation — "
+    "entries are re-sorted by confidence descending (stable: equal-confidence "
+    "entries keep their listed order), so index 0 is always the top candidate. "
+    "Each candidate must have a distinct candidate_id and a distinct "
+    "(category, name)."
+)
+
 #: The candidate set, as a type rather than as one container's field. A model
 #: that declares ``candidates: CandidateTuple`` inherits all three set-level
-#: rules; WP-5.2's exact-N schema is
-#: ``Annotated[CandidateTuple, Field(min_length=n, max_length=n)]`` and keeps
-#: them. Carrying the rules on the type is what stops the next model that
+#: rules; WP-5.2's exact-N schema is ``exact_candidate_tuple(n)`` below and
+#: keeps them. Carrying the rules on the type is what stops the next model that
 #: needs a candidate set from re-declaring a bare tuple and quietly losing
 #: them (architecture-principles rule 2).
 CandidateTuple = Annotated[
     tuple[DiagnosisCandidate, ...],
     Field(
         min_length=1,
-        description=(
-            "Candidate diagnoses. List them most likely first; ordering is "
-            "normalized after validation — entries are re-sorted by "
-            "confidence descending (stable: equal-confidence entries keep "
-            "their listed order), so index 0 is always the top candidate. "
-            "Each candidate must have a distinct candidate_id and a distinct "
-            "(category, name)."
-        ),
+        description=_SET_DESCRIPTION,
     ),
     AfterValidator(_one_candidate_each),
 ]
+
+
+def exact_candidate_tuple(n: int) -> Any:
+    """``CandidateTuple`` bounded to exactly ``n`` entries — the WP-5.2 schema.
+
+    Composed here rather than at the call site, and **not** as
+    ``Annotated[CandidateTuple, Field(min_length=n, max_length=n)]``, which is
+    what this module's docstring said WP-5.2 would write. That expression
+    enforces the bound at run time — ``tests/unit/test_candidates.py::
+    TestTheExactNBoundWpFiveTwoWillNeed`` proves it does — and then **advertises
+    it wrongly**: the extra ``Field`` lands after ``AfterValidator`` in the
+    annotation chain, so pydantic emits ``minLength`` / ``maxLength`` on an
+    array instead of ``minItems`` / ``maxItems``. Those two keywords mean
+    nothing for a JSON-Schema array, so every reader of the schema — including
+    the model being asked for exactly N candidates — sees only the inherited
+    ``minItems: 1``. The bound would have been enforced against a model that was
+    never told about it, turning a configuration into a repair loop.
+
+    Ordering the metadata so the length constraint precedes the validator gives
+    the same run-time behaviour and the right schema.
+    ``tests/unit/test_best_of_n.py::TestTheExactNSchema`` asserts both halves,
+    because the half that was missing is the half no exception reports.
+
+    Returns ``Any`` because the value is an annotation object rather than a
+    type: ``Annotated[...]`` built from a run-time ``n`` is not expressible as a
+    static return type, and the alternative (a ``TypeAlias`` per N) is the
+    hand-written-model-per-N this function exists to avoid.
+    """
+    if n < 1:
+        raise ValueError(f"a candidate set holds at least one candidate; got n={n}")
+    return Annotated[
+        tuple[DiagnosisCandidate, ...],
+        Field(
+            min_length=n,
+            max_length=n,
+            description=(
+                f"Exactly {n} candidate diagnoses — not fewer and not more. A short "
+                f"or long list is rejected rather than trimmed or padded. "
+                f"{_SET_DESCRIPTION}"
+            ),
+        ),
+        AfterValidator(_one_candidate_each),
+    ]
 
 
 class CandidateSet(StructuredOutput):

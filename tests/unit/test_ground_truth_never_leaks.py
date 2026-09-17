@@ -71,7 +71,7 @@ from incident_commander.agent.briefing import render_briefing
 from incident_commander.agent.briefing_enrichment import _format_context as _format_writer_context
 from incident_commander.agent.factory import start_run
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
-from incident_commander.agent.investigation import _format_planner_context
+from incident_commander.agent.planner_context import format_planner_context
 from incident_commander.agent.remediation import (
     RemediationPlan,
     _action_result_of,
@@ -201,7 +201,13 @@ def rendered_agent_contexts(scenario: Scenario) -> dict[str, str]:
     probe_summary = "\n".join(entry.result_summary for entry in run.evidence)
     briefing = render_briefing(run)
     return {
-        "investigation_planner": _format_planner_context(run),
+        "investigation_planner": format_planner_context(run),
+        # The best-of-N arm's context is the same render with the evidence-id
+        # column on (WP-5.2, ADR 0043). Swept as its own entry rather than
+        # assumed to be covered by the line above: the flag adds text to every
+        # evidence line, and "the other rendering" is exactly where a leak
+        # would be missed.
+        "investigation_planner_best_of_n": format_planner_context(run, show_evidence_ids=True),
         "remediation_planner": _format_plan_context(run, _HYPOTHESIS.name),
         "verification_judge": _format_verify_context(
             _PLAN, probe_summary, _action_result_of(run, _PLAN)

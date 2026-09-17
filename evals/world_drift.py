@@ -42,6 +42,26 @@ left dirty by something (reset it and run this again). The check says which keys
 and which values moved and leaves the reading to a person — and until that
 reading is made, no number from a recorded run of this world should be reported.
 
+**A fourth reading, and the one this module had to answer** (WO-R3-271,
+ADR 0050): *the world's own history moved, and no reset undoes that.* All four
+committed recordings exited 1 about two hours after they were taken, on a
+freshly reset world, 217–262 disagreements each, and every one of them inside
+``list_audit_events`` or ``search_traces``. The audit log is immutable and every
+read the harness makes is an entry in it, so ``total`` grows on its own and the
+newest-50 page holds different rows; job and trace ids are re-minted by every
+reset. Under ADR 0047 § 5 that made a recorded result permanently unreportable
+— a check that can only ever fail.
+
+``_HISTORY`` below is the answer, and it is narrow on purpose. Those paths
+are compared by SHAPE — presence, JSON type, and the rows a scenario's own
+claims read — and by nothing else. Everything the seeder fixes stays compared by
+value: a changed dead-letter row, a changed lag reading, a changed cache key.
+The table is per tool, per path, with a written reason each, and
+``tests/unit/test_recorded_mode.py::TestHistoryIsNotState`` checks every path
+against the tool's own output model and refuses a table that covers a whole
+tool, because the failure mode of a rule like this is not being wrong once — it
+is growing by one line at a time until nothing is compared.
+
 **Exit codes**, in ``evals/recorder.py``'s vocabulary plus one of its own::
 
     0  no drift — the recording still matches the live world
@@ -79,6 +99,13 @@ from evals.dossier import (
     seed_chaos,
 )
 from evals.fixture_drift import CannedCall, Drift, compare
+from evals.fixture_drift import _policy_path as _fixture_policy_path
+from evals.graders.deterministic import (
+    EvidenceFieldExpectation,
+    _split_row_path,
+    leaf_claims,
+    selected_values,
+)
 from evals.recorded_client import matching_recordings
 from evals.recorder import (
     EXIT_PRECONDITION,
@@ -100,13 +127,243 @@ from incident_commander.tools.mcp_client import MCPClientProtocol, ToolResult, m
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 _SCENARIOS_DIR: Final[Path] = _REPO_ROOT / "evals" / "scenarios"
 
-#: Drift kinds this module adds to ``fixture_drift``'s four. They are about the
-#: CALL SET rather than about a payload, which is a difference the walk cannot
-#: see: it compares two answers to one call and has nothing to say about a call
-#: that has no answer on one side.
+#: Drift kinds this module adds to ``fixture_drift``'s four. The first three are
+#: about the CALL SET rather than about a payload, which is a difference the walk
+#: cannot see: it compares two answers to one call and has nothing to say about a
+#: call that has no answer on one side. The fourth is about a HISTORY path, where
+#: the walk has been told not to compare values and something else has to.
 KIND_UNANSWERED: Final[str] = "live_call_unanswered"
 KIND_MISSING_KEY: Final[str] = "recorded_call_missing_live"
 KIND_UNREADABLE: Final[str] = "payload_unreadable"
+KIND_HISTORY_CLAIM: Final[str] = "history_claim_broken"
+
+
+# --------------------------------------------------------------------------
+# History is not state
+# --------------------------------------------------------------------------
+
+#: Paths whose VALUES record what the world has DONE rather than what state it
+#: is IN. Compared by shape — presence, JSON type, and any claim the scenario
+#: itself makes about them — and never by value.
+#:
+#: **The membership test, and it is not the one ``_VOLATILE`` uses.**
+#: ``fixture_drift._VOLATILE`` asks "does the fixture pack FIX this value?" — if
+#: the seeder writes an exact number, a recording can match it and must. That
+#: question is necessary here and not sufficient, because a recording is replayed
+#: against a world that has been reset since, so it also has to ask: **can
+#: anything in the lab put this value BACK?** For the three path families below
+#: the answer is no, and no amount of resetting changes it:
+#:
+#: * the platform's audit log is immutable (CLAUDE.md invariant 6) and every read
+#:   the harness makes is an entry in it, so the log grows while you look at it;
+#: * a reset deletes the fixture rows and seeds new ones, so a server-minted row
+#:   id is a different id afterwards even when the row means the same thing.
+#:
+#: A path that fails only the first test belongs in ``_VOLATILE``. A path that
+#: fails this second one belongs here, and nowhere else: this table is not
+#: consulted by ``make test-drift``, so nothing here can weaken the check on the
+#: 41 committed canned fixtures.
+#:
+#: **Why this cannot grow into a blanket exemption.** Three mechanisms, none of
+#: them "somebody remembers":
+#:
+#: 1. every path is checked against the tool's own output model, so a typo or a
+#:    field the platform dropped is a failing test rather than a wider hole;
+#: 2. the declared set must be a STRICT subset of that model's paths, so a whole
+#:    tool cannot be forgiven — ``search_traces`` keeps ``job_type`` and
+#:    ``status``, which are the fault's signature, and ``list_audit_events``
+#:    keeps ``events`` itself, so a listing that lost its rows still drifts;
+#: 3. a path a scenario's own claims read is re-checked against the live reading
+#:    (``rechecked_claims``), so the forgiveness is never blind — and a claim
+#:    that cannot be evaluated against one reading takes its path back out of
+#:    the set entirely.
+#:
+#: The set is also pinned by an exact-equality test, so widening it is an edit
+#: somebody reviews rather than a side effect of touching this file.
+_HISTORY: Final[Mapping[str, Mapping[str, str]]] = {
+    "list_audit_events": {
+        "total": (
+            "the count of every action the platform has ever recorded. Reads are "
+            "audit events, so the harness's own probes move it — it grew 3,770 -> "
+            "3,946 between a recording and its drift check with nothing else "
+            "touching the stack. Monotonic and immutable: no reset lowers it."
+        ),
+        "events.id": (
+            "the audit row's own primary key, minted per row. The newest-50 page "
+            "holds whatever ran last, so two honest readings share no row ids at "
+            "all unless nothing at all happened in between."
+        ),
+        "events.action": (
+            "which actions appear in the newest 50 rows is a function of what ran "
+            "against the stack before you looked, not of the scenario's fault. A "
+            "recording taken after a seeding sees `chaos.*` and `agent.*` rows; a "
+            "re-read after a reset sees the reset's own."
+        ),
+        "events.principal_type": (
+            "the kind of principal on whichever rows happen to be newest. Same "
+            "reason as `events.action`: it describes the traffic, not the world."
+        ),
+        "events.principal_id": (
+            "the service-account uuid on those rows. `make bootstrap-token` mints "
+            "a new principal on every `down -v`, which is the reason "
+            "`list_dlq_messages.items.fenced_by` is already forgiven in "
+            "`_VOLATILE` — the same value through a different tool."
+        ),
+        "events.resource_type": (
+            "what the newest rows happen to be about. A page of tool invocations "
+            "says `mcp_tool`; a page of replays says `job`."
+        ),
+        "events.resource_id": (
+            "the id of that resource — a tool name on an invocation row, a "
+            "re-minted job uuid on a replay row. Neither survives a reset."
+        ),
+        "events.extra_data": (
+            "the per-action detail bag, `dict[str, Any]` on the platform's own "
+            "model: arguments, latencies, scopes, outcomes. Cut at this node "
+            "rather than leaf by leaf because the keys are whatever the action "
+            "wrote, so an exact list is unwriteable and would silently miss the "
+            "key that ships tomorrow. A measured latency is the clearest case "
+            "there is of a value nothing can put back."
+        ),
+    },
+    "get_trace": {
+        "audit_events.action": (
+            "the same immutable audit rows as `list_audit_events.events`, read "
+            "through a second tool. Declared here so one field is not history "
+            "through one tool and pinned state through another — the asymmetry "
+            "`_VOLATILE`'s own `jobs.updated_at` and `used_memory_human` notes "
+            "record as a defect found after the fact."
+        ),
+        "audit_events.principal_type": "as `list_audit_events.events.principal_type`.",
+        "audit_events.resource_type": "as `list_audit_events.events.resource_type`.",
+        "audit_events.resource_id": "as `list_audit_events.events.resource_id`.",
+        "audit_events.extra_data": "as `list_audit_events.events.extra_data`, and an open map too.",
+    },
+    "search_traces": {
+        "matches.trace_id": (
+            "the trace's own id. `make eval-reset PURGE_IDEMPOTENCY=1` drops the "
+            "seeded rows and re-seeds them, so the fault comes back with a new "
+            "id; the traffic generator's rows carry random ids that were never "
+            "reproducible at all. What the scenario grades on is the job's type "
+            "and status, and both of those stay compared by value."
+        ),
+        "matches.job_id": (
+            "the job behind that trace, re-minted by the same reset and for the "
+            "same reason. A scenario that grades on a specific id says so in a "
+            "claim, and `rechecked_claims` puts the claim back."
+        ),
+    },
+}
+
+
+#: Path with list markers stripped, which is the form BOTH tables are written
+#: in. ``fixture_drift``'s own function, imported rather than re-implemented:
+#: the walk looks a path up in ``shape_only`` using this normalisation, so a
+#: second copy here would be two answers to "is this the path I declared" and
+#: the table would silently stop matching.
+_policy_path = _fixture_policy_path
+
+
+@dataclass(frozen=True)
+class HistoryClaim:
+    """A scenario claim that reads a path this check would otherwise forgive.
+
+    The second half of ADR 0050: the forgiveness is scoped to values nothing can
+    put back, and where a scenario actually grades on one of those values the
+    check stops asking "is it the same?" and asks the scenario's own question
+    instead — "does the live world still satisfy this?". A re-minted trace id
+    still satisfies ``matches[].trace_id is_null false``; an empty ``matches``
+    list does not, and that is real drift the value comparison would have
+    drowned in 47 id disagreements.
+
+    The comparator is the grader's own (``FieldComparator.satisfied_by``) over
+    the grader's own selection (``selected_values``), so "the claim holds" means
+    here exactly what it means at grade time.
+    """
+
+    tool: str
+    path: str
+    claim: EvidenceFieldExpectation
+
+    def holds_for(self, payload: Mapping[str, Any]) -> bool:
+        """Does one live reading still satisfy this claim?"""
+        observed = selected_values(payload, self.claim.field, self.claim.where)
+        if not observed:
+            # Fails closed, the grader's and the precondition walker's rule: an
+            # assertion with nothing to read is unanswerable, not satisfied.
+            return False
+        if self.claim.rows == "all":
+            return all(self.claim.satisfied_by(value) for value in observed)
+        return any(self.claim.satisfied_by(value) for value in observed)
+
+    def describe(self) -> str:
+        return f"{self.tool}.{self.path} <- {self.claim.describe_claim()}"
+
+
+def _claim_paths(claim: EvidenceFieldExpectation) -> set[str]:
+    """The normalized paths one claim reads — its field, and its row selector's.
+
+    Both, because a selector is part of what the claim depends on: ``where:
+    {field: job_id, equals: <id>}`` on ``matches[].status`` is a claim about the
+    row with THAT job id, and forgiving ``matches.job_id`` while grading
+    ``matches.status`` would let the comparison pick a different row.
+    """
+    paths = {_policy_path(claim.field)}
+    if claim.where is not None:
+        rows_path, _in_row = _split_row_path(claim.field)
+        paths.add(_policy_path(f"{rows_path}.{claim.where.field}"))
+    return paths
+
+
+def rechecked_claims(scenario: Scenario | None) -> tuple[HistoryClaim, ...]:
+    """Every claim this scenario makes about a path ``_HISTORY`` forgives.
+
+    Derived from the scenario, never listed: a scenario that grows a claim on a
+    history path is covered the moment it lands, which is the property a
+    hand-written table could not have (``dossier.derive_probes``' own reason).
+
+    ``which: sum`` claims are deliberately absent, and they do NOT lose their
+    guard: ``sum`` reduces every observation ACROSS A RUN to one total, and one
+    live reading is not a run, so re-checking it here would be a second and
+    weaker definition of a claim the grader already owns. ``shape_only_paths``
+    removes their paths from the forgiven set instead — the fail-safe direction,
+    because a value that cannot be re-checked goes back to being compared.
+
+    Preconditions are not here either, and for a better reason: ``main`` already
+    establishes every one of them live before it compares anything, and exits 7
+    when one is unmet. A precondition on a history tool is therefore checked
+    harder than a claim, not softer.
+    """
+    if scenario is None:
+        return ()
+    found: list[HistoryClaim] = []
+    for claim in leaf_claims(scenario.expectation.expected_evidence_fields):
+        if claim.which == "sum":
+            continue
+        for tool in claim.tools:
+            forgiven = _HISTORY.get(tool, {})
+            for path in sorted(_claim_paths(claim) & set(forgiven)):
+                found.append(HistoryClaim(tool=tool, path=path, claim=claim))
+    return tuple(found)
+
+
+def shape_only_paths(tool: str, scenario: Scenario | None) -> frozenset[str]:
+    """What the walk may compare by type only, for this tool in this scenario.
+
+    The declared set, minus every path read by a claim that ``rechecked_claims``
+    cannot evaluate against a single reading. Nothing in the corpus hits that
+    subtraction today; it exists so that the day a ``which: sum`` claim lands on
+    an audit path, the effect is a stricter check rather than a silent hole.
+    """
+    declared = frozenset(_HISTORY.get(tool, {}))
+    if scenario is None:
+        return declared
+    unrecheckable: set[str] = set()
+    for claim in leaf_claims(scenario.expectation.expected_evidence_fields):
+        if claim.which != "sum" or tool not in claim.tools:
+            continue
+        unrecheckable |= _claim_paths(claim)
+    return declared - unrecheckable
 
 
 @dataclass(frozen=True)
@@ -129,6 +386,13 @@ class DriftReport:
     live_fingerprint: str
     drifts: tuple[Drift, ...]
     live_findings: tuple[str, ...] = ()
+    #: ``<tool>.<path>`` for every value this check compared by shape only, and
+    #: the scenario claims it re-checked instead. Carried and printed because a
+    #: clean walk must never be readable as "everything was compared" — that is
+    #: the ADR 0047 § 2 argument for marking a not-applicable dimension twice,
+    #: applied to a check rather than to a grade.
+    shape_only: tuple[str, ...] = ()
+    rechecked: tuple[str, ...] = ()
 
     @property
     def clean(self) -> bool:
@@ -189,10 +453,18 @@ def drift_between(
       ``payload_unreadable``. Silently skipping it would make an unparseable
       answer indistinguishable from an identical one.
 
+    A fourth, and the one ``_HISTORY`` makes possible: ``history_claim_broken``
+    — a path whose values this check no longer compares, on which the scenario
+    nevertheless grades something, and the live reading no longer satisfies it.
+    That is the drift a forgiven id column would otherwise have hidden.
+
     Pure, so it is unit-testable offline against synthetic recordings; the live
     half is ``main`` below, exactly as ``fixture_drift`` splits the same work.
     """
     live_by_key = {call.key: call for call in live}
+    claims_by_tool: dict[str, list[HistoryClaim]] = {}
+    for entry in rechecked_claims(scenario):
+        claims_by_tool.setdefault(entry.tool, []).append(entry)
     drifts: list[Drift] = []
     for recorded in recording.calls:
         found = live_by_key.get(recorded.key)
@@ -236,8 +508,27 @@ def drift_between(
                     ),
                 ),
                 live_payload,
+                shape_only=shape_only_paths(recorded.tool, scenario),
             )
         )
+        # What the scenario itself grades on a forgiven path, asked of the LIVE
+        # reading. Runs whether or not the walk found anything: a claim that has
+        # stopped holding is drift on its own, and it is the only thing left
+        # looking at a path whose values are no longer compared.
+        for entry in claims_by_tool.get(recorded.tool, ()):
+            if entry.holds_for(live_payload):
+                continue
+            drifts.append(
+                Drift(
+                    scenario=recording.scenario,
+                    tool=recorded.tool,
+                    path=entry.path,
+                    kind=KIND_HISTORY_CLAIM,
+                    canned=entry.claim.describe_claim(),
+                    live=selected_values(live_payload, entry.claim.field, entry.claim.where)
+                    or "nothing at that path",
+                )
+            )
     # A call the platform refused outright has no ``RecordedCall`` at all — the
     # recorder files those as failures — so the live side is short. Reported from
     # the recording's side above; this catches the opposite, which means the two
@@ -267,6 +558,11 @@ def build_report(
     live_findings: Sequence[str] = (),
 ) -> DriftReport:
     """Assemble the report from a recording and a freshly-read world."""
+    forgiven = sorted(
+        f"{call.tool}.{path}"
+        for call in recording.calls
+        for path in shape_only_paths(call.tool, scenario)
+    )
     return DriftReport(
         world=world,
         scenario=recording.scenario,
@@ -275,6 +571,8 @@ def build_report(
         live_fingerprint=world_fingerprint(live_world),
         drifts=tuple(drift_between(recording, live_world.calls, scenario=scenario)),
         live_findings=tuple(live_findings),
+        shape_only=tuple(dict.fromkeys(forgiven)),
+        rechecked=tuple(entry.describe() for entry in rechecked_claims(scenario)),
     )
 
 
@@ -291,8 +589,8 @@ def render(report: DriftReport) -> str:
     if report.clean:
         lines.append(
             "DRIFT: none — every recorded call still answers the same, allowing for the "
-            "fields `fixture_drift._VOLATILE` declares volatile. A recorded result from "
-            "this world may be reported."
+            "fields `fixture_drift._VOLATILE` declares volatile and the history paths "
+            "below. A recorded result from this world may be reported."
         )
     else:
         lines.append(f"DRIFT: {len(report.drifts)} disagreement(s):")
@@ -304,6 +602,25 @@ def render(report: DriftReport) -> str:
             "from this world — re-record it (`make world-record ONLY="
             f"{report.scenario}`) or reset the world and run this again."
         )
+    # Always printed, clean or not: the reader has to be able to see what this
+    # check did NOT compare, or "no drift" reads as a stronger statement than it
+    # is (ADR 0050 § 4).
+    if report.shape_only:
+        lines.append(
+            f"DRIFT: history — {len(report.shape_only)} path(s) compared by SHAPE only "
+            "(presence and JSON type). Nothing in the lab can put these values back: "
+            "the audit log is immutable and every harness read is an entry in it, and a "
+            "reset re-mints every row id. `world_drift._HISTORY` says why, per path."
+        )
+        lines.extend(f"  ~ {path}" for path in report.shape_only)
+    else:
+        lines.append("DRIFT: history — no path in this recording is compared by shape only.")
+    if report.rechecked:
+        lines.append(
+            f"DRIFT: history — {len(report.rechecked)} of this scenario's own claim(s) read a "
+            "path above, so they were re-checked against the live reading instead:"
+        )
+        lines.extend(f"  ? {claim}" for claim in report.rechecked)
     if report.live_findings:
         lines.append(f"DRIFT: coherence lint on the LIVE re-read — {len(report.live_findings)}:")
         lines.extend(f"  - {finding}" for finding in report.live_findings)

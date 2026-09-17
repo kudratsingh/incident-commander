@@ -408,13 +408,36 @@ def _json_type(value: Any) -> str:
     return type(value).__name__
 
 
-def compare(call: CannedCall, live: Mapping[str, Any]) -> list[Drift]:
+def compare(
+    call: CannedCall,
+    live: Mapping[str, Any],
+    *,
+    shape_only: frozenset[str] = frozenset(),
+) -> list[Drift]:
     """Every way ``call``'s canned payload disagrees with the live response.
 
     ``live`` must be the snapshot taken for THIS element's position in the
     sequence — see ``fixture_probe.probe_live``. Handing element 1 the
     snapshot element 0 was compared against is what made a deliberately
     post-action recording drift by construction.
+
+    ``shape_only`` is the CALLER's additional declaration: normalized paths
+    (no ``[]`` markers, as ``_policy_path`` writes them) whose values are
+    compared for JSON type and nothing else, cut at that node so an open map
+    underneath is not descended into. It is **empty by default**, which is the
+    load-bearing half: ``make test-drift`` and
+    ``tests/integration/test_canned_fixtures_match_live.py`` pass nothing, so
+    the canned-fixture walk is byte-for-byte the walk it was, and widening
+    ``_VOLATILE`` is still the only way to forgive a canned fixture.
+
+    The one caller is ``evals/world_drift.py``, whose question is a different
+    one. ``_VOLATILE`` asks "does the fixture pack FIX this value?"; a recorded
+    world also has to ask "can anything in the lab PUT this value BACK?" — and
+    for the platform's audit log the answer is no, because the log is immutable
+    and every read the harness makes is an entry in it. That judgement is
+    declared there, per tool and per path with a reason, and deliberately not
+    here: a path added to this module's tables weakens a check on 41 committed
+    fixtures, and the two questions must not share one table.
     """
     volatile = _VOLATILE.get(call.tool, frozenset())
     unbounded = _UNBOUNDED_TEXT.get(call.tool, frozenset())
@@ -435,6 +458,21 @@ def compare(call: CannedCall, live: Mapping[str, Any]) -> list[Drift]:
 
     def walk(canned_node: Any, live_node: Any, path: str, in_list: bool) -> None:
         """Compare one canned node against its live counterpart, descending as it goes."""
+        if path and _policy_path(path) in shape_only:
+            # A caller-declared shape-only path: type, then stop. Checked FIRST
+            # so the cut applies to containers too — ``extra_data`` on an audit
+            # row is ``dict[str, Any]``, an open map whose keys are whatever the
+            # action wrote, so an exact list of its leaves is unwriteable and
+            # any attempt at one would fail in the direction of noise. Type is
+            # compared over the flattened values so a merged row's list of ids
+            # is still checked for "these are still strings"; an all-null side
+            # yields nothing and says nothing, the ``walk_leaves`` rule.
+            canned_types = {_json_type(v) for v in _flatten(canned_node) if v is not None}
+            live_types = {_json_type(v) for v in _flatten(live_node) if v is not None}
+            if canned_types and live_types and not canned_types & live_types:
+                record(path, "type", sorted(canned_types), sorted(live_types))
+            return
+
         if isinstance(canned_node, Mapping) and isinstance(live_node, Mapping):
             for key in sorted(set(canned_node) - set(live_node)):
                 record(_join(path, key), "canned_only_field", canned_node[key])

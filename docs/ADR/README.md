@@ -2,7 +2,7 @@
 
 Any decision that constrains future work gets a record here, before or with the pull request that implements it. An accepted ADR is never rewritten: when a decision moves, a later ADR amends or supersedes it and both stay on the shelf, so the reasoning that was true at the time is still readable.
 
-Forty records, plus [`0000-template.md`](0000-template.md). All are accepted. The column that repays reading is the last one — it is where a decision has since been narrowed, extended or replaced.
+Forty-one records, plus [`0000-template.md`](0000-template.md). All are accepted. The column that repays reading is the last one — it is where a decision has since been narrowed, extended or replaced.
 
 | # | Decision | Later movement |
 |---|---|---|
@@ -46,6 +46,7 @@ Forty records, plus [`0000-template.md`](0000-template.md). All are accepted. Th
 | [0038](0038-the-agents-view-of-a-scenario-is-an-allow-list-projection.md) | The agent's view of a scenario is an allow-list projection | — |
 | [0039](0039-a-split-is-a-property-of-a-template.md) | A split is a property of a template, and the loader enforces it | — |
 | [0040](0040-a-ground-truth-is-a-statement-about-one-world.md) | A ground truth is a statement about one world; a grader that cannot establish that world reports "not graded" | Scopes 0038's answer key; does not change it |
+| [0041](0041-read-the-whole-queue-before-you-replay-part-of-it.md) | Read the whole queue before you replay part of it — an unfiltered DLQ listing is required before any replay or fence | Adds to 0031's subject rule; does not change it |
 
 ## Two formatting conventions coexist
 

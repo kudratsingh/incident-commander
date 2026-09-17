@@ -500,6 +500,28 @@ _JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
         "same scenario, same deliberate malformation — v0.6.0 made this a "
         "third field the fixture deliberately omits",
     ),
+    # v0.6.7 (plat #204, WO-R3-254) added three more fields to this tool's
+    # output, so the same deliberately-malformed fixture is now short six
+    # rather than three. Nothing about the scenario changed: it exists to hand
+    # the agent a response the schema rejects, and every field it does not
+    # carry is the point. The other fourteen canned lag responses in the suite
+    # WERE re-recorded with all three; this one is the single exception, which
+    # is what makes the key-set diff worth keeping strict.
+    ("tool_output_schema_mismatch", "get_consumer_lag", "measured_at", "live_only_field"): (
+        CANNED_ONLY,
+        "same scenario, same deliberate malformation — v0.6.7 made this a "
+        "fourth field the fixture deliberately omits",
+    ),
+    ("tool_output_schema_mismatch", "get_consumer_lag", "age_seconds", "live_only_field"): (
+        CANNED_ONLY,
+        "same scenario, same deliberate malformation — v0.6.7 made this a "
+        "fifth field the fixture deliberately omits",
+    ),
+    ("tool_output_schema_mismatch", "get_consumer_lag", "recent_samples", "live_only_field"): (
+        CANNED_ONLY,
+        "same scenario, same deliberate malformation — v0.6.7 made this a "
+        "sixth field the fixture deliberately omits",
+    ),
 }
 
 

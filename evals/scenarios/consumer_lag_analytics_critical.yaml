@@ -20,7 +20,7 @@ canned_tool_responses:
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"analytics-consumer","lag":50000,"lag_known":true,"source":"static","cache_key":"kafka:consumer_lag:analytics-consumer"}'
+      text: '{"consumer_group":"analytics-consumer","lag":50000,"lag_known":true,"source":"static","cache_key":"kafka:consumer_lag:analytics-consumer","measured_at":null,"age_seconds":null,"recent_samples":[]}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

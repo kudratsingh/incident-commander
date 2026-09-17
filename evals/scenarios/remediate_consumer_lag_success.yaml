@@ -45,11 +45,11 @@ canned_tool_responses:
   get_consumer_lag:
   - content:
     - type: text
-      text: '{"consumer_group":"worker-dispatcher","lag":15000,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+      text: '{"consumer_group":"worker-dispatcher","lag":15000,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-07-28T10:07:30Z","age_seconds":18,"recent_samples":[{"lag":15000,"measured_at":"2026-07-28T10:07:30Z"},{"lag":11200,"measured_at":"2026-07-28T10:06:30Z"},{"lag":7600,"measured_at":"2026-07-28T10:05:30Z"},{"lag":4100,"measured_at":"2026-07-28T10:04:30Z"},{"lag":900,"measured_at":"2026-07-28T10:03:30Z"}]}'
     is_error: false
   - content:
     - type: text
-      text: '{"consumer_group":"worker-dispatcher","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+      text: '{"consumer_group":"worker-dispatcher","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-07-28T10:09:30Z","age_seconds":12,"recent_samples":[{"lag":0,"measured_at":"2026-07-28T10:09:30Z"},{"lag":4200,"measured_at":"2026-07-28T10:08:30Z"},{"lag":15000,"measured_at":"2026-07-28T10:07:30Z"},{"lag":11200,"measured_at":"2026-07-28T10:06:30Z"},{"lag":7600,"measured_at":"2026-07-28T10:05:30Z"}]}'
     is_error: false
   restart_consumer_group:
     content:

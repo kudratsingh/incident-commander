@@ -47,7 +47,7 @@ canned_tool_responses:
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"worker-dispatcher","lag":1200,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+      text: '{"consumer_group":"worker-dispatcher","lag":1200,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-07-28T10:07:30Z","age_seconds":22,"recent_samples":[{"lag":1200,"measured_at":"2026-07-28T10:07:30Z"},{"lag":900,"measured_at":"2026-07-28T10:06:30Z"},{"lag":640,"measured_at":"2026-07-28T10:05:30Z"},{"lag":410,"measured_at":"2026-07-28T10:04:30Z"},{"lag":180,"measured_at":"2026-07-28T10:03:30Z"}]}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

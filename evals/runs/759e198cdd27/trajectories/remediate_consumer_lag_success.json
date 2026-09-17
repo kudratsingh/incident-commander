@@ -1,0 +1,783 @@
+{
+  "scenario": "remediate_consumer_lag_success",
+  "incident_id": "bc523a89-b09e-4203-9084-be1eebdbac57",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "bc523a89-b09e-4203-9084-be1eebdbac57",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T14:44:18.055295Z",
+      "updated_at": "2026-09-17T14:44:18.055295Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "bc523a89-b09e-4203-9084-be1eebdbac57",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 105.293193,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "83da8402-733c-4e20-818c-115f0f3d1667",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "94d523891e9a868d3ce95ee9982f3323"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T14:46:03.348488Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T14:44:18.055295Z",
+      "updated_at": "2026-09-17T14:46:03.348488Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "bc523a89-b09e-4203-9084-be1eebdbac57",
+      "state": "planning",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 59707,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 105.293275,
+        "max_usd": "1.00",
+        "usd_used": "0.146407"
+      },
+      "evidence": [
+        {
+          "evidence_id": "83da8402-733c-4e20-818c-115f0f3d1667",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "94d523891e9a868d3ce95ee9982f3323"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T14:46:03.348488Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "508ee7a5-ea7b-4c1e-8351-585fbd384ade",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":30,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-09-17T14:45:51.151613Z\",\"age_seconds\":20,\"recent_samples\":[{\"lag\":30,\"measured_at\":\"2026-09-17T14:45:51.151613Z\"},{\"lag\":11,\"measured_at\":\"2026-09-17T14:44:50.630861Z\"}]}",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7a01da62-279c-44c1-a6b0-983d3157811e",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":4,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-17T14:35:58.804412Z\",\"updated_at\":\"2026-09-17T14:36:04.804412Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-17T14:36:04.804412Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-09-17T14:31:58.804412Z\",\"updated_at\":\"2026-09-17T14:32:20.804412Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-09-17T14:32:20.804412Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-17T14:18:58.804412Z\",\"updated_at\":\"2026-09-17T14:19:32.804412Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T14:19:32.804412Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-17T14:03:58.804412Z\",\"updated_at\":\"2026-09-17T14:04:14.804412Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T14:04:14.804412Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0a9ce261-4c51-4439-9999-09ddda0bc798",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":30,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-09-17T14:45:51.151613Z\",\"age_seconds\":36,\"recent_samples\":[{\"lag\":30,\"measured_at\":\"2026-09-17T14:45:51.151613Z\"},{\"lag\":11,\"measured_at\":\"2026-09-17T14:44:50.630861Z\"}]}",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "952fe8ef-9692-47d0-be7b-d5a4a400a0a0",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 20
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T12:43:58.804416Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T11:43:58.804416Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-09-17T08:43:58.804416Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-09-16T20:43:58.804416Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-09-16T16:43:58.804416Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-09-15T14:43:58.804416Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "16e397ca-8052-4837-b9d2-d9e852fcbead",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The worker-dispatcher consumer group is confirmed stalled: lag climbed from 11 to 30 within ~60s, the group retains its assignment but is not processing. This meets the consumer_saturation Tier-1 fix threshold (confidence 0.82 > 0.7). The DLQ entries present are context — the alert subject is the consumer lag itself, not a DLQ scope. Remediation (restart/scale-up of worker-dispatcher) is the appropriate Tier-1 action."
+          },
+          "result_summary": "planner handoff to PLANNING: The worker-dispatcher consumer group is confirmed stalled: lag climbed from 11 to 30 within ~60s, the group retains its assignment but is not processing. This meets the consumer_saturation Tier-1 fix threshold (confidence 0.82 > 0.7). The DLQ entries present are context — the alert subject is the consumer lag itself, not a DLQ scope. Remediation (restart/scale-up of worker-dispatcher) is the appropriate Tier-1 action.",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-lag-climbing-30-and-rising",
+          "confidence": 0.82,
+          "reasoning": "The alert explicitly flags worker-dispatcher as stalled with climbing lag; two samples show lag jumped from 11 to 30 within ~60s, confirming the consumer is not draining the queue despite retaining its group assignment."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "v0.4.3-prod-deploy-2h-before-incident",
+          "confidence": 0.45,
+          "reasoning": "v0.4.3 was deployed to prod at 12:43 UTC (~2h before the evidence window); v0.4.2 had a note 'correlated with billing failures', suggesting this service has had recent deploy-related issues that could explain a consumer stall."
+        },
+        {
+          "category": "poison_message",
+          "name": "human_required-csv_upload-bad-data-unfenced",
+          "confidence": 0.3,
+          "reasoning": "A human_required DLQ row exists (csv_upload, row 15382 parse error) that is unfenced; if this job is in the worker-dispatcher processing chain it could be causing repeated failures, though the DLQ scope of this alert is null (not the named subject)."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "partner-api-timeout-and-smtp-unreachable",
+          "confidence": 0.25,
+          "reasoning": "Two DLQ entries show upstream timeouts (partner-api) and SMTP connection refused, suggesting external dependencies are degraded, which could be causing the worker to stall on retries."
+        },
+        {
+          "category": "unknown",
+          "name": "worker-dispatcher-stall-unclassified",
+          "confidence": 0.1,
+          "reasoning": "No direct evidence of the internal cause of the stall beyond rising lag; internal consumer process issue cannot be ruled out."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T14:44:18.055295Z",
+      "updated_at": "2026-09-17T14:46:03.348570Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "bc523a89-b09e-4203-9084-be1eebdbac57",
+      "state": "remediating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 78227,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 159.656308,
+        "max_usd": "1.00",
+        "usd_used": "0.211976"
+      },
+      "evidence": [
+        {
+          "evidence_id": "83da8402-733c-4e20-818c-115f0f3d1667",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "94d523891e9a868d3ce95ee9982f3323"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T14:46:03.348488Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "508ee7a5-ea7b-4c1e-8351-585fbd384ade",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":30,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-09-17T14:45:51.151613Z\",\"age_seconds\":20,\"recent_samples\":[{\"lag\":30,\"measured_at\":\"2026-09-17T14:45:51.151613Z\"},{\"lag\":11,\"measured_at\":\"2026-09-17T14:44:50.630861Z\"}]}",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7a01da62-279c-44c1-a6b0-983d3157811e",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":4,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-17T14:35:58.804412Z\",\"updated_at\":\"2026-09-17T14:36:04.804412Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-17T14:36:04.804412Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-09-17T14:31:58.804412Z\",\"updated_at\":\"2026-09-17T14:32:20.804412Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-09-17T14:32:20.804412Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-17T14:18:58.804412Z\",\"updated_at\":\"2026-09-17T14:19:32.804412Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T14:19:32.804412Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-17T14:03:58.804412Z\",\"updated_at\":\"2026-09-17T14:04:14.804412Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T14:04:14.804412Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0a9ce261-4c51-4439-9999-09ddda0bc798",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":30,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-09-17T14:45:51.151613Z\",\"age_seconds\":36,\"recent_samples\":[{\"lag\":30,\"measured_at\":\"2026-09-17T14:45:51.151613Z\"},{\"lag\":11,\"measured_at\":\"2026-09-17T14:44:50.630861Z\"}]}",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "952fe8ef-9692-47d0-be7b-d5a4a400a0a0",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 20
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T12:43:58.804416Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T11:43:58.804416Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-09-17T08:43:58.804416Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-09-16T20:43:58.804416Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-09-16T16:43:58.804416Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-09-15T14:43:58.804416Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "16e397ca-8052-4837-b9d2-d9e852fcbead",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The worker-dispatcher consumer group is confirmed stalled: lag climbed from 11 to 30 within ~60s, the group retains its assignment but is not processing. This meets the consumer_saturation Tier-1 fix threshold (confidence 0.82 > 0.7). The DLQ entries present are context — the alert subject is the consumer lag itself, not a DLQ scope. Remediation (restart/scale-up of worker-dispatcher) is the appropriate Tier-1 action."
+          },
+          "result_summary": "planner handoff to PLANNING: The worker-dispatcher consumer group is confirmed stalled: lag climbed from 11 to 30 within ~60s, the group retains its assignment but is not processing. This meets the consumer_saturation Tier-1 fix threshold (confidence 0.82 > 0.7). The DLQ entries present are context — the alert subject is the consumer lag itself, not a DLQ scope. Remediation (restart/scale-up of worker-dispatcher) is the appropriate Tier-1 action.",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4b42b81a-993e-423b-8a1a-18fd51611e2c",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "worker-dispatcher-lag-climbing-30-and-rising"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"worker-dispatcher\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-09-17T14:46:57.711603Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-lag-climbing-30-and-rising",
+          "confidence": 0.82,
+          "reasoning": "The alert explicitly flags worker-dispatcher as stalled with climbing lag; two samples show lag jumped from 11 to 30 within ~60s, confirming the consumer is not draining the queue despite retaining its group assignment."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "v0.4.3-prod-deploy-2h-before-incident",
+          "confidence": 0.45,
+          "reasoning": "v0.4.3 was deployed to prod at 12:43 UTC (~2h before the evidence window); v0.4.2 had a note 'correlated with billing failures', suggesting this service has had recent deploy-related issues that could explain a consumer stall."
+        },
+        {
+          "category": "poison_message",
+          "name": "human_required-csv_upload-bad-data-unfenced",
+          "confidence": 0.3,
+          "reasoning": "A human_required DLQ row exists (csv_upload, row 15382 parse error) that is unfenced; if this job is in the worker-dispatcher processing chain it could be causing repeated failures, though the DLQ scope of this alert is null (not the named subject)."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "partner-api-timeout-and-smtp-unreachable",
+          "confidence": 0.25,
+          "reasoning": "Two DLQ entries show upstream timeouts (partner-api) and SMTP connection refused, suggesting external dependencies are degraded, which could be causing the worker to stall on retries."
+        },
+        {
+          "category": "unknown",
+          "name": "worker-dispatcher-stall-unclassified",
+          "confidence": 0.1,
+          "reasoning": "No direct evidence of the internal cause of the stall beyond rising lag; internal consumer process issue cannot be ruled out."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "worker-dispatcher-lag-climbing-30-and-rising",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_expectation": "The recent_samples show lag flat or declining from the pre-restart high of 30, confirming the consumer is draining the queue again. Note: due to the ~30s cache staleness after recovery, an initial reading may still show 30 — a subsequent sample within ~60s should show lag dropping.",
+        "action_rationale": null
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T14:44:18.055295Z",
+      "updated_at": "2026-09-17T14:46:57.711603Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "bc523a89-b09e-4203-9084-be1eebdbac57",
+      "state": "verifying",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 5,
+        "max_tokens": 200000,
+        "tokens_used": 78227,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 168.04157,
+        "max_usd": "1.00",
+        "usd_used": "0.211976"
+      },
+      "evidence": [
+        {
+          "evidence_id": "83da8402-733c-4e20-818c-115f0f3d1667",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "94d523891e9a868d3ce95ee9982f3323"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T14:46:03.348488Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "508ee7a5-ea7b-4c1e-8351-585fbd384ade",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":30,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-09-17T14:45:51.151613Z\",\"age_seconds\":20,\"recent_samples\":[{\"lag\":30,\"measured_at\":\"2026-09-17T14:45:51.151613Z\"},{\"lag\":11,\"measured_at\":\"2026-09-17T14:44:50.630861Z\"}]}",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7a01da62-279c-44c1-a6b0-983d3157811e",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":4,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-17T14:35:58.804412Z\",\"updated_at\":\"2026-09-17T14:36:04.804412Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-17T14:36:04.804412Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-09-17T14:31:58.804412Z\",\"updated_at\":\"2026-09-17T14:32:20.804412Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-09-17T14:32:20.804412Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-17T14:18:58.804412Z\",\"updated_at\":\"2026-09-17T14:19:32.804412Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T14:19:32.804412Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-17T14:03:58.804412Z\",\"updated_at\":\"2026-09-17T14:04:14.804412Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T14:04:14.804412Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0a9ce261-4c51-4439-9999-09ddda0bc798",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":30,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-09-17T14:45:51.151613Z\",\"age_seconds\":36,\"recent_samples\":[{\"lag\":30,\"measured_at\":\"2026-09-17T14:45:51.151613Z\"},{\"lag\":11,\"measured_at\":\"2026-09-17T14:44:50.630861Z\"}]}",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "952fe8ef-9692-47d0-be7b-d5a4a400a0a0",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 20
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T12:43:58.804416Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T11:43:58.804416Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-09-17T08:43:58.804416Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-09-16T20:43:58.804416Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-09-16T16:43:58.804416Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-09-15T14:43:58.804416Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "16e397ca-8052-4837-b9d2-d9e852fcbead",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The worker-dispatcher consumer group is confirmed stalled: lag climbed from 11 to 30 within ~60s, the group retains its assignment but is not processing. This meets the consumer_saturation Tier-1 fix threshold (confidence 0.82 > 0.7). The DLQ entries present are context — the alert subject is the consumer lag itself, not a DLQ scope. Remediation (restart/scale-up of worker-dispatcher) is the appropriate Tier-1 action."
+          },
+          "result_summary": "planner handoff to PLANNING: The worker-dispatcher consumer group is confirmed stalled: lag climbed from 11 to 30 within ~60s, the group retains its assignment but is not processing. This meets the consumer_saturation Tier-1 fix threshold (confidence 0.82 > 0.7). The DLQ entries present are context — the alert subject is the consumer lag itself, not a DLQ scope. Remediation (restart/scale-up of worker-dispatcher) is the appropriate Tier-1 action.",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4b42b81a-993e-423b-8a1a-18fd51611e2c",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "worker-dispatcher-lag-climbing-30-and-rising"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"worker-dispatcher\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-09-17T14:46:57.711603Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dfcb9b82-8137-478c-b8fd-d571e39a8485",
+          "tool_name": "restart_consumer_group",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "idempotency_key": "6ae6b8fc81855f5305293515d4e5fbe6"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"kill_key_cleared\":true,\"latency_key_cleared\":false,\"group_recognized\":true,\"accepted\":true}",
+          "timestamp": "2026-09-17T14:47:06.096865Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-lag-climbing-30-and-rising",
+          "confidence": 0.82,
+          "reasoning": "The alert explicitly flags worker-dispatcher as stalled with climbing lag; two samples show lag jumped from 11 to 30 within ~60s, confirming the consumer is not draining the queue despite retaining its group assignment."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "v0.4.3-prod-deploy-2h-before-incident",
+          "confidence": 0.45,
+          "reasoning": "v0.4.3 was deployed to prod at 12:43 UTC (~2h before the evidence window); v0.4.2 had a note 'correlated with billing failures', suggesting this service has had recent deploy-related issues that could explain a consumer stall."
+        },
+        {
+          "category": "poison_message",
+          "name": "human_required-csv_upload-bad-data-unfenced",
+          "confidence": 0.3,
+          "reasoning": "A human_required DLQ row exists (csv_upload, row 15382 parse error) that is unfenced; if this job is in the worker-dispatcher processing chain it could be causing repeated failures, though the DLQ scope of this alert is null (not the named subject)."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "partner-api-timeout-and-smtp-unreachable",
+          "confidence": 0.25,
+          "reasoning": "Two DLQ entries show upstream timeouts (partner-api) and SMTP connection refused, suggesting external dependencies are degraded, which could be causing the worker to stall on retries."
+        },
+        {
+          "category": "unknown",
+          "name": "worker-dispatcher-stall-unclassified",
+          "confidence": 0.1,
+          "reasoning": "No direct evidence of the internal cause of the stall beyond rising lag; internal consumer process issue cannot be ruled out."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "worker-dispatcher-lag-climbing-30-and-rising",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_expectation": "The recent_samples show lag flat or declining from the pre-restart high of 30, confirming the consumer is draining the queue again. Note: due to the ~30s cache staleness after recovery, an initial reading may still show 30 — a subsequent sample within ~60s should show lag dropping.",
+        "action_rationale": null
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-17T14:44:18.055295Z",
+      "updated_at": "2026-09-17T14:47:06.096865Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "bc523a89-b09e-4203-9084-be1eebdbac57",
+      "state": "resolved",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_stalled",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "worker-dispatcher stopped processing; lag climbing, group assignment retained"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 9,
+        "max_tokens": 200000,
+        "tokens_used": 84706,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 168.07542,
+        "max_usd": "1.00",
+        "usd_used": "0.220107"
+      },
+      "evidence": [
+        {
+          "evidence_id": "83da8402-733c-4e20-818c-115f0f3d1667",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "94d523891e9a868d3ce95ee9982f3323"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T14:46:03.348488Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "508ee7a5-ea7b-4c1e-8351-585fbd384ade",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":30,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-09-17T14:45:51.151613Z\",\"age_seconds\":20,\"recent_samples\":[{\"lag\":30,\"measured_at\":\"2026-09-17T14:45:51.151613Z\"},{\"lag\":11,\"measured_at\":\"2026-09-17T14:44:50.630861Z\"}]}",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7a01da62-279c-44c1-a6b0-983d3157811e",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":4,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-17T14:35:58.804412Z\",\"updated_at\":\"2026-09-17T14:36:04.804412Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-17T14:36:04.804412Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-09-17T14:31:58.804412Z\",\"updated_at\":\"2026-09-17T14:32:20.804412Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-09-17T14:32:20.804412Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-17T14:18:58.804412Z\",\"updated_at\":\"2026-09-17T14:19:32.804412Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T14:19:32.804412Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-17T14:03:58.804412Z\",\"updated_at\":\"2026-09-17T14:04:14.804412Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T14:04:14.804412Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "0a9ce261-4c51-4439-9999-09ddda0bc798",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":30,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-09-17T14:45:51.151613Z\",\"age_seconds\":36,\"recent_samples\":[{\"lag\":30,\"measured_at\":\"2026-09-17T14:45:51.151613Z\"},{\"lag\":11,\"measured_at\":\"2026-09-17T14:44:50.630861Z\"}]}",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "952fe8ef-9692-47d0-be7b-d5a4a400a0a0",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 20
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T12:43:58.804416Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T11:43:58.804416Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-09-17T08:43:58.804416Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-09-16T20:43:58.804416Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-09-16T16:43:58.804416Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-09-15T14:43:58.804416Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "16e397ca-8052-4837-b9d2-d9e852fcbead",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "The worker-dispatcher consumer group is confirmed stalled: lag climbed from 11 to 30 within ~60s, the group retains its assignment but is not processing. This meets the consumer_saturation Tier-1 fix threshold (confidence 0.82 > 0.7). The DLQ entries present are context — the alert subject is the consumer lag itself, not a DLQ scope. Remediation (restart/scale-up of worker-dispatcher) is the appropriate Tier-1 action."
+          },
+          "result_summary": "planner handoff to PLANNING: The worker-dispatcher consumer group is confirmed stalled: lag climbed from 11 to 30 within ~60s, the group retains its assignment but is not processing. This meets the consumer_saturation Tier-1 fix threshold (confidence 0.82 > 0.7). The DLQ entries present are context — the alert subject is the consumer lag itself, not a DLQ scope. Remediation (restart/scale-up of worker-dispatcher) is the appropriate Tier-1 action.",
+          "timestamp": "2026-09-17T14:46:03.348570Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4b42b81a-993e-423b-8a1a-18fd51611e2c",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "worker-dispatcher-lag-climbing-30-and-rising"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"worker-dispatcher\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-09-17T14:46:57.711603Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dfcb9b82-8137-478c-b8fd-d571e39a8485",
+          "tool_name": "restart_consumer_group",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "idempotency_key": "6ae6b8fc81855f5305293515d4e5fbe6"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"kill_key_cleared\":true,\"latency_key_cleared\":false,\"group_recognized\":true,\"accepted\":true}",
+          "timestamp": "2026-09-17T14:47:06.096865Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f2ed0b03-e117-4a91-bfd1-8126baef3505",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":50,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-09-17T14:46:51.261672Z\",\"age_seconds\":14,\"recent_samples\":[{\"lag\":50,\"measured_at\":\"2026-09-17T14:46:51.261672Z\"},{\"lag\":30,\"measured_at\":\"2026-09-17T14:45:51.151613Z\"},{\"lag\":11,\"measured_at\":\"2026-09-17T14:44:50.630861Z\"}]}",
+          "timestamp": "2026-09-17T14:47:06.130819Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "95a12b51-45f3-4072-9d71-fc2e9e966490",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The recent_samples show lag flat or declining from the pre-restart high of 30, confirming the consumer is draining the queue again. Note: due to the ~30s cache staleness after recovery, an initial reading may still show 30 — a subsequent sample within ~60s should show lag dropping.",
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "not_verified: Lag has increased to 50 from the pre-restart high of 30 shown in recent_samples; expected behavior was flat or declining lag after consumer restart, but the trend shows deterioration (11→30→50 over ~2 minutes), indicating the consumer is not draining the queue.",
+          "timestamp": "2026-09-17T14:47:06.130819Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d53bc847-c237-4c33-963a-7d4296f7a511",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "attempt": 2,
+            "of": 6
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":50,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-09-17T14:46:51.261672Z\",\"age_seconds\":36,\"recent_samples\":[{\"lag\":50,\"measured_at\":\"2026-09-17T14:46:51.261672Z\"},{\"lag\":30,\"measured_at\":\"2026-09-17T14:45:51.151613Z\"},{\"lag\":11,\"measured_at\":\"2026-09-17T14:44:50.630861Z\"}]}",
+          "timestamp": "2026-09-17T14:47:27.962298Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2c3a3c5a-5ce9-44bd-9e95-e8a6de674bcd",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The recent_samples show lag flat or declining from the pre-restart high of 30, confirming the consumer is draining the queue again. Note: due to the ~30s cache staleness after recovery, an initial reading may still show 30 — a subsequent sample within ~60s should show lag dropping.",
+            "attempt": 2,
+            "of": 6
+          },
+          "result_summary": "not_verified: Recent samples show lag climbing (11→30→50) rather than flat or declining; the current lag of 50 exceeds the pre-restart high of 30, indicating the consumer is not draining the queue.",
+          "timestamp": "2026-09-17T14:47:27.962298Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f0ea9259-d7ab-41c0-9d32-67849799e777",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "attempt": 3,
+            "of": 6
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":50,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-09-17T14:46:51.261672Z\",\"age_seconds\":57,\"recent_samples\":[{\"lag\":50,\"measured_at\":\"2026-09-17T14:46:51.261672Z\"},{\"lag\":30,\"measured_at\":\"2026-09-17T14:45:51.151613Z\"},{\"lag\":11,\"measured_at\":\"2026-09-17T14:44:50.630861Z\"}]}",
+          "timestamp": "2026-09-17T14:47:49.148495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "56d26c71-ed1d-4e82-aa1b-9b3d0856c2cb",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The recent_samples show lag flat or declining from the pre-restart high of 30, confirming the consumer is draining the queue again. Note: due to the ~30s cache staleness after recovery, an initial reading may still show 30 — a subsequent sample within ~60s should show lag dropping.",
+            "attempt": 3,
+            "of": 6
+          },
+          "result_summary": "not_verified: The most recent lag sample is 50, up from the pre-restart value of 30, indicating the queue is growing rather than draining as expected after restart.",
+          "timestamp": "2026-09-17T14:47:49.148495Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8bfbd3eb-7ca5-41d6-b972-6df586ceec61",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "attempt": 4,
+            "of": 6
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-09-17T14:47:51.733018Z\",\"age_seconds\":18,\"recent_samples\":[{\"lag\":0,\"measured_at\":\"2026-09-17T14:47:51.733018Z\"},{\"lag\":50,\"measured_at\":\"2026-09-17T14:46:51.261672Z\"},{\"lag\":30,\"measured_at\":\"2026-09-17T14:45:51.151613Z\"},{\"lag\":11,\"measured_at\":\"2026-09-17T14:44:50.630861Z\"}]}",
+          "timestamp": "2026-09-17T14:48:10.405899Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "64e261c6-0ef8-4ce9-91c1-afc170c5202e",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "The recent_samples show lag flat or declining from the pre-restart high of 30, confirming the consumer is draining the queue again. Note: due to the ~30s cache staleness after recovery, an initial reading may still show 30 — a subsequent sample within ~60s should show lag dropping.",
+            "attempt": 4,
+            "of": 6
+          },
+          "result_summary": "verified: The recent_samples show lag declining from 50 → 30 → 11 → 0 over ~3 minutes, confirming the consumer group has recovered and is draining the queue; the current lag reading of 0 matches the expected post-fix behavior of lag dropping below the pre-restart high of 30.",
+          "timestamp": "2026-09-17T14:48:10.405899Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-lag-climbing-30-and-rising",
+          "confidence": 0.82,
+          "reasoning": "The alert explicitly flags worker-dispatcher as stalled with climbing lag; two samples show lag jumped from 11 to 30 within ~60s, confirming the consumer is not draining the queue despite retaining its group assignment."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "v0.4.3-prod-deploy-2h-before-incident",
+          "confidence": 0.45,
+          "reasoning": "v0.4.3 was deployed to prod at 12:43 UTC (~2h before the evidence window); v0.4.2 had a note 'correlated with billing failures', suggesting this service has had recent deploy-related issues that could explain a consumer stall."
+        },
+        {
+          "category": "poison_message",
+          "name": "human_required-csv_upload-bad-data-unfenced",
+          "confidence": 0.3,
+          "reasoning": "A human_required DLQ row exists (csv_upload, row 15382 parse error) that is unfenced; if this job is in the worker-dispatcher processing chain it could be causing repeated failures, though the DLQ scope of this alert is null (not the named subject)."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "partner-api-timeout-and-smtp-unreachable",
+          "confidence": 0.25,
+          "reasoning": "Two DLQ entries show upstream timeouts (partner-api) and SMTP connection refused, suggesting external dependencies are degraded, which could be causing the worker to stall on retries."
+        },
+        {
+          "category": "unknown",
+          "name": "worker-dispatcher-stall-unclassified",
+          "confidence": 0.1,
+          "reasoning": "No direct evidence of the internal cause of the stall beyond rising lag; internal consumer process issue cannot be ruled out."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "worker-dispatcher-lag-climbing-30-and-rising",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_expectation": "The recent_samples show lag flat or declining from the pre-restart high of 30, confirming the consumer is draining the queue again. Note: due to the ~30s cache staleness after recovery, an initial reading may still show 30 — a subsequent sample within ~60s should show lag dropping.",
+        "action_rationale": null
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-09-17T14:44:18.055295Z",
+      "updated_at": "2026-09-17T14:48:10.405899Z"
+    }
+  ],
+  "invocation_id": "759e198cdd27"
+}

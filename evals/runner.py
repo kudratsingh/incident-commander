@@ -42,7 +42,12 @@ from evals.graders.deterministic import (
     is_vacuous_detail,
 )
 from evals.graders.llm_judge import JudgeScore, judge_briefing
-from evals.graders.root_cause import RootCauseCoverage, coverage_over
+from evals.graders.root_cause import (
+    RootCauseCoverage,
+    coverage_over,
+    is_not_graded_detail,
+    label_describes_this_world,
+)
 from evals.guards import (
     AuditWindowScan,
     PrincipalGuardError,
@@ -962,6 +967,30 @@ class ChaosHookRecord(BaseModel):
     error: str | None = None
 
 
+#: ``ChaosHookRecord.phase`` for a hook that MANUFACTURED the world, as
+#: opposed to one that put it back.
+CHAOS_SETUP_PHASE: Final[str] = "setup"
+
+
+def seeded_chaos(records: Iterable[ChaosHookRecord]) -> bool:
+    """Did this run manufacture its own fault world?
+
+    The second half of INC-003's rule (``root_cause.label_describes_this_world``
+    is the rule itself): a live run whose scenario planted the fault is in the
+    world its ground truth describes, and a live run that planted nothing is
+    not. Setup records only — a teardown record says the world was put BACK,
+    which is the opposite claim — and successful ones only, since a failed
+    setup hook abandons the scenario ungraded anyway.
+
+    Reads the records rather than ``Scenario.seeds_chaos`` on purpose: this is
+    the question "what world was this run actually in?", and the archive
+    answers it for a run that finished months ago, whose scenario file may
+    since have gained or lost a hook. ``scripts/regrade_archive.py`` asks it
+    of ``ScenarioOutcome.chaos_hooks`` for exactly that reason.
+    """
+    return any(record.phase == CHAOS_SETUP_PHASE and record.ok for record in records)
+
+
 def _invoke_plan_hook(
     scenario: Scenario,
     hook: ChaosHook,
@@ -1042,7 +1071,7 @@ def _seed_chaos_plan(
     """
     records: list[ChaosHookRecord] = []
     for position, hook in enumerate(plan.setup, start=1):
-        record = _invoke_plan_hook(scenario, hook, settings, tracer, phase="setup")
+        record = _invoke_plan_hook(scenario, hook, settings, tracer, phase=CHAOS_SETUP_PHASE)
         records.append(record)
         if not record.ok:
             raise ChaosSetupFailed(
@@ -1583,6 +1612,16 @@ def run_scenario(
             # grades ROOT_CAUSE vacuously rather than red.
             ground_truth=(
                 None if scenario.ground_truth is None else scenario.ground_truth.root_causes
+            ),
+            # Which world the run was actually in (INC-003). The runner is the
+            # only place that knows — ``grade()`` is a pure function of its
+            # arguments and must stay one — so the fact is passed in beside
+            # the label it qualifies. ``chaos_records`` holds the SETUP hooks
+            # at this point (teardown runs after grading), and a canned run
+            # seeded nothing but is in the label's world by definition.
+            world_matches_ground_truth=label_describes_this_world(
+                live_mcp=live_mcp_available,
+                chaos_seeded=seeded_chaos(chaos_records),
             ),
         )
         judge_score: JudgeScore | None = None
@@ -2382,14 +2421,25 @@ def root_cause_coverage(report: RunReport) -> RootCauseCoverage:
     ``is_vacuous_detail`` rather than re-deriving the condition keeps this
     number and the regression gate's vacated-assertion check reading the
     same signal — if one moves, both move.
+
+    The ungraded rows are then split in two (INC-003): a row held back
+    because the run's world is not the label's world is counted and named
+    separately from a row whose scenario declares no label at all. Read off
+    the detail the grader wrote rather than re-derived from the scenario
+    files, so the number holds for an archived report as well — including one
+    written before this rule existed, where it is simply zero.
     """
-    verdicts = [
-        (not is_vacuous_detail(dimension.detail), dimension.passed)
+    rows = [
+        dimension
         for outcome in report.outcomes
         for dimension in outcome.report.dimensions
         if dimension.dimension is GradeDimension.ROOT_CAUSE
     ]
-    return coverage_over(verdicts, total=report.total)
+    return coverage_over(
+        [(not is_vacuous_detail(row.detail), row.passed) for row in rows],
+        total=report.total,
+        world_mismatch=sum(1 for row in rows if is_not_graded_detail(row.detail)),
+    )
 
 
 def _print_summary(report: RunReport) -> None:

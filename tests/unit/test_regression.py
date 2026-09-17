@@ -11,6 +11,7 @@ from evals.graders.deterministic import (
     GradeReport,
     is_vacuous_detail,
 )
+from evals.graders.root_cause import not_graded_detail
 from evals.regression import compare
 from evals.runner import RunReport, ScenarioOutcome
 from incident_commander.agent.state import IncidentState
@@ -495,6 +496,26 @@ class TestVacuityClassifier:
     )
     def test_substantive_details_are_not_vacuous(self, detail: str) -> None:
         assert not is_vacuous_detail(detail)
+
+    def test_the_world_scoped_not_graded_detail_is_vacuous(self) -> None:
+        """INC-003's second shape of "nothing was asserted here".
+
+        ROOT_CAUSE passes without a verdict in two different situations now:
+        the scenario declares no label ("no ground truth set"), and the run
+        was in a world the label does not describe. Both are the absence of a
+        claim, so both have to read as vacuous — a not-graded row that looked
+        substantive would sit in the accuracy denominator and quietly restate
+        the 61% the incident is about.
+        """
+        detail = not_graded_detail("db_query_latency")
+        assert is_vacuous_detail(detail)
+
+    def test_a_graded_root_cause_verdict_is_still_substantive(self) -> None:
+        """The near-miss the shape must not swallow."""
+        assert not is_vacuous_detail(
+            "diagnosed no_fault; ground truth db_query_latency — not the declared cause "
+            "(precision 0.00, recall 0.00, F1 0.00)"
+        )
 
     def test_every_nothing_asserted_branch_in_the_grader_is_classified(self) -> None:
         """Walks the grader for the literal it emits when nothing is set.

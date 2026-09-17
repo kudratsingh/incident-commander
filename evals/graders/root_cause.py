@@ -39,16 +39,85 @@ implementation detail:
 
 3. **Exact set is the pass condition.** Partial credit is measured and
    reported; it does not turn a wrong answer green.
+
+4. **A label is true of ONE world** (INC-003, WO-R3-265). The labels were
+   read off each scenario's canned fixtures, and the read-only smoke pass
+   runs those same scenarios against an unseeded live stack where the fault
+   does not exist. Applying the label there grades the agent against a world
+   it was never in — it cost seven false reds and one meaningless "61%" on
+   the paid archive ``0db6fe722f7c``. ``label_describes_this_world`` is the
+   one place that rule lives, and ``not_graded_detail`` is what the dimension
+   says when the answer is no.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Final
 
 from pydantic import BaseModel, ConfigDict
 
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
 from incident_commander.agent.state import RunState
+
+#: How a ROOT_CAUSE detail opens when the run's world is not the label's.
+#: ``deterministic.is_vacuous_detail`` matches on it, so a not-graded row
+#: leaves the accuracy denominator and the regression gate's vacated-assertion
+#: check the same way an unasserted dimension does. Defined here rather than
+#: there because the dimension's own vocabulary lives in this module and two
+#: copies of a magic prefix is one copy too many.
+NOT_GRADED_PREFIX: Final[str] = "not graded:"
+
+
+def label_describes_this_world(*, live_mcp: bool, chaos_seeded: bool) -> bool:
+    """Is the world this run was in the world the ground truth describes?
+
+    Two worlds carry the label and one does not:
+
+    * **canned** (``live_mcp`` false) — the fixtures the label was read from,
+      by definition the world it describes. This is every offline run,
+      including a declared-live scenario that fell back to canned, and it is
+      why ``make eval-reg`` sees no change from this rule at all.
+    * **live, and the scenario seeded its own fault** — the chaos plan built
+      the world the label was written about, so the label is about this run.
+      The remediation scenarios are this case.
+    * **live, and nothing was seeded** — the read-only smoke pass. The world
+      is whatever the shared stack happened to hold, the canned fault is not
+      in it, and the label says nothing about it. INC-003.
+
+    Note what is NOT a factor: whether the row would pass. Keeping the greens
+    of a mismatched world and dropping only the reds would buy back the same
+    invalid number with a friendlier sign.
+
+    Keyword-only, boolean-in/boolean-out, and deliberately trivial: the point
+    is that the runner and ``scripts/regrade_archive.py`` answer this question
+    with the same function, or a re-grade of an archive is not the grade the
+    runner would have given.
+    """
+    return not live_mcp or chaos_seeded
+
+
+def not_graded_detail(expected: str) -> str:
+    """The ROOT_CAUSE detail for a run the label does not describe.
+
+    Names the label it held back, so a reader of the archive can see which
+    statement was skipped rather than only that one was.
+    """
+    return (
+        f"{NOT_GRADED_PREFIX} the label describes a world this run did not have "
+        f"— a live run that seeded no fault; ground truth {expected}"
+    )
+
+
+def is_not_graded_detail(detail: str) -> bool:
+    """True for a detail ``not_graded_detail`` produced.
+
+    Matched by prefix rather than by equality because the label it names
+    varies per scenario, and by shape rather than by an enumerated list for
+    the reason ``is_vacuous_detail`` gives: a wording that changes must not
+    silently stop being recognised as an absence of a claim.
+    """
+    return detail.startswith(NOT_GRADED_PREFIX)
 
 
 def final_diagnosis(run: RunState) -> Hypothesis | None:
@@ -185,6 +254,14 @@ class RootCauseCoverage(BaseModel):
     graded: int
     #: Of those, how many named the declared cause exactly.
     correct: int
+    #: Of the ungraded, how many were held back because the run was in a world
+    #: the label does not describe (INC-003) rather than because no label
+    #: exists. Both are outside the denominator and they are different facts:
+    #: "nine scenarios declare no label" is about the corpus, "seven labels
+    #: describe a world this run did not have" is about the run. Defaults to 0
+    #: so every existing caller — and every archived report read back through
+    #: this model — keeps its meaning unchanged.
+    not_graded_world: int = 0
 
     @property
     def accuracy(self) -> float | None:
@@ -193,26 +270,53 @@ class RootCauseCoverage(BaseModel):
 
     def describe(self) -> str:
         """One line for the run summary and for a phase report."""
+        held_back = (
+            f"; {self.not_graded_world} not graded — the label describes a world "
+            "the run did not have"
+            if self.not_graded_world
+            else ""
+        )
         if self.graded == 0:
+            # The wording when nothing was held back is unchanged to the byte:
+            # it is quoted in docs and in committed reports, and a report that
+            # says the same thing should say it the same way.
+            if not self.not_graded_world:
+                return (
+                    f"root cause: not measured — 0 of {self.total} scenario(s) declare a "
+                    "ground truth, so no run was graded on diagnosis"
+                )
             return (
-                f"root cause: not measured — 0 of {self.total} scenario(s) declare a "
-                "ground truth, so no run was graded on diagnosis"
+                f"root cause: not measured — 0 of {self.total} scenario(s) were graded "
+                f"on diagnosis{held_back}"
             )
         accuracy = self.correct / self.graded
         return (
             f"root cause: {self.correct}/{self.graded} correct "
             f"({accuracy:.0%}) over {self.graded} of {self.total} scenario(s) "
-            "carrying a ground truth"
+            f"carrying a ground truth{held_back}"
         )
 
 
-def coverage_over(verdicts: Iterable[tuple[bool, bool]], total: int) -> RootCauseCoverage:
+def coverage_over(
+    verdicts: Iterable[tuple[bool, bool]], total: int, *, world_mismatch: int = 0
+) -> RootCauseCoverage:
     """Roll up ``(is_graded, passed)`` pairs, one per scenario, into coverage.
 
     Takes plain pairs rather than ``DimensionResult``s so this module keeps
     its one-way dependency on ``deterministic.py``; the caller decides what
     counts as graded (in the runner: a ROOT_CAUSE detail ``is_vacuous_detail``
     does not match).
+
+    ``world_mismatch`` is how many of the ungraded rows were held back by
+    INC-003's rule. Keyword-only with a default, for the same reason
+    ``grade``'s new argument is: a caller that cannot tell the two absences
+    apart keeps reporting exactly what it reported before rather than
+    guessing.
     """
     graded = [passed for is_graded, passed in verdicts if is_graded]
-    return RootCauseCoverage(total=total, graded=len(graded), correct=sum(graded))
+    return RootCauseCoverage(
+        total=total,
+        graded=len(graded),
+        correct=sum(graded),
+        not_graded_world=world_mismatch,
+    )

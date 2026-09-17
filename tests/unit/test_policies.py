@@ -907,6 +907,184 @@ class TestSourceListingForAction:
             )
 
 
+class TestWholeQueueReadBeforeDlqAction:
+    """ADR 0041's constants stay tied to the maps they were copied from.
+
+    ``investigation.py`` holds its own name for the dead-letter listing and its
+    own set of that listing's slice filters, because ``remediation.py`` imports
+    that module and the dependency cannot run the other way. Those copies are
+    the thing this class exists to stop drifting: a renamed tool or a third
+    filter added on the platform side would quietly widen what counts as "the
+    whole queue", and the guard would start admitting a partial read.
+    """
+
+    def test_the_listing_tool_is_the_one_the_row_guard_reads(self) -> None:
+        from incident_commander.agent.investigation import DLQ_LISTING_TOOL
+        from incident_commander.agent.remediation import DLQ_ROW_SOURCE
+
+        assert DLQ_ROW_SOURCE.tool_name == DLQ_LISTING_TOOL
+        assert tier_of(DLQ_LISTING_TOOL) is Tier.READ, (
+            "The whole-queue read is a call the guard asks the PLANNER to make, "
+            "so it has to be a read-tier probe."
+        )
+
+    def test_the_filter_set_is_every_slice_the_listing_can_be_narrowed_on(self) -> None:
+        """Derived from ``SOURCE_LISTING_FOR_ACTION``, not hand-kept beside it.
+
+        Every ``ListingScope.read_field`` recorded against the dead-letter
+        listing is a dimension the platform lets a caller narrow on, so every
+        one of them is a way to have read less than the whole queue. Paging
+        arguments (``limit``, ``offset``) appear in no scope and are correctly
+        absent: they bound a page, they do not select a slice.
+        """
+        from incident_commander.agent.investigation import (
+            DLQ_LISTING_FILTERS,
+            DLQ_LISTING_TOOL,
+        )
+        from incident_commander.agent.remediation import SOURCE_LISTING_FOR_ACTION
+
+        declared = {
+            scope.read_field
+            for listings in SOURCE_LISTING_FOR_ACTION.values()
+            for listing in listings
+            if listing.tool_name == DLQ_LISTING_TOOL
+            for scope in listing.scopes
+        }
+        assert declared == DLQ_LISTING_FILTERS, (
+            f"DLQ_LISTING_FILTERS is {sorted(DLQ_LISTING_FILTERS)} but "
+            f"SOURCE_LISTING_FOR_ACTION narrows {DLQ_LISTING_TOOL} on "
+            f"{sorted(declared)}. A filter missing here is a filtered page the "
+            "whole-queue guard would accept as unfiltered."
+        )
+        for field in DLQ_LISTING_FILTERS:
+            assert field in TOOL_REGISTRY[DLQ_LISTING_TOOL].input_model.model_fields
+
+    def test_the_action_set_covers_every_dlq_tool_the_two_maps_name(self) -> None:
+        """A replay tool cannot join the family by being left out of this set.
+
+        ``DLQ_ACTION_TOOLS`` is declared rather than derived, because the fence
+        is deliberately inert in both read-before-act maps and a derivation
+        would drop it. This is the check that keeps "declared" from meaning
+        "stale": everything those maps tie to the dead-letter listing must be
+        in it, and the fence must be too.
+        """
+        from incident_commander.agent.investigation import (
+            DLQ_ACTION_TOOLS,
+            DLQ_LISTING_TOOL,
+        )
+        from incident_commander.agent.remediation import (
+            SOURCE_LISTING_FOR_ACTION,
+            SOURCE_ROW_FOR_ACTION,
+        )
+
+        tied_to_the_queue = {
+            action
+            for action, sources in SOURCE_ROW_FOR_ACTION.items()
+            if any(source.tool_name == DLQ_LISTING_TOOL for source in sources)
+        } | {
+            action
+            for action, sources in SOURCE_LISTING_FOR_ACTION.items()
+            if any(source.tool_name == DLQ_LISTING_TOOL for source in sources)
+        }
+        assert tied_to_the_queue <= DLQ_ACTION_TOOLS, (
+            f"{sorted(tied_to_the_queue - DLQ_ACTION_TOOLS)} act on dead-letter "
+            "rows per the read-before-act maps but are not in DLQ_ACTION_TOOLS, "
+            "so a handoff steering at them would skip the whole-queue read."
+        )
+        assert "mark_dlq_permanent" in DLQ_ACTION_TOOLS, (
+            "The fence is the half a derivation from those maps would lose — it "
+            "is inert in both by design (WO-R2-144) — and ADR 0041 covers it."
+        )
+        for tool in DLQ_ACTION_TOOLS:
+            assert tier_of(tool) is Tier.TIER_1, (
+                f"{tool} is in DLQ_ACTION_TOOLS at tier {tier_of(tool).value}; "
+                "the set is about actions the handoff can steer at."
+            )
+
+    def test_the_acting_categories_are_exactly_the_dlq_routed_ones(self) -> None:
+        """The derivation, checked against what the routing maps actually say.
+
+        Not a hand-written expectation of the two categories: the assertion is
+        that a category is in the set precisely when some tool it can route to
+        is a dead-letter action. A new category routed at a replay picks itself
+        up; a category that stops routing there drops out.
+        """
+        from incident_commander.agent.investigation import (
+            DLQ_ACTING_CATEGORIES,
+            DLQ_ACTION_TOOLS,
+            FIX_MAP,
+            HINT_ROUTED_CATEGORIES,
+            HINT_ROUTED_TOOLS,
+        )
+
+        hint_routed = {tool for tools in HINT_ROUTED_TOOLS.values() for tool in tools}
+        for category, mapped_tool in FIX_MAP.items():
+            reachable = {mapped_tool}
+            if category in HINT_ROUTED_CATEGORIES:
+                reachable |= hint_routed
+            expected = bool(reachable & DLQ_ACTION_TOOLS)
+            assert (category in DLQ_ACTING_CATEGORIES) is expected, (
+                f"{category.value} routes to {sorted(reachable)} and "
+                f"{'does' if expected else 'does not'} reach a dead-letter "
+                f"action, but it is {'not ' if expected else ''}in "
+                "DLQ_ACTING_CATEGORIES."
+            )
+        assert set(FIX_MAP) >= DLQ_ACTING_CATEGORIES, (
+            "A category with no Tier-1 fix never reaches the handoff guard — "
+            "the FIX_MAP check escalates first — so listing one here would be "
+            "a rule that can never fire."
+        )
+
+    def test_every_canned_dlq_scenario_reads_the_queue_whole_before_acting(self) -> None:
+        """The corpus half of the rule, read off the scenarios themselves.
+
+        For every scenario whose scripted investigation hands off with a
+        dead-letter-routed category, an unfiltered ``list_dlq_messages`` probe
+        must come before the handoff. This is what says no canned trajectory
+        depends on the behaviour ADR 0041 forbids — and it is the test that
+        would have caught live run ``fc896b25a09c``'s shape if a scenario had
+        ever been scripted that way.
+        """
+        from incident_commander.agent.investigation import (
+            DLQ_ACTING_CATEGORIES,
+            DLQ_LISTING_FILTERS,
+            DLQ_LISTING_TOOL,
+        )
+
+        checked = 0
+        for scenario in load_scenarios(_SCENARIO_DIR):
+            canned = scenario.canned_llm_responses or {}
+            steps = canned.get("investigation_planner") or []
+            listed_whole = False
+            for step in steps:
+                action = step.get("next_action") or {}
+                hypotheses = step.get("hypotheses") or []
+                if action.get("kind") == "probe":
+                    arguments = action.get("arguments") or {}
+                    if action.get("tool_name") == DLQ_LISTING_TOOL and not any(
+                        isinstance(arguments.get(f), str) and arguments[f].strip()
+                        for f in DLQ_LISTING_FILTERS
+                    ):
+                        listed_whole = True
+                    continue
+                if action.get("kind") != "remediate" or not hypotheses:
+                    continue
+                if hypotheses[0].get("category") not in {c.value for c in DLQ_ACTING_CATEGORIES}:
+                    continue
+                checked += 1
+                assert listed_whole, (
+                    f"{scenario.name} hands off to a dead-letter action with no "
+                    f"unfiltered {DLQ_LISTING_TOOL} probe before it. Under ADR "
+                    "0041 the guard refuses that handoff, so the scripted run "
+                    "no longer reaches PLANNING. The FIXTURE is authoritative: "
+                    "move the script, never the claim."
+                )
+        assert checked >= 9, (
+            f"Only {checked} scenarios exercised this rule; the corpus had 9 "
+            "when ADR 0041 landed, so the walk has stopped selecting them."
+        )
+
+
 class TestResolutionClass:
     """``RESOLUTION_CLASS`` answers "can a successful call END the incident?".
 

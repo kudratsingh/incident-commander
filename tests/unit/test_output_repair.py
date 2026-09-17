@@ -117,13 +117,28 @@ def _briefing(run_state: RunState) -> EscalationBriefing:
     )
 
 
-def _investigating(run_state: RunState) -> RunState:
-    return run_state.model_copy(
-        update={
-            "state": IncidentState.INVESTIGATING,
-            "alert": {"source": "kafka", "severity": "high"},
-        }
-    )
+def _investigating(run_state: RunState, whole_queue_read: datetime | None = None) -> RunState:
+    """An INVESTIGATING state on a subject-less alert.
+
+    ``whole_queue_read`` seeds the unfiltered ``list_dlq_messages`` reading
+    ADR 0041 requires before a dead-letter handoff. Only the one test driving
+    a POISON_MESSAGE `remediate` to PLANNING needs it; every other caller here
+    ends the run somewhere the guard never runs.
+    """
+    update: dict[str, Any] = {
+        "state": IncidentState.INVESTIGATING,
+        "alert": {"source": "kafka", "severity": "high"},
+    }
+    if whole_queue_read is not None:
+        update["evidence"] = (
+            EvidenceEntry(
+                tool_name="list_dlq_messages",
+                arguments={"remediation_hint": None, "job_type": None, "limit": 50, "offset": 0},
+                result_summary='{"total":5,"items":[]}',
+                timestamp=whole_queue_read,
+            ),
+        )
+    return run_state.model_copy(update=update)
 
 
 class _NoMCP:
@@ -670,7 +685,13 @@ class TestTheLiveRunEndToEnd:
 
         llm = _ScriptedLLM([json.loads(json.dumps(LIVE_RECORD_OUTPUT_INPUT))])
         transition = make_llm_investigate(_NoMCP(), llm, model="m")
-        result = transition(_investigating(run_state), now)
+        # The whole-queue reading that run had already taken (ADR 0041). It is
+        # not scaffolding for the guard: the payload's own text names the rows
+        # only an unfiltered listing shows ("an unclassified
+        # SchemaValidationError bulk_api_sync"), so a run state without it
+        # describes a trajectory `779b19a287a7` did not have. The claim under
+        # test is unchanged — one call, no repair, and the handoff lands.
+        result = transition(_investigating(run_state, whole_queue_read=now), now)
         assert len(llm.calls) == 1
         assert llm.repair_of == [None]
         # `remediate` on a POISON_MESSAGE top hypothesis hands off to

@@ -45,7 +45,7 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("118e7739f4261a4b49ac8fda63b149e058621a6ba81f04108c3e64a214ff16af"),
     # Moved by WP-1.6, intentionally: nine category rows and the healthy-world
     # rule. Named in that PR's body per plan 04 working rule 5.
-    "investigation_planner": ("fe44f30ebd88389e0aca9352c766324ef36e9aed3e565f34eff20335f4b9538d"),
+    "investigation_planner": ("e01a1d68c282fc51dc4906774e67e87da85110444ae121e7d61698cc10fd3ab8"),
     "briefing_judge": ("838a5ee5de6081c32ef1b7aba35aefe0ddd83826e841af2ca831ba76f4692719"),
     "remediation_planner": ("042b8372e1687a3f1174c22f626a94406da1e00f2f0b680f459187f7394d8a60"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),

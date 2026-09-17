@@ -204,11 +204,10 @@ class DiagnosisCandidate(StructuredOutput):
         ),
     )
     confidence: float = Field(ge=0.0, le=1.0)
-    # Defaulted rather than required, and the two reference fields are the only
-    # ones here that are. An omitted citation list and an empty one say the
-    # same thing — this candidate cited nothing — so turning the absence into a
-    # harness repair would spend a billed call on a distinction with no
-    # meaning. ``next_probe`` below is required for the opposite reason.
+    # The only two defaulted fields here. An omitted citation list and an empty
+    # one say the same thing — this candidate cited nothing — so turning the
+    # absence into a harness repair would spend a billed call on a distinction
+    # with no meaning. ``next_probe`` below is required for the opposite reason.
     evidence_for: tuple[EvidenceRef, ...] = Field(
         default=(),
         description="Evidence ids that support this candidate. May be empty.",

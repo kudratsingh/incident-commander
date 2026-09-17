@@ -81,14 +81,19 @@ canned_llm_responses:
       tool_name: list_audit_events
       arguments:
         action_prefix: deploy
+  # The first two turns rank `unknown` honestly: before the audit read there
+  # is no actor in evidence and "many things are alerting" is not a cause.
+  # This turn HAS the actor, so it names it. It used to stay `unknown` while
+  # its own reasoning and stop reason both said "deploy" \u2014 the free-form
+  # `name` carried the diagnosis the enum refused to (WO-R3-262).
   - hypotheses:
-    - category: unknown
-      name: cascading_failure
+    - category: deploy_regression
+      name: deploy_v1_42_0_cascade
       confidence: 0.9
-      reasoning: "Deploy v1.42.0 completed 2 minutes before the storm \u2014 high-confidence trigger candidate.\n"
+      reasoning: "Deploy v1.42.0 completed at 09:58Z, two minutes before the first of five alerts across api, db, kafka, dlq and cache \u2014 the only actor in the audit read, and the only thing common to five subsystems failing at once.\n"
     next_action:
       kind: stop
-      reason: deploy-triggered cascade; human should decide rollback
+      reason: deploy-triggered cascade; rollback is a human decision
   briefing_writer:
   - findings: 'Five alerts fired within 3 minutes across api, db, kafka, dlq, and cache. A deploy of v1.42.0 completed 2 minutes before the first alert.
 

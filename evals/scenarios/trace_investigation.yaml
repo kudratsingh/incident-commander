@@ -42,11 +42,26 @@ canned_tool_responses:
     is_error: false
 canned_llm_responses:
   investigation_planner:
+  # The worst of the seven this packet found (WO-R3-262): the script reasoned
+  # about "3 retries against Stripe timing out" and briefed the same, while
+  # the fixture serves a report_gen job that died with "OOM during PDF
+  # generation (200MB report)" at retry_count 2. There is no Stripe and no
+  # timeout anywhere in this scenario \u2014 the scripted agent was reasoning
+  # about evidence the world does not contain, and the offline suite could
+  # not see it because nothing compared the conclusion to the fixture.
+  #
+  # The category stays `unknown`, and that is the answer rather than a
+  # failure to reach one: the fault is known precisely (a worker exhausted
+  # memory rendering an oversized report) and HypothesisCategory has no
+  # member for resource exhaustion, so the prompt's own rule applies \u2014 "pick
+  # the closest matching category. If nothing fits, use `unknown`" \u2014 and the
+  # escalation carries the full evidence chain. The missing category is
+  # filed separately; it changes the agent's prompt and is the owner's call.
   - hypotheses:
-    - category: transient_dependency
-      name: downstream_timeout
-      confidence: 0.55
-      reasoning: 'Job failure alert carries a trace_id; fetch the trace for the full retry + audit picture.
+    - category: unknown
+      name: unread_job_failure
+      confidence: 0.45
+      reasoning: 'Job failure alert carries a trace_id and nothing about why it failed; fetch the trace for the error text, the retry history and the audit events.
 
         '
     next_action:
@@ -55,24 +70,24 @@ canned_llm_responses:
       arguments:
         trace_id: 0e24ca29-1d47-57e9-b898-4d79bb6da981
   - hypotheses:
-    - category: transient_dependency
-      name: downstream_timeout
+    - category: unknown
+      name: job_out_of_memory
       confidence: 0.85
-      reasoning: "Trace shows 3 retries against Stripe timing out \u2014 root cause is the external dependency, not the job code.\n"
+      reasoning: "Trace shows one failed job \u2014 report_gen, retry_count 2 \u2014 that died with \"OOM during PDF generation (200MB report)\". The cause is not in doubt: the worker ran out of memory on an oversized report. No category covers resource exhaustion, so this escalates as `unknown` with the trace attached rather than being forced into a dependency or data label it does not fit.\n"
     next_action:
       kind: stop
-      reason: root cause is external dependency; escalate for retry policy tuning
+      reason: worker ran out of memory rendering a 200MB report; no category fits, escalate with the trace
   briefing_writer:
-  - findings: 'Job process_payment (trace 0e24ca29-1d47-57e9-b898-4d79bb6da981) failed after 3 retries with "stripe api timeout" as the error on each attempt.
+  - findings: 'Job 5967d510-0290-5627-a9db-4e29e3a38e44 (report_gen, trace 0e24ca29-1d47-57e9-b898-4d79bb6da981) failed with "OOM during PDF generation (200MB report)" after 2 retries. The audit log records the same error on the job.failed event.
 
       '
-    recommendation: 'Confirm Stripe is healthy from the platform''s network; if so, consider widening the timeout or adding a circuit breaker on this job type.
+    recommendation: 'Cap or stream report generation so a 200MB document does not have to be held in memory, and raise the report_gen worker''s memory limit until it is. Retrying as-is will fail the same way.
 
       '
   briefing_judge:
   - groundedness: 0.9
     actionability: 0.85
-    reasoning: 'Findings ground in the trace''s retry history and error message; recommendation names concrete mitigations.
+    reasoning: 'Findings quote the trace''s own error text and retry count and name the job; recommendation names concrete mitigations and says why a plain retry will not help.
 
       '
 expectation:

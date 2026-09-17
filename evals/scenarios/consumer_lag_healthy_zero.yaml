@@ -39,16 +39,22 @@ canned_llm_responses:
       tool_name: get_consumer_lag
       arguments:
         consumer_group: healthy-consumer
+  # `no_fault`, not `unknown`. The probe came back and it came back CLEAN —
+  # lag 0 with lag_known true on the group the alert names — and the planner
+  # prompt draws that line explicitly: "do not downgrade a clean reading to
+  # `unknown` — `unknown` means the probes left you unable to tell, which is
+  # a different report and sends the human somewhere else". This script
+  # predated the NO_FAULT label (WP-1.6) and was never revisited (WO-R3-262).
   - hypotheses:
-    - category: unknown
+    - category: no_fault
       name: alerting_false_positive
       confidence: 0.75
-      reasoning: 'Lag reading is 0; the alerting rule may be misconfigured or firing on a spike that has already recovered.
+      reasoning: 'Lag reads 0 on healthy-consumer with lag_known true, so the alerted condition is not present. Nothing is broken and there is nothing to fix; what needs attention is the paging rule, not the consumer.
 
         '
     next_action:
       kind: stop
-      reason: 'Lag reading contradicts alert; human should reconcile with the alerting rule.
+      reason: 'Reading is healthy and the alerted condition is absent; human should reconcile the alerting rule.
 
         '
   briefing_writer:

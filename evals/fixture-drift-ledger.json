@@ -8,9 +8,9 @@
     "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything"
   },
   "_counts": {
-    "recorded": 48,
+    "recorded": 52,
     "fixture-defect": 0,
-    "explained": 48
+    "explained": 52
   },
   "known_drift": [
     {
@@ -124,6 +124,38 @@
       "kind": "value",
       "context": "post-fault",
       "why": "poison_message injects the unclassified row this scenario exists to fence, so the faulted world holds five DLQ rows where the un-faulted world the check probes holds the four boot-seeded ones"
+    },
+    {
+      "scenario": "jobs_not_progressing_dispatcher_stall",
+      "tool": "get_consumer_lag",
+      "path": "lag",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "kill_consumer makes worker-dispatcher's lag climb; the check probes the un-faulted world, so the canned backlog cannot match by design \u2014 the same mechanism as consumer_lag_high, in this family's world. The second element of the sequence is the post-restart read and shares this key (the ledger excludes the index on purpose)"
+    },
+    {
+      "scenario": "jobs_not_progressing_dispatcher_stall",
+      "tool": "get_outbox_status",
+      "path": "unpublished_count",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "this scenario's premise needs a producer running (lag is arrival minus service and kill_consumer supplies only the service half), so its recording caught one event between its commit and the relay's next tick. The check probes the un-faulted world, which has no producer and reads 0. Both satisfy the scenario's own claim, `at_most 5`"
+    },
+    {
+      "scenario": "jobs_not_progressing_outbox_stall",
+      "tool": "get_outbox_status",
+      "path": "unpublished_count",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "pause_control_loop(outbox_relay) stops the relay, so committed events accumulate undelivered; that queue IS the fault, and the check probes the world before the hook fires, where it is empty. Both elements of the sequence (11 growing to 19) share this key"
+    },
+    {
+      "scenario": "jobs_not_progressing_outbox_stall_deploy_noise",
+      "tool": "get_outbox_status",
+      "path": "unpublished_count",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "same hook, same world, same reason \u2014 this scenario differs from its quiet sibling only in the alert it hands the agent"
     },
     {
       "scenario": "remediate_consumer_lag_success",

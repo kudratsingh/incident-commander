@@ -71,48 +71,6 @@ _NOW = datetime(2026, 8, 8, tzinfo=UTC)
 # stub the writers out so ``main()`` never touches evals/ (ADR 0011 freeze).
 _STUB_REPORT_PATH = Path("evals/reports/report.20260808T000000Z.stubbed0000.json")
 
-# The seven scenarios whose CANNED PLANNER misdiagnoses the world its own
-# fixtures describe, discovered when WO-R3-261 gave all 41 scenarios a
-# ground truth. ROOT_CAUSE is ANDed into ``passed``, so each of these grades
-# red offline — and the red is about the scripted agent, not about the label:
-# every label here was read off the scenario's chaos hook and canned fixtures
-# before its canned planner was looked at, and the evidence for each sits in
-# a comment above that scenario's ``ground_truth`` block.
-#
-# Recorded rather than hidden, and NOT worked around: bending a label or
-# editing a canned script to clear a red would make the suite grade itself
-# (INCIDENTS.md, grader drift — a suite that agrees with the agent measures
-# nothing). Fixing the seven scripts is its own packet and its own review;
-# until then this is the honest statement of where the corpus stands, and the
-# equality below means a new red, or one of these going green, fails here and
-# forces the decision to be made rather than absorbed.
-_MISDIAGNOSING_CANNED_PLANNERS: Final[dict[str, str]] = {
-    # Its own stop reason says "deploy-triggered cascade" and its reasoning
-    # names the deploy two minutes before the storm, then it files that under
-    # `unknown` instead of `deploy_regression`.
-    "alert_storm": "names the deploy as the trigger, classifies it unknown",
-    # Probes the alerted group, reads lag 0, and downgrades a clean reading to
-    # `unknown` — the one move the planner prompt tells it not to make.
-    "consumer_lag_healthy_zero": "a healthy reading graded unknown, not no_fault",
-    # "the consumer likely stopped processing entirely" IS consumer_saturation;
-    # the free-form name carries the diagnosis and the enum says unknown. Its
-    # reasoning also quotes a lag of 2,500,000 that no fixture here serves.
-    "consumer_lag_shipping_extreme": "an outage described in prose, filed as unknown",
-    # Concludes "transient producer surge" from a re-read of the SAME canned
-    # response; the byte-identical world in consumer_lag_payments_critical is
-    # scripted as consumer_saturation.
-    "multi_probe_hypothesis_evolution": "producer spike inferred from an unchanged fixture",
-    # `transient_dependency` names an EXTERNAL dependency; the subject is the
-    # platform's own database, and the taxonomy has db_query_latency for it.
-    "postgres_slow": "the platform's own database called an external dependency",
-    # `stale_cache` is the one-hot-key case and no key is named anywhere in the
-    # scenario; 250 clients and 1G of memory is redis_saturation.
-    "redis_saturation": "Redis-wide pressure diagnosed as one stale key",
-    # Reasons about "3 retries against Stripe timing out" while the fixture
-    # serves "OOM during PDF generation (200MB report)" with retry_count 2.
-    "trace_investigation": "reasons about evidence the fixture does not contain",
-}
-
 
 def _is_write_locked(path: Path) -> bool:
     return path.stat().st_mode & 0o222 == 0
@@ -443,19 +401,14 @@ class TestRunAll:
         from evals.scenarios.loader import load_scenarios
 
         scenarios = load_scenarios(Path(__file__).resolve().parents[2] / "evals" / "scenarios")
-        # Every shipped scenario has canned fallback data, so all of them run
-        # in offline mode — and all of them passed until WO-R3-261 gave the
-        # corpus a ground truth and ROOT_CAUSE started asking a question seven
-        # canned planners get wrong about their own world. See
-        # ``_MISDIAGNOSING_CANNED_PLANNERS`` for what each one says and why the
-        # label was not moved to meet it.
+        # Every shipped scenario has canned fallback data, so all of them
+        # run — and pass — in offline mode. Since WO-R3-261 that includes the
+        # ROOT_CAUSE dimension on the 32 scenarios that declare a ground
+        # truth, so this is now also the statement that no canned planner
+        # misdiagnoses the world its own fixtures serve.
         report, _, _ = run_all(scenarios, _test_settings())
-        failed = {o.scenario for o in report.outcomes if not o.report.passed}
-        assert failed == set(_MISDIAGNOSING_CANNED_PLANNERS), (
-            "the offline suite's red set moved. Reds here are canned-planner "
-            "misdiagnoses, one per recorded entry; a new name means a new one, "
-            "and a missing name means a script was fixed and its entry should go."
-        )
+        failed = sorted(o.scenario for o in report.outcomes if not o.report.passed)
+        assert report.failed == 0, f"scenarios red in the offline suite: {failed}"
         assert report.total >= 10  # taxonomy expansion floor
 
 
@@ -2326,31 +2279,28 @@ class TestScenarioBudgetReachesTheRun:
             run_scenario(scenario, _test_settings(budget_max_tool_calls=17))
         assert captured[0].budget.max_tool_calls == 17
 
-    def test_no_shipped_scenario_goes_red_on_its_own_ceiling(self) -> None:
+    def test_every_shipped_scenario_still_grades_green_under_its_own_ceiling(self) -> None:
         # The suite-wide statement of the change: nine scenarios declare a cap
         # of 0, which start_run ignores (a zero ledger is born exhausted), and
         # the rest now run under the number they are graded against.
-        #
-        # The claim is about the BUDGET dimension, which is what a ceiling can
-        # move, so it is asserted on that dimension rather than on the whole
-        # row. It used to be asserted on the row because the whole corpus was
-        # green; since WO-R3-261 seven rows are red on ROOT_CAUSE (a canned
-        # planner misdiagnosing its own world, recorded in
-        # ``_MISDIAGNOSING_CANNED_PLANNERS``), and letting those reds fail this
-        # test would say the ceilings broke something they did not touch.
         from evals.scenarios.loader import load_scenarios
 
         scenarios = load_scenarios(Path(__file__).resolve().parents[2] / "evals" / "scenarios")
         report, _, _ = run_all(scenarios, _test_settings())
+        failed = [o.scenario for o in report.outcomes if not o.report.passed]
+        assert failed == [], f"scenarios red under their own ceiling: {failed}"
+        # Anti-vacuity: a sweep over an empty report is green and says nothing.
+        assert len(report.outcomes) >= 41
+        # The BUDGET dimension is the one a ceiling can move, and it is the
+        # claim this test is actually about — asserted directly so a future
+        # red somewhere else cannot be mistaken for a budget failure.
         over_budget = [
             outcome.scenario
             for outcome in report.outcomes
             for dimension in outcome.report.dimensions
             if dimension.dimension is GradeDimension.BUDGET and not dimension.passed
         ]
-        assert over_budget == [], f"scenarios red under their own ceiling: {over_budget}"
-        # Anti-vacuity: an empty or dimension-less report would pass the sweep.
-        assert len(report.outcomes) >= 41
+        assert over_budget == [], f"scenarios over their own ceiling: {over_budget}"
 
 
 class _ClosableCanned(CannedMCPClient):

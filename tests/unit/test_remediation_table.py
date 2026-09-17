@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from evals.remediation_table import current_claim, table_span, updated_document
+from evals.remediation_table import (
+    current_claim,
+    makes_a_remediation_claim,
+    table_span,
+    updated_document,
+)
 from evals.scenarios.loader import load_scenarios
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -61,6 +66,35 @@ def test_changed_nested_claim_and_precondition_require_a_refresh() -> None:
         }
     )
     assert current_claim(changed) != before
+
+
+def test_every_do_nothing_scenario_is_in_the_table() -> None:
+    """The do-nothing claim is the one the suite has graded wrong twice, so it is listed.
+
+    A scenario that forbids the action tools claims the correct action count is zero
+    (ADR 0033). Membership must follow from that, not from a hand-kept list.
+    """
+    scenarios = load_scenarios(ROOT / "evals/scenarios")
+    document = (ROOT / "docs/eval-methodology.md").read_text()
+    do_nothing = [
+        s
+        for s in scenarios
+        if not s.expectation.expected_action_tools and s.expectation.forbidden_action_tools
+    ]
+    assert len(do_nothing) >= 3, "expected the do-nothing controls to still exist"
+    for scenario in do_nothing:
+        assert makes_a_remediation_claim(scenario)
+        assert f"| `{scenario.name}` |" in document
+
+
+def test_a_scenario_with_no_claim_stays_out_of_the_table() -> None:
+    scenarios = load_scenarios(ROOT / "evals/scenarios")
+    document = (ROOT / "docs/eval-methodology.md").read_text()
+    start, end = table_span(document)
+    listed = {row.split("`")[1] for row in document[start:end].splitlines()[2:]}
+    for scenario in scenarios:
+        if not makes_a_remediation_claim(scenario):
+            assert scenario.name not in listed
 
 
 def test_history_is_not_silently_deleted_if_a_scenario_disappears() -> None:

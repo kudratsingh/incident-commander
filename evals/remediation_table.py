@@ -1,8 +1,9 @@
 """Refresh the methodology's current claims from validated scenario models.
 
 Only the current-claim column is generated. Historical failures are editorial
-and stay verbatim. Include every action scenario plus the documented no-action
-counterexample; missing future action rows are added without inventing history.
+and stay verbatim. Row membership is derived too, so a new scenario cannot be
+left out by forgetting to list it; missing rows are added without inventing
+history.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from evals.scenarios.schema import Scenario
 ROOT = Path(__file__).resolve().parents[1]
 HEADING = "### The remediation claim, per scenario"
 HEADER = "| scenario | laziest trajectory that passed before | claim now |"
-NO_ACTION_EXAMPLES = frozenset({"consumer_lag_high"})
 
 
 def _code(value: object) -> str:
@@ -35,6 +35,20 @@ def _claim(model: BaseModel) -> str:
     if alternatives is not None:
         return "any_of " + _code(alternatives)
     return ", ".join(f"{key} {_code(value)}" for key, value in data.items())
+
+
+def makes_a_remediation_claim(scenario: Scenario) -> bool:
+    """A scenario belongs in the table when it says what to do, or what not to do.
+
+    Derived, never listed. A hand-kept allowlist is the same drift channel the
+    table itself had, and it had already missed `consumer_lag_healthy_zero` and
+    `no_fault_healthy_cache`. A scenario that forbids the action tools is claiming
+    the correct action count is zero (ADR 0033), which is a remediation claim and
+    the one the suite has been wrong about twice (WO-R2-140, WO-R2-160). A
+    scenario that neither acts nor forbids makes no claim here and stays out.
+    """
+    expectation = scenario.expectation
+    return bool(expectation.expected_action_tools or expectation.forbidden_action_tools)
 
 
 def current_claim(scenario: Scenario) -> str:
@@ -76,16 +90,10 @@ def render_table(document: str, scenarios: Sequence[Scenario]) -> str:
         if name in history:
             raise ValueError(f"duplicate remediation table row: {name}")
         history[name] = before
-    selected = {
-        s.name: s
-        for s in scenarios
-        if s.expectation.expected_action_tools or s.name in NO_ACTION_EXAMPLES
-    }
+    selected = {s.name: s for s in scenarios if makes_a_remediation_claim(s)}
     obsolete = history.keys() - selected.keys()
     if obsolete:
-        raise ValueError(
-            f"table history needs review for removed action scenarios: {sorted(obsolete)}"
-        )
+        raise ValueError(f"table history needs review for removed scenarios: {sorted(obsolete)}")
     rows = [HEADER, "|---|---|---|"]
     for name, scenario in sorted(selected.items()):
         before = history.get(name, "No earlier passing failure recorded in this table.")

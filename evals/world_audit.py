@@ -138,18 +138,41 @@ def _payload_of(result: ToolResult) -> tuple[dict[str, Any] | None, str]:
     return payload, "\n".join(blocks)
 
 
-def read(client: MCPClientProtocol, probe: Probe) -> Reading:
-    """Make one read call. Never raises — a failed probe is part of the report."""
+def read_result(client: MCPClientProtocol, probe: Probe) -> tuple[Reading, ToolResult | None]:
+    """One read call: the ``Reading`` the audit wants, and the ``ToolResult`` itself.
+
+    ``Reading`` keeps the first JSON object plus the joined raw text, which is
+    everything a report needs and strictly less than the platform sent: the
+    content blocks and ``is_error`` are gone. The world recorder
+    (``evals/recorder.py``) needs exactly what is gone, because a replay client
+    has to answer with a ``ToolResult`` and not with a paraphrase of one
+    (divergence F3, WO-R3-196).
+
+    So the loop lives here once and returns both halves. ``read`` below is this
+    function with the second half dropped, so a recording and an audit can
+    never disagree about what one probe returned — a second read loop beside
+    this one would be a second definition of "what the world said".
+
+    ``None`` for the result means the call never reached the platform (an
+    ``MCPError``): there is no answer to record, which is a different fact from
+    an answer that says ``is_error=True``, and the recorder files the two in
+    different places.
+    """
     try:
         result = client.call_tool(probe.tool, probe.args)
     except MCPError as err:
-        return Reading(probe, None, "", f"MCPError: {err}")
+        return Reading(probe, None, "", f"MCPError: {err}"), None
     payload, raw = _payload_of(result)
     if result.is_error:
-        return Reading(probe, payload, raw, "the tool reported is_error=True")
+        return Reading(probe, payload, raw, "the tool reported is_error=True"), result
     if payload is None:
-        return Reading(probe, None, raw, "no readable JSON object in the result")
-    return Reading(probe, payload, raw, None)
+        return Reading(probe, None, raw, "no readable JSON object in the result"), result
+    return Reading(probe, payload, raw, None), result
+
+
+def read(client: MCPClientProtocol, probe: Probe) -> Reading:
+    """Make one read call. Never raises — a failed probe is part of the report."""
+    return read_result(client, probe)[0]
 
 
 @dataclass(frozen=True)

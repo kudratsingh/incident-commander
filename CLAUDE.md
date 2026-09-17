@@ -141,12 +141,14 @@ incident-commander/
 │   ├── preconditions.py            # what must be true of the world before a scenario may run
 │   ├── world_audit.py              # zero-LLM read-only check of the seeded world (make world-audit)
 │   ├── dossier.py                  # zero-LLM read of one scenario's fault world before a paid run
+│   ├── recorder.py                 # zero-LLM recording of that world for replay (make world-record)
 │   ├── inventory.py                # counts and classifies the corpus (make inventory)
 │   ├── fixture_drift.py            # canned fixture VALUES vs live, against a blessed ledger
 │   ├── traces/                     # raw trace JSONL per run
 │   ├── runs/                       # per-run scored outcomes
 │   ├── trajectories/               # captured runs for debugging and analysis
 │   ├── briefings/                  # escalation briefings emitted during runs
+│   ├── recorded_worlds/            # recorded fault worlds + their ground-truth siblings
 │   └── reports/                    # baseline.json + a folder per report family (README.md maps it)
 ├── contracts/
 │   └── platform-tools.snapshot.json   # generated from platform, diffed in CI
@@ -197,9 +199,9 @@ This block describes `docs/` as it is. Entries that do not exist yet carry an ex
 docs/
 ├── README.md                   # the map: one line per document, and which are history
 ├── ADR/                        # numbered decision records, never edited after acceptance
-│   ├── README.md               # the index: all 42, with status and what amended what
+│   ├── README.md               # the index: all 43, with status and what amended what
 │   ├── 0000-template.md
-│   └── 0001-…0042-….md         # 0001 external client architecture … 0042 an evidence ref is resolved by a validator
+│   └── 0001-…0043-….md         # 0001 external client architecture … 0043 a recording is keyed by what the agent sends
 ├── lessons/                    # case studies of things that went wrong, or almost did
 │   ├── phase-6-hardening.md          # free-form Hypothesis.name → schema tightening
 │   ├── live-eval-noise-sources.md    # the five buckets a weird live failure falls into
@@ -216,7 +218,7 @@ docs/
 └── interview-map.md            # (planned — Phase 8) component → JD skill → talking points
 ```
 
-ADR process: any decision that constrains future work gets an ADR before or with the implementing PR. Status flow is proposed, accepted, superseded. An accepted ADR is never rewritten — a later ADR amends or supersedes it and both stay on the shelf. The set runs 0001 through 0042; [`docs/ADR/README.md`](docs/ADR/README.md) lists every one with its status and records which later ADR moved which.
+ADR process: any decision that constrains future work gets an ADR before or with the implementing PR. Status flow is proposed, accepted, superseded. An accepted ADR is never rewritten — a later ADR amends or supersedes it and both stay on the shelf. The set runs 0001 through 0043; [`docs/ADR/README.md`](docs/ADR/README.md) lists every one with its status and records which later ADR moved which.
 
 Before opening a PR touching schemas, prompts, or the state machine, read [`docs/architecture-principles.md`](docs/architecture-principles.md). It codifies the rules that came out of past PRs — most importantly "default to the structural fix, not the band-aid." When you hit a symptom that a prompt tweak would patch, the first design conversation is whether the schema should reject the class of bug instead. See [`docs/lessons/phase-6-hardening.md`](docs/lessons/phase-6-hardening.md) for the case study that produced this rule.
 
@@ -347,6 +349,7 @@ make eval-smoke   # read-only smoke pass under the read-scoped smoke token
 make eval-reset   # clear leftover chaos state between runs
 make world-audit  # zero-LLM read-only check that the seeded world matches the baseline
 make world-dossier ONLY=<scenario>  # zero-LLM read of one scenario's fault world
+make world-record ONLY=<scenario>   # zero-LLM recording of that world, for replay
 make demo         # compose the platform stack up. Nothing else — no eval, no scenario
 make demo-down    # stop it, keep the volumes
 make demo-destroy CONFIRM=1  # stop it and delete the volumes. Irreversible

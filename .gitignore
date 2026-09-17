@@ -82,6 +82,23 @@ evals/reports/human/*
 evals/reports/dossiers/*
 !evals/reports/dossiers/.gitkeep
 
+# `make world-record` output (WP-3.1, evals/recorder.py): one versioned JSON
+# recording of a seeded fault world per run, plus its ground-truth sibling.
+# Ignored, like the trajectories and the dossiers, and for a reason specific to
+# these: a recording holds the FULL ToolResult of every read the agent might
+# make, so it is tens to hundreds of KB, it is re-recorded on every platform
+# release (`make world-drift`), and the same scenario accumulates one per
+# release forever — none of which a git history should carry by default.
+#
+# It is still evidence and it still leaves the machine: `audit-ws/evidence/
+# sync.sh` mirrors `evals/recorded_worlds/` into the private workspace on every
+# sync (the workspace rule "nothing important lives only on a local machine").
+# Committing ONE recording that a reported result rests on is a deliberate act
+# somebody takes, exactly as committing a report is — no rule here makes that
+# decision for them.
+evals/recorded_worlds/*
+!evals/recorded_worlds/.gitkeep
+
 # The chaos-teardown latch (ADR 0037, evals/runner.py). Operational state
 # with two transitions — a teardown compensator failed; an operator reset the
 # world — and per-checkout by definition. Ignored so it can never be committed

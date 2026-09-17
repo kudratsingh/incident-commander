@@ -445,6 +445,7 @@ class _ScriptedLLM:
         max_tokens: int = 4096,
         *,
         repair_of: str | None = None,
+        temperature: float | None = None,
     ) -> LLMResult[T]:
         self.calls.append((system_prompt, user_message))
         self.repair_of.append(repair_of)

@@ -256,10 +256,10 @@ class MeteredLLMClient:
     billed leg: a repaired call (ADR 0035) arrives here twice, once raising
     and once parsing, which is exactly how the ledger charges it.
 
-    It changes nothing about the call. ``repair_of`` and ``max_tokens`` are
-    forwarded untouched, and an exception is re-raised after it is recorded —
-    a metering wrapper that swallowed a failure would turn an escalation into
-    a silent success.
+    It changes nothing about the call. ``repair_of``, ``max_tokens`` and
+    ``temperature`` are forwarded untouched, and an exception is re-raised after
+    it is recorded — a metering wrapper that swallowed a failure would turn an
+    escalation into a silent success.
     """
 
     inner: LLMClientProtocol
@@ -277,6 +277,7 @@ class MeteredLLMClient:
         max_tokens: int = 4096,
         *,
         repair_of: str | None = None,
+        temperature: float | None = None,
     ) -> LLMResult[T]:
         started = self.clock()
         try:
@@ -287,6 +288,7 @@ class MeteredLLMClient:
                 model=model,
                 max_tokens=max_tokens,
                 repair_of=repair_of,
+                temperature=temperature,
             )
         except Exception as err:
             # Only what the failure itself reports. ``LLMError`` carries the
@@ -477,7 +479,7 @@ class RunAccounting:
         One path can make it false without anything being wrong, and it is
         worth naming rather than hiding behind a tolerance: when a structured
         call exhausts its repair (ADR 0035), the caller charges the ledger the
-        *summed* usage of every failed leg in one go, and ``repair._sum_usage``
+        *summed* usage of every failed leg in one go, and ``repair.sum_usage``
         carries ``discarded_max_tokens`` as a maximum rather than a sum. If two
         legs of one call requested different output caps, the ledger's single
         conservative charge is larger than the per-leg sum here. That is

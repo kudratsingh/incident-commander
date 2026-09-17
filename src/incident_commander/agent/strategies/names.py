@@ -24,8 +24,8 @@ class StrategyName(StrEnum):
     Plan 02 § 4 lists seven names for Phases 5, 6, 9, 12 and 13; each lands as a
     member here *with* its implementation and its registry entry, never in
     advance — the same reasoning ``evals.runner.ExecutionMode`` uses for
-    withholding ``recorded`` until WP-3.3 can produce one. Two members today:
-    the control group, and WP-5.2's enumerating arm.
+    withholding ``recorded`` until WP-3.3 can produce one. Three members today:
+    the control group and Phase 5's two best-of-N arms.
 
     ``StrEnum``, so a settings field typed as this serializes as the plain
     string into the run's provenance record and a stamped value read back from
@@ -37,3 +37,7 @@ class StrategyName(StrEnum):
     #: diagnoses. Input unchanged, output ~N×; it measures enumeration, which is
     #: a different thing from the literature's pass@k (decision D4).
     BEST_OF_N_ENUMERATED = "best_of_n_enumerated"
+    #: WP-5.3, plan 02 § 11.2: N independent planner calls at a configured
+    #: temperature, the candidate set being the union of their top hypotheses.
+    #: N× planner cost, and the literature's pass@k — the other half of D4.
+    BEST_OF_N_SAMPLED = "best_of_n_sampled"

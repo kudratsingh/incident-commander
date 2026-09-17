@@ -42,6 +42,12 @@ class CannedLLMClient:
         self._index = 0
         self.calls: list[tuple[str, str]] = []
         self.repair_of: list[str | None] = []
+        #: The ``temperature`` each call was made with, in order. ``None`` is
+        #: "no temperature was sent", which is what every role but the sampled
+        #: inference strategy does. Recorded rather than ignored so a test can
+        #: assert the temperature was APPLIED to the call rather than assume a
+        #: setting reached it (WP-5.3's acceptance).
+        self.temperatures: list[float | None] = []
 
     @property
     def has_remaining(self) -> bool:
@@ -56,12 +62,16 @@ class CannedLLMClient:
         max_tokens: int = 4096,
         *,
         repair_of: str | None = None,
+        temperature: float | None = None,
     ) -> LLMResult[T]:
         # ``repair_of`` is trace correlation on the real client and has no
         # canned equivalent; it is recorded so a test can assert the repair
-        # re-ask named the record it was repairing (ADR 0035).
+        # re-ask named the record it was repairing (ADR 0035). ``temperature``
+        # has no canned equivalent either — a scripted payload is the same
+        # payload at any temperature — and is recorded for the same reason.
         self.calls.append((system_prompt, user_message))
         self.repair_of.append(repair_of)
+        self.temperatures.append(temperature)
         if self._index >= len(self._outputs):
             raise LLMError("no more canned responses")
         payload = self._outputs[self._index]

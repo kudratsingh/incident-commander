@@ -100,7 +100,7 @@ class OutputRepairExhausted(LLMError):
             for i, err in enumerate(repairs, start=1)
         )
         super().__init__(f"{first}; {detail}" if detail else str(first))
-        self.usage = _sum_usage(*(_usage_of(err) for err in failures))
+        self.usage = sum_usage(*(usage_of(err) for err in failures))
         self.record_id = getattr(failures[-1], "record_id", None)
         self.failures = tuple(failures)
 
@@ -129,11 +129,15 @@ def call_with_output_repair[T: BaseModel](
     user_message: str,
     output_model: type[T],
     model: str,
+    temperature: float | None = None,
 ) -> RepairedCall[T]:
     """Call ``llm_client``; on an output-shape failure, re-ask once.
 
     Raises ``OutputRepairExhausted`` when the repair fails too, and lets any
     transport ``LLMError`` through unchanged.
+
+    ``temperature`` is forwarded to both legs; ``None`` sends none, which is
+    every caller but ``best_of_n_sampled``.
 
     The cap is enforced by the loop bound, not by a check a later edit can
     walk past: at most ``MAX_OUTPUT_REPAIRS + 1`` calls leave this function
@@ -150,6 +154,13 @@ def call_with_output_repair[T: BaseModel](
                 output_model=output_model,
                 model=model,
                 repair_of=repair_of,
+                # The repair re-ask is made at the SAME temperature as the call
+                # it repairs. ADR 0035's re-ask asks for the same answer in the
+                # right shape, so changing the sampling under it would make the
+                # repair a different draw rather than a reformat — and on a
+                # sampled arm (WP-5.3) that would quietly turn one sample into
+                # two different ones.
+                temperature=temperature,
             )
         except _REPAIRABLE as err:
             failures.append(err)
@@ -187,12 +198,12 @@ def _trim(text: str) -> str:
     return f"{text[:_MAX_ERROR_CHARS]}… (error truncated)"
 
 
-def _usage_of(err: Exception) -> LLMUsage | None:
+def usage_of(err: BaseException) -> LLMUsage | None:
     usage = getattr(err, "usage", None)
     return usage if isinstance(usage, LLMUsage) else None
 
 
-def _sum_usage(*usages: LLMUsage | None) -> LLMUsage | None:
+def sum_usage(*usages: LLMUsage | None) -> LLMUsage | None:
     """Add up what several billed-and-failed calls each charged.
 
     ``cost_of`` is linear in the four token counters, so charging the sum
@@ -202,6 +213,11 @@ def _sum_usage(*usages: LLMUsage | None) -> LLMUsage | None:
     it is carried as the **maximum** of the inputs while
     ``discarded_attempts`` is summed — the product stays the conservative
     over-estimate ADR 0015 asks for, and never an under-report.
+
+    Public since WP-5.3: a strategy that makes N independent calls has to hand
+    the loop's one ``accrue_llm_error`` the sum of everything the step billed
+    when call k of N fails, or the N−1 calls that already returned are charged
+    to nobody (ADR 0045).
     """
     present = [usage for usage in usages if usage is not None]
     if not present:

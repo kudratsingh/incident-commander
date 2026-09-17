@@ -5396,9 +5396,11 @@ class TestTheFinalDiagnosisIsTheTopCandidate:
         one. This asserts that structurally rather than by inspection.
 
         The permitted writers are the loop's own ``_plan_next_step`` and each
-        inference strategy that makes its own planner call — WP-5.2's
-        ``best_of_n_enumerated`` is the first, because its output schema is not
-        ``InvestigationStep`` and so it cannot go through the loop's call.
+        inference strategy that makes its own planner call: WP-5.2's
+        ``best_of_n_enumerated``, whose output schema is not
+        ``InvestigationStep`` and so cannot go through the loop's call, and
+        WP-5.3's ``best_of_n_sampled``, which makes N of them at a temperature
+        the loop's call does not take.
         Every one of them writes the field exactly once, in the ``model_copy``
         that also accrues that call, which is what keeps "the latest ranking" and
         "the ranking of the deciding step" the same object.
@@ -5413,11 +5415,15 @@ class TestTheFinalDiagnosisIsTheTopCandidate:
             for path in package.rglob("*.py")
             if '"hypotheses":' in path.read_text()
         )
-        permitted = ["agent/investigation.py", "agent/strategies/best_of_n_enumerated.py"]
+        permitted = [
+            "agent/investigation.py",
+            "agent/strategies/best_of_n_enumerated.py",
+            "agent/strategies/best_of_n_sampled.py",
+        ]
         assert writers == permitted, (
             f"the ranking is now written in {writers}; the final diagnosis can no "
             "longer be read off RunState.hypotheses without checking which write "
-            "came last (WO-R3-191, WO-R3-205, plan 02 § 11.3)."
+            "came last (WO-R3-191, WO-R3-205, WO-R3-206, plan 02 § 11.3)."
         )
         for writer in writers:
             once = (package / writer).read_text().count('"hypotheses":')

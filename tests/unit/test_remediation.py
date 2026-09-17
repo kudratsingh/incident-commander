@@ -1431,6 +1431,7 @@ class TestRejectedPlansAreStillBilled:
                 max_tokens: int = 4096,
                 *,
                 repair_of: str | None = None,
+                temperature: float | None = None,
             ) -> LLMResult[T]:
                 raise LLMError(
                     "no record_output tool_use in response; stop_reason=max_tokens",

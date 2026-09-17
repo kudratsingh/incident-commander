@@ -170,6 +170,26 @@ class Settings(BaseSettings):
     # simply not part of that arm, and the strategy stamps into the run's
     # provenance exactly the knobs it actually used.
     best_of_n: int = Field(default=1, ge=1, le=8)
+    # The sampling temperature ``best_of_n_sampled`` draws its N independent
+    # planner calls at (plan 02 § 11.2, WP-5.3). Env var SAMPLE_TEMPERATURE.
+    #
+    # Unread by every other strategy, and that is what keeps it safe to add:
+    # ``llm/client.py`` sends the ``temperature`` field only when a caller
+    # passes one, so the request bytes of every existing role — including the
+    # ones the campaign's eight green live runs were made with — do not move.
+    #
+    # Bounded 0.0–1.0, the range the Messages API accepts. Note that the newer
+    # models reject the sampling parameters outright
+    # (``llm/client.SAMPLING_REJECTED_MODELS``): this repo's two priced ids
+    # accept them, and a test in ``tests/unit/test_best_of_n_sampled.py`` fails
+    # the day a model that does not is added to ``MODEL_PRICING``, rather than a
+    # paid sweep discovering it as a 400 on the first planner call.
+    #
+    # 1.0 is plan 02 § 11.2's default. It is the temperature that makes the N
+    # draws differ at all — at 0.0 a sampled arm is N identical calls and N
+    # times the bill for one answer — so the default is the value the arm is
+    # for, and lowering it is a deliberate experiment.
+    sample_temperature: float = Field(default=1.0, ge=0.0, le=1.0)
 
     # --- The selected strategy's budget policy (plan 02 § 8, WP-2.4) -------
     # A strategy that samples eight candidates per planner step spends roughly

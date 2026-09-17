@@ -438,6 +438,7 @@ class TestBudgetGuards:
                 max_tokens: int = 2048,
                 *,
                 repair_of: str | None = None,
+                temperature: float | None = None,
             ) -> LLMResult[T]:
                 self.calls += 1
                 payload = {

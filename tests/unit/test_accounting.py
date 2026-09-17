@@ -185,6 +185,7 @@ class _FailsThenSucceeds:
         max_tokens: int = 4096,
         *,
         repair_of: str | None = None,
+        temperature: float | None = None,
     ) -> LLMResult[T]:
         self.calls += 1
         if self.calls == 1:
@@ -379,6 +380,7 @@ class TestOneCallIsPricedAndTimed:
                 max_tokens: int = 4096,
                 *,
                 repair_of: str | None = None,
+                temperature: float | None = None,
             ) -> LLMResult[T]:
                 raise LLMError("truncated", usage=LLMUsage(input_tokens=90, output_tokens=4_096))
 

@@ -47,7 +47,7 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # rule. Named in that PR's body per plan 04 working rule 5.
     "investigation_planner": ("fe44f30ebd88389e0aca9352c766324ef36e9aed3e565f34eff20335f4b9538d"),
     "briefing_judge": ("838a5ee5de6081c32ef1b7aba35aefe0ddd83826e841af2ca831ba76f4692719"),
-    "remediation_planner": ("15a7f80c766bc21f2ab7dec47ad77c3a79bcaa70c5de051a8da2273f7afcfe55"),
+    "remediation_planner": ("042b8372e1687a3f1174c22f626a94406da1e00f2f0b680f459187f7394d8a60"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
     "output_repair": ("461943691f22c6fb6c0c1b62a1cb356dc43eab3ec963b21db069a5701e86a1a0"),
 }

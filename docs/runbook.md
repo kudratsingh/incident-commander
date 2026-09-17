@@ -941,6 +941,32 @@ operate by:
 - Reprobe delay must straddle the cache window: `INVESTIGATE_REPROBE_DELAY_SECONDS=75`
   (a 20s reprobe lands inside the same ~60s cached reading and shows a
   static value — live run 2026-08-31 collapsed a correct hypothesis on it).
+- **Since the v0.6.7 pin, one read shows the trend.** `get_consumer_lag`
+  returns `measured_at` (when this number was measured), `age_seconds` (how
+  old it is) and `recent_samples` — the last five measurements, newest
+  first, each with its own time, the current one included. Comparing those
+  samples is how a reader tells a climbing lag from a flat one without being
+  able to wait, and it is the evidence; a second call is not. Two calls a few
+  seconds apart return the SAME number with the SAME `measured_at`, because
+  a new measurement is taken only about every 60s — that repetition means
+  "not re-measured yet", never "not moving". A genuinely newer number exists
+  once `age_seconds` passes ~60; until then the response in hand already
+  contains every reading the platform has. This is what live run
+  `42000dfda188` (2026-09-17, red) had no way to see: it re-read lag three
+  times inside 25s, got 29 → 29 → 29, and read that as a lag that was not
+  moving. The seven recorded-constant groups report `measured_at` and
+  `age_seconds` null with an empty `recent_samples` — a constant was never
+  measured at a moment, so it has no time and no history.
+- **`make eval-reset` clears the samples window** (`lag_samples_cleared` in
+  its summary), and the metrics loop sleeps 60s before its first
+  measurement — so immediately after a reset `recent_samples` is empty and
+  refills one entry per minute. An empty window is absence of history, never
+  evidence of a steady lag. In practice the run's own precondition wait
+  (`lag >= 20` over 10×15s) is what fills it: the fault has to become
+  visible to the 60s recompute before the run starts at all, so by the time
+  the agent takes its first reading the window holds a sample or two and
+  grows through the investigation. Do not add a separate warm-up; the
+  precondition is the warm-up.
 - **There is no head start to give.** An earlier version of this note said
   to run `UNTIL_LAG=30` before launching the runner and then keep it
   pumping. The first half cannot work: before the runner seeds
@@ -1045,12 +1071,16 @@ and on `main` until the other half lands. Bless the new snapshot locally
 from the new pinned stack, then commit the compose bump, the snapshot, and
 any registry realignment together.
 
-Platform ships a new digest → three steps on the agent side:
+Platform ships a new digest → four steps on the agent side:
 
-1. Update `demo/compose.yml`:
+1. Update `demo/compose.yml` — **all THREE platform-code services**
+   (`migrate`, `platform`, `api`) and the prose that names the version:
    ```yaml
-   image: ghcr.io/kudratsingh/incident-platform@sha256:<new-digest>
+   image: ghcr.io/kudratsingh/incident-platform:<tag>@sha256:<new-digest>
    ```
+   They must carry the identical string. A bump that moves `platform` and
+   leaves `api` behind runs the MCP surface and the consumer groups on two
+   different builds, which is the drift the pin exists to close.
 2. Regenerate the contract snapshot:
    ```bash
    make demo                    # scoped `up --wait`; see below
@@ -1062,11 +1092,46 @@ Platform ships a new digest → three steps on the agent side:
    recreates every one-shot there is (`migrate`, `redpanda-init`), so the
    unscoped form fails here every time. `make demo` scopes `--wait` to the
    five long-running services; `depends_on` still runs the one-shots first.
+
+   `make snapshot` reads `PLATFORM_MCP_URL` and `PLATFORM_TOKEN` from the
+   **shell** environment, not from `.env` (`scripts/snapshot_platform_tools.py`
+   calls `os.getenv` directly, unlike the make targets that go through
+   `Settings`). From a clean shell it exits 2 telling you to run
+   `make bootstrap-token`, which is misleading when the tokens are already
+   in `.env`. Load them for the command instead of re-minting:
+   ```bash
+   set -a && . ./.env && set +a && make snapshot
+   ```
+   `make test-contract`, `make test-drift` and `make test-idempotency` read
+   the shell environment the same way. Note what that means for `make test`:
+   with the platform env loaded, its integration leg also runs
+   `test_idempotency_contract.py`, which **mutates the world** (fires
+   `kill_consumer`, restarts `worker-dispatcher`). Run `make eval-reset
+   PURGE_IDEMPOTENCY=1` before anything that reads the world afterwards, or
+   run `make test` from a clean shell and leave that file to CI.
 3. Address any registry drift the contract test surfaces:
    ```bash
    make test-contract           # will fail if tool schemas moved
    ```
    If a required tool field was added/renamed, update `src/incident_commander/tools/registry.py` to match.
+   `tests/unit/test_registry_matches_snapshot.py` is what tells you: it holds
+   the local Pydantic model to strict schema equality with the snapshot
+   (descriptions ignored, titles NOT), so an added field fails there until
+   the model mirrors it.
+4. Re-record what the fixtures pinned, using the drift machinery rather than
+   grep:
+   ```bash
+   make fixture-drift           # human-readable: NEW / STALE per fixture
+   make fixture-drift-bless     # deliberate; its own commit
+   make test-drift              # the ratchet CI runs
+   ```
+   `make fixture-drift` names every canned response the new build no longer
+   matches, which is the list to re-record; a value the fixture pack does not
+   fix belongs in `_VOLATILE` in `evals/fixture_drift.py` instead of in the
+   ledger, and a deliberate mismatch belongs in `_JUSTIFIED` in
+   `evals/fixture_drift_ledger.py` with its reason. Bless only from a freshly
+   reset stack — the ledger is blessed against a fresh seed, and it may only
+   shrink.
 
 ## Connection pool and run capacity ([ADR 0022](ADR/0022-connection-pool-sizing-and-the-run-concurrency-ceiling.md))
 

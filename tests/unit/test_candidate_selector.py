@@ -209,14 +209,39 @@ def _context(
 
 
 def _settings(**overrides: Any) -> Settings:
+    """``Settings`` built from explicit placeholders, isolated from the machine.
+
+    Every required field is supplied here and ``_env_file=None`` turns dotenv off,
+    so this constructor reads nothing from the developer's environment. The
+    shorter version — four fields and no ``_env_file`` — passed on a machine whose
+    worktree has a ``.env`` and failed in CI with three `Field required` errors,
+    which is exactly the shape WO-R3-247 closed for ``test_provenance.py``
+    (cmd #235): a test that borrows the ambient environment is a test whose result
+    depends on who ran it. Same pattern as ``tests/unit/test_config.py`` and
+    ``tests/unit/test_provenance.py``.
+
+    Init keyword arguments outrank environment variables in pydantic-settings, so
+    the values below also win over anything a shell happens to export — the other
+    half of the isolation, and the reason an exported ``BEST_OF_N`` cannot move a
+    number asserted here.
+
+    None of these is a credential. They are the shapes the validators accept and
+    nothing more; a real key in a test file would be a secret committed to a
+    public repo.
+    """
     base: dict[str, Any] = {
         "anthropic_api_key": "sk-ant-test",
         "judge_model": "claude-haiku-4-5",
+        "platform_mcp_url": "https://mcp.platform.local",
+        "platform_rest_url": "https://api.platform.local",
+        "platform_token": "svc-token",
         "platform_webhook_secret": "s" * 32,
         "database_url": "postgresql://u:p@localhost/db",
         **overrides,
     }
-    return Settings(**base)
+    # ``_env_file=None`` disables dotenv; it does not disable exported shell
+    # variables, which the explicit values above already outrank.
+    return Settings(_env_file=None, **base)  # type: ignore[call-arg]
 
 
 # --------------------------------------------------------------------------

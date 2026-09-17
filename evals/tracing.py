@@ -59,6 +59,13 @@ class TraceKind(StrEnum):
     PRECONDITION = "precondition"
     #: The chaos hook a live scenario fires to seed its fault (``runner``).
     CHAOS_SETUP = "chaos_setup"
+    #: One planner step as the inference strategy recorded it — the candidate
+    #: set it considered, the step it emitted, the hypothesis ranking either
+    #: side of it, and what the call billed
+    #: (``agent.strategies.records.StepRecord``, plan 02 § 7). Evaluator-side
+    #: research data: it is written *about* the run and never read back into
+    #: one, which is why it lives here and not on the ``RunState`` checkpoint.
+    STEP = "step"
     #: Scenario boundaries: the header and footer of one invocation.
     SCENARIO_START = "scenario_start"
     SCENARIO_END = "scenario_end"

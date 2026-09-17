@@ -66,6 +66,7 @@ from incident_commander.agent.remediation import (
 )
 from incident_commander.agent.state import BudgetLedger, EvidenceEntry, IncidentState, RunState
 from incident_commander.agent.strategies.protocol import InvestigationStrategy
+from incident_commander.agent.strategies.records import StepRecord, StepSink
 from incident_commander.agent.strategies.registry import STRATEGIES
 from incident_commander.config import ChaosTokenNotConfigured, ModelRole, Settings
 from incident_commander.llm.client import LLMClient, LLMClientProtocol, LLMError, preflight_auth
@@ -1013,6 +1014,33 @@ def clear_chaos_block(path: Path | None = None) -> str | None:
     return reason
 
 
+def _step_sink(tracer: JsonlTracer) -> StepSink:
+    """Send each planner step's ``StepRecord`` to the trace store (WP-2.1).
+
+    The strategy produces a record every step whether or not anyone is
+    listening; this is what gives the records somewhere to land. One line of
+    JSONL per planner step, beside the ``llm`` and ``mcp`` records of the same
+    invocation, joinable to them by ``call_id`` — and append-only like every
+    other record, so a re-run of a scenario adds its steps rather than
+    replacing the earlier attempt's (invariant 9, F-002).
+
+    Wired whenever a tracer exists, which includes a canned run with
+    ``EVAL_TRACE_DIR`` set: the fake clients are not traced (they have no
+    request or response to capture) but the *decisions* a canned run makes are
+    the research data, and they are real. That is the offline landing place
+    divergence D1 says WP-2.1 needs.
+
+    The kind is stamped here rather than inside the record, so every trace
+    record's kind still comes from the ``TraceKind`` enumeration the human
+    renderer is held to.
+    """
+
+    def sink(record: StepRecord) -> None:
+        tracer.write({"kind": TraceKind.STEP, **record.as_trace_record()})
+
+    return sink
+
+
 def run_scenario(
     scenario: Scenario,
     settings: Settings,
@@ -1054,8 +1082,12 @@ def run_scenario(
     )
 
     # Tracing (opt-in): when EVAL_TRACE_DIR is set, capture every LLM +
-    # MCP call for this scenario into a JSONL file. Only wires into the
-    # live clients — canned clients are already deterministic.
+    # MCP call for this scenario into a JSONL file. The call hooks only wire
+    # into the live clients — canned clients are already deterministic and
+    # have no raw request/response to capture. The per-step ``StepRecord``s
+    # (WP-2.1) are written on both paths: what a canned run decided is as
+    # real as what a live run decided, and it is the offline half of every
+    # strategy comparison.
     tracer: JsonlTracer | None = None
     trace_dir_env = os.environ.get(_TRACE_DIR_ENV)
     if trace_dir_env:
@@ -1212,6 +1244,10 @@ def run_scenario(
         investigation_llm,
         model=settings.agent_model,
         strategy=strategy,
+        # Where this run's per-step research records go. ``None`` when no
+        # tracer was built (no ``EVAL_TRACE_DIR``): the strategy still builds
+        # every record, nothing reads them, and the run is byte-identical.
+        record_step=_step_sink(tracer) if tracer is not None else None,
         # Freshness re-probe (ADR 0009) is live-only: canned tool responses
         # are instant-consistent, and a re-probe would consume an extra
         # scripted planner response, breaking every canned scenario.

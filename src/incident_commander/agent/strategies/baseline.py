@@ -32,6 +32,7 @@ from incident_commander.agent.strategies.protocol import StrategyContext
 from incident_commander.agent.strategies.records import (
     CandidateRecord,
     LLMCallRecord,
+    PlannerCall,
     StepRecord,
 )
 
@@ -63,8 +64,8 @@ class BaselineStrategy:
         Catching anything here would move that accounting behind a strategy,
         where each new strategy would have to remember to repeat it.
         """
-        updated, step = _plan_next_step(run_state, at, ctx.llm_client, ctx.model)
-        record = self._record(run_state, updated, step, ctx)
+        updated, step, call = _plan_next_step(run_state, at, ctx.llm_client, ctx.model)
+        record = self._record(run_state, updated, step, call, ctx)
         if ctx.record_step is not None:
             ctx.record_step(record)
         return updated, step, record
@@ -74,6 +75,7 @@ class BaselineStrategy:
         before: RunState,
         after: RunState,
         step: InvestigationStep,
+        call: PlannerCall,
         ctx: StrategyContext,
     ) -> StepRecord:
         """Build the step's ``StepRecord``.
@@ -85,6 +87,12 @@ class BaselineStrategy:
         ``hypothesis_state_after`` is. A best-of-N strategy is the one that
         makes this set longer, and the difference between the two lengths is the
         measurement Phases 5 and 6 are built on.
+
+        The numbers come from ``call`` — the planner call's own report — not
+        from anything rebuilt here. ``planner_input_tokens`` is the provider's
+        count of the context it was fed (zero on a canned run, which bills
+        nothing), and ``planner_context_chars`` is that same context measured
+        locally, so an offline record is not silently all-zero.
         """
         action = step.next_action
         top = step.hypotheses[0]
@@ -93,6 +101,10 @@ class BaselineStrategy:
             name=top.name,
             confidence=top.confidence,
             proposed_probe=(action.tool_name if isinstance(action, ProbeAction) else None),
+            # One call generated the whole ranking, so the one candidate names
+            # it. For a strategy that generates candidates in separate calls
+            # this is what says which call produced which candidate.
+            generation_call_id=call.record_id,
         )
         return StepRecord(
             run_id=str(before.incident_id),
@@ -111,11 +123,18 @@ class BaselineStrategy:
                     role=_PLANNER_ROLE,
                     model=ctx.model,
                     # The ledger's own delta across the call — which is the
-                    # number ADR 0015 holds the run to, and the only one this
-                    # seam can read (see ``LLMCallRecord``). It already
-                    # includes a repair's second call.
+                    # number ADR 0015 holds the run to. It already includes a
+                    # repair's second call and any billed-then-discarded
+                    # attempt, which the counters below cannot see.
                     tokens_used=after.budget.tokens_used - before.budget.tokens_used,
                     usd_used=after.budget.usd_used - before.budget.usd_used,
+                    input_tokens=call.input_tokens,
+                    output_tokens=call.output_tokens,
+                    cache_read_tokens=call.cache_read_tokens,
+                    cache_creation_tokens=call.cache_creation_tokens,
+                    call_id=call.record_id,
                 ),
             ),
+            planner_input_tokens=call.context_tokens,
+            planner_context_chars=call.context_chars,
         )

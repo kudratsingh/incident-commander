@@ -180,7 +180,7 @@ class TestBaselineIsTheExistingCall:
         usage = CannedUsage(input_tokens=11, output_tokens=7, cache_read_tokens=3)
         state = _investigating(run_state)
 
-        direct_state, direct_step = _plan_next_step(
+        direct_state, direct_step, direct_call = _plan_next_step(
             state, now, CannedLLMClient([_stop_payload()], usage=usage), "m"
         )
         strategy_llm = CannedLLMClient([_stop_payload()], usage=usage)
@@ -196,6 +196,12 @@ class TestBaselineIsTheExistingCall:
         assert seam_state.budget.tokens_used == direct_state.budget.tokens_used == 21
         assert seam_state.hypotheses == direct_state.hypotheses
         assert record.llm_calls[0].tokens_used == 21
+        # The measurements the record carries are the call's own report, not
+        # a second reading taken beside it (WP-2.1).
+        assert record.llm_calls[0].input_tokens == direct_call.input_tokens == 11
+        assert record.llm_calls[0].output_tokens == direct_call.output_tokens == 7
+        assert record.llm_calls[0].cache_read_tokens == direct_call.cache_read_tokens == 3
+        assert record.planner_input_tokens == direct_call.context_tokens == 14
 
     def test_the_planner_prompt_is_the_same_one(self, run_state: RunState, now: datetime) -> None:
         # The canned suite keys its planner responses by prompt name, so a

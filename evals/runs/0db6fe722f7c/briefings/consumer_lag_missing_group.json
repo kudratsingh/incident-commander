@@ -1,0 +1,46 @@
+{
+  "incident_id": "bfad15ef-8f1a-4948-a0ab-f29624a23c59",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.kafka severity=critical fingerprint=consumer_lag_high group=unknown-consumer",
+  "escalation_reason": "max iterations (5) exceeded",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-09-17T13:23:27.465916Z\",\"age_seconds\":16,\"recent_samples\":[{\"lag\":0,\"measured_at\":\"2026-09-17T13:23:27.465916Z\"},{\"lag\":0,\"measured_at\":\"2026-09-17T13:22:27.096520Z\"},{\"lag\":0,\"measured_at\":\"2026-09-17T13:21:27.018543Z\"},{\"lag\":0,\"measured_at\":\"2026-09-17T13:20:26.508339Z\"},{\"lag\":0,\"measured_at\":\"2026-09-17T13:19:26.249809Z\"}]}",
+      "arguments": {
+        "consumer_group": "worker-dispatcher"
+      }
+    },
+    {
+      "tool": "list_active_alerts",
+      "summary": "{\"total\":3,\"alerts\":[{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-09-17T13:09:13.342757Z\",\"extra_data\":null},{\"id\":\"c6c4e180-f625-53c2-85c2-2d505fec61e5\",\"severity\":\"warning\",\"source\":\"dlq\",\"title\":\"DLQ backlog growing\",\"description\":\"3 send_email jobs dead-lettered in last hour.\",\"fired_at\":\"2026-09-17T13:02:13.342757Z\",\"extra_data\":null},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-09-17T12:52:13.342757Z\",\"extra_data\":null}]}",
+      "arguments": {
+        "severity": null,
+        "limit": 50
+      }
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:billing-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}",
+      "arguments": {
+        "consumer_group": "billing-consumer"
+      }
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:billing-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}",
+      "arguments": {
+        "consumer_group": "billing-consumer"
+      }
+    }
+  ],
+  "findings": "The alert's named consumer group (\"unknown-consumer\") was not directly probed; worker-dispatcher showed zero lag across five recent samples, but billing-consumer has a confirmed sustained lag of 15,000 with no live telemetry available (source: static, no timestamp or recent samples), matching a separate critical alert that has been firing for 20+ minutes. The triggering consumer group identity remains unresolved as the run hit its iteration limit.",
+  "recommendation": "Confirm whether billing-consumer is the true source of this alert and investigate why its lag metric is returning only static data with no live samples, then check the API 5xx critical alert (also active) for any causal relationship to the billing pipeline backlog.",
+  "budget_used": {
+    "tool_calls": 4,
+    "tokens": 56186,
+    "wall_seconds": 0.030249,
+    "usd": "0.110185"
+  }
+}

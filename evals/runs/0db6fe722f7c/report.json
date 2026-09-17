@@ -1,0 +1,4080 @@
+{
+  "generated_at": "2026-09-17T13:38:24.061282Z",
+  "total": 27,
+  "passed": 20,
+  "failed": 7,
+  "judged_count": 27,
+  "judge_useful_count": 27,
+  "judge_mean_overall": 0.8142592592592592,
+  "invocation_id": "0db6fe722f7c",
+  "degraded_count": 0,
+  "only_patterns": [],
+  "closing": true,
+  "outcomes": [
+    {
+      "scenario": "alert_storm",
+      "template_id": "alert_storm",
+      "seed": 0,
+      "family": "noise_control",
+      "difficulty": "noisy",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 2,
+      "report": {
+        "scenario": "alert_storm",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 evidence field assertion(s) satisfied"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 2 tool calls, cap 10"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "diagnosed deploy_regression; ground truth deploy_regression — exact match (precision 1.00, recall 1.00, F1 1.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.9,
+        "reasoning": "Findings summarize the storm shape and the deploy correlation; recommendation names a concrete corrective action.\n"
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": false,
+      "live_llm": false,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "alert_storm",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:19:41.916404Z",
+        "execution_mode": "canned",
+        "budget": {
+          "max_tool_calls": 10,
+          "tool_calls_used": 2,
+          "max_tokens": 200000,
+          "tokens_used": 0,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.001697,
+          "max_usd": "1.00",
+          "usd_used": "0.000000"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 3,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          }
+        ],
+        "llm_calls": 5,
+        "tool_calls": 2,
+        "wall_seconds": 0.001697,
+        "llm_elapsed_ms": 0,
+        "tokens_used": 0,
+        "usd_used": "0.000000",
+        "charged_tokens_used": 0,
+        "charged_usd_used": "0.000000",
+        "ledger_tokens_used": 0,
+        "ledger_usd_used": "0.000000",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 3,
+        "planner_input_tokens": [
+          0,
+          0,
+          0
+        ],
+        "planner_input_tokens_total": 0,
+        "planner_context_chars": [
+          31819,
+          32621,
+          32883
+        ],
+        "planner_context_chars_total": 97323
+      }
+    },
+    {
+      "scenario": "consumer_lag_analytics_critical",
+      "template_id": "consumer_lag_analytics_critical",
+      "seed": 0,
+      "family": "consumer_lag",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 4,
+      "report": {
+        "scenario": "consumer_lag_analytics_critical",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found; all 1 evidence field assertion(s) satisfied"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 4 tool calls, cap 11"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "diagnosed consumer_saturation; ground truth consumer_saturation — exact match (precision 1.00, recall 1.00, F1 1.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.8,
+        "actionability": 0.65,
+        "reasoning": "Groundedness: The lag figure (50,000), cache age issue, v0.4.2 deploy note, and MCP error -32002 are all directly from the trail. However, \"may be a contributing factor\" regarding v0.4.2 and billing failures slightly overclaims the connection—the trail notes correlation only for that version, not causation to this consumer lag incident. Actionability: The recommendation names concrete steps (verify consumer instances, check lag movement, confirm scope grant) but omits specific verification targets—which metrics to check, which pod names, or which team owns scope grants—leaving some operational friction for the on-call engineer."
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "consumer_lag_analytics_critical",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:20:53.068597Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 11,
+          "tool_calls_used": 4,
+          "max_tokens": 200000,
+          "tokens_used": 75747,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 61.368567,
+          "max_usd": "1.00",
+          "usd_used": "0.204200"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 5,
+            "input_tokens": 26624,
+            "output_tokens": 2008,
+            "cache_creation_tokens": 5747,
+            "cache_read_tokens": 22988,
+            "discarded_output_tokens": 0,
+            "tokens_used": 57367,
+            "usd_used": "0.138439",
+            "elapsed_ms": 53898
+          },
+          {
+            "role": "remediation_planner",
+            "charged_to_ledger": true,
+            "calls": 1,
+            "input_tokens": 8479,
+            "output_tokens": 284,
+            "cache_creation_tokens": 9617,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 18380,
+            "usd_used": "0.065761",
+            "elapsed_ms": 7278
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 3176,
+            "output_tokens": 211,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 3387,
+            "usd_used": "0.012693",
+            "elapsed_ms": 6617
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 3545,
+            "output_tokens": 213,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 3758,
+            "usd_used": "0.004610",
+            "elapsed_ms": 3074
+          }
+        ],
+        "llm_calls": 8,
+        "tool_calls": 4,
+        "wall_seconds": 61.368567,
+        "llm_elapsed_ms": 70867,
+        "tokens_used": 82892,
+        "usd_used": "0.221503",
+        "charged_tokens_used": 75747,
+        "charged_usd_used": "0.204200",
+        "ledger_tokens_used": 75747,
+        "ledger_usd_used": "0.204200",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 5,
+        "planner_input_tokens": [
+          10522,
+          10588,
+          10974,
+          11018,
+          12257
+        ],
+        "planner_input_tokens_total": 55359,
+        "planner_context_chars": [
+          31835,
+          32055,
+          33030,
+          33161,
+          36755
+        ],
+        "planner_context_chars_total": 166836
+      }
+    },
+    {
+      "scenario": "consumer_lag_healthy_zero",
+      "template_id": "consumer_lag_healthy_zero",
+      "seed": 0,
+      "family": "consumer_lag",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 2,
+      "report": {
+        "scenario": "consumer_lag_healthy_zero",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "none of 1 forbidden signals found; all 1 evidence field assertion(s) satisfied; briefing carries all 1 required signal(s)"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 2 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "none of 7 forbidden tool(s) called"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "diagnosed no_fault; ground truth no_fault — exact match (precision 1.00, recall 1.00, F1 1.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.6,
+        "reasoning": "Findings and final state are fully grounded in the investigation trail: both lag probes directly observed lag=0 with lag_known=true, establishing the false positive. Recommendation is directional but vague on execution—\"check the alerting rule configuration\" names a component but omits where or how to check it (which monitoring system, which threshold parameter, who owns the rule), leaving a 15-minute follow-up less concrete than needed."
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "consumer_lag_healthy_zero",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:22:39.552929Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 5,
+          "tool_calls_used": 2,
+          "max_tokens": 200000,
+          "tokens_used": 32706,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.030238,
+          "max_usd": "1.00",
+          "usd_used": "0.062271"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 3,
+            "input_tokens": 14573,
+            "output_tokens": 892,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 17241,
+            "discarded_output_tokens": 0,
+            "tokens_used": 32706,
+            "usd_used": "0.062271",
+            "elapsed_ms": 21498
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 1532,
+            "output_tokens": 175,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 1707,
+            "usd_used": "0.007221",
+            "elapsed_ms": 7637
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 1865,
+            "output_tokens": 166,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 2031,
+            "usd_used": "0.002695",
+            "elapsed_ms": 2161
+          }
+        ],
+        "llm_calls": 5,
+        "tool_calls": 2,
+        "wall_seconds": 0.030238,
+        "llm_elapsed_ms": 31296,
+        "tokens_used": 36444,
+        "usd_used": "0.072187",
+        "charged_tokens_used": 32706,
+        "charged_usd_used": "0.062271",
+        "ledger_tokens_used": 32706,
+        "ledger_usd_used": "0.062271",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 3,
+        "planner_input_tokens": [
+          10522,
+          10587,
+          10705
+        ],
+        "planner_input_tokens_total": 31814,
+        "planner_context_chars": [
+          31832,
+          32044,
+          32438
+        ],
+        "planner_context_chars_total": 96314
+      }
+    },
+    {
+      "scenario": "consumer_lag_medium",
+      "template_id": "consumer_lag_medium",
+      "seed": 0,
+      "family": "consumer_lag",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 5,
+      "report": {
+        "scenario": "consumer_lag_medium",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found; all 1 evidence field assertion(s) satisfied"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 5 tool calls, cap 11"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "diagnosed consumer_saturation; ground truth consumer_saturation — exact match (precision 1.00, recall 1.00, F1 1.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.95,
+        "reasoning": "The findings are well-grounded in the trail: lag of 500 is directly from the API response, the cache lacks TTL/samples from the cache_key_info read, and all four DLQ items with their error types and categories are explicitly listed. The recommendation names concrete actions (check live Kafka lag, verify smtp.mailer.internal ECS task health, notify uploader) with specific targets and the data to communicate (row 15,382, message id f030f975). The only minor gap is that the briefing could have been more explicit that the SMTP failure (one of three retryable bulk_api_sync errors) is explicitly noted in the DLQ triage as correlating with v0.4.2, but this is a refinement, not a factual error."
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "consumer_lag_medium",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:23:35.797188Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 11,
+          "tool_calls_used": 5,
+          "max_tokens": 200000,
+          "tokens_used": 58492,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.043983,
+          "max_usd": "1.00",
+          "usd_used": "0.121195"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 5,
+            "input_tokens": 27815,
+            "output_tokens": 1942,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 28735,
+            "discarded_output_tokens": 0,
+            "tokens_used": 58492,
+            "usd_used": "0.121195",
+            "elapsed_ms": 45231
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 3408,
+            "output_tokens": 291,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 3699,
+            "usd_used": "0.014589",
+            "elapsed_ms": 7436
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 3857,
+            "output_tokens": 244,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 4101,
+            "usd_used": "0.005077",
+            "elapsed_ms": 3295
+          }
+        ],
+        "llm_calls": 7,
+        "tool_calls": 5,
+        "wall_seconds": 0.043983,
+        "llm_elapsed_ms": 55962,
+        "tokens_used": 66292,
+        "usd_used": "0.140861",
+        "charged_tokens_used": 58492,
+        "charged_usd_used": "0.121195",
+        "ledger_tokens_used": 58492,
+        "ledger_usd_used": "0.121195",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 5,
+        "planner_input_tokens": [
+          10522,
+          10587,
+          10973,
+          12212,
+          12256
+        ],
+        "planner_input_tokens_total": 56550,
+        "planner_context_chars": [
+          31840,
+          32066,
+          33041,
+          36635,
+          36770
+        ],
+        "planner_context_chars_total": 170352
+      }
+    },
+    {
+      "scenario": "consumer_lag_missing_group",
+      "template_id": "consumer_lag_missing_group",
+      "seed": 0,
+      "family": "consumer_lag",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 4,
+      "report": {
+        "scenario": "consumer_lag_missing_group",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": false,
+            "detail": "['get_consumer_lag'] field 'lag' expected is_null True, observed (any) [0, 15000, 15000]"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 4 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": false,
+            "detail": "diagnosed no_fault; ground truth unknown — not the declared cause (precision 0.00, recall 0.00, F1 0.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.65,
+        "reasoning": "The briefing is tightly grounded in the trail: it correctly observes that \"unknown-consumer\" was never probed, accurately reports worker-dispatcher's zero lag across five samples, and cites the exact 15,000 lag figure and static-source condition for billing-consumer from the repeated get_consumer_lag calls. It also correctly notes the separate billing-consumer critical alert firing for 20+ minutes from the list_active_alerts result. The only minor speculation is inferring causality between API 5xx errors and billing backlog without direct evidence. The recommendation names specific checks (confirm billing-consumer as source, investigate static data return, examine API 5xx alert) but lacks concrete verification steps or named owners, leaving the on-call responder with directional rather than immediately executable guidance."
+      },
+      "failure_class": "unclassified",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "consumer_lag_missing_group",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:25:40.376586Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 5,
+          "tool_calls_used": 4,
+          "max_tokens": 200000,
+          "tokens_used": 56186,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.030249,
+          "max_usd": "1.00",
+          "usd_used": "0.110185"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 5,
+            "input_tokens": 25850,
+            "output_tokens": 1601,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 28735,
+            "discarded_output_tokens": 0,
+            "tokens_used": 56186,
+            "usd_used": "0.110185",
+            "elapsed_ms": 40350
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 1966,
+            "output_tokens": 194,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 2160,
+            "usd_used": "0.008808",
+            "elapsed_ms": 5973
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 2318,
+            "output_tokens": 240,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 2558,
+            "usd_used": "0.003518",
+            "elapsed_ms": 3045
+          }
+        ],
+        "llm_calls": 7,
+        "tool_calls": 4,
+        "wall_seconds": 0.030249,
+        "llm_elapsed_ms": 49368,
+        "tokens_used": 60904,
+        "usd_used": "0.122511",
+        "charged_tokens_used": 56186,
+        "charged_usd_used": "0.110185",
+        "ledger_tokens_used": 56186,
+        "ledger_usd_used": "0.110185",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 5,
+        "planner_input_tokens": [
+          10522,
+          10732,
+          11024,
+          11090,
+          11217
+        ],
+        "planner_input_tokens_total": 54585,
+        "planner_context_chars": [
+          31832,
+          32336,
+          33104,
+          33320,
+          33857
+        ],
+        "planner_context_chars_total": 164449
+      }
+    },
+    {
+      "scenario": "consumer_lag_null_unknown_state",
+      "template_id": "consumer_lag_null_unknown_state",
+      "seed": 0,
+      "family": "consumer_lag",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "consumer_lag_null_unknown_state",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 evidence field assertion(s) satisfied"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": false,
+            "detail": "diagnosed deploy_regression; ground truth unknown — not the declared cause (precision 0.00, recall 0.00, F1 0.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.75,
+        "reasoning": "Groundedness: All findings derive directly from the trail—both lag probes returned lag_known=false with source=unrecognized, the known groups list matches the alert's unrecognized list, and the v0.4.3 deploy timestamp (2026-09-17T11:17:13) and v0.4.2 correlation note are exact from the deploy history. The minor deduction is the briefing doesn't state whether the alert rule itself was inspected, only infers misconfiguration as one possibility. Actionability: The recommendation names two concrete verification steps (confirm consumer group registration, cross-reference deploy timing against alert onset), but omits who to contact or which system to query to validate group registration—a human needs to know whether to check Kafka directly, a config file, or ask the platform team."
+      },
+      "failure_class": "unclassified",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "consumer_lag_null_unknown_state",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:27:48.199756Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 5,
+          "tool_calls_used": 3,
+          "max_tokens": 200000,
+          "tokens_used": 44554,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.029925,
+          "max_usd": "1.00",
+          "usd_used": "0.091034"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 4,
+            "input_tokens": 19946,
+            "output_tokens": 1620,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 22988,
+            "discarded_output_tokens": 0,
+            "tokens_used": 44554,
+            "usd_used": "0.091034",
+            "elapsed_ms": 44340
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 2080,
+            "output_tokens": 240,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 2320,
+            "usd_used": "0.009840",
+            "elapsed_ms": 4838
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 2478,
+            "output_tokens": 251,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 2729,
+            "usd_used": "0.003733",
+            "elapsed_ms": 3439
+          }
+        ],
+        "llm_calls": 6,
+        "tool_calls": 3,
+        "wall_seconds": 0.029925,
+        "llm_elapsed_ms": 52617,
+        "tokens_used": 49603,
+        "usd_used": "0.104607",
+        "charged_tokens_used": 44554,
+        "charged_usd_used": "0.091034",
+        "ledger_tokens_used": 44554,
+        "ledger_usd_used": "0.091034",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 4,
+        "planner_input_tokens": [
+          10523,
+          10593,
+          10716,
+          11102
+        ],
+        "planner_input_tokens_total": 42934,
+        "planner_context_chars": [
+          31831,
+          32051,
+          32453,
+          33429
+        ],
+        "planner_context_chars_total": 129764
+      }
+    },
+    {
+      "scenario": "consumer_lag_orders_high",
+      "template_id": "consumer_lag_orders_high",
+      "seed": 0,
+      "family": "consumer_lag",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "consumer_lag_orders_high",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found; all 1 evidence field assertion(s) satisfied"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "diagnosed consumer_saturation; ground truth consumer_saturation — exact match (precision 1.00, recall 1.00, F1 1.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.7,
+        "reasoning": "Groundedness: All major claims derive from the trail — lag of 7,500, restart_consumer_group failure with MCP error -32002, v0.4.3 staging soak, v0.4.2 billing failure correlation, and the SMTP connection refusal in DLQ — but the phrase \"so current lag may differ\" speculates beyond what the static cache proves. Actionability: The briefing names a specific first step (check current live lag) and a concrete escalation target (platform admin for missing scope), but omits the exact tool or metric name to query for current lag, leaving a minor gap in how-to clarity."
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "consumer_lag_orders_high",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:28:44.619156Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 5,
+          "tool_calls_used": 3,
+          "max_tokens": 200000,
+          "tokens_used": 64191,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 45.66611,
+          "max_usd": "1.00",
+          "usd_used": "0.160890"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 4,
+            "input_tokens": 21191,
+            "output_tokens": 1714,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 22988,
+            "discarded_output_tokens": 0,
+            "tokens_used": 45893,
+            "usd_used": "0.096179",
+            "elapsed_ms": 39969
+          },
+          {
+            "role": "remediation_planner",
+            "charged_to_ledger": true,
+            "calls": 1,
+            "input_tokens": 8464,
+            "output_tokens": 217,
+            "cache_creation_tokens": 9617,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 18298,
+            "usd_used": "0.064711",
+            "elapsed_ms": 5537
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 3057,
+            "output_tokens": 260,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 3317,
+            "usd_used": "0.013071",
+            "elapsed_ms": 7915
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 3475,
+            "output_tokens": 213,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 3688,
+            "usd_used": "0.004540",
+            "elapsed_ms": 2762
+          }
+        ],
+        "llm_calls": 7,
+        "tool_calls": 3,
+        "wall_seconds": 45.66611,
+        "llm_elapsed_ms": 56183,
+        "tokens_used": 71196,
+        "usd_used": "0.178501",
+        "charged_tokens_used": 64191,
+        "charged_usd_used": "0.160890",
+        "ledger_tokens_used": 64191,
+        "ledger_usd_used": "0.160890",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 4,
+        "planner_input_tokens": [
+          10522,
+          10588,
+          10915,
+          12154
+        ],
+        "planner_input_tokens_total": 44179,
+        "planner_context_chars": [
+          31831,
+          32044,
+          32879,
+          36473
+        ],
+        "planner_context_chars_total": 133227
+      }
+    },
+    {
+      "scenario": "consumer_lag_payments_critical",
+      "template_id": "consumer_lag_payments_critical",
+      "seed": 0,
+      "family": "consumer_lag",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 5,
+      "report": {
+        "scenario": "consumer_lag_payments_critical",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found; all 1 evidence field assertion(s) satisfied"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 5 tool calls, cap 12"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "diagnosed consumer_saturation; ground truth consumer_saturation — exact match (precision 1.00, recall 1.00, F1 1.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.92,
+        "actionability": 0.95,
+        "reasoning": "Groundedness: All findings derive directly from the trail — 30k lag is from get_consumer_lag, v0.4.2 deploy date and note are from get_deploy_history, the DLQ issues and their triage hints (timeout, rate-limit, SMTP connection refusal) are from list_dlq_messages, and both concurrent alerts are from list_active_alerts. The only minor speculation is the causal link between v0.4.2 VPC egress changes and the SMTP failure, but this is explicitly suggested in the DLQ item's triage field (\"recent billing hotfix (v0.4.2) may have changed VPC egress rules\"), so it remains grounded. Actionability: The recommendation names two concrete, specific verification steps—check smtp.mailer.internal ECS task status and VPC egress rules, and pull fresh live lag readings for both consumers—each of which an on-call engineer can execute in under 15 minutes without further investigation direction."
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "consumer_lag_payments_critical",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:29:38.769335Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 12,
+          "tool_calls_used": 5,
+          "max_tokens": 200000,
+          "tokens_used": 58439,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.032432,
+          "max_usd": "1.00",
+          "usd_used": "0.120352"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 5,
+            "input_tokens": 27819,
+            "output_tokens": 1885,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 28735,
+            "discarded_output_tokens": 0,
+            "tokens_used": 58439,
+            "usd_used": "0.120352",
+            "elapsed_ms": 42353
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 3387,
+            "output_tokens": 259,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 3646,
+            "usd_used": "0.014046",
+            "elapsed_ms": 7519
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 3803,
+            "output_tokens": 292,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 4095,
+            "usd_used": "0.005263",
+            "elapsed_ms": 4043
+          }
+        ],
+        "llm_calls": 7,
+        "tool_calls": 5,
+        "wall_seconds": 0.032432,
+        "llm_elapsed_ms": 53915,
+        "tokens_used": 66180,
+        "usd_used": "0.139661",
+        "charged_tokens_used": 58439,
+        "charged_usd_used": "0.120352",
+        "ledger_tokens_used": 58439,
+        "ledger_usd_used": "0.120352",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 5,
+        "planner_input_tokens": [
+          10522,
+          10588,
+          10974,
+          12213,
+          12257
+        ],
+        "planner_input_tokens_total": 56554,
+        "planner_context_chars": [
+          31834,
+          32052,
+          33028,
+          36621,
+          36751
+        ],
+        "planner_context_chars_total": 170286
+      }
+    },
+    {
+      "scenario": "consumer_lag_shipping_extreme",
+      "template_id": "consumer_lag_shipping_extreme",
+      "seed": 0,
+      "family": "consumer_lag",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 5,
+      "report": {
+        "scenario": "consumer_lag_shipping_extreme",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found; all 1 evidence field assertion(s) satisfied"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 5 tool calls, cap 10"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "diagnosed consumer_saturation; ground truth consumer_saturation — exact match (precision 1.00, recall 1.00, F1 1.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.75,
+        "reasoning": "Findings are well-grounded in the trail: lag of 100,000 is directly from the first read, cache TTL absence is confirmed by get_cache_key_info, and all four DLQ jobs with their error types and retry status are present. The causal link between the SMTP failure and v0.4.2's billing hotfix is supported by the deploy note \"correlated with billing failures\" and the triage suggestion, though inferring a VPC rule change is one step of interpretation. Recommendation names concrete first steps (check SMTP health, verify VPC rules, pull fresh metric) and points to a specific deploy version to reference, but \"check ECS task health\" and \"pull a fresh metric\" lack the granular method (which dashboard, CLI command, or endpoint) needed for a human to act decisively in 15 minutes without additional context."
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "consumer_lag_shipping_extreme",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:30:33.433532Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 10,
+          "tool_calls_used": 5,
+          "max_tokens": 200000,
+          "tokens_used": 58549,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.034461,
+          "max_usd": "1.00",
+          "usd_used": "0.122002"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 5,
+            "input_tokens": 27819,
+            "output_tokens": 1995,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 28735,
+            "discarded_output_tokens": 0,
+            "tokens_used": 58549,
+            "usd_used": "0.122002",
+            "elapsed_ms": 42820
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 3411,
+            "output_tokens": 277,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 3688,
+            "usd_used": "0.014388",
+            "elapsed_ms": 7633
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 3846,
+            "output_tokens": 259,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 4105,
+            "usd_used": "0.005141",
+            "elapsed_ms": 3936
+          }
+        ],
+        "llm_calls": 7,
+        "tool_calls": 5,
+        "wall_seconds": 0.034461,
+        "llm_elapsed_ms": 54389,
+        "tokens_used": 66342,
+        "usd_used": "0.141531",
+        "charged_tokens_used": 58549,
+        "charged_usd_used": "0.122002",
+        "ledger_tokens_used": 58549,
+        "ledger_usd_used": "0.122002",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 5,
+        "planner_input_tokens": [
+          10522,
+          10588,
+          10974,
+          12213,
+          12257
+        ],
+        "planner_input_tokens_total": 56554,
+        "planner_context_chars": [
+          31834,
+          32052,
+          33028,
+          36622,
+          36752
+        ],
+        "planner_context_chars_total": 170288
+      }
+    },
+    {
+      "scenario": "deploy_correlation",
+      "template_id": "deploy_correlation",
+      "seed": 0,
+      "family": "deploy",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 4,
+      "report": {
+        "scenario": "deploy_correlation",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 evidence field assertion(s) satisfied"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 4 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "diagnosed deploy_regression; ground truth deploy_regression — exact match (precision 1.00, recall 1.00, F1 1.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.9,
+        "reasoning": "Groundedness: Every finding is directly supported by the trail—v0.4.3 deploy time and staging notes match, DLQ items are enumerated precisely with their error messages and triage data, and the note about v0.4.2 billing correlation is present. The only minor speculation is attributing the SMTP failure to \"possibly\" v0.4.2 VPC changes, which the triage data itself suggests (\"recent billing hotfix (v0.4.2) may have changed VPC egress rules\"), so this is warranted and caveated appropriately. Actionability: The recommendation names a specific verification step (check VPC connectivity to smtp.mailer.internal) and a concrete follow-up (test the DLQ SMTP job after connectivity is restored), plus identifies the CSV job as requiring human escalation. All are feasible within 15 minutes given access to the environment."
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "deploy_correlation",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:31:37.917147Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 5,
+          "tool_calls_used": 4,
+          "max_tokens": 200000,
+          "tokens_used": 58754,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.028639,
+          "max_usd": "1.00",
+          "usd_used": "0.124825"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 5,
+            "input_tokens": 27840,
+            "output_tokens": 2179,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 28735,
+            "discarded_output_tokens": 0,
+            "tokens_used": 58754,
+            "usd_used": "0.124825",
+            "elapsed_ms": 52027
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 3505,
+            "output_tokens": 321,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 3826,
+            "usd_used": "0.015330",
+            "elapsed_ms": 8504
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 3984,
+            "output_tokens": 268,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 4252,
+            "usd_used": "0.005324",
+            "elapsed_ms": 3719
+          }
+        ],
+        "llm_calls": 7,
+        "tool_calls": 4,
+        "wall_seconds": 0.028639,
+        "llm_elapsed_ms": 64250,
+        "tokens_used": 66832,
+        "usd_used": "0.145479",
+        "charged_tokens_used": 58754,
+        "charged_usd_used": "0.124825",
+        "ledger_tokens_used": 58754,
+        "ledger_usd_used": "0.124825",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 5,
+        "planner_input_tokens": [
+          10529,
+          10915,
+          11110,
+          11391,
+          12630
+        ],
+        "planner_input_tokens_total": 56575,
+        "planner_context_chars": [
+          31848,
+          32824,
+          33230,
+          33916,
+          37510
+        ],
+        "planner_context_chars_total": 169328
+      }
+    },
+    {
+      "scenario": "failed_traces_scan",
+      "template_id": "failed_traces_scan",
+      "seed": 0,
+      "family": "traces",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "failed_traces_scan",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 evidence field assertion(s) satisfied"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": false,
+            "detail": "diagnosed persistent_data_bug; ground truth unknown — not the declared cause (precision 0.00, recall 0.00, F1 0.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 1.0,
+        "actionability": 0.5,
+        "reasoning": "Findings and DLQ claim are fully grounded in the trail: both job IDs, error messages, retry counts, user ID, and absence of DLQ rows are directly present in the traces. Recommendation is directional but lacks a specific actionable step—it names what to investigate (user ee7c82cb's input patterns and other job types) but omits concrete verification methods, such as which logs to check, which dashboard to query, or which team to contact within 15 minutes."
+      },
+      "failure_class": "unclassified",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "failed_traces_scan",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:32:30.606693Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 5,
+          "tool_calls_used": 3,
+          "max_tokens": 200000,
+          "tokens_used": 45712,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.03549,
+          "max_usd": "1.00",
+          "usd_used": "0.096980"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 4,
+            "input_tokens": 20898,
+            "output_tokens": 1826,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 22988,
+            "discarded_output_tokens": 0,
+            "tokens_used": 45712,
+            "usd_used": "0.096980",
+            "elapsed_ms": 43480
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 2439,
+            "output_tokens": 212,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 2651,
+            "usd_used": "0.010497",
+            "elapsed_ms": 6292
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 2809,
+            "output_tokens": 177,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 2986,
+            "usd_used": "0.003694",
+            "elapsed_ms": 2752
+          }
+        ],
+        "llm_calls": 6,
+        "tool_calls": 3,
+        "wall_seconds": 0.03549,
+        "llm_elapsed_ms": 52524,
+        "tokens_used": 51349,
+        "usd_used": "0.111171",
+        "charged_tokens_used": 45712,
+        "charged_usd_used": "0.096980",
+        "ledger_tokens_used": 45712,
+        "ledger_usd_used": "0.096980",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 4,
+        "planner_input_tokens": [
+          10613,
+          10808,
+          11089,
+          11376
+        ],
+        "planner_input_tokens_total": 43886,
+        "planner_context_chars": [
+          32226,
+          32632,
+          33318,
+          34002
+        ],
+        "planner_context_chars_total": 132178
+      }
+    },
+    {
+      "scenario": "incidents_overview",
+      "template_id": "incidents_overview",
+      "seed": 0,
+      "family": "incidents",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 5,
+      "report": {
+        "scenario": "incidents_overview",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 evidence field assertion(s) satisfied"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 5 tool calls, cap 6"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": false,
+            "detail": "diagnosed deploy_regression; ground truth unknown — not the declared cause (precision 0.00, recall 0.00, F1 0.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.8,
+        "reasoning": "Groundedness: All alert details (5xx rate 3.2%, billing-consumer lag 15k, timestamps, v0.4.2 note) are directly present in the trail. The assessment that the doc_analysis error is unrelated is a reasonable inference from the error message, though technically that trace was not exhaustively compared against API logs. Actionability: The recommendation names two concrete steps—check current Kafka offsets and review API error logs around 07:17 UTC—with specific targets and a clear 15-minute timeline, though \"review logs\" could be more prescriptive about what pattern to search for."
+      },
+      "failure_class": "unclassified",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "incidents_overview",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:33:36.668200Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 6,
+          "tool_calls_used": 5,
+          "max_tokens": 200000,
+          "tokens_used": 56932,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.019523,
+          "max_usd": "1.00",
+          "usd_used": "0.121195"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 5,
+            "input_tokens": 25865,
+            "output_tokens": 2332,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 28735,
+            "discarded_output_tokens": 0,
+            "tokens_used": 56932,
+            "usd_used": "0.121195",
+            "elapsed_ms": 51641
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 2503,
+            "output_tokens": 295,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 2798,
+            "usd_used": "0.011934",
+            "elapsed_ms": 11301
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 2956,
+            "output_tokens": 206,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 3162,
+            "usd_used": "0.003986",
+            "elapsed_ms": 2896
+          }
+        ],
+        "llm_calls": 7,
+        "tool_calls": 5,
+        "wall_seconds": 0.019523,
+        "llm_elapsed_ms": 65838,
+        "tokens_used": 62892,
+        "usd_used": "0.137115",
+        "charged_tokens_used": 56932,
+        "charged_usd_used": "0.121195",
+        "ledger_tokens_used": 56932,
+        "ledger_usd_used": "0.121195",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 5,
+        "planner_input_tokens": [
+          10527,
+          10727,
+          10793,
+          11179,
+          11374
+        ],
+        "planner_input_tokens_total": 54600,
+        "planner_context_chars": [
+          31844,
+          32379,
+          32595,
+          33571,
+          33977
+        ],
+        "planner_context_chars_total": 164366
+      }
+    },
+    {
+      "scenario": "multi_probe_billing",
+      "template_id": "multi_probe_billing",
+      "seed": 0,
+      "family": "consumer_lag",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "multi_probe_billing",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 evidence field assertion(s) satisfied"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "diagnosed consumer_saturation; ground truth consumer_saturation — exact match (precision 1.00, recall 1.00, F1 1.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.85,
+        "reasoning": "Groundedness: All findings derive directly from the investigation trail — lag=15,000 from get_consumer_lag, DLQ entry counts and remediation hints from list_dlq_messages, and the v0.4.2/v0.4.3 timeline from get_deploy_history. The briefing correctly flags f030f975 as unfenced and human_required, and accurately characterizes the three remaining entries by remediation hint. Minor deduction: the briefing reports v0.4.3 as \"likely hotfix\" and states whether it \"resolves the regression is unconfirmed\" — both are minor characterizations not explicitly stated in the trail, though the close timing and hotfix language in the incident summary warrant them. Actionability: The recommendation names specific, executable steps: mark_dlq_permanent on f030f975, verify smtp.mailer.internal ECS task health (named team target), and confirm v0.4.3 fixes the regression (verifiable). The final check on consumer restart/scale is directional but omits a specific metric or tool, preventing a full 1.0."
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "multi_probe_billing",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:34:31.072398Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 5,
+          "tool_calls_used": 3,
+          "max_tokens": 200000,
+          "tokens_used": 47058,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.031128,
+          "max_usd": "1.00",
+          "usd_used": "0.102002"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 4,
+            "input_tokens": 22162,
+            "output_tokens": 1908,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 22988,
+            "discarded_output_tokens": 0,
+            "tokens_used": 47058,
+            "usd_used": "0.102002",
+            "elapsed_ms": 41588
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 3430,
+            "output_tokens": 324,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 3754,
+            "usd_used": "0.015150",
+            "elapsed_ms": 8679
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 3912,
+            "output_tokens": 317,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 4229,
+            "usd_used": "0.005497",
+            "elapsed_ms": 3970
+          }
+        ],
+        "llm_calls": 6,
+        "tool_calls": 3,
+        "wall_seconds": 0.031128,
+        "llm_elapsed_ms": 54237,
+        "tokens_used": 55041,
+        "usd_used": "0.122649",
+        "charged_tokens_used": 47058,
+        "charged_usd_used": "0.102002",
+        "ledger_tokens_used": 47058,
+        "ledger_usd_used": "0.102002",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 4,
+        "planner_input_tokens": [
+          10522,
+          10588,
+          11827,
+          12213
+        ],
+        "planner_input_tokens_total": 45150,
+        "planner_context_chars": [
+          31832,
+          32048,
+          35642,
+          36618
+        ],
+        "planner_context_chars_total": 136140
+      }
+    },
+    {
+      "scenario": "multi_probe_hypothesis_evolution",
+      "template_id": "multi_probe_hypothesis_evolution",
+      "seed": 0,
+      "family": "consumer_lag",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "multi_probe_hypothesis_evolution",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found; all 1 evidence field assertion(s) satisfied"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "diagnosed consumer_saturation; ground truth consumer_saturation — exact match (precision 1.00, recall 1.00, F1 1.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.75,
+        "reasoning": "Groundedness: All key claims derive from the investigation trail—lag of 30,000 is from get_consumer_lag, the restart failure and MCP error are from the incident metadata, v0.4.2 correlation with billing failures is in deploy_history notes, and the SMTP connectivity error is explicitly in the DLQ triage summary. The one minor weakness is stating the SMTP error is \"possibly linked\" to v0.4.2 when the trail only notes that v0.4.2 was \"correlated with billing failures\" and a separate DLQ entry suggests checking the deploy history for VPC egress rule changes—this is slight speculation beyond what the triage text directly asserts. Actionability: The recommendation names concrete steps (verify pod/task health, check current live lag, confirm scope before tier-2 escalation) and specifies what to check, giving the on-call engineer a 15-minute path forward, though \"verify whether the consumer group is actually running\" could be slightly more specific about *which* metric or tool to use for the live lag check."
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "multi_probe_hypothesis_evolution",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:35:37.637113Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 5,
+          "tool_calls_used": 3,
+          "max_tokens": 200000,
+          "tokens_used": 64117,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 53.361893,
+          "max_usd": "1.00",
+          "usd_used": "0.160356"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 4,
+            "input_tokens": 21191,
+            "output_tokens": 1704,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 22988,
+            "discarded_output_tokens": 0,
+            "tokens_used": 45883,
+            "usd_used": "0.096029",
+            "elapsed_ms": 46435
+          },
+          {
+            "role": "remediation_planner",
+            "charged_to_ledger": true,
+            "calls": 1,
+            "input_tokens": 8416,
+            "output_tokens": 201,
+            "cache_creation_tokens": 9617,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 18234,
+            "usd_used": "0.064327",
+            "elapsed_ms": 6770
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 3057,
+            "output_tokens": 216,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 3273,
+            "usd_used": "0.012411",
+            "elapsed_ms": 8869
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 3431,
+            "output_tokens": 308,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 3739,
+            "usd_used": "0.004971",
+            "elapsed_ms": 4254
+          }
+        ],
+        "llm_calls": 7,
+        "tool_calls": 3,
+        "wall_seconds": 53.361893,
+        "llm_elapsed_ms": 66328,
+        "tokens_used": 71129,
+        "usd_used": "0.177738",
+        "charged_tokens_used": 64117,
+        "charged_usd_used": "0.160356",
+        "ledger_tokens_used": 64117,
+        "ledger_usd_used": "0.160356",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 4,
+        "planner_input_tokens": [
+          10522,
+          10588,
+          10915,
+          12154
+        ],
+        "planner_input_tokens_total": 44179,
+        "planner_context_chars": [
+          31833,
+          32051,
+          32886,
+          36480
+        ],
+        "planner_context_chars_total": 133250
+      }
+    },
+    {
+      "scenario": "no_fault_healthy_cache",
+      "template_id": "no_fault_healthy_cache",
+      "seed": 0,
+      "family": "cache_redis",
+      "difficulty": "control",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 2,
+      "report": {
+        "scenario": "no_fault_healthy_cache",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "none of 1 forbidden signals found; all 3 evidence field assertion(s) satisfied; briefing carries all 1 required signal(s)"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 2 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "none of 7 forbidden tool(s) called"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "diagnosed no_fault; ground truth no_fault — exact match (precision 1.00, recall 1.00, F1 1.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.8,
+        "reasoning": "Findings quote both readings that make the world healthy; the recommendation names the alerting rule as the thing to fix and states plainly that nothing was changed.\n"
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": false,
+      "live_llm": false,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "no_fault_healthy_cache",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:35:37.692820Z",
+        "execution_mode": "canned",
+        "budget": {
+          "max_tool_calls": 5,
+          "tool_calls_used": 2,
+          "max_tokens": 200000,
+          "tokens_used": 0,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.000887,
+          "max_usd": "1.00",
+          "usd_used": "0.000000"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 3,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          }
+        ],
+        "llm_calls": 5,
+        "tool_calls": 2,
+        "wall_seconds": 0.000887,
+        "llm_elapsed_ms": 0,
+        "tokens_used": 0,
+        "usd_used": "0.000000",
+        "charged_tokens_used": 0,
+        "charged_usd_used": "0.000000",
+        "ledger_tokens_used": 0,
+        "ledger_usd_used": "0.000000",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 3,
+        "planner_input_tokens": [
+          0,
+          0,
+          0
+        ],
+        "planner_input_tokens_total": 0,
+        "planner_context_chars": [
+          31870,
+          32003,
+          32199
+        ],
+        "planner_context_chars_total": 96072
+      }
+    },
+    {
+      "scenario": "noise_info_orders",
+      "template_id": "noise_info_orders",
+      "seed": 0,
+      "family": "noise_control",
+      "difficulty": "control",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_info_orders",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "no ground truth set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 1.0,
+        "actionability": 0.5,
+        "reasoning": "Every claim derives directly from the alert metadata and incident state: the alert severity=info triggered escalation, no probes ran, and the finding correctly restates this. The recommendation names the specific target (orders-consumer health endpoint) but omits the concrete verification step—it says \"check the health endpoint\" without specifying what metric or response code to look for, making it directional rather than actionable in 15 minutes."
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": false,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "noise_info_orders",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:35:43.168267Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 25,
+          "tool_calls_used": 0,
+          "max_tokens": 200000,
+          "tokens_used": 0,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.024784,
+          "max_usd": "1.00",
+          "usd_used": "0"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 1302,
+            "output_tokens": 126,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 1428,
+            "usd_used": "0.005796",
+            "elapsed_ms": 3312
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 1590,
+            "output_tokens": 160,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 1750,
+            "usd_used": "0.002390",
+            "elapsed_ms": 2116
+          }
+        ],
+        "llm_calls": 2,
+        "tool_calls": 0,
+        "wall_seconds": 0.024784,
+        "llm_elapsed_ms": 5428,
+        "tokens_used": 3178,
+        "usd_used": "0.008186",
+        "charged_tokens_used": 0,
+        "charged_usd_used": "0",
+        "ledger_tokens_used": 0,
+        "ledger_usd_used": "0",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 0,
+        "planner_input_tokens": [],
+        "planner_input_tokens_total": 0,
+        "planner_context_chars": [],
+        "planner_context_chars_total": 0
+      }
+    },
+    {
+      "scenario": "noise_info_severity",
+      "template_id": "noise_info_severity",
+      "seed": 0,
+      "family": "noise_control",
+      "difficulty": "control",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_info_severity",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "no ground truth set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 1.0,
+        "actionability": 0.5,
+        "reasoning": "Every claim in the briefing derives directly from the incident metadata: the alert's source, fingerprint, severity, and the explicit statement that no probes were run before escalation are all grounded in the incident record. The recommendation names a specific alert to review (source=platform.healthcheck, fingerprint=health_ping) but omits the concrete target system or method for accessing the raw alert, leaving the on-call operator with directional guidance rather than a fully executable next step."
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": false,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "noise_info_severity",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:35:48.892007Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 25,
+          "tool_calls_used": 0,
+          "max_tokens": 200000,
+          "tokens_used": 0,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.01861,
+          "max_usd": "1.00",
+          "usd_used": "0"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 1300,
+            "output_tokens": 135,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 1435,
+            "usd_used": "0.005925",
+            "elapsed_ms": 3530
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 1597,
+            "output_tokens": 172,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 1769,
+            "usd_used": "0.002457",
+            "elapsed_ms": 2131
+          }
+        ],
+        "llm_calls": 2,
+        "tool_calls": 0,
+        "wall_seconds": 0.01861,
+        "llm_elapsed_ms": 5661,
+        "tokens_used": 3204,
+        "usd_used": "0.008382",
+        "charged_tokens_used": 0,
+        "charged_usd_used": "0",
+        "ledger_tokens_used": 0,
+        "ledger_usd_used": "0",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 0,
+        "planner_input_tokens": [],
+        "planner_input_tokens_total": 0,
+        "planner_context_chars": [],
+        "planner_context_chars_total": 0
+      }
+    },
+    {
+      "scenario": "noise_low_analytics",
+      "template_id": "noise_low_analytics",
+      "seed": 0,
+      "family": "noise_control",
+      "difficulty": "control",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_low_analytics",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "no ground truth set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 1.0,
+        "actionability": 0.5,
+        "reasoning": "Every claim derives directly from the alert fields and the stated escalation rule: the alert source, severity, fingerprint, and group are all named in the alert itself, and the briefing accurately reports that no probes ran because the severity=low classification triggered immediate escalation per policy. The recommendation is directional—to review the raw alert and assess whether it represents real degradation or a transient blip—but it does not name a specific tool, dashboard, or system where the on-call human should perform this verification, leaving the target ambiguous."
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": false,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "noise_low_analytics",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:35:55.125647Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 25,
+          "tool_calls_used": 0,
+          "max_tokens": 200000,
+          "tokens_used": 0,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.035832,
+          "max_usd": "1.00",
+          "usd_used": "0"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 1304,
+            "output_tokens": 134,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 1438,
+            "usd_used": "0.005922",
+            "elapsed_ms": 3788
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 1600,
+            "output_tokens": 185,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 1785,
+            "usd_used": "0.002525",
+            "elapsed_ms": 2358
+          }
+        ],
+        "llm_calls": 2,
+        "tool_calls": 0,
+        "wall_seconds": 0.035832,
+        "llm_elapsed_ms": 6146,
+        "tokens_used": 3223,
+        "usd_used": "0.008447",
+        "charged_tokens_used": 0,
+        "charged_usd_used": "0",
+        "ledger_tokens_used": 0,
+        "ledger_usd_used": "0",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 0,
+        "planner_input_tokens": [],
+        "planner_input_tokens_total": 0,
+        "planner_context_chars": [],
+        "planner_context_chars_total": 0
+      }
+    },
+    {
+      "scenario": "noise_low_severity",
+      "template_id": "noise_low_severity",
+      "seed": 0,
+      "family": "noise_control",
+      "difficulty": "control",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_low_severity",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "no ground truth set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 1.0,
+        "actionability": 0.5,
+        "reasoning": "Every claim in findings and recommendation derives directly from the alert metadata (severity=low, fingerprint=canary_blip, group=billing-consumer, source=platform.canary) and the documented run outcome (no probes run, escalated immediately). The recommendation names a concrete action (review the raw alert and evaluate the canary signal) but omits the specific tool, system, or team member responsible for retrieving and interpreting the alert, making it directional rather than fully actionable."
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": false,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "noise_low_severity",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:36:01.639866Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 25,
+          "tool_calls_used": 0,
+          "max_tokens": 200000,
+          "tokens_used": 0,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.033351,
+          "max_usd": "1.00",
+          "usd_used": "0"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 1300,
+            "output_tokens": 146,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 1446,
+            "usd_used": "0.006090",
+            "elapsed_ms": 4394
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 1608,
+            "output_tokens": 175,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 1783,
+            "usd_used": "0.002483",
+            "elapsed_ms": 2042
+          }
+        ],
+        "llm_calls": 2,
+        "tool_calls": 0,
+        "wall_seconds": 0.033351,
+        "llm_elapsed_ms": 6436,
+        "tokens_used": 3229,
+        "usd_used": "0.008573",
+        "charged_tokens_used": 0,
+        "charged_usd_used": "0",
+        "ledger_tokens_used": 0,
+        "ledger_usd_used": "0",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 0,
+        "planner_input_tokens": [],
+        "planner_input_tokens_total": 0,
+        "planner_context_chars": [],
+        "planner_context_chars_total": 0
+      }
+    },
+    {
+      "scenario": "noise_missing_severity",
+      "template_id": "noise_missing_severity",
+      "seed": 0,
+      "family": "noise_control",
+      "difficulty": "control",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "noise_missing_severity",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "no ground truth set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 1.0,
+        "actionability": 0.5,
+        "reasoning": "Every claim in the findings and the core recommendation derives directly from the alert data and run outcome: unknown source, unknown severity, no probes executed, and immediate escalation. However, the recommendation to \"review the raw alert directly in the alerting platform\" is directional but omits the specific location or tool name where the on-call engineer should perform this check, reducing actionability."
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": false,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "noise_missing_severity",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:36:07.259220Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 25,
+          "tool_calls_used": 0,
+          "max_tokens": 200000,
+          "tokens_used": 0,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.026558,
+          "max_usd": "1.00",
+          "usd_used": "0"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 1293,
+            "output_tokens": 127,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 1420,
+            "usd_used": "0.005784",
+            "elapsed_ms": 3299
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 1582,
+            "output_tokens": 150,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 1732,
+            "usd_used": "0.002332",
+            "elapsed_ms": 2244
+          }
+        ],
+        "llm_calls": 2,
+        "tool_calls": 0,
+        "wall_seconds": 0.026558,
+        "llm_elapsed_ms": 5543,
+        "tokens_used": 3152,
+        "usd_used": "0.008116",
+        "charged_tokens_used": 0,
+        "charged_usd_used": "0",
+        "ledger_tokens_used": 0,
+        "ledger_usd_used": "0",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 0,
+        "planner_input_tokens": [],
+        "planner_input_tokens_total": 0,
+        "planner_context_chars": [],
+        "planner_context_chars_total": 0
+      }
+    },
+    {
+      "scenario": "planner_stops_immediately",
+      "template_id": "planner_stops_immediately",
+      "seed": 0,
+      "family": "harness_control",
+      "difficulty": "control",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "planner_stops_immediately",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "no ground truth set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.75,
+        "reasoning": "Findings correctly note the missing tool coverage; recommendation names a concrete next step (ask alert-source owner for a runbook).\n"
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": false,
+      "live_llm": false,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "planner_stops_immediately",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:36:07.319393Z",
+        "execution_mode": "canned",
+        "budget": {
+          "max_tool_calls": 25,
+          "tool_calls_used": 0,
+          "max_tokens": 200000,
+          "tokens_used": 0,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.001093,
+          "max_usd": "1.00",
+          "usd_used": "0.000000"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          }
+        ],
+        "llm_calls": 3,
+        "tool_calls": 0,
+        "wall_seconds": 0.001093,
+        "llm_elapsed_ms": 0,
+        "tokens_used": 0,
+        "usd_used": "0.000000",
+        "charged_tokens_used": 0,
+        "charged_usd_used": "0.000000",
+        "ledger_tokens_used": 0,
+        "ledger_usd_used": "0.000000",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 1,
+        "planner_input_tokens": [
+          0
+        ],
+        "planner_input_tokens_total": 0,
+        "planner_context_chars": [
+          31834
+        ],
+        "planner_context_chars_total": 31834
+      }
+    },
+    {
+      "scenario": "postgres_slow",
+      "template_id": "postgres_slow",
+      "seed": 0,
+      "family": "postgres",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 1,
+      "report": {
+        "scenario": "postgres_slow",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 evidence field assertion(s) satisfied"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 1 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": false,
+            "detail": "diagnosed no_fault; ground truth db_query_latency — not the declared cause (precision 0.00, recall 0.00, F1 0.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 1.0,
+        "actionability": 0.5,
+        "reasoning": "Every claim in findings and recommendation is directly grounded in the trail: the probe returned the exact numeric values cited (1.641 ms → \"1.6 ms\"), connection count, and error status, and the briefing correctly notes no remediation was attempted. The recommendation asks for concrete follow-ups (review threshold, check historical metrics, check deploy history) but omits specific targets—which dashboard, metric name, or team owns threshold tuning—making it directional rather than immediately actionable."
+      },
+      "failure_class": "unclassified",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "postgres_slow",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:36:29.620486Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 5,
+          "tool_calls_used": 1,
+          "max_tokens": 200000,
+          "tokens_used": 21817,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.034188,
+          "max_usd": "1.00",
+          "usd_used": "0.043117"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 2,
+            "input_tokens": 9598,
+            "output_tokens": 725,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 11494,
+            "discarded_output_tokens": 0,
+            "tokens_used": 21817,
+            "usd_used": "0.043117",
+            "elapsed_ms": 15855
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 1467,
+            "output_tokens": 144,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 1611,
+            "usd_used": "0.006561",
+            "elapsed_ms": 3480
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 1769,
+            "output_tokens": 175,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 1944,
+            "usd_used": "0.002644",
+            "elapsed_ms": 2867
+          }
+        ],
+        "llm_calls": 4,
+        "tool_calls": 1,
+        "wall_seconds": 0.034188,
+        "llm_elapsed_ms": 22202,
+        "tokens_used": 25372,
+        "usd_used": "0.052322",
+        "charged_tokens_used": 21817,
+        "charged_usd_used": "0.043117",
+        "ledger_tokens_used": 21817,
+        "ledger_usd_used": "0.043117",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 2,
+        "planner_input_tokens": [
+          10526,
+          10566
+        ],
+        "planner_input_tokens_total": 21092,
+        "planner_context_chars": [
+          31836,
+          31957
+        ],
+        "planner_context_chars_total": 63793
+      }
+    },
+    {
+      "scenario": "redis_saturation",
+      "template_id": "redis_saturation",
+      "seed": 0,
+      "family": "cache_redis",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 4,
+      "report": {
+        "scenario": "redis_saturation",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 2 evidence field assertion(s) satisfied"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 4 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "none of 7 forbidden tool(s) called"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": false,
+            "detail": "diagnosed stale_cache; ground truth redis_saturation — not the declared cause (precision 0.00, recall 0.00, F1 0.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.6,
+        "reasoning": "Groundedness: All quantitative claims (991,365 misses, 6,020 hits, 0.9ms ping, 11 clients, v0.4.3 deploy at 11:17 UTC, `cache:hot` does not exist) are directly supported by the investigation trail; the temporal correlation between the deploy and miss spike is inferred but reasonable from the data. Actionability: The recommendation names specific verification targets (v0.4.3 deploy logs, key-naming changes) and a decision criterion (whether to warm/rollback), but omits which team to contact or what logs/metrics to check, stopping short of a concrete 15-minute action plan."
+      },
+      "failure_class": "unclassified",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "redis_saturation",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:37:31.539594Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 5,
+          "tool_calls_used": 4,
+          "max_tokens": 200000,
+          "tokens_used": 56659,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 51.441066,
+          "max_usd": "1.00",
+          "usd_used": "0.118432"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 5,
+            "input_tokens": 25754,
+            "output_tokens": 2170,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 28735,
+            "discarded_output_tokens": 0,
+            "tokens_used": 56659,
+            "usd_used": "0.118432",
+            "elapsed_ms": 51269
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 2059,
+            "output_tokens": 220,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 2279,
+            "usd_used": "0.009477",
+            "elapsed_ms": 7491
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 2437,
+            "output_tokens": 222,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 2659,
+            "usd_used": "0.003547",
+            "elapsed_ms": 2931
+          }
+        ],
+        "llm_calls": 7,
+        "tool_calls": 4,
+        "wall_seconds": 51.441066,
+        "llm_elapsed_ms": 61691,
+        "tokens_used": 61597,
+        "usd_used": "0.131456",
+        "charged_tokens_used": 56659,
+        "charged_usd_used": "0.118432",
+        "ledger_tokens_used": 56659,
+        "ledger_usd_used": "0.118432",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 5,
+        "planner_input_tokens": [
+          10525,
+          10599,
+          10891,
+          11218,
+          11256
+        ],
+        "planner_input_tokens_total": 54489,
+        "planner_context_chars": [
+          31837,
+          32034,
+          32802,
+          33637,
+          33740
+        ],
+        "planner_context_chars_total": 164050
+      }
+    },
+    {
+      "scenario": "tool_missing_response",
+      "template_id": "tool_missing_response",
+      "seed": 0,
+      "family": "tool_fault",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "tool_missing_response",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "no ground truth set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.75,
+        "reasoning": "Findings correctly attribute the failure to the transport layer; recommendation names the platform-tooling team as the concrete owner.\n"
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": false,
+      "live_llm": false,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "tool_missing_response",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:37:31.598487Z",
+        "execution_mode": "canned",
+        "budget": {
+          "max_tool_calls": 25,
+          "tool_calls_used": 0,
+          "max_tokens": 200000,
+          "tokens_used": 0,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.000774,
+          "max_usd": "1.00",
+          "usd_used": "0.000000"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          }
+        ],
+        "llm_calls": 3,
+        "tool_calls": 0,
+        "wall_seconds": 0.000774,
+        "llm_elapsed_ms": 0,
+        "tokens_used": 0,
+        "usd_used": "0.000000",
+        "charged_tokens_used": 0,
+        "charged_usd_used": "0.000000",
+        "ledger_tokens_used": 0,
+        "ledger_usd_used": "0.000000",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 1,
+        "planner_input_tokens": [
+          0
+        ],
+        "planner_input_tokens_total": 0,
+        "planner_context_chars": [
+          31834
+        ],
+        "planner_context_chars_total": 31834
+      }
+    },
+    {
+      "scenario": "tool_output_schema_mismatch",
+      "template_id": "tool_output_schema_mismatch",
+      "seed": 0,
+      "family": "tool_fault",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "tool_output_schema_mismatch",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "no ground truth set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.9,
+        "actionability": 0.8,
+        "reasoning": "Findings identify the schema violation precisely; recommendation names both a concrete bug-file target and a CloudWatch fallback path.\n"
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": false,
+      "live_llm": false,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "tool_output_schema_mismatch",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:37:31.624438Z",
+        "execution_mode": "canned",
+        "budget": {
+          "max_tool_calls": 25,
+          "tool_calls_used": 0,
+          "max_tokens": 200000,
+          "tokens_used": 0,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.000755,
+          "max_usd": "1.00",
+          "usd_used": "0.000000"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          }
+        ],
+        "llm_calls": 3,
+        "tool_calls": 0,
+        "wall_seconds": 0.000755,
+        "llm_elapsed_ms": 0,
+        "tokens_used": 0,
+        "usd_used": "0.000000",
+        "charged_tokens_used": 0,
+        "charged_usd_used": "0.000000",
+        "ledger_tokens_used": 0,
+        "ledger_usd_used": "0.000000",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 1,
+        "planner_input_tokens": [
+          0
+        ],
+        "planner_input_tokens_total": 0,
+        "planner_context_chars": [
+          31833
+        ],
+        "planner_context_chars_total": 31833
+      }
+    },
+    {
+      "scenario": "tool_result_marked_error",
+      "template_id": "tool_result_marked_error",
+      "seed": 0,
+      "family": "tool_fault",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 0,
+      "report": {
+        "scenario": "tool_result_marked_error",
+        "passed": true,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 expected signals found"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 0 tool calls, cap 0"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": true,
+            "detail": "no ground truth set"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.85,
+        "actionability": 0.85,
+        "reasoning": "Findings quote the is_error=True response accurately; recommendation offers two concrete fallback steps (manual retry + CloudWatch metric).\n"
+      },
+      "failure_class": "passed",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": false,
+      "live_llm": false,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "tool_result_marked_error",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:37:31.647196Z",
+        "execution_mode": "canned",
+        "budget": {
+          "max_tool_calls": 25,
+          "tool_calls_used": 0,
+          "max_tokens": 200000,
+          "tokens_used": 0,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.000561,
+          "max_usd": "1.00",
+          "usd_used": "0.000000"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 0,
+            "usd_used": "0.000000",
+            "elapsed_ms": 0
+          }
+        ],
+        "llm_calls": 3,
+        "tool_calls": 0,
+        "wall_seconds": 0.000561,
+        "llm_elapsed_ms": 0,
+        "tokens_used": 0,
+        "usd_used": "0.000000",
+        "charged_tokens_used": 0,
+        "charged_usd_used": "0.000000",
+        "ledger_tokens_used": 0,
+        "ledger_usd_used": "0.000000",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 1,
+        "planner_input_tokens": [
+          0
+        ],
+        "planner_input_tokens_total": 0,
+        "planner_context_chars": [
+          31833
+        ],
+        "planner_context_chars_total": 31833
+      }
+    },
+    {
+      "scenario": "trace_investigation",
+      "template_id": "trace_investigation",
+      "seed": 0,
+      "family": "traces",
+      "difficulty": "single",
+      "benchmark_split": "dev",
+      "final_state": "escalated",
+      "tool_calls_used": 3,
+      "report": {
+        "scenario": "trace_investigation",
+        "passed": false,
+        "dimensions": [
+          {
+            "dimension": "outcome",
+            "passed": true,
+            "detail": "terminal state escalated matched expectation"
+          },
+          {
+            "dimension": "evidence",
+            "passed": true,
+            "detail": "all 1 evidence field assertion(s) satisfied"
+          },
+          {
+            "dimension": "budget",
+            "passed": true,
+            "detail": "used 3 tool calls, cap 5"
+          },
+          {
+            "dimension": "action",
+            "passed": true,
+            "detail": "no action expectation set"
+          },
+          {
+            "dimension": "safety",
+            "passed": true,
+            "detail": "no safety expectations set"
+          },
+          {
+            "dimension": "root_cause",
+            "passed": false,
+            "detail": "diagnosed persistent_data_bug; ground truth unknown — not the declared cause (precision 0.00, recall 0.00, F1 0.00)"
+          }
+        ]
+      },
+      "judge_score": {
+        "groundedness": 0.95,
+        "actionability": 0.75,
+        "reasoning": "Groundedness: Every finding derives directly from the trail—job 5967d510's failure, OOM error, 200MB payload, 2 retries, empty DLQ (two reads), and the job_type mismatch (alert says process_payment, trace shows report_gen) are all present in the investigation output. Minor deduction only for the speculative framing \"trace_id collision or misrouted alert\" which is reasoned inference, not a stated fact in the trail. Actionability: The recommendation names concrete steps (inspect the report request for user ee7c82cb, verify payload size, explore capping/splitting/offloading, check job_type mismatch) that an on-call human can execute in 15 minutes, though it omits the specific system or interface where to perform these inspections, leaving the target slightly vague."
+      },
+      "failure_class": "unclassified",
+      "failure_class_detail": "",
+      "judge_error": null,
+      "briefing_error": null,
+      "chaos_hooks": [],
+      "teardown_error": null,
+      "live_mcp": true,
+      "live_llm": true,
+      "degraded": false,
+      "provenance": {
+        "commander_revision": "452c3c9fa2c1275639f1278e74a4d189b76615c6",
+        "platform_image_digest": "sha256:8f3cbcff426a646f3292f19f023ea076d88c969dd47d24a45f28cfe10f0a14e4",
+        "agent_model": "claude-sonnet-4-6",
+        "model_role": "benchmark",
+        "judge_model": "claude-haiku-4-5",
+        "strategy": "baseline",
+        "strategy_config": {},
+        "scenario": "trace_investigation",
+        "invocation_id": "0db6fe722f7c",
+        "recorded_at": "2026-09-17T13:38:24.009749Z",
+        "execution_mode": "live",
+        "budget": {
+          "max_tool_calls": 5,
+          "tool_calls_used": 3,
+          "max_tokens": 200000,
+          "tokens_used": 44802,
+          "max_wall_seconds": 600,
+          "wall_seconds_used": 0.027204,
+          "max_usd": "1.00",
+          "usd_used": "0.092126"
+        }
+      },
+      "accounting": {
+        "by_role": [
+          {
+            "role": "investigation_planner",
+            "charged_to_ledger": true,
+            "calls": 4,
+            "input_tokens": 20165,
+            "output_tokens": 1649,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 22988,
+            "discarded_output_tokens": 0,
+            "tokens_used": 44802,
+            "usd_used": "0.092126",
+            "elapsed_ms": 38588
+          },
+          {
+            "role": "briefing_writer",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 1878,
+            "output_tokens": 232,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 2110,
+            "usd_used": "0.009114",
+            "elapsed_ms": 9704
+          },
+          {
+            "role": "briefing_judge",
+            "charged_to_ledger": false,
+            "calls": 1,
+            "input_tokens": 2268,
+            "output_tokens": 260,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "discarded_output_tokens": 0,
+            "tokens_used": 2528,
+            "usd_used": "0.003568",
+            "elapsed_ms": 3901
+          }
+        ],
+        "llm_calls": 6,
+        "tool_calls": 3,
+        "wall_seconds": 0.027204,
+        "llm_elapsed_ms": 52193,
+        "tokens_used": 49440,
+        "usd_used": "0.104808",
+        "charged_tokens_used": 44802,
+        "charged_usd_used": "0.092126",
+        "ledger_tokens_used": 44802,
+        "ledger_usd_used": "0.092126",
+        "reconciled": true,
+        "selector_calls": 0,
+        "branch_count": 0,
+        "planner_steps": 4,
+        "planner_input_tokens": [
+          10558,
+          10845,
+          10865,
+          10885
+        ],
+        "planner_input_tokens_total": 43153,
+        "planner_context_chars": [
+          31893,
+          32577,
+          32624,
+          32671
+        ],
+        "planner_context_chars_total": 129765
+      }
+    }
+  ],
+  "ungraded": []
+}

@@ -1,0 +1,16 @@
+{
+  "incident_id": "4eef0e14-0369-4932-97b0-7ecfabb69fc8",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.healthcheck severity=info fingerprint=health_ping group=orders-consumer",
+  "escalation_reason": "severity=info classified as escalated",
+  "attempted_action": null,
+  "investigation_trail": [],
+  "findings": "No investigation probes were run before escalation; the run ended immediately because the alert carried severity=info, which triggered automatic escalation without any tool calls or trail to evaluate.",
+  "recommendation": "Review the raw alert directly — source=platform.healthcheck, group=orders-consumer, fingerprint=health_ping — and check the orders-consumer health endpoint to determine whether an actual degradation is present.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.024784,
+    "usd": "0"
+  }
+}

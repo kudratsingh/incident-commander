@@ -1,0 +1,22 @@
+{
+  "incident_id": "16f9e854-330c-4f74-b021-91b7954c5d8e",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.db severity=critical fingerprint=db_latency_high",
+  "escalation_reason": "planner stop: Postgres health is fully clean: ping latency 1.6ms, 1 active connection, no errors reported. The alerted signal (db_latency_high) is not present in the current live reading. This appears to be a false positive or a transient spike that has already recovered. No Tier-1 auto-remediation is warranted. Recommend a human reviews the alerting threshold and whether a brief latency spike genuinely occurred — deploy history and trace search could be follow-up steps if the human wants to characterise the event, but there is nothing actionable for the autonomous agent to do.",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_postgres_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":1.641,\"active_connections\":1,\"dialect\":\"postgresql\",\"error\":null}",
+      "arguments": {}
+    }
+  ],
+  "findings": "A single Postgres health probe at investigation time returned clean results: ping latency 1.6 ms, 1 active connection, and no errors, meaning the db_latency_high signal is not present in the live reading and may have been a transient spike; no remediation actions were attempted.",
+  "recommendation": "Review the alerting threshold configuration and check historical latency metrics or deploy history around the alert timestamp to determine whether a genuine spike occurred and whether the threshold needs adjustment.",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 21817,
+    "wall_seconds": 0.034188,
+    "usd": "0.043117"
+  }
+}

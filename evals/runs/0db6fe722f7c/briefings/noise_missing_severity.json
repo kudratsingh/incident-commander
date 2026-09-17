@@ -1,0 +1,16 @@
+{
+  "incident_id": "ff7bc812-5ae1-420f-92a6-f76db5833649",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.unknown severity=unknown fingerprint=no_severity",
+  "escalation_reason": "severity=unknown classified as escalated",
+  "attempted_action": null,
+  "investigation_trail": [],
+  "findings": "No probes were run before escalation — the alert carried unknown severity and unknown source, causing the run to escalate immediately without any investigation.",
+  "recommendation": "Review the raw alert for incident ff7bc812-5ae1-420f-92a6-f76db5833649 directly in the alerting platform to determine its true source, severity, and any attached metadata before taking further action.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 0,
+    "wall_seconds": 0.026558,
+    "usd": "0"
+  }
+}

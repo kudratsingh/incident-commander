@@ -1,0 +1,211 @@
+{
+  "scenario": "consumer_lag_payments_critical",
+  "incident_id": "e1f26f1c-1ec3-40f5-87b6-6f82a4821ef1",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "e1f26f1c-1ec3-40f5-87b6-6f82a4821ef1",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "payments-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 12,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:28:44.670069Z",
+      "updated_at": "2026-09-17T13:28:44.670069Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "e1f26f1c-1ec3-40f5-87b6-6f82a4821ef1",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "payments-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 12,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.032396,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7507b155-e2c9-444e-b35a-8188cb2646ff",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:28:44.702465Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:28:44.670069Z",
+      "updated_at": "2026-09-17T13:28:44.702465Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "e1f26f1c-1ec3-40f5-87b6-6f82a4821ef1",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "payments-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 12,
+        "tool_calls_used": 5,
+        "max_tokens": 200000,
+        "tokens_used": 58439,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.032432,
+        "max_usd": "1.00",
+        "usd_used": "0.120352"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7507b155-e2c9-444e-b35a-8188cb2646ff",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:28:44.702465Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "51651424-dbc9-43bd-82d7-f23fdfb813b7",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "payments-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"payments-consumer\",\"lag\":30000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:payments-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}",
+          "timestamp": "2026-09-17T13:28:44.702501Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d1603f26-7418-439d-aa4f-8a44e0ad9d39",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 20
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T11:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T10:17:13.337886Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-09-17T07:17:13.337886Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-09-16T19:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-09-16T15:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-09-15T13:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-09-17T13:28:44.702501Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2a681444-c908-4f63-930e-fa8e0f6a11a2",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":4,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-09-17T13:09:13.337884Z\",\"updated_at\":\"2026-09-17T13:09:19.337884Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-09-17T13:09:19.337884Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-09-17T13:05:13.337884Z\",\"updated_at\":\"2026-09-17T13:05:35.337884Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-09-17T13:05:35.337884Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-09-17T12:52:13.337884Z\",\"updated_at\":\"2026-09-17T12:52:47.337884Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T12:52:47.337884Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-09-17T12:37:13.337884Z\",\"updated_at\":\"2026-09-17T12:37:29.337884Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-09-17T12:37:29.337884Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-09-17T13:28:44.702501Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b8b7fe2b-ab39-450c-b2ff-50e32cae0925",
+          "tool_name": "get_cache_key_info",
+          "arguments": {
+            "key": "kafka:consumer_lag:payments-consumer"
+          },
+          "result_summary": "{\"key\":\"kafka:consumer_lag:payments-consumer\",\"exists\":true,\"type\":\"string\",\"ttl_seconds\":null,\"size\":5}",
+          "timestamp": "2026-09-17T13:28:44.702501Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4de5db0c-f143-4ea7-b03f-16d2b5e52742",
+          "tool_name": "list_active_alerts",
+          "arguments": {
+            "severity": null,
+            "limit": 50
+          },
+          "result_summary": "{\"total\":3,\"alerts\":[{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-09-17T13:09:13.342757Z\",\"extra_data\":null},{\"id\":\"c6c4e180-f625-53c2-85c2-2d505fec61e5\",\"severity\":\"warning\",\"source\":\"dlq\",\"title\":\"DLQ backlog growing\",\"description\":\"3 send_email jobs dead-lettered in last hour.\",\"fired_at\":\"2026-09-17T13:02:13.342757Z\",\"extra_data\":null},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-09-17T12:52:13.342757Z\",\"extra_data\":null}]}",
+          "timestamp": "2026-09-17T13:28:44.702501Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a0cedf26-4163-410a-b96b-546a12c3738e",
+          "tool_name": "_planner_escalate",
+          "arguments": {
+            "reason": "max iterations (5) exceeded"
+          },
+          "result_summary": "max iterations (5) exceeded",
+          "timestamp": "2026-09-17T13:28:44.702501Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "payments-consumer-lag-30k",
+          "confidence": 0.72,
+          "reasoning": "The payments-consumer has a confirmed lag of 30,000 messages, which is the primary alerted signal and the most direct explanation for the incident."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "v0.4.3-deploy-correlated-with-lag",
+          "confidence": 0.45,
+          "reasoning": "A deploy to prod (v0.4.3) occurred at 11:17 UTC today, shortly before the incident; v0.4.2 was also noted as 'correlated with billing failures', suggesting recent deploys may be degrading consumer throughput."
+        },
+        {
+          "category": "downstream_dependency",
+          "name": "smtp-and-partner-api-failures-in-dlq",
+          "confidence": 0.35,
+          "reasoning": "Multiple DLQ entries reflect downstream failures (partner-api timeouts, SMTP refused), which could be contributing to consumer slowdown if the consumer blocks on these calls."
+        },
+        {
+          "category": "poison_message",
+          "name": "csv-upload-human-required-dlq-unfenced",
+          "confidence": 0.25,
+          "reasoning": "A human_required DLQ entry for a bad CSV upload exists unfenced, which could contribute to consumer stalls if it is repeatedly attempted."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:28:44.670069Z",
+      "updated_at": "2026-09-17T13:28:44.702501Z"
+    }
+  ],
+  "invocation_id": "0db6fe722f7c"
+}

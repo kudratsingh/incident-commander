@@ -1,0 +1,192 @@
+{
+  "scenario": "consumer_lag_null_unknown_state",
+  "incident_id": "ecefcb3b-54da-4ce4-8db8-97d094869f1c",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "ecefcb3b-54da-4ce4-8db8-97d094869f1c",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "ledger-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:25:40.428466Z",
+      "updated_at": "2026-09-17T13:25:40.428466Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ecefcb3b-54da-4ce4-8db8-97d094869f1c",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "ledger-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.029888,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "fef04391-8507-4ba0-8d7c-61e3eb7fd875",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:25:40.458354Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:25:40.428466Z",
+      "updated_at": "2026-09-17T13:25:40.458354Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "ecefcb3b-54da-4ce4-8db8-97d094869f1c",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "ledger-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 44554,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.029925,
+        "max_usd": "1.00",
+        "usd_used": "0.091034"
+      },
+      "evidence": [
+        {
+          "evidence_id": "fef04391-8507-4ba0-8d7c-61e3eb7fd875",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T13:25:40.458354Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4a2417a5-d636-4dec-ab1b-79004c5c4c63",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "ledger-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"ledger-consumer\",\"lag\":null,\"lag_known\":false,\"source\":\"unrecognized\",\"cache_key\":\"kafka:consumer_lag:ledger-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}",
+          "timestamp": "2026-09-17T13:25:40.458391Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "72f20d01-38cd-4bd4-8f89-85f8d9b62a9a",
+          "tool_name": "_freshness_reprobe",
+          "arguments": {
+            "tool": "get_consumer_lag",
+            "delay_seconds": 75.0
+          },
+          "result_summary": "cached read get_consumer_lag contradicted actionable hypothesis 'consumer_saturation' (0.70 >= 0.7); re-probing after 75s before accepting the contradiction",
+          "timestamp": "2026-09-17T13:25:40.458391Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f422d274-8679-45bd-8159-0fd165c0edd4",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "ledger-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"ledger-consumer\",\"lag\":null,\"lag_known\":false,\"source\":\"unrecognized\",\"cache_key\":\"kafka:consumer_lag:ledger-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}",
+          "timestamp": "2026-09-17T13:25:40.458391Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "70cb24f8-4393-4f46-b7e7-073bc614447b",
+          "tool_name": "get_deploy_history",
+          "arguments": {
+            "environment": null,
+            "limit": 10
+          },
+          "result_summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T11:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T10:17:13.337886Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-09-17T07:17:13.337886Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-09-16T19:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-09-16T15:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-09-15T13:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+          "timestamp": "2026-09-17T13:25:40.458391Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b8b526e3-9660-4922-9c73-ecf2043dfa88",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "Both probes of get_consumer_lag for 'ledger-consumer' returned lag_known=false with source=unrecognized — this consumer group is not registered in the platform's known groups (worker-dispatcher, billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer). The platform cannot report lag for it, so the alerted signal cannot be confirmed or cleared programmatically. A deploy regression is plausible (v0.4.3 deployed today; v0.4.2 was previously noted as correlated with billing failures), but rollback requires human sign-off. With 1 tool call remaining and no path to confirming consumer saturation, this must escalate to a human: (1) verify whether 'ledger-consumer' is a known/registered consumer group, (2) investigate whether the v0.4.3 deploy introduced a regression that caused the alert, and (3) review the alerting rule to determine if the group name is misconfigured."
+          },
+          "result_summary": "planner stop: Both probes of get_consumer_lag for 'ledger-consumer' returned lag_known=false with source=unrecognized — this consumer group is not registered in the platform's known groups (worker-dispatcher, billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer). The platform cannot report lag for it, so the alerted signal cannot be confirmed or cleared programmatically. A deploy regression is plausible (v0.4.3 deployed today; v0.4.2 was previously noted as correlated with billing failures), but rollback requires human sign-off. With 1 tool call remaining and no path to confirming consumer saturation, this must escalate to a human: (1) verify whether 'ledger-consumer' is a known/registered consumer group, (2) investigate whether the v0.4.3 deploy introduced a regression that caused the alert, and (3) review the alerting rule to determine if the group name is misconfigured.",
+          "timestamp": "2026-09-17T13:25:40.458391Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "deploy_regression",
+          "name": "v0.4.3-deploy-correlated-with-ledger-consumer-lag",
+          "confidence": 0.45,
+          "reasoning": "A prod deploy of v0.4.3 occurred at 11:17Z today, and a prior deploy (v0.4.2) was explicitly noted as 'correlated with billing failures', suggesting this service has a deploy regression pattern; however, the consumer group 'ledger-consumer' is unrecognized by the lag tool, making it impossible to confirm lag exists."
+        },
+        {
+          "category": "unknown",
+          "name": "ledger-consumer-unrecognized-group-lag-unknown",
+          "confidence": 0.4,
+          "reasoning": "Two probes of get_consumer_lag returned lag_known=false with source=unrecognized for 'ledger-consumer', meaning the platform has no record of this consumer group — it may not be registered, never started, or the alert fingerprint refers to a group outside the known set."
+        },
+        {
+          "category": "consumer_saturation",
+          "name": "ledger-consumer-high-lag-unverifiable",
+          "confidence": 0.15,
+          "reasoning": "The alert fingerprint is consumer_lag_high for ledger-consumer, but both lag probes returned null/unknown, so consumer saturation cannot be confirmed or denied from current evidence."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T13:25:40.428466Z",
+      "updated_at": "2026-09-17T13:25:40.458391Z"
+    }
+  ],
+  "invocation_id": "0db6fe722f7c"
+}

@@ -1,0 +1,58 @@
+{
+  "incident_id": "7e1ab0b6-50f4-4c27-ae83-9561db77d84f",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.api severity=critical fingerprint=elevated_error_rate",
+  "escalation_reason": "max iterations (5) exceeded",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "list_active_alerts",
+      "summary": "{\"total\":2,\"alerts\":[{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-09-17T13:09:13.342757Z\",\"extra_data\":null},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-09-17T12:52:13.342757Z\",\"extra_data\":null}]}",
+      "arguments": {
+        "severity": "critical",
+        "limit": 50
+      }
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"billing-consumer\",\"lag\":15000,\"lag_known\":true,\"source\":\"static\",\"cache_key\":\"kafka:consumer_lag:billing-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}",
+      "arguments": {
+        "consumer_group": "billing-consumer"
+      }
+    },
+    {
+      "tool": "get_deploy_history",
+      "summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T11:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T10:17:13.337886Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-09-17T07:17:13.337886Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-09-16T19:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-09-16T15:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-09-15T13:17:13.337886Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+      "arguments": {
+        "environment": null,
+        "limit": 20
+      }
+    },
+    {
+      "tool": "search_traces",
+      "summary": "{\"matches\":[{\"trace_id\":\"edeeb994-56d2-53e6-88fd-8af47e695dbc\",\"job_id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"job_type\":\"doc_analysis\",\"status\":\"failed\",\"created_at\":\"2026-09-17T12:47:13.337884Z\"},{\"trace_id\":\"0e24ca29-1d47-57e9-b898-4d79bb6da981\",\"job_id\":\"5967d510-0290-5627-a9db-4e29e3a38e44\",\"job_type\":\"report_gen\",\"status\":\"failed\",\"created_at\":\"2026-09-17T12:32:13.337884Z\"}]}",
+      "arguments": {
+        "status": "failed",
+        "job_type": null,
+        "since_hours": 2,
+        "limit": 20
+      }
+    },
+    {
+      "tool": "get_trace",
+      "summary": "{\"trace_id\":\"edeeb994-56d2-53e6-88fd-8af47e695dbc\",\"jobs\":[{\"id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"type\":\"doc_analysis\",\"status\":\"failed\",\"user_id\":\"ee7c82cb-bab6-5780-8590-55b57064cbe3\",\"retry_count\":2,\"error_message\":\"pdf extraction failed: file is corrupted\",\"created_at\":\"2026-09-17T12:47:13.337884Z\",\"updated_at\":\"2026-09-17T12:47:23.337884Z\"}],\"audit_events\":[{\"action\":\"job.failed\",\"resource_type\":\"job\",\"resource_id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"principal_type\":\"user\",\"created_at\":\"2026-09-08T02:16:36.672412Z\",\"extra_data\":{\"error_message\":\"pdf extraction failed: file is corrupted\"}}],\"truncated\":false,\"total_jobs\":1,\"total_audit_events\":1}",
+      "arguments": {
+        "trace_id": "edeeb994-56d2-53e6-88fd-8af47e695dbc",
+        "include_audit": true
+      }
+    }
+  ],
+  "findings": "Two critical alerts are active: the API 5xx rate is at 3.2% (fired 13:09 UTC), and the billing-consumer Kafka lag is at 15,000 messages with 20+ minutes of sustained lag (fired 12:52 UTC); the most recent prod deploy is v0.4.3 at 11:17 UTC, and v0.4.2 (deployed at 07:17 UTC) was noted as \"correlated with billing failures,\" suggesting the degradation predates the latest deploy. A failed doc_analysis trace was also found, but its error (\"pdf extraction failed: file is corrupted\") appears to be a data-quality issue unrelated to the platform alerts, and the second failed trace (report_gen) was not inspected before the run hit its iteration limit.",
+  "recommendation": "Prioritize confirming whether the billing-consumer lag is still growing by checking current Kafka consumer group offsets, then review API error logs around the v0.4.2 deploy at 07:17 UTC to determine if that change introduced the elevated 5xx rate that persists under v0.4.3.",
+  "budget_used": {
+    "tool_calls": 5,
+    "tokens": 56932,
+    "wall_seconds": 0.019523,
+    "usd": "0.121195"
+  }
+}

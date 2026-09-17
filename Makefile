@@ -44,7 +44,8 @@ help:
 	@echo "  baseline-report  assemble the Phase 0 baseline from the committed archives;"
 	@echo "                   reads only, spends nothing, writes nothing. FORMAT: --format"
 	@echo "  phase-close-report  assemble the phase-close report (plan 03 section 14) from the"
-	@echo "                   committed archives; reads only, spends nothing. --write persists it"
+	@echo "                   committed archives; reads only, spends nothing. PHASE=<n> picks"
+	@echo "                   the phase (default: the latest declared). WRITE=1 persists it"
 	@echo "  research-report  assemble the aggregate research report (plan 03 section 15) from the"
 	@echo "                   committed archives: one leaderboard per model, grouped by the seven"
 	@echo "                   WP-2.5 keys, every difference beside its paired-trial count."
@@ -78,8 +79,15 @@ world-audit:
 baseline-report:
 	uv run python -m evals.baseline_report
 
+# PHASE= selects which phase's scope to assemble; it defaults to the latest one
+# declared in evals/phase_close_report.py::SCOPES, which is the phase being
+# closed. WRITE=1 persists the versioned JSON + Markdown pair — and because the
+# filename carries the newest archive in scope, adding a pending re-run's
+# archive to that scope writes the final version BESIDE the draft rather than
+# over it (invariant 9).
 phase-close-report:
-	uv run python -m evals.phase_close_report
+	uv run python -m evals.phase_close_report \
+		$(if $(PHASE),--phase $(PHASE),) $(if $(WRITE),--write,)
 
 research-report:
 	uv run python -m evals.research_report

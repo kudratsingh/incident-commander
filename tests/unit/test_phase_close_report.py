@@ -2,7 +2,7 @@
 
 Four claims, from WO-R3-189's test requirement:
 
-* the report is a versioned artifact that ``artifacts.newest`` resolves;
+* the report is a versioned artifact the resolver finds;
 * it carries all seven sections of plan 03 § 14 and none of them is empty;
 * the leak hunt is a real grep over the trajectories the phase produced, and
   re-running it here reproduces what the committed report recorded;
@@ -11,16 +11,31 @@ Four claims, from WO-R3-189's test requirement:
 The last one is the red-before: ``closing_verdict`` is the guard, and the test
 below hands it a scope with one development run to prove the mark is derived
 from the rows rather than asserted by whoever ran the assembler.
+
+WO-R3-195 (WP-2.6) adds three, because there are now two phases in one
+assembler:
+
+* EVERY declared phase regenerates byte for byte, not just the newest. Phase
+  1's document is committed evidence and generalising the assembler must not
+  move a byte of it;
+* the DRAFT mark is derived from the scope. A scope that still declares a
+  pending re-run assembles a DRAFT; the same scope with those archives in
+  ``live_legs`` assembles a FINAL. There is no argument that sets it;
+* each phase's artifact is resolved by ITS OWN sweep id. ``artifacts.newest``
+  now answers "phase 2", which is right for a reader and wrong for a test
+  about phase 1.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import shutil
 import subprocess
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -34,6 +49,20 @@ from incident_commander.config import ModelRole
 pytestmark = pytest.mark.skipif(
     shutil.which("grep") is None, reason="the leak hunt shells out to grep"
 )
+
+#: Every phase this assembler declares. Tests that are about the PROTOCOL run
+#: over all of them, so a third phase inherits the checks instead of needing
+#: its own copies.
+PHASES: list[int] = sorted(close.SCOPES)
+
+
+def _committed(phase: int) -> dict[str, Any]:
+    document: dict[str, Any] = json.loads(close.committed(phase)[0].read_text())
+    return document
+
+
+def _rendered(phase: int) -> str:
+    return close.committed(phase)[1].read_text()
 
 
 def _report(invocation_id: str, role: ModelRole, *, predates_roles: bool = False) -> RunReport:
@@ -91,6 +120,19 @@ def test_the_phase_close_report_resolves_through_the_artifact_resolver() -> None
         assert path.parent == close.REPO_ROOT / "evals/reports/phase-close"
 
 
+@pytest.mark.parametrize("phase", PHASES)
+def test_each_phase_resolves_its_own_artifact_by_its_own_sweep(phase: int) -> None:
+    """Two phases share one kind, so "newest" stopped meaning "mine"."""
+    scope = close.SCOPES[phase]
+    for path in close.committed(phase):
+        assert path.is_file()
+        assert scope.canned_sweep in path.name
+    assert json.loads(close.committed(phase)[0].read_text())["phase"] == phase
+    # The newest version of the kind is the latest phase, which is what a
+    # reader following `artifacts.newest` should get.
+    assert artifacts.newest("phase_close_report") == close.committed(max(PHASES))[0]
+
+
 def test_the_new_kind_does_not_adopt_or_get_adopted_by_its_neighbours(tmp_path: Path) -> None:
     """Three families share ``evals/reports/``; each resolves only its own stem."""
     reports = tmp_path / "evals" / "reports"
@@ -109,7 +151,7 @@ def test_the_new_kind_does_not_adopt_or_get_adopted_by_its_neighbours(tmp_path: 
 
 def test_writing_twice_refuses_rather_than_replacing(tmp_path: Path) -> None:
     """Invariant 9 at the filesystem: a second write raises, never overwrites."""
-    document = json.loads(artifacts.newest("phase_close_report").read_text())
+    document = _committed(max(PHASES))
     first = close.write(document, root=tmp_path)
     assert all(path.is_file() for path in first)
     with pytest.raises(FileExistsError):
@@ -121,8 +163,9 @@ def test_writing_twice_refuses_rather_than_replacing(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------
 
 
-def test_the_committed_report_carries_all_seven_sections_and_none_is_empty() -> None:
-    document = json.loads(artifacts.newest("phase_close_report").read_text())
+@pytest.mark.parametrize("phase", PHASES)
+def test_the_committed_report_carries_all_seven_sections_and_none_is_empty(phase: int) -> None:
+    document = _committed(phase)
     assert tuple(document["sections"]) == close.SECTION_KEYS
     assert len(close.SECTION_KEYS) == 7
     for key in close.SECTION_KEYS:
@@ -131,19 +174,20 @@ def test_the_committed_report_carries_all_seven_sections_and_none_is_empty() -> 
         assert any(value not in (None, "", [], {}) for value in section.values()), key
 
 
-def test_every_section_reaches_the_human_half() -> None:
-    rendered = artifacts.newest("phase_close_report_md").read_text()
+@pytest.mark.parametrize("phase", PHASES)
+def test_every_section_reaches_the_human_half(phase: int) -> None:
+    rendered = _rendered(phase)
     for title in close.SECTION_TITLES.values():
         assert f"## {title}" in rendered, title
     assert "What this close does and does not claim" in rendered
     assert "Deviations from the protocol as written" in rendered
 
 
-def test_an_empty_section_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_empty_section_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     """The completeness rule is enforced at assembly, not left to a reviewer."""
-    monkeypatch.setattr(close, "_spend_line", lambda root: {})
+    monkeypatch.setattr(close, "_spend_line", lambda root, scope: {})
     with pytest.raises(ValueError, match="empty section"):
-        close.assemble(close.REPO_ROOT)
+        close.assemble(close.REPO_ROOT, close.PHASE2)
 
 
 # --------------------------------------------------------------------------
@@ -183,15 +227,14 @@ def test_a_run_that_predates_model_roles_is_also_non_closing() -> None:
     assert "predate model roles" in verdict["reason"]
 
 
-def test_the_committed_report_is_closing_and_says_why() -> None:
-    document = json.loads(artifacts.newest("phase_close_report").read_text())
+@pytest.mark.parametrize("phase", PHASES)
+def test_the_committed_report_is_closing_and_says_why(phase: int) -> None:
+    scope = close.SCOPES[phase]
+    document = _committed(phase)
     assert document["closing"] is True
     assert document["closing_reason"].strip()
-    assert set(document["runs_in_scope"]) == {
-        close.CANNED_SWEEP_ARCHIVE,
-        *(leg.archive_id for leg in close.LIVE_LEGS),
-    }
-    assert "CLOSING" in artifacts.newest("phase_close_report_md").read_text()
+    assert set(document["runs_in_scope"]) == set(scope.archives)
+    assert "CLOSING" in _rendered(phase)
 
 
 # --------------------------------------------------------------------------
@@ -199,14 +242,15 @@ def test_the_committed_report_is_closing_and_says_why() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_the_gating_grep_is_reproducible_and_still_finds_nothing() -> None:
+@pytest.mark.parametrize("phase", PHASES)
+def test_the_gating_grep_is_reproducible_and_still_finds_nothing(phase: int) -> None:
     """The committed command is re-run here, against the committed evidence.
 
     A grep whose output is pasted into a document is a claim; a grep the test
     suite re-runs is a check. If a later commit puts ``chaos`` into a
-    trajectory this phase produced, this goes red.
+    trajectory either phase produced, this goes red.
     """
-    document = json.loads(artifacts.newest("phase_close_report").read_text())
+    document = _committed(phase)
     recorded = document["sections"]["leak_hunt"]["committed_commands"]["trajectories"]
     completed = subprocess.run(
         recorded["command"].split(),
@@ -220,27 +264,53 @@ def test_the_gating_grep_is_reproducible_and_still_finds_nothing() -> None:
     assert recorded["matching_lines"] == 0
 
 
-def test_nothing_the_agent_read_from_the_platform_carries_an_unadjudicated_term() -> None:
+@pytest.mark.parametrize(("phase", "trajectories"), [(1, 45), (2, 71)])
+def test_nothing_the_agent_read_from_the_platform_carries_an_unadjudicated_term(
+    phase: int, trajectories: int
+) -> None:
     """WP-1.5's acceptance, claimed here rather than in WO-R3-187."""
-    hunt = json.loads(artifacts.newest("phase_close_report").read_text())["sections"]["leak_hunt"]
+    hunt = _committed(phase)["sections"]["leak_hunt"]
     assert hunt["verdict"] == "PASS"
     assert hunt["unadjudicated_hits"] == []
-    assert hunt["trajectories"]["files_searched"] == 45
+    assert hunt["trajectories"]["files_searched"] == trajectories
     read = hunt["trajectories"]["platform_responses_the_agent_read"]
     assert "chaos" not in read
     for term in read:
         assert term in hunt["adjudications"], term
 
 
-def test_the_chaos_mentions_are_ours_and_the_harness_s_and_none_are_the_platform_s() -> None:
+@pytest.mark.parametrize("phase", PHASES)
+def test_the_chaos_mentions_are_ours_and_the_harness_s_and_none_are_the_platform_s(
+    phase: int,
+) -> None:
     """The point of the classification: which side of the boundary each hit is on."""
-    hunt = json.loads(artifacts.newest("phase_close_report").read_text())["sections"]["leak_hunt"]
+    hunt = _committed(phase)["sections"]["leak_hunt"]
     totals = hunt["traces_by_author"]["totals"]
     assert totals["platform_response"].get("chaos", 0) == 0
-    assert totals["commander_prompt"]["chaos"] > 0  # WO-R3-255, our own prompt
     assert totals["harness_record"]["chaos"] > 0  # the evaluator's own setup record
     for run in hunt["traces_by_author"]["per_run"]:
         assert run["platform_response"].get("chaos", 0) == 0, run["archive"]
+
+
+def test_the_last_chaos_token_on_our_own_side_is_gone_by_phase_2() -> None:
+    """The one bucket that moved between the two closes.
+
+    Phase 1 found `chaos` in our own `remediation_planner.md` and filed
+    WO-R3-255 for it. cmd #258 removed it. This is where that removal is
+    checked against live traces rather than against the diff that made it.
+    """
+    assert (
+        _committed(1)["sections"]["leak_hunt"]["traces_by_author"]["totals"]["commander_prompt"][
+            "chaos"
+        ]
+        > 0
+    )
+    assert (
+        _committed(2)["sections"]["leak_hunt"]["traces_by_author"]["totals"][
+            "commander_prompt"
+        ].get("chaos", 0)
+        == 0
+    )
 
 
 def test_the_terms_are_derived_from_the_corpus_not_typed_out() -> None:
@@ -257,27 +327,72 @@ def test_the_terms_are_derived_from_the_corpus_not_typed_out() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_the_sweep_section_matches_the_committed_archives() -> None:
-    document = json.loads(artifacts.newest("phase_close_report").read_text())
-    sweep = document["sections"]["sweep_results"]
+@pytest.mark.parametrize(("phase", "live_total", "live_passed"), [(1, 4, 3), (2, 3, 1)])
+def test_the_sweep_section_matches_the_committed_archives(
+    phase: int, live_total: int, live_passed: int
+) -> None:
+    scope = close.SCOPES[phase]
+    sweep = _committed(phase)["sections"]["sweep_results"]
     raw = json.loads(
-        (close.archive_dir(close.REPO_ROOT, close.CANNED_SWEEP_ARCHIVE) / "report.json").read_text()
+        (close.archive_dir(close.REPO_ROOT, scope.canned_sweep) / "report.json").read_text()
     )
+    assert sweep["canned_sweep"]["archive"] == scope.canned_sweep
     assert sweep["canned_sweep"]["total"] == raw["total"] == 41
     assert sweep["canned_sweep"]["passed"] == raw["passed"] == 41
     assert sweep["canned_sweep"]["model_roles"] == [ModelRole.BENCHMARK.value]
     assert "no changes vs baseline" in sweep["canned_sweep"]["gate_lines"]
-    assert sweep["live_total"] == 4
-    assert sweep["live_passed"] == 3
+    assert sweep["live_total"] == live_total
+    assert sweep["live_passed"] == live_passed
+
+
+def test_the_root_cause_column_appears_only_where_something_was_graded() -> None:
+    """A row of zeroes would read as "every diagnosis was wrong"."""
+    phase1 = _committed(1)["sections"]["sweep_results"]
+    assert "root_cause" not in phase1["canned_sweep"]  # the labels did not exist yet
+    assert all("root_cause" not in leg for leg in phase1["live_legs"])
+
+    phase2 = _committed(2)["sections"]["sweep_results"]
+    diagnosis = phase2["canned_sweep"]["root_cause"]
+    assert (diagnosis["graded"], diagnosis["correct"], diagnosis["of_total"]) == (32, 32, 41)
+    assert all(leg["root_cause"]["graded"] == 1 for leg in phase2["live_legs"])
+    assert phase2["live_root_cause_on_seeded_legs"] == {
+        "correct": 3,
+        "graded": 3,
+        "why_only_these": phase2["live_root_cause_on_seeded_legs"]["why_only_these"],
+    }
+
+
+def test_the_read_only_pass_reports_the_regrade_and_never_the_withdrawn_figure() -> None:
+    """INC-003: the archive's own headline must not be quoted as a result."""
+    document = _committed(2)
+    block = document["sections"]["sweep_results"]["read_only_pass"]
+    assert block["archive"] == "0db6fe722f7c"
+    assert block["as_archived_passed"] == 20
+    assert block["regrade"]["totals"]["regraded_passed"] == 26
+    assert block["regrade"]["root_cause"]["regraded"] == {
+        "graded": 2,
+        "correct": 2,
+        "not_graded_world": 16,
+        "accuracy": 1.0,
+        "describe": block["regrade"]["root_cause"]["regraded"]["describe"],
+    }
+    assert block["regrade"]["files_verified_unchanged"] == 82
+
+    # The withdrawn figure appears exactly where it is labelled as withdrawn,
+    # and nowhere else in the human half.
+    rendered = _rendered(2)
+    quoted = [line for line in rendered.splitlines() if "11/18" in line]
+    assert len(quoted) == 3  # does-not-claim, the section-1 note, deviation D6
+    assert "WITHDRAWN" in rendered
+    for line in quoted:
+        assert "withdrawn" in line.lower(), line
 
 
 def test_the_gate_crossing_audit_covers_every_handoff_including_the_red_run_s_none() -> None:
-    audit = json.loads(artifacts.newest("phase_close_report").read_text())["sections"][
-        "gate_crossing_audit"
-    ]
+    audit = _committed(1)["sections"]["gate_crossing_audit"]
     assert audit["bar"] == close.REMEDIATE_BAR == 0.7
     by_archive = {run["archive"]: run for run in audit["runs"]}
-    assert set(by_archive) == {leg.archive_id for leg in close.LIVE_LEGS}
+    assert set(by_archive) == {leg.archive_id for leg in close.PHASE1.live_legs}
 
     red = by_archive["42000dfda188"]
     assert red["final_state"] == "escalated"
@@ -304,18 +419,41 @@ def test_the_gate_crossing_audit_covers_every_handoff_including_the_red_run_s_no
         assert run["verify_judgments"][-1]["verdict"] == "verified"
 
 
-def test_the_budget_section_reports_counts_and_says_why_the_diff_is_null() -> None:
-    budget = json.loads(artifacts.newest("phase_close_report").read_text())["sections"][
-        "budget_profile_diff"
-    ]
+@pytest.mark.parametrize("phase", PHASES)
+def test_the_budget_section_reports_counts_and_says_why_the_diff_is_null(phase: int) -> None:
+    budget = _committed(phase)["sections"]["budget_profile_diff"]
     assert budget["diff"] == "null"
     assert "O-14" in budget["why_null"]
     assert budget["budget_trips"] == []
-    assert len(budget["per_run"]) == len(close.LIVE_LEGS)
+    assert len(budget["per_run"]) == len(close.SCOPES[phase].live_legs)
     for row in budget["per_run"]:
         assert row["llm_calls_total"] == sum(row["llm_calls_by_role"].values())
         assert row["agent_tool_calls_billed"] <= row["max_tool_calls"]
         assert row["tokens_used"] < row["max_tokens"]
+
+
+def test_the_per_role_split_appears_only_once_the_records_exist() -> None:
+    """WP-2.3's column. A table of blanks would invite a comparison it cannot support."""
+    assert "per_role_totals" not in _committed(1)["sections"]["budget_profile_diff"]
+
+    budget = _committed(2)["sections"]["budget_profile_diff"]
+    roles = {row["role"]: row for row in budget["per_role_totals"]}
+    assert set(roles) == {
+        "investigation_planner",
+        "remediation_planner",
+        "briefing_writer",
+        "briefing_judge",
+        "verification_judge",
+    }
+    # Sorted by spend, planner first — the point of the column.
+    assert budget["per_role_totals"][0]["role"] == "investigation_planner"
+    assert roles["briefing_judge"]["charged_to_ledger"] is False  # the evaluator's own
+    # cmd #264 changed the answer mid-phase, so the column says so instead of
+    # picking whichever run it read first.
+    assert roles["briefing_writer"]["charged_to_ledger"] == "mixed"
+    assert "cmd #264" in budget["per_role_note"]
+    for row in budget["per_role_totals"]:
+        assert row["calls"] > 0 and row["tokens"] > 0 and row["elapsed_ms"] > 0
 
 
 def test_no_judge_calibration_was_owed_and_the_prompts_are_hashed() -> None:
@@ -328,11 +466,12 @@ def test_no_judge_calibration_was_owed_and_the_prompts_are_hashed() -> None:
     assert judge["why"].strip() and judge["evidence"].strip()
 
 
-def test_the_baseline_delta_cites_the_phase_0_artifact_by_id_and_finds_no_movement() -> None:
-    delta = json.loads(artifacts.newest("phase_close_report").read_text())["sections"][
-        "baseline_delta"
-    ]
-    assert delta["phase0_baseline_cited_by_id"] == close.PHASE0_BASELINE_CITED
+@pytest.mark.parametrize("phase", PHASES)
+def test_the_baseline_delta_cites_the_phase_0_artifact_by_id_and_blocks_on_nothing(
+    phase: int,
+) -> None:
+    delta = _committed(phase)["sections"]["baseline_delta"]
+    assert delta["phase0_baseline_cited_by_id"] == close.SCOPES[phase].phase0_baseline_cited
     assert (
         delta["phase0_baseline_resolved_by_artifacts_newest"]
         == artifacts.newest("baseline_report").name
@@ -343,12 +482,36 @@ def test_the_baseline_delta_cites_the_phase_0_artifact_by_id_and_finds_no_moveme
         assert comparison["dropped_scenarios"] == []
         assert comparison["dropped_dimensions"] == []
         assert comparison["vacated_assertions"] == []
-        assert comparison["row_level_differences"] == []
+    # Plan 03 § 14 step 6 blocks on UNEXPLAINED movement, which is derived,
+    # not declared: whatever a comparison could not account for lands here.
     assert delta["unexplained_movement"] == []
 
 
-def test_the_spend_line_is_the_archives_own_ledgers_not_an_estimate() -> None:
-    spend = json.loads(artifacts.newest("phase_close_report").read_text())["sections"]["spend_line"]
+def test_row_movement_is_classified_rather_than_asserted_away() -> None:
+    """Phase 1 saw zero differing rows; Phase 2 sees all 41 and must explain them.
+
+    Red before ``_classify_row_differences``: the section printed "41 differing
+    rows" beside a paragraph saying nothing had moved, and a reader had no way
+    to tell an added dimension from a changed verdict.
+    """
+    for comparison in _committed(1)["sections"]["baseline_delta"]["comparisons"]:
+        assert comparison["row_level_differences"] == []
+        assert "movement_by_a_dimension_this_phase_added" not in comparison
+
+    for comparison in _committed(2)["sections"]["baseline_delta"]["comparisons"]:
+        assert len(comparison["row_level_differences"]) == 41
+        explained = comparison["movement_by_a_dimension_this_phase_added"]
+        assert explained["rows"] == 41
+        assert explained["dimensions_added"] == {"root_cause": 41}
+        assert explained["all_passing"] is True
+        assert comparison["unexplained_row_differences"] == []
+
+
+@pytest.mark.parametrize(("phase", "plan_rows"), [(1, 3), (2, 4)])
+def test_the_spend_line_is_the_archives_own_ledgers_not_an_estimate(
+    phase: int, plan_rows: int
+) -> None:
+    spend = _committed(phase)["sections"]["spend_line"]
     total = Decimal("0")
     for row in spend["live_runs"]:
         raw = json.loads(
@@ -358,11 +521,47 @@ def test_the_spend_line_is_the_archives_own_ledgers_not_an_estimate() -> None:
         assert row["usd"] == ledger["usd_used"]
         assert row["agent_loop_wall_seconds"] == round(ledger["wall_seconds_used"], 3)
         assert row["tokens"] == ledger["tokens_used"]
-        assert row["start_to_finish_seconds"] >= row["agent_loop_wall_seconds"]
         total += Decimal(str(row["usd"]))
+    if (pass_row := spend.get("read_only_pass")) is not None:
+        total += Decimal(pass_row["usd"])
     assert Decimal(spend["live_total_usd"]) == total
     assert spend["canned_sweep"]["usd"] == "0.000000"
-    assert len(spend["against_plan_03_section_11"]) == 3
+    assert len(spend["against_plan_03_section_11"]) == plan_rows
+
+
+def test_the_bill_separates_the_agents_spend_from_the_evaluators() -> None:
+    """Two real numbers, and the difference between them is checkable.
+
+    The agent's ledger is what invariant 7 caps; the eval harness's briefing
+    judge is real money that would fail the ledger reconciliation if it were
+    folded in. Phase 1's archives carry no per-role record, so it reports one
+    total and the key is absent rather than equal to the other.
+    """
+    assert "live_total_usd_including_evaluator" not in _committed(1)["sections"]["spend_line"]
+
+    spend = _committed(2)["sections"]["spend_line"]
+    ledgers = Decimal(spend["live_total_usd"])
+    bill = Decimal(spend["live_total_usd_including_evaluator"])
+    assert bill > ledgers
+    assert bill - ledgers == Decimal(spend["evaluator_share_usd"])
+
+    # And the bill is the sum of every per-role row, evaluator roles included.
+    roles = _committed(2)["sections"]["budget_profile_diff"]["per_role_totals"]
+    assert sum((Decimal(role["usd"]) for role in roles), Decimal("0")) == bill
+
+
+def test_wall_time_comes_from_the_traces_because_one_ledger_meter_is_wrong() -> None:
+    """A finding, pinned: `648a32f2339d` records 0.057 s for a 58-second run.
+
+    The report says so rather than printing the figure straight, and this test
+    is what stops the caveat from being quietly dropped if the number changes.
+    """
+    spend = _committed(2)["sections"]["spend_line"]
+    row = next(r for r in spend["live_runs"] if r["archive"] == "648a32f2339d")
+    assert row["agent_loop_wall_seconds"] < 1
+    assert row["start_to_finish_seconds"] > 50
+    caps = _committed(2)["sections"]["budget_profile_diff"]["caps_note"]
+    assert "should NOT be trusted" in caps and "648a32f2339d" in caps
 
 
 # --------------------------------------------------------------------------
@@ -370,28 +569,117 @@ def test_the_spend_line_is_the_archives_own_ledgers_not_an_estimate() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_the_committed_report_regenerates_byte_for_byte() -> None:
-    """Every input is committed, so the document is a function of the repo.
+@pytest.mark.parametrize("phase", PHASES)
+def test_the_committed_report_regenerates_byte_for_byte(phase: int) -> None:
+    """Every input is committed, so each document is a function of the repo.
 
     If this fails, something the report READ has changed — a judge prompt, the
     blessed baseline, an archive. That is worth a look rather than a re-write:
     the report's claims are about the state those inputs were in.
+
+    Phase 1 is the load-bearing case for WO-R3-195: generalising the assembler
+    for a second phase must not move one byte of a document that is already
+    committed evidence.
     """
-    document = close.assemble(close.REPO_ROOT)
-    assert close.render_json(document) == artifacts.newest("phase_close_report").read_text()
-    assert close.render_markdown(document) == artifacts.newest("phase_close_report_md").read_text()
+    document = close.assemble(close.REPO_ROOT, close.SCOPES[phase])
+    committed_json, committed_md = close.committed(phase)
+    assert close.render_json(document) == committed_json.read_text()
+    assert close.render_markdown(document) == committed_md.read_text()
 
 
-def test_the_report_states_the_reduction_and_its_open_follow_ups() -> None:
-    document = json.loads(artifacts.newest("phase_close_report").read_text())
-    rendered = artifacts.newest("phase_close_report_md").read_text()
+@pytest.mark.parametrize("phase", PHASES)
+def test_the_report_states_its_reduction_and_its_open_follow_ups(phase: int) -> None:
+    document = _committed(phase)
+    rendered = _rendered(phase)
     assert {entry["id"] for entry in document["deviations"]} >= {"D1", "D2", "D3", "D4"}
-    assert "O-15" in rendered and "O-14" in rendered
-    assert {entry["id"] for entry in document["follow_ups"]} == {
+    assert "O-14" in rendered
+    assert document["follow_ups"]
+    assert all(
+        entry["what"].strip() and entry["status"].strip() for entry in document["follow_ups"]
+    )
+    assert document["incidents_row_reason"].strip()
+    assert document["claims"]["does_claim"] and document["claims"]["does_not_claim"]
+
+
+def test_each_phase_names_its_own_scope_decision_and_incident_answer() -> None:
+    assert "O-15" in _rendered(1)
+    assert _committed(1)["incidents_row_filed"] is False
+    assert {e["id"] for e in _committed(1)["follow_ups"]} == {
         "WO-R3-253",
         "WO-R3-255",
         "O-8",
     }
-    assert document["incidents_row_filed"] is False
-    assert document["incidents_row_reason"].strip()
-    assert document["claims"]["does_claim"] and document["claims"]["does_not_claim"]
+
+    assert "O-20" in _rendered(2)
+    # INC-003 was filed BEFORE its fix, which is the protocol; the close says so.
+    assert _committed(2)["incidents_row_filed"] is True
+    assert "INC-003" in _committed(2)["incidents_row_reason"]
+    assert {"WO-R3-266", "WO-R3-268 / O-21"} <= {e["id"] for e in _committed(2)["follow_ups"]}
+
+
+# --------------------------------------------------------------------------
+# DRAFT vs FINAL — derived from the scope, never set
+# --------------------------------------------------------------------------
+
+
+def test_the_draft_mark_is_derived_from_the_scope_not_hand_set() -> None:
+    """A status field anyone can type is one that will be typed wrong.
+
+    The only way to reach FINAL is to hold the evidence: put the pending
+    archives in ``live_legs`` and the ``PendingRerun`` entries go away with
+    them. There is no argument to ``assemble`` or ``draft_status`` that says
+    "this one is final".
+    """
+    drafted = close.draft_status(close.PHASE2)
+    assert drafted["status"] == "DRAFT"
+    assert len(drafted["pending_reruns"]) == 2
+    assert {entry["scenario"] for entry in drafted["pending_reruns"]} == {
+        "remediate_stale_cache_success",
+        "remediate_dlq_backlog_success",
+    }
+    for entry in drafted["pending_reruns"]:
+        assert "owner" in entry["blocked_on"]
+        assert entry["supersedes"] in {leg.archive_id for leg in close.PHASE2.live_legs}
+
+    # Phase 1 owes nothing and derives FINAL from the same function.
+    assert close.draft_status(close.PHASE1)["status"] == "FINAL"
+
+    # And so does Phase 2 once its two re-runs are in, with no other edit.
+    final = dataclasses.replace(close.PHASE2, pending_reruns=())
+    assert close.draft_status(final)["status"] == "FINAL"
+    assert close.draft_status(final)["pending_reruns"] == []
+
+
+def test_the_committed_phase_2_report_is_a_draft_and_says_what_is_owed() -> None:
+    document = _committed(2)
+    rendered = _rendered(2)
+    assert document["status"] == "DRAFT"
+    assert len(document["pending_reruns"]) == 2
+    assert "**DRAFT**" in rendered
+    assert "What is still owed" in rendered
+    for entry in document["pending_reruns"]:
+        assert f"`{entry['scenario']}`" in rendered
+
+    # Phase 1's document predates the field and must not grow one.
+    assert "status" not in _committed(1)
+
+
+def test_the_final_version_is_written_beside_the_draft_not_over_it(tmp_path: Path) -> None:
+    """Invariant 9: adding the re-runs must not aim at the draft's own path.
+
+    The stamp is the newest moment any evidence in scope was written, so a
+    scope with two newer archives in it lands on a new filename. Proven here by
+    moving the draft's own newest timestamp forward and watching the target
+    path change rather than collide.
+    """
+    document = close.assemble(close.REPO_ROOT, close.PHASE2)
+    first_json, first_md = close.write(document, root=tmp_path)
+    assert first_json.is_file() and first_md.is_file()
+    with pytest.raises(FileExistsError):
+        close.write(document, root=tmp_path)
+
+    later = json.loads(json.dumps(document))
+    later["sections"]["spend_line"]["live_runs"][-1]["run_finished_at"] = "2026-09-18T09:00:00Z"
+    second_json, _ = close.write(later, root=tmp_path)
+    assert second_json != first_json
+    assert first_json.read_text() == close.render_json(document)  # the draft is untouched

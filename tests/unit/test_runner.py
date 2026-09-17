@@ -4228,3 +4228,141 @@ class TestChaosTeardownBlocksFurtherLiveRuns:
         # what went wrong" is not a reason to carry on spending.
         (tmp_path / "block.json").write_text("{not json")
         assert runner_module.chaos_block_reason() is not None
+
+
+def _never_stopping_scenario(name: str = "iteration_override_probe") -> Scenario:
+    """A canned scenario whose planner probes forever and never stops.
+
+    The loop's own iteration bound is the only thing that ends it, so the
+    number of probes it got through IS the bound it ran under — which is the
+    observable ``MAX_ITERATIONS_OVERRIDE`` has to move. Six planner responses
+    (one more than the default bound of 5) and a tool-call ceiling of nine, so
+    neither the canned queue nor the budget can end the run first and stand in
+    for the bound.
+    """
+    probe = {
+        "hypotheses": [
+            {
+                "category": "consumer_saturation",
+                "name": "consumer_saturation",
+                "confidence": 0.55,
+                "reasoning": "Paging severity on the billing consumer.",
+            }
+        ],
+        "next_action": {
+            "kind": "probe",
+            "tool_name": "get_consumer_lag",
+            "arguments": {"consumer_group": "billing"},
+        },
+    }
+    return Scenario(
+        name=name,
+        alert=AlertPayload(source="platform.kafka", severity="high", group="billing"),
+        expectation=ScenarioExpectation(
+            name=name,
+            expected_terminal_state=IncidentState.ESCALATED,
+            max_tool_calls=9,
+        ),
+        canned_tool_responses={
+            "get_consumer_lag": ToolResult(
+                content=[
+                    {
+                        "type": "text",
+                        "text": (
+                            '{"consumer_group":"billing","lag":42,"lag_known":true,'
+                            '"source":"static",'
+                            '"cache_key":"kafka:consumer_lag:worker-dispatcher"}'
+                        ),
+                    }
+                ],
+            )
+        },
+        canned_llm_responses={"investigation_planner": [dict(probe) for _ in range(6)]},
+    )
+
+
+class TestMaxIterationsOverrideReachesTheLoop:
+    """WO-R3-256: WP-2.4's third knob had no consumer.
+
+    ``MAX_ITERATIONS_OVERRIDE`` landed on ``Settings`` with cmd #251 and the
+    one call site that could honor it — ``make_llm_investigate`` here — was
+    owned by another packet that wave, so the setting configured nothing. It
+    is harmless while ``baseline`` is the only strategy (its override is
+    unset) and wrong the moment a strategy that needs more or fewer planner
+    steps than five is run: the run would be measured under the fleet default
+    while its provenance named a strategy that asked for something else.
+    """
+
+    def test_the_default_bound_is_five_planner_steps(self) -> None:
+        """The control: unset means the loop's own default, unchanged."""
+        result = run_scenario(_never_stopping_scenario(), _test_settings())
+        assert result.outcome.tool_calls_used == 5
+
+    def test_the_override_bounds_the_investigation_loop(self) -> None:
+        result = run_scenario(
+            _never_stopping_scenario(),
+            _test_settings(max_iterations_override=2),
+        )
+        assert result.outcome.tool_calls_used == 2
+
+    def test_the_override_can_widen_the_bound_too(self) -> None:
+        """Not only downward: a strategy may need more steps than five."""
+        result = run_scenario(
+            _never_stopping_scenario(),
+            _test_settings(max_iterations_override=6),
+        )
+        assert result.outcome.tool_calls_used == 6
+
+
+class TestCrashPathLedgerIsSeededFromTheScaledCeilings:
+    """WO-R3-256: a crash row must not report the UNSCALED ceilings.
+
+    ``_crashed_result`` rebuilds the ledger a run "would have been seeded
+    with" when the crash carried no partial one. It read
+    ``budget_max_tokens`` / ``budget_max_usd`` directly, which are the
+    configured ceilings BEFORE WP-2.4's per-strategy multipliers — so under a
+    non-1.0 multiplier the row named budgets no run would ever have had, and
+    a cost table built from crashed rows would compare a scaled run against
+    unscaled ceilings.
+    """
+
+    def _crash_budget(self, **overrides: Any) -> BudgetLedger:
+        result = _crashed_result(
+            _passing_scenario(),
+            RuntimeError("platform unreachable"),
+            settings=_test_settings(**overrides),
+        )
+        provenance = result.outcome.provenance
+        assert provenance is not None
+        return provenance.budget
+
+    def test_a_doubled_token_ceiling_reaches_the_crash_row(self) -> None:
+        budget = self._crash_budget(
+            budget_max_tokens=500_000,
+            token_budget_multiplier=Decimal("2"),
+        )
+        assert budget.max_tokens == 1_000_000
+
+    def test_a_doubled_dollar_ceiling_reaches_the_crash_row(self) -> None:
+        budget = self._crash_budget(
+            budget_max_usd=Decimal("5.00"),
+            usd_budget_multiplier=Decimal("2"),
+        )
+        assert budget.max_usd == Decimal("10.00")
+
+    def test_the_unmultiplied_dimensions_are_untouched(self) -> None:
+        """Tool calls and wall seconds are never scaled (WP-2.4)."""
+        budget = self._crash_budget(
+            budget_max_seconds=1_800,
+            token_budget_multiplier=Decimal("2"),
+            usd_budget_multiplier=Decimal("2"),
+        )
+        # The scenario's own declared cap, not the fleet default, and not
+        # doubled (ADR 0019 + WP-2.4).
+        assert budget.max_tool_calls == 5
+        assert budget.max_wall_seconds == 1_800
+
+    def test_the_baseline_multipliers_leave_the_row_where_it_was(self) -> None:
+        budget = self._crash_budget(budget_max_tokens=500_000, budget_max_usd=Decimal("5.00"))
+        assert budget.max_tokens == 500_000
+        assert budget.max_usd == Decimal("5.00")

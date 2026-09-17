@@ -578,6 +578,33 @@ This replaced four "refreshable pointer" files that each run rewrote in place. T
 
 **Cost.** Disk use now grows with every run rather than staying flat: on the order of a few KB per scenario per run, so a daily 38-scenario suite adds a few MB a month across all four families. That is the price of these files being evidence, and it is the price `evals/runs/` already pays. Pruning is a deliberate, announced operation — never something a run does to itself.
 
+## Cost, latency, and context accounting
+
+Every row of the aggregate report carries an `accounting` record beside its `provenance` one: what the run spent, on which prompt role, over how many planner steps, and how much context each of those steps carried (plan 03 § 7.8, plan 02 § 17). It is built by `src/incident_commander/agent/accounting.py::RunAccounting` and written by `evals/runner.py::build_accounting`.
+
+The reason it exists is comparison. A strategy that samples eight candidates per planner step spends roughly eight times the control group's tokens on the same incident, and the accuracy/cost frontier the later phases are built to draw needs to say *where* the extra money went. A run total cannot: it cannot tell "this strategy reasoned more" from "this incident needed more remediation".
+
+| Field | What it is |
+|---|---|
+| `by_role` | one row per prompt role that billed anything — `investigation_planner`, `remediation_planner`, `verification_judge`, `briefing_writer`, `briefing_judge` — each with its call count, the four provider token counters kept apart, the discarded-attempt charge, the role's token volume, its dollars and its elapsed milliseconds |
+| `charged_to_ledger` (per role) | whether that role's calls reached the run's own `BudgetLedger`. True for the three roles inside the state machine; **false** for the briefing writer and the briefing judge, which are billed after the run reaches a terminal state and are not metered by it |
+| `llm_calls`, `tool_calls`, `wall_seconds`, `llm_elapsed_ms` | the run's shape: model calls, tool calls and wall clock off the ledger, and the time spent *inside* model calls. The last two are deliberately different numbers — the loop also probes, waits out ADR 0009's freshness window and grades, and a latency column that conflated them would bill a 75-second sleep to the model |
+| `tokens_used` / `usd_used` | every role, the evaluator's own spend included |
+| `charged_tokens_used` / `charged_usd_used` | only the roles the ledger was charged for |
+| `ledger_tokens_used` / `ledger_usd_used` / `reconciled` | the ledger's own totals, and whether the charged split equals them |
+| `selector_calls`, `branch_count` | the strategy dimensions. Both **0 for `baseline`, written rather than omitted**: a later strategy's row carries real numbers, and a reader comparing the two must not have to guess what a missing key meant. `branch_count` counts candidates considered *beyond* the one emitted, so the control group's is zero by construction rather than equal to its step count |
+| `planner_steps`, `planner_input_tokens`, `planner_context_chars` | per step, in order, each with its total. The first is the provider's count of the context the planner was fed — honestly `0` on a canned run, which bills nothing — and the second is that same context measured locally in characters, which is the measurement the offline suite *can* make |
+
+Three rules hold this record down:
+
+- **Costs come from `llm/pricing.py::cost_of`, never re-derived.** That function prices the four token classes separately (cache creation at 1.25x input, cache read at 0.1x) and bills `discarded_output_tokens` at the output rate on purpose (ADR 0015), so a thrown-away attempt cannot under-bill. A model with no pinned price row bills at the per-class ceiling of every registered row, never at zero.
+- **The split reconciles with the ledger, and says so in the artifact.** Both sides are built from the same `LLMUsage` objects by the same two functions — `token_volume` for the count and `cost_of` for the money — so `reconciled` is an equality, not a tolerance. `make eval` prints a `COST UNRECONCILED` line naming the scenarios if it is ever false. A breakdown that does not add up to the total it breaks down is worse than no breakdown: every cost column in every comparison is computed from it, and a dropped leg reports one arm as cheaper than it was.
+- **A billed call is recorded whatever it produced.** A call that was billed and then raised — a truncated response, an exhausted retry loop, an output the schema rejected — is recorded with `failed: true`. The ADR-0035 repair path therefore appears as two records for one planner step, which is exactly how the ledger charges it, and the step's own `llm_calls` entry carries the ledger delta across the whole step beside the counters of the call that parsed.
+
+**Context handling is instrumentation, held constant across strategies.** This packet introduces no compaction and no per-probe summarisation: every strategy's planner call is rendered by the same `investigation._format_planner_context`, and `planner_context_chars` measures that exact string. If a future packet adds compaction, it applies to every arm at once — a compaction difference between two arms is a confound that invalidates the comparison, not a strategy (plan 02 § 17, decision C11). Say so in the packet that adds it, and record the choice here.
+
+Two things the record deliberately does not claim. Per-call latency is measured around the call by the accounting wrapper, so a `0` there means "under half a millisecond", while `StepRecord`'s own `elapsed_ms` stays `null` because nothing in `llm/client.py` times a call — `null` says "not measured" where a zero would read as a measurement. And `accounting` itself is `null` on every archived report, on the committed baseline, and on a crash that died before the first call: absent means "no measurement exists", never "this run was free".
+
 ## Regression gating
 
 `make eval-reg` runs the full suite offline and compares against `evals/reports/baseline.json`. Behavior-changing PRs that touch prompts, tools, policy tiers, or the pinned model must pass. When a scenario's expectation legitimately shifts (new tool, new prompt, new grader dim), `make baseline` regenerates the baseline — commit the diff so the reviewer sees the metric movement.

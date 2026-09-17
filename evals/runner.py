@@ -12,6 +12,7 @@ import uuid
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
@@ -55,10 +56,14 @@ from evals.preconditions import unmet
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import ChaosHook, ChaosPlan, Scenario
 from evals.tracing import JsonlTracer, TraceKind, tracer_for
+from incident_commander.agent.accounting import RunAccounting
 from incident_commander.agent.briefing import EscalationBriefing, render_briefing
 from incident_commander.agent.briefing_enrichment import enrich_briefing
 from incident_commander.agent.factory import start_run
-from incident_commander.agent.investigation import make_llm_investigate
+from incident_commander.agent.investigation import (
+    _DEFAULT_MAX_ITERATIONS,
+    make_llm_investigate,
+)
 from incident_commander.agent.loop import run_to_completion
 from incident_commander.agent.orchestrator import TRANSITIONS, Transition
 from incident_commander.agent.remediation import (
@@ -328,6 +333,132 @@ def build_provenance(
     )
 
 
+class RoleAccounting(BaseModel):
+    """One prompt role's share of a run's bill (plan 03 § 7.8).
+
+    Role is the unit because it is the one a strategy changes: a best-of-N
+    arm spends its extra tokens in ``investigation_planner`` and nowhere
+    else, so a run total alone cannot tell "the strategy cost more" from
+    "the incident needed more remediation".
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    role: str
+    # Whether this role's calls reached the run's own BudgetLedger. The
+    # briefing judge and the briefing writer are billed AFTER the run reaches
+    # a terminal state and are not metered by it, so a reconciliation that
+    # folded them in would fail on every run — see RunAccountingRecord below.
+    charged_to_ledger: bool
+    calls: int
+    input_tokens: int
+    output_tokens: int
+    cache_creation_tokens: int
+    cache_read_tokens: int
+    discarded_output_tokens: int
+    tokens_used: int
+    usd_used: Decimal
+    elapsed_ms: int
+
+
+class RunAccountingRecord(BaseModel):
+    """What one run cost, how long it took, and how much context it carried.
+
+    Divergence D3, the half WP-0.3 left open. WP-0.3 put the run's own ledger
+    on the row, which answers "what did this run spend in total?". It cannot
+    answer "on which role?", "over how many planner steps?" or "how much
+    context did each step carry?" — and those are the columns the
+    accuracy/cost frontier in Phases 6, 9, 12 and 13 is drawn from. Divergence
+    D4 is the same gap one layer out: the campaign's cost figures live in
+    prose because no artifact carried them.
+
+    ``reconciled`` is the field that makes the rest usable. The charged split
+    is built from the same ``LLMUsage`` objects the ledger was charged with,
+    so it should equal the ledger exactly; the row states both sides and
+    whether they matched, rather than asserting agreement a reader cannot
+    check (``agent/accounting.py::RunAccounting.reconciles_with`` names the
+    one path that can legitimately differ, and in which direction).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    by_role: tuple[RoleAccounting, ...] = ()
+    llm_calls: int = 0
+    # From the run's own ledger, not counted again here.
+    tool_calls: int = 0
+    wall_seconds: float = 0.0
+    # Time spent inside LLM calls. Deliberately not the same number as
+    # ``wall_seconds``: the loop also probes, waits out ADR 0009's freshness
+    # window and grades, and a latency column that conflated the two would
+    # attribute a 75-second sleep to the model.
+    llm_elapsed_ms: int = 0
+    # Every role, the evaluator's own spend included.
+    tokens_used: int = 0
+    usd_used: Decimal = Decimal("0")
+    # Only the roles the run's ledger was charged for.
+    charged_tokens_used: int = 0
+    charged_usd_used: Decimal = Decimal("0")
+    ledger_tokens_used: int = 0
+    ledger_usd_used: Decimal = Decimal("0")
+    reconciled: bool = True
+    # Zero for ``baseline``, and WRITTEN as zero rather than omitted: a
+    # later strategy's row carries real numbers here, and a reader comparing
+    # the two must not have to decide what a missing key meant.
+    selector_calls: int = 0
+    branch_count: int = 0
+    planner_steps: int = 0
+    # Per step, in order, and the total beside it (plan 02 § 17).
+    planner_input_tokens: tuple[int, ...] = ()
+    planner_input_tokens_total: int = 0
+    planner_context_chars: tuple[int, ...] = ()
+    planner_context_chars_total: int = 0
+
+
+def build_accounting(accounting: RunAccounting, budget: BudgetLedger) -> RunAccountingRecord:
+    """Assemble one run's accounting row from the run's own measurements.
+
+    Takes the ledger rather than reading it back off the report for the same
+    reason ``build_provenance`` does: the number the row reconciles against
+    has to be the one the run actually finished with.
+    """
+    return RunAccountingRecord(
+        by_role=tuple(
+            RoleAccounting(
+                role=role.role,
+                charged_to_ledger=role.charged_to_ledger,
+                calls=role.calls,
+                input_tokens=role.input_tokens,
+                output_tokens=role.output_tokens,
+                cache_creation_tokens=role.cache_creation_tokens,
+                cache_read_tokens=role.cache_read_tokens,
+                discarded_output_tokens=role.discarded_output_tokens,
+                tokens_used=role.tokens_used,
+                usd_used=role.usd_used,
+                elapsed_ms=role.elapsed_ms,
+            )
+            for role in accounting.roles
+        ),
+        llm_calls=accounting.llm_calls,
+        tool_calls=budget.tool_calls_used,
+        wall_seconds=budget.wall_seconds_used,
+        llm_elapsed_ms=accounting.elapsed_ms,
+        tokens_used=accounting.tokens_used,
+        usd_used=accounting.usd_used,
+        charged_tokens_used=accounting.charged_tokens_used,
+        charged_usd_used=accounting.charged_usd_used,
+        ledger_tokens_used=budget.tokens_used,
+        ledger_usd_used=budget.usd_used,
+        reconciled=accounting.reconciles_with(budget),
+        selector_calls=accounting.selector_calls,
+        branch_count=accounting.branch_count,
+        planner_steps=len(accounting.steps),
+        planner_input_tokens=accounting.planner_input_tokens,
+        planner_input_tokens_total=sum(accounting.planner_input_tokens),
+        planner_context_chars=accounting.planner_context_chars,
+        planner_context_chars_total=sum(accounting.planner_context_chars),
+    )
+
+
 class ScenarioOutcome(BaseModel):
     """One scenario's run + grade, persisted in the aggregate report."""
 
@@ -404,6 +535,11 @@ class ScenarioOutcome(BaseModel):
     # the reader tolerates its absence (ADR 0013's own precedent for
     # ``live_mcp``/``live_llm`` above).
     provenance: RunProvenance | None = None
+    # What the run cost, by role and by step (WP-2.3). ``None`` means "no
+    # measurement exists", which is every archived report, the committed
+    # baseline, and a crash that died before a single call was made — never
+    # "this run was free", which is what a zeroed record would have said.
+    accounting: RunAccountingRecord | None = None
 
 
 class _GroupingKeys(TypedDict):
@@ -632,6 +768,11 @@ class ScenarioCrash(Exception):
         # says what happened to the world, and the second one decides
         # whether the next live run may start at all.
         self.teardown_error: str | None = None
+        # What the run had billed when it died, by role (WP-2.3). Same
+        # reasoning as ``checkpoints``: a crashed run's spend is still spend,
+        # and a crash row that cannot name it leaves the cost columns a lower
+        # bound that reads like a measurement.
+        self.accounting: RunAccounting | None = None
 
     @property
     def final(self) -> RunState | None:
@@ -1234,6 +1375,34 @@ def run_scenario(
         briefing_llm = CannedLLMClient(scenario.canned_llm_responses.get("briefing_writer", []))
         judge_llm = CannedLLMClient(scenario.canned_llm_responses.get("briefing_judge", []))
 
+    # The two clients whose queues are read AFTER the run, to decide whether
+    # there is a canned response left to spend. Bound before the metering
+    # wrappers below, because ``has_remaining`` is the canned client's own
+    # question and a wrapper is not a ``CannedLLMClient``.
+    briefing_canned = briefing_llm if isinstance(briefing_llm, CannedLLMClient) else None
+    judge_canned = judge_llm if isinstance(judge_llm, CannedLLMClient) else None
+
+    # Cost, latency and context accounting for this run (WP-2.3). Every LLM
+    # client the run can reach is wrapped, so the split is complete by
+    # construction rather than by remembering to instrument each new call
+    # site — and it covers the canned suite, where there is no tracer to
+    # derive a split from (divergence D1).
+    #
+    # ``charged_to_ledger`` is declared HERE because this is the only place
+    # that knows it. Both post-run roles are billed and neither reaches
+    # ``BudgetLedger``: ``enrich_briefing`` runs after the state machine has
+    # reached a terminal state, and the briefing judge is the evaluator's own
+    # spend, not the agent's. They are recorded either way — a billed call
+    # missing from the record is the under-report ADR 0015 exists to prevent
+    # — and kept out of the reconciliation, which is a statement about the
+    # ledger.
+    accounting = RunAccounting()
+    investigation_llm = accounting.meter(investigation_llm, "investigation_planner")
+    remediation_planner_llm = accounting.meter(remediation_planner_llm, "remediation_planner")
+    verification_judge_llm = accounting.meter(verification_judge_llm, "verification_judge")
+    briefing_llm = accounting.meter(briefing_llm, "briefing_writer", charged_to_ledger=False)
+    judge_llm = accounting.meter(judge_llm, "briefing_judge", charged_to_ledger=False)
+
     # The inference strategy for this run (WP-0.2). Resolved here — the edge
     # that owns configuration — and passed to both the loop that runs it and the
     # provenance record that names it, so the two cannot disagree about which
@@ -1246,15 +1415,28 @@ def run_scenario(
         investigation_llm,
         model=settings.agent_model,
         strategy=strategy,
-        # Where this run's per-step research records go. ``None`` when no
-        # tracer was built (no ``EVAL_TRACE_DIR``): the strategy still builds
-        # every record, nothing reads them, and the run is byte-identical.
-        record_step=_step_sink(tracer) if tracer is not None else None,
+        # Where this run's per-step research records go: always to the run's
+        # accounting (WP-2.3 needs the context size of every step, on every
+        # run), and on to the trace store as well when one was built. A run
+        # without ``EVAL_TRACE_DIR`` still writes no trace file — the sink
+        # composes, it does not choose.
+        record_step=accounting.step_sink(_step_sink(tracer) if tracer is not None else None),
         # Freshness re-probe (ADR 0009) is live-only: canned tool responses
         # are instant-consistent, and a re-probe would consume an extra
         # scripted planner response, breaking every canned scenario.
         reprobe_attempts=(settings.investigate_reprobe_attempts if live_mcp_available else 0),
         reprobe_delay_seconds=settings.investigate_reprobe_delay_seconds,
+        # WP-2.4's third knob, wired here because this is its only consumer
+        # (WO-R3-256): a strategy that needs more or fewer planner steps than
+        # the loop's default says so through ``MAX_ITERATIONS_OVERRIDE``, and
+        # until this line the setting configured nothing. Unset means the
+        # loop's own default, named rather than re-declared — a second copy of
+        # the number here would drift from the one the loop actually enforces.
+        max_iterations=(
+            _DEFAULT_MAX_ITERATIONS
+            if settings.max_iterations_override is None
+            else settings.max_iterations_override
+        ),
     )
     # Phase 6 remediation loop: PLANNING → REMEDIATING → VERIFYING. Each
     # role gets its own LLM client so canned queues stay role-partitioned
@@ -1330,9 +1512,7 @@ def run_scenario(
         # still makes no LLM call of its own; it reads a finished object.
         briefing = render_briefing(final)
         briefing_error: str | None = None
-        if scenario.use_live_llm or (
-            isinstance(briefing_llm, CannedLLMClient) and briefing_llm.has_remaining
-        ):
+        if scenario.use_live_llm or (briefing_canned is not None and briefing_canned.has_remaining):
             try:
                 briefing = enrich_briefing(briefing, briefing_llm, model=settings.agent_model)
             except (LLMError, ValidationError) as err:
@@ -1365,9 +1545,7 @@ def run_scenario(
         )
         judge_score: JudgeScore | None = None
         judge_error: str | None = None
-        if scenario.use_live_llm or (
-            isinstance(judge_llm, CannedLLMClient) and judge_llm.has_remaining
-        ):
+        if scenario.use_live_llm or (judge_canned is not None and judge_canned.has_remaining):
             try:
                 judge_score = judge_briefing(briefing, judge_llm, model=settings.judge_model)
             except (LLMError, ValidationError) as err:
@@ -1399,6 +1577,10 @@ def run_scenario(
             live_mcp_client.close()
             live_mcp_client = None
         crash.teardown_error = _tear_down()
+        # What the run had billed before it died. The crash row is the
+        # only place this can reach a report, and a crashed run's spend
+        # is spend (invariant 9 one layer down).
+        crash.accounting = accounting
         # Re-raise carrying the run's own history, so the crash row reports
         # what the scenario actually spent instead of a hardcoded zero.
         raise crash from exc
@@ -1448,6 +1630,9 @@ def run_scenario(
             # The strategy object the loop above actually ran with.
             strategy=strategy,
         ),
+        # What it cost, by role and by planner step, reconciled against the
+        # same ledger the provenance above carries (WP-2.3).
+        accounting=build_accounting(accounting, final.budget),
     )
     if tracer is not None:
         tracer.write(
@@ -1607,6 +1792,19 @@ def _crashed_result(
         crash_class = "shared-env"
     else:
         crash_class = "transport"
+    # What the crash had billed, when the crash carried the measurement AND a
+    # checkpoint to reconcile it against. ``None`` means no measurement exists
+    # — a direct call from a test, or a failure before the first client was
+    # built — and it is deliberately distinct from a zeroed record, which
+    # would claim the run was free. The two conditions travel together in
+    # practice: every LLM call the agent makes is inside a transition, and a
+    # transition that ran left a checkpoint behind it.
+    crash_accounting = exc.accounting if isinstance(exc, ScenarioCrash) else None
+    accounting = (
+        None
+        if crash_accounting is None or partial is None
+        else build_accounting(crash_accounting, partial.budget)
+    )
     outcome = ScenarioOutcome(
         scenario=scenario.name,
         **_grouping_keys(scenario),
@@ -1657,20 +1855,31 @@ def _crashed_result(
                 # The partial ledger when the crash carried one (what the
                 # run had actually spent), else the ledger it would have
                 # been seeded with — never zeros standing in for unknowns.
+                #
+                # "Would have been seeded with" is asked of the seed itself
+                # (WO-R3-256). This used to be a second copy of ``start_run``'s
+                # body, and it had already drifted: WP-2.4 made the token and
+                # dollar ceilings per-strategy multiples of the configured
+                # ones, the copy went on reading the configured ones, and under
+                # a non-1.0 multiplier a crash row named budgets no run would
+                # ever have had. One seam — the same argument WP-2.4 makes for
+                # the multipliers themselves, and the reason
+                # ``tests/unit/test_budgets.py`` reads the source to keep the
+                # scaled ceilings out of every file but ``config.py`` and
+                # ``factory.py``.
                 budget=(
                     partial.budget
                     if partial is not None
-                    else BudgetLedger(
-                        max_tool_calls=(
-                            scenario.expectation.max_tool_calls or settings.budget_max_tool_calls
-                        ),
-                        max_tokens=settings.budget_max_tokens,
-                        max_wall_seconds=settings.budget_max_seconds,
-                        max_usd=settings.budget_max_usd,
-                    )
+                    else start_run(
+                        scenario.agent_visible().alert,
+                        settings,
+                        datetime.now(UTC),
+                        max_tool_calls=scenario.expectation.max_tool_calls,
+                    ).budget
                 ),
             )
         ),
+        accounting=accounting,
     )
     # Invariant 9: the evidence a crashed run did produce is still evidence.
     # An empty trajectory under a nil incident id is not "no data", it is
@@ -2161,6 +2370,31 @@ def _print_summary(report: RunReport) -> None:
             f"mean overall {report.judge_mean_overall:.2f}"
         )
     print(root_cause_coverage(report).describe())
+    # The run's bill, from the rows' own accounting records (WP-2.3) rather
+    # than re-added from settings or a trace — the console number and the
+    # artifact number are then the same value by construction, the rule the
+    # degraded line above was written for (A-01). Silent on a canned suite,
+    # where every fake bills nothing and a "$0.000000" line would be noise.
+    accounted = [o.accounting for o in report.outcomes if o.accounting is not None]
+    if any(row.usd_used > 0 for row in accounted):
+        unreconciled = [
+            o.scenario
+            for o in report.outcomes
+            if o.accounting is not None and not o.accounting.reconciled
+        ]
+        print(
+            f"cost: ${sum((row.usd_used for row in accounted), Decimal('0')):.6f}, "
+            f"{sum(row.tokens_used for row in accounted)} tokens, "
+            f"{sum(row.llm_calls for row in accounted)} LLM calls, "
+            f"{sum(row.tool_calls for row in accounted)} tool calls"
+        )
+        if unreconciled:
+            # Never silent: a split that does not add up to the ledger is the
+            # one thing this record exists to make impossible to miss.
+            print(
+                "COST UNRECONCILED: the per-role split does not equal the "
+                f"budget ledger for {', '.join(unreconciled)}"
+            )
     for outcome in report.outcomes:
         mark = "PASS" if outcome.report.passed else "FAIL"
         judge_hint = ""

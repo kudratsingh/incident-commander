@@ -242,6 +242,21 @@ KINDS: Final[dict[str, ArtifactKind]] = {
     "research_report_md": ArtifactKind(
         ("evals", "reports"), ".md", fixed_stem="research_report", folder="research"
     ),
+    # `make regrade-archive ARCHIVE=<id>` (scripts/regrade_archive.py) — one
+    # locked archive re-graded from its own trajectories under today's rules
+    # (WO-R3-265, INC-003). Its own stem and folder for the same reason as
+    # every pair above, and one more that is specific to it: this document is
+    # ABOUT an archive, and the archive it is about is never rewritten. The
+    # re-grade therefore has to land somewhere else, be versioned, and never
+    # replace a previous re-grade of the same run — two re-grades under two
+    # rule sets are two facts, and the older one is the record of what the
+    # numbers were when somebody quoted them.
+    "regrade_report": ArtifactKind(
+        ("evals", "reports"), ".json", fixed_stem="regrade_report", folder="regrades"
+    ),
+    "regrade_report_md": ArtifactKind(
+        ("evals", "reports"), ".md", fixed_stem="regrade_report", folder="regrades"
+    ),
 }
 
 

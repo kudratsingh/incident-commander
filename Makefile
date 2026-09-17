@@ -49,6 +49,9 @@ help:
 	@echo "                   committed archives: one leaderboard per model, grouped by the seven"
 	@echo "                   WP-2.5 keys, every difference beside its paired-trial count."
 	@echo "                   Reads only, spends nothing. --write persists it; --scan lists scope"
+	@echo "  regrade-archive  re-grade one locked run archive under today's rules from its own"
+	@echo "                   trajectories; ARCHIVE=<run id> REQUIRED. Reads only, spends"
+	@echo "                   nothing, never touches the archive. WRITE=1 persists the report"
 	@echo "  world-dossier    FREE (zero-LLM) pre-run reading of one scenario's fault world;"
 	@echo "                   ONLY=<name> REQUIRED, full scenario name. Seeds chaos, reads"
 	@echo "                   every probe the agent will make, lints, resets, re-audits."
@@ -68,7 +71,7 @@ help:
 inventory:
 	uv run python -m evals.inventory
 
-.PHONY: world-audit baseline-report phase-close-report research-report
+.PHONY: world-audit baseline-report phase-close-report research-report regrade-archive
 world-audit:
 	PLATFORM_COMPOSE="$(PLATFORM_COMPOSE)" uv run python -m evals.world_audit --roots "$(ROOTS)"
 
@@ -80,6 +83,21 @@ phase-close-report:
 
 research-report:
 	uv run python -m evals.research_report
+
+# Re-grade one locked archive under today's rules (WO-R3-265, INC-003). Reads
+# only: no model call, no platform, nothing spent, and the archive itself is
+# sha256-verified unchanged. ARCHIVE= is required — there is no "re-grade
+# everything" default, because a re-grade is a statement about one run.
+# RUNS_DIR= points at another checkout's evals/runs when the locked original
+# lives there; WRITE=1 persists the versioned JSON + Markdown pair.
+ifdef ARCHIVE
+regrade-archive:
+	PYTHONPATH=. uv run python scripts/regrade_archive.py $(ARCHIVE) \
+		$(if $(RUNS_DIR),--runs-dir $(RUNS_DIR),) $(if $(WRITE),--write,)
+else
+regrade-archive:
+	$(error 'make regrade-archive' needs ARCHIVE=<run id>, e.g. ARCHIVE=0db6fe722f7c)
+endif
 
 setup:
 	uv sync --all-groups

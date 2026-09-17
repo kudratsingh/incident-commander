@@ -6,6 +6,7 @@
 - `baseline/` — `make baseline-report` output, the JSON and the same document as Markdown. Committed.
 - `phase-close/` — `make phase-close-report` output, same pair. Committed.
 - `research/` — `make research-report` output, same pair: the aggregate leaderboard across the committed archives, one model per table, every difference beside its paired-trial count. Committed.
+- `regrades/` — `make regrade-archive ARCHIVE=<run id>` output, same pair: one locked run archive re-graded under today's rules, from its own trajectories. The archive itself is never touched (its sha256s are in the JSON), so a correction to a paid run's numbers lives here, beside the evidence rather than inside it. Committed.
 - `dossiers/<scenario>/` — `make world-dossier ONLY=<scenario>`: the free read of a fault world before a paid run.
 - `human/<scenario>/` — the readable step-by-step trajectory of each run, rendered from `evals/traces/`. Start here to see what the agent did.
 - `human/_superseded/<scenario>/` — earlier renders of a run that has a newer one. Kept, never deleted; just out of the way.

@@ -21,30 +21,37 @@ The three claims worth holding onto, and each has a test below:
 from __future__ import annotations
 
 import json
-from datetime import datetime
-from typing import Any
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any, Final
+from uuid import uuid4
 
 import pytest
 from pydantic import BaseModel, ValidationError
 
 from evals.graders.deterministic import DimensionResult, GradeDimension, GradeReport
+from evals.graders.llm_judge import JudgeScore, judge_briefing
 from evals.runner import _classify_failure
 from incident_commander.agent.briefing import EscalationBriefing
 from incident_commander.agent.briefing_enrichment import BriefingContent, enrich_briefing
 from incident_commander.agent.hypothesis import InvestigationStep
 from incident_commander.agent.investigation import make_llm_investigate
-from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
+from incident_commander.agent.remediation import RemediationPlan, make_llm_verify
+from incident_commander.agent.state import BudgetLedger, EvidenceEntry, IncidentState, RunState
 from incident_commander.llm.client import LLMError, LLMOutputError, LLMResult, LLMUsage
+from incident_commander.llm.fakes import CannedLLMClient
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.repair import (
     INVESTIGATION_PLANNER_INVALID,
     MAX_OUTPUT_REPAIRS,
     OUTPUT_INVALID_PREFIXES,
     PLANNER_OUTPUT_INVALID_CLASS,
+    VERIFY_JUDGE_INVALID,
     OutputRepairExhausted,
     call_with_output_repair,
     repair_message,
 )
+from incident_commander.tools.mcp_client import ToolResult
 
 _GOOD_STEP: dict[str, Any] = {
     "hypotheses": [{"category": "unknown", "name": "n", "confidence": 0.5, "reasoning": "r"}],
@@ -128,6 +135,81 @@ class _NoMCP:
         timeout_seconds: float | None = None,
     ) -> Any:
         raise AssertionError(f"no tool call expected, got {name}")
+
+
+class _SequencedMCP:
+    """Returns one canned ``ToolResult`` per call, in order."""
+
+    def __init__(self, results: list[ToolResult]) -> None:
+        self._results = list(results)
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def call_tool(
+        self,
+        name: str,
+        arguments: Any,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ToolResult:
+        self.calls.append((name, dict(arguments)))
+        return self._results.pop(0)
+
+
+def _lag_result(lag: int) -> ToolResult:
+    payload = {
+        "consumer_group": "worker-dispatcher",
+        "lag": lag,
+        "lag_known": True,
+        "source": "live",
+        "cache_key": "kafka:consumer_lag:worker-dispatcher",
+    }
+    return ToolResult(content=[{"type": "text", "text": json.dumps(payload)}], is_error=False)
+
+
+_PLAN: Final[RemediationPlan] = RemediationPlan(
+    target_hypothesis="consumer_saturation",
+    action_tool="restart_consumer_group",
+    action_arguments={"consumer_group": "worker-dispatcher"},
+    verify_tool="get_consumer_lag",
+    verify_arguments={"consumer_group": "worker-dispatcher"},
+    verify_expectation="lag should drop toward zero",
+)
+
+_GOOD_JUDGMENT: dict[str, Any] = {"verdict": "verified", "reasoning": "lag is 0"}
+# ``verdict`` is a two-value Literal, so a third word is a shape the schema
+# rejects and the decoder cannot rescue — the judge-side twin of _BAD_STEP.
+_BAD_JUDGMENT: dict[str, Any] = {"verdict": "probably fine", "reasoning": "lag is 0"}
+
+_GOOD_SCORE: dict[str, Any] = {
+    "groundedness": 0.9,
+    "actionability": 0.8,
+    "reasoning": "every claim traces to the trail",
+}
+# Out of the 0-1 band ``JudgeScore`` declares. Constrained decoding does not
+# guarantee those bounds, which is why the runner catches ValidationError.
+_BAD_SCORE: dict[str, Any] = {
+    "groundedness": 7.0,
+    "actionability": 0.8,
+    "reasoning": "scored out of ten",
+}
+
+
+def _verifying() -> RunState:
+    now = datetime(2026, 7, 15, 20, 0, tzinfo=UTC)
+    return RunState(
+        incident_id=uuid4(),
+        state=IncidentState.VERIFYING,
+        alert={"source": "test", "severity": "high"},
+        budget=BudgetLedger(
+            max_tool_calls=25,
+            max_tokens=200_000,
+            max_wall_seconds=1_800,
+            max_usd=Decimal("5.00"),
+        ),
+        created_at=now,
+        updated_at=now,
+        remediation_plan=_PLAN.model_dump(mode="json"),
+    )
 
 
 class TestTheCap:
@@ -364,6 +446,158 @@ class TestTheBriefingWriter:
         with pytest.raises(OutputRepairExhausted):
             enrich_briefing(briefing, llm, model="m")
         assert len(llm.calls) == 2
+
+
+class TestTheVerificationJudge:
+    """WO-R2-174: the same wrapper, the same cap, on the judge that says "did it work?".
+
+    The judge reads a probe and answers one question. A reply the schema
+    rejects answers nothing about the world — the envelope failed — and
+    before this the run escalated on it with a Tier-1 action already
+    executed, so a human read "verification incomplete" for a fix that had
+    landed.
+    """
+
+    def test_a_malformed_first_judgment_does_not_end_the_run(
+        self,
+    ) -> None:
+        llm = _ScriptedLLM([_BAD_JUDGMENT, _GOOD_JUDGMENT])
+        transition = make_llm_verify(_SequencedMCP([_lag_result(0)]), llm, model="m")
+
+        result = transition(_verifying(), datetime(2026, 7, 15, 20, 0, tzinfo=UTC))
+
+        assert result.state is IncidentState.RESOLVED
+        assert len(llm.calls) == 2
+        # The re-ask carries the original context plus the complaint.
+        assert llm.calls[1][1].startswith(llm.calls[0][1])
+        judged = [e for e in result.evidence if e.tool_name == "_verify_judge"]
+        assert len(judged) == 1
+        assert judged[0].result_summary.startswith("verified")
+
+    def test_both_calls_are_billed_on_the_repaired_path(self) -> None:
+        """A repaired judgment is two billed calls; charging one is ADR 0015's under-report."""
+        llm = _ScriptedLLM(
+            [
+                _output_error(usage=LLMUsage(input_tokens=1000, output_tokens=100)),
+                _GOOD_JUDGMENT,
+            ],
+            usage=LLMUsage(input_tokens=2000, output_tokens=200),
+        )
+        transition = make_llm_verify(
+            _SequencedMCP([_lag_result(0)]), llm, model="claude-sonnet-4-6"
+        )
+
+        result = transition(_verifying(), datetime(2026, 7, 15, 20, 0, tzinfo=UTC))
+
+        assert result.state is IncidentState.RESOLVED
+        assert result.budget.tokens_used == 1000 + 100 + 2000 + 200
+        assert result.budget.usd_used > 0
+
+    def test_two_malformed_judgments_escalate_with_both_errors(self) -> None:
+        """Never a silent verdict: the run ends on the reason it always did."""
+        llm = _ScriptedLLM(
+            [
+                _output_error("first complaint", usage=LLMUsage(input_tokens=1000)),
+                _output_error("second complaint", usage=LLMUsage(input_tokens=2000)),
+            ]
+        )
+        transition = make_llm_verify(
+            _SequencedMCP([_lag_result(0)]), llm, model="claude-sonnet-4-6"
+        )
+
+        result = transition(_verifying(), datetime(2026, 7, 15, 20, 0, tzinfo=UTC))
+
+        assert result.state is IncidentState.ESCALATED
+        marker = [e for e in result.evidence if e.tool_name == "_remediation_escalate"]
+        assert len(marker) == 1
+        reason = marker[0].result_summary
+        assert reason.startswith(VERIFY_JUDGE_INVALID)
+        assert "first complaint" in reason
+        assert "second complaint" in reason
+        # No judgment was reached, so no judge evidence may claim one.
+        assert not [e for e in result.evidence if e.tool_name == "_verify_judge"]
+        # Cap respected, and both billed calls charged.
+        assert len(llm.calls) == MAX_OUTPUT_REPAIRS + 1 == 2
+        assert result.budget.tokens_used == 3000
+
+    def test_a_transport_failure_is_still_not_re_asked(self) -> None:
+        """Scope is unchanged: a 429 goes straight out, as it does everywhere else."""
+        llm = _ScriptedLLM([LLMError("429 rate limited")])
+        transition = make_llm_verify(_SequencedMCP([_lag_result(0)]), llm, model="m")
+
+        result = transition(_verifying(), datetime(2026, 7, 15, 20, 0, tzinfo=UTC))
+
+        assert result.state is IncidentState.ESCALATED
+        assert len(llm.calls) == 1
+
+
+class TestTheEvalBriefingJudge:
+    """WO-R2-174: the grader's judge repairs once, and never invents a score."""
+
+    def test_a_malformed_first_score_is_repaired(self, run_state: RunState) -> None:
+        llm = _ScriptedLLM([_BAD_SCORE, _GOOD_SCORE])
+
+        score = judge_briefing(_briefing(run_state), llm, model="m")
+
+        assert score.groundedness == 0.9
+        assert score.is_useful
+        assert len(llm.calls) == 2
+        # The re-ask carries the original briefing plus the complaint.
+        assert llm.calls[1][1].startswith(llm.calls[0][1])
+
+    def test_the_cap_is_one_here_too(self, run_state: RunState) -> None:
+        llm = _ScriptedLLM([_BAD_SCORE, _BAD_SCORE])
+
+        with pytest.raises(OutputRepairExhausted):
+            judge_briefing(_briefing(run_state), llm, model="m")
+
+        assert len(llm.calls) == MAX_OUTPUT_REPAIRS + 1 == 2
+
+    def test_a_twice_malformed_score_is_a_harness_event_not_a_number(
+        self, run_state: RunState
+    ) -> None:
+        """The column stays EMPTY and says why.
+
+        ``OutputRepairExhausted`` is an ``LLMError``, which is what
+        ``evals/runner.py`` catches to set ``judge_error`` and leave
+        ``judge_score`` ``None``. A default score would be an invented number
+        inside ``judge_mean_overall`` that no reader could tell from a real
+        one.
+        """
+        llm = _ScriptedLLM([_BAD_SCORE, _BAD_SCORE])
+        judge_score: JudgeScore | None = None
+        judge_error: str | None = None
+
+        # The runner's own arms, quoted.
+        try:
+            judge_score = judge_briefing(_briefing(run_state), llm, model="m")
+        except (LLMError, ValidationError) as err:
+            judge_error = f"judge call failed: {err}"
+
+        assert judge_score is None
+        assert judge_error is not None
+        assert "repair 1 of 1 also failed validation" in judge_error
+
+    def test_a_clean_score_still_costs_exactly_one_call(self, run_state: RunState) -> None:
+        """The canned path must not consume an extra payload (ADR 0035 § Neutral)."""
+        llm = _ScriptedLLM([_GOOD_SCORE])
+
+        score = judge_briefing(_briefing(run_state), llm, model="m")
+
+        assert score.overall == pytest.approx(0.85)
+        assert len(llm.calls) == 1
+
+    def test_the_canned_client_exhausting_its_script_is_not_repairable(
+        self, run_state: RunState
+    ) -> None:
+        """``CannedLLMClient`` raises a plain ``LLMError``; a clean canned run never repairs."""
+        canned = CannedLLMClient([])
+
+        with pytest.raises(LLMError) as caught:
+            judge_briefing(_briefing(run_state), canned, model="m")
+
+        assert not isinstance(caught.value, OutputRepairExhausted)
+        assert len(canned.calls) == 1
 
 
 class TestTheFailureClass:

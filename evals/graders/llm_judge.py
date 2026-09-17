@@ -20,6 +20,7 @@ from pydantic import ConfigDict, Field
 from incident_commander.agent.briefing import EscalationBriefing, render_trail
 from incident_commander.llm.client import LLMClientProtocol
 from incident_commander.llm.prompts.loader import load_prompt
+from incident_commander.llm.repair import call_with_output_repair
 from incident_commander.llm.structured import StructuredOutput
 
 USEFUL_THRESHOLD: Final[float] = 0.7
@@ -48,14 +49,29 @@ def judge_briefing(
     judge_client: LLMClientProtocol,
     model: str,
 ) -> JudgeScore:
-    """Grade a briefing. Uses the pinned ``JUDGE_MODEL`` at the call site."""
-    result = judge_client.call(
+    """Grade a briefing. Uses the pinned ``JUDGE_MODEL`` at the call site.
+
+    One bounded re-ask on an output-shape failure — the same wrapper and the
+    same cap of 1 as every other structured-output call site (ADR 0035,
+    widened here by WO-R2-174). A score the schema rejects is the envelope
+    failing, not the briefing being bad, and the two must not be confused:
+    the run is already graded on its five deterministic dimensions by the time
+    this is called, so a malformed reply that is *not* repaired must leave the
+    judge column EMPTY and say why. That is what the caller does — a second
+    failure raises ``OutputRepairExhausted``, which is an ``LLMError``, so
+    ``evals/runner.py`` records ``judge_error`` and leaves ``judge_score``
+    ``None``. A default score here would be an invented number in the column
+    that feeds ``judge_mean_overall``, and a metric nobody can tell from a
+    real one.
+    """
+    call = call_with_output_repair(
+        judge_client,
         system_prompt=load_prompt("briefing_judge"),
         user_message=_format_briefing(briefing),
         output_model=JudgeScore,
         model=model,
     )
-    return result.output
+    return call.result.output
 
 
 def _format_briefing(briefing: EscalationBriefing) -> str:

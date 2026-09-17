@@ -137,11 +137,19 @@ class SelectorRecord:
     change under a reader when it does.
     """
 
-    selected_candidate_id: str
+    #: ``None`` on ``probe_more`` and ``escalate``: ``SelectionResult`` states a
+    #: selection if and only if it commits to one (ADR 0048), and a record that
+    #: had to spell that absence as ``""`` would read as a candidate whose id is
+    #: the empty string. WP-6.2 widened the type for that reason.
+    selected_candidate_id: str | None
     scores: dict[str, float] = field(default_factory=dict)
     uncertainty: float | None = None
-    #: ``select`` | ``probe_more`` | ``escalate`` — a Literal once the role has
-    #: a prompt and a schema to constrain it (architecture principle 1).
+    #: ``select`` | ``probe_more`` | ``escalate`` — ``SelectionDecision``'s
+    #: value, stored as its ``str``. Deliberately not the enum itself: this
+    #: module is trace data and imports nothing but ``hypothesis``, and typing
+    #: the field would make it depend on ``agent/selection.py`` and so on
+    #: ``llm/`` and ``agent/briefing.py``. The closed set is enforced where the
+    #: value is produced — the schema the model answers against.
     decision: str
     call_id: str = ""
 

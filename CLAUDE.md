@@ -204,9 +204,9 @@ This block describes `docs/` as it is. Entries that do not exist yet carry an ex
 docs/
 ├── README.md                   # the map: one line per document, and which are history
 ├── ADR/                        # numbered decision records, never edited after acceptance
-│   ├── README.md               # the index: all 48, with status and what amended what
+│   ├── README.md               # the index: all 49, with status and what amended what
 │   ├── 0000-template.md
-│   └── 0001-…0048-….md         # 0001 external client architecture … 0048 a selector is constrained by its schema
+│   └── 0001-…0049-….md         # 0001 external client architecture … 0049 the oracle gap is the evaluator's
 ├── lessons/                    # case studies of things that went wrong, or almost did
 │   ├── phase-6-hardening.md          # free-form Hypothesis.name → schema tightening
 │   ├── live-eval-noise-sources.md    # the five buckets a weird live failure falls into
@@ -223,7 +223,7 @@ docs/
 └── interview-map.md            # (planned — Phase 8) component → JD skill → talking points
 ```
 
-ADR process: any decision that constrains future work gets an ADR before or with the implementing PR. Status flow is proposed, accepted, superseded. An accepted ADR is never rewritten — a later ADR amends or supersedes it and both stay on the shelf. The set runs 0001 through 0048; [`docs/ADR/README.md`](docs/ADR/README.md) lists every one with its status and records which later ADR moved which.
+ADR process: any decision that constrains future work gets an ADR before or with the implementing PR. Status flow is proposed, accepted, superseded. An accepted ADR is never rewritten — a later ADR amends or supersedes it and both stay on the shelf. The set runs 0001 through 0049; [`docs/ADR/README.md`](docs/ADR/README.md) lists every one with its status and records which later ADR moved which.
 
 Before opening a PR touching schemas, prompts, or the state machine, read [`docs/architecture-principles.md`](docs/architecture-principles.md). It codifies the rules that came out of past PRs — most importantly "default to the structural fix, not the band-aid." When you hit a symptom that a prompt tweak would patch, the first design conversation is whether the schema should reject the class of bug instead. See [`docs/lessons/phase-6-hardening.md`](docs/lessons/phase-6-hardening.md) for the case study that produced this rule.
 
@@ -372,7 +372,7 @@ filter at parse time, because a filtered run must not be blessed over a full bas
 ## Configuration
 
 `.env.example` is the full, annotated list and `src/incident_commander/config.py` is the
-authority; `Settings` reads 33 variables. Values are never committed. The ones that decide
+authority; `Settings` reads 34 variables. Values are never committed. The ones that decide
 how a run behaves:
 
 ```text
@@ -384,6 +384,7 @@ DEVELOPMENT_MODEL        # the model the `development` role uses
 BENCHMARK_MODEL          # the model the `benchmark` role uses — a measurement run pins this
 MODEL_ROLE               # which of the two above a run takes. `make eval MODEL_ROLE=…`
 INFERENCE_STRATEGY       # the planner-call seam (ADR 0036). Default `baseline`
+SELECTOR_GENERATOR       # which generator a `candidate_selector` arm decides over (ADR 0049)
 
 # Reaching the platform — THREE principals, and the split is load-bearing
 PLATFORM_MCP_URL         # MCP JSON-RPC endpoint (the platform runs MCP as its own process)

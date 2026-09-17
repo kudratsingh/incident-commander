@@ -41,3 +41,9 @@ class StrategyName(StrEnum):
     #: temperature, the candidate set being the union of their top hypotheses.
     #: N× planner cost, and the literature's pass@k — the other half of D4.
     BEST_OF_N_SAMPLED = "best_of_n_sampled"
+    #: WP-6.2, plan 02 § 12: a generator arm plus a ``candidate_selector`` call
+    #: that decides among the set it produced. The arm is
+    #: ``(generator, N, selector)``, so ``strategy_config`` stamps all three —
+    #: two different generators under one selector are two arms, and a report
+    #: keyed on the name alone would collapse them into one row.
+    CANDIDATE_SELECTOR = "candidate_selector"

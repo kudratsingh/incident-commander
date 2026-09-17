@@ -57,6 +57,17 @@ class StrategyContext:
     #: Where this step's ``StepRecord`` goes. ``None`` means nobody is
     #: recording — see ``records.StepSink``.
     record_step: StepSink | None = None
+    #: The client the ``candidate_selector`` role calls through (WP-6.2).
+    #: Separate from ``llm_client`` because the ROLE is what the accounting
+    #: splits on: the two clients are metered as ``investigation_planner`` and
+    #: ``candidate_selector``, and a selector sharing the planner's wrapper
+    #: would fold selection's cost into generation's and make "what did
+    #: selection cost" unanswerable — which is the number the arm is compared
+    #: on. ``None`` for every strategy that makes no selector call, which is
+    #: every strategy but one; the selector strategy refuses rather than
+    #: silently falling back to the planner's client, because a fallback would
+    #: report the selector's tokens under the planner's role.
+    selector_llm_client: LLMClientProtocol | None = None
 
 
 class InvestigationStrategy(Protocol):

@@ -64,7 +64,7 @@ import hashlib
 import json
 import subprocess
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
@@ -457,7 +457,7 @@ def _evidence_rows(trajectory: dict[str, Any]) -> list[dict[str, Any]]:
 # --------------------------------------------------------------------------
 
 
-def leak_terms(root: Path) -> dict[str, tuple[str, ...]]:
+def leak_terms(root: Path, ran: Collection[str] | None = None) -> dict[str, tuple[str, ...]]:
     """The three term families plan 03 § 14 step 2 names, derived not typed.
 
     ``chaos`` is the vocabulary the two-token split (WP-1.5) exists to keep
@@ -465,8 +465,29 @@ def leak_terms(root: Path) -> dict[str, tuple[str, ...]]:
     ``HypothesisCategory`` and the fixture names off the scenario corpus and
     its chaos hooks, so a label or a scenario added tomorrow is hunted
     without anyone re-typing a list.
+
+    ``ran`` narrows the fixture names to the scenarios a phase actually ran,
+    and ``leak_hunt`` always passes it. The full corpus was the wrong set for
+    two reasons and the second one is why this parameter exists:
+
+    * a name that could not have appeared in this phase's trajectories is
+      hunted, found zero times, and reports a zero nobody learned anything
+      from;
+    * the document is EVIDENCE and this list goes inside it, so deriving it
+      from today's corpus made every committed report un-regenerable the moment
+      a later phase added a scenario. WO-R3-202 (WP-4.3) is when that fired: the
+      corpus went 41 → 45 and three committed documents stopped rebuilding, a
+      corpus doing its job reported as three broken reports.
+
+    ``None`` keeps the whole-corpus behaviour for a caller that has no phase in
+    hand. The corpus is still what the names are read FROM — a scenario's hook
+    is not recorded in its archive — so a renamed scenario drops out of the set
+    rather than silently keeping its old spelling.
     """
     scenarios = load_scenarios(root / "evals/scenarios")
+    if ran is not None:
+        wanted = set(ran)
+        scenarios = [scenario for scenario in scenarios if scenario.name in wanted]
     return {
         "chaos_vocabulary": ("chaos",),
         "root_cause_labels": tuple(sorted(category.value for category in HypothesisCategory)),
@@ -669,7 +690,12 @@ ADJUDICATED_HITS: Final[dict[str, str]] = {
 
 
 def leak_hunt(root: Path, scope: PhaseScope) -> dict[str, Any]:
-    groups = leak_terms(root)
+    # The phase's OWN scenarios, read off its canned sweep: the sweep is the one
+    # archive that covers the whole suite as it stood, and `leak_terms`'
+    # docstring says why the term list has to be a function of the evidence
+    # rather than of today's corpus.
+    swept, _, _ = _read_report(archive_dir(root, scope.canned_sweep) / "report.json")
+    groups = leak_terms(root, {outcome.scenario for outcome in swept.outcomes})
     terms = _all_terms(groups)
     files = _trajectory_files(root, scope)
     read_only = () if scope.read_only_pass is None else (scope.read_only_pass.archive_id,)
@@ -962,9 +988,22 @@ def _sweep_results(root: Path, scope: PhaseScope) -> dict[str, Any]:
     )
     blessed, blessed_sha, _ = _read_report(root / BLESSED_BASELINE)
     comparison = regression.compare(blessed, canned)
+    # Checked in the one direction that stays true as the corpus grows, for the
+    # reason `evals/baseline_report.py::assemble` records at length: a phase-close
+    # report is FROZEN EVIDENCE about the suite as it stood, and equality made
+    # every committed one un-regenerable the moment a later phase added a
+    # scenario. WO-R3-202 (WP-4.3) is when that happened — 41 → 45 — and it made
+    # three committed documents fail to rebuild, which is a corpus doing its job
+    # being reported as three broken reports.
+    #
+    # The property worth keeping is the other direction: a sweep naming a
+    # scenario the corpus no longer has is citing something a reader cannot look
+    # at. "The sweep covered the whole suite" is carried by its own `total`,
+    # which the document records beside the blessed baseline's.
     corpus = load_scenarios(root / "evals/scenarios")
-    if {outcome.scenario for outcome in canned.outcomes} != {s.name for s in corpus}:
-        raise ValueError("the canned sweep does not cover the current scenario corpus exactly")
+    vanished = sorted({outcome.scenario for outcome in canned.outcomes} - {s.name for s in corpus})
+    if vanished:
+        raise ValueError(f"the canned sweep names scenario(s) the corpus no longer has: {vanished}")
     legs: list[dict[str, Any]] = []
     for leg in scope.live_legs:
         report, sha, _ = _read_report(archive_dir(root, leg.archive_id) / "report.json")

@@ -1,0 +1,34 @@
+{
+  "absent_reason": null,
+  "applies": true,
+  "ground_truth": {
+    "affected_components": [
+      "worker-dispatcher"
+    ],
+    "causal_chain": [],
+    "incident_count": 1,
+    "root_causes": [
+      "consumer_saturation"
+    ]
+  },
+  "provenance": {
+    "commander_head": "a9dce8a",
+    "invocation_id": "64da05aefc99",
+    "platform_mcp_url": "http://localhost:8001/mcp",
+    "read_principal": "PLATFORM_SMOKE_TOKEN (read-scoped)",
+    "recorded_at": "2026-09-17T20:52:46.960388+00:00"
+  },
+  "recording": "jobs_not_progressing_dispatcher_stall.20260917T205246Z.64da05aefc99.json",
+  "scenario": "jobs_not_progressing_dispatcher_stall",
+  "schema_version": 1,
+  "why_this_file_is_separate": "ADR 0038: the wall around the answer key is structural. The replay client loads the recording through `recorder.load_recording`, which takes one path and has no way to reach this file; `RecordedWorld` forbids extra keys, so a ground truth cannot ride inside a recording either. Pinned by tests/unit/test_recorder.py.",
+  "world": {
+    "chaos_hooks": [
+      "kill_consumer"
+    ],
+    "chaos_seeded": true,
+    "label": "the live platform with `jobs_not_progressing_dispatcher_stall`'s fault plan seeded (1 hook(s): `kill_consumer`), settled 0.0s, read under the read-scoped principal",
+    "live_mcp": true,
+    "settle_seconds": 0.0
+  }
+}

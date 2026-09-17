@@ -12,7 +12,7 @@ Two guards, and the second is the one that matters:
    or that it deliberately has none. A YAML whose label is edited without the
    record moving fails here, and so does a record entry naming a scenario
    that has left the corpus. This is a hand-maintained list on purpose: the
-   labels are a reviewed judgement about 41 worlds, and a test that derived
+   labels are a reviewed judgement about 45 worlds, and a test that derived
    them from the YAMLs would assert that the files equal themselves.
 
 2. **The abstention rule.** "No label" is only admissible for a scenario that
@@ -69,6 +69,15 @@ _DECIDED: Final[Mapping[str, tuple[Category, ...] | None]] = {
     "dlq_wait_and_replay_success": (Category.POISON_MESSAGE,),
     "failed_traces_scan": (Category.UNKNOWN,),
     "incidents_overview": (Category.UNKNOWN,),
+    # WO-R3-202 (WP-4.3), plan 01 section 7.1's Family B. One symptom, four
+    # worlds, three answers — and the pair of `outbox_stall` rows is the
+    # measurement: same world, same label, different alert, so only this
+    # dimension can tell a run that read the evidence from one that blamed the
+    # release the alert happened to name.
+    "jobs_not_progressing_dispatcher_stall": (Category.CONSUMER_SATURATION,),
+    "jobs_not_progressing_healthy_backlog_spike": (Category.NO_FAULT,),
+    "jobs_not_progressing_outbox_stall": (Category.OUTBOX_STALL,),
+    "jobs_not_progressing_outbox_stall_deploy_noise": (Category.OUTBOX_STALL,),
     "multi_probe_billing": (Category.CONSUMER_SATURATION,),
     "multi_probe_hypothesis_evolution": (Category.CONSUMER_SATURATION,),
     "no_fault_healthy_cache": (Category.NO_FAULT,),
@@ -195,10 +204,12 @@ class TestEveryScenarioCarriesADecision:
         """The number in the PR body, checked against the corpus that produced it."""
         corpus = _corpus()
         graded = [s for s in corpus if s.root_cause_graded]
-        assert (len(graded), len(corpus)) == (32, 41), (
+        assert (len(graded), len(corpus)) == (36, 45), (
             f"{len(graded)} of {len(corpus)} scenarios are root-cause graded; "
-            "WO-R3-261 landed 32 of 41. Update this number and the run summary's "
-            "coverage line together."
+            "WO-R3-261 landed 32 of 41 and WO-R3-202 took it to 36 of 45 — all "
+            "four `jobs_not_progressing` worlds carry a label, because ADR 0038 "
+            "makes one mandatory for a new scenario. Update this number and the "
+            "run summary's coverage line together."
         )
 
 

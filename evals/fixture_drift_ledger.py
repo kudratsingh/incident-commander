@@ -68,6 +68,49 @@ _JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
         "poison_message adds a dead-letter row, so the canned total counts a "
         "row the un-faulted world has not produced yet",
     ),
+    # The `jobs_not_progressing` family (WO-R3-202, WP-4.3). Four rows, and each
+    # one is a named mechanism rather than "the scenario seeds a fault".
+    #
+    # What is NOT here is the point: every other field of `get_outbox_status` is
+    # either declared volatile in `fixture_drift._VOLATILE` (the clocks and the
+    # ages) or matches live with no entry at all
+    # (`unpublished_past_attempt_limit`, `relay_heartbeat_known`,
+    # `relay_tick_interval_s`). `unpublished_count` is the one field the outbox
+    # scenarios actually grade, so it stays guarded and its disagreement is
+    # written down here.
+    ("jobs_not_progressing_dispatcher_stall", "get_consumer_lag", "lag", "value"): (
+        POST_FAULT,
+        "kill_consumer makes worker-dispatcher's lag climb; the check probes "
+        "the un-faulted world, so the canned backlog cannot match by design — "
+        "the same mechanism as consumer_lag_high, in this family's world. The "
+        "second element of the sequence is the post-restart read and shares "
+        "this key (the ledger excludes the index on purpose)",
+    ),
+    ("jobs_not_progressing_dispatcher_stall", "get_outbox_status", "unpublished_count", "value"): (
+        POST_FAULT,
+        "this scenario's premise needs a producer running (lag is arrival minus "
+        "service and kill_consumer supplies only the service half), so its "
+        "recording caught one event between its commit and the relay's next "
+        "tick. The check probes the un-faulted world, which has no producer and "
+        "reads 0. Both satisfy the scenario's own claim, `at_most 5`",
+    ),
+    ("jobs_not_progressing_outbox_stall", "get_outbox_status", "unpublished_count", "value"): (
+        POST_FAULT,
+        "pause_control_loop(outbox_relay) stops the relay, so committed events "
+        "accumulate undelivered; that queue IS the fault, and the check probes "
+        "the world before the hook fires, where it is empty. Both elements of "
+        "the sequence (11 growing to 19) share this key",
+    ),
+    (
+        "jobs_not_progressing_outbox_stall_deploy_noise",
+        "get_outbox_status",
+        "unpublished_count",
+        "value",
+    ): (
+        POST_FAULT,
+        "same hook, same world, same reason — this scenario differs from its "
+        "quiet sibling only in the alert it hands the agent",
+    ),
     # The first POST_ACTION rows. The constant has existed since the ledger
     # did, describing exactly this and matching nothing — because until ADR 0025
     # no fixture recorded the world after the agent's own remediation.

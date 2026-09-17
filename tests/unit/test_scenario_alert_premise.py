@@ -180,6 +180,17 @@ _NON_WEBHOOK_ALERT_FIELDS: Final[frozenset[str]] = frozenset(
         # make, in its own field. Non-webhook for the same reason its sibling
         # is — the platform's DLQ alert producer does not send it yet.
         "dlq_scope",
+        # WO-R3-202 / ADR 0051. The `jobs_not_progressing` family's noise
+        # variant carries the running release, which is how a production alert
+        # really arrives enriched — and it is the distractor the family needed
+        # after `bad_deploy` was ruled out for leaking `chaos:bad_deploy` and
+        # "Simulated bad deploy" through `list_active_alerts` (plan divergence
+        # G5). A top-level scenario convention like the twelve above it: a real
+        # alert would carry it inside `extra_data`, which `alert_subject`
+        # already reads one level into. Deliberately NOT in
+        # `ALERT_SUBJECT_PROBES` — no probe is required by naming a release,
+        # and the family's subject stays the consumer group.
+        "deploy_version",
     }
 )
 

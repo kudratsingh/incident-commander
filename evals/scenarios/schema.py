@@ -669,12 +669,15 @@ class ScenarioFamily(StrEnum):
     inventory records the promotion, scenario by scenario, including the
     five the rule could not place and this packet classified by hand).
 
-    Deliberately **not** here: ``jobs_not_progressing``, ``workflow_stuck``
-    and ``api_latency``. Those are plan 01 § 7's future worlds, and no
-    scenario in this repo manufactures one yet. A family for a world nobody
-    has built is an empty group in every report until its own packet lands,
-    and an empty group that looks like a measured zero is worse than an
-    absent one.
+    Deliberately **not** here: ``workflow_stuck`` and ``api_latency``. Those
+    are plan 01 § 7's remaining future worlds, and no scenario in this repo
+    manufactures one yet. A family for a world nobody has built is an empty
+    group in every report until its own packet lands, and an empty group that
+    looks like a measured zero is worse than an absent one.
+
+    ``jobs_not_progressing`` was on that list until WO-R3-202 (WP-4.3) built
+    the four worlds, which is the rule working as intended: the member lands
+    in the same change as the scenarios that fill it, never before.
     """
 
     CACHE_REDIS = "cache_redis"
@@ -685,6 +688,12 @@ class ScenarioFamily(StrEnum):
     # path (stop on iteration 1) with no fault to diagnose.
     HARNESS_CONTROL = "harness_control"
     INCIDENTS = "incidents"
+    # Plan 01 § 7.1's Family B: "accepted but not executing" over four worlds
+    # — a stalled dispatcher consumer, a stalled outbox relay, the same relay
+    # stall with an unrelated release in view, and a healthy backlog that is
+    # already draining. One symptom, four answers, one alert
+    # (evals/scenarios/README-jobs-not-progressing.md holds the matrix).
+    JOBS_NOT_PROGRESSING = "jobs_not_progressing"
     NOISE_CONTROL = "noise_control"
     POSTGRES = "postgres"
     TOOL_FAULT = "tool_fault"

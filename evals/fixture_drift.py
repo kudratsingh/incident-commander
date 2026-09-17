@@ -80,7 +80,54 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
     # timing, not contract. `lag` itself stays out, so the number the lag
     # scenarios rest on is still guarded, and so does `source`, which is a
     # stable property of the group rather than of when you looked.
-    "get_consumer_lag": frozenset({"lag_known"}),
+    #
+    # v0.6.7 (plat #204, WO-R3-254) shipped the freshness metadata the note
+    # above reserved this slot for, and all of it is a property of when you
+    # looked rather than of the fixture pack:
+    #
+    #   `measured_at` is the platform's clock at the moment the metrics loop
+    #   took the reading. No recording can match it, exactly like the four
+    #   DLQ clocks below — declared here rather than blessed as four
+    #   known-drift entries, the `dead_lettered_at` call made on the way in.
+    #
+    #   `age_seconds` is `now - measured_at` and lands anywhere in 0..~60 as
+    #   the loop's cadence rolls. It is the `ttl_seconds` case: a countdown
+    #   nothing fixes. Pinning one reading also makes the ledger FLAP rather
+    #   than merely disagree — on the re-record run that produced this entry a
+    #   canned 12 happened to equal a live 12, so the drift key vanished for
+    #   that one fixture and would have come back on the next run, which is
+    #   the stale-entry red the ledger exists to avoid.
+    #
+    #   `recent_samples` is the rolling window of those same readings, and it
+    #   fails the membership test twice over. Its VALUES are what the loop
+    #   measured while a fault was or was not running — the seeder writes no
+    #   window at all (it deliberately skips worker-dispatcher, the only
+    #   group that has one), so there is nothing for a recording to match.
+    #   Its EMPTINESS is a function of how long the stack has been up: the
+    #   loop sleeps 60s before its first measurement, so a freshly booted or
+    #   freshly reset platform reports `[]` and a minute later reports rows.
+    #   That is the `_differs_in_type` lesson — the same fixture landing in
+    #   the ledger under two different keys (`no_live_rows` one run,
+    #   `not_live_reachable` the next) depending on timing, with the ratchet
+    #   reddening on whichever one it did not see. Both halves are silenced
+    #   together, by the entry here and by the `no_live_rows` exemption in
+    #   `compare`.
+    #
+    # What none of this silences: the key-set diff runs first, so a fixture
+    # that has not been re-recorded is still reported as `live_only_field` on
+    # all three fields. That is exactly how this re-pin found the fourteen
+    # canned lag responses it had to re-record, and it is what keeps
+    # `tool_output_schema_mismatch`'s deliberate omission in the ledger.
+    "get_consumer_lag": frozenset(
+        {
+            "lag_known",
+            "measured_at",
+            "age_seconds",
+            "recent_samples",
+            "recent_samples.lag",
+            "recent_samples.measured_at",
+        }
+    ),
     "get_postgres_health": frozenset({"ping_latency_ms", "active_connections"}),
     # Every field here is a gauge of a running server, and the line that
     # decides membership is whether the fixture pack FIXES the value.
@@ -391,7 +438,20 @@ def compare(call: CannedCall, live: Mapping[str, Any]) -> list[Drift]:
                 # `canned_only_field` per key would turn that single fact into
                 # a dozen, and make the result depend on how wide the fixture
                 # happens to be rather than on what is wrong.
-                record(f"{path}[]", "no_live_rows", len(canned_node), 0)
+                #
+                # Unless the list itself is declared volatile, in which case
+                # there is no conclusion to draw at all: a volatile list is one
+                # whose CONTENTS nothing fixes, and an empty reading of it is
+                # the same observation as a full one — `get_consumer_lag`'s
+                # `recent_samples` is empty for the first minute of a stack's
+                # life and populated after it. Without this the finding's KIND
+                # would depend on when the check ran (`no_live_rows` inside
+                # that minute, `not_live_reachable` outside it), and the
+                # ledger's stale check reddens on whichever key it did not
+                # see. Presence and type are still guarded by the key-set diff
+                # above, which runs before this branch.
+                if _policy_path(path) not in volatile:
+                    record(f"{path}[]", "no_live_rows", len(canned_node), 0)
                 return
             if _has_mappings(canned_node) or _has_mappings(live_node):
                 walk(_merge_rows(canned_node), _merge_rows(live_node), f"{path}[]", True)

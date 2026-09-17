@@ -427,6 +427,55 @@ class TestEmptyLiveList:
         assert compare(_call("search_traces", {"matches": []}), {"matches": []}) == []
 
 
+class TestVolatileListEmptinessSaysNothing:
+    """A volatile list reports the same drift whether live is empty or not.
+
+    `get_consumer_lag.recent_samples` is the window the platform's metrics
+    loop rolls: it is `[]` for the first minute of a stack's life and
+    populated after it. Without the exemption the drift KIND depended on when
+    the check ran — `no_live_rows` inside that minute, nothing outside it —
+    and the ledger's stale check reddens on whichever key it did not see.
+    This is the `_differs_in_type` lesson (null-vs-zero landing under two
+    keys by timing) applied to list emptiness.
+    """
+
+    def test_an_empty_live_window_is_not_reported(self) -> None:
+        canned = {
+            "consumer_group": "worker-dispatcher",
+            "recent_samples": [{"lag": 15000, "measured_at": "2026-07-28T10:07:30Z"}],
+        }
+        live = {"consumer_group": "worker-dispatcher", "recent_samples": []}
+        assert compare(_call("get_consumer_lag", canned), live) == []
+
+    def test_a_populated_live_window_is_not_reported_either(self) -> None:
+        canned = {
+            "consumer_group": "worker-dispatcher",
+            "recent_samples": [{"lag": 15000, "measured_at": "2026-07-28T10:07:30Z"}],
+        }
+        live = {
+            "consumer_group": "worker-dispatcher",
+            "recent_samples": [{"lag": 0, "measured_at": "2026-09-17T09:28:20.158626Z"}],
+        }
+        assert compare(_call("get_consumer_lag", canned), live) == []
+
+    def test_a_missing_window_is_still_shape_drift(self) -> None:
+        # The exemption is about VALUES, never about presence: a fixture that
+        # was not re-recorded for v0.6.7 must still be reported, which is how
+        # the fourteen canned lag responses were found.
+        drifts = compare(
+            _call("get_consumer_lag", {"consumer_group": "worker-dispatcher"}),
+            {"consumer_group": "worker-dispatcher", "recent_samples": []},
+        )
+        assert [(d.path, d.kind) for d in drifts] == [("recent_samples", "live_only_field")]
+
+    def test_a_non_volatile_list_still_reports_no_live_rows(self) -> None:
+        drifts = compare(
+            _call("get_trace", {"jobs": [{"status": "failed"}]}),
+            {"jobs": []},
+        )
+        assert [d.kind for d in drifts] == ["no_live_rows"]
+
+
 class TestSeededPrecondition:
     """A check whose premise was never established reports that, not a result."""
 

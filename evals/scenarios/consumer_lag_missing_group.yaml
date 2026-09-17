@@ -30,7 +30,7 @@ canned_tool_responses:
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"unknown-consumer","lag":null,"lag_known":false,"source":"unrecognized","cache_key":"kafka:consumer_lag:unknown-consumer"}'
+      text: '{"consumer_group":"unknown-consumer","lag":null,"lag_known":false,"source":"unrecognized","cache_key":"kafka:consumer_lag:unknown-consumer","measured_at":null,"age_seconds":null,"recent_samples":[]}'
     is_error: false
 canned_llm_responses:
   investigation_planner:

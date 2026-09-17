@@ -1,0 +1,32 @@
+{
+  "absent_reason": null,
+  "applies": false,
+  "ground_truth": {
+    "affected_components": [
+      "dlq"
+    ],
+    "causal_chain": [],
+    "incident_count": 1,
+    "root_causes": [
+      "poison_message"
+    ]
+  },
+  "provenance": {
+    "commander_head": "62efe8f",
+    "invocation_id": "1800b3ddafb5",
+    "platform_mcp_url": "http://localhost:8001/mcp",
+    "read_principal": "PLATFORM_SMOKE_TOKEN (read-scoped)",
+    "recorded_at": "2026-09-17T18:22:56.587912+00:00"
+  },
+  "recording": "dlq_backlog.20260917T182256Z.1800b3ddafb5.json",
+  "scenario": "dlq_backlog",
+  "schema_version": 1,
+  "why_this_file_is_separate": "ADR 0038: the wall around the answer key is structural. The replay client loads the recording through `recorder.load_recording`, which takes one path and has no way to reach this file; `RecordedWorld` forbids extra keys, so a ground truth cannot ride inside a recording either. Pinned by tests/unit/test_recorder.py.",
+  "world": {
+    "chaos_hooks": [],
+    "chaos_seeded": false,
+    "label": "the live platform as it stood, with NO fault seeded for `dlq_backlog` \u2014 whatever the shared stack happened to hold. A ground truth written about the scenario's fault is not about this world (ADR 0040, INC-003).",
+    "live_mcp": true,
+    "settle_seconds": 0.0
+  }
+}

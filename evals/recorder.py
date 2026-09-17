@@ -129,7 +129,7 @@ from evals.dossier import (
 )
 from evals.graders.root_cause import label_describes_this_world
 from evals.scenarios.loader import load_scenarios
-from evals.scenarios.schema import Scenario
+from evals.scenarios.schema import Scenario, chaos_tool_names
 from incident_commander.config import ChaosTokenNotConfigured, Settings
 from incident_commander.tools.mcp_client import MCPClientProtocol, ToolResult, make_client
 from incident_commander.tools.registry import TOOL_REGISTRY
@@ -149,6 +149,11 @@ EXIT_PRECONDITION: Final[int] = 7
 #: missing field, because a recording is the world a measured run was in and a
 #: half-understood one silently measures something else.
 SCHEMA_VERSION: Final[int] = 1
+
+#: The lint's own name for a lab term that reached a recorded RESULT — the one
+#: part of a recording a replayed agent can see. A constant because the test and
+#: the renderer both compare against it.
+LAB_VOCABULARY_KIND: Final[str] = "lab vocabulary in a recorded result"
 
 #: The per-call fields that are about WHEN the recording happened rather than
 #: about the world. ``world_fingerprint`` drops them, and that is the whole
@@ -659,6 +664,72 @@ def findings_of(
     return [*dlq_findings, *target_findings, *furniture_findings]
 
 
+def lab_vocabulary_terms() -> frozenset[str]:
+    """The words a recorded result must not carry, derived rather than typed.
+
+    ``chaos`` is the vocabulary the three-token split exists to keep off the
+    agent's side (ADR 0012), and the chaos HOOK names come from
+    ``chaos_tool_names()`` — the closed set the platform's own contract
+    publishes — so a hook added tomorrow is covered without anyone editing a
+    list here.
+
+    Root-cause labels are deliberately NOT in this set even though the
+    phase-close leak hunt hunts them: ``HypothesisCategory`` contains
+    ``unknown``, which is an ordinary English word that appears in perfectly
+    innocent platform output, and a lint that cries on every "unknown group" is
+    a lint the reader learns to skim. The whole-corpus leak hunt adjudicates
+    those by name in a report a human reads; this one has to be quiet enough to
+    be believed.
+    """
+    return frozenset({"chaos"}) | chaos_tool_names()
+
+
+def lint_agent_visible_vocabulary(calls: Sequence[RecordedCall]) -> list[Finding]:
+    """Does anything a replayed agent can SEE name the lab?
+
+    This check exists because of a hazard the recorder introduces and nothing
+    else in the repo has: **it reads under a principal that is not the agent's.**
+    A live run's agent holds ``PLATFORM_TOKEN``, which deliberately lacks
+    ``chaos:invoke`` so it cannot read the ``chaos.`` audit stream and discover
+    which hook caused its own incident (CLAUDE.md § Configuration, platform
+    ADR 0012). The recorder reads under ``PLATFORM_SMOKE_TOKEN``. If that
+    principal can see anything the agent's cannot, a recording would hand it
+    straight to a replayed agent as tool output — and the leak would be in a
+    committed fixture, replayed to every run built on it, rather than in one
+    trajectory.
+
+    Only ``result`` is scanned, because ``answer()`` is the whole replay surface:
+    the world label names its hooks on purpose (ADR 0040 needs it to) and no
+    agent can reach it. A finding rather than a refusal, for the reason
+    ``evals/dossier.py``'s own lint gives — a lint that returns a verdict
+    becomes a gate somebody tunes to green — but a hit here means the recording
+    should not be replayed until the cause is understood, and the finding says
+    so.
+    """
+    terms = sorted(lab_vocabulary_terms())
+    findings: list[Finding] = []
+    for call in calls:
+        blob = json.dumps(call.result, default=str).lower()
+        hit = sorted(term for term in terms if term in blob)
+        if not hit:
+            continue
+        findings.append(
+            Finding(
+                LAB_VOCABULARY_KIND,
+                f"`{call.tool}` result in this recording",
+                f"the recorded response names {hit}. The agent's own principal cannot "
+                "read the chaos audit stream; this recording was read under the "
+                "read-scoped smoke principal, so a term that reached a RESULT would be "
+                "replayed to the agent as tool output and would tell it which hook "
+                "caused its own incident (ADR 0012, and the three-token split that "
+                "exists for it). Do not replay this recording until the cause is "
+                "understood: either the platform started emitting the term, or this "
+                "principal can see more than the agent's can.",
+            )
+        )
+    return findings
+
+
 def build_world(
     *,
     scenario: Scenario,
@@ -877,12 +948,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             "the WIRED arguments the agent's client sends."
         )
         calls, readings, failures = record_calls(read_client, probes)
-        findings = findings_of(
-            scenario,
-            readings,
-            preconditions,
-            sanctioned_incoherent=sorted(seeded.sanctioned_incoherent),
-        )
+        findings = [
+            *findings_of(
+                scenario,
+                readings,
+                preconditions,
+                sanctioned_incoherent=sorted(seeded.sanctioned_incoherent),
+            ),
+            # Last, and over the CALLS rather than the readings: this one asks
+            # what a replayed agent can see, and that is `result`.
+            *lint_agent_visible_vocabulary(calls),
+        ]
 
         provenance = RecordedProvenance(
             recorded_at=generated_at.isoformat(),

@@ -40,6 +40,7 @@ not import one.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,8 +49,9 @@ from typing import Any, Final
 import pytest
 
 from evals import artifacts, dossier, recorder
+from evals.graders.root_cause import label_describes_this_world
 from evals.scenarios.loader import load_scenarios
-from evals.scenarios.schema import Scenario
+from evals.scenarios.schema import Scenario, chaos_tool_names
 from incident_commander.tools.mcp_client import MCPError, ToolResult
 from incident_commander.tools.policies import Tier, tier_of
 from incident_commander.tools.registry import TOOL_REGISTRY
@@ -803,6 +805,180 @@ class TestTheDossierPathIsUnchanged:
         ]
         assert rendered[0] == rendered[1]
         assert "## 4. Every read the agent is expected to make" in rendered[0]
+
+
+def _paths_read_while_loading(path: Path) -> set[str]:
+    """Every file ``load_recording`` touches, watched from outside it.
+
+    A free function rather than a closure in the loop that calls it: a nested
+    spy would capture the loop's own accumulator, which is the bug ruff's B023
+    exists to catch and exactly the sort of thing that makes a leak test pass
+    for the wrong reason.
+    """
+    touched: set[str] = set()
+    real_read_text = Path.read_text
+
+    def spy(self: Path, *args: Any, **kwargs: Any) -> str:
+        touched.add(str(self))
+        return real_read_text(self, *args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(Path, "read_text", spy)
+        recorder.load_recording(path)
+    return touched
+
+
+class TestNothingAgentVisibleNamesTheLab:
+    """The hazard the recorder introduces, and nothing else in the repo has.
+
+    A live run's agent holds `PLATFORM_TOKEN`, which deliberately lacks
+    `chaos:invoke` so it cannot read the `chaos.` audit stream and learn which
+    hook caused its own incident (ADR 0012, the three-token split). The recorder
+    reads under `PLATFORM_SMOKE_TOKEN`. Anything that principal can see and the
+    agent's cannot would be handed to a replayed agent as tool output — and it
+    would be in a committed fixture replayed to every run built on it, not in
+    one trajectory somebody reads once.
+    """
+
+    def test_the_term_set_is_derived_from_the_contract_not_typed(self) -> None:
+        terms = recorder.lab_vocabulary_terms()
+        assert "chaos" in terms
+        assert chaos_tool_names() <= terms
+        # `unknown` is an ordinary English word and would cry on innocent
+        # output; the whole-corpus leak hunt adjudicates labels by name instead.
+        assert "unknown" not in terms
+
+    def test_a_term_in_a_recorded_result_is_a_finding(self) -> None:
+        wired = wire_arguments(TOOL_REGISTRY["list_audit_events"], {})
+        leaky = recorder.RecordedCall(
+            tool="list_audit_events",
+            arguments=wired,
+            key=recorder.call_key("list_audit_events", wired),
+            result={
+                "content": [
+                    {"type": "text", "text": '{"events": [{"action": "chaos.kill_consumer"}]}'}
+                ],
+                "is_error": False,
+            },
+            started_at=_T1.isoformat(),
+            completed_at=_T1.isoformat(),
+            duration_ms=1,
+        )
+        findings = recorder.lint_agent_visible_vocabulary([leaky])
+        assert [f.kind for f in findings] == [recorder.LAB_VOCABULARY_KIND]
+        assert "list_audit_events" in findings[0].subject
+        assert "ADR 0012" in findings[0].detail
+
+    def test_a_clean_result_is_silent(self) -> None:
+        assert recorder.lint_agent_visible_vocabulary(_minimal_world().calls) == []
+
+    def test_the_world_label_may_name_its_hooks_and_is_not_scanned(
+        self, scenarios: dict[str, Scenario]
+    ) -> None:
+        """ADR 0040 needs the label to say which hooks built the world.
+
+        It is evaluator-side and unreachable through `answer()`, so naming them
+        there is required rather than a leak — and the lint must not confuse the
+        two, or a scenario could never declare its own fault plan.
+        """
+        label = recorder.world_label(scenarios["remediate_consumer_lag_success"], chaos_seeded=True)
+        assert "kill_consumer" in label.label
+        assert label.chaos_hooks == ("kill_consumer",)
+        world = _record(scenarios["remediate_consumer_lag_success"], _lag_client())
+        assert [f for f in world.findings if f.kind == recorder.LAB_VOCABULARY_KIND] == []
+
+
+class TestTheCommittedRecordings:
+    """Every recording this repo carries, checked as the fixture it now is.
+
+    They are committed rather than gitignored because WP-3.2's replay client and
+    WP-3.3's `--mode recorded` cannot run in a fresh clone without them, and a
+    benchmark whose world exists only on the machine that recorded it is not a
+    benchmark anyone can reproduce. That makes them code's responsibility: a
+    recording that has stopped loading, or that has started carrying its own
+    answer key, is a defect in the repo and not in somebody's scratch directory.
+    """
+
+    @staticmethod
+    def _recordings() -> list[Path]:
+        folder = _REPO_ROOT / "evals" / "recorded_worlds"
+        return sorted(p for p in folder.rglob("*.json") if not p.name.endswith(".truth.json"))
+
+    def test_there_is_at_least_one(self) -> None:
+        assert self._recordings(), (
+            "evals/recorded_worlds/ carries no recording — WP-3.2 and WP-3.3 need at "
+            "least one committed world to run against in a fresh clone"
+        )
+
+    def test_every_one_loads_through_the_loader(self) -> None:
+        for path in self._recordings():
+            world = recorder.load_recording(path)
+            assert world.schema_version == recorder.SCHEMA_VERSION, path.name
+            assert world.calls, path.name
+            assert world.scenario == path.parent.name, path.name
+            # The key stored is the key `answer` will compute. A hand-edited
+            # recording whose key stopped matching its own arguments would
+            # answer nothing and look fine.
+            for call in world.calls:
+                assert call.key == recorder.call_key(call.tool, call.arguments), path.name
+
+    def test_every_recorded_call_is_answerable_by_its_own_arguments(self) -> None:
+        """The round trip that is the whole point: what was recorded is what replays."""
+        for path in self._recordings():
+            world = recorder.load_recording(path)
+            for call in world.calls:
+                answered = world.answer(call.tool, call.arguments)
+                assert answered is not None, f"{path.name}: {call.tool}"
+                assert answered.model_dump(mode="json") == call.result, f"{path.name}: {call.tool}"
+
+    def test_no_recording_carries_an_answer_key_and_every_sibling_does(self) -> None:
+        for path in self._recordings():
+            document = json.loads(path.read_text())
+            assert "ground_truth" not in document, path.name
+            assert set(document) == set(recorder.RecordedWorld.model_fields), path.name
+            sibling = path.with_name(path.name.replace(".json", ".truth.json"))
+            assert sibling.exists(), f"{path.name} has no ground-truth sibling"
+            truth = json.loads(sibling.read_text())
+            assert truth["scenario"] == document["scenario"]
+            assert truth["recording"] == path.name
+            # The rule, not a restatement of it: whether the label applies is
+            # `label_describes_this_world`'s answer for that world.
+            assert truth["applies"] == label_describes_this_world(
+                live_mcp=document["world"]["live_mcp"],
+                chaos_seeded=document["world"]["chaos_seeded"],
+            ), sibling.name
+
+    def test_the_answer_key_is_unreachable_from_the_recording(self) -> None:
+        """Loading a committed recording opens that file and no other."""
+        for path in self._recordings():
+            touched = _paths_read_while_loading(path)
+            sibling = path.with_name(path.name.replace(".json", ".truth.json"))
+            assert touched == {str(path)}, path.name
+            assert str(sibling) not in touched, path.name
+
+    def test_nothing_a_replayed_agent_can_see_names_the_lab(self) -> None:
+        """Run the vocabulary lint over what is committed, not only over a fake."""
+        for path in self._recordings():
+            world = recorder.load_recording(path)
+            assert recorder.lint_agent_visible_vocabulary(world.calls) == [], path.name
+
+    def test_no_recorded_call_is_a_write(self) -> None:
+        for path in self._recordings():
+            for call in recorder.load_recording(path).calls:
+                assert tier_of(call.tool) is Tier.READ, f"{path.name}: {call.tool}"
+
+    def test_no_committed_recording_holds_a_credential(self) -> None:
+        """A recording is read from a live platform, so this is not hypothetical.
+
+        Identifier-shaped values (the principal UUIDs the audit log returns) are
+        NOT credentials and are expected — a token is. The patterns are the
+        credential shapes this project actually uses.
+        """
+        secrets = re.compile(r"sk-ant-|sa_[A-Za-z0-9_]{10,}|Bearer\s+\S|ANTHROPIC_API_KEY")
+        folder = _REPO_ROOT / "evals" / "recorded_worlds"
+        for path in sorted(folder.rglob("*.json")):
+            found = secrets.findall(path.read_text())
+            assert not found, f"{path.name} carries a credential-shaped string"
 
 
 class TestSelectionGuard:

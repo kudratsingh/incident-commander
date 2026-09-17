@@ -1,0 +1,54 @@
+{
+  "incident_id": "15b635f7-1274-4a7b-b1c1-670bc9053de0",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.cache severity=critical fingerprint=cache_miss_spike",
+  "escalation_reason": "max iterations (5) exceeded",
+  "attempted_action": null,
+  "investigation_trail": [
+    {
+      "tool": "get_cache_key_info",
+      "summary": "{\"key\":\"cache:jobs:worker-dispatcher:hot_set\",\"exists\":true,\"type\":\"string\",\"ttl_seconds\":593,\"size\":90}",
+      "arguments": {
+        "key": "cache:jobs:worker-dispatcher:hot_set"
+      }
+    },
+    {
+      "tool": "get_redis_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":0.649,\"connected_clients\":11,\"used_memory_bytes\":1763040,\"used_memory_human\":\"1.68M\",\"keyspace_hits\":9855,\"keyspace_misses\":1193604,\"error\":null}",
+      "arguments": {}
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-09-17T15:05:56.714029Z\",\"age_seconds\":34,\"recent_samples\":[{\"lag\":0,\"measured_at\":\"2026-09-17T15:05:56.714029Z\"},{\"lag\":0,\"measured_at\":\"2026-09-17T15:04:56.323105Z\"}]}",
+      "arguments": {
+        "consumer_group": "worker-dispatcher"
+      }
+    },
+    {
+      "tool": "get_deploy_history",
+      "summary": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T13:04:52.740918Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-17T12:04:52.740918Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-09-17T09:04:52.740918Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-09-16T21:04:52.740918Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-09-16T17:04:52.740918Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-09-15T15:04:52.740918Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}",
+      "arguments": {
+        "environment": null,
+        "limit": 10
+      }
+    },
+    {
+      "tool": "search_traces",
+      "summary": "{\"matches\":[]}",
+      "arguments": {
+        "status": "failed",
+        "job_type": "worker-dispatcher",
+        "since_hours": 4,
+        "limit": 20
+      }
+    }
+  ],
+  "findings": "Redis is healthy and responsive (ping 0.65 ms), but the keyspace shows a severe miss ratio — 1,193,604 misses against only 9,855 hits — and the hot-set key for worker-dispatcher exists with a 593-second TTL and only 90 bytes of content, suggesting it may be nearly empty or stale; a prod deploy to v0.4.3 landed roughly two hours before the alert, following a v0.4.2 deploy that was already noted as correlated with billing failures, and no failed traces for worker-dispatcher were found in the last four hours.",
+  "recommendation": "Check whether the hot_set key's 90-byte payload is a valid, populated set or a near-empty artifact introduced by the v0.4.3 deploy, and cross-reference the cache miss spike onset time against the 13:04 prod deploy timestamp to confirm causation before considering a rollback through the tier-2 flow.",
+  "budget_used": {
+    "tool_calls": 5,
+    "tokens": 55907,
+    "wall_seconds": 0.057253,
+    "usd": "0.135919"
+  }
+}

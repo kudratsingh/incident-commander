@@ -497,6 +497,36 @@ evals/reports/baseline.json                       ← last-blessed baseline (reg
 
 The `evals/reports/human/*.txt` files are the fastest path to understand one run — every LLM call is a labeled step with full system prompt, user message, and parsed output.
 
+### Step records — what the planner decided, per step
+
+A trace record of kind `step` is written once per planner iteration, by the inference strategy that made the call (`src/incident_commander/agent/strategies/records.py::StepRecord`, plan 02 § 7). It is the unit every strategy comparison, every pass@k number and every calibration input is computed from, and it holds:
+
+| Field | What it is |
+|---|---|
+| `step_id`, `run_id`, `iteration` | identity: the record, the incident it belongs to, which loop iteration it was |
+| `strategy`, `model` | which strategy made the call, under which model id |
+| `candidate_set` | every diagnosis the strategy considered this step — `baseline` records exactly one, because one call returns one ranking and nothing was enumerated behind it |
+| `selector` | the `candidate_selector`'s decision, or `null` when there was nothing to select between (every `baseline` step) |
+| `emitted_step` | the `InvestigationStep` actually handed back to the loop — the one part of the record with consequences |
+| `hypothesis_state_before` / `_after` | the ranking either side of the call |
+| `llm_calls` | per call: the ledger's own delta (`tokens_used`, `usd_used` — ADR 0015's number, repairs included) *and* the four provider counters for the call that parsed, plus `call_id`, which joins this record to the `llm` record holding its full request and response |
+| `planner_input_tokens` | the provider's count of the context the planner was fed (input + cache read + cache creation). Honestly `0` on a canned run: the fake client bills nothing |
+| `planner_context_chars` | that same context measured locally, in characters. It exists because the offline suite runs on a fake client, so a canned record with only the token count would say nothing about how much context the planner saw. Characters are not tokens and are never reported as if they were |
+
+Three rules hold this record down:
+
+- **It goes to the trace store, never to `RunState`.** The checkpoint is a frozen `schema_version = 3` object holding the latest ranking; research data in it would change the schema every future strategy touches, and none of it is needed to resume a run. Pinned by `tests/unit/test_tracing.py::TestStepRecordsReachTheTraceStore::test_the_checkpoint_is_still_schema_version_3`.
+- **No hidden chain-of-thought is stored.** Structured outputs and the short `reasoning` fields the schema already asks for, only — enforced on the field names *and* on what lands on disk by `tests/unit/test_tracing.py::TestNoChainOfThoughtIsStored`, not by a sentence in a docstring.
+- **It is evaluator-side.** Nothing the agent can read back; the loop is handed the record and deliberately ignores it, because research data must not be able to change the run.
+
+Records are written only when a tracer exists, i.e. when `EVAL_TRACE_DIR` is set — which `make eval-live` and `make eval-smoke` do, and `make eval` / `make eval-reg` do not, so the regression suite stays byte-identical. Set it yourself to capture a canned run's decisions, which cost nothing to produce and are as real as a live run's:
+
+```bash
+EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --only remediate_stale_cache_success
+```
+
+Like every other record they are append-only: a re-run adds its steps under a new `invocation_id` rather than replacing the earlier attempt's (invariant 9, F-002). They render in the human report as `STEP n — PLANNER STEP (iteration i, strategy s)`.
+
 ### Artifacts
 
 Every output above is **versioned and never overwritten** (CLAUDE.md invariant 9). `<stamp>` is the run's UTC time as `YYYYMMDDTHHMMSSZ` and `<inv>` is its `invocation_id`, so a re-run of a scenario lands a new file beside the old one instead of replacing it. Writes are exclusive-create: a collision raises, it never overwrites.

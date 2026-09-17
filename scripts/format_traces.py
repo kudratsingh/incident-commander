@@ -3,9 +3,9 @@
 
 Each ``evals/traces/<scenario>.jsonl`` produces one
 ``evals/reports/human/<scenario>.<YYYYMMDDTHHMMSSZ>.<render_id>.txt`` where
-every LLM call, MCP tool call, and scenario boundary is a numbered, labeled
-step. Written for eyeball inspection of a full incident trajectory — the
-JSONL stays canonical.
+every LLM call, MCP tool call, planner step and scenario boundary is a
+numbered, labeled step. Written for eyeball inspection of a full incident
+trajectory — the JSONL stays canonical.
 
 Reports are VERSIONED and never overwritten (CLAUDE.md invariant 9). Each
 run of this script is one render session with its own stamp and id, so a
@@ -304,6 +304,79 @@ def _fmt_precondition(step: int, r: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _fmt_candidate(c: dict[str, Any], idx: int) -> str:
+    probe = c.get("proposed_probe")
+    tail = f" → probe {probe}" if probe else ""
+    return (
+        f"    {idx}. {c.get('name', '?')} "
+        f"[{c.get('category', '?')}] confidence {c.get('confidence', '?')}{tail}"
+    )
+
+
+def _fmt_selector(selector: dict[str, Any] | None) -> list[str]:
+    """The ``candidate_selector``'s decision, or the honest absence of one.
+
+    ``null`` is the baseline's value and says something: one candidate was
+    generated, so nothing was selected between. Rendering it as a blank would
+    make the control group look like a strategy whose selector did not run.
+    """
+    if not selector:
+        return ["Selector:      none (single-candidate step)"]
+    scores = selector.get("scores") or {}
+    return [
+        f"Selector:      {selector.get('decision', '?')} → "
+        f"{selector.get('selected_candidate_id', '?')}",
+        f"  uncertainty: {selector.get('uncertainty')}",
+        f"  scores:      {json.dumps(scores)}",
+    ]
+
+
+def _fmt_step_record(step: int, r: dict[str, Any]) -> str:
+    """One planner step as the strategy recorded it (``StepRecord``, 02 § 7).
+
+    This is the research record: the candidates the strategy considered, the
+    one step it handed the loop, the ranking either side of it, and what the
+    call was fed and billed. It sits beside the ``llm`` record of the same
+    call — ``call_id`` joins them — and a reader comparing two strategies is
+    reading this, not the prose.
+    """
+    candidates = r.get("candidate_set") or []
+    calls = r.get("llm_calls") or []
+    before = r.get("hypothesis_state_before") or []
+    after = r.get("hypothesis_state_after") or []
+    lines = [
+        _rule("="),
+        f"STEP {step} — PLANNER STEP (iteration {r.get('iteration', '?')}, "
+        f"strategy {r.get('strategy', '?')}) @ {_fmt_ts(r.get('timestamp', ''))}",
+        _rule("="),
+        "",
+        f"Model:         {r.get('model', '?')}",
+        f"Run:           {r.get('run_id', '?')}  step_id={r.get('step_id', '?')}",
+        f"Context:       planner_input_tokens={r.get('planner_input_tokens')} "
+        f"chars={r.get('planner_context_chars')}",
+    ]
+    for call in calls:
+        lines.append(
+            f"LLM call:      {call.get('role', '?')} "
+            f"tokens_used={call.get('tokens_used')} usd={call.get('usd_used')} "
+            f"in={call.get('input_tokens')} out={call.get('output_tokens')} "
+            f"cache_read={call.get('cache_read_tokens')} "
+            f"cache_write={call.get('cache_creation_tokens')} "
+            f"call_id={call.get('call_id') or '(untraced)'}"
+        )
+    lines.extend(_fmt_selector(r.get("selector")))
+    lines.append("")
+    lines.append(f"--- CANDIDATE SET ({len(candidates)}) ---")
+    for i, candidate in enumerate(candidates, start=1):
+        lines.append(_fmt_candidate(candidate, i))
+    lines.append("")
+    lines.append(f"Ranking: {len(before)} hypotheses before → {len(after)} after")
+    emitted = r.get("emitted_step") or {}
+    lines.append(f"Emitted: {_fmt_next_action(emitted.get('next_action', {}))}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _fmt_chaos_setup(step: int, r: dict[str, Any]) -> str:
     """Compact step for the seeding hook a live scenario fires before the agent runs."""
     lines = [
@@ -335,6 +408,7 @@ STEP_FORMATTERS: Final[dict[str, Callable[[int, dict[str, Any]], str]]] = {
     "mcp_error": _fmt_mcp_error,
     "precondition": _fmt_precondition,
     "chaos_setup": _fmt_chaos_setup,
+    "step": _fmt_step_record,
 }
 # Billed-but-failed calls count as calls. A header that counted `mcp_error`
 # as a tool call but dropped `llm_error` from the LLM total reported the

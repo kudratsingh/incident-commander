@@ -786,3 +786,181 @@ class TestTheRepairedCallIsLabeled:
         from scripts.format_traces import _MAX_OUTPUT_REPAIRS
 
         assert _MAX_OUTPUT_REPAIRS == MAX_OUTPUT_REPAIRS
+
+
+# ---------------------------------------------------------------------------
+# WP-2.1 — the ``step`` kind.
+#
+# ``TraceKind`` membership is enforced by TestEveryKindRenders above, so the
+# formatter had to land in the same PR as the kind. These are the tests for
+# what it actually says: a reader comparing two strategies reads the planner
+# step, and a record that renders as "unknown kind" is a JSON dump of exactly
+# what they came for.
+
+
+def _step(
+    invocation: str,
+    when: str,
+    *,
+    iteration: int = 0,
+    candidates: int = 1,
+    selector: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """What ``runner._step_sink`` writes: a ``StepRecord`` plus its kind."""
+    return _stamp(
+        {
+            "kind": "step",
+            "step_id": "step00000001",
+            "run_id": "incident-42",
+            "iteration": iteration,
+            "strategy": "baseline",
+            "model": _MODEL,
+            "candidate_set": [
+                {
+                    "candidate_id": f"cand0000000{n}",
+                    "category": "resource_exhaustion",
+                    "name": "redis memory pressure",
+                    "confidence": 0.6 + n / 10,
+                    "evidence_for": [],
+                    "evidence_against": [],
+                    "proposed_probe": "get_redis_health",
+                    "generation_call_id": "rec000000001",
+                }
+                for n in range(candidates)
+            ],
+            "selector": selector,
+            "emitted_step": {
+                "hypotheses": [
+                    {
+                        "category": "resource_exhaustion",
+                        "name": "redis memory pressure",
+                        "confidence": 0.6,
+                        "reasoning": "maxmemory reached",
+                    }
+                ],
+                "next_action": {
+                    "kind": "probe",
+                    "tool_name": "get_redis_health",
+                    "arguments": {},
+                },
+            },
+            "hypothesis_state_before": [],
+            "hypothesis_state_after": [
+                {
+                    "category": "resource_exhaustion",
+                    "name": "redis memory pressure",
+                    "confidence": 0.6,
+                    "reasoning": "maxmemory reached",
+                }
+            ],
+            "llm_calls": [
+                {
+                    "role": "investigation_planner",
+                    "model": _MODEL,
+                    "tokens_used": 1200,
+                    "usd_used": "0.004200",
+                    "input_tokens": 900,
+                    "output_tokens": 300,
+                    "cache_read_tokens": 0,
+                    "cache_creation_tokens": 0,
+                    "call_id": "rec000000001",
+                    "elapsed_ms": None,
+                }
+            ],
+            "planner_input_tokens": 900,
+            "planner_context_chars": 4321,
+        },
+        invocation,
+        when,
+    )
+
+
+def test_a_planner_step_renders_as_a_labeled_step(tmp_path: Path) -> None:
+    path = _write_jsonl(
+        tmp_path / "redis_saturation.jsonl",
+        [
+            _scenario_start("inv1", "2026-08-08T10:00:00+00:00"),
+            _step("inv1", "2026-08-08T10:00:01+00:00"),
+            _scenario_end(
+                "inv1", "2026-08-08T10:00:09+00:00", passed=True, final_state="ESCALATED"
+            ),
+        ],
+    )
+    text = format_trace(path)
+
+    assert "STEP 1 — PLANNER STEP (iteration 0, strategy baseline)" in text
+    assert "unknown kind" not in text
+    # What the step was fed and what it cost, beside the decision it made.
+    assert "planner_input_tokens=900" in text
+    assert "chars=4321" in text
+    assert "call_id=rec000000001" in text
+    assert "--- CANDIDATE SET (1) ---" in text
+    assert "redis memory pressure" in text
+    assert "Emitted: PROBE get_redis_health({})" in text
+
+
+def test_a_baseline_step_says_its_selector_is_absent(tmp_path: Path) -> None:
+    # ``null`` is the baseline's value and it means something: one candidate
+    # was generated, so nothing was selected between it and anything else.
+    path = _write_jsonl(
+        tmp_path / "redis_saturation.jsonl",
+        [
+            _scenario_start("inv1", "2026-08-08T10:00:00+00:00"),
+            _step("inv1", "2026-08-08T10:00:01+00:00"),
+        ],
+    )
+    assert "Selector:      none (single-candidate step)" in format_trace(path)
+
+
+def test_a_selected_candidate_is_rendered_with_its_scores(tmp_path: Path) -> None:
+    # Nothing writes a selector yet (the role arrives in Phase 6), so this is
+    # the renderer's forward half: the day one does, it must not land in the
+    # report as a raw dump.
+    path = _write_jsonl(
+        tmp_path / "redis_saturation.jsonl",
+        [
+            _scenario_start("inv1", "2026-08-08T10:00:00+00:00"),
+            _step(
+                "inv1",
+                "2026-08-08T10:00:01+00:00",
+                candidates=3,
+                selector={
+                    "selected_candidate_id": "cand00000002",
+                    "scores": {"cand00000002": 0.8},
+                    "uncertainty": 0.2,
+                    "decision": "select",
+                    "call_id": "rec000000002",
+                },
+            ),
+        ],
+    )
+    text = format_trace(path)
+
+    assert "Selector:      select → cand00000002" in text
+    assert "uncertainty: 0.2" in text
+    assert "--- CANDIDATE SET (3) ---" in text
+
+
+def test_a_planner_step_is_not_counted_as_an_llm_or_tool_call(tmp_path: Path) -> None:
+    """The header counts calls; a step record is a record ABOUT calls.
+
+    The planner call it describes is already counted through its own ``llm``
+    record, so counting the step too would report one live investigation as
+    twice the LLM calls it made — the same shape of double-count the
+    invocation grouping was written to stop.
+    """
+    path = _write_jsonl(
+        tmp_path / "redis_saturation.jsonl",
+        [
+            _scenario_start("inv1", "2026-08-08T10:00:00+00:00"),
+            _llm("inv1", "2026-08-08T10:00:01+00:00"),
+            _step("inv1", "2026-08-08T10:00:01+00:00"),
+            _scenario_end(
+                "inv1", "2026-08-08T10:00:09+00:00", passed=True, final_state="ESCALATED"
+            ),
+        ],
+    )
+    text = format_trace(path)
+
+    assert "LLM calls:     1" in text
+    assert "Tool calls:    0" in text

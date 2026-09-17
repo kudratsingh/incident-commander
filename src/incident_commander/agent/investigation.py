@@ -36,7 +36,7 @@ from incident_commander.agent.state import (
     RunState,
 )
 from incident_commander.agent.strategies.protocol import InvestigationStrategy, StrategyContext
-from incident_commander.agent.strategies.records import StepSink
+from incident_commander.agent.strategies.records import PlannerCall, StepSink
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.repair import (
@@ -775,7 +775,7 @@ def _plan_next_step(
     at: datetime,
     llm_client: LLMClientProtocol,
     model: str,
-) -> tuple[RunState, InvestigationStep]:
+) -> tuple[RunState, InvestigationStep, PlannerCall]:
     """One planner LLM call — plus one bounded repair if it does not parse.
 
     ADR 0035: a ``record_output`` payload the schema rejects is a harness
@@ -784,11 +784,23 @@ def _plan_next_step(
     (``accrue_structured_call``). A second failure raises
     ``OutputRepairExhausted``, which the caller escalates on exactly as it
     escalated on the first failure before this change.
+
+    The third return value is the call's own measurements — token counters,
+    trace-record id, the size of the context it was handed (WP-2.1). They are
+    visible only here, and a ``StepRecord`` built without them carries a
+    ``None`` where a number belongs. Nothing in the loop reads it: research
+    data must not be able to change the run.
     """
+    system_prompt = load_prompt("investigation_planner")
+    # Bound to a local rather than passed inline because the step record
+    # measures what was sent. Re-rendering it afterwards to measure it would
+    # be a second render that a future non-deterministic context would
+    # silently make a different string from the one the model saw.
+    user_message = _format_planner_context(run_state)
     call = call_with_output_repair(
         llm_client,
-        system_prompt=load_prompt("investigation_planner"),
-        user_message=_format_planner_context(run_state),
+        system_prompt=system_prompt,
+        user_message=user_message,
         output_model=InvestigationStep,
         model=model,
     )
@@ -800,7 +812,16 @@ def _plan_next_step(
             "updated_at": at,
         }
     )
-    return updated, call.result.output
+    result = call.result
+    measured = PlannerCall(
+        record_id=result.record_id,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        cache_read_tokens=result.cache_read_tokens,
+        cache_creation_tokens=result.cache_creation_tokens,
+        context_chars=len(system_prompt) + len(user_message),
+    )
+    return updated, result.output, measured
 
 
 def _execute_probe(

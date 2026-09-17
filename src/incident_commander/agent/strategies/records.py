@@ -16,13 +16,15 @@ Produced here, consumed by WP-2.1. Three properties are load-bearing:
   the schema already asks for, and the short ``reasoning`` field on each
   hypothesis, only.
 
-Two fields the plan's schema names are ``None`` on this seam rather than
-invented: ``elapsed_ms`` (the LLM client does not time calls) and
-``planner_input_tokens`` (the context size is not returned by
-``_plan_next_step``, whose signature plan 02 § 4 and divergence A1 pin
-verbatim). They are declared so WP-2.1 fills a named field instead of adding
-one, and ``None`` says "not measured here" where a zero would read as a
-measurement.
+One field the plan's schema names is still ``None`` here: ``elapsed_ms``, the
+wall time of a call, because nothing in ``llm/client.py`` times one and a
+fabricated duration is worse than an absent one. ``None`` says "not measured"
+where a zero would read as a measurement.
+
+WP-2.1 filled the rest. ``_plan_next_step`` now returns a ``PlannerCall``
+beside the state and the step, so the four token counters, the call's own
+trace-record id and the size of the context the planner was handed are
+measured where they are visible instead of left at zero.
 """
 
 from __future__ import annotations
@@ -39,6 +41,50 @@ from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory, 
 def _new_id() -> str:
     """A 12-hex id, the same width and mint as ``evals.tracing``'s record ids."""
     return uuid.uuid4().hex[:12]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PlannerCall:
+    """What one planner call reported, carried out of ``_plan_next_step``.
+
+    Not a trace record: it is the measurement a strategy needs to *fill* one.
+    Everything here is visible only inside the function that makes the call —
+    the four token counters live on ``LLMResult``, the trace-record id is
+    minted by the client, and the rendered prompt is a local — so before
+    WP-2.1 widened that return, the record's ``planner_input_tokens``,
+    ``call_id`` and ``generation_call_id`` had no honest value and sat at
+    ``None`` / ``""``.
+
+    The counters describe the call that PARSED. A billed re-ask before it
+    (ADR 0035) is in the ledger delta on ``LLMCallRecord.tokens_used`` and in
+    the trace as its own ``llm`` record naming what it repaired — so a
+    repaired step's record shows both what the accepted call was fed and what
+    the whole step cost, and neither number pretends to be the other.
+    """
+
+    #: Trace-record id of the call that parsed, or ``""`` when the client is
+    #: untraced (every canned run, and any live run without ``EVAL_TRACE_DIR``).
+    record_id: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    #: Characters of system prompt + user message in the FIRST ask of this
+    #: step — the context the step was planned from. Measured locally, so it
+    #: is a real number on a canned run, where the fake client bills nothing
+    #: and every provider-reported counter above is honestly zero.
+    context_chars: int = 0
+
+    @property
+    def context_tokens(self) -> int:
+        """Provider-reported size of the context the model was fed.
+
+        The sum of the three input-side counters, not ``input_tokens`` alone:
+        ``llm/client.py`` caches the system prompt, so most of a real call's
+        context arrives on ``cache_read_tokens`` and reading only the first
+        counter would report a shrinking context as the cache warms.
+        """
+        return self.input_tokens + self.cache_read_tokens + self.cache_creation_tokens
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -98,15 +144,20 @@ class SelectorRecord:
 class LLMCallRecord:
     """What one LLM call inside a planner step billed.
 
-    ``call_id`` is the call's trace-record id where the seam can name it, and
-    ``""`` where it cannot: ``_plan_next_step`` returns ``(RunState,
-    InvestigationStep)`` — the signature plan 02 § 4 writes verbatim and
-    divergence A1 confirms — so the ``RepairedCall`` carrying ``record_id`` and
-    the four token counters never leaves it. Rather than widen that contract
-    (WP-0.2 replaces the call, it does not redesign it), ``baseline`` records
-    the budget ledger's own delta for the step, which is the number ADR 0015
-    holds the run to and includes a repair's second call and any billed-then-
-    discarded attempt. WP-2.1 can widen the return and fill the split in.
+    Two different numbers, both wanted, neither substitutable for the other:
+
+    * ``tokens_used`` / ``usd_used`` are the budget ledger's own delta across
+      the step — what ADR 0015 holds the run to. They include a repair's
+      second call and any billed-then-discarded attempt, so they are the
+      honest cost of the step.
+    * the four counters are what the call that PARSED reported. They are the
+      split a context/cost comparison across strategies needs (WP-2.3), and
+      they cannot see a discarded attempt, which is exactly why they do not
+      replace the ledger delta.
+
+    ``call_id`` is the call's trace-record id, so a reader can put this step
+    beside the ``llm`` record holding its full request and response in the
+    same JSONL. ``""`` when the client is untraced.
     """
 
     role: str
@@ -115,6 +166,10 @@ class LLMCallRecord:
     #: definition: input + output + cache creation + cache read + discarded).
     tokens_used: int
     usd_used: Decimal
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
     call_id: str = ""
     #: Wall time of the call. ``None`` here: nothing in ``llm/client.py`` times
     #: a call today, and a fabricated duration is worse than an absent one.
@@ -149,18 +204,31 @@ class StepRecord:
     hypothesis_state_before: tuple[Hypothesis, ...] = ()
     hypothesis_state_after: tuple[Hypothesis, ...] = ()
     llm_calls: tuple[LLMCallRecord, ...] = ()
-    #: Context size fed to the planner this step. ``None`` at this seam — see
-    #: the module docstring.
+    #: Context size fed to the planner this step, as the provider counted it
+    #: (``PlannerCall.context_tokens``). ``None`` when no call was measured.
+    #: A canned run reports 0: the fake client bills nothing, and 0 is the
+    #: true number of tokens it charged for the context it was handed.
     planner_input_tokens: int | None = None
+    #: The same context measured locally, in characters of prompt text. An
+    #: extension beyond plan 02 § 7's schema, and the reason for it is
+    #: divergence D1: the offline suite runs on a fake client, so every
+    #: provider-reported token count there is honestly zero and a record with
+    #: only ``planner_input_tokens`` says nothing about how much context an
+    #: offline run's planner actually saw. Characters are not tokens and are
+    #: never reported as if they were — they are a measurement the canned
+    #: suite can make.
+    planner_context_chars: int | None = None
 
     def as_trace_record(self) -> dict[str, Any]:
         """JSON-safe dict, ready for a tracer.
 
-        The tracer's ``kind`` is deliberately not set here: ``TraceKind`` is a
+        The tracer's ``kind`` is deliberately not set here. ``TraceKind`` is a
         closed enum whose every member must have a human-report formatter
-        (``tests/unit/test_format_traces.py::TestEveryKindRenders``), so the
-        ``step`` kind and its renderer land together in WP-2.1 — the packet
-        that reads these records — not here, where nothing would render them.
+        (``tests/unit/test_format_traces.py::TestEveryKindRenders``), and
+        stamping the kind is the writer's job: ``evals/runner.py`` wraps this
+        dict as ``{"kind": TraceKind.STEP, **record}`` on its way to the
+        tracer. A record that named its own kind would let a strategy write a
+        kind the enumeration has never heard of.
         """
         return {
             "step_id": self.step_id,
@@ -179,6 +247,7 @@ class StepRecord:
             ],
             "llm_calls": [call.as_record() for call in self.llm_calls],
             "planner_input_tokens": self.planner_input_tokens,
+            "planner_context_chars": self.planner_context_chars,
         }
 
 

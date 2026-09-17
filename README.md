@@ -133,4 +133,4 @@ Copy `.env.example` to `.env` and fill it in. It is annotated variable by variab
 
 ## License
 
-TBD.
+No license is granted at this time. The code is published for reading and review only; all rights are reserved. You may not use, copy, modify or redistribute it without written permission from the author.

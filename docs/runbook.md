@@ -1019,7 +1019,12 @@ operate by:
   key `create_stale_cache` writes, so the scenario's precondition can
   confirm the seeded key is there before any spend. Before that tool
   shipped the fault was real but unobservable and the scenario was
-  canned-only.)
+  canned-only. As of the v0.6.8 pin that read also says whether the entry's
+  records still exist — a healthy hot set answers `records_referenced: 3,
+  records_found: 3` and the seeded one answers `3 / 0` — which is the
+  first reading in this world that tells a stale hot key from a current
+  one, and the reason the scenario stopped sitting on the 0.7 decision
+  boundary (WO-R3-267).)
 
 ## Debugging one scenario
 
@@ -1132,6 +1137,29 @@ Platform ships a new digest → four steps on the agent side:
    `evals/fixture_drift_ledger.py` with its reason. Bless only from a freshly
    reset stack — the ledger is blessed against a fresh seed, and it may only
    shrink.
+
+   Three things this walk does in an order worth knowing, all seen on the
+   v0.6.8 bump:
+
+   - A new tool field shows up **twice**. First as `live_only_field` on every
+     fixture that has not been re-recorded (the key-set diff runs before any
+     value comparison, so a volatility declaration does not silence it), and
+     then — once the field is recorded with a value the un-faulted world does
+     not have — as an ordinary `value` drift. The second appearance is the one
+     that needs a `_JUSTIFIED` line, and `make fixture-drift-bless` will
+     happily write the entry without one: an unlisted key is classified
+     `fixture-defect`, i.e. work, so the burn-down number is what tells you
+     the reason is missing, not an error.
+   - **Run it on a stack you have just reset.** An aged stack reports a
+     `NEW failed_traces_scan:search_traces matches[] [no_live_rows]` that is
+     about the clock and not about the fixtures: the seeded failed traces age
+     out of that scenario's 1-hour probe window, and `make eval-reset`
+     re-baselines their timestamps. Blessing through it writes a row CI never
+     sees (LESSONS 2026-09-07).
+   - The ledger key is `(scenario, tool, path, kind)` and carries **no element
+     index**, so a sequenced fixture whose two elements disagree for two
+     different reasons still gets one line and one context. Say both halves in
+     the `why` and file it under the one a reader would come looking for.
 
 ## Connection pool and run capacity ([ADR 0022](ADR/0022-connection-pool-sizing-and-the-run-concurrency-ceiling.md))
 

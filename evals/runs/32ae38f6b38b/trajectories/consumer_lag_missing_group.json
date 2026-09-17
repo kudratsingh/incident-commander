@@ -1,0 +1,148 @@
+{
+  "scenario": "consumer_lag_missing_group",
+  "incident_id": "b8223e02-b926-4b83-8b5b-69a61aef4526",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "b8223e02-b926-4b83-8b5b-69a61aef4526",
+      "state": "triage",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "unknown-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.0,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T10:35:49.358807Z",
+      "updated_at": "2026-09-17T10:35:49.358807Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "b8223e02-b926-4b83-8b5b-69a61aef4526",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "unknown-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 0,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000023,
+        "max_usd": "5.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "8f8a16b3-0f8a-472a-a581-0bf8171d187c",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T10:35:49.358830Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T10:35:49.358807Z",
+      "updated_at": "2026-09-17T10:35:49.358830Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "b8223e02-b926-4b83-8b5b-69a61aef4526",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.kafka",
+        "severity": "critical",
+        "fingerprint": "consumer_lag_high",
+        "group": "unknown-consumer",
+        "remediation_hint": null,
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 5,
+        "tool_calls_used": 1,
+        "max_tokens": 500000,
+        "tokens_used": 0,
+        "max_wall_seconds": 1800,
+        "wall_seconds_used": 0.000034,
+        "max_usd": "5.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "8f8a16b3-0f8a-472a-a581-0bf8171d187c",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "b9f43e93fc1ed31fb15e63f924d9abdf"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-09-17T10:35:49.358830Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d16fc334-b2a5-4b80-8a32-f1f74929a736",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "unknown-consumer"
+          },
+          "result_summary": "{\"consumer_group\":\"unknown-consumer\",\"lag\":null,\"lag_known\":false,\"source\":\"unrecognized\",\"cache_key\":\"kafka:consumer_lag:unknown-consumer\",\"measured_at\":null,\"age_seconds\":null,\"recent_samples\":[]}",
+          "timestamp": "2026-09-17T10:35:49.358841Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "809733d7-4255-47ba-bc90-6d666435fe20",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "named consumer group is unresolvable and lag is unknown; human decision required"
+          },
+          "result_summary": "planner stop: named consumer group is unresolvable and lag is unknown; human decision required",
+          "timestamp": "2026-09-17T10:35:49.358841Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "unknown",
+          "name": "unresolvable_consumer_group",
+          "confidence": 0.6,
+          "reasoning": "Probe of the named group returned lag: null with lag_known: false and source: unrecognized — the platform has no offsets for \"unknown-consumer\" at all. Null is unknown-not-healthy: it carries no magnitude and neither confirms nor excludes saturation, so there is nothing here to size a remediation against.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-09-17T10:35:49.358807Z",
+      "updated_at": "2026-09-17T10:35:49.358841Z"
+    }
+  ],
+  "invocation_id": "32ae38f6b38b"
+}

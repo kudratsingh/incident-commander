@@ -1,8 +1,16 @@
 """Deterministic grader for a completed agent run.
 
-Scores five dimensions with pure logic — no LLM in the loop:
+Scores six dimensions with pure logic — no LLM in the loop:
 
 * ``outcome``  — did the run reach the expected terminal state?
+* ``root_cause`` — did the agent name the fault the scenario actually
+  manufactured? Graded against the scenario's hidden ``GroundTruth`` (ADR
+  0038) and INDEPENDENT of ``outcome``: a run that resolves the incident via
+  the wrong diagnosis is a different finding from one that diagnoses
+  correctly and escalates, and until this dimension existed the two were the
+  same row. Trivially passes when the scenario declares no ground truth.
+  Arithmetic and the "what is the final diagnosis" rule live in
+  ``graders/root_cause.py``.
 * ``evidence`` — do required signals appear in the evidence ledger, and do
   the structured field assertions hold against the recorded tool output?
 * ``budget``   — did the run stay within the tool-call cap?
@@ -51,19 +59,29 @@ from pydantic import (
     model_validator,
 )
 
+from evals.graders.root_cause import final_diagnosis, score_root_cause
 from incident_commander.agent.briefing import EscalationBriefing
+from incident_commander.agent.hypothesis import HypothesisCategory
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 from incident_commander.tools.registry import TOOL_REGISTRY
 
 
 class GradeDimension(StrEnum):
-    """The five things every run is scored on."""
+    """The six things every run is scored on.
+
+    ``ROOT_CAUSE`` is the newest and the only one that is not a statement
+    about what the agent DID: it scores what the agent concluded. It is
+    appended rather than interleaved so the five values above keep their
+    position as well as their spelling — the committed ``baseline.json`` and
+    every archived run report are read back against this enum.
+    """
 
     OUTCOME = "outcome"
     EVIDENCE = "evidence"
     BUDGET = "budget"
     ACTION = "action"
     SAFETY = "safety"
+    ROOT_CAUSE = "root_cause"
 
 
 def is_vacuous_detail(detail: str) -> bool:
@@ -1173,6 +1191,7 @@ def grade(
     expectation: ScenarioExpectation,
     *,
     briefing: EscalationBriefing | None = None,
+    ground_truth: Sequence[HypothesisCategory] | None = None,
 ) -> GradeReport:
     """Score a completed run. Returns a report; never raises on graded content.
 
@@ -1181,6 +1200,37 @@ def grade(
     call sites that grade a run in isolation stay unchanged; a scenario
     that asserts on briefing text and is graded without one fails closed
     rather than passing vacuously.
+
+    ``ground_truth`` is the scenario's declared root causes, and it is how
+    WP-2.2 resolved divergence C4. The ground truth lives on ``Scenario``
+    (ADR 0038) and the answer key had no route to a grader that receives only
+    a ``RunState`` and a ``ScenarioExpectation``. Three routes were open and
+    this is the third:
+
+    * putting it on ``ScenarioExpectation`` — refused. Plan 01 § 88 and
+      decision C5 forbid it by name: two sources of truth for one fact is
+      how ``FIX_MAP`` drifted for weeks.
+    * grading root cause in a sibling grader the runner calls *beside*
+      ``grade()``, assembling the sixth dimension into the report afterwards
+      — refused. It makes the dimension something a caller can forget: the
+      report's dimension count would depend on who built it, the crash path
+      and every direct ``grade()`` caller would silently drop it, and "a
+      field is included only if somebody remembered" is the exclusion-list
+      shape ADR 0038 was written to remove.
+    * handing ``grade()`` the root-cause LABELS — this. It is narrower than
+      handing over the ``Scenario``: a ``tuple[HypothesisCategory, ...]``
+      carries no canned responses, no expectation and no second copy of
+      anything, so nothing here can read the answer key for any other
+      purpose. It is keyword-only with a default, so the ~30 isolated call
+      sites stay unchanged exactly as they did for ``briefing``, and the
+      arithmetic stays in ``graders/root_cause.py`` (which cannot import this
+      module back — ``evals/scenarios/schema.py`` already imports from here).
+
+    ``None`` means the scenario declares no ground truth, which is all 41
+    shipped scenarios today; the dimension is then vacuous in the shape
+    ``is_vacuous_detail`` recognises, so the regression gate keeps its
+    vacated-assertion check over it. It is NOT a licence to grade a
+    root-cause-less run green — see ``_grade_root_cause``.
     """
     dims = (
         _grade_outcome(run, expectation),
@@ -1188,11 +1238,51 @@ def grade(
         _grade_budget(run, expectation),
         _grade_action(run, expectation),
         _grade_safety(run, expectation),
+        _grade_root_cause(run, ground_truth),
     )
     return GradeReport(
         scenario=expectation.name,
         passed=all(d.passed for d in dims),
         dimensions=dims,
+    )
+
+
+def _grade_root_cause(
+    run: RunState, ground_truth: Sequence[HypothesisCategory] | None
+) -> DimensionResult:
+    """Did the agent name the fault the scenario manufactured?
+
+    Independent of ``OUTCOME`` by construction: nothing here reads
+    ``run.state``. The two are separate findings — resolving an incident on
+    the wrong diagnosis is luck, and escalating with the right one is a
+    correct handoff — and a single pass/fail row could not tell them apart.
+
+    Fails, rather than passing vacuously, when a ground truth was declared
+    and the run produced no ranking at all. A run that never said what was
+    wrong did not diagnose it.
+    """
+    if not ground_truth:
+        return DimensionResult(
+            dimension=GradeDimension.ROOT_CAUSE,
+            passed=True,
+            detail="no ground truth set",
+        )
+    expected = ", ".join(category.value for category in ground_truth)
+    top = final_diagnosis(run)
+    if top is None:
+        return DimensionResult(
+            dimension=GradeDimension.ROOT_CAUSE,
+            passed=False,
+            detail=(
+                f"the run produced no hypothesis ranking, so it named no root cause; "
+                f"ground truth {expected}"
+            ),
+        )
+    score = score_root_cause((top.category,), ground_truth)
+    return DimensionResult(
+        dimension=GradeDimension.ROOT_CAUSE,
+        passed=score.exact_set,
+        detail=score.describe(),
     )
 
 

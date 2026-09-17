@@ -33,7 +33,8 @@ import pytest
 from evals.graders.deterministic import GradeDimension, GradeReport
 from evals.runner import run_scenario
 from evals.scenarios.loader import load_scenarios
-from evals.scenarios.schema import Scenario
+from evals.scenarios.schema import GroundTruth, Scenario
+from incident_commander.agent.hypothesis import HypothesisCategory
 from incident_commander.agent.remediation import _PLAN_REFUSED_SUBJECT_TARGET_MARKER
 from incident_commander.agent.state import IncidentState
 from tests.unit.test_runner import _test_settings
@@ -88,6 +89,25 @@ def _with_llm(scenario: Scenario, mutate: Any) -> Scenario:
     responses = copy.deepcopy(dict(scenario.canned_llm_responses))
     mutate(responses)
     return scenario.model_copy(update={"canned_llm_responses": responses})
+
+
+def _with_ground_truth(scenario: Scenario, *causes: HypothesisCategory) -> Scenario:
+    """A copy of the scenario carrying the answer key its YAML does not.
+
+    No shipped scenario declares a ``ground_truth`` yet (WO-R3-191), so the
+    ROOT_CAUSE case has to attach one to have anything to grade. It attaches
+    the cause the scenario's world actually manufactures — the sabotage below
+    is still done to the AGENT, not to the answer key, which is what keeps
+    this file's discipline intact: every case here makes the agent do one
+    specific wrong thing.
+
+    Evaluator-only, so attaching it cannot reach the agent: the runner builds
+    the run from ``agent_visible()``, an allow-list this field is not on
+    (ADR 0038, ``tests/unit/test_ground_truth_never_leaks.py``).
+    """
+    return scenario.model_copy(
+        update={"ground_truth": GroundTruth(incident_count=1, root_causes=causes)}
+    )
 
 
 def _failing(report: GradeReport) -> set[GradeDimension]:
@@ -221,6 +241,42 @@ class TestABrokenAgentIsCaught:
         )
         assert result.outcome.final_state is IncidentState.ESCALATED
 
+    def test_an_agent_that_names_the_wrong_cause_fails_on_ROOT_CAUSE(self) -> None:
+        """WP-2.2's headline case, through the whole chain rather than the grader alone.
+
+        The agent takes every correct step — the two listings, the replay of
+        the alerted slice, the verify — and reaches RESOLVED, while calling
+        the fault a stale cache. Before ROOT_CAUSE existed, that run and a
+        correctly-reasoned one were the same green row: a right answer for
+        the wrong reason is luck, and the suite could not say so.
+
+        ``stale_cache`` is the sabotage rather than an escalate-only category
+        on purpose. It is in ``FIX_MAP``, so the remediate gate still hands
+        off to PLANNING and the run still resolves — which is what leaves
+        OUTCOME green and makes this a clean single-dimension red. A category
+        outside the map would escalate the run and red four dimensions at
+        once, proving something weaker.
+        """
+
+        def _misdiagnose(responses: dict[str, list[dict[str, Any]]]) -> None:
+            for step in responses["investigation_planner"]:
+                for hypothesis in step["hypotheses"]:
+                    hypothesis["category"] = HypothesisCategory.STALE_CACHE.value
+
+        truthful = _with_ground_truth(_subject(), HypothesisCategory.POISON_MESSAGE)
+        # The control's control: with the answer key attached and nothing
+        # sabotaged, the scenario still passes — so the red below is the
+        # misdiagnosis and not the ground truth being wrong about the world.
+        assert _grade(truthful).passed, "the attached ground truth does not match the scenario"
+
+        report = _grade(_with_llm(truthful, _misdiagnose))
+        assert _failing(report) == {GradeDimension.ROOT_CAUSE}, (
+            "an agent that resolved the incident on the wrong diagnosis did not red "
+            f"ROOT_CAUSE alone; failing dimensions: {sorted(d.value for d in _failing(report))}"
+        )
+        assert report.dimensions[0].dimension is GradeDimension.OUTCOME
+        assert report.dimensions[0].passed, "OUTCOME must stay green — the incident was fixed"
+
     def test_an_agent_that_skips_investigation_fails_on_EVIDENCE(self) -> None:
         # Straight to remediation with no probe, so nothing is cited.
         #
@@ -249,6 +305,7 @@ class TestABrokenAgentIsCaught:
 #   never acts            outcome, evidence, action
 #   fix not verified      OUTCOME only
 #   unsafe replay         SAFETY only        (on dlq_mixed_partial)
+#   names the wrong cause ROOT_CAUSE only    (ground truth attached)
 #   skips investigation   outcome, evidence, action
 #
 # The unsafe-replay row carries its scenario because it is the one case whose
@@ -329,8 +386,8 @@ def test_the_watched_set_is_derived_from_the_enum() -> None:
     assert not watched & _EXEMPT_DIMENSIONS, "a dimension is both watched and exempt"
     # Anti-vacuity canary: every assertion above is satisfied by an empty
     # watched set, and an empty parametrize list collects zero cases and
-    # reports green. The grader scores five dimensions and exempts one.
-    assert len(watched) >= 4, (
+    # reports green. The grader scores six dimensions and exempts one.
+    assert len(watched) >= 5, (
         f"only {len(watched)} dimension(s) are watched, so the coverage floor "
         f"below collects almost nothing. Either GradeDimension shrank or the "
         f"derivation broke; a floor that parametrizes over an empty set passes "

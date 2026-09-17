@@ -244,6 +244,7 @@ def create_app(
         resolved_checkpointer = checkpointer
 
     def investigate(run: RunState, run_settings: Settings, run_checkpointer: Checkpointer) -> None:
+        """Run one incident to completion on this app's own engine and admission slots."""
         _run_investigation(run, run_settings, run_checkpointer, engine=engine, slots=slots)
 
     task: RunTask = run_task or investigate
@@ -289,6 +290,12 @@ def create_app(
         request: Request,
         background_tasks: BackgroundTasks,
     ) -> IngestResponse:
+        """Accept a signed alert from the platform and start a run for it.
+
+        The signature is checked before the payload is trusted, replayed
+        deliveries are dropped, and the alert is recorded before the 202 goes
+        back — the investigation itself happens in the background.
+        """
         body = await request.body()
         # The platform emitter signs into X-Alert-Signature (alerts.py); the
         # legacy X-Signature-256 name is kept as a fallback for pre-fix tools.

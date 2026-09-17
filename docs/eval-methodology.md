@@ -577,6 +577,37 @@ What a recording is **for**: strategy experiments, paired comparisons, phase-clo
 It also refuses to construct at all without a recording, or with an empty one, rather than answering `not_recorded` to everything and producing a run-shaped object with nothing in it. There is no fall-back to a real client and no way to add one by accident: the module imports no `Settings`, no URL, no token and no transport, and the test asserts that on the module's own syntax tree.
 
 
+### Running one — `--mode recorded [--world <id>]`
+
+The third mode, and the one every later paired comparison runs in ([ADR 0047](ADR/0047-a-recorded-run-grades-diagnosis-and-the-plan-and-nothing-else.md)): a **real model** against a **replayed platform**. It seeds nothing, settles nothing, polls no precondition, tears nothing down, and is parallel-safe, because there is no shared world to serialise over — the world is a file, read once.
+
+```bash
+uv run python -m evals.runner --mode recorded --only remediate_consumer_lag_success
+uv run python -m evals.runner --mode recorded --world c8c4f0119dcd --only remediate_consumer_lag_success
+```
+
+`--world` is a recording's invocation id (the last segment of its filename) or a scenario's full name for its newest; without it, each selected scenario replays its newest recording. Resolution goes through `artifacts.versions` and is shared with `make world-drift`, so the id that selects a world to replay is the id that selects the world to check.
+
+**It spends money.** The platform leg is free; the planner calls are real, at roughly live per-scenario rates. Every recorded run needs the owner's explicit yes, like a live run. The refusals reflect that: `--mode recorded` cannot be combined with `--live` or `--smoke`, it will not start under a placeholder `ANTHROPIC_API_KEY` (a canned planner under a recorded label is a fabricated row), and a selected scenario with no recording is refused by name rather than served canned fixtures.
+
+**What a recorded row may claim.** `root_cause` and `budget` are graded; `evidence` is graded for a read-only run and not for a truncated one; `outcome`, `action` and `safety` are reported **not applicable in recorded mode** with the reason — a marked non-claim (`DimensionResult.applicable = False`, and a detail `is_vacuous_detail` recognises), never a green. The one that matters most is SAFETY: it is graded from the platform audit log as ground truth (invariant 6), a recording has none, and "zero unauthorized actions" asserted by a run that could not have taken one is the single most dangerous number this harness could emit. `MODE_APPLICABLE_DIMENSIONS` enforces the boundary in `grade()` — a mode may not mark `root_cause` inapplicable, because that is the only thing the mode exists to measure.
+
+`root_cause` is world-scoped off the **recording's own label**, not off the run's live flags (ADR 0040, INC-003): a recording of an unseeded world reports *not graded*, exactly as its sibling answer key already says.
+
+**A scenario with `expected_action_tools` stops at the `PLANNING` handoff.** `RecordedHandoff` replaces the `REMEDIATING` and `AWAITING_APPROVAL` transitions on every recorded run — not only on the scenarios that declare an action, because what a run *does* is the agent's choice and a read-only scenario whose agent chooses to remediate would otherwise hit the replay client's Tier-1 refusal and crash. The plan is then reported in the row's `replay.plan` block (the planned tool, its arguments, whether it is one the scenario expected) rather than graded as an ACTION, which has to stay silent.
+
+**The `replay` block** on each recorded outcome carries which recording, its world fingerprint, the replay clock and offset, answered / missed / refused counts, the recording's coherence findings, and the plan. **A run with any miss is not comparable** — the agent took its next step after a `not_recorded` tool error the world never produced — and `degraded` is set for it. Not for replaying, though: replaying is the mode, and `execution_mode` is where a reader learns it.
+
+### Has the world moved? — `make world-drift WORLD=<id>`
+
+A recording is only evidence while the world it came from still matches it, and nothing surfaces the staleness on its own: the file loads and replays perfectly forever, long after the platform release that invalidated it. **Run the drift check before reporting any recorded number** — it is a step in `docs/runbook.md` and a test asserts it is written there, because a check nobody runs is a check that does not exist.
+
+It re-reads the recording's **own** calls live under the read-scoped principal and diffs them with `evals/fixture_drift.py`'s walk, reused rather than reimplemented: that module already knows which fields legitimately move between two honest observations (`_VOLATILE` — the DLQ clocks, the lag reading's freshness metadata, the Redis gauges, the cache TTL), and a second opinion about that would be a second answer to "is this difference real", with the more forgiving one winning by accident. Three call-set findings the payload walk cannot produce are added: a recorded call the platform no longer answers, a live answer with no recorded counterpart, and a result with no readable JSON object.
+
+Zero model tokens, and not free of consequence: when the recording is of a seeded world it fires the same hooks, waits the same settle, polls the same preconditions and then resets, because the live platform does not hold the scenario's fault until its hooks fire and a check that skipped the seeding would report the whole fault as drift every time. It inherits `make test-drift`'s ordering constraint unchanged — never after a mutating check.
+
+Exit 1 means **the world moved**, not that the check failed, and the check does not choose between the three readings (a platform release, a fixture-pack change, a dirty world). Both fingerprints print either way: `recorder.world_fingerprint` is exact and therefore moves for every platform clock, so it is not the verdict — "the documents differ and nothing meaningful moved" is the normal outcome.
+
 ## Trace outputs
 
 Every live run writes three coordinated views per scenario:

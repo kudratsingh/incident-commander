@@ -63,7 +63,7 @@ module's.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -71,6 +71,7 @@ from typing import Any, Final
 
 from pydantic import ValidationError
 
+from evals import artifacts
 from evals.recorder import RecordedWorld, call_key, load_recording, world_fingerprint
 from incident_commander.tools.mcp_client import ToolResult
 from incident_commander.tools.policies import Tier, tier_of
@@ -246,6 +247,35 @@ def replay_key(tool: str, arguments: Mapping[str, Any]) -> str | None:
     except ValidationError:
         return None
     return call_key(tool, wired)
+
+
+def matching_recordings(world: str, scenarios: Iterable[str]) -> dict[str, Path]:
+    """Every scenario whose recordings include one matching ``world``, newest match each.
+
+    One rule, in one place, because two callers ask this question and a second
+    copy of it would let ``--mode recorded --world X`` and ``make world-drift
+    WORLD=X`` resolve to different recordings — which is the drift check
+    comparing a world nobody replayed.
+
+    ``world`` is either a recording's invocation id (the last segment of its
+    filename) or a scenario's full name, meaning "the newest recording of that
+    scenario". The two cannot collide: an invocation id is 12 hex characters and
+    a scenario name is not. Resolution goes through ``artifacts.versions``, never
+    a glob and never ``ls -t`` — the ordering rule is the filename's stamp and
+    invocation id, in one resolver (CLAUDE.md invariant 9's corollary).
+    """
+    found: dict[str, Path] = {}
+    for scenario in scenarios:
+        versions = artifacts.versions("recorded_world", scenario)
+        if not versions:
+            continue
+        if scenario == world:
+            found[scenario] = versions[-1]
+            continue
+        pinned = [path for path in versions if path.name.endswith(f".{world}.json")]
+        if pinned:
+            found[scenario] = pinned[-1]
+    return found
 
 
 def _shift_timestamp(value: Any, delta: timedelta) -> Any:

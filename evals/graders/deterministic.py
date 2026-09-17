@@ -47,7 +47,7 @@ import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from enum import StrEnum
 from functools import lru_cache
-from typing import Annotated, Any, Literal, Self, get_args
+from typing import Annotated, Any, Final, Literal, Self, get_args
 
 from pydantic import (
     BaseModel,
@@ -122,7 +122,45 @@ def is_vacuous_detail(detail: str) -> bool:
     ``graders/root_cause.py`` and recognised through
     ``is_not_graded_detail``, so there is one spelling of it, not two.
     """
-    return (detail.startswith("no ") and detail.endswith(" set")) or is_not_graded_detail(detail)
+    return (
+        (detail.startswith("no ") and detail.endswith(" set"))
+        or is_not_graded_detail(detail)
+        or is_not_applicable_detail(detail)
+    )
+
+
+#: How a dimension says "this mode makes no such claim". One prefix, in one
+#: place, for the same reason ``graders/root_cause.py`` owns the not-graded
+#: wording: two spellings of "this green is not a claim" is one spelling too
+#: many, and the readers are the regression gate, the report renderer and the
+#: phase-close assembler.
+NOT_APPLICABLE_PREFIX: Final[str] = "not applicable in "
+
+
+def not_applicable_detail(mode: str, why: str) -> str:
+    """The detail a dimension carries when the run's MODE cannot support it.
+
+    A third shape of green that is not a claim, beside the two
+    ``is_vacuous_detail`` above already knows: an expectation nobody set, and a
+    ground truth about a world this run was not in (INC-003). This one is
+    "the run could not possibly have produced the evidence this dimension
+    grades" — a recorded run has no audit log, so SAFETY has nothing to read,
+    and a run stopped at the ``PLANNING`` handoff executed nothing, so OUTCOME
+    and ACTION have nothing to describe.
+
+    It passes rather than fails, and the reason is the same one
+    ``_grade_root_cause`` gives for a not-graded verdict: ``GradeReport.passed``
+    is an ``all()``, so a red here would fail every run in the mode for a reason
+    that is not about the agent. What makes that safe is that the green is
+    MARKED — ``DimensionResult.applicable`` is False and this detail says which
+    mode and why — so nothing downstream can read it as a dimension that held.
+    """
+    return f"{NOT_APPLICABLE_PREFIX}{mode} mode: {why}"
+
+
+def is_not_applicable_detail(detail: str) -> bool:
+    """True when a dimension was skipped because the run's mode cannot support it."""
+    return detail.startswith(NOT_APPLICABLE_PREFIX)
 
 
 # --- Evidence expectations -----------------------------------------------
@@ -1181,13 +1219,27 @@ class ScenarioExpectation(BaseModel):
 
 
 class DimensionResult(BaseModel):
-    """One dimension's score, with the sentence that explains it."""
+    """One dimension's score, with the sentence that explains it.
+
+    ``applicable`` is the structural half of "this green is not a claim". A
+    dimension the run's MODE cannot support (recorded mode has no audit log, so
+    SAFETY has nothing to read) passes with ``applicable=False`` and a detail
+    ``is_not_applicable_detail`` recognises. Two mechanisms rather than one on
+    purpose: the flag is what a reader should branch on, and the detail is what
+    the regression gate and the archived reports — which predate this field and
+    must keep parsing — can still see. Defaulting to ``True`` is what keeps the
+    committed baseline and every locked archive readable (ADR 0013's precedent
+    for ``live_mcp``), and it defaults in the direction that cannot hide
+    coverage: a forgotten flag reads as a real claim, which fails loudly, not as
+    a skipped one, which would vanish silently.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     dimension: GradeDimension
     passed: bool
     detail: str
+    applicable: bool = True
 
 
 class GradeReport(BaseModel):
@@ -1207,6 +1259,7 @@ def grade(
     briefing: EscalationBriefing | None = None,
     ground_truth: Sequence[HypothesisCategory] | None = None,
     world_matches_ground_truth: bool = True,
+    not_applicable: Mapping[GradeDimension, str] | None = None,
 ) -> GradeReport:
     """Score a completed run. Returns a report; never raises on graded content.
 
@@ -1262,19 +1315,91 @@ def grade(
     the default keeps them correct; and a default of ``False`` would turn a
     forgotten argument into silently vanished coverage, which is the failure
     mode ``is_vacuous_detail`` exists to catch rather than to cause.
+
+    ``not_applicable`` maps a dimension to the sentence saying why the run's
+    MODE cannot support it (WP-3.3). It is a fact passed in for the third time
+    and for the same reason as the two above: this function is pure, it does not
+    know what mode produced the run, and it must not learn. Recorded mode is the
+    caller that uses it — a replayed platform has no audit log, so SAFETY has
+    nothing to read (invariant 6), and a run stopped at the ``PLANNING`` handoff
+    executed nothing, so OUTCOME and ACTION have nothing to describe. Only
+    ``MODE_APPLICABLE_DIMENSIONS`` may appear; anything else raises, because a
+    mode that could mark ROOT_CAUSE inapplicable could turn every run in it
+    green with no verdict inside.
     """
-    dims = (
-        _grade_outcome(run, expectation),
-        _grade_evidence(run, expectation, briefing),
-        _grade_budget(run, expectation),
-        _grade_action(run, expectation),
-        _grade_safety(run, expectation),
-        _grade_root_cause(run, ground_truth, world_matches_ground_truth),
+    not_applicable = dict(not_applicable or {})
+    if overreach := sorted(set(not_applicable) - MODE_APPLICABLE_DIMENSIONS):
+        raise ValueError(
+            "a run's mode may only declare "
+            + ", ".join(sorted(d.value for d in MODE_APPLICABLE_DIMENSIONS))
+            + " inapplicable, never "
+            + ", ".join(d.value for d in overreach)
+            + " — those are what the run is measured on, and a mode that could "
+            "excuse itself from them could excuse itself from being measured."
+        )
+    dims = tuple(
+        _mark_not_applicable(dimension, not_applicable)
+        for dimension in (
+            _grade_outcome(run, expectation),
+            _grade_evidence(run, expectation, briefing),
+            _grade_budget(run, expectation),
+            _grade_action(run, expectation),
+            _grade_safety(run, expectation),
+            _grade_root_cause(run, ground_truth, world_matches_ground_truth),
+        )
     )
     return GradeReport(
         scenario=expectation.name,
         passed=all(d.passed for d in dims),
         dimensions=dims,
+    )
+
+
+#: The only dimensions a run's MODE may declare inapplicable.
+#:
+#: OUTCOME, ACTION and SAFETY are the three statements about what the agent DID,
+#: and a mode that executes nothing makes none of them. EVIDENCE joins them for
+#: one case and one only — a run cut short before its action, whose evidence
+#: claims read that action's own response — and it is the outer edge: an
+#: expectation about what the agent READ is a real claim about a replayed world,
+#: so a mode is allowed to skip it only where the reading it names could not have
+#: happened at all.
+#:
+#: What is deliberately absent is the boundary. ROOT_CAUSE above all: a mode
+#: allowed to mark diagnosis inapplicable would turn every run in it green with
+#: no verdict inside, and diagnosis is the only thing recorded mode exists to
+#: measure. BUDGET is absent because a ledger is a fact about any run that
+#: happened, however far it got.
+MODE_APPLICABLE_DIMENSIONS: Final[frozenset[GradeDimension]] = frozenset(
+    {
+        GradeDimension.OUTCOME,
+        GradeDimension.ACTION,
+        GradeDimension.SAFETY,
+        GradeDimension.EVIDENCE,
+    }
+)
+
+
+def _mark_not_applicable(
+    result: DimensionResult, not_applicable: Mapping[GradeDimension, str]
+) -> DimensionResult:
+    """Replace one dimension's verdict with a marked, reasoned non-claim.
+
+    Applied as a pass OVER the graded tuple rather than as a branch inside each
+    grader, for the reason the ``_grade_root_cause`` sibling records: every
+    dimension is emitted for every run, and a dimension a caller could skip is
+    a dimension whose presence depends on who built the report. Here the
+    dimension is always graded and then overwritten, so the report's shape never
+    changes and the skip is visible in the row rather than in its absence.
+    """
+    why = not_applicable.get(result.dimension)
+    if why is None:
+        return result
+    return DimensionResult(
+        dimension=result.dimension,
+        passed=True,
+        detail=why,
+        applicable=False,
     )
 
 

@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 import uuid
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -40,6 +40,7 @@ from evals.graders.deterministic import (
     GradeReport,
     grade,
     is_vacuous_detail,
+    not_applicable_detail,
 )
 from evals.graders.llm_judge import JudgeScore, judge_briefing
 from evals.graders.root_cause import (
@@ -58,6 +59,7 @@ from evals.guards import (
     assert_write_capable_principal,
 )
 from evals.preconditions import unmet
+from evals.recorded_client import RecordedMCPClient, matching_recordings
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import ChaosHook, ChaosPlan, Scenario
 from evals.tracing import JsonlTracer, TraceKind, tracer_for
@@ -173,14 +175,20 @@ _CHAOS_BLOCK_PATH = _REPO_ROOT / "evals" / ".chaos-teardown-block.json"
 class ExecutionMode(StrEnum):
     """How the world under a run was produced.
 
-    ``CANNED`` and ``LIVE`` are the two modes that exist today; ``recorded``
-    (a replayed, pinned world) arrives with WP-3.3 and is deliberately not
-    declared here in advance — a mode nothing can produce is a value a reader
-    would have to guess the meaning of.
+    ``RECORDED`` arrived with WP-3.3 and is the third: the platform is a
+    recording of one moment of the live world (ADR 0043), replayed from disk,
+    while the agent's model calls are real. It is appended rather than
+    interleaved for the reason ``GradeDimension`` gives — archived reports and
+    the committed baseline are read back against this enum — and it is a
+    distinct value rather than ``LIVE`` with a flag because the whole of
+    ADR 0013 is that a run must never be mistakable for a more-real run than it
+    is. A recorded row's grades are valid for diagnosis, plan, candidate metrics
+    and calibration, and for nothing else (plan 02 § 189, 03 § 52).
     """
 
     CANNED = "canned"
     LIVE = "live"
+    RECORDED = "recorded"
 
 
 class RunProvenance(BaseModel):
@@ -575,6 +583,23 @@ class ScenarioOutcome(BaseModel):
     # baseline, and a crash that died before a single call was made — never
     # "this run was free", which is what a zeroed record would have said.
     accounting: RunAccountingRecord | None = None
+    # What the REPLAY did, on a recorded run only (WP-3.3): which recording,
+    # its world fingerprint, the replay clock and offset, how many calls it
+    # answered, how many it MISSED, whether it refused anything, the coherence
+    # findings the recording carries, and the plan a truncated run stopped at.
+    # ``None`` on every other run and on every archived report, which is the
+    # same default-bearing reasoning as the two fields above.
+    #
+    # An untyped mapping, exactly like ``RunProvenance.strategy_config``: its
+    # shape is ``RecordedMCPClient.summary()``'s plus the plan block, it exists
+    # to be read by a person and grouped by a report, and nothing grades on it.
+    # A second schema for it here would be a second place for the replay's own
+    # vocabulary to drift from the module that produces it.
+    #
+    # The miss count is the load-bearing number: a recorded run that asked the
+    # recording for something it does not hold is not a comparable run, and
+    # ``degraded`` above is set from it for exactly that reason.
+    replay: dict[str, Any] | None = None
 
 
 class _GroupingKeys(TypedDict):
@@ -1250,6 +1275,175 @@ def _step_sink(tracer: JsonlTracer) -> StepSink:
     return sink
 
 
+def _replay_record(
+    replay_client: RecordedMCPClient | None,
+    recorded_world: Path | None,
+    handoff: RecordedHandoff,
+    final: RunState,
+    scenario: Scenario,
+) -> dict[str, Any] | None:
+    """The ``replay`` row on a recorded outcome, or ``None`` on every other run.
+
+    Three things a reader of a recorded result needs and cannot get anywhere
+    else:
+
+    * **which world**, by fingerprint and by path — the fingerprint because that
+      is what ``make world-drift`` compares, and a row naming only a file would
+      not say whether the world in it had moved;
+    * **how complete the replay was** — answered, missed, refused. A miss means
+      the agent asked the recording for something it does not hold, so the run is
+      not comparable with another run of the same world, and the count is the
+      only place that fact survives;
+    * **the plan**, when the run was truncated. ``ACTION`` stays not-applicable
+      (nothing executed), so "grade the plan" (04:117) is reported HERE rather
+      than as a dimension: the planned tool, its arguments, and whether it is one
+      the scenario expected. A paired comparison reads this field; nothing gates
+      on it.
+    """
+    if replay_client is None or recorded_world is None:
+        return None
+    record: dict[str, Any] = dict(replay_client.summary())
+    record["recording"] = _repo_relative(recorded_world)
+    record["world_label"] = replay_client.world.world.label
+    record["findings"] = [
+        {"kind": f.kind, "subject": f.subject, "detail": f.detail}
+        for f in replay_client.world.findings
+    ]
+    record["truncated_at_planning_handoff"] = handoff.fired
+    # ``RunState.remediation_plan`` is a plain mapping on the checkpoint
+    # (``state.py``: ``dict[str, object] | None``), so it is read by key. The
+    # plan's own model lives in ``agent/remediation.py`` and is not imported for
+    # this — a report row needs the three values, not the schema.
+    plan = final.remediation_plan
+    planned_tool = None if plan is None else plan.get("action_tool")
+    expected = tuple(scenario.expectation.expected_action_tools)
+    record["plan"] = {
+        "expected_action_tools": list(expected),
+        "planned_action_tool": planned_tool,
+        "planned_action_arguments": None if plan is None else plan.get("action_arguments"),
+        "planned_verify_tool": None if plan is None else plan.get("verify_tool"),
+        # ``None`` — not ``False`` — when there is nothing to compare: no plan was
+        # made, or the scenario expects no action. A boolean there would read as
+        # "the plan was wrong", and "there was no plan" is a different fact.
+        "matches_expected": (
+            None if (planned_tool is None or not expected) else planned_tool in expected
+        ),
+    }
+    return record
+
+
+#: What a recorded run's evidence ledger records where it stopped. Written down
+#: once because three readers compare against it: the trajectory a person opens,
+#: the ``replay`` row on the outcome, and the test that proves the run really was
+#: truncated rather than merely unlucky.
+RECORDED_HANDOFF_REASON: Final[str] = (
+    "recorded mode: stopped at the PLANNING handoff. A recording has no state to "
+    "change and no audit log to observe a change in, so the plan was made and not "
+    "executed; OUTCOME, ACTION and SAFETY are not graded for this run."
+)
+
+
+class RecordedHandoff:
+    """Ends a recorded run where the plan is made, before anything is executed.
+
+    Installed for ``REMEDIATING`` **and** ``AWAITING_APPROVAL`` on every recorded
+    run — not only on the scenarios that declare ``expected_action_tools``. The
+    declaration says what a run is GRADED on; what a run DOES is decided by the
+    agent, and an agent that reaches the remediate handoff on a read-only
+    scenario would otherwise hand a Tier-1 call to the replay client. That call
+    is refused (ADR 0044), which is correct and is also a crashed scenario. This
+    makes the refusal unreachable rather than merely right: in recorded mode
+    there is no transition that could execute anything.
+
+    It stops at ``ESCALATED`` rather than inventing a state, because the state
+    machine's terminal set is an ADR-0002 decision and a new one would need an
+    ADR of its own for no measurement gained. The plan itself is kept — it is
+    what "grade the plan" (04:117) reads — and ``fired`` is what tells the caller
+    the run was truncated, which is a different question from what the terminal
+    state says.
+    """
+
+    def __init__(self) -> None:
+        self.fired = False
+
+    def __call__(self, run_state: RunState, at: datetime) -> RunState:
+        self.fired = True
+        entry = EvidenceEntry(
+            tool_name="_recorded_handoff",
+            arguments={},
+            result_summary=RECORDED_HANDOFF_REASON,
+            timestamp=at,
+        )
+        return run_state.model_copy(
+            update={
+                "state": IncidentState.ESCALATED,
+                "updated_at": at,
+                "evidence": (*run_state.evidence, entry),
+            }
+        )
+
+
+def recorded_not_applicable(*, truncated: bool) -> dict[GradeDimension, str]:
+    """Which dimensions a recorded run makes no claim about, and why (plan 02 §189).
+
+    Three always, and a fourth when the run was truncated at the handoff:
+
+    ``OUTCOME``
+        A recorded run's terminal state is partly the harness's own choice — the
+        handoff transition above ends it — so an outcome claim would be a claim
+        about this function. Plan 02 § 189 says recorded mode is not for outcome
+        claims at all, and 03 § 52 lists what it IS for: diagnosis, plan
+        selection, candidate metrics, calibration.
+    ``ACTION``
+        Nothing was executed, so there is no action to be the right one.
+    ``SAFETY``
+        Safety is graded from the platform's audit log as ground truth
+        (invariant 6) and a recording has none. A green SAFETY here would be the
+        most dangerous number in the repo: "zero unauthorized actions" asserted
+        by a run that could not have taken one.
+    ``EVIDENCE``, only when truncated
+        This one is a DIVERGENCE from WO-R3-198's stated scope (it names the
+        three above) and it is reported as one. Two facts force it. A truncated
+        run never calls the action tool, and these scenarios' evidence claims
+        read that tool's own response — ``remediate_consumer_lag_success``
+        asserts ``kill_key_cleared`` on ``restart_consumer_group``, which no
+        replay can produce. And the handoff transition adds an evidence entry of
+        its own, so leaving EVIDENCE graded would let harness prose satisfy a
+        scenario's substring claim. Grading it would therefore be red for a
+        reason that is the mode rather than the agent, which is the
+        mis-attribution INCIDENTS.md exists to record.
+
+    ``BUDGET`` and ``ROOT_CAUSE`` stay graded, and ``MODE_APPLICABLE_DIMENSIONS``
+    refuses any attempt to mark ROOT_CAUSE — recorded mode exists to measure
+    diagnosis. BUDGET is a real ceiling check over the calls that were actually
+    made; a truncated run cannot fail it, which is equally true of any run that
+    escalates early, so it is a weak claim rather than a false one.
+    """
+    reasons = {
+        GradeDimension.OUTCOME: not_applicable_detail(
+            "recorded",
+            "a replayed world's run is stopped by the harness at the handoff, so "
+            "its terminal state is not the agent's outcome (plan 02 §189)",
+        ),
+        GradeDimension.ACTION: not_applicable_detail(
+            "recorded", "no action is executed against a recording"
+        ),
+        GradeDimension.SAFETY: not_applicable_detail(
+            "recorded",
+            "safety is graded from the platform audit log as ground truth "
+            "(invariant 6) and a recording has none",
+        ),
+    }
+    if truncated:
+        reasons[GradeDimension.EVIDENCE] = not_applicable_detail(
+            "recorded",
+            "the run stopped at the PLANNING handoff, so the action tool's own "
+            "response — which this scenario's evidence claims read — was never "
+            "produced",
+        )
+    return reasons
+
+
 def run_scenario(
     scenario: Scenario,
     settings: Settings,
@@ -1257,12 +1451,35 @@ def run_scenario(
     mcp_token: str | None = None,
     invocation_id: str = "",
     model_role: ModelRole = ModelRole.DEVELOPMENT,
+    recorded_world: Path | None = None,
 ) -> ScenarioResult:
     """Drive one scenario end-to-end and grade the result.
 
     Uses ``CannedMCPClient`` for tool calls and ``CannedLLMClient`` for both
     the investigation planner and the briefing writer, each with its own
     per-scenario response queue keyed under ``canned_llm_responses``.
+
+    ``recorded_world`` selects RECORDED mode (WP-3.3): the path to one
+    recording, and the path IS the mode — there is no separate flag that could
+    disagree with it. It changes four things and nothing else:
+
+    * the agent's client is a ``RecordedMCPClient`` over that recording, so no
+      platform is reached at all;
+    * nothing is seeded, nothing settles, no precondition is polled and nothing
+      is torn down — the world is a file, and a reset would be a reset of
+      something this run never touched;
+    * ``REMEDIATING`` and ``AWAITING_APPROVAL`` are replaced by a transition
+      that stops the run at the ``PLANNING`` handoff, so no Tier-1 call is ever
+      attempted (04:117). The replay client would refuse one anyway; this is
+      what makes the refusal unreachable rather than merely correct;
+    * OUTCOME, ACTION and SAFETY are graded as not-applicable-in-this-mode, and
+      the row is stamped ``ExecutionMode.RECORDED``.
+
+    What it does NOT change: the model. A recorded run's planner calls are real
+    calls, so a recorded run spends real money at roughly live per-scenario
+    rates. The LLM leg still degrades to the canned client under a placeholder
+    key exactly as every other mode does, and a run that degraded says so in
+    ``degraded`` — which is how the machinery is exercised at zero cost.
 
     ``model_role`` is recorded, not resolved, here: ``main`` resolves
     ``settings.agent_model`` from the role before the suite starts, and this
@@ -1280,11 +1497,24 @@ def run_scenario(
     # a run by a call site here forgetting to leave it out.
     agent_visible = scenario.agent_visible()
 
+    # RECORDED mode, decided once and read everywhere below. The world is a
+    # file, so every live-platform behaviour this function has — seeding,
+    # settling, preconditions, teardown, the real transport — is off.
+    recorded = recorded_world is not None
+
     # use_live_* means "prefer live if env is real, else fall back to canned."
     # Nothing skips just because env is placeholder — canned data is the
     # deterministic offline fallback for `make eval` / CI.
-    live_mcp_available = scenario.use_live_mcp and not _is_offline_placeholder(
-        str(settings.platform_mcp_url)
+    #
+    # ``not recorded`` comes FIRST and is not an ``and`` at the end by accident:
+    # a recorded run under a real ``PLATFORM_MCP_URL`` is the one combination
+    # that could silently seed chaos into the shared world and read it live
+    # while the row claimed to be a replay. The recording is the world, or there
+    # is no run.
+    live_mcp_available = (
+        not recorded
+        and scenario.use_live_mcp
+        and not _is_offline_placeholder(str(settings.platform_mcp_url))
     )
     live_llm_available = scenario.use_live_llm and not _is_offline_api_key(
         settings.anthropic_api_key.get_secret_value()
@@ -1351,7 +1581,31 @@ def run_scenario(
 
     mcp_client: MCPClientProtocol
     live_mcp_client: MCPClient | None = None
-    if live_mcp_available:
+    replay_client: RecordedMCPClient | None = None
+    if recorded_world is not None:
+        # The replay clock is the run's OWN clock, so every age the agent can
+        # compute is the age the recorder observed (ADR 0044). Built before the
+        # LLM clients and before the transitions, like the live client, so a
+        # recording that will not load costs nothing.
+        replay_client = RecordedMCPClient.from_path(recorded_world, replay_clock=now)
+        mcp_client = replay_client
+        print(
+            f"  replay: {_repo_relative(recorded_world)} — "
+            f"{len(replay_client.world.calls)} recorded call(s), world "
+            f"{str(replay_client.summary()['world_fingerprint'])[:12]}, "
+            f"replay offset {int(replay_client.offset.total_seconds())}s"
+        )
+        # The coherence lints ran at record time and their findings travel
+        # INSIDE the recording (ADR 0043). Printed here, on every recorded run,
+        # because that is the point of carrying them: "a recorded world that
+        # contradicts itself is a fixture defect, not a benchmark" (plan 02
+        # § 187), and a finding nobody sees is a finding nobody acts on. A
+        # finding is not a verdict and does not refuse the run — the dossier's
+        # own rule, for the reason its lint docstring gives: a lint that returns
+        # a verdict becomes a gate somebody tunes to green.
+        for finding in replay_client.world.findings:
+            print(f"  replay lint [{finding.kind}] {finding.subject}: {finding.detail}")
+    elif live_mcp_available:
         # Fire the scenario's declared setup hooks BEFORE building the
         # agent's client so a seeding failure surfaces immediately with a
         # clear reason, not as a downstream "read returned healthy" bug.
@@ -1552,6 +1806,15 @@ def run_scenario(
         # than reusing the transition's single entry read.
         clock=tick,
     )
+    # RECORDED mode stops where the plan is made (04:117). Installed AFTER the
+    # two transitions it replaces, so the replacement is visible as a
+    # replacement rather than as an absence, and over both of PLANNING's
+    # acting successors — a Tier-2 plan goes to AWAITING_APPROVAL, and an
+    # approval against a recorded world is as meaningless as an action.
+    handoff = RecordedHandoff()
+    if recorded:
+        transitions[IncidentState.REMEDIATING] = handoff
+        transitions[IncidentState.AWAITING_APPROVAL] = handoff
 
     # Outside the try so a crash can still read what the run had spent when
     # it died — see ScenarioCrash.
@@ -1628,6 +1891,30 @@ def run_scenario(
                 # (llm/fakes.py) and never goes through _parse, so the raw
                 # pydantic error is still reachable.
                 briefing_error = f"briefing enrichment failed: {err}"
+        # Which world this run was actually in (INC-003, ADR 0040). The runner
+        # is the only place that knows — ``grade()`` is a pure function of its
+        # arguments and must stay one.
+        if replay_client is not None:
+            # A recorded world states which world it is IN the recording
+            # (ADR 0043 § 4), and the recording is the only authority here:
+            # ``live_mcp_available`` is False on this path by construction, so
+            # the live/canned derivation below would answer "not the label's
+            # world" for every recorded run and strike out the one dimension
+            # recorded mode exists to measure. These two booleans are what the
+            # recorder wrote down at the moment that world existed.
+            replay_label = replay_client.world.world
+            world_matches_ground_truth = label_describes_this_world(
+                live_mcp=replay_label.live_mcp,
+                chaos_seeded=replay_label.chaos_seeded,
+            )
+        else:
+            # ``chaos_records`` holds the SETUP hooks at this point (teardown
+            # runs after grading), and a canned run seeded nothing but is in the
+            # label's world by definition.
+            world_matches_ground_truth = label_describes_this_world(
+                live_mcp=live_mcp_available,
+                chaos_seeded=seeded_chaos(chaos_records),
+            )
         report = grade(
             final,
             scenario.expectation,
@@ -1641,16 +1928,13 @@ def run_scenario(
             ground_truth=(
                 None if scenario.ground_truth is None else scenario.ground_truth.root_causes
             ),
-            # Which world the run was actually in (INC-003). The runner is the
-            # only place that knows — ``grade()`` is a pure function of its
-            # arguments and must stay one — so the fact is passed in beside
-            # the label it qualifies. ``chaos_records`` holds the SETUP hooks
-            # at this point (teardown runs after grading), and a canned run
-            # seeded nothing but is in the label's world by definition.
-            world_matches_ground_truth=label_describes_this_world(
-                live_mcp=live_mcp_available,
-                chaos_seeded=seeded_chaos(chaos_records),
-            ),
+            # Which world the run was actually in (INC-003), decided above
+            # because the answer differs by mode and a conditional inside an
+            # argument list is a conditional nobody reads.
+            world_matches_ground_truth=world_matches_ground_truth,
+            # Which dimensions this MODE cannot make a claim about (WP-3.3).
+            # ``None`` for every other mode, so nothing else changes.
+            not_applicable=(recorded_not_applicable(truncated=handoff.fired) if recorded else None),
         )
         judge_score: JudgeScore | None = None
         judge_error: str | None = None
@@ -1726,8 +2010,17 @@ def run_scenario(
         # Provenance mirrors the tracer's scenario_start keys above.
         live_mcp=live_mcp_available,
         live_llm=live_llm_available,
-        degraded=(scenario.use_live_mcp and not live_mcp_available)
-        or (scenario.use_live_llm and not live_llm_available),
+        # A recorded run is degraded when the recording could not answer
+        # something the agent asked for, or refused something it tried. The
+        # field already meant "this row is not the measurement it looks like"
+        # (a declared-live leg that fell back to canned); a miss is the same
+        # statement about a replayed world, and ADR 0044 uses the same word for
+        # it. Deliberately NOT true merely because a recorded run replayed a
+        # platform — that is the mode, not a degradation of it, and
+        # ``execution_mode`` below is where a reader learns it.
+        degraded=(scenario.use_live_mcp and not live_mcp_available and not recorded)
+        or (scenario.use_live_llm and not live_llm_available)
+        or (replay_client is not None and replay_client.degraded),
         provenance=build_provenance(
             scenario.name,
             settings,
@@ -1735,11 +2028,17 @@ def run_scenario(
             invocation_id=invocation_id,
             # Derived from what the legs ACTUALLY did, the same two values
             # the live/canned flags above are derived from — never from the
-            # --live flag, which says what was asked for.
+            # --live flag, which says what was asked for. ``recorded`` is first
+            # because it is the narrowest true statement: the platform leg was
+            # a replay of one recorded moment, whatever the model leg did.
             execution_mode=(
-                ExecutionMode.LIVE
-                if (live_mcp_available or live_llm_available)
-                else ExecutionMode.CANNED
+                ExecutionMode.RECORDED
+                if recorded
+                else (
+                    ExecutionMode.LIVE
+                    if (live_mcp_available or live_llm_available)
+                    else ExecutionMode.CANNED
+                )
             ),
             # The run's own final ledger: seeded maxima and all four meters —
             # and, since WO-R3-260, the briefing writer's post-terminal call,
@@ -1758,6 +2057,7 @@ def run_scenario(
         # reconciling against the pre-briefing ledger would report every run
         # with an enriched briefing as unreconciled.
         accounting=build_accounting(accounting, reported_ledger),
+        replay=_replay_record(replay_client, recorded_world, handoff, final, scenario),
     )
     if tracer is not None:
         tracer.write(
@@ -1866,6 +2166,7 @@ def _crashed_result(
     *,
     settings: Settings | None = None,
     model_role: ModelRole = ModelRole.DEVELOPMENT,
+    recorded: bool = False,
 ) -> ScenarioResult:
     """Synthesize a failed ScenarioResult when run_scenario raises.
 
@@ -1958,7 +2259,12 @@ def _crashed_result(
         # and `degraded` False alongside said that was intended. A row that
         # misdescribes how it ran is worse than a missing row: the report is
         # the artifact, and a reader counting live coverage counted wrong.
-        live_mcp=scenario.use_live_mcp,
+        # ``recorded`` overrides the declared MCP leg, for the reason the
+        # comment above gives: the row must not misdescribe how it ran. A
+        # recorded run reached no platform whatever the scenario declares, and a
+        # crashed recorded row claiming a live platform is exactly the reader
+        # counting live coverage wrong.
+        live_mcp=scenario.use_live_mcp and not recorded,
         live_llm=scenario.use_live_llm,
         # Same reasoning one field up: a crashed row that cannot say which
         # model and revision it crashed under is a row nobody can act on.
@@ -1975,11 +2281,18 @@ def _crashed_result(
                 invocation_id=invocation_id,
                 # The DECLARED legs, like the two flags above: a crash can
                 # happen before either leg is chosen, and what the scenario
-                # asked for is the only honest answer available here.
+                # asked for is the only honest answer available here. Except for
+                # ``recorded``, which is not a declaration but an instruction
+                # the caller gave — the platform leg WAS a replay, however early
+                # the crash came.
                 execution_mode=(
-                    ExecutionMode.LIVE
-                    if (scenario.use_live_mcp or scenario.use_live_llm)
-                    else ExecutionMode.CANNED
+                    ExecutionMode.RECORDED
+                    if recorded
+                    else (
+                        ExecutionMode.LIVE
+                        if (scenario.use_live_mcp or scenario.use_live_llm)
+                        else ExecutionMode.CANNED
+                    )
                 ),
                 # The partial ledger when the crash carried one (what the
                 # run had actually spent), else the ledger it would have
@@ -2038,7 +2351,17 @@ def run_all(
     only_patterns: tuple[str, ...] = (),
     on_result: Callable[[ScenarioResult], None] | None = None,
     model_role: ModelRole = ModelRole.DEVELOPMENT,
+    recorded_worlds: Mapping[str, Path] | None = None,
 ) -> tuple[RunReport, tuple[Trajectory, ...], tuple[EscalationBriefing, ...]]:
+    """Run every scenario and assemble the report.
+
+    ``recorded_worlds`` maps a scenario name to the recording to replay it
+    against (WP-3.3). A scenario absent from the mapping runs in whatever mode it
+    would have run in anyway, which is what keeps this one loop serving all three
+    modes; ``main`` refuses a recorded selection with a scenario that has no
+    recording, before anything runs, so the silent-canned-fallback case cannot be
+    reached from the CLI.
+    """
     # run_scenario falls back to canned when env is placeholder; nothing
     # is skipped here. Per-scenario crashes are captured as failed outcomes
     # so the batch keeps running — see _crashed_result.
@@ -2051,7 +2374,9 @@ def run_all(
     # a scenario crash.
     results: list[ScenarioResult] = []
     ungraded: list[UngradedScenario] = []
+    worlds = dict(recorded_worlds or {})
     for scenario in scenarios:
+        recorded_world = worlds.get(scenario.name)
         try:
             result = run_scenario(
                 scenario,
@@ -2060,6 +2385,7 @@ def run_all(
                 mcp_token=mcp_token,
                 invocation_id=invocation_id,
                 model_role=model_role,
+                recorded_world=recorded_world,
             )
         except ChaosSetupFailed as exc:
             # NOT a graded row, and this is the whole point of the branch
@@ -2075,7 +2401,12 @@ def run_all(
         except Exception as exc:  # noqa: BLE001 — deliberate: don't abort suite
             print(f"  CRASH {scenario.name}: {type(exc).__name__}: {exc}")
             result = _crashed_result(
-                scenario, exc, invocation_id, settings=settings, model_role=model_role
+                scenario,
+                exc,
+                invocation_id,
+                settings=settings,
+                model_role=model_role,
+                recorded=recorded_world is not None,
             )
         results.append(result)
         if on_result is not None:
@@ -2665,6 +2996,118 @@ def _parse_model_role(argv: Sequence[str]) -> tuple[ModelRole | None, str]:
         return None, f"MODEL ROLE FAIL: --model-role {raw!r} is not one of: {roles}"
 
 
+#: The one value ``--mode`` takes. The other two modes are selected by what the
+#: run can reach — ``--live`` for the platform, nothing for canned — and giving
+#: them flag spellings here would be two ways to ask for one thing.
+RECORDED_MODE: Final[str] = "recorded"
+
+
+def _parse_mode(argv: Sequence[str]) -> tuple[str | None, str]:
+    """The ``--mode`` selection: ``""`` for absent, the value, or ``None`` + a refusal.
+
+    Three states rather than two, for the reason ``_parse_model_role`` records:
+    a refusal that looks like a selection makes every later refusal unreachable.
+    An unrecognised value is REFUSED rather than ignored — "--mode recordd ran
+    the canned suite and reported it" is the same class of bug as a dead
+    ``--only`` pattern, and this one would spend money on the way.
+    """
+    raw: str | None = None
+    for i, arg in enumerate(argv):
+        if arg == "--mode" and i + 1 < len(argv):
+            raw = argv[i + 1]
+        elif arg.startswith("--mode="):
+            raw = arg.split("=", 1)[1]
+    if raw is None:
+        return "", ""
+    value = raw.strip()
+    if value == RECORDED_MODE:
+        return value, ""
+    return None, (
+        f"MODE FAIL: --mode {raw!r} is not a mode this runner takes. The only value "
+        f"is --mode {RECORDED_MODE} (replay a recorded world). A live run is "
+        "--live, and a canned run is the default — those are selected by what the "
+        "run can reach, not by this flag."
+    )
+
+
+def _parse_world(argv: Sequence[str]) -> str | None:
+    """The ``--world`` selection: a recording's invocation id, or a scenario name."""
+    for i, arg in enumerate(argv):
+        if arg == "--world" and i + 1 < len(argv):
+            return argv[i + 1].strip()
+        if arg.startswith("--world="):
+            return arg.split("=", 1)[1].strip()
+    return None
+
+
+def recordings_for(scenarios: Sequence[Scenario], world: str | None) -> tuple[dict[str, Path], str]:
+    """Which recording each selected scenario replays, or a refusal saying why not.
+
+    Two selections, and the difference is what a reported result rests on.
+
+    Without ``--world``, each scenario replays its NEWEST recording, resolved
+    through ``artifacts.newest_or_none`` — never a glob and never ``ls -t``
+    (CLAUDE.md invariant 9's corollary). A scenario with no recording is a
+    REFUSAL, not a canned fallback: ``run_scenario`` would otherwise serve the
+    canned fixtures and the row would land in a recorded report as though a
+    world had been replayed, which is the same fabrication the ``--live``
+    canned-only gate refuses one mode over.
+
+    With ``--world <id>``, one exact recording is pinned — by its invocation id,
+    which is what makes a reported number reproducible when a scenario has
+    several recordings and the newest is not the one the result came from. A
+    scenario NAME is accepted there too and means "the newest of that scenario":
+    the two cannot collide (an invocation id is 12 hex characters and a scenario
+    name is not), and refusing the friendlier spelling would only send operators
+    to look the id up. Either way it must resolve to exactly one recording and
+    the selection must be exactly that scenario — a pinned world and a wider
+    selection is an instruction with two readings.
+    """
+    if world is None:
+        found: dict[str, Path] = {}
+        missing: list[str] = []
+        for scenario in scenarios:
+            path = artifacts.newest_or_none("recorded_world", scenario.name)
+            if path is None:
+                missing.append(scenario.name)
+            else:
+                found[scenario.name] = path
+        if missing:
+            return {}, (
+                f"RECORDED FAIL: {len(missing)} selected scenario(s) have no recorded "
+                f"world: {', '.join(sorted(missing))}. Record each one first "
+                "(`make world-record ONLY=<scenario>`, which needs the stack up and "
+                "costs no model tokens). A recorded run will not fall back to canned "
+                "fixtures: the row would claim a world it never replayed."
+            )
+        return found, ""
+
+    # One resolver for both callers — ``make world-drift`` asks the same question
+    # of the same id, and two copies of the rule would let the two resolve to
+    # different recordings.
+    matches = matching_recordings(world, [scenario.name for scenario in scenarios])
+    if not matches:
+        return {}, (
+            f"RECORDED FAIL: --world {world!r} matches no recording of any selected "
+            "scenario. Pass a recording's invocation id (the last segment of its "
+            "filename under evals/recorded_worlds/) or a selected scenario's full name."
+        )
+    if len(matches) > 1:
+        return {}, (
+            f"RECORDED FAIL: --world {world!r} matches recordings of "
+            f"{len(matches)} scenarios: {', '.join(sorted(matches))}. One world is one "
+            "scenario's world; narrow the selection with --only."
+        )
+    if len(scenarios) > 1:
+        return {}, (
+            f"RECORDED FAIL: --world {world!r} pins one recording but "
+            f"{len(scenarios)} scenarios are selected. Add --only "
+            f"{next(iter(matches))}, or drop --world to replay each scenario's newest "
+            "recording."
+        )
+    return matches, ""
+
+
 def _smoke_holdback_reason(scenario: Scenario) -> str:
     """Why the derived smoke pass does not contain ``scenario``.
 
@@ -2752,6 +3195,35 @@ def main() -> int:
         )
         print("no scenarios ran, nothing was spent")
         return 10
+    # Before the settings load, like the refusals around it: a mistyped mode
+    # must cost nothing, and this parse depends on no environment.
+    mode, mode_refusal = _parse_mode(sys.argv[1:])
+    if mode is None:
+        print(mode_refusal)
+        print("no scenarios ran, nothing was spent")
+        return 2
+    recorded = mode == RECORDED_MODE
+    world = _parse_world(sys.argv[1:])
+    if world is not None and not recorded:
+        print(
+            f"WORLD FAIL: --world {world!r} was given without --mode {RECORDED_MODE}. "
+            "A world is a recording, and only a recorded run replays one."
+        )
+        print("no scenarios ran, nothing was spent")
+        return 2
+    if recorded and (live or smoke):
+        # The one combination that could touch the shared world while claiming
+        # to be a replay. Refused here rather than reconciled: --live and
+        # --smoke are about reaching a platform, and a recorded run's platform
+        # is a file.
+        asked = " and ".join(flag for flag in ("--live", "--smoke") if flag in sys.argv[1:])
+        print(
+            f"MODE FAIL: --mode {RECORDED_MODE} cannot be combined with {asked}. A "
+            "recorded run replays a world from disk: it seeds nothing, resets nothing "
+            "and reaches no platform, so there is no live stage for it to be part of."
+        )
+        print("no scenarios ran, nothing was spent")
+        return 2
     # Before the settings load, like the two refusals around it: a mistyped
     # role must cost nothing, and this parse depends on no environment.
     model_role, role_refusal = _parse_model_role(sys.argv[1:])
@@ -2797,7 +3269,12 @@ def main() -> int:
         print("no scenarios ran, nothing was spent")
         return 2
     try:
-        settings = _settings_for_mode(live)
+        # A recorded run reads the real environment, and that is the whole
+        # reason it costs money: the platform is a replay, the MODEL is not.
+        # ``PLATFORM_MCP_URL`` is read too and deliberately ignored —
+        # ``run_scenario`` forces the live MCP leg off whenever a recording is
+        # passed, so a real URL in .env cannot make a recorded run touch it.
+        settings = _settings_for_mode(live or recorded)
     except ValidationError as err:
         # Exit 3 is the preflight/env code (see the smoke-token and LLM-auth
         # exits below); a raw traceback would exit 1, the code reserved for
@@ -3050,6 +3527,45 @@ def main() -> int:
             )
             print("no scenarios ran, nothing was spent")
             return 7
+    recorded_worlds: dict[str, Path] = {}
+    if recorded:
+        # Resolved AFTER the selection is final, so the refusal can name the
+        # scenarios that are actually going to run.
+        recorded_worlds, recorded_refusal = recordings_for(scenarios, world)
+        if recorded_refusal:
+            print(recorded_refusal)
+            print("no scenarios ran, nothing was spent")
+            return 2
+        if _is_offline_api_key(settings.anthropic_api_key.get_secret_value()):
+            # The mirror of the --live degradation refusal below, and the same
+            # argument: a recorded run whose planner is the canned client is a
+            # CANNED run wearing a recorded label, and its row would be counted
+            # as a measurement of a strategy that never ran. Refused before the
+            # archive exists.
+            #
+            # It is also why the offline proof of this mode drives ``run_all``
+            # directly from tests rather than through this entry point: there the
+            # canned planner is the point and the row is never reported.
+            print(
+                f"PREFLIGHT FAIL (env): --mode {RECORDED_MODE} but ANTHROPIC_API_KEY is "
+                "empty or a placeholder. A recorded run replays the PLATFORM; its "
+                "planner calls are real, and with no key this would be a canned run "
+                "labelled recorded."
+            )
+            print("no scenarios ran, nothing was spent")
+            return 3
+        print(
+            f"mode: {RECORDED_MODE} — the platform is a replay of a recorded world, the "
+            "model is real. Grades are valid for diagnosis and the plan only: OUTCOME, "
+            "ACTION and SAFETY are reported not-applicable (plan 02 §189, 03 §52)."
+        )
+        for name in sorted(recorded_worlds):
+            print(f"  {name} → {_repo_relative(recorded_worlds[name])}")
+        print(
+            "Run `make world-drift WORLD=<id>` before reporting any number from this "
+            "run: a recording is only evidence while the world it came from still "
+            "matches it (docs/runbook.md)."
+        )
     offline_mcp = _is_offline_placeholder(str(settings.platform_mcp_url))
     offline_llm = _is_offline_api_key(settings.anthropic_api_key.get_secret_value())
     degraded_to_canned = sum(
@@ -3249,6 +3765,7 @@ def main() -> int:
             only_patterns=tuple(only_patterns),
             on_result=_after_scenario,
             model_role=model_role,
+            recorded_worlds=recorded_worlds,
         )
     finally:
         if scan_client is not None:

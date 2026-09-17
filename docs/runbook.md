@@ -1026,6 +1026,70 @@ operate by:
   one, and the reason the scenario stopped sitting on the 0.7 decision
   boundary (WO-R3-267).)
 
+## Recorded-mode runs and the drift check (WP-3.3)
+
+A recorded run replays a **recorded world** (`evals/recorded_worlds/`, [ADR 0043](ADR/0043-a-recording-is-keyed-by-what-the-agent-sends.md)) instead of talking to the platform, while the agent's model calls are real. That is what makes a paired comparison affordable: one seeding, then as many runs of the same world as you like, in parallel, with no reset between them.
+
+**It spends money.** The platform leg is free; the planner calls are not, at roughly live per-scenario rates. Every recorded run therefore needs the owner's explicit yes, exactly like a live run — readiness is not authorization.
+
+```bash
+# one scenario, its newest recording
+uv run python -m evals.runner --mode recorded --only remediate_consumer_lag_success
+
+# a specific recording, pinned by its invocation id (the last filename segment)
+uv run python -m evals.runner --mode recorded --world c8c4f0119dcd \
+    --only remediate_consumer_lag_success
+```
+
+There is deliberately no `make` target for it. `make eval-live` exists because a live run has a
+world to seed and reset around it; a recorded run has neither, and a target would mostly be a
+second place for the mode's refusals to be re-stated. The runner's own gates are the guard.
+
+`--mode recorded` cannot be combined with `--live` or `--smoke`, and it refuses to start if `ANTHROPIC_API_KEY` is a placeholder: a canned planner under a recorded label would be a fabricated row. A selected scenario with no recording is refused by name — it never falls back to canned fixtures.
+
+### What a recorded result may and may not say
+
+| Dimension | In recorded mode |
+|---|---|
+| `root_cause` | **graded.** The reason the mode exists. Scoped to the recording's own world label ([ADR 0040](ADR/0040-a-ground-truth-is-a-statement-about-one-world.md)): a recording of an unseeded world reports *not graded*, exactly as its sibling answer key says. |
+| `budget` | graded. A real ceiling check over the calls that were made. |
+| `evidence` | graded for a read-only scenario — a replayed read **is** the platform's own answer. Not applicable when the run stopped at the handoff, because those claims read the action tool's own response. |
+| `outcome` | **not applicable.** The run is stopped by the harness at the `PLANNING` handoff, so its terminal state is not the agent's outcome. |
+| `action` | **not applicable.** Nothing is executed against a recording. |
+| `safety` | **not applicable.** Safety is graded from the platform audit log as ground truth (invariant 6) and a recording has none. |
+
+A not-applicable dimension passes with `applicable: false` and a detail beginning "not applicable in recorded mode" — a marked non-claim, never a green. A scenario declaring `expected_action_tools` runs only as far as the plan; the plan itself (the tool it chose, its arguments, whether it is one the scenario expected) is reported in the row's `replay.plan` block, because the dimension that would carry it has to stay silent.
+
+The row also carries `replay.misses`. **A recorded run with any miss is not comparable** — the agent asked the recording for something it does not hold, got a `not_recorded` tool error, and took its next step after an error the world never produced. `degraded` is set for it. Re-record the world wider rather than reading the run.
+
+### Before reporting any recorded number: `make world-drift`
+
+A recording is only evidence while the world it came from still matches it, and nothing surfaces the staleness on its own — the file loads and replays perfectly forever. **Run the drift check first, every time, and read its output before quoting a recorded result.**
+
+```bash
+make demo                                  # stack up, if it is down
+make world-audit                           # the seeded baseline, as for any live step
+make world-drift WORLD=c8c4f0119dcd        # or WORLD=<scenario> for its newest recording
+```
+
+It re-reads the recording's **own** calls live under the read-scoped smoke principal and diffs them with the fixture-drift walk, so the fields that legitimately move between two honest observations (`fixture_drift._VOLATILE`: the DLQ clocks, the lag reading's freshness metadata, the Redis gauges, the cache TTL) are checked for type and not for value. Zero model tokens.
+
+It is not free of consequence: when the recording is of a **seeded** world it fires the same chaos hooks, waits the same settle, polls the same preconditions and then resets — because the live platform does not hold the scenario's fault until its hooks fire, and a check that skipped the seeding would report the whole fault as drift every time. So it needs the stack up, a world audit, and the owner's yes, at $0 of model cost.
+
+**Ordering**, inherited from `make test-drift` and for the same reason (see the Makefile comment at `test-drift`): never run a drift check *after* a mutating check in the same sequence, or it reports that check's mutations as drift. `make test-idempotency` goes last, always.
+
+Exit codes: `0` no drift, `1` drift, `2` selection refusal, `3` preflight, `4` post-reset baseline dirty, `5` a chaos hook was refused, `6` the reset failed, `7` a precondition was not met.
+
+**Exit 1 means the world moved, not that the check failed.** Three readings, and the check deliberately does not choose between them:
+
+1. the platform was released — re-record (`make world-record ONLY=<scenario>`) and re-pin whatever rested on the old recording;
+2. the fixture pack changed — same answer;
+3. the world was left dirty by something else — `make eval-reset PURGE_IDEMPOTENCY=1`, then run the check again.
+
+If the drift check and `make fixture-drift` disagree, re-run `make fixture-drift` first and compare its numbers — the recorded caution in `context/INDEX.md` applies here unchanged.
+
+Two fingerprints are printed either way. `recorder.world_fingerprint` is exact, so it moves for every platform clock; the verdict is the walk, which knows which of those movements are honest. "The documents differ and nothing meaningful moved" is the normal, healthy outcome.
+
 ## Debugging one scenario
 
 The per-scenario trace file is the fastest path:

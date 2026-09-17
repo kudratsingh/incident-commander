@@ -68,6 +68,7 @@ class ShapeDefect:
     detail: str
 
     def describe(self) -> str:
+        """One line naming the fixture, the field and the disagreement."""
         return f"{self.scenario}:{self.tool} {self.path} [{self.kind}] {self.detail}"
 
 
@@ -126,6 +127,7 @@ def check_call(call: CannedCall, schema: Mapping[str, Any]) -> list[ShapeDefect]
         )
 
     def walk_object(payload: Mapping[str, Any], node: Mapping[str, Any], path: str) -> None:
+        """Compare one mapping's keys against an object schema node, then its values."""
         properties = node.get("properties")
         if not isinstance(properties, Mapping):
             return  # an unconstrained object claims nothing to disagree with
@@ -145,6 +147,7 @@ def check_call(call: CannedCall, schema: Mapping[str, Any]) -> list[ShapeDefect]
             walk_value(payload[key], properties[key], _join(path, key))
 
     def walk_value(value: Any, node: Mapping[str, Any], path: str) -> None:
+        """Check one value's type against its schema node, then descend into objects and lists."""
         node = _resolve(node, defs)
         declared = _declared_types(node)
         if declared and not (_schema_types(value) & declared):

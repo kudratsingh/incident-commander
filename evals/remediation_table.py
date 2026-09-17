@@ -30,6 +30,7 @@ def _code(value: object) -> str:
 
 
 def _claim(model: BaseModel) -> str:
+    """One claim rendered for the table: its any_of alternatives, or its field/value pairs."""
     data = model.model_dump(mode="json", exclude_defaults=True)
     alternatives = data.get("any_of")
     if alternatives is not None:
@@ -73,6 +74,7 @@ def current_claim(scenario: Scenario) -> str:
 
 
 def table_span(document: str) -> tuple[int, int]:
+    """Where the generated table starts and ends inside the methodology document."""
     start = document.index(HEADER, document.index(HEADING))
     end = document.index("\n\n", start)
     return start, end
@@ -102,11 +104,13 @@ def render_table(document: str, scenarios: Sequence[Scenario]) -> str:
 
 
 def updated_document(document: str, scenarios: Sequence[Scenario]) -> str:
+    """The document with its claim table swapped for a freshly derived one."""
     start, end = table_span(document)
     return document[:start] + render_table(document, scenarios) + document[end:]
 
 
 def main() -> None:
+    """Rewrite the methodology doc with the regenerated claim table."""
     path = ROOT / "docs" / "eval-methodology.md"
     path.write_text(updated_document(path.read_text(), load_scenarios(ROOT / "evals/scenarios")))
 

@@ -53,6 +53,7 @@ def fetch_tools(mcp_url: str, token: str) -> dict[str, object]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Fetch the live tool list, normalize it, and write the snapshot file."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mcp-url",

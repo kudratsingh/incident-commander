@@ -135,6 +135,7 @@ class ChaosClient:
         )
 
     def call(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Fire one hook and return its parsed result. Every failure raises ChaosInvocationError."""
         body = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -226,6 +227,7 @@ class ChaosClient:
         return {}
 
     def close(self) -> None:
+        """Release the underlying HTTP connection."""
         self._client.close()
 
 

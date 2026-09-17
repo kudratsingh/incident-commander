@@ -166,6 +166,7 @@ def base_url_default() -> str:
 
 
 def _register(client: httpx.Client, email: str, password: str) -> None:
+    """Create the demo user and its tenant; an existing user is already success."""
     r = client.post(
         "/auth/register",
         json={
@@ -218,6 +219,7 @@ def _promote(container: str, email: str) -> None:
 
 
 def _login(client: httpx.Client, email: str, password: str) -> str:
+    """Exchange the demo credentials for the admin JWT the rest of the flow uses."""
     r = client.post("/auth/login", json={"email": email, "password": password})
     r.raise_for_status()
     token: str = r.json()["access_token"]
@@ -333,6 +335,7 @@ def _create_or_get_sa(
 
 
 def _mint_token(client: httpx.Client, jwt: str, sa_id: str) -> str:
+    """Mint one service account a fresh token and return its plaintext."""
     r = client.post(
         f"/admin/service-accounts/{sa_id}/tokens",
         json={},
@@ -344,6 +347,7 @@ def _mint_token(client: httpx.Client, jwt: str, sa_id: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Register, promote, and mint a token for each of the three eval principals."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--base-url",

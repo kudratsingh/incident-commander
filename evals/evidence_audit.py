@@ -68,6 +68,7 @@ def _models_in(annotation: object) -> list[type[BaseModel]]:
 
 
 def _collect_field_names(model: type[BaseModel], seen: set[type[BaseModel]]) -> set[str]:
+    """Field names of ``model`` and of every model nested inside it, cycle-safe."""
     if model in seen:
         return set()
     seen.add(model)

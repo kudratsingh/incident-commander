@@ -88,6 +88,7 @@ class Tally:
         return self.created + self.rate_limited + self.backpressured + len(self.errors)
 
     def describe(self) -> str:
+        """The one-line summary, with each outcome in its own bucket."""
         parts = [f"{self.created} created"]
         if self.rate_limited:
             parts.append(f"{self.rate_limited} rate-limited")
@@ -99,6 +100,7 @@ class Tally:
 
 
 def login(client: httpx.Client, email: str, password: str) -> str:
+    """Log in the demo USER — job creation needs one, not a service account."""
     r = client.post("/auth/login", json={"email": email, "password": password})
     r.raise_for_status()
     token: str = r.json()["access_token"]
@@ -151,6 +153,7 @@ class LagReader:
         self._client = client
 
     def read(self) -> int | None:
+        """The current lag, or ``None`` when it is switched off or cannot be read."""
         if not self.enabled:
             return None
         try:
@@ -222,6 +225,7 @@ def run(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Check the flags, log in, run the loop, and report what arrived."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--email", default=DEFAULT_EMAIL)

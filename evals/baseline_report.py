@@ -42,6 +42,8 @@ NEVER_RUN_LIVE = ("dlq_mislabeled_replay_safe", "saga_stuck", "dlq_mixed_partial
 
 
 class DebtVerdict(BaseModel):
+    """One row of the debt walk: which PR, how it was settled, and the evidence for that."""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     row: int
@@ -308,10 +310,12 @@ def assemble(root: Path, offline_path: Path) -> dict[str, Any]:
 
 
 def render_json(document: dict[str, Any]) -> str:
+    """The document as deterministic JSON — the machine-readable half."""
     return json.dumps(document, indent=2, ensure_ascii=False) + "\n"
 
 
 def render_markdown(document: dict[str, Any]) -> str:
+    """The document as the report a person reads — the same numbers, laid out."""
     provenance = document["provenance"]
     lines = [
         "# The Phase 0 baseline",
@@ -426,6 +430,7 @@ def write(document: dict[str, Any], *, root: Path | None = None) -> tuple[Path, 
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Assemble the baseline from the committed archives, then print it or write both halves."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--offline-report", type=Path, help="defaults to artifacts.newest('report')"

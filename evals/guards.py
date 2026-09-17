@@ -514,6 +514,7 @@ class AuditWindowScan:
             self._covered_upto = page_newest
 
     def _merge(self, events: list[AuditEventEntry]) -> None:
+        """Fold a page's in-window rows into the scan, deduped by id and capped."""
         for event in events:
             if event.created_at < self.since:
                 continue
@@ -549,6 +550,7 @@ class AuditWindowScan:
         )
 
     def inconclusive_reason(self) -> str:
+        """The message explaining why this scan cannot vouch for the whole window."""
         returned, total = self._last_page
         if self._overflowed:
             return (

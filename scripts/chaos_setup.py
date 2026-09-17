@@ -61,11 +61,13 @@ from evals.chaos_hooks import ChaosClient
 
 
 def _print_result(action: str, result: dict[str, Any]) -> None:
+    """Echo what the platform returned for one hook."""
     print(f"[{action}] platform returned:")
     print(json.dumps(result, indent=2))
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    """The CLI: one subcommand per chaos hook, plus the shared connection flags."""
     parser = argparse.ArgumentParser(
         prog="chaos_setup",
         description=("Fire platform chaos hooks to seed a fixable state for live eval."),
@@ -175,6 +177,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Fire the requested hook, print what the platform did, and say what to run next."""
     parser = _build_parser()
     args = parser.parse_args()
 

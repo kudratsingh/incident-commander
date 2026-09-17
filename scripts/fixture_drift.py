@@ -96,6 +96,7 @@ def _parse_pairs(raw: list[str]) -> frozenset[tuple[str, str]]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Report canned-vs-live drift against the running platform, or re-bless the ledger."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--bless",

@@ -90,6 +90,7 @@ class Probe:
 
     @property
     def label(self) -> str:
+        """The call rendered as ``tool(name=value)`` for the report."""
         rendered = ", ".join(f"{name}={value!r}" for name, value in self.arguments)
         return f"{self.tool}({rendered})"
 
@@ -153,6 +154,8 @@ def read(client: MCPClientProtocol, probe: Probe) -> Reading:
 
 @dataclass(frozen=True)
 class BaselineLine:
+    """One audited line: what was expected, what came back, and whether they matched."""
+
     name: str
     expected: str
     observed: str
@@ -226,6 +229,7 @@ def audit_baseline(client: MCPClientProtocol) -> list[BaselineLine]:
 
 
 def _audit_trace_freshness(client: MCPClientProtocol) -> BaselineLine:
+    """Are the two seeded failed traces still inside the scenario's probe window?"""
     # Let the platform apply the same created_at window as the scenario,
     # avoiding a second clock or timestamp parser in the audit.
     reading = read(
@@ -357,6 +361,7 @@ def audit_world(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Audit the seeded world under the read-only token and print PASS/FAIL per line."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--roots", default="", help="comma-separated root job ids; read only")
     args = parser.parse_args(argv)

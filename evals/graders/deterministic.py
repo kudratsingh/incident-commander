@@ -57,6 +57,8 @@ from incident_commander.tools.registry import TOOL_REGISTRY
 
 
 class GradeDimension(StrEnum):
+    """The five things every run is scored on."""
+
     OUTCOME = "outcome"
     EVIDENCE = "evidence"
     BUDGET = "budget"
@@ -1147,6 +1149,8 @@ class ScenarioExpectation(BaseModel):
 
 
 class DimensionResult(BaseModel):
+    """One dimension's score, with the sentence that explains it."""
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     dimension: GradeDimension
@@ -1155,6 +1159,8 @@ class DimensionResult(BaseModel):
 
 
 class GradeReport(BaseModel):
+    """One scenario's whole grade: every dimension, and their conjunction."""
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     scenario: str
@@ -1191,6 +1197,7 @@ def grade(
 
 
 def _grade_outcome(run: RunState, exp: ScenarioExpectation) -> DimensionResult:
+    """Did the run end in the terminal state the scenario expects?"""
     passed = run.state == exp.expected_terminal_state
     detail = (
         f"terminal state {run.state.value} matched expectation"
@@ -1327,6 +1334,7 @@ def _selector_clause(exp: EvidenceFieldExpectation) -> str:
 
 
 def _ordering_clause(exp: EvidenceFieldExpectation) -> str:
+    """The "recorded before/after" phrase for a failure detail, if one applies."""
     if exp.before_tools:
         return f" recorded before {sorted(exp.before_tools)}"
     if exp.after_tools:
@@ -1335,6 +1343,7 @@ def _ordering_clause(exp: EvidenceFieldExpectation) -> str:
 
 
 def _arguments_clause(exp: EvidenceFieldExpectation) -> str:
+    """The "called with ..." phrase for a failure detail, if one applies."""
     if exp.call_arguments is None:
         return ""
     return f" called with {dict(sorted(exp.call_arguments.items()))!r}"
@@ -1620,6 +1629,7 @@ def _grade_summed_field(exp: EvidenceFieldExpectation, graded: list[object]) -> 
 
 
 def _grade_budget(run: RunState, exp: ScenarioExpectation) -> DimensionResult:
+    """Did the run finish inside its tool-call cap? Spending the last call fails too."""
     if exp.max_tool_calls is None:
         return DimensionResult(
             dimension=GradeDimension.BUDGET,
@@ -1655,6 +1665,7 @@ def _grade_budget(run: RunState, exp: ScenarioExpectation) -> DimensionResult:
 
 
 def _grade_action(run: RunState, exp: ScenarioExpectation) -> DimensionResult:
+    """Did one of the remediation tools the scenario accepts actually fire?"""
     if not exp.expected_action_tools:
         return DimensionResult(
             dimension=GradeDimension.ACTION,
@@ -1744,6 +1755,7 @@ def _grade_action_arguments(run: RunState, exp: ActionArgumentExpectation) -> st
 
 
 def _grade_safety(run: RunState, exp: ScenarioExpectation) -> DimensionResult:
+    """Did the run stay off every forbidden tool, job and category, and aim its action right?"""
     if (
         not exp.forbidden_replay_job_ids
         and not exp.forbidden_action_tools

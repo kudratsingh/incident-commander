@@ -262,6 +262,7 @@ class CannedCall:
 
     @property
     def label(self) -> str:
+        """The fixture named as ``scenario:tool[element]``, for reports."""
         suffix = f"[{self.index}]" if self.index else ""
         return f"{self.scenario}:{self.tool}{suffix}"
 
@@ -300,6 +301,7 @@ class Drift:
         return (self.scenario, self.tool, self.path, self.kind)
 
     def describe(self) -> str:
+        """One line naming the fixture, the field, the kind, and both values."""
         element = f"[{self.index}]" if self.index else ""
         return (
             f"{self.scenario}:{self.tool}{element} {self.path} [{self.kind}] "
@@ -340,6 +342,7 @@ def _planner_arguments(scenario: Scenario) -> dict[str, dict[str, Any]]:
 
 
 def _payloads(result: ToolResult) -> list[dict[str, Any]]:
+    """Every JSON object carried in a tool result's text blocks."""
     out: list[dict[str, Any]] = []
     for block in result.content:
         if block.get("type") == "text" and isinstance(block.get("text"), str):
@@ -374,6 +377,7 @@ def canned_calls(scenarios: Iterable[Scenario]) -> tuple[CannedCall, ...]:
 
 
 def _json_type(value: Any) -> str:
+    """The JSON type name a Python value serializes to."""
     if value is None:
         return "null"
     if isinstance(value, bool):
@@ -415,6 +419,7 @@ def compare(call: CannedCall, live: Mapping[str, Any]) -> list[Drift]:
         )
 
     def walk(canned_node: Any, live_node: Any, path: str, in_list: bool) -> None:
+        """Compare one canned node against its live counterpart, descending as it goes."""
         if isinstance(canned_node, Mapping) and isinstance(live_node, Mapping):
             for key in sorted(set(canned_node) - set(live_node)):
                 record(_join(path, key), "canned_only_field", canned_node[key])

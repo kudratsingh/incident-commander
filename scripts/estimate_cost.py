@@ -81,6 +81,7 @@ def _aware(raw: str) -> datetime:
 
 
 def _tier(model: str) -> str:
+    """Which price row a model id falls under; anything unrecognised is priced as sonnet."""
     for name in RATES:
         if name in model:
             return name
@@ -88,6 +89,7 @@ def _tier(model: str) -> str:
 
 
 def main() -> int:
+    """Total the traced LLM calls by invocation, model tier and role, and price them."""
     argv = sys.argv[1:]
     since = None
     if "--since" in argv:

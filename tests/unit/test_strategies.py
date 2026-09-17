@@ -472,12 +472,19 @@ class TestTheDefaultIsBaseline:
         assert default_strategy().name == _settings().inference_strategy.value == "baseline"
 
     def test_an_unknown_configured_strategy_is_refused_at_construction(self) -> None:
+        # The placeholder used to be "best_of_n_sampled", which WP-5.3 made a
+        # real member. A name from plan 02 § 4 that has no implementation yet is
+        # the right stand-in: it is what an operator reading the plan would
+        # actually mistype, and it stays unknown until its packet lands.
         with pytest.raises(ValidationError) as caught:
-            _settings(inference_strategy="best_of_n_sampled")
-        assert "baseline" in str(caught.value), (
+            _settings(inference_strategy="reflection")
+        message = str(caught.value)
+        assert "baseline" in message, (
             "the refusal must name the permitted values; an operator who typed "
             "the wrong one is the person who needs the list"
         )
+        for member in StrategyName:
+            assert member.value in message
 
     def test_a_blank_value_falls_back_to_the_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # ``env_ignore_empty``: INFERENCE_STRATEGY= means unset, not "".

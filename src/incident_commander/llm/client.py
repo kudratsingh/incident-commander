@@ -45,6 +45,37 @@ _PREFLIGHT_TIMEOUT: Final[httpx.Timeout] = httpx.Timeout(30.0, connect=5.0)
 _MAX_RETRY_AFTER_SECONDS: Final[float] = 60.0
 
 
+#: Model ids that **reject** ``temperature`` (and ``top_p`` / ``top_k``) with a
+#: 400. Anthropic removed the sampling parameters on the Fable/Mythos 5 family,
+#: Opus 5 / 4.8 / 4.7 and Sonnet 5; Opus 4.6, Sonnet 4.6 and Haiku 4.5 still
+#: accept them. This repo is pinned to ``claude-sonnet-4-6`` with
+#: ``claude-haiku-4-5`` as the judge, so the sampled inference strategy
+#: (WP-5.3) can send one today — and would 400 on the first planner call under
+#: a newer pin.
+#:
+#: DECLARED rather than derived, and deliberately **not** a refusal. Nothing
+#: here blocks a model that is not on the list: a wrong refusal stops a
+#: legitimate run, while a wrong allow surfaces as a rejected request — which
+#: the provider does not bill and which ``LLMClient.call`` already turns into
+#: one escalation with the reason in it, before any spend. What the list is for
+#: is the tripwire in ``tests/unit/test_best_of_n_sampled.py``: no id in
+#: ``MODEL_PRICING`` may appear here, so the day someone prices one of these
+#: models the suite fails and names the sampled arm, instead of a paid sweep
+#: discovering it.
+SAMPLING_REJECTED_MODELS: Final[frozenset[str]] = frozenset(
+    {
+        "claude-fable-5",
+        "claude-fable-5-1",
+        "claude-mythos-5",
+        "claude-mythos-5-1",
+        "claude-opus-5",
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-sonnet-5",
+    }
+)
+
+
 def elapsed_ms_of(seconds: float) -> int:
     """Whole milliseconds, never negative. ``0`` is a measurement, not a gap.
 
@@ -174,6 +205,13 @@ class LLMClientProtocol(Protocol):
     carries that call's trace-record id so the JSONL and the human report
     can show the pair as one repaired step rather than two unrelated ones.
     It changes nothing about what is sent to the model.
+
+    ``temperature`` is the sampling temperature for this one call (WP-5.3,
+    plan 02 § 11.2). ``None`` — the default, and what every call in this repo
+    made before ``best_of_n_sampled`` existed — sends **no** temperature field
+    at all, so the request bytes of every other call are unchanged and the
+    provider's own default applies. See ``SAMPLING_REJECTED_MODELS`` above for
+    the models that refuse it.
     """
 
     def call[T: BaseModel](
@@ -185,6 +223,7 @@ class LLMClientProtocol(Protocol):
         max_tokens: int = 4096,
         *,
         repair_of: str | None = None,
+        temperature: float | None = None,
     ) -> LLMResult[T]: ...
 
 
@@ -232,6 +271,7 @@ class LLMClient:
         max_tokens: int = 4096,
         *,
         repair_of: str | None = None,
+        temperature: float | None = None,
     ) -> LLMResult[T]:
         """Make one structured-output call and return the parsed output with what it billed.
 
@@ -267,6 +307,18 @@ class LLMClient:
             ],
             "tool_choice": {"type": "tool", "name": _STRUCTURED_TOOL_NAME},
         }
+        # Added only when asked for, never as an explicit default. Two reasons,
+        # and the first is the load-bearing one: the request body is what the
+        # tracer writes and what the provider reads, so a ``"temperature": 1.0``
+        # appearing on every call would change the recorded request of every
+        # existing role — including the ones the campaign's eight green live runs
+        # were made with — for no behavioural gain. The second is that the field
+        # is rejected outright by newer models (``SAMPLING_REJECTED_MODELS``), so
+        # sending it unasked would break those pins for callers that never wanted
+        # it. Forced tool use is unaffected by temperature: the schema still
+        # constrains the payload, and temperature only varies what goes in it.
+        if temperature is not None:
+            request_body["temperature"] = temperature
 
         def _trace_error(err: Exception, attempt: int, *, terminal: bool) -> None:
             """Record a call that was billed (or attempted) and did not return.

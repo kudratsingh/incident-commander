@@ -308,7 +308,10 @@ def strategy_knobs(settings: Settings) -> StrategyKnobs:
     ``n`` the strategy stamps and the seeded ledger already in the provenance
     record.
     """
-    return StrategyKnobs(n=settings.best_of_n)
+    return StrategyKnobs(
+        n=settings.best_of_n,
+        sample_temperature=settings.sample_temperature,
+    )
 
 
 def build_provenance(

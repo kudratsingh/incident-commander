@@ -2704,6 +2704,7 @@ class TestTwoFaultPreconditions:
                 max_tokens: int = 4096,
                 *,
                 repair_of: str | None = None,
+                temperature: float | None = None,
             ) -> LLMResult[T]:
                 order.append("llm")
                 return super().call(

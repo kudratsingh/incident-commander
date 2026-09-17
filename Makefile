@@ -523,3 +523,7 @@ endif
 clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache build dist *.egg-info
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
+
+.PHONY: remediation-table
+remediation-table:
+	uv run python -m evals.remediation_table

@@ -7,7 +7,7 @@ and ``evals/phase_close_report.py``, nothing here runs an eval and nothing is
 typed in — every number is read out of a committed ``evals/runs/<id>/report.json``
 — which is what lets a test regenerate the committed artifact byte for byte.
 
-Four decisions are load-bearing.
+Five decisions are load-bearing.
 
 **One model per table, enforced by refusal.** ``assemble`` raises rather than
 footnotes when the rows in scope name two ``agent_model`` ids, and the message
@@ -44,11 +44,20 @@ by ``regression.compare`` — the gate's own definition of what a scenario-level
 regression is — rather than against the moving baseline.
 
 What this cannot say yet is written into the artifact (``limits``) rather than
-left for the reader to notice: one strategy, one model, one rep per live
-scenario, no recorded-world mode until Phase 3, and — the big one — no
-root-cause number, because ROOT_CAUSE (WP-2.2, cmd #255) and the ground-truth
-labels (WO-R3-261, cmd #260) both landed AFTER every archive in scope was
-written, so not one committed run was ever graded on diagnosis.
+left for the reader to notice: one strategy, one model, roughly one rep per
+live scenario, no recorded-world mode until Phase 3, and a root-cause column
+that now has numbers in it but a small denominator — the first version of this
+report had none at all, because ROOT_CAUSE (WP-2.2, cmd #255) and the
+ground-truth labels (WO-R3-261, cmd #260) landed after every archive it
+covered. The Phase 2 archives supply it, and ``limits`` says exactly which
+rows are graded and which of three reasons excuses the rest.
+
+**One archive's diagnosis grades are read from somewhere else.** The live
+read-only pass graded canned-world labels against an unseeded live world
+(INC-003); ADR 0040 withdrew those verdicts and an offline re-grade replaced
+them. ``SUPERSEDED_ROOT_CAUSE`` maps that archive to the re-grade, and
+``build_rows`` substitutes on the way in — the archive is never edited
+(invariant 9) and the withdrawn figure never reaches a table.
 """
 
 from __future__ import annotations
@@ -92,7 +101,37 @@ SCOPE: Final[tuple[str, ...]] = (
     "845bdae22195",
     "ee183c85429c",
     "47abb70a2b9e",
+    # --- added by the Phase 2 close (WO-R3-195) ---
+    # Canned full suite, benchmark role, the first sweep run AFTER the
+    # ground-truth labels landed (cmd #260). This is the archive that ends
+    # "no root-cause number": 32 of its 41 rows carry a graded diagnosis.
+    "b75527784077",
+    # The live read-only pass. Its own ROOT_CAUSE verdicts are superseded —
+    # see SUPERSEDED_ROOT_CAUSE below — and every other dimension on it stands.
+    "0db6fe722f7c",
+    # The three seeded live legs of the Phase 2 close, in the order the owner
+    # released them. Two are red; both stay, for the reason above.
+    "759e198cdd27",
+    "648a32f2339d",
+    "fc896b25a09c",
 )
+
+#: Archives whose ROOT_CAUSE verdicts have been withdrawn and replaced by a
+#: committed offline re-grade, mapped to the document that replaces them.
+#:
+#: `0db6fe722f7c` graded its diagnoses against labels written for each
+#: scenario's CANNED world while running against an unseeded LIVE one
+#: (INC-003), which made seven correct "nothing is wrong here" answers read as
+#: misdiagnoses. ADR 0040 scoped a label to the world it describes, and the
+#: archive was re-graded offline at no cost. The archive itself is untouched
+#: and stays untouched (invariant 9) — the substitution happens here, on the
+#: way into the table, so that this report never restates a number the project
+#: has formally withdrawn. The re-grade's verdicts are read, not recomputed:
+#: it is the reviewed answer for that run and a second opinion assembled here
+#: would be exactly the kind of quiet re-scoring this module exists to avoid.
+SUPERSEDED_ROOT_CAUSE: Final[dict[str, str]] = {
+    "0db6fe722f7c": "evals/reports/regrades/regrade_report.20260917T133824Z.0db6fe722f7c.json",
+}
 
 #: Plan 03 § 10: ~100 paired trials per arm to detect a 15-point difference at
 #: 80% power. Every difference below it is labelled in the artifact and in the
@@ -283,7 +322,54 @@ def _root_cause_verdict(outcome: ScenarioOutcome) -> tuple[bool, bool]:
     return (False, False)
 
 
-def build_row(source: Source, outcome: ScenarioOutcome) -> Row:
+@dataclass(frozen=True)
+class Regraded:
+    """One scenario's verdict as the superseding re-grade states it."""
+
+    passed: bool
+    dimensions: tuple[tuple[str, bool, str], ...]
+    root_cause_graded: bool
+    root_cause_correct: bool
+
+
+def regraded_verdicts(root: Path, archive: str) -> dict[str, Regraded]:
+    """``{scenario: Regraded}`` from the re-grade that supersedes an archive.
+
+    Read out of the committed re-grade document rather than recomputed, and
+    scored with the same ``is_vacuous_detail`` test ``_root_cause_verdict``
+    uses, so "graded" means the same thing on both sides of the substitution.
+    The whole row is replaced, not only the ROOT_CAUSE cell: a withdrawn
+    dimension verdict changes whether the ROW passed, and a pass rate computed
+    from one and a diagnosis column computed from the other would be two
+    different runs printed side by side.
+    """
+    document = json.loads((root / SUPERSEDED_ROOT_CAUSE[archive]).read_text())
+    if document["archive"] != archive:
+        raise ValueError(f"re-grade for {archive} describes {document['archive']}")
+    verdicts: dict[str, Regraded] = {}
+    for entry in document["scenarios"]:
+        dimensions = tuple(
+            (name, dimension["regraded"]["passed"], dimension["regraded"]["detail"])
+            for name, dimension in sorted(entry["dimensions"].items())
+        )
+        root_cause = entry["dimensions"].get("root_cause", {}).get("regraded")
+        verdicts[entry["scenario"]] = Regraded(
+            passed=entry["regraded"]["passed"],
+            dimensions=dimensions,
+            root_cause_graded=(
+                root_cause is not None and not is_vacuous_detail(root_cause["detail"])
+            ),
+            root_cause_correct=bool(root_cause is not None and root_cause["passed"]),
+        )
+    return verdicts
+
+
+def build_row(
+    source: Source,
+    outcome: ScenarioOutcome,
+    *,
+    regraded: dict[str, Regraded] | None = None,
+) -> Row:
     provenance = outcome.provenance
     if provenance is None:  # pragma: no cover - SCOPE is provenance-carrying
         raise ValueError(
@@ -291,6 +377,9 @@ def build_row(source: Source, outcome: ScenarioOutcome) -> Row:
             "name its own model, strategy or execution mode — remove it from SCOPE"
         )
     graded, correct = _root_cause_verdict(outcome)
+    override = None if regraded is None else regraded.get(outcome.scenario)
+    if override is not None:
+        graded, correct = override.root_cause_graded, override.root_cause_correct
     return Row(
         archive=source.archive,
         scenario=outcome.scenario,
@@ -299,8 +388,10 @@ def build_row(source: Source, outcome: ScenarioOutcome) -> Row:
         model_role=provenance.model_role.value,
         execution_mode=provenance.execution_mode.value,
         group=regression.grouping_values(outcome),
-        passed=outcome.report.passed,
-        dimensions=tuple(
+        passed=outcome.report.passed if override is None else override.passed,
+        dimensions=override.dimensions
+        if override is not None
+        else tuple(
             (d.dimension.value, d.passed, d.detail)
             for d in sorted(outcome.report.dimensions, key=lambda d: d.dimension.value)
         ),
@@ -315,8 +406,18 @@ def build_row(source: Source, outcome: ScenarioOutcome) -> Row:
     )
 
 
-def build_rows(sources: Iterable[Source]) -> list[Row]:
-    return [build_row(source, outcome) for source in sources for outcome in source.report.outcomes]
+def build_rows(root: Path, sources: Iterable[Source]) -> list[Row]:
+    rows: list[Row] = []
+    for source in sources:
+        regraded = (
+            regraded_verdicts(root, source.archive)
+            if source.archive in SUPERSEDED_ROOT_CAUSE
+            else None
+        )
+        rows.extend(
+            build_row(source, outcome, regraded=regraded) for outcome in source.report.outcomes
+        )
+    return rows
 
 
 def refusal_for(rows: Sequence[Row]) -> str | None:
@@ -639,23 +740,44 @@ def _accuracy_by(rows: Sequence[Row], key: str) -> dict[str, Any]:
     grouped: dict[tuple[str, str], list[Row]] = {}
     for row in rows:
         grouped.setdefault((row.arm_label, row.group[key]), []).append(row)
-    return {
-        "key": key,
-        "rows": [
+    graded = [row for row in rows if row.root_cause_graded]
+    correct = sum(1 for row in graded if row.root_cause_correct)
+    slices: list[dict[str, Any]] = []
+    thin = 0
+    for (arm, value), members in sorted(grouped.items()):
+        slice_graded = sum(1 for row in members if row.root_cause_graded)
+        slice_correct = sum(
+            1 for row in members if row.root_cause_graded and row.root_cause_correct
+        )
+        if 0 < slice_graded < 5:
+            thin += 1
+        slices.append(
             {
                 "arm": arm,
                 key: value,
                 "runs": len(members),
                 "passed": sum(row.passed for row in members),
                 "pass_rate": _rate(sum(row.passed for row in members), len(members)),
-                "root_cause_graded": sum(row.root_cause_graded for row in members),
+                "root_cause_graded": slice_graded,
+                "root_cause_correct": slice_correct,
+                "root_cause_accuracy": _rate(slice_correct, slice_graded),
             }
-            for (arm, value), members in sorted(grouped.items())
-        ],
-        "root_cause_accuracy": None,
+        )
+    return {
+        "key": key,
+        "rows": slices,
+        "root_cause_accuracy": _rate(correct, len(graded)),
         "root_cause_note": (
             "not measurable from this scope: no archived run carries a graded ROOT_CAUSE "
             "dimension (see limits)"
+            if not graded
+            else (
+                f"{correct}/{len(graded)} over the rows that carry a graded diagnosis, which is "
+                f"{len(graded)} of {len(rows)} — see limits for the three reasons the rest do "
+                f"not. Per-slice accuracy is beside each row and {thin} slice(s) rest on "
+                "fewer than five graded rows; those are counts, not rates, and nothing here is "
+                "a per-difficulty or per-family finding"
+            )
         ),
     }
 
@@ -780,10 +902,27 @@ def _not_measurable(what: str, why: str, requires: Sequence[str]) -> dict[str, A
 def _scenario_level_regressions(sources: Sequence[Source], rows: Sequence[Row]) -> dict[str, Any]:
     """Arm against arm, using the gate's own ``compare`` (WO-R2-79's definition).
 
-    Full-suite sources only. A filtered report is excluded for the reason the
-    gate excludes it: its absent scenarios would read as dropped coverage.
+    Full-suite sources only, and "full" is two exclusions rather than one.
+
+    A FILTERED report is excluded for the reason the gate excludes it: its
+    absent scenarios would read as dropped coverage.
+
+    A PARTIAL report is excluded for the same reason one layer out. A run that
+    covers a subset of the corpus without being filtered — the read-only smoke
+    pass is the example: it selects the read-only scenarios by scope, not by
+    ``--only`` — produces the identical distortion. Comparing it to a full
+    sweep printed "7 regressions, 14 dropped scenarios", and those seven were
+    precisely the verdicts INC-003 withdrew: a live unseeded world graded
+    against labels written for a canned one. The scenarios it does not contain
+    are missing, not failed, and the world it ran in is not the world the other
+    side ran in.
     """
-    full = [source for source in sources if not source.filtered]
+    widest = max((len(source.report.outcomes) for source in sources), default=0)
+    full = [
+        source
+        for source in sources
+        if not source.filtered and len(source.report.outcomes) == widest
+    ]
     comparisons = []
     for index, left in enumerate(full):
         for right in full[index + 1 :]:
@@ -817,8 +956,52 @@ def _scenario_level_regressions(sources: Sequence[Source], rows: Sequence[Row]) 
             for source in sources
             if source.filtered
         ],
+        "excluded_partial_runs": [
+            {
+                "archive": source.archive,
+                "scenarios": len(source.report.outcomes),
+                "full_suite_is": widest,
+                "why": (
+                    "a run covering part of the corpus is not a suite-level input either: its "
+                    "absent scenarios read as dropped coverage, and where it also ran in a "
+                    "different world its rows are not comparable at all (INC-003)"
+                ),
+            }
+            for source in sources
+            if not source.filtered and len(source.report.outcomes) != widest
+        ],
         "rows_covered": len(rows),
     }
+
+
+def _root_cause_difference_refusal(rows: Sequence[Row]) -> str:
+    """Why no arm-vs-arm diagnosis difference is printed, in today's terms.
+
+    It used to be "nothing is graded". That stopped being true in Phase 2, and
+    a stale reason is worse than none — so the sentence is rebuilt from the
+    rows, and it now names the real obstacle: the graded rows do not PAIR.
+    """
+    by_arm: dict[str, list[Row]] = {}
+    for row in rows:
+        if row.root_cause_graded:
+            by_arm.setdefault(row.arm_label, []).append(row)
+    if not by_arm:
+        return (
+            "no arm in scope has a graded ROOT_CAUSE row, so the difference has no "
+            "two sides to take"
+        )
+    sizes = ", ".join(f"{arm} ({len(members)})" for arm, members in sorted(by_arm.items()))
+    shared: set[str] | None = None
+    for members in by_arm.values():
+        names = {row.scenario for row in members}
+        shared = names if shared is None else (shared & names)
+    return (
+        f"{len(by_arm)} arm(s) carry graded ROOT_CAUSE rows — {sizes} — but a difference here is "
+        f"PAIRED by scenario, and only {len(shared or set())} scenario name(s) appear in both. "
+        "A canned fixture and a seeded live world are not two measurements of the same thing, "
+        "so pairing them by name would invent a comparison neither run supports — and even if "
+        "it were fair, three pairs is two orders of magnitude below the floor"
+    )
 
 
 def _paired_differences(rows: Sequence[Row]) -> dict[str, Any]:
@@ -841,10 +1024,7 @@ def _paired_differences(rows: Sequence[Row]) -> dict[str, Any]:
         "skipped_metrics": [
             {
                 "metric": "root_cause_accuracy",
-                "why": (
-                    "no arm in scope has a graded ROOT_CAUSE row, so the difference has no "
-                    "two sides to take"
-                ),
+                "why": _root_cause_difference_refusal(rows),
             },
             {
                 "metric": "pass_at_k / selected@k / oracle gap",
@@ -859,41 +1039,90 @@ def _paired_differences(rows: Sequence[Row]) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 
 
-def _limits(rows: Sequence[Row], sources: Sequence[Source]) -> list[str]:
+def _root_cause_limit(root: Path, rows: Sequence[Row], sources: Sequence[Source]) -> str:
+    """Which rows carry a diagnosis verdict, which do not, and why not.
+
+    Every number in this sentence is counted, not typed, because the point of
+    the sentence is that the denominator is small and the reasons it is small
+    are three different things.
+    """
+    graded = [row for row in rows if row.root_cause_graded]
+    correct = sum(1 for row in graded if row.root_cause_correct)
+    live_graded = [row for row in graded if row.execution_mode == "live"]
+    dimensionless = sum(
+        1
+        for source in sources
+        for outcome in source.report.outcomes
+        if not any(d.dimension is GradeDimension.ROOT_CAUSE for d in outcome.report.dimensions)
+    )
+    # Only archives actually in scope: the map is a repository-wide fact, the
+    # count is a fact about this document.
+    world_mismatch = sum(
+        json.loads((root / SUPERSEDED_ROOT_CAUSE[source.archive]).read_text())["root_cause"][
+            "regraded"
+        ]["not_graded_world"]
+        for source in sources
+        if source.archive in SUPERSEDED_ROOT_CAUSE
+    )
+    unlabelled = len(rows) - len(graded) - dimensionless - world_mismatch
+    return (
+        f"A ROOT-CAUSE NUMBER AT LAST, OVER {len(graded)} OF {len(rows)} ROWS — and the other "
+        f"{len(rows) - len(graded)} are ungraded for three different reasons, which is why the "
+        f"column is not an accuracy over the corpus. GRADED: {len(graded)} rows, {correct} "
+        f"correct, of which {len(live_graded)} are live. NOT GRADED: {dimensionless} rows sit "
+        "in archives written before ROOT_CAUSE was a dimension (cmd #255) or before the labels "
+        f"existed (cmd #260), so they carry no verdict at all; {unlabelled} rows are scenarios "
+        f"that deliberately declare no ground truth; and {world_mismatch} rows are held back by "
+        "ADR 0040 — their label describes a world that run did not have, because the read-only "
+        "pass seeds no fault. Those last ones are the withdrawn grades of INC-003: this report "
+        "reads them from the committed offline re-grade rather than from the archive, so the "
+        "figure the archive still carries appears nowhere in this document."
+    )
+
+
+def _limits(root: Path, rows: Sequence[Row], sources: Sequence[Source]) -> list[str]:
     """What this report cannot say, in the report, in its own words."""
     live = [row for row in rows if row.execution_mode == "live"]
     repeats = Counter(row.scenario for row in live)
+    repeated = sorted(name for name, count in repeats.items() if count > 1)
+    with_accounting = [
+        source.archive
+        for source in sources
+        if any(outcome.accounting is not None for outcome in source.report.outcomes)
+    ]
     return [
         "ONE STRATEGY. Every run in scope is `baseline`; the leaderboard has one strategy to "
         "rank, so it is a record, not a ranking. Plan 03 § 8's nine-arm matrix has not run.",
         "ONE MODEL. Every row names claude-sonnet-4-6 under two roles. A second model would be "
         "refused by this assembler, not footnoted — there is no cross-model number here.",
-        f"ONE REP PER LIVE SCENARIO, almost. {len(live)} live runs cover "
-        f"{len(repeats)} scenario(s); the only repeat is the red-then-green re-run of "
-        "`remediate_consumer_lag_success`. Plan 03 § 10 asks for 5 reps at comparison time.",
+        f"ONE REP PER LIVE SCENARIO, almost. {len(live)} live rows cover "
+        f"{len(repeats)} scenario(s); only {len(repeated)} of them ran more than once "
+        f"({', '.join('`' + name + '`' for name in repeated)}), and never more than twice "
+        "against the same commander. Plan 03 § 10 asks for 5 reps at comparison time, so "
+        "nothing here supports a variance claim.",
         f"EVERY DIFFERENCE IS BELOW THE FLOOR. The largest paired count here is far under "
         f"{PAIRED_TRIAL_FLOOR} paired trials, so no difference in this document should be "
         "read as a detected effect. The bootstrap intervals are printed to make that visible.",
-        "NO ROOT-CAUSE NUMBER. ROOT_CAUSE became a dimension in cmd #255 and the ground-truth "
-        "labels landed in cmd #260 — both AFTER every archive in scope was written, so not one "
-        "committed run was graded on diagnosis. The first benchmark-role sweep archive "
-        "committed after cmd #260 supplies it, and this report is versioned so that sweep gets "
-        "a new one rather than editing this.",
+        _root_cause_limit(root, rows, sources),
         "NO pass@k, selected@k, ORACLE GAP OR CALIBRATION. All four need per-step candidate "
         "sets and confidences; a committed report carries grades, not candidate sets.",
         "NO RECORDED-WORLD MODE. Every row is canned or live (`ExecutionMode` has two members). "
         "Plan 03 § 5 puts strategy comparisons in recorded mode, which arrives in Phase 3, so "
         "instances are paired here by scenario NAME rather than by recorded-world id.",
-        "NO PER-ROLE COST BREAKDOWN. WP-2.3's `accounting` record (per-role calls, tokens, USD, "
-        f"ms) is absent from all {len(sources)} archives in scope — it merged after them. Cost "
-        "here is the run's own budget ledger, which is the whole run rather than a role.",
+        "PER-ROLE COST IS NOT IN THIS TABLE, THOUGH IT NOW EXISTS. WP-2.3's `accounting` record "
+        f"(per-role calls, tokens, USD, ms) is present in {len(with_accounting)} of "
+        f"{len(sources)} archives in scope and absent from the rest, which merged before it. "
+        "Cost here is therefore still the run's own budget ledger — the whole run rather than a "
+        "role — because a column populated for some rows and blank for others would invite "
+        "exactly the comparison it cannot support. The Phase 2 close report breaks the live "
+        "runs down by role; this table will, once every archive in scope carries the record.",
     ]
 
 
 def assemble(root: Path, archives: Sequence[str] = SCOPE) -> dict[str, Any]:
     """The research document. Every value is read from a file under ``root``."""
     sources = read_scope(root, archives)
-    rows = build_rows(sources)
+    rows = build_rows(root, sources)
     if not rows:
         raise ValueError("no rows in scope: a research report over nothing is not a report")
     if (refusal := refusal_for(rows)) is not None:
@@ -973,7 +1202,7 @@ def assemble(root: Path, archives: Sequence[str] = SCOPE) -> dict[str, Any]:
             ),
         },
         "sections": sections,
-        "limits": _limits(rows, sources),
+        "limits": _limits(root, rows, sources),
         "no_runs_were_made_to_produce_this": (
             "Zero live invocations, zero LLM calls and zero platform calls produced this "
             "document. Every number was read out of a committed archive under evals/runs/."
@@ -988,6 +1217,11 @@ def assemble(root: Path, archives: Sequence[str] = SCOPE) -> dict[str, Any]:
 
 def render_json(document: dict[str, Any]) -> str:
     return json.dumps(document, indent=2, ensure_ascii=False) + "\n"
+
+
+def _capitalized(sentence: str) -> str:
+    """First letter up, the rest untouched — ``str.capitalize`` lowercases ids."""
+    return sentence[:1].upper() + sentence[1:]
 
 
 def _number(value: float | None, places: int = 3) -> str:
@@ -1273,6 +1507,19 @@ def render_markdown(document: dict[str, Any]) -> str:
         lines.append(
             "Excluded from the suite diff (filtered runs, one scenario each): "
             + ", ".join(f"`{e['archive']}`" for e in regressions["excluded_filtered_runs"])
+            + "."
+        )
+        lines.append("")
+    if regressions["excluded_partial_runs"]:
+        lines.append(
+            "Also excluded (part of the corpus, not filtered — the read-only pass selects by "
+            "token scope): "
+            + ", ".join(
+                f"`{e['archive']}` ({e['scenarios']} of {e['full_suite_is']})"
+                for e in regressions["excluded_partial_runs"]
+            )
+            + ". "
+            + _capitalized(regressions["excluded_partial_runs"][0]["why"])
             + "."
         )
         lines.append("")

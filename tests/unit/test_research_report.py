@@ -420,10 +420,52 @@ def test_the_report_states_what_it_cannot_say_yet() -> None:
     document = json.loads(artifacts.newest("research_report").read_text())
     rendered = artifacts.newest("research_report_md").read_text()
     limits = " ".join(document["limits"])
-    for claim in ("ONE STRATEGY", "ONE MODEL", "NO ROOT-CAUSE NUMBER", "NO RECORDED-WORLD MODE"):
+    for claim in ("ONE STRATEGY", "ONE MODEL", "NO RECORDED-WORLD MODE"):
         assert claim in limits
     assert "What this report cannot say yet" in rendered
     assert document["no_runs_were_made_to_produce_this"].startswith("Zero live invocations")
+
+
+def test_the_root_cause_limit_counts_every_ungraded_row_and_says_which_reason() -> None:
+    """The version before the Phase 2 archives said "NO ROOT-CAUSE NUMBER".
+
+    It now has one, over a small denominator, and the limit has to account for
+    the whole corpus rather than wave at it: graded plus the three reasons for
+    ungraded must add up to every row in scope, or a reader cannot tell a
+    missing label from a withdrawn verdict.
+    """
+    document = json.loads(artifacts.newest("research_report").read_text())
+    limit = next(entry for entry in document["limits"] if "ROOT-CAUSE NUMBER" in entry)
+
+    sources = research.read_scope(research.REPO_ROOT)
+    rows = research.build_rows(research.REPO_ROOT, sources)
+    graded = [row for row in rows if row.root_cause_graded]
+    dimensionless = sum(
+        1
+        for source in sources
+        for outcome in source.report.outcomes
+        if not any(d.dimension is GradeDimension.ROOT_CAUSE for d in outcome.report.dimensions)
+    )
+    world_mismatch = sum(
+        len(
+            [
+                e
+                for e in research.regraded_verdicts(research.REPO_ROOT, source.archive).values()
+                if not e.root_cause_graded and e.dimensions
+            ]
+        )
+        for source in sources
+        if source.archive in research.SUPERSEDED_ROOT_CAUSE
+    )
+    assert 0 < len(graded) < len(rows)  # a denominator, not an accuracy over the corpus
+    unlabelled = len(rows) - len(graded) - dimensionless - world_mismatch
+    assert unlabelled > 0
+
+    # Every one of the four buckets is named in the sentence, and they add up.
+    for number in (len(graded), len(rows), len(rows) - len(graded), dimensionless):
+        assert str(number) in limit, number
+    assert "ADR 0040" in limit and "INC-003" in limit
+    assert f"{len(graded)} correct" in limit  # every graded row is correct today
 
 
 def test_the_committed_report_is_non_closing_because_a_development_run_is_in_scope() -> None:
@@ -446,11 +488,76 @@ def test_scenario_level_regressions_exclude_the_filtered_runs() -> None:
         "845bdae22195",
         "ee183c85429c",
         "47abb70a2b9e",
+        "759e198cdd27",
+        "648a32f2339d",
+        "fc896b25a09c",
     }
     assert [(c["baseline_side"], c["latest_side"]) for c in section["comparisons"]] == [
-        ("2408b07ef532", "32ae38f6b38b")
+        ("2408b07ef532", "32ae38f6b38b"),
+        ("2408b07ef532", "b75527784077"),
+        ("32ae38f6b38b", "b75527784077"),
     ]
     assert all(not c["gate_would_fail"] for c in section["comparisons"])
+
+
+def test_a_partial_suite_is_excluded_from_the_diff_too() -> None:
+    """The red-before, and it cost $2.15 to learn.
+
+    ``0db6fe722f7c`` is not filtered — ``make eval-smoke`` selects by token
+    scope, not by ``--only`` — so the filtered-run rule let it into the suite
+    diff, where comparing 27 unseeded live rows against a 41-row canned sweep
+    printed "7 regressions". Those seven were exactly the verdicts INC-003
+    withdrew. A partial suite is now excluded for the same reason a filtered
+    one is, and its absence is stated rather than silent.
+    """
+    section = json.loads(artifacts.newest("research_report").read_text())["sections"][
+        "scenario_level_regressions"
+    ]
+    partial = section["excluded_partial_runs"]
+    assert [entry["archive"] for entry in partial] == ["0db6fe722f7c"]
+    assert partial[0]["scenarios"] == 27
+    assert partial[0]["full_suite_is"] == 41
+    compared = {
+        side for c in section["comparisons"] for side in (c["baseline_side"], c["latest_side"])
+    }
+    assert "0db6fe722f7c" not in compared
+    assert all(not c["dropped_scenarios"] for c in section["comparisons"])
+
+
+def test_the_withdrawn_root_cause_verdicts_are_read_from_the_regrade_not_the_archive() -> None:
+    """INC-003: the archive still carries seven grades the project withdrew.
+
+    Red before ``SUPERSEDED_ROOT_CAUSE`` existed: the table read the archive
+    and reported 46 of 53 graded rows correct, which is the withdrawn 11/18
+    folded into a larger number. The substitution happens on the way in, the
+    archive is never edited, and the re-grade's own verdicts are what appear.
+    """
+    archive = "0db6fe722f7c"
+    assert archive in research.SUPERSEDED_ROOT_CAUSE
+    regraded = research.regraded_verdicts(research.REPO_ROOT, archive)
+    source = research.read_source(research.REPO_ROOT, archive)
+    archived = {
+        outcome.scenario: research._root_cause_verdict(outcome)
+        for outcome in source.report.outcomes
+    }
+
+    # The archive's own verdicts: 18 graded, 7 of them failing.
+    assert sum(1 for graded, _ in archived.values() if graded) == 18
+    assert sum(1 for graded, ok in archived.values() if graded and not ok) == 7
+
+    # The re-grade's: 2 graded, none failing, 16 held back by ADR 0040.
+    assert sum(1 for entry in regraded.values() if entry.root_cause_graded) == 2
+    assert all(entry.root_cause_correct for entry in regraded.values() if entry.root_cause_graded)
+
+    rows = {
+        row.scenario: row
+        for row in research.build_rows(
+            research.REPO_ROOT, research.read_scope(research.REPO_ROOT, (archive,))
+        )
+    }
+    assert sum(1 for row in rows.values() if row.root_cause_graded) == 2
+    assert sum(1 for row in rows.values() if row.passed) == 26  # was 20 as archived
+    assert source.report.passed == 20  # and the archive is untouched
 
 
 # --------------------------------------------------------------------------

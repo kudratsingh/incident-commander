@@ -88,7 +88,7 @@ def test_the_phase_close_report_resolves_through_the_artifact_resolver() -> None
         assert kind in artifacts.KINDS
         path = artifacts.newest(kind)
         assert path.is_file()
-        assert path.parent == close.REPO_ROOT / "evals/reports"
+        assert path.parent == close.REPO_ROOT / "evals/reports/phase-close"
 
 
 def test_the_new_kind_does_not_adopt_or_get_adopted_by_its_neighbours(tmp_path: Path) -> None:

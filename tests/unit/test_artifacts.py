@@ -119,7 +119,7 @@ class TestFlatOutputsAreVersioned:
         write_report(_report(_INV1, _T1, total=1), directory=tmp_path)
         write_report(_report(_INV2, _T2, total=2), directory=tmp_path)
 
-        files = sorted(p.name for p in tmp_path.iterdir())
+        files = sorted(p.name for p in tmp_path.rglob("*.json"))
         assert len(files) == 2, f"a re-run replaced the first report: {files}"
         newest = artifacts.newest("report", directory=tmp_path)
         assert RunReport.model_validate_json(newest.read_text()).invocation_id == _INV2
@@ -216,9 +216,12 @@ class TestHumanReportsAreVersioned:
         self._trace(trace_dir / "redis_saturation.jsonl", "inv0000000001", "redis_saturation")
 
         assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir)]) == 0
-        assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir)]) == 0
+        # The second pass is INCREMENTAL and would skip an already-rendered
+        # attempt (WO-R3-257), so ask for the re-render explicitly — the rule
+        # under test here is that it lands beside the first, not over it.
+        assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir), "--force"]) == 0
 
-        files = sorted(p.name for p in out_dir.iterdir())
+        files = sorted(p.name for p in out_dir.rglob("*.txt"))
         assert len(files) == 2, f"a second render replaced the first report: {files}"
         assert all(f.endswith(".txt") for f in files)
         newest = artifacts.newest("human", "redis_saturation", directory=out_dir)
@@ -320,3 +323,160 @@ class TestNewestResolution:
             artifacts.version_name("trajectory", "s", timestamp=_T1, invocation_id="../../etc")
         with pytest.raises(ValueError, match="invocation_id"):
             artifacts.version_name("trajectory", "s", timestamp=_T1, invocation_id="")
+
+
+class TestTheLayoutIsOneFamilyPerFolder:
+    """WO-R3-257: where each family lives, and that reads still find the old place.
+
+    The owner asked for a reports folder a person can navigate. The layout
+    that answers it is data in ``KINDS``, so these tests read it the way
+    every caller does — by writing an artifact and asking where it went —
+    rather than restating a path list that could drift from the writers.
+    """
+
+    _EXPECTED: Final[dict[str, tuple[str, ...]]] = {
+        "report": ("evals", "reports", "runs", "2026-09"),
+        "baseline_report": ("evals", "reports", "baseline"),
+        "baseline_report_md": ("evals", "reports", "baseline"),
+        "phase_close_report": ("evals", "reports", "phase-close"),
+        "phase_close_report_md": ("evals", "reports", "phase-close"),
+        "human": ("evals", "reports", "human", "consumer_lag_pass"),
+        "dossier": ("evals", "reports", "dossiers", "consumer_lag_pass"),
+        "trajectory": ("evals", "trajectories"),
+        "briefing": ("evals", "briefings"),
+    }
+
+    @staticmethod
+    def _scenario_for(kind: str) -> str | None:
+        return "consumer_lag_pass" if artifacts.KINDS[kind].per_scenario else None
+
+    def test_every_kind_writes_where_the_layout_says(self, tmp_path: Path) -> None:
+        assert set(self._EXPECTED) == set(artifacts.KINDS), (
+            "a new artifact kind was added without saying where in the tree it lives"
+        )
+        for kind, expected in self._EXPECTED.items():
+            scenario = self._scenario_for(kind)
+            written = artifacts.write_versioned(
+                kind,
+                scenario,
+                content="{}",
+                timestamp=_T1,
+                invocation_id=_INV1,
+                root=tmp_path,
+            )
+            assert written.parent.relative_to(tmp_path).parts == expected, kind
+
+    def test_every_kind_resolves_from_the_new_layout(self, tmp_path: Path) -> None:
+        """The other half: written there, found there, by ``newest``."""
+        for kind in self._EXPECTED:
+            scenario = self._scenario_for(kind)
+            written = artifacts.write_versioned(
+                kind,
+                scenario,
+                content="{}",
+                timestamp=_T1,
+                invocation_id=_INV1,
+                root=tmp_path,
+            )
+            assert artifacts.newest(kind, scenario, root=tmp_path) == written, kind
+
+    def test_every_kind_still_finds_a_file_left_in_the_old_flat_place(self, tmp_path: Path) -> None:
+        """The transition window: merged, not yet migrated, and nothing breaks.
+
+        Between this code landing and ``scripts/migrate_reports_layout.py``
+        running, every existing artifact is still in the flat container. A
+        resolver that only looked in the new sub-folder would report an empty
+        reports folder to the regression gate, to ``make baseline-report``
+        and to the trace formatter — over a directory holding a hundred runs.
+        """
+        for kind, expected in self._EXPECTED.items():
+            scenario = self._scenario_for(kind)
+            container = artifacts.directory_for(kind, root=tmp_path)
+            container.mkdir(parents=True, exist_ok=True)
+            flat = container / artifacts.version_name(
+                kind, scenario, timestamp=_T1, invocation_id=_INV1
+            )
+            flat.write_text("{}")
+            assert artifacts.newest(kind, scenario, root=tmp_path) == flat, kind
+            assert artifacts.versions(kind, scenario, root=tmp_path) == [flat], kind
+            # …and the new place still wins once something lands there.
+            fresh = artifacts.write_versioned(
+                kind,
+                scenario,
+                content="{}",
+                timestamp=_T2,
+                invocation_id=_INV2,
+                root=tmp_path,
+            )
+            assert expected[-1] in fresh.parts
+            assert artifacts.newest(kind, scenario, root=tmp_path) == fresh, kind
+
+    def test_reports_group_by_the_month_they_were_generated_in(self, tmp_path: Path) -> None:
+        """The folder comes from the report's own stamp, not from the clock."""
+        december = datetime(2026, 12, 31, 23, 59, 59, tzinfo=UTC)
+        written = write_report(_report(_INV1, december), directory=tmp_path)
+        assert written.parent == tmp_path / "runs" / "2026-12"
+        assert artifacts.newest("report", directory=tmp_path) == written
+
+    def test_a_superseded_render_is_still_resolved(self, tmp_path: Path) -> None:
+        """Moved aside for readability is not moved out of the record.
+
+        ``human/_superseded/<scenario>/`` holds earlier renders of runs that
+        have a newer one. They are evidence (invariant 9), so ``versions()``
+        returns them — and because they are by construction older than the
+        render that superseded them, one can never become ``newest()``.
+        """
+        kept = artifacts.write_versioned(
+            "human",
+            "consumer_lag_pass",
+            content="new render",
+            timestamp=_T2,
+            invocation_id=_INV2,
+            directory=tmp_path,
+        )
+        aside = tmp_path / artifacts.SUPERSEDED_DIR / "consumer_lag_pass"
+        aside.mkdir(parents=True)
+        older = aside / artifacts.version_name(
+            "human", "consumer_lag_pass", timestamp=_T1, invocation_id=_INV1
+        )
+        older.write_text("old render")
+
+        assert artifacts.versions("human", "consumer_lag_pass", directory=tmp_path) == [
+            older,
+            kept,
+        ]
+        assert artifacts.newest("human", "consumer_lag_pass", directory=tmp_path) == kept
+
+    def test_the_two_pinned_files_are_not_members_of_any_family(self, tmp_path: Path) -> None:
+        """``baseline.json`` and ``latest.json`` stay at the top and stay themselves.
+
+        The gate reads ``baseline.json`` by a literal path (evals.yml's filter
+        names it too), so it must not acquire a folder. ``latest.json`` is
+        pre-versioning evidence and is the ``report`` family's oldest version
+        wherever it sits.
+        """
+        (tmp_path / "baseline.json").write_text("{}")
+        latest = tmp_path / "latest.json"
+        latest.write_text("{}")
+        assert artifacts.versions("report", directory=tmp_path) == [latest]
+        assert artifacts.versions("baseline_report", directory=tmp_path) == []
+
+    def test_a_scenario_name_cannot_steer_a_write_out_of_its_folder(self) -> None:
+        """A scenario name is a directory name now; it gets the same check an id does."""
+        for bad in ("../../etc", "a/b", ".hidden", "..", ""):
+            with pytest.raises(ValueError):
+                artifacts.write_directory("human", bad)
+
+    def test_parse_version_name_is_the_one_reading_of_a_filename(self) -> None:
+        parsed = artifacts.parse_version_name(
+            "consumer_lag_pass.20260906T101112Z.aaaaaaaa0001.txt", suffix=".txt"
+        )
+        assert parsed is not None
+        assert (parsed.stem, parsed.stamp, parsed.invocation_id) == (
+            "consumer_lag_pass",
+            "20260906T101112Z",
+            "aaaaaaaa0001",
+        )
+        assert parsed.timestamp() == datetime(2026, 9, 6, 10, 11, 12, tzinfo=UTC)
+        assert artifacts.parse_version_name("consumer_lag_pass.txt", suffix=".txt") is None
+        assert artifacts.parse_version_name("s.not-a-stamp.id.txt", suffix=".txt") is None

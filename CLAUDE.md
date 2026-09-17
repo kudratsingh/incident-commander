@@ -146,7 +146,7 @@ incident-commander/
 │   ├── runs/                       # per-run scored outcomes
 │   ├── trajectories/               # captured runs for debugging and analysis
 │   ├── briefings/                  # escalation briefings emitted during runs
-│   └── reports/                    # baseline.json + committed regression reports
+│   └── reports/                    # baseline.json + a folder per report family (README.md maps it)
 ├── contracts/
 │   └── platform-tools.snapshot.json   # generated from platform, diffed in CI
 ├── context/                        # session history across sessions — see the section below

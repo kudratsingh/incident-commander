@@ -493,8 +493,163 @@ def test_main_never_writes_outside_the_requested_out_dir(tmp_path: Path) -> None
     )
 
     assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir)]) == 0
-    written = [p.name for p in out_dir.iterdir()]
-    assert written == [artifacts.newest("human", "solo", directory=out_dir).name]
+    written = [p.relative_to(out_dir).as_posix() for p in out_dir.rglob("*") if p.is_file()]
+    newest = artifacts.newest("human", "solo", directory=out_dir)
+    assert written == [newest.relative_to(out_dir).as_posix()]
+    # And it went into the scenario's own folder, not beside it (WO-R3-257).
+    assert newest.parent == out_dir / "solo"
+
+
+# --- WO-R3-257: one run adds one file -------------------------------------
+
+
+def _traced(path: Path, invocation: str, scenario: str, when: str) -> Path:
+    """A minimal complete trace for one scenario, one invocation."""
+    return _write_jsonl(
+        path,
+        [
+            _scenario_start(invocation, when, scenario=scenario),
+            _scenario_end(invocation, when, passed=True, final_state="resolved", scenario=scenario),
+        ],
+    )
+
+
+def _suite(tmp_path: Path, scenarios: tuple[str, ...]) -> tuple[Path, Path]:
+    trace_dir = tmp_path / "traces"
+    for name in scenarios:
+        _traced(trace_dir / f"{name}.jsonl", "inv1", name, "2026-08-01T10:00:00+00:00")
+    return trace_dir, tmp_path / "human"
+
+
+def _txt(out_dir: Path) -> list[str]:
+    return sorted(p.relative_to(out_dir).as_posix() for p in out_dir.rglob("*.txt"))
+
+
+class TestARunRendersOnlyWhatItRan:
+    """The renderer stopped re-rendering the whole corpus on every invocation.
+
+    ``make eval-live ONLY=<one scenario>`` chains this script, and it used to
+    write one report per trace file it could find — 39 for a one-scenario
+    run, 38 of them identical re-renders of trajectories nobody had touched.
+    They are permanent (invariant 9 forbids deleting them), which is how
+    ``evals/reports/human/`` reached 765 files for 56 distinct runs. The rule
+    is now: render an attempt no existing report covers, and nothing else.
+    """
+
+    def test_a_one_scenario_run_writes_exactly_one_new_file(self, tmp_path: Path) -> None:
+        trace_dir, out_dir = _suite(tmp_path, ("alpha", "beta", "gamma"))
+        assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir)]) == 0
+        after_first_sweep = _txt(out_dir)
+        assert len(after_first_sweep) == 3
+
+        # One scenario re-runs: its trace file gains a second invocation.
+        with (trace_dir / "beta.jsonl").open("a") as handle:
+            for record in (
+                _scenario_start("inv2", "2026-08-02T10:00:00+00:00", scenario="beta"),
+                _scenario_end(
+                    "inv2",
+                    "2026-08-02T10:00:00+00:00",
+                    passed=True,
+                    final_state="resolved",
+                    scenario="beta",
+                ),
+            ):
+                handle.write(json.dumps(record) + "\n")
+
+        assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir)]) == 0
+
+        added = set(_txt(out_dir)) - set(after_first_sweep)
+        assert len(added) == 1, f"a one-scenario run wrote {len(added)} files: {sorted(added)}"
+        assert next(iter(added)).startswith("beta/")
+
+    def test_a_sweep_with_nothing_new_writes_nothing(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        trace_dir, out_dir = _suite(tmp_path, ("alpha", "beta"))
+        assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir)]) == 0
+        rendered = _txt(out_dir)
+        capsys.readouterr()
+
+        assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir)]) == 0
+
+        assert _txt(out_dir) == rendered
+        printed = capsys.readouterr().out
+        assert "0 trajectory files" in printed
+        assert "2 scenario(s) skipped" in printed
+
+    def test_a_scenario_whose_newest_attempt_is_unrendered_catches_up(self, tmp_path: Path) -> None:
+        """The second half of the rule, and the reason it is not "only the last run".
+
+        A render can be missing for reasons that have nothing to do with this
+        invocation — the renderer failed on that file last time (A-05), the
+        report was never produced, the trace was restored from an archive. The
+        test is coverage, not recency, so those catch up on the next sweep.
+        """
+        trace_dir, out_dir = _suite(tmp_path, ("alpha", "beta"))
+        assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir), "beta"]) == 0
+        assert [p.split("/")[0] for p in _txt(out_dir)] == ["beta"]
+
+        assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir)]) == 0
+
+        assert [p.split("/")[0] for p in _txt(out_dir)] == ["alpha", "beta"]
+
+    def test_force_re_renders_everything(self, tmp_path: Path) -> None:
+        trace_dir, out_dir = _suite(tmp_path, ("alpha", "beta"))
+        assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir)]) == 0
+        assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir), "--force"]) == 0
+        assert len(_txt(out_dir)) == 4
+
+    def test_naming_a_scenario_always_renders_it(self, tmp_path: Path) -> None:
+        """An explicit request is an instruction, not a question."""
+        trace_dir, out_dir = _suite(tmp_path, ("alpha",))
+        assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir)]) == 0
+        assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir), "alpha"]) == 0
+        assert len(_txt(out_dir)) == 2
+
+    def test_the_rendered_invocations_are_read_back_from_the_report(self, tmp_path: Path) -> None:
+        """The skip decision reads the header the renderer itself wrote."""
+        from scripts.format_traces import needs_render, newest_invocation, rendered_invocations
+
+        trace_dir, out_dir = _suite(tmp_path, ("alpha",))
+        trace = trace_dir / "alpha.jsonl"
+        assert newest_invocation(trace) == "inv1"
+        assert needs_render(trace, out_dir) is True
+
+        assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir)]) == 0
+        report = artifacts.newest("human", "alpha", directory=out_dir)
+        assert rendered_invocations(report) == {"inv1"}
+        assert needs_render(trace, out_dir) is False
+
+    def test_an_all_render_covers_every_invocation_it_rendered(self, tmp_path: Path) -> None:
+        """``--all`` writes one header per group, so it covers all of them."""
+        from scripts.format_traces import rendered_invocations
+
+        trace_dir = tmp_path / "traces"
+        out_dir = tmp_path / "human"
+        _write_jsonl(
+            trace_dir / "alpha.jsonl",
+            [
+                _scenario_start("inv1", "2026-08-01T10:00:00+00:00", scenario="alpha"),
+                _scenario_end(
+                    "inv1",
+                    "2026-08-01T10:00:00+00:00",
+                    passed=True,
+                    final_state="resolved",
+                    scenario="alpha",
+                ),
+                _scenario_start("inv2", "2026-08-02T10:00:00+00:00", scenario="alpha"),
+                _scenario_end(
+                    "inv2",
+                    "2026-08-02T10:00:00+00:00",
+                    passed=True,
+                    final_state="resolved",
+                    scenario="alpha",
+                ),
+            ],
+        )
+        assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir), "--all"]) == 0
+        report = artifacts.newest("human", "alpha", directory=out_dir)
+        assert rendered_invocations(report) == {"inv1", "inv2"}
 
 
 # --- Every kind the harness writes must render (WO-R2-85) -----------------

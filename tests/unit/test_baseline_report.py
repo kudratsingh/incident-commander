@@ -230,7 +230,7 @@ def test_the_committed_baseline_resolves_through_the_artifact_resolver() -> None
         assert kind in artifacts.KINDS
         path = artifacts.newest(kind)
         assert path.is_file()
-        assert path.parent == baseline.REPO_ROOT / "evals/reports"
+        assert path.parent == baseline.REPO_ROOT / "evals/reports/baseline"
 
 
 def test_the_committed_baseline_regenerates_byte_for_byte() -> None:

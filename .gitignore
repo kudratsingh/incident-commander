@@ -62,7 +62,15 @@ evals/briefings/*
 evals/reports/latest.json
 # Versioned successors of latest.json (cmd #185): one per run, never overwritten, durable copy
 # lives in evals/runs/<id>/report.json. Ignored for the same reason latest.json was.
+# Two patterns for one family: the flat name they used to have, and
+# `evals/reports/runs/<YYYY-MM>/` where WO-R3-257 files them now. Note this is
+# evals/REPORTS/runs — not `evals/runs/`, the per-invocation archive, which is
+# deliberately tracked (see the block near the end of this file).
 evals/reports/report.*.json
+evals/reports/runs/
+# Per-scenario folders since WO-R3-257 (`human/<scenario>/`, plus
+# `human/_superseded/<scenario>/` for repeat renders). A directory-wide `*`
+# excludes the sub-directories too, so one pattern still covers the family.
 evals/reports/human/*
 !evals/reports/human/.gitkeep
 # `make world-dossier` output (cmd: evals/dossier.py). One versioned markdown
@@ -89,6 +97,13 @@ evals/.chaos-teardown-block.json
 # live-campaign archives must be committed (see docs/runbook.md,
 # "Live eval protocol"). The flat-pointer ignores above (trajectories,
 # briefings, traces, latest.json, reports/human) are refreshable by design.
+# Not to be confused with `evals/reports/runs/`, which IS ignored above: that
+# one holds the per-run aggregate reports, whose durable copy is the archive
+# here. Two folders called "runs", opposite rules, on purpose.
+#
+# Also NOT ignored, and deliberately: evals/reports/baseline/ and
+# evals/reports/phase-close/ — the two report families a human commits by
+# hand. Their old flat names were tracked and their new folders are too.
 
 # Session context archives (context/README.md). Deliberately NOT committed:
 # transcripts carry live credentials, and the raw set is >100MB of binary that

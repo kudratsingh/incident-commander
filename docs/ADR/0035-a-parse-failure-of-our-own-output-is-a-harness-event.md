@@ -242,6 +242,52 @@ it sent.
   Telling the model "you get one correction" before it has made a mistake buys nothing and costs
   cache-stable prompt bytes on every call.
 
+> **Amended 2026-09-17 — the two judges now get the repair as well (WO-R2-174).** The bullet above
+> is left as accepted; this is the pointer, not a rewrite. See the amendment section below.
+
+### Amendment 2026-09-17: the repair covers both judges (WO-R2-174)
+
+The scope note above deferred the verification judge and the eval briefing judge on a good rule —
+do not widen a cap onto call sites with no live failure behind them. That rule is about widening
+the *cap*, and this change does not widen it: the cap stays 1, at every call site. What is widened
+is which calls get the one re-ask they were always entitled to under this ADR's own reasoning, and
+the argument for each is the same argument the three planner sites already won.
+
+**The verification judge** (`remediation.make_llm_verify`) is the worse of the two, because of
+where it sits. It is called *after* a Tier-1 action has executed. A judgment the schema rejects
+says nothing about whether the action worked — the envelope failed, which is exactly this ADR's
+definition of a harness event — and escalating on it hands a human "verification incomplete" for a
+fix that had already landed. That is the same class of wrong answer as the planner escalation this
+ADR was written to stop, one state later and with a real mutation already behind it. Its failure
+path is otherwise unchanged: a second malformation still ends the run on `VERIFY_JUDGE_INVALID`,
+now carrying both errors.
+
+**The eval briefing judge** (`graders/llm_judge.py`) is not on the agent's path at all — it is a
+soft-quality column on a run five deterministic dimensions have already graded. So the thing to be
+careful about here is not the escalation, it is the score. A malformed reply must never become a
+number. It does not: a second failure raises `OutputRepairExhausted`, which is an `LLMError`, so
+`evals/runner.py` keeps `judge_score` at `None` and records `judge_error` — the harness-event path
+that was already there. What changes is that one re-ask is spent before the column is given up,
+and a run whose judge stumbled once now gets scored instead of reporting a hole.
+
+What does **not** change:
+
+* The cap is 1 everywhere, enforced by the same loop bound in the same function. There is no second
+  implementation and no per-call-site budget.
+* Scope is unchanged. Only an output failure is repairable; a transport `LLMError` goes straight
+  out at both new sites as it does at the three old ones.
+* Both legs are billed. The verification judge accrues through `accrue_structured_call` instead of
+  `accrue_llm_usage` for exactly ADR 0015's reason — charging only the leg that parsed would make
+  the repaired path look as cheap as the clean one.
+* No prompt is told about the repair in advance, at these sites either.
+* Canned runs are untouched. `CannedLLMClient` raises a plain `LLMError` when its script runs out,
+  which is not repairable, so a clean canned run still consumes exactly one payload per judge call:
+  `make eval-reg` stays 41/41 with no changes against the blessed baseline.
+
+Still deferred, and for the reason the original note gives: no prompt changes, no widening of the
+decoder's delimiter set, and no third call to any site. Tests: `tests/unit/test_output_repair.py`
+(`TestTheVerificationJudge`, `TestTheEvalBriefingJudge`).
+
 ## Revisit trigger
 
 * A paid run that spends the repair and **still** escalates on shape — that would say the re-ask is
@@ -264,4 +310,4 @@ it sent.
   matches, and the harness-offers-never-substitutes rule), [ADR 0005](0005-hypothesis-and-action-schema-tightening.md)
   (the schema this change does not loosen), CLAUDE.md invariant 4 (tool output stays untrusted;
   this is about the agent's own output).
-* Work order: WO-R2-173.
+* Work order: WO-R2-173; the 2026-09-17 amendment is WO-R2-174.

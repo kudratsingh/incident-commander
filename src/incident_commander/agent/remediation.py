@@ -32,7 +32,6 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from incident_commander.agent.accounting import (
     accrue_llm_error,
-    accrue_llm_usage,
     accrue_structured_call,
 )
 from incident_commander.agent.hypothesis import ReadToolName
@@ -2522,7 +2521,14 @@ def make_llm_verify(
                 )
 
             try:
-                judgment_result = llm_client.call(
+                # One bounded re-ask, the same wrapper and the same cap of 1 as
+                # the three planner call sites (ADR 0035, widened here by
+                # WO-R2-174). A judgment the schema rejects says nothing about
+                # whether the action worked — it is the envelope that failed —
+                # and escalating an executed Tier-1 action on it means a human
+                # reads "verification incomplete" for a fix that landed.
+                judge_call = call_with_output_repair(
+                    llm_client,
                     system_prompt=load_prompt("verification_judge"),
                     user_message=_format_verify_context(
                         plan, probe_summary, _action_result_of(run_state, plan)
@@ -2532,7 +2538,11 @@ def make_llm_verify(
                 )
             except (ValueError, ValidationError, LLMError) as err:
                 # Same rule as the planner above: a judge call that was billed
-                # and then failed is spend, not a free escalation.
+                # and then failed is spend, not a free escalation. That now
+                # covers a spent repair too — ``OutputRepairExhausted`` is an
+                # ``LLMError`` carrying the SUM of what both legs billed, so
+                # this one accrual charges the whole thing, and the run ends
+                # on the same ``VERIFY_JUDGE_INVALID`` reason it always did.
                 run_state = run_state.model_copy(
                     update={"budget": accrue_llm_error(run_state.budget, err, model)}
                 )
@@ -2540,7 +2550,7 @@ def make_llm_verify(
                     run_state, at_attempt, f"{VERIFY_JUDGE_INVALID}: {err}"
                 )
 
-            judgment = judgment_result.output
+            judgment = judge_call.result.output
             # Ordinal labels: under probe_attempts>1 a run produces several
             # probe+judge pairs; {attempt, of} on the evidence arguments is
             # what lets a reader (and the human trace render) tell poll #2/4
@@ -2562,8 +2572,11 @@ def make_llm_verify(
             )
             # Tokens + USD from the judge call, then the verify probe's own
             # tool call. Cache counters and dollars accrue per poll attempt,
-            # not once per VERIFYING entry (ADR 0015).
-            new_budget = accrue_llm_usage(run_state.budget, judgment_result, model).model_copy(
+            # not once per VERIFYING entry (ADR 0015). ``accrue_structured_call``
+            # rather than ``accrue_llm_usage`` because a repaired judgment is
+            # two billed calls: charging only the leg that parsed would make
+            # the repaired path look exactly as cheap as the clean one.
+            new_budget = accrue_structured_call(run_state.budget, judge_call, model).model_copy(
                 update={"tool_calls_used": run_state.budget.tool_calls_used + 1}
             )
             # Accumulate evidence + budget across polling attempts so an

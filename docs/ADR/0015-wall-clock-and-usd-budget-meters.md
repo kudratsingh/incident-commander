@@ -286,3 +286,13 @@ Related, same work order: `LLMResult.elapsed_ms`. The client now times its own l
 `StepRecord.llm_calls[].elapsed_ms` carries a real duration instead of the `None` WP-2.1 left
 there. It is a measurement, not a meter — nothing gates on it — and `None` still means "not
 measured", which is what a client that does not time itself honestly reports.
+
+## Amendment, 2026-09-17 — terminal and crashed transitions close the wall meter (WO-R3-270)
+
+The loop now reads its injected clock after a successful transition and accrues
+that value before returning a terminal state. It also accrues and checkpoints
+the value when a transition raises before re-raising. The earlier top-of-loop
+read could only measure time before dispatch: a transition that resolved,
+escalated, or crashed after a long call left its final elapsed time out of the
+ledger. The extra read keeps the durable `created_at` anchor and makes every
+exit path a complete meter rather than a lower bound.

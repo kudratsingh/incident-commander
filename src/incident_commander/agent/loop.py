@@ -154,7 +154,21 @@ def run_to_completion(
         if run_state.budget.is_exhausted and exemption is None:
             run_state = _escalate(run_state, "budget exhausted", now)
         else:
-            run_state = dispatch(run_state, now, transitions=transitions)
+            try:
+                run_state = dispatch(run_state, now, transitions=transitions)
+            except BaseException:
+                # A transition can spend almost all of a run before it raises.
+                # Persist that elapsed time with the checkpoint the caller will
+                # resume from; otherwise a crash turns the meter into a lower
+                # bound until the next successful loop entry.
+                run_state = _accrue_wall_time(run_state, clock())
+                if checkpointer is not None:
+                    checkpointer.write(run_state)
+                raise
+            # The top-of-loop reading measures time before a transition. Take
+            # one more reading after it so a terminal transition records its
+            # own duration; terminal runs never enter the loop again.
+            run_state = _accrue_wall_time(run_state, clock())
         if checkpointer is not None:
             checkpointer.write(run_state)
         steps += 1

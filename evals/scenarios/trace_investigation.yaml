@@ -50,13 +50,17 @@ canned_llm_responses:
   # about evidence the world does not contain, and the offline suite could
   # not see it because nothing compared the conclusion to the fixture.
   #
-  # The category stays `unknown`, and that is the answer rather than a
-  # failure to reach one: the fault is known precisely (a worker exhausted
-  # memory rendering an oversized report) and HypothesisCategory has no
-  # member for resource exhaustion, so the prompt's own rule applies \u2014 "pick
-  # the closest matching category. If nothing fits, use `unknown`" \u2014 and the
-  # escalation carries the full evidence chain. The missing category is
-  # filed separately; it changes the agent's prompt and is the owner's call.
+  # The concluding category is `resource_exhaustion` (WO-R3-263, owner
+  # decision O-19). WO-R3-262 left it as `unknown` and said so: the fault was
+  # known precisely \u2014 a worker exhausted memory rendering an oversized report
+  # \u2014 and HypothesisCategory had no member for it, so the prompt's own
+  # fallback applied ("pick the closest matching category. If nothing fits,
+  # use `unknown`"). The taxonomy gap is closed now, and `unknown` would be
+  # the wrong answer with it closed: `unknown` means the probes left the agent
+  # unable to tell, which sends a human looking for evidence that is already
+  # in the trace. The FIRST step keeps `unknown`, and that is not an
+  # oversight: nothing has been read at that point, so "I cannot yet tell" is
+  # exactly true, and the trace is what moves it to a named cause.
   - hypotheses:
     - category: unknown
       name: unread_job_failure
@@ -70,13 +74,13 @@ canned_llm_responses:
       arguments:
         trace_id: 0e24ca29-1d47-57e9-b898-4d79bb6da981
   - hypotheses:
-    - category: unknown
+    - category: resource_exhaustion
       name: job_out_of_memory
       confidence: 0.85
-      reasoning: "Trace shows one failed job \u2014 report_gen, retry_count 2 \u2014 that died with \"OOM during PDF generation (200MB report)\". The cause is not in doubt: the worker ran out of memory on an oversized report. No category covers resource exhaustion, so this escalates as `unknown` with the trace attached rather than being forced into a dependency or data label it does not fit.\n"
+      reasoning: "Trace shows one failed job \u2014 report_gen, retry_count 2 \u2014 that died with \"OOM during PDF generation (200MB report)\". The cause is not in doubt: the worker ran out of memory on an oversized report, which is resource exhaustion and not a dependency or a data fault. No Tier-1 action raises a memory limit, so this escalates with the trace attached.\n"
     next_action:
       kind: stop
-      reason: worker ran out of memory rendering a 200MB report; no category fits, escalate with the trace
+      reason: worker ran out of memory rendering a 200MB report; resource_exhaustion has no Tier-1 fix, escalate with the trace
   briefing_writer:
   - findings: 'Job 5967d510-0290-5627-a9db-4e29e3a38e44 (report_gen, trace 0e24ca29-1d47-57e9-b898-4d79bb6da981) failed with "OOM during PDF generation (200MB report)" after 2 retries. The audit log records the same error on the job.failed event.
 
@@ -107,13 +111,15 @@ expectation:
 # the chaos hook and the canned fixtures above and never off the canned planner.
 # WO-R3-261.
 # `get_trace` reports one failed job: report_gen, retry_count 2, error "OOM
-# during PDF generation (200MB report)". That is a real, named fault and
-# HypothesisCategory has no member for a worker exhausting memory, so the closest
-# honest classification is `unknown` — the planner prompt's own rule is "pick the
-# closest matching category. If nothing fits, use unknown". Not forced into
-# `transient_dependency`: there is no external dependency anywhere in this
-# fixture. Recorded as a taxonomy gap in the PR body.
+# during PDF generation (200MB report)". A worker exhausted memory rendering an
+# oversized report, so the label is `resource_exhaustion` (WO-R3-263, owner
+# decision O-19, ADR 0054). It was `unknown` when WO-R3-261 wrote these labels,
+# because the enum had no member for it and the label had to be the honest
+# closest fit rather than the right answer — this scenario is the world that
+# found the gap. Still not `transient_dependency`: there is no external
+# dependency anywhere in this fixture. Still not `persistent_data_bug`: the
+# input is a legitimate 200MB report, not malformed data.
 ground_truth:
   incident_count: 1
-  root_causes: [unknown]
+  root_causes: [resource_exhaustion]
   affected_components: [report_gen]

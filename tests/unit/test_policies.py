@@ -31,6 +31,7 @@ from incident_commander.agent.investigation import (
     AlertSubject,
     SubjectMatch,
     alert_subject,
+    stuck_chain_root_rule,
 )
 from incident_commander.agent.remediation import (
     DLQ_ROW_SOURCE,
@@ -40,6 +41,7 @@ from incident_commander.agent.remediation import (
 )
 from incident_commander.agent.state import IncidentState
 from incident_commander.llm.prompts.loader import load_prompt
+from incident_commander.llm.prompts.shared_rules import STUCK_CHAIN_ROOT_RULE
 from incident_commander.tools import policies
 from incident_commander.tools.mcp_client import ToolResult
 from incident_commander.tools.policies import (
@@ -1240,28 +1242,95 @@ class TestFixMapMatchesTheSuite:
     about the CORPUS rather than about one scenario: any future scenario
     that forbids its own category's steered fix fails here.
 
-    Scoped to scenarios that expect ``resolved``. Escalate-only scenarios
-    forbid every Tier-1 tool on purpose — "when the correct behaviour is to
-    touch nothing, the forbidden set is every tool that can touch
-    something" — so including them would make the check fire on every
-    category that has a fix at all, which is no check.
+    **The scoping, and the hole it used to leave (WO-R3-263, O-19).** This was
+    scoped to scenarios expecting ``resolved``, for a good reason: a scenario
+    whose correct behaviour is to touch nothing forbids every Tier-1 tool on
+    purpose, so including it would fire the check on every category that has a
+    fix at all, which is no check. The reason is right and the scoping was too
+    narrow, because "expects ``escalated``" and "forbids everything" are not
+    the same thing. A scenario that expects ``escalated`` AND requires an
+    action has made a real, specific decision about what may and may not be
+    called — and the disagreement this class exists to catch was sitting in
+    exactly that gap for weeks:
+
+    ``FIX_MAP`` steered ``RUNAWAY_SAGA`` at ``replay_dlq_by_ids``
+    unconditionally, both prompts routed a ``human_required`` chain root to
+    ``mark_dlq_permanent``, and ``saga_stuck`` forbids ``replay_dlq_by_ids``,
+    expects the fence and expects ``escalated``. The one scenario that proves
+    the disagreement was the one scenario this check could not see.
+
+    So the selection is now "scenarios whose forbidden set is a decision
+    rather than a blanket": ``resolved``, or ``escalated`` while still
+    requiring an action. Derived from the expectation, never declared — a
+    scenario cannot opt into or out of this check.
     """
 
     @staticmethod
-    def _resolving_scenarios() -> list[Scenario]:
-        return [
-            s
-            for s in load_scenarios(_SCENARIO_DIR)
-            if s.expectation.expected_terminal_state is IncidentState.RESOLVED
-        ]
+    def _scenarios_whose_forbidden_set_is_a_decision() -> list[Scenario]:
+        """Every scenario whose ``forbidden_action_tools`` is a real choice.
+
+        Two shapes qualify, and the second is WO-R3-263's widening:
+
+        * it expects ``resolved`` — the run acts, so the tools it forbids are
+          alternatives to the right action;
+        * it expects ``escalated`` and nevertheless requires an action (fence,
+          then escalate) — same thing, reached by a different terminal state.
+
+        An escalate-only scenario with no expected action is excluded, because
+        there its forbidden set says "touch nothing" and every routed fix is
+        trivially in it.
+        """
+        checked: list[Scenario] = []
+        for scenario in load_scenarios(_SCENARIO_DIR):
+            expectation = scenario.expectation
+            state = expectation.expected_terminal_state
+            acts_anyway = state is IncidentState.ESCALATED and bool(
+                expectation.expected_action_tools
+            )
+            if state is IncidentState.RESOLVED or acts_anyway:
+                checked.append(scenario)
+        return checked
 
     def test_the_corpus_has_resolving_scenarios_to_check(self) -> None:
         """Anti-vacuity canary: an empty selection would report nothing, green."""
-        assert self._resolving_scenarios()
+        assert self._scenarios_whose_forbidden_set_is_a_decision()
+
+    def test_the_selection_reaches_the_escalating_scenarios_that_still_act(self) -> None:
+        """The widening's own canary, naming the scenarios it had to reach.
+
+        ``saga_stuck`` is the one that was invisible; ``dlq_human_required_
+        escalates`` is the shape that created the gap (WO-R2-140: fence, then
+        escalate). If either drops out of this selection the check has gone
+        back to not seeing the class of defect it was widened for, and the
+        note in ``test_every_hint_routed_scenario_is_checked_elsewhere`` is
+        describing a reach it no longer has.
+        """
+        selected = {s.name for s in self._scenarios_whose_forbidden_set_is_a_decision()}
+        assert {"saga_stuck", "dlq_human_required_escalates"} <= selected, (
+            f"the escalate-with-an-action scenarios are not in the selection: {sorted(selected)}"
+        )
+
+    def test_an_escalate_only_scenario_is_still_excluded(self) -> None:
+        """The reason for the original scoping, kept enforceable.
+
+        ``trace_investigation`` escalates and takes no action, so every Tier-1
+        tool it forbids is forbidden as a class. Pulling scenarios like it into
+        the check would make it fire on every category with a fix — the
+        failure mode the widening had to avoid rather than trade for.
+        """
+        selected = {s.name for s in self._scenarios_whose_forbidden_set_is_a_decision()}
+        excluded = [
+            s.name
+            for s in load_scenarios(_SCENARIO_DIR)
+            if s.expectation.expected_terminal_state is IncidentState.ESCALATED
+            and not s.expectation.expected_action_tools
+        ]
+        assert excluded, "no escalate-only scenario left to prove the exclusion is doing work"
+        assert not (set(excluded) & selected)
 
     def test_no_scenario_forbids_the_fix_its_category_is_steered_to(self) -> None:
         problems: list[str] = []
-        for scenario in self._resolving_scenarios():
+        for scenario in self._scenarios_whose_forbidden_set_is_a_decision():
             forbidden = set(scenario.expectation.forbidden_action_tools)
             if not forbidden:
                 continue
@@ -1270,7 +1339,13 @@ class TestFixMapMatchesTheSuite:
                     # The map's value names the common case only; the
                     # actual tool comes from the row's `remediation_hint`.
                     # `dlq_human_required_escalates` forbids
-                    # `replay_dlq_by_ids` and is right to.
+                    # `replay_dlq_by_ids` and is right to, and since
+                    # WO-R3-263 so does `saga_stuck` — a stuck chain's root
+                    # is a dead-letter row like any other, so the row routes
+                    # it. What the exemption defers TO is checked in
+                    # `TestHintRoutedToolsMatchTheSuite`, which grades both
+                    # saga scenarios against their own root's hint; the
+                    # exemption is a handoff to that check, not a pass.
                     continue
                 steered = FIX_MAP.get(category)
                 if steered is not None and steered in forbidden:
@@ -1316,17 +1391,19 @@ class TestFixMapMatchesTheSuite:
             )
 
     def test_every_hint_routed_scenario_is_checked_elsewhere(self) -> None:
-        """The gap this class does not cover, named so nobody looks for it here.
+        """What the exemption above hands off to, named so nobody looks here.
 
-        Scoping to ``resolved`` is right for ``FIX_MAP`` (see the class
-        docstring) and it leaves one shape unchecked: a scenario that expects
-        ``escalated`` and nevertheless requires an action.
-        ``dlq_human_required_escalates`` became exactly that with WO-R2-140 —
-        fence, then escalate — so a prompt that routed ``human_required`` at
-        a tool that scenario forbids would slip through every assertion
-        above. ``TestHintRoutedToolsMatchTheSuite`` below is that check; this
-        assertion fails if it is deleted, because a documented gap with no
-        check behind it is worse than an undocumented one.
+        The selection now reaches an ``escalated``-with-an-action scenario
+        (WO-R3-263), so the gap this note used to describe is closed — but the
+        assertions above still SKIP any hint-routed category, and for those the
+        steered tool is the row's to choose. ``dlq_human_required_escalates``
+        (WO-R2-140: fence, then escalate) and ``saga_stuck`` (WO-R3-263: a
+        chain root is routed by its own row) are both in that class, so a
+        prompt routing ``human_required`` at a tool they forbid would still
+        slip past everything above. ``TestHintRoutedToolsMatchTheSuite`` below
+        is that check; this assertion fails if it is deleted, because a
+        documented handoff with no check behind it is worse than an
+        undocumented one.
         """
         assert HINT_ROUTED_TOOLS, "HINT_ROUTED_TOOLS is empty; the hint-routing check is vacuous"
         escalating_with_an_action = [
@@ -1723,6 +1800,199 @@ class TestHintRoutedToolsMatchTheSuite:
                     f"HINT_ROUTED_TOOLS routes {hint!r} to {tool!r}, which "
                     f"the remediation planner prompt never names."
                 )
+
+
+class TestStuckChainRootRule:
+    """One conditional rule, and the three things it has to agree with.
+
+    Owner decision O-19 (2026-09-17, WO-R3-263, ADR 0054) closed a
+    disagreement rather than a bug: ``FIX_MAP`` steered ``RUNAWAY_SAGA`` at
+    ``replay_dlq_by_ids`` unconditionally, both prompts routed a
+    ``human_required`` chain root to ``mark_dlq_permanent``, and ``saga_stuck``
+    forbids the replay and grades the fence. Three statements about one
+    incident, two of them true and nothing holding them together.
+
+    The condition the owner attached to the fix is that the rule is written
+    ONCE and given identically to every reader — the planner prompt, the
+    routing code and the briefing judge — which is INC-002's prevention clause
+    (a rule given to one reader is half a rule). ``shared_rules.py`` holds the
+    sentence; ``load_prompt`` renders it; the prompt-side identity is checked
+    in ``test_prompts_snapshot.py::TestSharedRulesReachEveryReader``.
+
+    This class is the other half: the rule's WORDS against the routing that
+    enforces them, and both against the two scenarios that grade the two arms.
+    ``saga_stuck`` (root ``human_required``, fence, escalate) and
+    ``remediate_runaway_saga_success`` (root ``replay_safe``, replay by id,
+    resolve) are the same chain shape with opposite correct actions, so a rule
+    that collapsed the conditional would fail one of them — which is exactly
+    what an unconditional ``FIX_MAP`` value did.
+    """
+
+    #: The two arms, as (hint the root's row carries, the tool that routes).
+    #: Not "what the scenarios expect" — that is what the assertions derive and
+    #: compare against. This is the rule, transcribed once so a test can read
+    #: it, and every value in it is checked against ``HINT_ROUTED_TOOLS``, the
+    #: rule's own sentence and the corpus below.
+    _ARMS: Final[dict[str, str]] = {
+        "human_required": "mark_dlq_permanent",
+        "replay_safe": "replay_dlq_by_ids",
+    }
+
+    #: The scenario that grades each arm. Named because the pair IS the check:
+    #: one of them alone cannot tell a conditional rule from a constant.
+    _SCENARIO_FOR_ARM: Final[dict[str, str]] = {
+        "human_required": "saga_stuck",
+        "replay_safe": "remediate_runaway_saga_success",
+    }
+
+    @staticmethod
+    def _scenario(name: str) -> Scenario:
+        return next(s for s in load_scenarios(_SCENARIO_DIR) if s.name == name)
+
+    @classmethod
+    def _root_hint(cls, scenario: Scenario) -> str | None:
+        """The hint the scenario's OWN precondition proves its root carries.
+
+        Derived, never declared, and the derivation is the scenario's own
+        words: it asks the platform for one hint's page and asserts the alerted
+        root's id is on it, which is the same statement as "this root's hint is
+        that hint" made with the platform's filter (both saga YAMLs say so in
+        as many words). So a scenario that stopped proving its premise would
+        drop out of this check rather than keep passing on a claim nobody
+        verifies.
+        """
+        subject = alert_subject(scenario.alert.model_dump())
+        if subject is None:
+            return None
+        for probe in scenario.expected_precondition:
+            if probe.tool != DLQ_ROW_SOURCE.tool_name:
+                continue
+            hint = probe.arguments.get("remediation_hint")
+            if not isinstance(hint, str):
+                continue
+            if any(
+                field.path.endswith(f"[].{DLQ_ROW_SOURCE.id_field}")
+                and field.equals == subject.value
+                for field in probe.expect
+            ):
+                return hint
+        return None
+
+    def test_the_category_is_routed_by_the_row_and_not_by_the_map(self) -> None:
+        """Gap 2's structural half: ``RUNAWAY_SAGA`` is hint-routed.
+
+        Without this the map's value IS the routing, and one value cannot be
+        two answers. With it, ``FIX_MAP[RUNAWAY_SAGA]`` names the common case
+        and the root's row picks the tool — the same shape ``POISON_MESSAGE``
+        has had since the DLQ tools landed.
+        """
+        assert HypothesisCategory.RUNAWAY_SAGA in HINT_ROUTED_CATEGORIES
+        assert HypothesisCategory.RUNAWAY_SAGA in FIX_MAP
+
+    def test_the_rule_the_code_names_is_the_rule_the_prompts_are_served(self) -> None:
+        """The routing module and the three prompts read one string.
+
+        ``investigation.stuck_chain_root_rule()`` is reachable from the module
+        that ENCODES the rule, and it must be the same object the prompts get.
+        A second copy here — even a correct one — would be the fourth hand-copy
+        ADR 0054 exists to prevent.
+        """
+        assert stuck_chain_root_rule() == STUCK_CHAIN_ROOT_RULE
+        for name in ("investigation_planner", "remediation_planner", "briefing_judge"):
+            assert STUCK_CHAIN_ROOT_RULE in load_prompt(name), name
+
+    @pytest.mark.parametrize("hint", sorted(_ARMS))
+    def test_each_arm_routes_the_tool_the_rule_names(self, hint: str) -> None:
+        """The rule's words against ``HINT_ROUTED_TOOLS``, per arm.
+
+        The prose could drift from the map in either direction and both are the
+        PR #173 failure again: a rule naming a tool the routing does not admit
+        steers the agent at a refusal, and a routing admitting a tool the rule
+        does not name is a steer the live agent never reads.
+        """
+        tool = self._ARMS[hint]
+        assert f"`{tool}`" in STUCK_CHAIN_ROOT_RULE, (
+            f"the shared rule does not name {tool!r}, the tool a {hint!r} root routes to"
+        )
+        assert tool in HINT_ROUTED_TOOLS[hint], (
+            f"HINT_ROUTED_TOOLS[{hint!r}] does not route {tool!r}; the rule "
+            f"given to three readers and the map they are written from "
+            f"disagree about this arm."
+        )
+        # A chain root is ONE job, so the arm's tool has to be able to name it
+        # — ADR 0032's rule, reused rather than restated. A category replay
+        # names a filter, which is why `remediate_runaway_saga_success` forbids
+        # it even though `replay_safe` admits it in general.
+        assert RESOURCE_ARG_FIELDS[tool], f"{tool!r} cannot name the root it acts on"
+
+    @pytest.mark.parametrize("hint", sorted(_SCENARIO_FOR_ARM))
+    def test_the_saga_pair_routes_as_each_root_row_dictates(self, hint: str) -> None:
+        """Both arms, graded by the corpus, derived from each root's own row."""
+        scenario = self._scenario(self._SCENARIO_FOR_ARM[hint])
+        assert self._root_hint(scenario) == hint, (
+            f"{scenario.name}'s precondition no longer proves its root's hint "
+            f"is {hint!r}, so nothing derives which arm of the rule it grades."
+        )
+        expected = set(scenario.expectation.expected_action_tools)
+        assert expected == {self._ARMS[hint]}, (
+            f"{scenario.name} expects {sorted(expected)}; a {hint!r} root "
+            f"routes to {self._ARMS[hint]!r}."
+        )
+        other_arm = next(tool for arm, tool in self._ARMS.items() if arm != hint)
+        assert other_arm in set(scenario.expectation.forbidden_action_tools), (
+            f"{scenario.name} does not forbid {other_arm!r}, the other arm's "
+            f"tool. The pair is what proves the rule is conditional: if either "
+            f"scenario tolerated both tools, a constant would pass too."
+        )
+
+    def test_a_chain_root_with_a_permanent_error_is_never_replayed(self) -> None:
+        """ADR 0034's precedence, on a chain root, proved from the corpus.
+
+        The rule says the error outranks a replay-safe label and never the
+        other way round, so the one thing that must be true of every permanent
+        root is that no replay tool can be reached for it.
+        ``saga_stuck``'s root is the corpus's permanent chain root: its
+        precondition pins the platform's own error text, and the family that
+        text belongs to is read with the same table ``make world-dossier``
+        lints rows against — so "permanent" means one thing in this repo and is
+        spelled once.
+        """
+        scenario = self._scenario("saga_stuck")
+        pinned = [
+            field
+            for probe in scenario.expected_precondition
+            for field in probe.expect
+            if field.path.endswith("error_message") and isinstance(field.equals, str)
+        ]
+        assert pinned, "saga_stuck no longer pins its root's error text"
+        families = error_families(str(pinned[0].equals))
+        assert families and not (families & HINT_COHERENT_FAMILIES["replay_safe"]), (
+            f"saga_stuck's root error is {sorted(families)}, which "
+            f"`replay_safe` would sanction — the scenario no longer holds a "
+            f"permanently-failing chain root, and this check has nothing to "
+            f"prove."
+        )
+        forbidden = set(scenario.expectation.forbidden_action_tools)
+        replay_tools = {"replay_dlq_by_ids", "replay_dlq_by_category", "replay_dlq_messages"}
+        assert replay_tools <= forbidden, (
+            f"saga_stuck permits {sorted(replay_tools - forbidden)} on a root "
+            f"whose error is permanent. The rule's fence arm is not a "
+            f"preference: a replay here re-runs a payload that cannot succeed."
+        )
+        assert set(scenario.expectation.expected_action_tools) <= CONTRADICTED_HINT_TOOLS, (
+            "the fence is the only action a permanently-failing row routes to "
+            "(CONTRADICTED_HINT_TOOLS), whatever its label says"
+        )
+
+    def test_the_rule_says_which_reading_outranks_which(self) -> None:
+        """The asymmetry, in the sentence itself rather than only in ADR 0034.
+
+        A rule that named both fields without saying which wins is two rules
+        again the first time a row carries a ``replay_safe`` hint over a schema
+        error — which is the row live run ``e72b5ffb9df0`` replayed.
+        """
+        assert "outranks a replay-safe label" in STUCK_CHAIN_ROOT_RULE
+        assert "never by the chain view" in STUCK_CHAIN_ROOT_RULE
 
 
 class TestEveryNewCategoryIsEscalateOnly:

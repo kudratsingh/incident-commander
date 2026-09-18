@@ -44,6 +44,17 @@ _WP_1_6_ADDITIONS: dict[str, str] = {
     "READ_MODEL_DRIFT": "read_model_drift",
 }
 
+#: WO-R3-263's addition (owner decision O-19, 2026-09-17; ADR 0054), kept as
+#: its own table rather than folded into the nine above, because the two
+#: additions were decided for different reasons and the provenance of a label
+#: is the thing a reader of a committed archive wants. The nine were a planned
+#: taxonomy widening (plan 02 § 5); this one is a gap the ground-truth pass
+#: found empirically — ``trace_investigation``'s world could not be named, so
+#: its honest label was ``unknown``.
+_WO_R3_263_ADDITION: dict[str, str] = {
+    "RESOURCE_EXHAUSTION": "resource_exhaustion",
+}
+
 
 class TestHypothesisCategory:
     def test_enum_values_are_stable(self) -> None:
@@ -53,6 +64,7 @@ class TestHypothesisCategory:
         assert {member.name: member.value for member in HypothesisCategory} == {
             **_ORIGINAL_EIGHT,
             **_WP_1_6_ADDITIONS,
+            **_WO_R3_263_ADDITION,
         }
 
     @pytest.mark.parametrize(("name", "value"), sorted(_ORIGINAL_EIGHT.items()))
@@ -73,6 +85,20 @@ class TestHypothesisCategory:
         ``ground_truth.root_causes`` (WP-1.3) and the root-cause grader
         (WP-2.2) are written against these strings, so a value that drifted
         from the plan would not fail until a scenario declared it.
+        """
+        assert HypothesisCategory[name].value == value
+
+    @pytest.mark.parametrize(("name", "value"), sorted(_WO_R3_263_ADDITION.items()))
+    def test_the_taxonomy_gap_label_exists_with_its_decided_value(
+        self, name: str, value: str
+    ) -> None:
+        """The spelling O-19 decided, which ``trace_investigation`` now declares.
+
+        A scenario's ``ground_truth.root_causes`` is validated against this
+        enum at load, so a value that drifted from the decision would fail the
+        corpus rather than this test — but it would fail it as "unknown
+        category", which does not say that the decision named a different
+        string.
         """
         assert HypothesisCategory[name].value == value
 

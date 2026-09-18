@@ -98,7 +98,13 @@ _DECIDED: Final[Mapping[str, tuple[Category, ...] | None]] = {
     "tool_missing_response": None,
     "tool_output_schema_mismatch": None,
     "tool_result_marked_error": None,
-    "trace_investigation": (Category.UNKNOWN,),
+    # Moved from UNKNOWN by WO-R3-263 (owner decision O-19, ADR 0054): the
+    # world is a `report_gen` worker that ran out of memory, and the taxonomy
+    # now has a member for that. The label did not change because the world
+    # did — it changed because the enum could finally say what the world was,
+    # and `unknown` ("the probes left me unable to tell") was never true of a
+    # trace that names the cause in its own error text.
+    "trace_investigation": (Category.RESOURCE_EXHAUSTION,),
 }
 
 #: Families whose scenarios measure the harness rather than a world. Neither

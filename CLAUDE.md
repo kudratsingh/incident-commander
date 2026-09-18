@@ -465,7 +465,7 @@ convention, including why the scrubber's "clean" report is a narrower claim than
 
 - Read `docs/ADR/` before proposing structural changes. Do not contradict an accepted ADR silently.
 - Never edit `contracts/platform-tools.snapshot.json` by hand. It is generated. Tool changes start with a platform PR.
-- Prompts live in `src/incident_commander/llm/prompts/` as versioned files with snapshot tests. Never inline prompts in code. That path is also the one `evals.yml` filters on — if prompts ever move, the workflow and this line move with them in the same PR.
+- Prompts live in `src/incident_commander/llm/prompts/` as versioned files with snapshot tests. Never inline prompts in code. That path is also the one `evals.yml` filters on — if prompts ever move, the workflow and this line move with them in the same PR. One narrow exception, recorded in [ADR 0054](docs/ADR/0054-one-rule-for-a-stuck-chains-root-rendered-into-every-reader.md): a rule that several prompts must state in the *same words* is held once in `llm/prompts/shared_rules.py` and written into each file as `{{rule:<key>}}`, which `load_prompt` expands as it serves the file. Whole prompts still live in the `.md` files, and the snapshot hashes are taken over the served text, so a shared-rule edit moves every hash it reaches.
 - Prefer changing one capability per PR with its full vertical slice. Ask before splitting or merging planned PR scopes.
 - When tests and implementation disagree, assume the test encodes intent unless the test itself is the bug, and say which case applies.
 - Run `make eval-reg` before declaring any prompt or policy change complete.

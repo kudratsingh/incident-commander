@@ -37,13 +37,15 @@ and neither one's bytes moved to make the other exist.
 from __future__ import annotations
 
 import dataclasses
+import difflib
 import json
+import re
 import shutil
 import subprocess
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -51,6 +53,7 @@ from evals import artifacts
 from evals import phase_close_report as close
 from evals.graders.deterministic import GradeReport
 from evals.runner import ExecutionMode, RunProvenance, RunReport, ScenarioOutcome
+from incident_commander.agent.hypothesis import HypothesisCategory
 from incident_commander.agent.state import BudgetLedger, IncidentState
 from incident_commander.config import ModelRole
 
@@ -77,6 +80,79 @@ def _document_cases() -> list[tuple[close.PhaseScope, Path, Path]]:
 
 def _case_ids() -> list[str]:
     return [json_path.stem for _, json_path, _ in _document_cases()]
+
+
+#: The values a committed close report states about the REPO AS OF ASSEMBLY
+#: TIME rather than about the archives it closes, with the reason each one is
+#: allowed to move after the document is committed (WO-R3-263).
+#:
+#: This is not a loosening of "every committed document regenerates byte for
+#: byte" — it is that claim, made about the half of the document that can
+#: actually hold still. Two values in a close report are derived from today's
+#: source tree by design and the document says so in its own prose:
+#:
+#: * the leak-hunt vocabulary — "all derived rather than typed: `chaos`; every
+#:   `HypothesisCategory` value; every scenario name and every chaos hook name
+#:   in the corpus". Adding a category widens the search, which is the whole
+#:   point of deriving it; the report's FINDINGS (hits, adjudications, verdict)
+#:   are about the archives and are not in this list.
+#: * the judge-prompt digests, printed under the heading "Judge prompt digests
+#:   at assembly time". A judge prompt edited after a close moves them, and the
+#:   claim the section makes — no judge re-run was required inside the phase —
+#:   is untouched by that.
+#:
+#: Everything else must still match to the byte, and an unexplained line is
+#: reported with the line in it. The same class as the corpus-size gate cmd
+#: #284 hit (LESSONS 2026-09-17): a frozen artifact regenerated from a living
+#: repo can only be pinned on what the repo is not allowed to move.
+_ASSEMBLY_TIME_FACTS: Final[tuple[tuple[str, str], ...]] = (
+    (
+        r'^\s*"term_count": \d+,?$',
+        "the leak vocabulary's size, derived from the enum and the corpus",
+    ),
+    (
+        r'^\s*"(?:' + "|".join(c.value for c in HypothesisCategory) + r')",?$',
+        "one derived leak term: a HypothesisCategory value",
+    ),
+    (
+        r"^\d+ terms in three families",
+        "the same size, in the markdown's own sentence",
+    ),
+    (
+        r"Per-run counts for all \d+ terms",
+        "and again where the markdown points at the JSON companion",
+    ),
+    (
+        r'^\s*"(?:briefing|verification)_judge\.md": "[0-9a-f]{64}",?$',
+        "a judge prompt digest, recorded at assembly time",
+    ),
+    (
+        r"^- `(?:briefing|verification)_judge\.md` — `sha256:[0-9a-f]{64}`$",
+        "the same digest, rendered",
+    ),
+)
+
+
+def _unexplained_drift(committed: str, regenerated: str) -> list[str]:
+    """Every differing line that is NOT an assembly-time fact.
+
+    Line-level rather than a normalising rewrite of both sides, because a
+    normaliser hides what it touched: this reports the offending line, which is
+    what a reader needs in order to decide whether a committed document just
+    lost its meaning or whether one more derived value needs recording above.
+    """
+    changed = [
+        line
+        for line in difflib.unified_diff(
+            committed.splitlines(), regenerated.splitlines(), lineterm="", n=0
+        )
+        if line[:1] in {"+", "-"} and not line.startswith(("+++", "---"))
+    ]
+    return [
+        line
+        for line in changed
+        if not any(re.search(pattern, line[1:]) for pattern, _ in _ASSEMBLY_TIME_FACTS)
+    ]
 
 
 def _committed(phase: int) -> dict[str, Any]:
@@ -667,10 +743,32 @@ def test_every_committed_report_regenerates_byte_for_byte(
     committed evidence. Phase 2's DRAFT is the second such case — a report that
     has been superseded is still evidence, and the FINAL was not allowed to
     reach back and change what the draft said about the runs it had.
+
+    The look WO-R3-263 took, recorded here because the next one will be the
+    same: two values in these documents are derived from the source tree at
+    ASSEMBLY TIME and nothing can freeze them — the leak-hunt vocabulary (every
+    ``HypothesisCategory`` value) and the judge-prompt digests. Adding a
+    category and putting a shared rule into the briefing judge moved exactly
+    those and nothing else. They are enumerated in ``_ASSEMBLY_TIME_FACTS``
+    with their reasons; every other line of every committed document is still
+    pinned to the byte, and the failure below names the line.
     """
     document = close.assemble(close.REPO_ROOT, scope)
-    assert close.render_json(document) == committed_json.read_text()
-    assert close.render_markdown(document, scope) == committed_md.read_text()
+    for regenerated, committed in (
+        (close.render_json(document), committed_json.read_text()),
+        (close.render_markdown(document, scope), committed_md.read_text()),
+    ):
+        drift = _unexplained_drift(committed, regenerated)
+        assert not drift, (
+            "a committed close report no longer regenerates, and the change is "
+            "not one of the assembly-time values this test allows:\n  "
+            + "\n  ".join(drift)
+            + "\n\nThe document's claims are about the inputs as they were. Read "
+            "what moved before touching anything: if an ARCHIVE, a baseline or a "
+            "spend figure moved, something has rewritten evidence. If it is one "
+            "more value the assembler derives from today's tree, add it to "
+            "_ASSEMBLY_TIME_FACTS with the reason."
+        )
 
 
 @pytest.mark.parametrize("phase", PHASES)
@@ -804,7 +902,10 @@ def test_the_final_version_was_written_beside_the_draft_not_over_it(tmp_path: Pa
     The stamp is the newest moment any evidence in scope was written, so the
     scope with two newer archives in it landed on a new filename. Both files
     are on disk, they carry the same canned-sweep id and different timestamps,
-    and the draft's bytes are the ones the draft's own scope produces.
+    and the draft's bytes are the ones the draft's own scope produces — up to
+    the assembly-time values nothing can freeze, which is the same allowance
+    ``test_every_committed_report_regenerates_byte_for_byte`` documents and
+    which is why the comparison goes through the same function.
     """
     (draft_json, draft_md), (final_json, final_md) = close.committed_versions(2)
     assert draft_json != final_json and draft_md != final_md
@@ -812,7 +913,7 @@ def test_the_final_version_was_written_beside_the_draft_not_over_it(tmp_path: Pa
     assert close.PHASE2.canned_sweep in final_json.name
     assert draft_json.name < final_json.name  # the timestamp, and the sort order
     draft = close.assemble(close.REPO_ROOT, close.PHASE2_DRAFT)
-    assert draft_json.read_text() == close.render_json(draft)
+    assert not _unexplained_drift(draft_json.read_text(), close.render_json(draft))
 
     # And a re-write of either aims at its own path and refuses.
     for scope in (close.PHASE2_DRAFT, close.PHASE2):

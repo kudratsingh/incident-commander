@@ -22,7 +22,7 @@ import json
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -610,16 +610,82 @@ def test_the_artifact_is_named_after_its_scope_not_after_the_clock() -> None:
     )
 
 
+#: Keys a later packet deliberately added to or changed in a leaderboard row,
+#: which is the only reason the committed JSON and today's render may differ.
+#:
+#: One entry so far. WP-6.3 gated ``judge_mean_overall`` on a calibration report
+#: (ADR 0052) and added three keys beside it, so the committed document — written
+#: before that rule existed — carries the bare mean where today's render carries a
+#: sentence saying it is withheld. The committed file is evidence of what was
+#: reported that day and is never rewritten (invariant 9), and the artifact's name
+#: identifies its SCOPE rather than its code, so a rule change cannot buy a new
+#: version without also changing the archives in scope.
+#:
+#: This list is the reviewable part. Adding to it is saying "a reporting rule
+#: changed deliberately, here is which field"; the assertions below still require
+#: that NOTHING ELSE moved, which is the direction that stays true (the lesson of
+#: cmd #284: pin the direction that survives a regeneration).
+_DELIBERATE_ROW_CHANGES: Final[tuple[str, ...]] = (
+    "judge_mean_overall",
+    "judge",
+    "judge_calibration_report_id",
+    "judge_gate",
+)
+
+
+def _without_the_deliberate_changes(payload: Any) -> Any:
+    """The document with the enumerated keys dropped from every row that has them.
+
+    Identified by ``judge_mean_overall``, which only a leaderboard row carries and
+    which BOTH sides have — keying on one of the added fields would strip today's
+    row and leave the committed one intact, and the comparison would fail on the
+    asymmetry rather than on a real difference.
+    """
+    if isinstance(payload, dict):
+        gated = "judge_mean_overall" in payload
+        return {
+            key: _without_the_deliberate_changes(value)
+            for key, value in payload.items()
+            if not (gated and key in _DELIBERATE_ROW_CHANGES)
+        }
+    if isinstance(payload, list):
+        return [_without_the_deliberate_changes(item) for item in payload]
+    return payload
+
+
 def test_the_committed_report_regenerates_byte_for_byte() -> None:
     """Every input is a locked archive, so the document is a function of the repo.
 
-    If this fails, something the report READ has changed — which for locked,
-    append-only archives should be impossible, so it is worth a look rather
-    than a re-write.
+    If this fails outside ``_DELIBERATE_ROW_CHANGES``, something the report READ
+    has changed — which for locked, append-only archives should be impossible, so
+    it is worth a look rather than a re-write.
+
+    The Markdown half is still compared byte for byte, with nothing excused: the
+    rendered table does not print the gated number, so a rule change that moved a
+    single character of the document a person reads would fail here.
     """
     document = research.assemble(research.REPO_ROOT)
-    assert research.render_json(document) == artifacts.newest("research_report").read_text()
+    committed = json.loads(artifacts.newest("research_report").read_text())
+    assert _without_the_deliberate_changes(document) == _without_the_deliberate_changes(committed)
     assert research.render_markdown(document) == artifacts.newest("research_report_md").read_text()
+
+
+def test_the_committed_report_predates_the_judge_gate() -> None:
+    """The other half of the allowance above: it is used, and only for this.
+
+    The committed document carries a bare judge mean because it was written before
+    ADR 0052; today's render withholds it. Asserting both sides means the excuse
+    cannot quietly start covering a field that changed for some other reason.
+    """
+    committed = json.loads(artifacts.newest("research_report").read_text())
+    rows = committed["sections"]["strategy_leaderboard"]["arms"]
+    assert rows
+    assert all(isinstance(row["judge_mean_overall"], float) for row in rows)
+    assert all("judge_gate" not in row for row in rows)
+    today = research.assemble(research.REPO_ROOT)
+    fresh = today["sections"]["strategy_leaderboard"]["arms"]
+    assert all(row["judge_mean_overall"] == research.WITHHELD_JUDGE for row in fresh)
+    assert all(row["judge_calibration_report_id"] is None for row in fresh)
 
 
 def test_every_archive_in_scope_is_committed_and_carries_provenance() -> None:

@@ -78,7 +78,7 @@ def render_trail(trail: Sequence[ProbeSummary]) -> list[str]:
 
     Shared rather than duplicated: the briefing writer
     (``briefing_enrichment._format_context``) and the briefing judge
-    (``evals/graders/llm_judge.py::_format_briefing``) render two overlapping
+    (``evals/graders/llm_judge.py::format_briefing_context``) render two overlapping
     contexts on purpose, but the trail is the half they share, and a judge
     grading groundedness against different phrasing than the writer received
     is grading a different briefing. One function means the two cannot drift;

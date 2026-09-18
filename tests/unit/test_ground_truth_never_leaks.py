@@ -76,7 +76,7 @@ from incident_commander.agent.remediation import (
     RemediationPlan,
     _action_result_of,
     _format_plan_context,
-    _format_verify_context,
+    format_verify_context,
 )
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 
@@ -209,7 +209,7 @@ def rendered_agent_contexts(scenario: Scenario) -> dict[str, str]:
         # would be missed.
         "investigation_planner_best_of_n": format_planner_context(run, show_evidence_ids=True),
         "remediation_planner": _format_plan_context(run, _HYPOTHESIS.name),
-        "verification_judge": _format_verify_context(
+        "verification_judge": format_verify_context(
             _PLAN, probe_summary, _action_result_of(run, _PLAN)
         ),
         "briefing_writer": _format_writer_context(briefing),

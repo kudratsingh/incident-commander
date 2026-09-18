@@ -1798,6 +1798,76 @@ the second while being incapable of failing the first. The forbidden-action rate
 counts only the first, and every SAFETY failure is listed with its own detail so the split can be
 checked.
 
+## Judge calibration
+
+Three of this harness's graders are models: `action_verifier` decides whether an executed Tier-1
+action worked, `briefing_judge` scores a briefing's groundedness and actionability, and
+`candidate_selector` picks which diagnosis a run acts on. A number any of them produces is worth
+exactly as much as the check on the instrument that produced it, and until WP-6.3 there was no
+check — while the research report's leaderboard printed a judge mean with nothing beside it. The one
+judge number this project ever audited by hand was wrong: INC-002 is the briefing judge scoring an
+honest briefing 0.0 for groundedness on a green paid archive.
+
+`make judge-calibration` (`evals/judge_calibration/`) is the check. It is FREE by default — no flags
+runs a scripted fake judge, which proves the harness end to end and spends nothing — and
+`LIVE=1 YES_SPEND=1` is the paid leg, two flags because PROTOCOL step 0 is that readiness is not
+authorization. Plan 03 § 9 is the protocol; [ADR 0052](ADR/0052-a-judge-number-is-withheld-until-its-judge-is-calibrated.md)
+records where this implementation departs from it and why.
+
+**Four legs, and a refusal is a result.**
+
+*The trap set.* Six hand-built cases per judge (§ 107 asks for five; each sixth is a regression case
+for a failure that already happened). Every case states the verdict it asserts and the argument for
+that verdict, so the ground truth belongs to the evaluator and depends on no run. This is the leg
+that cannot go circular.
+
+*Self-agreement at N=5.* The same question asked five times, reporting the fraction of identical
+verdicts. Read it beside accuracy, as plan 03 § 109 says: low stability means the rubric is
+ambiguous, high stability with low accuracy means the rubric is wrong. This leg is why no judge call
+sends a temperature — see below.
+
+*The track record*, for `action_verifier` only and for nothing: every live archive already holds the
+verdict it gave, so the leg reads 30 archived verdicts rather than buying new ones. A row is paired
+only where the scenario declares a Tier-1 action and expects to end `resolved`, because only there is
+`verified` unambiguously right; read-only scenarios and the stabilize-only handover are excluded with
+their reasons printed. And the leg is one-sided, which is the finding worth carrying: no live run in
+the archives was ever supposed to end `not_verified`, so the dangerous direction — blessing a fix
+that had not landed — is unmeasured by the archives and only the trap set reaches it.
+
+*The refusals.* `candidate_selector` has no track-record leg because its agreement with a scenario's
+labelled root cause IS `selected@k` at k=1 — the number a calibration report is what releases, so
+computing it here would certify a judge with the measurement the certificate unlocks.
+`briefing_judge` has none because nothing in this system deterministically labels a briefing useful;
+the five graded dimensions are statements about the run, not about its prose.
+
+**Stability is measured, not set.** Plan 03 § 9.1 asks for temperature 0. No judge call in this repo
+sends a temperature and none may be made to require one (owner decision O-24, ADR 0048):
+`llm/client.SAMPLING_REJECTED_MODELS` lists the model families that reject the parameter outright, so
+a calibration pinned to temperature 0 would stop working on the first re-pin. The determinism comes
+from the schema — forced tool use, a closed verdict set per role, validators that reject anything
+outside it — and from the self-agreement leg, which measures what the setting would only have
+claimed.
+
+**No judge number is printed before its calibration report exists.** `research_report`'s leaderboard
+withholds `judge_mean_overall` unless `briefing_judge` has an id in `JUDGE_CALIBRATION_REPORTS`, and
+the withheld value is a sentence rather than a null or a zero. The register is declared in source, not
+discovered on disk, so adding an id is a reviewable act; a fake-judge report can never be one
+(`judge_client: fake`). `judged_runs` is never withheld — how many runs were judged is a coverage fact
+about the arm. This is plan 02:243's rule and plan 04:169's acceptance, applied one role out from the
+selector gate beside it.
+
+**A rubric edit lands one line at a time, with a rerun.** This is a review convention, not something a
+test can decide: one rubric line per commit, and a diff that moves two lines is split before it is
+reviewed. What makes it checkable after the fact is that every calibration report carries the sha256
+and the line count of the exact prompt bytes it measured — a delta between two calibrations is
+attributable only if each says which rubric it was about. A packet that both edits a rubric and
+calibrates it leaves its own first number un-attributable, which is why WP-6.3 changed no rubric line.
+
+**`plan_approval_judge` is not calibrated because it does not exist** (divergence B6). Every
+approve/refuse decision about a remediation plan is deterministic guard code, by design, because
+invariant 4 forbids deriving a control from model output. Every calibration report says so, so a
+reader who finds no section for it can tell "not calibrated" from "not a judge".
+
 ## What eval doesn't cover (yet)
 
 - **Adversarial robustness** — Phase 7. Injection payloads in log lines, DLQ bodies, trace metadata.

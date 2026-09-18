@@ -653,7 +653,8 @@ def _load_snapshot_descriptions(path: Path = _SNAPSHOT_PATH) -> dict[str, str]:
     """Tool descriptions, mirrored verbatim from the committed contract snapshot.
 
     Load-bearing — the remediation planner authors its verify expectation from
-    them — so a missing or unreadable snapshot raises at import, never ``{}``.
+    them — so a missing or unreadable snapshot raises at import, never ``{}``. A
+    packaged deployment must ship the snapshot as package data.
     """
     try:
         raw = json.loads(path.read_text())

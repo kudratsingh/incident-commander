@@ -40,6 +40,23 @@ FIXTURE_DEFECT: Final = "fixture-defect"
 POST_FAULT: Final = "post-fault"
 POST_ACTION: Final = "post-action"
 CANNED_ONLY: Final = "canned-only"
+#: The recording is of a WARM stack and the check ran on a cold one. Added by
+#: WO-R3-202, which shipped the first canned `get_consumer_lag` response that
+#: pins a MEASURED zero on `worker-dispatcher`. That group is the one the metrics
+#: loop refreshes continuously, and for roughly the first minute of a freshly
+#: booted platform it has no measurement at all: the honest reading is
+#: `lag: null, lag_known: false`, which flips to `0, true` once the loop emits.
+#: `fixture_drift._VOLATILE` already forgives the `lag_known` half and
+#: deliberately does NOT forgive `lag` — that value is what every lag scenario
+#: rests on — so the value half lands here.
+#:
+#: Distinct from POST_FAULT, and the distinction is the reason this word exists
+#: rather than a fifth reuse of that one: post-fault drift is the chaos hook's
+#: doing and would vanish if the walk ran after seeding. This is neither the
+#: hook's nor the agent's doing — it is the platform's uptime, and no seeding or
+#: reset changes it. Calling it post-fault would claim a mechanism that is not
+#: there, which the note above `_JUSTIFIED` is explicitly about.
+COLD_STACK: Final = "cold-stack"
 
 # Entries that are NOT fixture defects, each with the claim that makes it so.
 #
@@ -110,6 +127,37 @@ _JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
         POST_FAULT,
         "same hook, same world, same reason — this scenario differs from its "
         "quiet sibling only in the alert it hands the agent",
+    ),
+    # The three cold-stack rows, and they are the only entries in this file that
+    # a warm developer stack cannot observe. `_blessed_against` above is what
+    # settles which side is authoritative: this file is blessed against CI's
+    # freshly seeded stack, so on a developer volume whose metrics loop has been
+    # running for minutes these three read as "already fixed". They are not —
+    # deleting them reds CI's contract job, which is where the cold reading is.
+    #
+    # Each scenario's world is the WARM one: its precondition asserts
+    # `lag_known equals true` beside `lag at_most 5`, so a cold stack fails the
+    # premise BEFORE any model call and reports that the world was never
+    # manufactured, rather than grading the agent against a missing reading.
+    # `make world-audit` (PROTOCOL step 3) checks `lag_known` too, so the paid
+    # path cannot reach a cold stack either.
+    ("jobs_not_progressing_healthy_backlog_spike", "get_consumer_lag", "lag", "value"): (
+        COLD_STACK,
+        "the recording pins worker-dispatcher's MEASURED zero; a freshly seeded "
+        "stack has taken no measurement yet and answers null, which lag_known "
+        "declares (and _VOLATILE already forgives). The scenario's premise is the "
+        "warm reading and its precondition asserts lag_known, so a cold stack "
+        "abandons the run instead of grading it",
+    ),
+    ("jobs_not_progressing_outbox_stall", "get_consumer_lag", "lag", "value"): (
+        COLD_STACK,
+        "same reading, same mechanism — this scenario's hook pauses the outbox "
+        "relay and never touches the lag metric, so the fault explains nothing "
+        "here and post-fault would be a claim about a mechanism that is absent",
+    ),
+    ("jobs_not_progressing_outbox_stall_deploy_noise", "get_consumer_lag", "lag", "value"): (
+        COLD_STACK,
+        "same hook, same world, same reason as its quiet sibling",
     ),
     # The first POST_ACTION rows. The constant has existed since the ledger
     # did, describing exactly this and matching nothing — because until ADR 0025
@@ -767,6 +815,12 @@ def dump_ledger(
                 CANNED_ONLY: (
                     "the scenario never runs live, so its recordings are its premise "
                     "rather than a recording of anything"
+                ),
+                COLD_STACK: (
+                    "the recording is of a warm stack and the check ran on a cold one: "
+                    "worker-dispatcher's lag is unmeasured for about the first minute "
+                    "after boot, so a fresh platform answers null where the recording "
+                    "says 0. Timing, not contract, and not fixable from either side"
                 ),
             },
             "_counts": {

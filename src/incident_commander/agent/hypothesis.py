@@ -107,6 +107,30 @@ class HypothesisCategory(StrEnum):
     this platform's Tier-1 surface raises a memory limit, resizes a worker or
     reclaims a disk. A human changes a limit or the work that needs it."""
 
+    # WO-R3-214 (WP-7.2, ADR 0053). Appended for the same reason every label
+    # since the original eight has been: the values already written into run
+    # archives, trajectories and `ground_truth.root_causes` keep their
+    # spelling and their position.
+
+    DAG_PAUSED = "dag_paused"
+    """A dependency chain is not advancing because it is deliberately
+    paused — `get_dag_state` reads `paused: true` with an expiry and the
+    ancestor that holds it — rather than because anything in it broke.
+
+    The gap WP-7.2 found by having to label a world it could not name. The
+    chain is healthy: no node is dead-lettered, nothing is queued to replay,
+    and the held descendants promote by themselves when the pause lifts. The
+    nearest labels were all wrong in a way that would send a human somewhere
+    else — `runaway_saga` says a node stopped the chain, `resolver_stall`
+    says nothing is coming, and `unknown` says the probes left the agent
+    unable to tell, when in fact one reading answered it outright.
+
+    Escalate-only, and the one category whose correct action count is zero
+    for a structural reason rather than a missing tool: the platform has no
+    un-pause tool at all, `pause_dag` would extend the very thing that is
+    holding the chain, and a replay is refused inside a paused DAG. What the
+    run does is name the pause, its owner and its expiry, and hand off."""
+
 
 class Hypothesis(StructuredOutput):
     """One candidate root cause with a confidence score, category, and reasoning.

@@ -1,0 +1,40 @@
+{
+  "absent_reason": null,
+  "applies": true,
+  "ground_truth": {
+    "affected_components": [
+      "workflow-stuck-eval"
+    ],
+    "causal_chain": [
+      "a DAG pause is set on root 4a30546f with a TTL",
+      "the dependency resolver honours the pause and promotes no child under it",
+      "descendant 7fb11dea stays in waiting although every parent has completed",
+      "the workflow resumes by itself when the pause expires, with nothing to repair"
+    ],
+    "incident_count": 1,
+    "root_causes": [
+      "dag_paused"
+    ]
+  },
+  "provenance": {
+    "commander_head": "c743736",
+    "invocation_id": "93673b198b72",
+    "platform_mcp_url": "http://localhost:8001/mcp",
+    "read_principal": "PLATFORM_SMOKE_TOKEN (read-scoped)",
+    "recorded_at": "2026-09-18T07:29:18.280999+00:00"
+  },
+  "recording": "workflow_stuck_paused_dag.20260918T072918Z.93673b198b72.json",
+  "scenario": "workflow_stuck_paused_dag",
+  "schema_version": 1,
+  "why_this_file_is_separate": "ADR 0038: the wall around the answer key is structural. The replay client loads the recording through `recorder.load_recording`, which takes one path and has no way to reach this file; `RecordedWorld` forbids extra keys, so a ground truth cannot ride inside a recording either. Pinned by tests/unit/test_recorder.py.",
+  "world": {
+    "chaos_hooks": [
+      "create_stuck_dag",
+      "pause_dag_chaos"
+    ],
+    "chaos_seeded": true,
+    "label": "the live platform with `workflow_stuck_paused_dag`'s fault plan seeded (2 hook(s): `create_stuck_dag`, `pause_dag_chaos`), settled 3.0s, read under the read-scoped principal",
+    "live_mcp": true,
+    "settle_seconds": 3.0
+  }
+}

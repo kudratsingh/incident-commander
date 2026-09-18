@@ -669,15 +669,16 @@ class ScenarioFamily(StrEnum):
     inventory records the promotion, scenario by scenario, including the
     five the rule could not place and this packet classified by hand).
 
-    Deliberately **not** here: ``workflow_stuck`` and ``api_latency``. Those
-    are plan 01 § 7's remaining future worlds, and no scenario in this repo
-    manufactures one yet. A family for a world nobody has built is an empty
-    group in every report until its own packet lands, and an empty group that
-    looks like a measured zero is worse than an absent one.
+    Deliberately **not** here: ``api_latency``. That is plan 01 § 7's
+    remaining future world, and no scenario in this repo manufactures one
+    yet. A family for a world nobody has built is an empty group in every
+    report until its own packet lands, and an empty group that looks like a
+    measured zero is worse than an absent one.
 
     ``jobs_not_progressing`` was on that list until WO-R3-202 (WP-4.3) built
-    the four worlds, which is the rule working as intended: the member lands
-    in the same change as the scenarios that fill it, never before.
+    the four worlds, and ``workflow_stuck`` until WO-R3-214 (WP-7.2) built
+    its first two — the rule working as intended: the member lands in the
+    same change as the scenarios that fill it, never before.
     """
 
     CACHE_REDIS = "cache_redis"
@@ -699,6 +700,13 @@ class ScenarioFamily(StrEnum):
     TOOL_FAULT = "tool_fault"
     TRACES = "traces"
     WORKFLOW = "workflow"
+    # Plan 01 § 7.2's Family C: "the child never ran" over worlds whose
+    # correct answers differ. Two are built (WO-R3-214, WP-7.2) — a stranded
+    # chain nothing is coming for, and the same chain deliberately held by a
+    # DAG pause. Distinct from ``workflow``, which groups the saga/chain
+    # scenarios written one at a time before families existed
+    # (evals/scenarios/README-workflow-stuck.md holds the matrix).
+    WORKFLOW_STUCK = "workflow_stuck"
 
 
 class ScenarioDifficulty(StrEnum):

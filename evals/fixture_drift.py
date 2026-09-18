@@ -344,28 +344,21 @@ class Drift:
     kind: str
     canned: Any = None
     live: Any = None
-    # Which element of a sequenced fixture disagreed. Reported, never keyed
-    # — see ``key``.
+    # Which element of a sequenced fixture disagreed.
     index: int = 0
 
     @property
-    def key(self) -> tuple[str, str, str, str]:
+    def key(self) -> tuple[str, str, str, str, int]:
         """Identity for the known-drift ledger. Deliberately excludes the
         observed values: a fixture whose wrong value changes is still the
         same unfixed drift, and re-blessing on every value wobble would make
         the ledger a rubber stamp.
 
-        It excludes ``index`` for the same reason, and the reason is worth
-        stating because the opposite is tempting. The ledger's unit is the
-        work: one line per recording that has to be corrected. A sequenced
-        fixture's elements are two recordings of ONE field, and whoever fixes
-        it opens one file and fixes the path — so keying by element would
-        split one job across two lines, and a scenario that grows a third
-        probe would silently regrow the ledger it is supposed to shrink.
-        The index belongs in the report, which is where you look to find out
-        which element to edit; ``describe`` carries it.
+        The element is part of the identity. A sequenced fixture can record
+        different worlds at different points in a run, so one path can need
+        distinct explanations for its pre-fault and post-action readings.
         """
-        return (self.scenario, self.tool, self.path, self.kind)
+        return (self.scenario, self.tool, self.path, self.kind, self.index)
 
     def describe(self) -> str:
         """One line naming the fixture, the field, the kind, and both values."""

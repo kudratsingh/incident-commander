@@ -13,6 +13,7 @@ An archive listed as *transcript only* means the raw session data is on disk und
 | Date | Archive | What this session established |
 |---|---|---|
 | 2026-09-17 | `0db6fe722f7c` (re-graded) | **WO-R3-266:** Four read-only consumer-lag scenarios establish their named live-world premise before a model call; an unmet premise aborts pre-spend rather than grading canned contents as live fact. The archive's missing-group evidence red remains a named historical hold-back because it predates that gate. |
+| 2026-09-18 | — | **WO-R3-269:** Fixture-drift ledger keys may identify a fixture element; stale-cache `size` records element 0's 90-byte fault and element 1's post-action absence separately. Legacy keys remain generic. |
 | 2026-09-17 | — | **WO-R3-258:** Documentation sweep closes stale freeze wording, localizes incident references, corrects the baseline-count comment, and makes ADR 0029/0033/0034 implementation status explicit. The named v0.6.3 runbook/schema references remain as accurate historical records. |
 | 2026-09-17 | — | **WO-R3-270:** `run_to_completion` accrues and checkpoints elapsed wall time after successful and failed transitions, so terminal and crash exits retain their duration. Existing archives remain historical records. |
 | 2026-08-08 → 08-10 | *transcript only* | **The audit.** 503 files read, 129 defects found and verified adversarially. Root-caused why the eval suite went green without meaning it: 32 of 37 scenarios silently fell back to canned responses. `AUDIT_REPORT.md`, `findings.json`. |

@@ -308,7 +308,7 @@
       "path": "size",
       "kind": "value",
       "index": 0,
-      "context": "cold-stack",
+      "context": "warm-stack",
       "why": "the 90-byte stale value is visible on a warm developer stack, but CI's fresh stack has not populated that cache entry and reads the fixture value; the entry is timing-scoped, not a fixture correction"
     },
     {

@@ -40,6 +40,7 @@ from incident_commander.agent.strategies.protocol import InvestigationStrategy, 
 from incident_commander.agent.strategies.records import PlannerCall, StepSink
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
+from incident_commander.llm.prompts.shared_rules import STUCK_CHAIN_ROOT_RULE
 from incident_commander.llm.repair import (
     INVESTIGATION_PLANNER_INVALID,
     call_with_output_repair,
@@ -132,6 +133,11 @@ FIX_MAP: Final[dict[HypothesisCategory, str]] = {
     # platform refuses to replay a job inside a paused DAG, so a pause
     # actively blocks the fix. See the stuck-chain section of the
     # remediation-planner prompt and `policies.RESOLUTION_CLASS`.
+    #
+    # The value is the COMMON CASE and nothing more, since WO-R3-263: the
+    # category is hint-routed (see `HINT_ROUTED_CATEGORIES` below), so which
+    # of the two tools a stuck chain's root gets is decided by that root's own
+    # dead-letter row, exactly as it is for `POISON_MESSAGE`.
     HypothesisCategory.RUNAWAY_SAGA: "replay_dlq_by_ids",
 }
 
@@ -153,8 +159,30 @@ FIX_MAP: Final[dict[HypothesisCategory, str]] = {
 # comment above FIX_MAP, which is the shape of thing that goes stale
 # unnoticed — the comment was accurate the whole time the value beside it
 # was not.
+#
+# `RUNAWAY_SAGA` JOINED IT ON 2026-09-17 (WO-R3-263, owner decision O-19, ADR
+# 0054), and the disagreement that put it here is worth stating because it
+# survived every test in the suite. `FIX_MAP` steered the category at
+# `replay_dlq_by_ids` unconditionally, while both prompts routed a
+# `human_required` chain root to `mark_dlq_permanent` — and `saga_stuck`
+# forbids `replay_dlq_by_ids` outright, expects the fence, and expects
+# `escalated`. Nothing caught it: `TestFixMapMatchesTheSuite` was scoped to
+# scenarios expecting `resolved`, so the one scenario that proves the
+# disagreement was the one scenario the check could not see. It is now scoped
+# to any scenario whose forbidden set is a real decision rather than
+# "everything that can touch something" — `resolved`, or `escalated` while
+# still requiring an action.
+#
+# The routing itself did not have to move: `HINT_ROUTED_TOOLS` already says
+# `human_required` → the fence and `replay_safe` → a by-id replay, which is
+# what the saga pair grades. What moved is the admission that a chain's root
+# is a dead-letter row like any other, so the row decides and the category
+# cannot. `stuck_chain_root_rule()` (below `CONTRADICTED_HINT_TOOLS`) is that
+# decision in one sentence, and
+# `tests/unit/test_policies.py::TestStuckChainRootRule` holds this set,
+# `HINT_ROUTED_TOOLS` and the rule's own words to each other.
 HINT_ROUTED_CATEGORIES: Final[frozenset[HypothesisCategory]] = frozenset(
-    {HypothesisCategory.POISON_MESSAGE}
+    {HypothesisCategory.POISON_MESSAGE, HypothesisCategory.RUNAWAY_SAGA}
 )
 
 
@@ -267,6 +295,22 @@ HINT_ROUTED_TOOLS: Final[dict[str, frozenset[str]]] = {
 # hint and error text rather than from anything a scenario declares about
 # itself.
 CONTRADICTED_HINT_TOOLS: Final[frozenset[str]] = frozenset({"mark_dlq_permanent"})
+
+
+def stuck_chain_root_rule() -> str:
+    """The stuck-chain conditional, in the words every reader of it is given.
+
+    Read from ``llm/prompts/shared_rules.py`` rather than spelled here: the
+    same sentence is rendered into the investigation planner's rules, the
+    remediation planner's stuck-chain routing table and the briefing judge's
+    rubric, and a fourth copy sitting beside the routing code would be the
+    thing ADR 0054 exists to prevent. It is reachable from this module because
+    this is where the rule is ENCODED — ``HINT_ROUTED_CATEGORIES`` plus
+    ``HINT_ROUTED_TOOLS`` are its structural half — and a rule whose code and
+    whose prose are never checked against each other is two rules (INC-002).
+    ``tests/unit/test_policies.py::TestStuckChainRootRule`` is that check.
+    """
+    return STUCK_CHAIN_ROOT_RULE
 
 
 # The read that shows a dead-letter row, and the two arguments that narrow it.

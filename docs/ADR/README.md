@@ -57,6 +57,10 @@ Fifty-one records, plus [`0000-template.md`](0000-template.md). All are accepted
 | [0049](0049-the-oracle-gap-is-an-evaluator-number-paired-within-one-world.md) | The oracle gap is the evaluator's number, paired within one world, withheld until its arm is calibrated | Makes 0040's world scoping operational for a DIFFERENCE; names the briefing limit 0044 records for the other arm |
 | [0050](0050-a-recorded-worlds-history-is-compared-by-shape.md) | A recorded world's audit log and row ids are HISTORY: compared by shape and by the scenario's own claims, never by value — because no reset puts them back | Amends 0047 § 5; keeps 0043's sweep and `fixture_drift._VOLATILE` untouched |
 | [0051](0051-a-scenario-family-shares-one-alert-and-its-noise-is-a-real-thing.md) | A scenario family shares ONE alert, which names the stuck pipeline rather than the component at fault; a family's distractor is a real thing the world holds, never a lab hook, and it is never graded | Applies 0012's no-lab-vocabulary rule and 0033's sanctioned-action rule to a whole family; `bad_deploy` excluded from agent-visible families |
+| [0054](0054-one-rule-for-a-stuck-chains-root-rendered-into-every-reader.md) | `resource_exhaustion` joins the taxonomy escalate-only, and a stuck chain's root is routed by its own dead-letter row — one sentence, held once, rendered into the planner prompt, the fix table and the judge | Applies INC-002's "every reader, same change" to routing; carries 0034's precedence and 0026's escalate-after-a-fence; closes the `resolved`-only scoping of `TestFixMapMatchesTheSuite` |
+
+Numbers 0052–0053 are assigned to packets in flight (WP-6.3, WP-7.2) and land with their
+pull requests; the gap above is that, not a missing record.
 
 ## Two formatting conventions coexist
 

@@ -23,6 +23,8 @@ For non-DLQ hypotheses:
 
 ## Stuck dependency chains (`runaway_saga` / `stuck_dag`)
 
+**The routing, in one sentence.** {{rule:stuck_chain_root}} Everything below is how to establish which of those two the row says, and how to verify whichever you do.
+
 `get_dag_state(job_id)` returns the alerted node, its direct parents and its direct children — each with a `status` — plus the chain's `paused` flag.
 
 **The shape that names its own fix.** The node the alert names reads `"status": "dead_letter"`, one or more descendants read `"status": "waiting"`, and the chain reads `"paused": false`. That chain cannot drain on its own: `dead_letter` is terminal, and the platform's resolver promotes a child only once every parent is `completed`. So the fix is a replay of that root — **once you have established the root is safe to replay.**

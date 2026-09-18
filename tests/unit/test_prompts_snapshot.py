@@ -32,6 +32,25 @@ from incident_commander.llm.prompts.loader import (
     PromptNotFoundError,
     available_prompts,
     load_prompt,
+    raw_prompt,
+)
+from incident_commander.llm.prompts.shared_rules import (
+    SHARED_RULES,
+    STUCK_CHAIN_ROOT_RULE,
+    UnknownSharedRuleError,
+    render,
+)
+
+#: The prompts O-19 names as readers of the stuck-chain rule: the planner that
+#: decides to hand off, the fix table that picks the tool, and the judge that
+#: grades what was written about the outcome. Written down rather than derived
+#: so the test below can compare it against the directory in BOTH directions —
+#: a reader that stops carrying the rule and a fourth that starts are each a
+#: change to the decision, not a detail.
+_STUCK_CHAIN_RULE_READERS: Final[tuple[str, ...]] = (
+    "briefing_judge",
+    "investigation_planner",
+    "remediation_planner",
 )
 
 #: Every category the planner may emit, in a stable order. Built from the
@@ -45,7 +64,17 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     "briefing_writer": ("118e7739f4261a4b49ac8fda63b149e058621a6ba81f04108c3e64a214ff16af"),
     # Moved by WP-1.6, intentionally: nine category rows and the healthy-world
     # rule. Named in that PR's body per plan 04 working rule 5.
-    "investigation_planner": ("e01a1d68c282fc51dc4906774e67e87da85110444ae121e7d61698cc10fd3ab8"),
+    #
+    # Moved again by WO-R3-263 (owner decision O-19, ADR 0054), and all three
+    # of the hashes it moved are named in that PR's body: the
+    # `resource_exhaustion` row plus the shared stuck-chain rule here, the
+    # shared rule in `remediation_planner`, the shared rule in
+    # `briefing_judge`. Note what the three have in common — one sentence,
+    # held in `llm/prompts/shared_rules.py`, expanded by `load_prompt`. These
+    # hashes are taken over the SERVED text, so editing that one sentence
+    # moves all three at once and a reviewer sees the whole blast radius,
+    # which is the property the indirection is for.
+    "investigation_planner": ("e6a5e1585cca43aab80f06a39ea738947ad7226af3cde6b9b10097f3d5939f1c"),
     # WP-5.2's addendum. Appended to `investigation_planner` above by
     # `best_of_n_enumerated`, never loaded on its own — which is why the hash of
     # the planner prompt beside it did not move: the control group's system
@@ -57,8 +86,8 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # beside it moved — the four agent-side roles and the two judges keep their
     # exact bytes. Named in that PR's body per plan 04 working rule 5.
     "candidate_selector": ("e9cab9c1444cd67006ddb10a4250f1893f399b11ee2e918af016359dd717f767"),
-    "briefing_judge": ("838a5ee5de6081c32ef1b7aba35aefe0ddd83826e841af2ca831ba76f4692719"),
-    "remediation_planner": ("042b8372e1687a3f1174c22f626a94406da1e00f2f0b680f459187f7394d8a60"),
+    "briefing_judge": ("479334d1a4a79ff9db84a5f5aa697d8d048196b0f966145ac776a9179c82e689"),
+    "remediation_planner": ("24829c8109392039c172631b3bb48a088b4017dc18c9840fba71696b0259d85f"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
     "output_repair": ("461943691f22c6fb6c0c1b62a1cb356dc43eab3ec963b21db069a5701e86a1a0"),
 }
@@ -257,6 +286,48 @@ class TestInvestigationPlannerInvariants:
             f"it. The table's third column is a statement about FIX_MAP's "
             f"keys, and the gate reads those keys."
         )
+
+    @pytest.mark.parametrize("category", [c for c in _CATEGORIES if c not in FIX_MAP])
+    def test_every_escalate_only_category_is_named_in_the_stop_rule(
+        self, category: HypothesisCategory
+    ) -> None:
+        """The table says "No"; this is the rule that tells the model what to DO.
+
+        The third column of the category table is a statement about
+        ``FIX_MAP``; the `stop` rule is the instruction, and it carries a
+        hand-typed list of every no-fix category. A category present in the
+        table and absent from that list is told it has no fix and never told
+        which action follows — and the model's other option, `remediate`, is
+        the one the state machine will refuse. Derived from ``FIX_MAP`` so the
+        next escalate-only category added fails here until the list moves,
+        which is how ``resource_exhaustion`` (WO-R3-263) was caught.
+        """
+        rule = next(
+            line
+            for line in load_prompt("investigation_planner").splitlines()
+            if line.startswith("- Emit `stop` for every category")
+        )
+        assert f"`{category.value}`" in rule, (
+            f"the `stop` rule does not name `{category.value}`, which has no "
+            f"Tier-1 fix. Add it to that rule's list."
+        )
+
+    def test_resource_exhaustion_is_defined_as_a_machine_running_out(self) -> None:
+        """WO-R3-263 / O-19's Gap 1, and the definition is the whole point.
+
+        The category exists because ``trace_investigation``'s world could not
+        be named: a `report_gen` job died on "OOM during PDF generation (200MB
+        report)" and the honest label was `unknown`, which means "the probes
+        left me unable to tell" and sends a human hunting for evidence that is
+        already in the trace. A row that did not say what exhaustion IS would
+        re-open that gap from the other side — the model would have a label it
+        cannot tell apart from a saturation or a dependency one.
+        """
+        row = self._category_row(HypothesisCategory.RESOURCE_EXHAUSTION)
+        assert row is not None
+        lowered = row.lower()
+        assert "out of memory" in lowered or "ran out of memory" in lowered
+        assert "no — escalate" in lowered
 
     def test_a_healthy_world_is_answered_with_no_fault_and_no_action(self) -> None:
         """WP-1.6's steering half, and steering that can be deleted is not steering.
@@ -870,11 +941,146 @@ class TestBriefingJudgeInvariants:
         assert "read the arguments before you interpret the result" in content
         assert "remediation_hint='replay_safe'" in content
 
+    def test_a_chain_left_stuck_by_a_fence_is_read_as_grounded(self) -> None:
+        """WO-R3-263 / O-19, and it is INC-002's shape one incident over.
+
+        ``saga_stuck``'s correct trajectory fences the root and escalates with
+        the chain exactly as stuck as it was — the fence drains nothing, which
+        the run's own before/after reads show. A judge that has not been told
+        that reads the honest briefing ("the root is still dead-lettered, the
+        descendants are still waiting") as a briefing contradicting its own
+        verified action, and marks the honesty down. That is the same mistake
+        the judge made in INC-002 in its own voice: the writer was told the
+        rule and the judge was not.
+
+        The rule reaches all three readers from one place, so this asserts the
+        shared sentence is HERE and that the rubric says which direction it
+        cuts — grounded for saying the chain is still stuck, ungrounded for
+        claiming the fence drained it.
+        """
+        content = load_prompt("briefing_judge")
+        assert STUCK_CHAIN_ROOT_RULE in content
+        lowered = content.lower()
+        assert "a fence is not a fix, and a briefing that says so is grounded" in lowered
+        assert "score it as grounded, not as a contradiction" in lowered
+        assert "claiming a fence drained the chain" in lowered
+
     def test_honest_remaining_rows_are_named_as_grounded(self) -> None:
         # The direction matters. Without this the rubric reads as one more
         # reason to mark a briefing DOWN, which is how the judge got here.
         content = load_prompt("briefing_judge").lower()
         assert "names untouched rows as remaining after a filtered read is grounded" in content
+
+
+class TestSharedRulesReachEveryReader:
+    """One rule, three readers, identical words — checked, not intended.
+
+    Owner decision O-19 (2026-09-17) made this a condition of the fix rather
+    than a nicety: the stuck-chain routing is "a CONDITIONAL rule written once
+    and given identically to the prompt, the fix table/routing code AND the
+    judge — the INC-002 lesson: every reader of a piece of evidence gets the
+    same reading rule in the same change."
+
+    INC-002 is what the other shape costs. Cmd #218 gave the briefing WRITER
+    the rule that a filtered read proves only its own slice; the judge was not
+    given it, read a filtered `total 0` as an empty queue, and scored an
+    honest briefing 0.0 — making the exact overclaim the writer had just been
+    forbidden. A rule given to one reader is half a rule.
+
+    The mechanism is ``shared_rules.py`` plus ``load_prompt``'s expansion, and
+    the tests below check the two failure modes it exists to close: a reader
+    that no longer gets the rule, and a reader that gets a hand-typed copy
+    which reads the same today.
+    """
+
+    def test_the_rule_is_one_sentence(self) -> None:
+        """O-19's word, and the reason it is worth pinning.
+
+        "The rule for Gap 2 is ONE sentence." A second sentence is where a
+        paraphrase starts, and a paraphrase in one of three renderings is the
+        drift the whole indirection exists to prevent — invisible in a diff,
+        because each copy still reads correctly on its own.
+        """
+        rule = STUCK_CHAIN_ROOT_RULE.strip()
+        assert rule.endswith("."), rule
+        assert ". " not in rule, (
+            f"the stuck-chain rule has more than one sentence:\n{rule}\n"
+            f"O-19 asks for one. Extra reasoning belongs in the prompt section "
+            f"around the rule, or in shared_rules.py's comment, not inside the "
+            f"sentence three readers share."
+        )
+
+    @pytest.mark.parametrize("name", _STUCK_CHAIN_RULE_READERS)
+    def test_every_reader_is_served_the_identical_rule(self, name: str) -> None:
+        assert STUCK_CHAIN_ROOT_RULE in load_prompt(name), (
+            f"{name} does not carry the stuck-chain rule as served. It must "
+            f"write `{{{{rule:stuck_chain_root}}}}` where the rule belongs; "
+            f"`load_prompt` expands it."
+        )
+
+    @pytest.mark.parametrize("name", _STUCK_CHAIN_RULE_READERS)
+    def test_every_reader_delegates_the_rule_rather_than_copying_it(self, name: str) -> None:
+        """The failure a "they all say the same thing" test cannot see.
+
+        Three hand-typed copies pass an identity check on the day they are
+        typed. This is the assertion that fails the moment one of them is a
+        copy at all: the FILE must carry the placeholder and must not carry
+        the sentence.
+        """
+        raw = raw_prompt(name)
+        assert "{{rule:stuck_chain_root}}" in raw, (
+            f"{name}.md does not delegate the shared rule. Replace the copied "
+            f"sentence with `{{{{rule:stuck_chain_root}}}}`."
+        )
+        assert STUCK_CHAIN_ROOT_RULE not in raw, (
+            f"{name}.md spells the stuck-chain rule out as well as delegating "
+            f"it. A copy beside the placeholder is a copy that will drift."
+        )
+
+    def test_the_readers_are_exactly_the_ones_the_decision_names(self) -> None:
+        """Both directions, because either is a change to O-19's contract.
+
+        A reader that quietly stops carrying the rule is the INC-002 shape
+        again. A fourth prompt that starts carrying it is not wrong in itself
+        — it is a decision about which roles are bound by this routing, and it
+        should land with the reason, not as a side effect.
+        """
+        carrying = tuple(
+            sorted(
+                name
+                for name in available_prompts()
+                if "{{rule:stuck_chain_root}}" in raw_prompt(name)
+            )
+        )
+        assert carrying == _STUCK_CHAIN_RULE_READERS, (
+            f"prompts carrying the stuck-chain rule are {list(carrying)}; O-19 "
+            f"names {list(_STUCK_CHAIN_RULE_READERS)}. Update this list with "
+            f"the reason if the set of bound readers really changed."
+        )
+
+    @pytest.mark.parametrize("name", available_prompts())
+    def test_no_served_prompt_carries_an_unexpanded_placeholder(self, name: str) -> None:
+        """Swept over the whole directory: a hole is worse than a copy.
+
+        A literal `{{rule:...}}` reaching a model is a prompt with a
+        load-bearing rule missing from it, and the model has no way to tell.
+        Unknown keys raise (below); this catches the other half — a typo in the
+        `rule:` prefix itself, which the regex would not match and so would
+        never look up.
+        """
+        assert "{{rule:" not in load_prompt(name), (
+            f"{name} is served with an unexpanded shared-rule placeholder. "
+            f"Check the spelling against shared_rules.PLACEHOLDER."
+        )
+
+    def test_an_unknown_rule_key_raises_instead_of_reaching_the_model(self) -> None:
+        with pytest.raises(UnknownSharedRuleError):
+            render("a prompt that asks for {{rule:no_such_rule}}")
+
+    def test_the_rule_table_is_not_empty(self) -> None:
+        """Anti-vacuity canary for every parametrized case above."""
+        assert SHARED_RULES
+        assert "stuck_chain_root" in SHARED_RULES
 
 
 class TestLoader:

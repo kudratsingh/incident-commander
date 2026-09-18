@@ -131,6 +131,25 @@ class HypothesisCategory(StrEnum):
     """A projected read model disagrees with the write side; what the
     platform reports and what it stored have diverged."""
 
+    # WO-R3-263 (owner decision O-19, 2026-09-17; ADR 0054). Appended for the
+    # same reason the nine above were: the values already written into run
+    # archives, trajectories and `ground_truth.root_causes` keep their
+    # spelling and their position.
+
+    RESOURCE_EXHAUSTION = "resource_exhaustion"
+    """A worker or job that ran out of memory, CPU or disk.
+
+    The gap WO-R3-261's ground-truth pass found by having to label a world it
+    could not name. `trace_investigation`'s trace holds one failed
+    `report_gen` job whose error reads "OOM during PDF generation (200MB
+    report)" — a precisely known fault with no member to carry it, so the
+    honest label was `unknown`, which means "the probes left me unable to
+    tell" and sends a human somewhere else entirely.
+
+    Escalate-only, and not a placeholder for a later promotion: nothing on
+    this platform's Tier-1 surface raises a memory limit, resizes a worker or
+    reclaims a disk. A human changes a limit or the work that needs it."""
+
 
 class Hypothesis(StructuredOutput):
     """One candidate root cause with a confidence score, category, and reasoning.

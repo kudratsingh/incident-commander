@@ -56,6 +56,7 @@ class ProbeResult:
     # only be dropped when this run genuinely disproved it, which requires
     # having probed it. ``checked`` is a count and cannot answer that.
     compared: tuple[tuple[str, str], ...] = ()
+    stack_context: str = "unknown"
 
 
 def unregistered_calls(calls: Iterable[CannedCall]) -> tuple[CannedCall, ...]:
@@ -123,6 +124,7 @@ def probe_live(
     cache: dict[tuple[str, str, int], tuple[Mapping[str, Any] | None, str | None]] = {}
     drifts: list[Drift] = []
     compared: dict[tuple[str, str], None] = {}
+    stack_context = "unknown"
     errors: list[ProbeError] = [
         ProbeError(
             scenario=call.scenario,
@@ -186,6 +188,15 @@ def probe_live(
                 )
                 continue
             drifts.extend(compare(call, payload))
+            if (
+                call.tool == "get_consumer_lag"
+                and call.arguments.get("consumer_group") == "worker-dispatcher"
+            ):
+                stack_context = (
+                    "warm"
+                    if payload.get("lag_known") is True and payload.get("measured_at")
+                    else "cold"
+                )
             compared[call.scenario, call.tool] = None
     finally:
         if owned:
@@ -197,6 +208,7 @@ def probe_live(
         skipped_write_tier=len(all_calls) - len(probed) - len(unregistered),
         live_calls=len(cache),
         compared=tuple(compared),
+        stack_context=stack_context,
     )
 
 

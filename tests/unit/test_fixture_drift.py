@@ -329,6 +329,11 @@ def _is_sequenced(scenario: Any) -> bool:
 
 
 class TestLedgerRatchet:
+    def test_cold_stack_entries_are_only_stale_on_a_cold_stack(self) -> None:
+        key = ("jobs_not_progressing_outbox_stall", "get_consumer_lag", "lag", "value")
+        assert classify([], frozenset({key}), stack_context="warm") == ((), ())
+        assert classify([], frozenset({key}), stack_context="cold")[1] == (key,)
+
     def _drift(self, scenario: str = "s", path: str = "lag") -> Drift:
         return Drift(scenario=scenario, tool="get_consumer_lag", path=path, kind="value")
 

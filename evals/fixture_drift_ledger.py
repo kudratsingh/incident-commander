@@ -849,7 +849,7 @@ def dump_ledger(
 
 
 def classify(
-    drifts: Iterable[Drift], ledger: frozenset[DriftKey]
+    drifts: Iterable[Drift], ledger: frozenset[DriftKey], *, stack_context: str = "unknown"
 ) -> tuple[tuple[Drift, ...], tuple[DriftKey, ...]]:
     """Split observed drift into ``(new, stale_ledger_entries)``.
 
@@ -863,5 +863,11 @@ def classify(
     new = tuple(
         drift for drift in drifts if drift.key not in ledger and drift.key[:4] not in ledger
     )
-    stale = tuple(sorted(key for key in ledger - matched if context_of(key)[0] != COLD_STACK))
+    stale = tuple(
+        sorted(
+            key
+            for key in ledger - matched
+            if context_of(key)[0] != COLD_STACK or stack_context != "warm"
+        )
+    )
     return new, stale

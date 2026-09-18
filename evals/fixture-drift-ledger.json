@@ -9,9 +9,9 @@
     "cold-stack": "the recording is of a warm stack and the check ran on a cold one: worker-dispatcher's lag is unmeasured for about the first minute after boot, so a fresh platform answers null where the recording says 0. Timing, not contract, and not fixable from either side"
   },
   "_counts": {
-    "recorded": 55,
+    "recorded": 56,
     "fixture-defect": 0,
-    "explained": 55
+    "explained": 56
   },
   "known_drift": [
     {
@@ -307,6 +307,16 @@
       "tool": "get_cache_key_info",
       "path": "size",
       "kind": "value",
+      "index": 0,
+      "context": "post-fault",
+      "why": "create_stale_cache writes the three stale-fixture ids as a 90-byte value; the un-faulted walk reads the seeder's 120-byte value instead"
+    },
+    {
+      "scenario": "remediate_stale_cache_success",
+      "tool": "get_cache_key_info",
+      "path": "size",
+      "kind": "value",
+      "index": 1,
       "context": "post-action",
       "why": "same recording, same reason: an absent key reports size=null"
     },

@@ -33,7 +33,7 @@ from evals.fixture_drift import Drift
 
 LEDGER_PATH: Final[Path] = Path(__file__).resolve().parent / "fixture-drift-ledger.json"
 
-DriftKey = tuple[str, str, str, str]
+DriftKey = tuple[str, str, str, str] | tuple[str, str, str, str, int]
 
 # Contexts. Only the first is work.
 FIXTURE_DEFECT: Final = "fixture-defect"
@@ -70,7 +70,7 @@ COLD_STACK: Final = "cold-stack"
 # The cost of being wrong here is asymmetric. Wrongly calling something a
 # defect wastes an investigation; wrongly absolving one deletes it from the
 # work list forever. So the bar is a specific mechanism, named.
-_JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
+_JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
     ("consumer_lag_high", "get_consumer_lag", "lag", "value"): (
         POST_FAULT,
         "kill_consumer makes worker-dispatcher's lag climb; the check probes "
@@ -188,7 +188,12 @@ _JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
         "exists=false; the walk probes the world before the deletion, where "
         "the key is still present",
     ),
-    ("remediate_stale_cache_success", "get_cache_key_info", "size", "value"): (
+    ("remediate_stale_cache_success", "get_cache_key_info", "size", "value", 0): (
+        POST_FAULT,
+        "create_stale_cache writes the three stale-fixture ids as a 90-byte value; "
+        "the un-faulted walk reads the seeder's 120-byte value instead",
+    ),
+    ("remediate_stale_cache_success", "get_cache_key_info", "size", "value", 1): (
         POST_ACTION,
         "same recording, same reason: an absent key reports size=null",
     ),
@@ -666,7 +671,7 @@ class LedgerEntry:
 
 def context_of(key: DriftKey) -> tuple[str, str]:
     """``(context, why)`` for one drift key. Unjustified means it is work."""
-    return _JUSTIFIED.get(key, (FIXTURE_DEFECT, ""))
+    return _JUSTIFIED.get(key, _JUSTIFIED.get(key[:4], (FIXTURE_DEFECT, "")))
 
 
 def load_ledger(path: Path | None = None) -> frozenset[DriftKey]:
@@ -696,12 +701,14 @@ def load_entries(path: Path | None = None) -> list[LedgerEntry]:
         if isinstance(row, list) and len(row) == 4:
             key = (str(row[0]), str(row[1]), str(row[2]), str(row[3]))
         elif isinstance(row, dict):
-            key = (
+            key: DriftKey = (
                 str(row["scenario"]),
                 str(row["tool"]),
                 str(row["path"]),
                 str(row["kind"]),
             )
+            if row.get("index") is not None:
+                key = (*key, int(row["index"]))
         else:
             continue
         context, why = context_of(key)
@@ -776,7 +783,9 @@ def dump_ledger(
     carried, _disproved = split_for_bless(
         observed, [entry.key for entry in load_entries(target)], checked
     )
-    keys = sorted(observed | set(carried))
+    keys = sorted(
+        observed | set(carried), key=lambda key: (*key[:4], -1 if len(key) == 4 else key[4])
+    )
     rows = []
     for key in keys:
         context, why = context_of(key)
@@ -787,6 +796,8 @@ def dump_ledger(
             "kind": key[3],
             "context": context,
         }
+        if len(key) == 5:
+            row["index"] = key[4]
         if why:
             row["why"] = why
         rows.append(row)
@@ -845,6 +856,10 @@ def classify(
     was fixed and its line here has to go.
     """
     observed = {drift.key for drift in drifts}
-    new = tuple(drift for drift in drifts if drift.key not in ledger)
-    stale = tuple(sorted(ledger - observed))
+    generic_observed = {key[:4] for key in observed}
+    matched = {key for key in ledger if key in observed or key in generic_observed}
+    new = tuple(
+        drift for drift in drifts if drift.key not in ledger and drift.key[:4] not in ledger
+    )
+    stale = tuple(sorted(ledger - matched))
     return new, stale

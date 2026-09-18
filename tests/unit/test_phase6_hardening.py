@@ -498,7 +498,7 @@ class TestVerifyJudgeSeesTheActionResult:
                 ),
             ),
         )
-        context = remediation._format_verify_context(
+        context = remediation.format_verify_context(
             plan, '{"total":4}', remediation._action_result_of(run, plan)
         )
         # The only success signal for a delayed replay lives here.
@@ -506,17 +506,17 @@ class TestVerifyJudgeSeesTheActionResult:
         assert "execute_at" in context
 
     def test_a_missing_action_result_says_so_rather_than_vanishing(self) -> None:
-        context = remediation._format_verify_context(self._plan(), '{"total":4}', None)
+        context = remediation.format_verify_context(self._plan(), '{"total":4}', None)
         assert "not recorded" in context
 
     def test_the_probe_result_is_still_shown(self) -> None:
-        context = remediation._format_verify_context(self._plan(), '{"total":4}', '{"scheduled":1}')
+        context = remediation.format_verify_context(self._plan(), '{"total":4}', '{"scheduled":1}')
         assert '{"total":4}' in context
 
     def test_the_transition_actually_passes_it_through(self) -> None:
         """The wiring, not just the formatter.
 
-        Testing `_format_verify_context` alone would pass even if the call
+        Testing `format_verify_context` alone would pass even if the call
         site never looked the action result up — which is exactly the shape
         of the original bug.
         """

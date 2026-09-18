@@ -25,6 +25,11 @@ from incident_commander.llm.structured import StructuredOutput
 
 USEFUL_THRESHOLD: Final[float] = 0.7
 
+#: The prompt file this judge's rubric lives in. Named once: the judge call
+#: below loads it, and the calibration harness hashes it so a report says which
+#: rubric bytes it calibrated (plan 03 § 110's attribution rule).
+JUDGE_PROMPT: Final[str] = "briefing_judge"
+
 
 class JudgeScore(StructuredOutput):
     """Per-briefing judge score. LLM emits the two numeric dimensions + reasoning."""
@@ -66,16 +71,23 @@ def judge_briefing(
     """
     call = call_with_output_repair(
         judge_client,
-        system_prompt=load_prompt("briefing_judge"),
-        user_message=_format_briefing(briefing),
+        system_prompt=load_prompt(JUDGE_PROMPT),
+        user_message=format_briefing_context(briefing),
         output_model=JudgeScore,
         model=model,
     )
     return call.result.output
 
 
-def _format_briefing(briefing: EscalationBriefing) -> str:
+def format_briefing_context(briefing: EscalationBriefing) -> str:
     """The context the judge grades against.
+
+    Public since WP-6.3, and it has to be: the calibration harness asks this
+    judge the trap-set questions through this same function. A calibration that
+    built its own copy of the judge's context would be measuring a judge nobody
+    runs, and the two copies would drift the first time a field is added here —
+    which is the shape of INC-002 one level up (a rule given to one reader of
+    the evidence and not to another).
 
     Must show everything the WRITER was shown
     (``agent/briefing_enrichment.py::_format_context``), because

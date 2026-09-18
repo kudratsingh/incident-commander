@@ -559,11 +559,25 @@ def safety_kind(detail: str) -> str:
 
 
 def arm_summary(arm: tuple[str, str, str], rows: Sequence[Row]) -> dict[str, Any]:
-    """One leaderboard row: correctness, and the budget beside it (02 § 8)."""
+    """One leaderboard row: correctness, and the budget beside it (02 § 8).
+
+    ``judge_mean_overall`` is gated (WP-6.3). It is the one number in this row
+    that is a statement about a MODEL'S OPINION rather than about the run, and it
+    is withheld until ``LEADERBOARD_JUDGE`` has an id in
+    ``JUDGE_CALIBRATION_REPORTS`` — the same rule, the same wording and the same
+    ``WITHHELD`` string the selector fields use two sections down.
+
+    ``judged_runs`` is NOT gated, on the same split ``_selector_number`` makes:
+    how many runs carry a judge score is a coverage fact about this arm, true
+    whatever the judge's calibration turns out to be. Withholding it would hide
+    the denominator as well as the number, and a reader could no longer tell "not
+    calibrated" from "never judged".
+    """
     coverage = coverage_over(
         ((row.root_cause_graded, row.root_cause_correct) for row in rows), total=len(rows)
     )
     judged = [row.judge_overall for row in rows if row.judge_overall is not None]
+    calibration_id = judge_calibration_report_for(LEADERBOARD_JUDGE)
     return {
         **dict(zip(ARM_KEYS, arm, strict=True)),
         "arm": arm_label(arm),
@@ -584,8 +598,15 @@ def arm_summary(arm: tuple[str, str, str], rows: Sequence[Row]) -> dict[str, Any
         "mean_tokens": _mean([float(row.tokens) for row in rows]),
         "usd_total": _usd(sum((row.usd for row in rows), Decimal("0"))),
         "mean_wall_seconds": _mean([row.wall_seconds for row in rows]),
-        "judge_mean_overall": _mean([float(value) for value in judged]),
+        "judge_mean_overall": (
+            _mean([float(value) for value in judged])
+            if calibration_id is not None or not judged
+            else WITHHELD_JUDGE
+        ),
         "judged_runs": len(judged),
+        "judge": LEADERBOARD_JUDGE,
+        "judge_calibration_report_id": calibration_id,
+        "judge_gate": JUDGE_GATE_RULE,
     }
 
 
@@ -1005,6 +1026,50 @@ ENUMERATING_SET_SIZE: Final[int] = 2
 CALIBRATION_REPORTS: Final[Mapping[str, str]] = MappingProxyType({})
 
 
+#: Calibration report id per JUDGE, declared exactly as the selector register
+#: above is, and for the same reason: adding an id here is the act of saying
+#: "this judge's numbers have been checked, and here is the artefact".
+#:
+#: The same rule, one role further out. Plan 02:243 is written about the selector,
+#: and plan 04:169's acceptance is written about selector numbers — but the
+#: argument does not depend on which model is speaking. A briefing-judge mean is
+#: a number whose scale nobody has checked until its judge is calibrated, and
+#: ``judge_mean_overall`` has been printed in this document's leaderboard since
+#: WP-2.5 with nothing beside it. INC-002 is what an unchecked judge number looks
+#: like when it is wrong: 0.38 on a briefing that was right, on a green archive,
+#: and the only reason it misled nobody is that nothing gated on it.
+#:
+#: **Empty today, which is the correct state.** WP-6.3 built the harness; the
+#: sweep that fills this is a paid run and is deferred (owner instruction O-22).
+#: So every judge number in this document is withheld and says so.
+#:
+#: Keyed by the role's normative name (plan 02 § 3) —
+#: ``evals/judge_calibration/roles.CALIBRATED_ROLES``. A fake-client calibration
+#: must never be entered here; ``CalibrationReport.is_a_measurement`` is the
+#: property that distinguishes one, and the reports say ``judge_client: fake``
+#: on their face.
+#:
+#: Pinned both ways by ``tests/unit/test_judge_calibration.py::
+#: TestNoJudgeNumberWithoutACalibrationReport``.
+JUDGE_CALIBRATION_REPORTS: Final[Mapping[str, str]] = MappingProxyType({})
+
+#: The judge whose scores ``judge_overall`` carries. ``evals/graders/llm_judge.py``
+#: is the briefing judge and nothing else writes that column, so the gate on the
+#: leaderboard's judge number is a question about exactly this role. Named rather
+#: than spelled at the call site so a second judge column arriving later has to
+#: choose its own register key instead of inheriting this one by accident.
+LEADERBOARD_JUDGE: Final[str] = "briefing_judge"
+
+
+def judge_calibration_report_for(judge: str) -> str | None:
+    """The calibration report id for one judge, or ``None``.
+
+    One reader of the register, for the reason its selector sibling gives: a gate
+    with two spellings is a gate one section can check a different way.
+    """
+    return JUDGE_CALIBRATION_REPORTS.get(judge)
+
+
 def calibration_report_for(arm: str) -> str | None:
     """The calibration report id for one selector arm, or ``None``.
 
@@ -1224,6 +1289,25 @@ SELECTOR_GATE_RULE: Final[str] = (
 #: reader of the JSON cannot mistake "this was not reported" for "this was zero"
 #: — the distinction INC-003 turned on one level up.
 WITHHELD: Final[str] = "withheld: no calibration report for this arm (plan 02:243)"
+
+#: The same rule for a JUDGE number, in the document, in its own words (WP-6.3).
+JUDGE_GATE_RULE: Final[str] = (
+    "plan 02:243's rule, applied to the judge: no judge number is reported before "
+    "its calibration report exists. `judge_mean_overall` is withheld unless "
+    f"{LEADERBOARD_JUDGE} has an id in research_report.JUDGE_CALIBRATION_REPORTS, "
+    "and every row says which case it is in. An uncalibrated judge's mean is a "
+    "number whose scale nobody has checked — INC-002 is one of them being wrong "
+    "by 0.38 about a briefing that was right, on a green archive. `judged_runs` is "
+    "not withheld: how many runs were judged is a coverage fact about the arm, not "
+    "a statement about the judge."
+)
+
+#: What a withheld judge number reads as. A string, not ``None`` and not 0.0, for
+#: the reason its selector sibling gives: a reader of the JSON must not be able to
+#: mistake "this was not reported" for "this was zero" (INC-003, one level up).
+WITHHELD_JUDGE: Final[str] = (
+    f"withheld: no calibration report for {LEADERBOARD_JUDGE} (plan 02:243, plan 04:169)"
+)
 
 
 def _selector_number(row: dict[str, Any]) -> dict[str, Any]:

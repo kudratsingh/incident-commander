@@ -346,6 +346,11 @@ class TestTheLayoutIsOneFamilyPerFolder:
         "regrade_report_md": ("evals", "reports", "regrades"),
         "human": ("evals", "reports", "human", "consumer_lag_pass"),
         "dossier": ("evals", "reports", "dossiers", "consumer_lag_pass"),
+        # WP-6.3. Per-JUDGE, not per-scenario: it rides the per-scenario
+        # mechanism because "one folder per subject" is the shape it needs, and
+        # the subject is a judge role name (`action_verifier`, …). The test's
+        # scenario stand-in below is what lands in that slot here.
+        "judge_calibration": ("evals", "reports", "judge-calibration", "consumer_lag_pass"),
         "trajectory": ("evals", "trajectories"),
         "briefing": ("evals", "briefings"),
         # WP-3.1, and the one family deliberately OUTSIDE `evals/reports/`: a

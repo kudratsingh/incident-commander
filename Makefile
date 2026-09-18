@@ -50,6 +50,12 @@ help:
 	@echo "                   committed archives: one leaderboard per model, grouped by the seven"
 	@echo "                   WP-2.5 keys, every difference beside its paired-trial count."
 	@echo "                   Reads only, spends nothing. --write persists it; --scan lists scope"
+	@echo "  judge-calibration  put each judge's trap set to it and report trap agreement,"
+	@echo "                   stability over N=5 and its track record (plan 03 section 9)."
+	@echo "                   FREE by default (scripted fake judge, spends nothing)."
+	@echo "                   JUDGE=<role> picks one; WRITE=1 persists; SCAN=1 asks nothing."
+	@echo "                   LIVE=1 asks the real JUDGE_MODEL and SPENDS MONEY: it also"
+	@echo "                   needs YES_SPEND=1 and the owner's explicit yes for that run"
 	@echo "  regrade-archive  re-grade one locked run archive under today's rules from its own"
 	@echo "                   trajectories; ARCHIVE=<run id> REQUIRED. Reads only, spends"
 	@echo "                   nothing, never touches the archive. WRITE=1 persists the report"
@@ -80,7 +86,7 @@ help:
 inventory:
 	uv run python -m evals.inventory
 
-.PHONY: world-audit baseline-report phase-close-report research-report regrade-archive
+.PHONY: world-audit baseline-report phase-close-report research-report regrade-archive judge-calibration
 world-audit:
 	PLATFORM_COMPOSE="$(PLATFORM_COMPOSE)" uv run python -m evals.world_audit --roots "$(ROOTS)"
 
@@ -99,6 +105,17 @@ phase-close-report:
 
 research-report:
 	uv run python -m evals.research_report
+
+# Judge calibration (plan 03 section 9, WP-6.3). FREE by default: no flags means
+# the scripted fake judge, which proves the harness end to end and spends
+# nothing. LIVE=1 asks the real pinned JUDGE_MODEL and needs YES_SPEND=1 as well
+# — the module refuses one flag on its own, because PROTOCOL step 0 is that
+# readiness is not authorization.
+judge-calibration:
+	uv run python -m evals.judge_calibration \
+		$(if $(SCAN),--scan,) $(if $(JUDGE),--judge $(JUDGE),) \
+		$(if $(REPS),--reps $(REPS),) $(if $(WRITE),--write,) \
+		$(if $(LIVE),--live,) $(if $(YES_SPEND),--yes-spend,)
 
 # Re-grade one locked archive under today's rules (WO-R3-265, INC-003). Reads
 # only: no model call, no platform, nothing spent, and the archive itself is

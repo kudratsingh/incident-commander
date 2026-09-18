@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from evals.graders.llm_judge import (
     USEFUL_THRESHOLD,
     JudgeScore,
-    _format_briefing,
+    format_briefing_context,
     judge_briefing,
 )
 from incident_commander.agent.briefing import (
@@ -435,7 +435,7 @@ class TestTheArchivedJudgeContextCarriesTheFilter:
         assert probe.summary == '{"total":0,"items":[]}'
 
     def test_the_filter_is_rendered_beside_the_zero(self) -> None:
-        context = _format_briefing(_run_e_briefing())
+        context = format_briefing_context(_run_e_briefing())
         line = _trail_line(context, "list_dlq_messages", last=True)
         assert "remediation_hint='replay_safe'" in line
         assert '"total":0' in line
@@ -445,7 +445,7 @@ class TestTheArchivedJudgeContextCarriesTheFilter:
         # Run E read the queue twice under one tool name. If both lines
         # rendered identically apart from their results, the judge would still
         # have to guess which read the `total 0` belonged to.
-        lines = _trail_lines(_format_briefing(_run_e_briefing()), "list_dlq_messages")
+        lines = _trail_lines(format_briefing_context(_run_e_briefing()), "list_dlq_messages")
         assert len(lines) == 3
         assert "remediation_hint=None" in lines[0]
         assert all("remediation_hint='replay_safe'" in line for line in lines[1:])
@@ -454,6 +454,6 @@ class TestTheArchivedJudgeContextCarriesTheFilter:
         # The judge called the briefing ungrounded for naming four remaining
         # rows. Three of them are visible in the trail's first, unfiltered
         # read; the briefing was reporting the context, not inventing.
-        context = _format_briefing(_run_e_briefing())
+        context = format_briefing_context(_run_e_briefing())
         for row in (_POISON_ROW, _HUMAN_ROW, _RATE_LIMIT_ROW):
             assert row in context

@@ -257,6 +257,38 @@ KINDS: Final[dict[str, ArtifactKind]] = {
     "regrade_report_md": ArtifactKind(
         ("evals", "reports"), ".md", fixed_stem="regrade_report", folder="regrades"
     ),
+    # `make judge-calibration` (evals/judge_calibration/, WP-6.3) — one judge's
+    # calibration: what its trap-set agreement, its stability over N identical
+    # asks and its track record against an independent label actually are.
+    #
+    # Grouped per JUDGE, using the per-scenario mechanism with the judge's name
+    # as the stem. Plan 03 § 112 spells the path
+    # `evals/reports/judge_calibration.<timestamp>.<id>.json` — flat, with one
+    # fixed stem — and that cannot carry "one per judge", which the same sentence
+    # also asks for: a fixed stem has no room for the judge's name, so three
+    # judges would share one family and `newest()` would resolve whichever was
+    # written last regardless of which judge it was about. The register in
+    # `evals/research_report.py` is keyed by judge, so "is briefing_judge
+    # calibrated?" has to be answerable about briefing_judge alone. Hence
+    # `judge-calibration/<judge>/<judge>.<stamp>.<id>.json`, the same shape
+    # `dossier` and `human` use, and the same shape the WO-R3-257 layout gives
+    # every other family. Reported as a divergence from 03:112 rather than
+    # silently reshaped.
+    #
+    # It needs an entry here at all for the reason divergence D2 gives: `KINDS`
+    # is a closed registry, so an unregistered family cannot be resolved by
+    # `newest()` and its writes would not be exclusive-create. Both matter — a
+    # second calibration of one judge must not replace the first (invariant 9:
+    # two calibrations under two rubrics are two facts, and the older one is the
+    # record of what the number was when somebody quoted it).
+    #
+    # No `_md` sibling, unlike the four report pairs above: a calibration is read
+    # by the register and by `make judge-calibration`'s own summary, which prints
+    # to the terminal. A Markdown half nobody opens is a second artifact to keep
+    # byte-identical for no reader.
+    "judge_calibration": ArtifactKind(
+        ("evals", "reports", "judge-calibration"), ".json", grouping="scenario"
+    ),
     # `make world-record ONLY=<scenario>` (evals/recorder.py, WP-3.1) — one
     # zero-LLM reading of one seeded fault world, keyed by the WIRED arguments
     # the agent's own client sends, for a replay platform to answer from.

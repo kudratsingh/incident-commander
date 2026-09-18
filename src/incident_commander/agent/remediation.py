@@ -51,6 +51,7 @@ from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.repair import (
     REMEDIATION_PLANNER_INVALID,
     VERIFY_JUDGE_INVALID,
+    RepairedCall,
     call_with_output_repair,
 )
 from incident_commander.llm.structured import StructuredOutput
@@ -678,6 +679,23 @@ class RemediationPlan(StructuredOutput):
             "and the wait it stated. Free text; not graded."
         ),
     )
+
+
+#: The judge role's NAME, and the prompt file its rubric lives in. Two
+#: constants because they are two different things that happen to be about one
+#: judge, and plan 02 § 3 is normative about the first: the role is
+#: ``action_verifier``; ``verification_judge`` is the file it has always loaded
+#: and the name the evidence ledger has always written. Renaming the file would
+#: move a snapshot hash and rewrite the `_verify_judge` marker that 156 committed
+#: trajectories carry, for no gain — so the role name is introduced here and the
+#: file keeps its name, with this comment as the bridge between them.
+#:
+#: Named once each, rather than spelled at the call site, because the
+#: calibration harness has to load the same rubric bytes the run loads and hash
+#: them (plan 03 § 110: a rubric change is attributable only if a report says
+#: which rubric it measured).
+ACTION_VERIFIER_ROLE: Final[str] = "action_verifier"
+VERIFICATION_JUDGE_PROMPT: Final[str] = "verification_judge"
 
 
 class VerificationJudgment(StructuredOutput):
@@ -2526,19 +2544,11 @@ def make_llm_verify(
                 )
 
             try:
-                # One bounded re-ask, the same wrapper and the same cap of 1 as
-                # the three planner call sites (ADR 0035, widened here by
-                # WO-R2-174). A judgment the schema rejects says nothing about
-                # whether the action worked — it is the envelope that failed —
-                # and escalating an executed Tier-1 action on it means a human
-                # reads "verification incomplete" for a fix that landed.
-                judge_call = call_with_output_repair(
+                judge_call = judge_verification(
                     llm_client,
-                    system_prompt=load_prompt("verification_judge"),
-                    user_message=_format_verify_context(
-                        plan, probe_summary, _action_result_of(run_state, plan)
-                    ),
-                    output_model=VerificationJudgment,
+                    plan=plan,
+                    probe_summary=probe_summary,
+                    action_summary=_action_result_of(run_state, plan),
                     model=model,
                 )
             except (ValueError, ValidationError, LLMError) as err:
@@ -2670,10 +2680,60 @@ def _action_result_of(run_state: RunState, plan: RemediationPlan) -> str | None:
     return None
 
 
-def _format_verify_context(
+def judge_verification(
+    llm_client: LLMClientProtocol,
+    *,
+    plan: RemediationPlan,
+    probe_summary: str,
+    action_summary: str | None,
+    model: str,
+) -> RepairedCall[VerificationJudgment]:
+    """Ask the ``action_verifier`` whether the executed action worked.
+
+    The role's name is ``action_verifier`` (plan 02 § 3); ``verification_judge``
+    is the prompt file it has always loaded, and the two are the same thing seen
+    from the code and from the naming convention. Nothing here uses the bare word
+    "verifier": unprefixed it is ambiguous between this judge, the webhook
+    signature verifier and the redaction verifier, which is why 02:25 asks for
+    the prefix. ``tests/unit/test_judge_calibration.py::
+    TestTheRoleWordIsAlwaysPrefixed`` sweeps this file for it.
+
+    One bounded re-ask, the same wrapper and the same cap of 1 as the three
+    planner call sites (ADR 0035, widened here by WO-R2-174). A judgment the
+    schema rejects says nothing about whether the action worked — it is the
+    envelope that failed — and escalating an executed Tier-1 action on it means a
+    human reads "verification incomplete" for a fix that landed.
+
+    **Extracted by WP-6.3, and that is the whole reason it is a function.** The
+    calibration harness has to put the trap set to this judge through the same
+    prompt, the same context renderer, the same schema and the same repair the
+    run uses, or it is calibrating something the run does not call. The
+    alternative — a second copy of this call inside ``evals/`` — is exactly the
+    two-readers-of-one-rule drift that produced INC-002.
+
+    No temperature is sent, and there is no parameter to send one with: owner
+    decision O-24 and ADR 0048 (the selector's, applied here for the same
+    reason) say nothing built now may require a sampling parameter, and
+    ``llm/client.SAMPLING_REJECTED_MODELS`` is why. Stability is therefore
+    something to MEASURE rather than assume — ADR 0052, and the self-agreement
+    leg of the calibration is that measurement.
+    """
+    return call_with_output_repair(
+        llm_client,
+        system_prompt=load_prompt(VERIFICATION_JUDGE_PROMPT),
+        user_message=format_verify_context(plan, probe_summary, action_summary),
+        output_model=VerificationJudgment,
+        model=model,
+    )
+
+
+def format_verify_context(
     plan: RemediationPlan, probe_summary: str, action_summary: str | None = None
 ) -> str:
     """What the judge is shown.
+
+    Public since WP-6.3, for the reason ``judge_verification`` above gives: the
+    calibration asks its trap questions in exactly the bytes a run would.
 
     ``action_summary`` is the executed action's own response, and leaving it
     out made one whole class of remediation unjudgeable. A delayed replay

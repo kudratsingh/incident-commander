@@ -74,7 +74,7 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # hashes are taken over the SERVED text, so editing that one sentence
     # moves all three at once and a reviewer sees the whole blast radius,
     # which is the property the indirection is for.
-    "investigation_planner": ("e6a5e1585cca43aab80f06a39ea738947ad7226af3cde6b9b10097f3d5939f1c"),
+    "investigation_planner": ("83cf494ee465539e5a3eea4aed73f23d7fe3466eba6d947902591a0e4c12138a"),
     # WP-5.2's addendum. Appended to `investigation_planner` above by
     # `best_of_n_enumerated`, never loaded on its own — which is why the hash of
     # the planner prompt beside it did not move: the control group's system

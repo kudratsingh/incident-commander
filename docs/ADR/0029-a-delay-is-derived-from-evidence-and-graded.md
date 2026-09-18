@@ -1,6 +1,6 @@
 # 0029 — A delay is derived from evidence, and it is graded
 
-- Status: accepted
+- Status: accepted · implemented (2026-09-17 documentation sweep)
 - Date: 2026-09-07
 - Deciders: coordinator + user, before the paid run of `dlq_wait_and_replay_success`
 

@@ -620,7 +620,7 @@ snapshot:
 	uv run python scripts/snapshot_platform_tools.py
 
 # Same parse-time ONLY guard as eval-reg: `make baseline ONLY=x` would
-# bless a filtered subset over the committed 37-scenario baseline (the
+# bless a filtered subset over the committed 41-scenario baseline (the
 # study/runs.jsonl artifact-loss pattern). Must refuse before the `eval`
 # prerequisite can write a filtered report; an ONLY= line in .env trips it
 # too, deliberately.

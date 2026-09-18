@@ -561,8 +561,8 @@ Offline `make eval` / `make eval-reg` / `make baseline` invocations also
 leave untracked `evals/runs/<id>/` directories behind. Leaving them
 untracked is acceptable; deleting them is not (invariant 9).
 
-This step first becomes exercisable at the post-v0.5.0 eval — under the
-ADR 0011 freeze nothing runs, so no archive is committed until then.
+This step became exercisable after the post-v0.5.0 eval. The ADR 0011 freeze
+closed on 2026-09-15; finalized archives are now committed after each run.
 
 ### Partial archives: no `report.json` means the run was killed ([ADR 0017](ADR/0017-eval-run-archive-lifecycle.md))
 

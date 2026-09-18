@@ -1,54 +1,21 @@
 #!/usr/bin/env python3
 """Move an existing ``evals/reports/`` tree into the per-folder layout. Never deletes.
 
-The owner's words, 2026-09-17: "the human folder under reports was not
-organized, that whole reports folder should be better organized". The new
-layout is defined in ``evals/artifacts.py`` and described for a human in
-``evals/reports/README.md``; this script is the one-time move that brings an
-existing folder to it, and the ONLY thing in the repo that moves an eval
-artifact.
+The one-time move into the layout ``evals/artifacts.py`` defines and
+``evals/reports/README.md`` describes, restating none of it:
 
-    report.<stamp>.<id>.json            → runs/<YYYY-MM>/
-    baseline_report.<stamp>.<id>.{json,md} → baseline/
-    phase_close_report.<stamp>.<id>.{json,md} → phase-close/
-    dossiers/<scenario>.<stamp>.<id>.md → dossiers/<scenario>/
-    human/<scenario>.<stamp>.<id>.txt   → human/<scenario>/       (newest render of a run)
-                                        → human/_superseded/…     (an older render of that run)
+    report → runs/<YYYY-MM>/; baseline_report → baseline/; phase_close_report →
+        phase-close/; dossiers/<scenario>.… → dossiers/<scenario>/
+    human/<scenario>.… → human/<scenario>/ for a run's newest render, else _superseded/
     baseline.json, latest.json, README.md → left exactly where they are
 
-**Everything is a move.** CLAUDE.md invariant 9 and the workspace rule above
-it make eval evidence append-only: never truncated, never overwritten, never
-deleted. A repeat render is not a duplicate to clean up, it is a file that
-was written once and must exist forever — so the 93% of ``human/`` that is
-repeat renders moves to ``_superseded/`` and stays readable, resolvable
-(``artifacts.versions``) and indexed. Nothing here calls ``unlink``.
-
-**Verified, not asserted.** Every file under the root is sha256'd before and
-after. The run refuses to report success unless the file count is unchanged
-and the multiset of digests is unchanged — a move that lost or altered a byte
-is a failure, loudly, with the manifest already on disk.
-
-**Refuses rather than overwrites.** A destination that already exists ends
-the run before anything moves. That is what makes a second run safe: the
-first run left nothing at the top level to move, so the second finds nothing
-to do and says so.
-
-**Locks are restored exactly as found.** Run archives and the hub mirror are
-write-locked by the filesystem (ADR 0021, ``evidence/sync.sh``). This unlocks
-only the files and directories it must touch — ``chflags nouchg`` then
-``chmod u+w`` — and puts every original mode and flag back afterwards,
-including on the directories it creates, which inherit the mode their parent
-had before the unlock.
-
-**It takes a root, so the mirror uses the same code.** The hub keeps a copy
-at ``audit-ws/evidence/reports`` and syncs it with ``rsync
---ignore-existing`` — so the mirror must be migrated BEFORE the next sync, or
-every file is copied a second time under its new name. Same script, two
-roots, mirror first.
+Everything is a move (invariant 9): the repeat renders that are 93% of ``human/`` stay
+resolvable under ``_superseded/``. Every file is sha256'd before and after, an existing
+destination ends the run before anything moves, and locks (ADR 0021) are restored as found.
+Migrate the ``--root`` hub mirror FIRST, or the next ``rsync`` copies every file again.
 
 Usage:
     uv run python scripts/migrate_reports_layout.py --dry-run
-    uv run python scripts/migrate_reports_layout.py --root ../evidence/reports --dry-run
     uv run python scripts/migrate_reports_layout.py --root ../evidence/reports
     uv run python scripts/migrate_reports_layout.py
 """
@@ -71,11 +38,8 @@ from pathlib import Path
 from typing import Final
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-# Same bootstrap, and the same reason, as scripts/format_traces.py: this file
-# is documented as runnable directly, and `evals` sits outside the installed
-# package. The layout itself is NOT duplicated here — every destination is
-# computed by evals/artifacts.py, so the migration and the resolver cannot
-# disagree about where a file belongs.
+# Same bootstrap, same reason, as scripts/format_traces.py: this file is documented as
+# runnable directly, and `evals` sits outside the installed package.
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
@@ -85,11 +49,8 @@ from scripts.format_traces import rendered_invocations  # noqa: E402
 EXIT_OK: Final[int] = 0
 EXIT_REFUSED: Final[int] = 2
 
-#: Files that belong at the top of the reports folder and never move.
-#: ``baseline.json`` is the regression gate's input and ``latest.json`` is
-#: pre-versioning evidence; both are named in Makefile recipes, in
-#: `.github/workflows/evals.yml`'s path filter and in three documents. Moving
-#: either would be a behaviour change wearing a tidy-up's clothes.
+#: Top-of-folder files that never move: ``baseline.json`` (the regression gate's input)
+#: and ``latest.json`` are named in Makefile recipes and in `evals.yml`'s path filter.
 PINNED_AT_ROOT: Final[frozenset[str]] = frozenset(
     {"baseline.json", "latest.json", "README.md", ".gitkeep", ".DS_Store"}
 )
@@ -159,13 +120,7 @@ def _sha256(path: Path) -> str:
 
 
 def fingerprint(root: Path) -> dict[str, str]:
-    """``{path relative to root: sha256}`` for every file under ``root``.
-
-    The before/after comparison that turns "it moved the files" from a claim
-    into a check. Symlinks are followed only if they point at a regular file;
-    nothing in this tree is a symlink by design (evals/artifacts.py rejected
-    the idea explicitly), so one appearing is worth the crash.
-    """
+    """``{path relative to root: sha256}``: the before/after check on every move."""
     return {
         path.relative_to(root).as_posix(): _sha256(path)
         for path in sorted(root.rglob("*"))
@@ -176,10 +131,8 @@ def fingerprint(root: Path) -> dict[str, str]:
 def _tracked_files(root: Path) -> set[str]:
     """Paths under ``root`` that git tracks, relative to ``root``.
 
-    ``git mv`` is used for these so history follows the file instead of
-    reading as a delete plus an add. A root outside a work tree (the hub
-    mirror is gitignored) answers the empty set and everything moves with
-    ``os.replace``.
+    These move with ``git mv`` so history follows the file; a root outside a work tree
+    answers the empty set.
     """
     try:
         result = subprocess.run(  # noqa: S603
@@ -201,15 +154,7 @@ def _tracked_files(root: Path) -> set[str]:
 def _human_moves(root: Path, tracked: set[str]) -> tuple[list[Move], list[tuple[Path, str]]]:
     """Split the flat ``human/`` folder into per-scenario folders.
 
-    One file per distinct RUN stays in ``human/<scenario>/``: the newest
-    render of it. Every other render of that same run moves to
-    ``human/_superseded/<scenario>/``. "The same run" is the set of
-    invocation ids the report renders, read from its own headers — the id in
-    a report's FILENAME names the render session, not the traced run, so the
-    filename cannot answer this and the file has to.
-
-    A render whose headers cannot be read is treated as its own run and kept:
-    the rule may only move a file it can prove is a repeat.
+    "The same run" is the invocation ids the report's headers name, not its FILENAME id.
     """
     container = root / "human"
     if not container.is_dir():
@@ -224,9 +169,8 @@ def _human_moves(root: Path, tracked: set[str]) -> tuple[list[Move], list[tuple[
         parsed = artifacts.parse_version_name(path.name, suffix=".txt")
         if parsed is None:
             if path.suffix == ".txt":
-                # `<scenario>.txt` — a pre-versioning render, the oldest
-                # version of its family (evals/artifacts.py). It keeps its
-                # name and moves into its scenario's folder with the rest.
+                # `<scenario>.txt` — a pre-versioning render, the oldest version of its
+                # family. It keeps its name and moves in with the rest.
                 by_scenario[path.stem].append((("", ""), path))
             else:
                 left.append((path, "not a human report"))
@@ -237,8 +181,8 @@ def _human_moves(root: Path, tracked: set[str]) -> tuple[list[Move], list[tuple[
         groups: dict[object, list[tuple[tuple[str, str], Path]]] = defaultdict(list)
         for key, path in entries:
             covered = frozenset(rendered_invocations(path))
-            # No readable header → key on the file itself, so it is a group
-            # of one and is never moved aside as somebody else's repeat.
+            # No readable header → key on the file itself, so it is a group of one and is
+            # never moved aside as somebody else's repeat.
             groups[covered or path.name].append((key, path))
         keep_dir = artifacts.write_directory("human", scenario, directory=container)
         aside_dir = container / artifacts.SUPERSEDED_DIR / scenario
@@ -316,17 +260,8 @@ def plan(root: Path) -> Plan:
 
 _IMMUTABLE: Final[int] = stat.UF_IMMUTABLE
 
-#: ``os.chflags`` on the platforms that have file flags (macOS and the BSDs),
-#: and ``None`` everywhere else. Linux has no file flags at all — typeshed
-#: declares neither the function nor ``stat_result.st_flags`` — and CI is
-#: Linux, so both halves are reached through one guarded name rather than
-#: written out at four call sites.
-#:
-#: The degraded behaviour is the honest one and not a special case: a platform
-#: with no flags reports every file's flags as 0, so "is it immutable?" is
-#: always False, nothing is unlocked, nothing is re-flagged, and modes are
-#: still saved and restored exactly. That is the same floor ADR 0021 accepts
-#: for the archive lock, which this mirrors.
+#: ``os.chflags`` where the platform has file flags, ``None`` elsewhere (Linux, so CI,
+#: has none: flags read as 0, nothing is re-flagged, modes still restore — ADR 0021).
 _CHFLAGS: Final[Callable[[Path, int], None] | None] = getattr(os, "chflags", None)
 
 
@@ -339,9 +274,7 @@ def _file_flags(info: os.stat_result) -> int:
 class LockState:
     """A path's mode and flags exactly as they were found.
 
-    ``flags`` is 0 on a platform without file flags, which makes every
-    immutability test below False without any of them needing to ask what
-    platform this is.
+    ``flags`` is 0 where the platform has none, so every immutability test below is False.
     """
 
     mode: int
@@ -354,11 +287,9 @@ def _state(path: Path) -> LockState:
 
 
 def _unlock(path: Path) -> LockState:
-    """Clear ``uchg`` then add the owner write bit, and report what was there.
+    """Clear ``uchg``, add the owner write bit, report what was there.
 
-    Best-effort in the same spirit as ADR 0021's ``_lock_path``: a filesystem
-    that refuses ``chflags`` or ``chmod`` should not stop the migration, it
-    should let the move fail on its own terms with a real error.
+    Best-effort, as ADR 0021's ``_lock_path`` is: let the move fail on its own terms.
     """
     original = _state(path)
     if _CHFLAGS is not None and original.flags & _IMMUTABLE:
@@ -395,10 +326,7 @@ def _git_mv(root: Path, move: Move) -> None:
 def _nearest_state(path: Path, states: dict[Path, LockState]) -> LockState | None:
     """The recorded lock state of the closest ancestor of ``path``.
 
-    A directory this migration creates should look like the one it was
-    created inside: in the hub mirror every directory is ``a-w``, and a new
-    scenario folder left at 755 would be the one writable hole in a locked
-    tree.
+    Every directory in the hub mirror is ``a-w``; one created at 755 is a writable hole.
     """
     for parent in path.parents:
         if parent in states:
@@ -407,12 +335,9 @@ def _nearest_state(path: Path, states: dict[Path, LockState]) -> LockState | Non
 
 
 def apply(migration: Plan) -> list[Path]:
-    """Perform the moves. Returns the directories created, for the caller's report.
+    """Perform the moves; returns the directories created, for the caller's report.
 
-    Ordering matters: unlock every directory this will write in or remove
-    from, move, then put every lock back — including on the new directories,
-    which take the mode their parent had before the unlock, so a locked tree
-    stays a locked tree.
+    Unlock, move, relock — new directories included, so a locked tree stays locked.
     """
     root = migration.root
     touched = {root}
@@ -426,8 +351,7 @@ def apply(migration: Plan) -> list[Path]:
         for move in migration.moves:
             parent = move.destination.parent
             if not parent.is_dir():
-                # Record every level that did not exist, not just the leaf:
-                # `human/_superseded/<scenario>` creates two, and a level
+                # Record every level that did not exist, not just the leaf: a level
                 # nobody recorded is a level nobody relocks.
                 missing = [p for p in (parent, *parent.parents) if not p.exists()]
                 parent.mkdir(parents=True, exist_ok=True)
@@ -436,17 +360,15 @@ def apply(migration: Plan) -> list[Path]:
             if move.tracked:
                 _git_mv(root, move)
             else:
-                # Checked once by `conflicts()` before anything moved, and
-                # again here: os.replace is silent about an existing
-                # destination, which is exactly the overwrite invariant 9
-                # forbids.
+                # Checked by `conflicts()` before anything moved, and again here:
+                # os.replace is silent about an existing destination (invariant 9).
                 if move.destination.exists():
                     raise FileExistsError(f"destination already exists: {move.destination}")
                 os.replace(move.source, move.destination)
             _relock(move.destination, file_state)
     finally:
-        # Deepest first: a created directory's own state comes from an
-        # ancestor, so read the ancestors before they are locked back down.
+        # Deepest first: a created directory's state comes from an ancestor, so read the
+        # ancestors before they are locked back down.
         for directory in sorted(set(created), key=lambda p: len(p.parts), reverse=True):
             inherited = _nearest_state(directory, dir_states)
             if inherited is not None:
@@ -543,10 +465,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"no such reports folder: {root}", file=sys.stderr)
         return EXIT_REFUSED
     if root.name != "reports":
-        # A deliberate rail rather than a nicety. This script unlocks and
-        # moves evidence; pointed at the wrong tree — `evals/runs/`, a repo
-        # root, a home directory — it would do so there. The one thing it
-        # migrates is a folder called `reports`.
+        # A deliberate rail: this script unlocks and moves evidence, and pointed at
+        # `evals/runs/` or a home directory it would do so there.
         print(
             f"refusing: {root} is not named 'reports'. This migrates a reports "
             "folder and nothing else; evals/runs/ is never touched.",

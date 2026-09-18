@@ -1,51 +1,24 @@
 #!/usr/bin/env python3
 """Chaos setup helper — put the live platform into a fixable state.
 
-Live-eval remediation scenarios (``remediate_*``) assume something is
-actually broken. When you invoke the agent against a healthy platform,
-the initial probe returns clean, the remediation is a no-op, and the
-verify judge trivially says "verified" — you get a green run that
-doesn't prove much.
+Live remediation scenarios (``remediate_*``) assume something is broken; against a healthy
+platform the run is green for nothing. This seeds a real failure right before
+``make eval-live``, and every effect self-cleans on TTL (5–10 min). The five hooks map to
+Tier-1 remediations: kill_consumer → restart_consumer_group, poison_message →
+replay_dlq_messages, saturate_redis → invalidate_cache_key, inject_latency → restart,
+bad_deploy → get_deploy_history.
 
-This CLI wraps the platform's chaos hooks so you can seed a real
-failure right before ``make eval-live``. The 5 hooks map to the
-Tier-1 remediations the agent knows about:
-
-    kill_consumer     → agent should restart_consumer_group
-    poison_message    → DLQ builds up; agent should replay_dlq_messages
-    saturate_redis    → cache pressure; agent should invalidate_cache_key
-    inject_latency    → lag grows without full kill; restart or wait
-    bad_deploy        → fires alert; agent correlates via get_deploy_history
-
-Every chaos effect self-cleans on TTL (default 5–10 min) so you can
-walk away and the platform recovers on its own.
-
-Usage:
+Usage (``--help`` lists all subcommands):
 
     export PLATFORM_MCP_URL=http://localhost:8001/mcp
     export PLATFORM_CHAOS_TOKEN=sa_...     # the evaluator's chaos:invoke token
     uv run python scripts/chaos_setup.py kill-consumer --group worker-dispatcher
-    uv run python scripts/chaos_setup.py poison-message --topic job.submitted
-    uv run python scripts/chaos_setup.py saturate-redis --num-keys 5000
-    uv run python scripts/chaos_setup.py inject-latency --group worker-dispatcher --ms 2000
-    uv run python scripts/chaos_setup.py bad-deploy
-    uv run python scripts/chaos_setup.py restore-consumer --group worker-dispatcher
 
-The token needs ``chaos:invoke`` scope, and since platform v0.6.5 that is a
-principal of its own: ``incident-commander-chaos``, printed as
-``PLATFORM_CHAOS_TOKEN`` by ``make bootstrap-token``. The AGENT's
-``PLATFORM_TOKEN`` deliberately does NOT carry the scope and will be refused
-here — the platform withholds the ``chaos.%`` audit rows from principals that
-cannot fire chaos, so an agent token that could seed could also read what was
-seeded (platform ADR 0012, owner decision O-4). If a hook 403s, re-run::
-
-    make bootstrap-token
-
-and paste the ``PLATFORM_CHAOS_TOKEN`` line; do not widen the agent account.
-
-Chaos hooks are only registered when the platform boots with
-``CHAOS_ENABLED=true``. That's on by default in demo/compose.yml; if
-you're running an isolated platform, set it yourself.
+``chaos:invoke`` is its own principal since v0.6.5 — ``incident-commander-chaos``, printed
+as ``PLATFORM_CHAOS_TOKEN`` by ``make bootstrap-token``. The AGENT's ``PLATFORM_TOKEN`` does
+NOT carry it and is refused here, because the platform withholds the ``chaos.%`` audit rows
+from principals that cannot fire chaos (platform ADR 0012, O-4). On a 403 re-run
+``make bootstrap-token``; never widen the agent account. Hooks need ``CHAOS_ENABLED=true``.
 """
 
 from __future__ import annotations
@@ -152,25 +125,18 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     bad_data.add_argument("--job-type", default="csv_upload")
-    # v0.6.2 (plat #198). The row's id is
-    # uuid5(dddddddd-bad0-4000-8000-000000000000, "{tenant_id}:{fixture_name}"),
-    # so a caller can compute it before invoking. The default matches the
-    # scenario's own chaos_setup so a hand-seeded world is the same world.
+    # v0.6.2 (plat #198): the row's id is uuid5(dddddddd-bad0-4000-8000-000000000000,
+    # "{tenant_id}:{fixture_name}"). Matches the scenario's own chaos_setup.
     bad_data.add_argument("--fixture-name", default="human-required-eval")
-    # `unclassified` (JSON null on the row), NOT the hook's own
-    # `human_required` default, and the difference is the whole point of the
-    # v0.6.2 re-pin: a row seeded already-classified makes the fence set a
-    # value it already had, so the drill measures nothing. See
-    # `evals/scenarios/dlq_human_required_escalates.yaml`.
+    # `unclassified` (JSON null), NOT the hook's `human_required` default: a row seeded
+    # already-classified makes the fence a no-op (dlq_human_required_escalates.yaml).
     bad_data.add_argument(
         "--remediation-hint",
         default="unclassified",
         choices=["unclassified", "human_required"],
     )
-    # Left unset by default so the platform picks the story its declared hint
-    # pins (`lab/dlq_failure_stories.py`), which keeps the lab's coherence
-    # table the single source of the text instead of copying it here — the
-    # copy that used to live in this default went stale at v0.6.1.
+    # Unset so the platform's `lab/dlq_failure_stories.py` stays the single source of the
+    # text — the copy that lived in this default went stale at v0.6.1.
     bad_data.add_argument("--error-message", default=None)
 
     return parser
@@ -265,13 +231,8 @@ def main() -> int:
                 "`deploy_correlation` exercises that path."
             )
         elif args.command == "restore-consumer":
-            # Not a chaos hook — call the agent's Tier-1 tool directly to
-            # clear leftover flags. Operator-driven; skips the propose/execute
-            # ceremony because the agent isn't in the loop.
-            # Fresh key per invocation. A fixed key made every repeat
-            # restore an idempotency-cache replay: the platform returned
-            # the first call's cached body (claiming kill_key_cleared)
-            # without deleting anything, and 409'd if --group differed.
+            # Not a chaos hook — the agent's Tier-1 tool, operator-driven. Fresh key per
+            # invocation: a fixed one made every repeat a cache replay that deleted nothing.
             key = f"restore-consumer-cli-{uuid.uuid4().hex}"
             result = client.call(
                 "restart_consumer_group",
@@ -284,9 +245,8 @@ def main() -> int:
                 "fixture_name": args.fixture_name,
                 "remediation_hint": args.remediation_hint,
             }
-            # Omitted rather than sent as null: the platform's own default
-            # depends on the declared hint, and passing null would be a
-            # caller asserting a text it has not chosen.
+            # Omitted rather than null: the platform's default depends on the declared hint,
+            # and null would assert a text this caller has not chosen.
             if args.error_message is not None:
                 arguments["error_message"] = args.error_message
             result = client.call("create_bad_data_job", arguments)

@@ -1,27 +1,9 @@
-"""Hypothesis engine models.
+"""Hypothesis engine models: one ``InvestigationStep`` per loop iteration.
 
-The LLM investigation loop outputs an ``InvestigationStep`` per iteration:
-ranked ``Hypothesis`` list plus a discriminated-union ``NextAction`` (probe
-another tool, remediate, or stop and escalate). Schema is authoritative —
-the ``LLMClient`` forces the model to satisfy it via
-``tool_choice=record_output``, which means:
-
-- ``Hypothesis.category`` is drawn from a fixed enum. The LLM cannot invent
-  a new value; Pydantic (and by extension the JSON schema exposed to the
-  model) rejects anything not in ``HypothesisCategory``.
-- ``ProbeAction.tool_name`` is a ``Literal`` generated from the read-tier
-  slice of ``TOOL_REGISTRY``. Same rule — no invented tool names.
-
-This is the Phase-6 hardening of a Phase-2 shortcut that let the LLM
-produce free-form strings. See ADR-0005.
-
-Every model here inherits ``StructuredOutput`` (``llm/structured.py``), which
-decodes a nested object or array that arrived as a JSON *string* before the
-normal validators run — the shape live run ``779b19a287a7`` emitted for
-``next_action`` (ADR 0035). It replaces the field-level ``json.loads``
-coercion this module used to carry on that one field: the same defect can
-land on any nested field of any ``record_output`` model, and a one-field
-patch is not a fix for the class.
+A ranked ``Hypothesis`` list plus a discriminated ``NextAction``. ``tool_choice=record_output``
+makes the schema authoritative, so ``HypothesisCategory`` and ``ProbeAction.tool_name`` cannot
+be invented (ADR-0005). Every model inherits ``StructuredOutput`` (``llm/structured.py``),
+which decodes a nested object that arrived as a JSON string (ADR 0035, run ``779b19a287a7``).
 """
 
 from __future__ import annotations
@@ -37,29 +19,10 @@ from incident_commander.llm.structured import StructuredOutput
 class HypothesisCategory(StrEnum):
     """Every root-cause category the agent knows how to classify.
 
-    Categories that map to a Tier-1 remediation live in ``FIX_MAP``
-    (``agent/investigation.py``). Categories NOT in ``FIX_MAP`` auto-
-    escalate — the agent hands off to a human with a briefing.
-
-    Adding a new fix category is a coordinated three-line change:
-    enum entry here + ``FIX_MAP`` entry + prompt example. Adding an
-    observation-only category (something the agent should recognize
-    but never auto-fix) is one line — this enum only.
-
-    "One line" is the enum entry; the prompt example is not optional for
-    either shape. A category the planner is never shown is a label it
-    cannot pick, so ``tests/unit/test_prompts_snapshot.py::
-    TestInvestigationPlannerInvariants::test_every_category_has_a_prompt_example``
-    parametrizes over this enum and fails until the new value appears in
-    the planner prompt's table.
-
-    **Every category added after the original eight starts OUTSIDE
-    ``FIX_MAP``** (WP-1.6, plan 02 § 5). Promoting one to an auto-fix is a
-    separate, later decision per category, with its own scenario and its
-    own ``TestFixMapMatchesTheSuite`` coverage — because the remediate gate
-    reads ``top.category not in FIX_MAP``, a category's arrival in that map
-    is the moment it authorises a Tier-1 write. Pinned by
-    ``tests/unit/test_policies.py::TestEveryNewCategoryIsEscalateOnly``.
+    Categories in ``FIX_MAP`` (``agent/investigation.py``) auto-remediate; the rest escalate.
+    A new one needs an enum entry plus a planner-prompt example, and **starts OUTSIDE
+    ``FIX_MAP``** (WP-1.6, plan 02 § 5). Pinned by ``TestInvestigationPlannerInvariants``
+    (test_prompts_snapshot.py) and ``TestEveryNewCategoryIsEscalateOnly`` (test_policies.py).
     """
 
     # Categories with Tier-1 fixes (see FIX_MAP in investigation.py):
@@ -85,11 +48,8 @@ class HypothesisCategory(StrEnum):
     """LLM couldn't classify the root cause into any known category.
     Escalate with the full evidence chain in the briefing."""
 
-    # WP-1.6 (plan 02 § 5). Nine labels the benchmark's new fault families
-    # and its level-0 control need, ALL outside FIX_MAP — see the class
-    # docstring. Appended rather than interleaved so the eight values above
-    # keep their position as well as their spelling: persisted trajectories
-    # and every committed run archive are read back against this enum.
+    # WP-1.6 (plan 02 § 5). Nine labels for new fault families, ALL outside FIX_MAP.
+    # Appended, not interleaved: run archives are read back against this enum.
 
     NO_FAULT = "no_fault"
     """Nothing is wrong. Every reading the agent took is healthy, so the
@@ -131,10 +91,7 @@ class HypothesisCategory(StrEnum):
     """A projected read model disagrees with the write side; what the
     platform reports and what it stored have diverged."""
 
-    # WO-R3-263 (owner decision O-19, 2026-09-17; ADR 0054). Appended for the
-    # same reason the nine above were: the values already written into run
-    # archives, trajectories and `ground_truth.root_causes` keep their
-    # spelling and their position.
+    # WO-R3-263 (owner decision O-19, ADR 0054). Appended — archives read it back by value.
 
     RESOURCE_EXHAUSTION = "resource_exhaustion"
     """A worker or job that ran out of memory, CPU or disk.
@@ -154,10 +111,7 @@ class HypothesisCategory(StrEnum):
 class Hypothesis(StructuredOutput):
     """One candidate root cause with a confidence score, category, and reasoning.
 
-    ``category`` is the structural key remediation routing uses. ``name``
-    remains free-form — it's for the briefing writer + operator, allowing
-    specificity like ``"worker-dispatcher 15k lag sustained 5min"`` that
-    the category enum can't capture.
+    ``category`` drives remediation routing; ``name`` stays free-form.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -182,10 +136,7 @@ class Hypothesis(StructuredOutput):
 # ---------------------------------------------------------------------------
 # NextAction — probe / remediate / stop
 #
-# ProbeAction.tool_name is a Literal generated from the read-tier slice
-# of TOOL_REGISTRY. Same for RemediationPlan.action_tool + verify_tool
-# in remediation.py. This is what makes "LLM invents an unknown tool"
-# structurally impossible instead of a runtime check.
+# ProbeAction.tool_name is a Literal over TOOL_REGISTRY's read tier: no invented tools.
 
 
 ReadToolName = Literal[
@@ -237,13 +188,9 @@ class StopAction(StructuredOutput):
 
 
 class RemediateAction(StructuredOutput):
-    """Root cause confirmed AND category has a Tier-1 fix — hand off
-    to the remediation planner.
+    """Root cause confirmed, category in ``FIX_MAP``, confidence over the threshold.
 
-    The investigation planner emits this iff the top hypothesis's
-    ``category`` is a key in ``FIX_MAP`` (see ``agent/investigation.py``)
-    AND its confidence is above the remediation threshold. If the
-    category has no fix, emit ``StopAction`` instead.
+    Hand off to the remediation planner; otherwise emit ``StopAction``.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -276,13 +223,7 @@ class InvestigationStep(StructuredOutput):
     def _rank_by_confidence(cls, value: tuple[Hypothesis, ...]) -> tuple[Hypothesis, ...]:
         """Normalize ranking at the schema boundary (B-07).
 
-        The 'ordered most likely first' contract used to live only in
-        prompt prose, yet three gates read index 0 as the top pick: the
-        remediate gate (investigation.py), the ADR-0009 reprobe prior,
-        and the remediation planner's target. Sorting here — once, where
-        LLM output enters the system — makes those readers correct for
-        any order the model emits. ``sorted`` is stable, so ties preserve
-        the model's stated order (asserted by
-        tests/unit/test_hypothesis.py::TestInvestigationStepOrdering).
+        Three gates read index 0 as the top pick, so the sort happens once here. Stable, so
+        ties keep the model's order (``test_hypothesis.py::TestInvestigationStepOrdering``).
         """
         return tuple(sorted(value, key=lambda h: h.confidence, reverse=True))

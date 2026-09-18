@@ -1,12 +1,7 @@
 """INVESTIGATING transitions.
 
-Two flavors:
-
-- ``make_investigate`` — Phase 0 deterministic: one hard-coded probe
-  (``get_consumer_lag``), then escalate. Runner still uses this until the
-  scenario library ships canned LLM responses.
-- ``make_llm_investigate`` — Phase 2 hypothesis engine: LLM ranks hypotheses,
-  picks probes, decides continue-or-stop. Multi-probe capable.
+``make_investigate``: Phase-0 deterministic ``get_consumer_lag`` probe, then escalate.
+``make_llm_investigate``: the Phase-2 hypothesis loop.
 """
 
 from __future__ import annotations
@@ -51,299 +46,111 @@ from incident_commander.tools.registry import TOOL_REGISTRY
 from incident_commander.tools.wire import wire_arguments
 
 _TOOL_NAME: Final[str] = "get_consumer_lag"
-# The bookkeeping marker for a Phase-1 escalation, distinct from the tool
-# that failed. Underscore-prefixed on purpose: that prefix is the repo-wide
-# convention for "this evidence entry is a marker, not a probe result", and
-# it is what `briefing._terminal_marker` reads a reason from and what the
-# trail filter excludes. Recording an escalation under the *tool's* name
-# lost the reason at the handoff and put a failed call in the trail as if it
-# had returned data (WO-R2-119).
-#
-# Renaming the marker rather than widening the recognizer is deliberate: the
-# success path below also ends ESCALATED, with a real `get_consumer_lag`
-# result as its last entry, so a recognizer that accepted non-underscore
-# markers would report that probe's JSON as the reason the agent gave up.
+# Bookkeeping marker for a Phase-1 escalation, distinct from the tool that failed. The
+# underscore is the repo-wide marker convention `briefing._terminal_marker` reads (WO-R2-119).
 _ESCALATION_MARKER: Final[str] = "_investigate_escalate"
-# The bookkeeping marker for ADR 0041's refusal. Distinct from
-# `_handoff_refused` (ADR 0031/0032's subject refusal) rather than reusing it:
-# a run can collect one of each, they say different things to the planner, and
-# a grader or a briefing reader has to be able to tell which read was missing.
+# Marker for ADR 0041's refusal, distinct from `_handoff_refused` (ADR 0031/0032):
+# a run can collect one of each, naming different missing reads.
 _WHOLE_QUEUE_REFUSED_MARKER: Final[str] = "_handoff_refused_unlisted_queue"
 _DEFAULT_MAX_ITERATIONS: Final[int] = 5
 _REMEDIATE_CONFIDENCE_THRESHOLD: Final[float] = 0.7
 
-# How many times one investigation may have its remediate handoff refused
-# for never having probed the alert's subject before the run escalates
-# instead. A refusal is not a failure — it is a steer, and the planner gets
-# to act on it (the reason lands in the evidence trail the next planner
-# context renders). But a planner that re-emits `remediate` after being
-# told twice is not going to probe on the third ask, and burning the
-# remaining iterations to arrive at the generic "max iterations exceeded"
-# throws away the one diagnosis worth putting in the briefing.
+# How many remediate handoffs may be refused for never probing the alert's subject before
+# the run escalates instead. A refusal steers the planner, but a third ask would not land.
 _MAX_SUBJECT_PROBE_REFUSALS: Final[int] = 2
 
-# How many times one investigation may have its remediate handoff refused for
-# never having read the dead-letter queue whole (ADR 0041) before the run
-# escalates instead.
-#
-# ONE, where the sibling above is two, and the asymmetry is the point. The
-# subject refusal names a value the planner has to get right — a consumer
-# group, a cache key, a category — so a second ask can land where the first
-# was misread. This one names a call with no arguments to get wrong:
-# `list_dlq_messages()`. A planner that re-emits `remediate` after being told
-# once to make that call is not going to make it on the second ask, and the
-# run has a better answer to give the human than a third identical refusal.
+# Same, for never having read the dead-letter queue whole (ADR 0041). ONE where the sibling
+# above is two: `list_dlq_messages()` has no argument to get wrong, so a re-ask adds nothing.
 _MAX_WHOLE_QUEUE_REFUSALS: Final[int] = 1
 
 
-# Single source of truth for category → Tier-1 tool routing.
-#
-# Categories in this map auto-remediate when the top hypothesis crosses
-# the confidence threshold. Categories NOT in this map — even at 1.0
-# confidence — auto-escalate to a human with a briefing. Adding a new
-# category to HypothesisCategory without adding it here is deliberate;
-# use that shape for observation-only classifications (e.g. UNKNOWN,
-# DEPLOY_REGRESSION) where auto-remediation would be wrong.
-#
-# Remediation planner selects the *specific* tool (e.g. for POISON_MESSAGE
-# it may pick replay_dlq_by_ids, replay_dlq_by_category, or mark_dlq_permanent
-# depending on the DLQ's remediation_hint contents). This map only asserts
-# "a Tier-1 fix category exists" — not the exact tool.
-#
-# The VALUE is nonetheless load-bearing, and 2026-09-07 is why. Only the
-# keys are read at runtime (`top.category not in FIX_MAP`), so a stale value
-# breaks nothing a test could see — but architecture-principles rule 2 makes
-# this map the single source of truth the remediation planner prompt is
-# written FROM, and the prompt is what the live agent actually obeys.
-# RUNAWAY_SAGA read `pause_dag` here, and the prompt said the same thing,
-# for the whole period after PR #173 redesigned
-# `remediate_runaway_saga_success` around replaying the dead-lettered root
-# and put `pause_dag` in that scenario's `forbidden_action_tools`. Nothing
-# was checking the two against each other; the drift was invisible in every
-# offline run because offline runs replay canned planner output and never
-# load the prompt. `tests/unit/test_policies.py::TestFixMapMatchesTheSuite`
-# is that check now: the tool a category is steered toward may not be a tool
-# the scenarios for that category forbid.
+# Single source of truth for category → Tier-1 tool routing: categories here auto-remediate
+# above the confidence threshold, categories absent always escalate. The value names the
+# common case (the remediation planner picks the specific tool) but is load-bearing — the
+# planner prompt is written FROM it, and `tests/unit/test_policies.py::TestFixMapMatchesTheSuite`
+# checks a category's steered tool is not one its scenarios forbid.
 FIX_MAP: Final[dict[HypothesisCategory, str]] = {
     HypothesisCategory.CONSUMER_SATURATION: "restart_consumer_group",
     HypothesisCategory.POISON_MESSAGE: "replay_dlq_by_ids",
     HypothesisCategory.STALE_CACHE: "invalidate_cache_key",
-    # Replaying the dead-lettered root, NOT pausing the chain. `pause_dag`
-    # halts promotion and self-expires; it never un-sticks a chain, and the
-    # platform refuses to replay a job inside a paused DAG, so a pause
-    # actively blocks the fix. See the stuck-chain section of the
-    # remediation-planner prompt and `policies.RESOLUTION_CLASS`.
-    #
-    # The value is the COMMON CASE and nothing more, since WO-R3-263: the
-    # category is hint-routed (see `HINT_ROUTED_CATEGORIES` below), so which
-    # of the two tools a stuck chain's root gets is decided by that root's own
-    # dead-letter row, exactly as it is for `POISON_MESSAGE`.
+    # Replay the dead-lettered root, NOT `pause_dag` — a pause never un-sticks a chain and
+    # blocks the replay. Hint-routed since WO-R3-263, so the root's own row picks the tool.
     HypothesisCategory.RUNAWAY_SAGA: "replay_dlq_by_ids",
 }
 
 
-# Categories whose SPECIFIC tool is chosen from the platform's per-row
-# `remediation_hint`, not from FIX_MAP's value.
+# Categories whose SPECIFIC tool comes from the platform's per-row `remediation_hint` rather
+# than FIX_MAP's value: `human_required` rows route to `mark_dlq_permanent`, `replay_safe`
+# ones to an immediate replay — same category, both correct.
 #
-# For these the value above names the common case and nothing more: a DLQ
-# holding `human_required` rows routes to `mark_dlq_permanent`, one holding
-# `wait_and_replay` rows routes to a deferred `replay_dlq_by_ids`, and one
-# holding `replay_safe` rows routes to an immediate replay — all under the
-# same POISON_MESSAGE category, all correct. `dlq_human_required_escalates`
-# forbids `replay_dlq_by_ids` outright, and is right to.
-#
-# Written down as a set rather than left in prose because a cross-check now
-# reads it: without the distinction, "the steered tool must not be a tool
-# the scenario forbids" is a true statement about map-routed categories and
-# a false one about hint-routed categories. It used to live only in the
-# comment above FIX_MAP, which is the shape of thing that goes stale
-# unnoticed — the comment was accurate the whole time the value beside it
-# was not.
-#
-# `RUNAWAY_SAGA` JOINED IT ON 2026-09-17 (WO-R3-263, owner decision O-19, ADR
-# 0054), and the disagreement that put it here is worth stating because it
-# survived every test in the suite. `FIX_MAP` steered the category at
-# `replay_dlq_by_ids` unconditionally, while both prompts routed a
-# `human_required` chain root to `mark_dlq_permanent` — and `saga_stuck`
-# forbids `replay_dlq_by_ids` outright, expects the fence, and expects
-# `escalated`. Nothing caught it: `TestFixMapMatchesTheSuite` was scoped to
-# scenarios expecting `resolved`, so the one scenario that proves the
-# disagreement was the one scenario the check could not see. It is now scoped
-# to any scenario whose forbidden set is a real decision rather than
-# "everything that can touch something" — `resolved`, or `escalated` while
-# still requiring an action.
-#
-# The routing itself did not have to move: `HINT_ROUTED_TOOLS` already says
-# `human_required` → the fence and `replay_safe` → a by-id replay, which is
-# what the saga pair grades. What moved is the admission that a chain's root
-# is a dead-letter row like any other, so the row decides and the category
-# cannot. `stuck_chain_root_rule()` (below `CONTRADICTED_HINT_TOOLS`) is that
-# decision in one sentence, and
-# `tests/unit/test_policies.py::TestStuckChainRootRule` holds this set,
-# `HINT_ROUTED_TOOLS` and the rule's own words to each other.
+# `RUNAWAY_SAGA` joined on 2026-09-17 (WO-R3-263, owner decision O-19, ADR 0054): a chain's
+# root is a dead-letter row like any other, and `TestFixMapMatchesTheSuite` missed the
+# disagreement while scoped to `resolved` scenarios. Pinned with `HINT_ROUTED_TOOLS` and
+# `stuck_chain_root_rule()` by `tests/unit/test_policies.py::TestStuckChainRootRule`.
 HINT_ROUTED_CATEGORIES: Final[frozenset[HypothesisCategory]] = frozenset(
     {HypothesisCategory.POISON_MESSAGE, HypothesisCategory.RUNAWAY_SAGA}
 )
 
 
-# The routing the set above defers to, written down: per-row
-# `remediation_hint` → the Tier-1 tools that hint admits.
+# The routing the set above defers to: per-row `remediation_hint` → the Tier-1 tools it
+# admits. The vocabulary is the alerted DLQ SLICE, named by `AlertPayload.remediation_hint`
+# or `AlertPayload.dlq_scope`; `unclassified` joined on 2026-09-08 after live run
+# `a0aa257bf865` showed a null hint IS a finding (ADR 0032). Sets, not single values,
+# because two hints genuinely admit two tools.
 #
-# Vocabulary is the alerted DLQ SLICE, which the alert names one of two ways:
-# the platform's `RemediationHint` values (mirrored in `list_dlq_messages`'
-# own description: `replay_safe`, `wait_and_replay`, `human_required`) in
-# `AlertPayload.remediation_hint`, or the unclassified scope in
-# `AlertPayload.dlq_scope`. Both are "which slice of the queue is this
-# incident", so both belong in one map.
-#
-# `unclassified` was absent here until 2026-09-08, on the reasoning that "the
-# platform calls a null hint UNKNOWN, nothing has classified the row, and
-# there is no routing to record". Live run `a0aa257bf865` showed that reading
-# to be wrong in the way that matters: there IS a routing — read the row's
-# error, then fence it (bad data, a schema the producer must fix) or replay it
-# by explicit id (transient) — and while nothing has classified the row, the
-# fact that nothing has is itself the finding (ADR 0032). What the map records
-# is the conservative floor the corpus grades, `mark_dlq_permanent`; the
-# by-id replay of an unclassified row whose error reads transient is
-# legitimate and is a PER-ROW decision from the error text, which a per-slice
-# map cannot express and the remediation-planner prompt owns.
-#
-# Sets, not single values, because two of the three hints genuinely admit two
-# tools — by-id and by-category are the same decision reached by naming rows
-# or by naming a filter — and `FIX_MAP`'s "the value names the common case"
-# hedge is exactly the vagueness that let a stale entry sit unnoticed. Where
-# the answer is one tool, the set has one member.
-#
-# NOT read at runtime, and that has to be said out loud because it is the
-# trap `FIX_MAP` fell into: only the prompt obeys this, so the map's job is
-# to be the single source the prompt is written FROM (architecture-principles
-# rule 2) and to be checkable. `tests/unit/test_policies.py::
-# TestHintRoutedToolsMatchTheSuite` is the check — for every scenario whose
-# ALERT names a hint, the tools this map routes it to must be the tools that
-# scenario expects, and none of them may be in its forbidden set.
-#
-# Why it had to exist by WO-R2-140: `TestFixMapMatchesTheSuite` is scoped to
-# scenarios expecting `resolved`, because escalate-only scenarios forbid
-# every Tier-1 tool on purpose. `dlq_human_required_escalates` is now an
-# escalated scenario that nevertheless REQUIRES an action, so it fell in the
-# gap — the prompt could route `human_required` at a tool that scenario
-# forbids and no test would have seen it.
-#
-# The vocabulary is a DLQ slice, so the check that reads this map was keyed on
-# the alert's own hint, and the note here used to end: "so the check stays
-# silent on scenarios whose subject is not a DLQ row at all: `saga_stuck`'s
-# alert names a `job_id`, its incident is the chain, and it forbids the fence
-# deliberately." WO-R2-160 (user decision, 2026-09-08) reversed the second
-# half — `saga_stuck` now FENCES its human_required root and then escalates —
-# and silence on it is therefore no longer the right answer.
-#
-# The map did not have to move; the routing it already records
-# (`human_required` → `mark_dlq_permanent`) is exactly what that scenario
-# expects. What moved is the check's reach: `TestHintRoutedToolsMatchTheSuite`
-# now also selects a scenario whose alert names a RESOURCE and whose own graded
-# evidence pins THAT resource's row hint, narrowed to the routed tools that can
-# name a resource at all (ADR 0032's rule, reused rather than restated — a
-# category replay cannot address one named row). The alert deliberately does
-# NOT carry the hint: putting it there would hand the agent the discriminator
-# the scenario exists to make it read.
+# NOT read at runtime — only the prompt obeys it, so this map's job is to be the single
+# source the prompt is written FROM (architecture-principles rule 2) and to be checkable by
+# `tests/unit/test_policies.py::TestHintRoutedToolsMatchTheSuite`, which also covers the
+# escalate-but-acts scenarios `TestFixMapMatchesTheSuite` cannot see (WO-R2-140, WO-R2-160).
 HINT_ROUTED_TOOLS: Final[dict[str, frozenset[str]]] = {
     "replay_safe": frozenset({"replay_dlq_by_ids", "replay_dlq_by_category"}),
     "wait_and_replay": frozenset({"replay_dlq_by_ids", "replay_dlq_by_category"}),
-    # One tool, and after WO-R2-140 the run escalates once it lands: the
-    # fence is `Resolution.STABILIZES`, so this entry routes an action whose
-    # success is a handoff, not an answer (`policies.RESOLUTION_CLASS`).
+    # One tool; the fence is `Resolution.STABILIZES`, so success is a handoff (WO-R2-140).
     "human_required": frozenset({"mark_dlq_permanent"}),
-    # Keyed on `AlertPayload.dlq_scope`'s only value rather than on a row
-    # hint — there is no row hint for a row nobody classified. Same one tool
-    # and the same stabilizer reasoning: a fence records "never auto-replay
-    # this" and hands the data bug to a human.
+    # Keyed on `AlertPayload.dlq_scope`, not a row hint: an unclassified row has none.
     "unclassified": frozenset({"mark_dlq_permanent"}),
 }
 
 # WHEN THE LABEL AND THE EVIDENCE DISAGREE, THE ROUTING ABOVE DOES NOT APPLY.
 #
-# Every entry in `HINT_ROUTED_TOOLS` reads the `remediation_hint` column as the
-# decision. That is right while the column is true, and the column is a
-# CLASSIFICATION — something wrote it, and triage, an operator or a backfill can
-# each write the wrong one. Nothing downstream re-derives it from the error
-# text, so a mislabelled row keeps its label until a person notices.
+# The user's ruling (WO-R2-167, 2026-09-08): when a row's `remediation_hint` and its
+# `error_message` disagree, the ERROR wins, the row is not replayed, and the disagreement is
+# reported in the briefing. A separate constant rather than a fifth `HINT_ROUTED_TOOLS` entry
+# because the contradiction is a property of a ROW, and a per-slice map cannot hold it.
 #
-# The user's ruling (WO-R2-167, 2026-09-08): when a row's `remediation_hint` and
-# its `error_message` disagree, **the error wins**, the row is not replayed, and
-# the disagreement is reported in the briefing. So the row is routed as what it
-# IS rather than as what it says it is, and for a permanent fault under any hint
-# that is one tool — the fence — for exactly the reasons the `human_required`
-# and `unclassified` entries above give: it stops the next bulk sweep re-running
-# a payload that cannot succeed, and it repairs nothing, so the run escalates.
-#
-# Why this is a separate constant and not a fifth `HINT_ROUTED_TOOLS` entry: the
-# contradiction is not a hint value. It is a property of a ROW — a pair of two
-# fields — and a per-slice map cannot hold a per-row condition without saying
-# something false about every other row in the slice. Adding `mark_dlq_permanent`
-# to `replay_safe`'s routed set would say "a replay_safe row may be fenced",
-# which is the opposite of what `dlq_replay_safe_success` grades.
-#
-# NOT READ AT RUNTIME, and that is a decision rather than an omission — see
-# ADR 0034. A plan-time refusal keyed on the error text would derive a control
-# from tool output, which CLAUDE.md invariant 4 forbids, and it would fail open
-# silently on any wording outside its vocabulary. The enforcement is the prompt
-# rule this constant is the source of, plus exact grading in
-# `dlq_mislabeled_replay_safe`, plus the free `make world-dossier` lint that
-# reads the pair before any spend. Checked by
-# `tests/unit/test_policies.py::TestHintRoutedToolsMatchTheSuite`, which derives
-# "this scenario's subject row is mislabelled" from the scenario's own pinned
-# hint and error text rather than from anything a scenario declares about
-# itself.
+# NOT READ AT RUNTIME, by decision (ADR 0034): a plan-time refusal keyed on error text would
+# derive a control from tool output, which CLAUDE.md invariant 4 forbids. Enforcement is the
+# prompt rule this constant sources, exact grading in `dlq_mislabeled_replay_safe`, the free
+# `make world-dossier` lint, and `tests/unit/test_policies.py::TestHintRoutedToolsMatchTheSuite`.
 CONTRADICTED_HINT_TOOLS: Final[frozenset[str]] = frozenset({"mark_dlq_permanent"})
 
 
 def stuck_chain_root_rule() -> str:
     """The stuck-chain conditional, in the words every reader of it is given.
 
-    Read from ``llm/prompts/shared_rules.py`` rather than spelled here: the
-    same sentence is rendered into the investigation planner's rules, the
-    remediation planner's stuck-chain routing table and the briefing judge's
-    rubric, and a fourth copy sitting beside the routing code would be the
-    thing ADR 0054 exists to prevent. It is reachable from this module because
-    this is where the rule is ENCODED — ``HINT_ROUTED_CATEGORIES`` plus
-    ``HINT_ROUTED_TOOLS`` are its structural half — and a rule whose code and
-    whose prose are never checked against each other is two rules (INC-002).
-    ``tests/unit/test_policies.py::TestStuckChainRootRule`` is that check.
+    Read from ``llm/prompts/shared_rules.py`` rather than spelled here, so a fourth copy
+    cannot drift (ADR 0054). ``HINT_ROUTED_CATEGORIES`` and ``HINT_ROUTED_TOOLS`` are its
+    structural half; ``TestStuckChainRootRule`` holds the two together.
     """
     return STUCK_CHAIN_ROOT_RULE
 
 
-# The read that shows a dead-letter row, and the two arguments that narrow it.
-#
-# Both are the commander's own names for the platform's call, held here rather
-# than imported because `remediation.py` imports THIS module and not the other
-# way round. That is not a licence to let them drift:
-# `tests/unit/test_policies.py::TestWholeQueueReadBeforeDlqAction` pins the
-# tool name against `remediation.DLQ_ROW_SOURCE.tool_name` and the filter set
-# against every `ListingScope.read_field` in `SOURCE_LISTING_FOR_ACTION`, so a
-# third filter added on the platform side lands loudly instead of quietly
-# widening what counts as "the whole queue".
+# The read that shows a dead-letter row, and the two arguments that narrow it. Held here
+# because `remediation.py` imports THIS module; pinned against `DLQ_ROW_SOURCE` and
+# `SOURCE_LISTING_FOR_ACTION` by `test_policies.py::TestWholeQueueReadBeforeDlqAction`.
 DLQ_LISTING_TOOL: Final[str] = "list_dlq_messages"
 
-# `limit` and `offset` are deliberately NOT here. They page a listing; they do
-# not select a slice of it, so a paged whole-queue read is still a whole-queue
-# read (the same reading `SOURCE_LISTING_FOR_ACTION`'s scopes take of them).
+# `limit` and `offset` are NOT here: paging a listing is not slicing it.
 DLQ_LISTING_FILTERS: Final[frozenset[str]] = frozenset({"remediation_hint", "job_type"})
 
 
 # Every Tier-1 tool that replays or fences a dead-letter row.
 #
-# Declared rather than derived, and the reason is worth stating because the
-# obvious derivation is wrong. `SOURCE_ROW_FOR_ACTION` and
-# `SOURCE_LISTING_FOR_ACTION` between them name `list_dlq_messages` for the
-# three replays — but `mark_dlq_permanent` is DELIBERATELY inert in both
-# (WO-R2-144: fencing is the conservative direction, so acting on an unread
-# row cannot cause the harm those guards exist to prevent). Deriving from them
-# would therefore silently drop the fence, which is half of what ADR 0041 is
-# about. So the set is written down, and
-# `tests/unit/test_policies.py::TestWholeQueueReadBeforeDlqAction` fails if it
-# ever stops being a superset of what those two maps tie to the dead-letter
-# listing — a replay tool shipped tomorrow cannot slip past by silence.
+# Declared, not derived: `mark_dlq_permanent` is DELIBERATELY inert in
+# `SOURCE_ROW_FOR_ACTION` and `SOURCE_LISTING_FOR_ACTION` (WO-R2-144), so deriving would
+# silently drop the fence — half of what ADR 0041 is about.
+# `test_policies.py::TestWholeQueueReadBeforeDlqAction` keeps this a superset of what those
+# maps tie to the listing.
 DLQ_ACTION_TOOLS: Final[frozenset[str]] = frozenset(
     {
         "replay_dlq_by_ids",
@@ -357,23 +164,10 @@ DLQ_ACTION_TOOLS: Final[frozenset[str]] = frozenset(
 def _dlq_acting_categories() -> frozenset[HypothesisCategory]:
     """Hypothesis categories whose Tier-1 route can reach a dead-letter action.
 
-    Derived from the two maps above it rather than hand-listed, because the
-    handoff is where this has to be decided and a handoff knows only the top
-    hypothesis's CATEGORY — the specific tool is the remediation planner's
-    choice, made a state later. So the question the guard can actually ask is
-    "could this handoff end in a dead-letter action?", and the honest answer is
-    the union of everywhere the category can route:
-
-    * `FIX_MAP[category]` — the one tool a map-routed category steers at;
-    * every tool in `HINT_ROUTED_TOOLS` for a category in
-      `HINT_ROUTED_CATEGORIES`, whose specific tool comes from the row's own
-      hint and so is not knowable here at all.
-
-    Today that is `POISON_MESSAGE` (hint-routed, every route a DLQ action) and
-    `RUNAWAY_SAGA` (`FIX_MAP` → `replay_dlq_by_ids`, the dead-lettered chain
-    root). `CONSUMER_SATURATION` and `STALE_CACHE` reach no dead-letter tool
-    and the guard stays inert on them, which is right: there is no queue to
-    read whole.
+    Derived rather than hand-listed, because a handoff knows only the top hypothesis's
+    CATEGORY: the union of ``FIX_MAP[category]`` and, for a ``HINT_ROUTED_CATEGORIES``
+    member, every tool in ``HINT_ROUTED_TOOLS``. Today ``POISON_MESSAGE`` and
+    ``RUNAWAY_SAGA``; the guard stays inert on the rest, which have no queue to read.
     """
     hint_routed = frozenset(tool for tools in HINT_ROUTED_TOOLS.values() for tool in tools)
     acting = set()
@@ -392,31 +186,12 @@ DLQ_ACTING_CATEGORIES: Final[frozenset[HypothesisCategory]] = _dlq_acting_catego
 class SubjectMatch(StrEnum):
     """How a probe is judged to have read the subject.
 
-    Two kinds, because the platform names a DLQ slice two ways and only one
-    of them is a value.
-
-    ``EQUALS`` is the original and the default: the probe counts when its
-    argument carries the subject's exact value. Every resource subject and
-    the category subject work this way.
-
-    ``UNFILTERED`` is the inverse claim: the probe counts when it did NOT
-    narrow on that argument. It exists for one subject — the unclassified
-    slice — and it is not a loophole in the value-matching rule, it is the
-    same rule applied to a slice the platform cannot express as a filter.
-    ``ListDlqMessagesInput.remediation_hint = null`` means "every category"
-    (the platform's own words: "Omit for all categories (including
-    uncategorized)"), so there is no ``list_dlq_messages(remediation_hint=
-    <unclassified>)`` to demand; the whole-queue page is the only read that
-    shows a null-hint row, and demanding it is therefore exact rather than
-    lax.
-
-    The same field name means opposite things on the two sides of that call
-    and it is worth saying once: ``remediation_hint: null`` in a listing
-    ARGUMENT means "no filter", while ``remediation_hint: null`` on a
-    returned ROW means "nobody classified this". Live run ``a0aa257bf865``
-    is what happens when the two are read as one fact — the agent made the
-    unfiltered read, saw the null-hint row, described it correctly, and then
-    acted on a different slice entirely.
+    ``EQUALS`` (the default) counts a probe whose argument carries the subject's exact
+    value. ``UNFILTERED`` is the inverse claim, for the one subject the platform cannot
+    express as a filter: ``ListDlqMessagesInput.remediation_hint = null`` means "every
+    category", so the whole-queue page is the only read that shows a null-hint row. The same
+    null means "nobody classified this" on a returned ROW — live run ``a0aa257bf865`` is what
+    reading the two as one fact costs.
     """
 
     EQUALS = "equals"
@@ -443,87 +218,26 @@ class SubjectProbe(NamedTuple):
     "unclassified" by default."""
 
 
-# Single source of truth for alert-field → subject-probe routing.
+# Single source of truth for alert-field → subject-probe routing: the value is the resource,
+# the pair is (the read tool that observes it, the argument the value belongs in).
 #
-# An alert names the resource it is about in one of these payload fields.
-# The value is the resource; the pair is (the read tool that observes that
-# resource, the argument field the value belongs in). Together they answer
-# one question mechanically: "which exact probe call would read the thing
-# this alert is complaining about?"
+# Keyed on the alert FIELD rather than on `fingerprint`, which is free text one family spells
+# three ways; the fields are `api/schemas.AlertPayload` plus the corpus's
+# `_NON_WEBHOOK_ALERT_FIELDS` (tests/unit/test_scenario_alert_premise.py), and the field is
+# what carries the VALUE — the 2026-08-30 live run probed the default group while the alert
+# named `unknown-consumer`, and only the value comparison catches that. Declaration order is
+# priority order: the first entry present is "the subject". The tool/argument halves stay
+# consistent with `policies.RESOURCE_ARG_FIELDS`, pinned by
+# `tests/unit/test_policies.py::TestAlertSubjectProbes`.
 #
-# Keyed on the alert FIELD rather than on `fingerprint`. Fingerprints are
-# free text the platform's alert rules author — this corpus alone spells
-# one family three ways (`consumer_lag_high`, `consumer_lag_warning`,
-# `consumer_stalled`), so a fingerprint-keyed map could only match by
-# prefix or substring, which is the heuristic this guard exists to avoid.
-# Field names are the closed vocabulary: they are the commander's own
-# ingress model (`api/schemas.AlertPayload`) plus the scenario corpus's
-# `_NON_WEBHOOK_ALERT_FIELDS` (tests/unit/test_scenario_alert_premise.py),
-# and — decisively — the field is what carries the subject's VALUE, which
-# the guard needs anyway. Knowing "this is a consumer-lag alert" is not
-# enough; the 2026-08-30 live run probed `get_consumer_lag` for the
-# platform's DEFAULT group while the alert named `unknown-consumer`, and
-# only the value comparison catches that.
-#
-# Declaration order is priority order: if an alert ever names two mappable
-# resources, the first entry present wins and becomes "the subject". The
-# guard demands one verified read of the alert's primary subject, not a
-# probe of everything the alert mentions — demanding all of them would
-# turn a richer alert into a blocked investigation.
-#
-# The tool/argument halves must stay consistent with
-# `policies.RESOURCE_ARG_FIELDS` (the same fields, seen from the tool
-# side); `tests/unit/test_policies.py::TestAlertSubjectProbes` pins that.
-#
-# ONE ENTRY IS A SLICE RATHER THAN A RESOURCE, AND THAT IS DELIBERATE.
-# `remediation_hint` names no single row: it names a partition of the
-# dead-letter queue. It is here because a category-scoped DLQ alert has a
-# subject in exactly the sense this guard means — there is one probe that
-# reads what the alert is complaining about, and it is the hint-filtered
-# listing — and because leaving it out cost a live run. In
-# `dlq_wait_and_replay_success` (archive `06e14be3e7b1`, 2026-09-07) the
-# alert's subject was the wait_and_replay backlog and the only thing saying
-# so was the fingerprint string `dlq_depth_warning_wait_replay`. The agent
-# listed the queue UNFILTERED, reasoned correctly about all four rows in
-# all three categories, and then stopped: "The DLQ contains 4 entries with
-# mixed remediation hints that cannot be handled by a single Tier-1
-# action." Every sentence of that is true, and it is an escalation only
-# because the scope was four rows instead of two. ADR 0008 allows one
-# attempt with one action, so an over-wide scope does not become a partial
-# fix — it becomes a handoff to a human. The alert now carries its category
-# (`api/schemas.AlertPayload.remediation_hint`) and this entry turns that
-# into the required first discriminating read.
-#
-# Why the resource/slice distinction does not weaken the guard, and where
-# the line is: a slice-valued subject is admissible only when the platform
-# names the same slice on BOTH sides of the read/act boundary — the value
-# filters a listing AND selects what an action touches. That is not a
-# judgement call, it is `remediation.SOURCE_LISTING_FOR_ACTION`'s own
-# `ListingScope(read_field="remediation_hint", action_field="category")`,
-# and `TestAlertSubjectProbes` derives the admissible set from it rather
-# than from a second hand-written list. `limit`, `offset` and `since_hours`
-# page or window a listing and select nothing on any action, so they can
-# never qualify — which is the property the resource-field check was
-# protecting.
-#
-# The two guards compose the right way round. A reading filtered to exactly
-# the slice an action names COVERS that action under ADR 0028, so the probe
-# this entry demands is also the probe that licenses a same-category
-# replay: the subject read and the read-before-act read are one call, not
-# two, and no scenario pays a tool call for the overlap.
-#
-# LAST in declaration order, so a resource always outranks a slice. An
-# alert naming both a `job_id` and a hint (a stuck chain whose root is
-# dead-lettered) is about that job; the hint would be the coarser reading
-# of the same incident.
-#
-# ONE ENTRY IS THE *ABSENCE* OF A FILTER, AND THAT IS THE THIRD SHAPE.
-# `dlq_scope="unclassified"` names the rows the platform's classifier has
-# not touched — the null-hint partition — and the only read that shows them
-# is the UNFILTERED listing. So its probe is value-matched on the absence of
-# a `remediation_hint` argument rather than on a value, which is what
-# ``SubjectMatch.UNFILTERED`` says. See ADR 0032 for why this is a separate
-# field rather than a reading of `remediation_hint: null`.
+# TWO ENTRIES ARE NOT RESOURCES. `remediation_hint` names a SLICE, admissible because
+# `remediation.SOURCE_LISTING_FOR_ACTION`'s `ListingScope` names the same slice on both sides
+# of the read/act boundary — and because leaving it out cost `dlq_wait_and_replay_success`
+# (archive `06e14be3e7b1`): the agent read the queue unfiltered, reasoned correctly about all
+# four rows, and escalated because its scope was four rows instead of two (ADR 0008). It is
+# LAST, so a resource always outranks a slice, and the read it demands also licenses a
+# same-category replay under ADR 0028. `dlq_scope="unclassified"` is the third shape — the
+# ABSENCE of a filter, `SubjectMatch.UNFILTERED`, a separate field per ADR 0032.
 ALERT_SUBJECT_PROBES: Final[dict[str, SubjectProbe]] = {
     "consumer_group": SubjectProbe("get_consumer_lag", "consumer_group"),
     "group": SubjectProbe("get_consumer_lag", "consumer_group"),
@@ -531,11 +245,8 @@ ALERT_SUBJECT_PROBES: Final[dict[str, SubjectProbe]] = {
     "job_id": SubjectProbe("get_dag_state", "job_id"),
     "trace_id": SubjectProbe("get_trace", "trace_id"),
     "remediation_hint": SubjectProbe("list_dlq_messages", "remediation_hint"),
-    # LAST, after the category: an alert that somehow named both a category
-    # and the unclassified scope is about the category it named. The
-    # admissible-value set is not decoration — for an UNFILTERED probe the
-    # value is never compared against anything, so without it any string a
-    # future producer put in this field would silently mean "unclassified".
+    # LAST: an alert naming both is about the category. The admissible-value set is
+    # required — an UNFILTERED probe never compares the value, so any string would pass.
     "dlq_scope": SubjectProbe(
         "list_dlq_messages",
         "remediation_hint",
@@ -563,55 +274,30 @@ class AlertSubject(NamedTuple):
 def alert_subject(alert: Mapping[str, Any]) -> AlertSubject | None:
     """The alert's own subject, or ``None`` when it names nothing mappable.
 
-    ``None`` is the inert case and it is common and legitimate: an
-    alert-storm meta-alert, a `db_latency_high` alert, and a whole-queue DLQ
-    depth alert all name a *condition* rather than a resource or slice this
-    agent can probe by name. Every caller must treat ``None`` as "no
-    opinion" — a guard that fabricated a subject for those alerts would
-    block investigations it knows nothing about, which is worse than the gap
-    it closes.
+    ``None`` is the inert case and it is legitimate — a meta-alert or a whole-queue depth
+    alert names a condition, not a probeable resource (``dlq_backlog`` and
+    ``dlq_mixed_partial`` are the corpus's witnesses). Every caller must read it as "no
+    opinion".
 
-    The DLQ case used to be listed here without qualification, and the
-    qualification is the point: a DLQ alert that fires on ONE remediation
-    category carries `remediation_hint` and DOES have a probe that reads it
-    (the hint-filtered listing). A DLQ alert about the queue's total depth,
-    or about a genuinely mixed queue, carries no hint and stays inert here —
-    `dlq_backlog` and `dlq_mixed_partial` are the corpus's two witnesses,
-    and the second one is deliberate: "a mixed queue is not a category" is a
-    statement the suite has to be able to fail.
-
-    Looks at the top level first, then one level into ``extra_data``. That
-    second lookup is not speculative: the platform's alert webhook sends
-    exactly ``{alert_id, tenant_id, severity, source, title, description,
-    fired_at, extra_data}``, so on a real alert every resource-naming field
-    in the map above arrives nested, while the scenario corpus carries them
-    at the top level (the divergence is written up in
-    ``tests/unit/test_scenario_alert_premise.py::_NON_WEBHOOK_ALERT_FIELDS``).
-    Reading only the top level would leave this guard permanently inert in
-    production while looking green offline — the exact shape of fail-open
-    that makes a guard worse than no guard.
+    Looks at the top level, then one level into ``extra_data``: a real webhook alert nests
+    every resource field, while the corpus carries them at the top level
+    (``tests/unit/test_scenario_alert_premise.py::_NON_WEBHOOK_ALERT_FIELDS``). Top level
+    only would leave this guard inert in production while looking green offline.
     """
     for source in (alert, alert.get("extra_data")):
         if not isinstance(source, Mapping):
             continue
         for field, probe in ALERT_SUBJECT_PROBES.items():
             raw = source.get(field)
-            # str and UUID only: an alert arriving as JSON gives strings,
-            # and a run state assembled in Python may hold a real UUID for
-            # `job_id`/`trace_id`. Numbers and booleans do not name a
-            # platform resource, and a Mapping is a nested payload, not a
-            # name.
+            # str and UUID only: JSON gives strings, Python a real UUID for
+            # `job_id`/`trace_id`. Nothing else names a resource.
             if not isinstance(raw, (str, UUID)):
                 continue
             value = str(raw).strip()
             if not value:
                 continue
-            # An entry that declares a vocabulary recognises only that
-            # vocabulary. Unrecognised → this field named nothing this agent
-            # knows how to read, which is the inert case and not an error:
-            # the platform may ship a scope word before the commander learns
-            # what probe reads it, and refusing an investigation over a word
-            # is worse than the gap.
+            # A declared vocabulary recognises only itself; unrecognised is the inert
+            # case, not an error — the platform may name a scope before we can read it.
             if probe.admissible_values is not None and value not in probe.admissible_values:
                 continue
             return AlertSubject(field, probe.tool_name, probe.argument_field, value, probe.match)
@@ -628,12 +314,8 @@ def make_investigate(
         # Accept legacy `group` field for backward-compat with older alert
         # producers; platform's tool arg is `consumer_group`.
         raw = run_state.alert.get("consumer_group") or run_state.alert.get("group")
-        # One canonical serialization for every outgoing call (wire.py's
-        # docstring: a second implementation drifts from the thing it
-        # guards). This leg is read-only and its default-fill is
-        # deliberate — an alert with no group named probes the platform's
-        # default group. The remediation legs may NOT default-fill; that
-        # asymmetry is the subject of ADR 0024.
+        # One canonical serialization for every outgoing call (wire.py). Read-only, so
+        # the default-fill is deliberate; the remediation legs may NOT (ADR 0024).
         arguments = wire_arguments(spec, {"consumer_group": str(raw)} if raw else {})
 
         try:
@@ -705,12 +387,8 @@ def _escalate(
 def _control_group() -> InvestigationStrategy:
     """``baseline``, imported at call time to keep one seam from being a cycle.
 
-    ``strategies.baseline`` imports ``_plan_next_step`` from this module — it
-    has to, the whole point being that the control group calls the existing body
-    rather than a copy of it — so this module cannot import the registry at
-    import time. A function-level import is the smaller price: the alternative
-    is moving the planner body out of the module that owns the loop, in the one
-    packet whose acceptance is that nothing moved.
+    ``strategies.baseline`` imports ``_plan_next_step`` from this module, so this module
+    cannot import the strategy registry at import time.
     """
     from incident_commander.agent.strategies.registry import default_strategy
 
@@ -731,45 +409,24 @@ def make_llm_investigate(
 ) -> Callable[[RunState, datetime], RunState]:
     """Bind clients + model to the Phase 2 INVESTIGATING transition.
 
-    Each iteration: the LLM ranks hypotheses and either proposes a probe or
-    says stop. Budget is checked before every LLM call and every tool call;
-    exhaustion escalates immediately. ``max_iterations`` guards against loops.
+    Each iteration the LLM ranks hypotheses and either probes or stops; budget is checked
+    before every LLM and tool call, and ``max_iterations`` guards the loop.
 
-    ``reprobe_attempts`` is the investigation-side twin of ADR 0006's verify
-    polling (ADR 0009): when a probe of a declared-cached tool (see
-    ``policies.CACHED_READ_FRESHNESS_SECONDS``) kills a fixable hypothesis
-    that was at or above the remediate threshold, the loop re-reads that
-    same probe after ``reprobe_delay_seconds`` before accepting the
-    contradiction — at most ``reprobe_attempts`` times per tool per run.
-    Default 0 preserves canned behavior byte-identically; the runner wires
-    it live, where a cached reading can predate the fault entirely.
+    ``reprobe_attempts`` is the investigation-side twin of ADR 0006's verify polling
+    (ADR 0009): when a declared-cached probe (``policies.CACHED_READ_FRESHNESS_SECONDS``)
+    kills a fixable hypothesis at or above the threshold, re-read it after
+    ``reprobe_delay_seconds`` first. Default 0 keeps canned behaviour byte-identical.
 
-    ``strategy`` is the inference strategy that makes the one planner call
-    (plan 02 § 4, WP-0.2). ``None`` means the control group — ``baseline``,
-    the current behaviour — resolved through the registry rather than from
-    ``Settings``, because configuration is wired at the edge here: the eval
-    runner resolves ``INFERENCE_STRATEGY`` and passes the strategy in, exactly
-    as it already passes ``model`` and the re-probe knobs. Everything *around*
-    the call — the subject-probe refusal, the ``FIX_MAP`` gate, the 0.7
-    threshold, the ADR-0009 re-probe, ``max_iterations``, ``_execute_probe``
-    and its tier re-check — stays here and is shared by every strategy. That
-    asymmetry is the packet: strategies propose, this loop decides.
+    ``strategy`` makes the one planner call (plan 02 § 4, WP-0.2); ``None`` is ``baseline``,
+    resolved through the registry because the eval runner wires ``INFERENCE_STRATEGY`` at the
+    edge. Everything around the call — the ``FIX_MAP`` gate, the 0.7 threshold, the
+    subject-probe refusal, the ADR-0009 re-probe, ``_execute_probe`` and its tier re-check —
+    stays here: strategies propose, this loop decides.
 
-    ``selector_llm_client`` is the client the ``candidate_selector`` role calls
-    through (WP-6.2). A second client rather than a second use of ``llm_client``
-    because the ROLE is what the accounting splits on: the eval runner meters the
-    two as ``investigation_planner`` and ``candidate_selector``, and a selector
-    sharing the planner's wrapper would fold selection's cost into generation's.
-    ``None`` for every arm that makes no selector call, which is every arm but
-    one; the selector strategy refuses rather than falling back, because a
-    fallback would report its tokens under another role's name.
-
-    ``record_step`` is where each step's ``StepRecord`` goes. ``None`` means
-    nobody is recording, which is every run today: the tracer is opt-in
-    (``EVAL_TRACE_DIR``) and the ``step`` trace kind lands with WP-2.1, the
-    packet that reads these records. Unrecorded or not, the record is built —
-    a strategy that only produces research data when someone is watching is a
-    strategy whose data cannot be trusted to be about the same run.
+    ``selector_llm_client`` is the ``candidate_selector`` role's client (WP-6.2), separate so
+    accounting meters the two roles apart. ``record_step`` takes each ``StepRecord``; ``None``
+    means nobody is recording (the tracer is opt-in via ``EVAL_TRACE_DIR``), but the record is
+    built either way.
     """
     chosen: Final[InvestigationStrategy] = strategy if strategy is not None else _control_group()
 
@@ -785,11 +442,8 @@ def make_llm_investigate(
 
             prior_hypotheses = run_state.hypotheses
             try:
-                # The third return value is the step's ``StepRecord``. The
-                # strategy has already written it to ``record_step``; it is
-                # returned as well so a caller that wants the record without
-                # installing a sink can have it. This loop does not read it —
-                # research data must not be able to change the run.
+                # Third value is the ``StepRecord``, already written to ``record_step``.
+                # The loop never reads it: research data must not change the run.
                 run_state, step, _ = chosen.plan_next_step(
                     run_state,
                     at,
@@ -803,10 +457,8 @@ def make_llm_investigate(
                     ),
                 )
             except (ValueError, ValidationError, LLMError) as err:
-                # ``_plan_next_step`` accrues on its way out, so a call that
-                # raises accrues nothing — and this is the run's hottest LLM
-                # call, made once per investigation iteration. Charge what the
-                # failed call already billed before escalating (ADR 0015).
+                # ``_plan_next_step`` accrues on the way out, so a raising call
+                # accrued nothing. Charge what it billed (ADR 0015).
                 run_state = run_state.model_copy(
                     update={"budget": accrue_llm_error(run_state.budget, err, model)}
                 )
@@ -820,9 +472,7 @@ def make_llm_investigate(
                 and last_probe is not None
                 and reprobes_spent.get(last_probe.tool_name, 0) < reprobe_attempts
             ):
-                # Do not act on this step yet — the hypothesis died on the
-                # word of a possibly-stale sensor. Re-read it fresh first;
-                # the next planner iteration sees both readings and decides.
+                # The hypothesis died on a possibly-stale sensor: re-read it first.
                 reprobes_spent[last_probe.tool_name] = (
                     reprobes_spent.get(last_probe.tool_name, 0) + 1
                 )
@@ -843,16 +493,8 @@ def make_llm_investigate(
             if isinstance(action, StopAction):
                 return _finalize(run_state, at, action.reason)
             if isinstance(action, RemediateAction):
-                # Structural guard: the LLM emitted `remediate`, but we
-                # verify the top hypothesis actually qualifies before
-                # handing off to PLANNING. Two conditions:
-                #   1. category is a key in FIX_MAP (auto-remediable)
-                #   2. confidence >= threshold
-                # Either condition failing → escalate with a clear reason.
-                # The Pydantic schema already prevented invalid *categories*;
-                # this catches the "correct category, insufficient confidence"
-                # or "prompt drift emitted remediate for an unmapped category"
-                # cases at the state-machine level.
+                # Structural guard before handing off to PLANNING: the category must be
+                # a key in FIX_MAP and confidence must clear the threshold, or escalate.
                 top = step.hypotheses[0]
                 if top.category not in FIX_MAP:
                     return _finalize(
@@ -874,11 +516,8 @@ def make_llm_investigate(
                             f"{_REMEDIATE_CONFIDENCE_THRESHOLD}; escalating"
                         ),
                     )
-                # Third structural guard: you may not remediate an incident
-                # whose own alerted signal nobody has read. Unlike the two
-                # above, this one REFUSES rather than escalates — the run is
-                # not over, the planner is simply sent back with the probe it
-                # skipped named for it (WO behaviour fix, 2026-08-30).
+                # Third guard: no remediation of an incident whose alerted signal nobody
+                # has read. REFUSES rather than escalates — the planner gets another turn.
                 if subject is not None and not _alert_subject_probed(run_state, subject):
                     if refusals_spent >= _MAX_SUBJECT_PROBE_REFUSALS:
                         return _finalize(
@@ -895,23 +534,10 @@ def make_llm_investigate(
                     refusals_spent += 1
                     run_state = _refuse_handoff(run_state, at, subject)
                     continue
-                # Fourth structural guard, and the mirror image of the third
-                # (ADR 0041): you may not replay or fence PART of a dead-letter
-                # queue nobody has read WHOLE. The guard above demands the
-                # alerted slice; this one demands the page that shows what is
-                # sitting beside it. Both, or the run acted on a queue it only
-                # half looked at.
-                #
-                # After the subject check rather than before it, so a run
-                # missing both reads is told about its own incident first. The
-                # two refusals then arrive in the order a careful operator
-                # would make the calls.
-                #
-                # Refuses rather than escalates, for the same reason the third
-                # guard does: the run is not over and the missing call is one
-                # the planner can still make. This is also the only place it
-                # CAN be made — a plan-time refusal would name a read the
-                # remediation planner has no way to perform, since PLANNING
+                # Fourth guard, the mirror of the third (ADR 0041): no replaying or fencing
+                # PART of a dead-letter queue nobody has read WHOLE. After the subject check,
+                # so a run missing both reads hears about its own incident first. Refuses
+                # rather than escalates, and this is the only place it can be made — PLANNING
                 # proposes actions and never probes.
                 if top.category in DLQ_ACTING_CATEGORIES and not _whole_queue_listed(run_state):
                     if whole_queue_refusals_spent >= _MAX_WHOLE_QUEUE_REFUSALS:
@@ -932,11 +558,8 @@ def make_llm_investigate(
                     continue
                 return _handoff_to_planning(run_state, at, action.reason)
 
-            # ProbeAction — tool_name is Literal-validated at schema time,
-            # so this branch only runs on tools that were in the read-tier
-            # slice of TOOL_REGISTRY when the module loaded. The extra
-            # runtime check catches the (rare) case where the registry
-            # drifts after startup.
+            # ProbeAction — tool_name is Literal-validated at schema time; this check
+            # catches a registry that drifted after startup.
             if action.tool_name not in TOOL_REGISTRY:
                 return _escalate_investigation(
                     run_state, at, f"planner proposed unknown tool: {action.tool_name}"
@@ -964,25 +587,15 @@ def _plan_next_step(
 ) -> tuple[RunState, InvestigationStep, PlannerCall]:
     """One planner LLM call — plus one bounded repair if it does not parse.
 
-    ADR 0035: a ``record_output`` payload the schema rejects is a harness
-    event, not a decision. ``call_with_output_repair`` re-asks once with the
-    validation error quoted back; both calls are billed and both are accrued
-    (``accrue_structured_call``). A second failure raises
-    ``OutputRepairExhausted``, which the caller escalates on exactly as it
-    escalated on the first failure before this change.
+    ADR 0035: a ``record_output`` payload the schema rejects is a harness event. Both legs
+    accrue; a second failure raises ``OutputRepairExhausted``.
 
-    The third return value is the call's own measurements — token counters,
-    trace-record id, the size of the context it was handed (WP-2.1) and how
-    long the client waited for it (WO-R3-260). They are visible only here, and
-    a ``StepRecord`` built without them carries a ``None`` where a number
-    belongs. Nothing in the loop reads it: research data must not be able to
-    change the run.
+    The third return value is the call's own measurements (tokens, trace-record id, context
+    size, elapsed time — WP-2.1, WO-R3-260). The loop never reads it.
     """
     system_prompt = load_prompt("investigation_planner")
-    # Bound to a local rather than passed inline because the step record
-    # measures what was sent. Re-rendering it afterwards to measure it would
-    # be a second render that a future non-deterministic context would
-    # silently make a different string from the one the model saw.
+    # A local, not inline: the step record measures what was sent, and a second
+    # render could differ from the string the model saw.
     user_message = format_planner_context(run_state)
     call = call_with_output_repair(
         llm_client,
@@ -1007,10 +620,8 @@ def _plan_next_step(
         cache_read_tokens=result.cache_read_tokens,
         cache_creation_tokens=result.cache_creation_tokens,
         context_chars=len(system_prompt) + len(user_message),
-        # The client's own measurement of the call that parsed, carried out
-        # rather than taken again here: a second stopwatch around this
-        # function would also time the accrual and the model_copy below, and
-        # report them as time the model spent.
+        # The client's own measurement — a stopwatch here would also time
+        # the accrual below and call it model time.
         elapsed_ms=result.elapsed_ms,
     )
     return updated, result.output, measured
@@ -1024,13 +635,8 @@ def _execute_probe(
 ) -> RunState:
     """Call the tool the planner picked. On any failure, escalate with the reason."""
     spec = TOOL_REGISTRY[action.tool_name]
-    # Runtime tier guard (B-06): the ReadToolName Literal keeps the schema
-    # read-only, but only tier_of() catches a READ→TIER_1 reclassification
-    # made in policies.py after the Literal was hand-listed — the live agent
-    # token carries actions:execute, so the platform would permit the call.
-    # Placed here so BOTH call sites are covered: the main probe branch and
-    # the freshness re-probe (ADR 0009). Mirrors make_llm_plan's
-    # defense-in-depth tier checks.
+    # Runtime tier guard (B-06): only tier_of() catches a READ→TIER_1 reclassification made
+    # after the Literal was hand-listed. Here, so both call sites are covered (ADR 0009).
     if tier_of(action.tool_name) is not Tier.READ:
         return _escalate_investigation(
             run_state,
@@ -1039,9 +645,7 @@ def _execute_probe(
             f"(tier={tier_of(action.tool_name).value})",
         )
     try:
-        # Same canonical serialization the remediation legs use: mode="json"
-        # so UUID/datetime fields become str/isoformat (httpx.json can't
-        # encode raw UUID objects), and no second copy of the rule to drift.
+        # Same canonical serialization the remediation legs use — no second copy.
         arguments = wire_arguments(spec, action.arguments)
     except ValidationError as err:
         return _escalate_investigation(
@@ -1096,16 +700,8 @@ def _cached_probe_contradiction(
 ) -> Hypothesis | None:
     """Return the fixable high-prior hypothesis a cached read just killed, if any.
 
-    Trigger requires all of:
-    - the last executed probe reads from a declared staleness window,
-    - the prior top hypothesis was actionable (category in ``FIX_MAP``)
-      and at/above the remediate threshold,
-    - the fresh planner output dropped that category below the threshold
-      (or dropped it entirely).
-
-    Scoped to FIX_MAP categories deliberately: the re-probe exists to
-    protect the remediate handoff decision. Unmapped categories escalate
-    to a human either way.
+    Triggers when a declared-cached probe drops a ``FIX_MAP`` hypothesis from at/above the
+    remediate threshold to below it — the re-probe exists to protect that handoff.
     """
     if last_probe is None or not is_cached_read(last_probe.tool_name):
         return None
@@ -1156,44 +752,16 @@ def _note_freshness_reprobe(
 def _alert_subject_probed(run_state: RunState, subject: AlertSubject) -> bool:
     """True when some probe in the evidence trail actually read the alert's subject.
 
-    Matching is on the tool AND the argument value, never the tool alone.
-    That distinction is the entire guard: on 2026-08-30 the agent answered a
-    ``group="unknown-consumer"`` alert by calling ``get_consumer_lag`` — the
-    right tool — with no group at all, which ``wire_arguments`` default-fills
-    to the platform's ``worker-dispatcher``. It then read a healthy number off
-    a consumer nobody had complained about, found a different critical alert
-    while it was in there, and chased that instead. "Did it call the tool" is
-    green for that run; "did it read the resource the alert named" is not.
+    Matching is on the tool AND the argument value, never the tool alone: on 2026-08-30 the
+    agent answered a ``group="unknown-consumer"`` alert with ``get_consumer_lag`` and no
+    group, which ``wire_arguments`` default-fills to ``worker-dispatcher``. Evidence records
+    the WIRED arguments, so the fill is visible here. Values compare exactly after
+    ``strip()`` — the campaign's own failure values are substrings of the true ones
+    (``remediation._unsourced_resource_args``).
 
-    Reading ``entry.arguments`` is what makes that check possible: evidence
-    records the WIRED arguments (post default-fill), so the default-filled
-    group is visible here as the literal ``worker-dispatcher`` it became on
-    the wire, rather than as the absence the planner emitted.
-
-    The same comparison is what makes a SLICE subject checkable, and the
-    second live run is why that matters. A ``remediation_hint`` alert is
-    answered by ``list_dlq_messages(remediation_hint=<hint>)``; an unfiltered
-    listing wires that argument to ``None``, which is not a ``str`` and so
-    matches nothing here. That is the correct reading rather than a
-    technicality: the unfiltered page is the whole queue, and the run this
-    guard exists for (`06e14be3e7b1`) read exactly that page, described all
-    four rows accurately, and escalated because it never scoped itself to the
-    two the alert was about.
-
-    Values compare exactly after ``strip()`` — no substring, case-insensitive,
-    or prefix matching, for the reason ``remediation._unsourced_resource_args``
-    gives: the campaign's own failure values are substrings of the true ones.
-
-    Under ``SubjectMatch.UNFILTERED`` the comparison inverts and nothing else
-    changes: the qualifying probe is the one that did NOT narrow on that
-    argument. The four ways a call declines to narrow — key absent, explicit
-    ``null`` (what ``wire_arguments`` writes for every unset optional filter,
-    so the wired arguments on the ledger are full of them), a non-string, a
-    whitespace-only string — all read as unfiltered, which is the same
-    collapse ``remediation._scope_value`` makes on both sides of ADR 0028's
-    coverage check. It has to be: the unfiltered page is the platform's "every
-    category", and a run that read it has seen the null-hint rows whichever
-    way its argument was spelled.
+    Under ``SubjectMatch.UNFILTERED`` the comparison inverts: the qualifying probe is the one
+    that did NOT narrow. Absent key, explicit ``null``, non-string and whitespace all read as
+    unfiltered, the same collapse ``remediation._scope_value`` makes for ADR 0028.
     """
     for entry in run_state.evidence:
         if entry.tool_name != subject.tool_name:
@@ -1212,28 +780,11 @@ def _alert_subject_probed(run_state: RunState, subject: AlertSubject) -> bool:
 def _whole_queue_listed(run_state: RunState) -> bool:
     """True when this run read the dead-letter queue with no slice filter on it.
 
-    ADR 0041's whole check, and it is deliberately a statement about the CALL
-    rather than about the rows that came back. Two reasons, both structural:
-
-    * a probe that failed never reaches the ledger — ``_execute_probe``
-      escalates on ``MCPError``, ``is_error`` and a parse failure before it
-      writes an entry — so every ``list_dlq_messages`` entry in evidence is a
-      reading that parsed;
-    * the rule is about what the agent LOOKED at, which is the thing the agent
-      controls. A queue that emptied between the read and the action is the
-      world's timing, and refusing over it would red a careful run — the same
-      reasoning ``SOURCE_LISTING_FOR_ACTION`` gives for grading coverage
-      rather than row presence.
-
-    "Unfiltered" is judged exactly as ``remediation._scope_value`` judges it,
-    and it has to be: a missing key, an explicit JSON ``null`` (what
-    ``wire_arguments`` writes for every unset optional filter, so the wired
-    arguments on the ledger are full of them), a non-string and a
-    whitespace-only string are the four ways a call declined to narrow. Paging
-    is not narrowing — ``limit`` and ``offset`` are not in
-    ``DLQ_LISTING_FILTERS`` — so a run that walked the queue a page at a time
-    has read it whole, which is what the platform's own pagination makes the
-    only way to read a long queue at all.
+    ADR 0041's whole check, and deliberately a statement about the CALL rather than the rows:
+    a probe that failed never reaches the ledger, and the rule is about what the agent looked
+    at. "Unfiltered" is judged exactly as ``remediation._scope_value`` judges it — missing
+    key, explicit ``null``, non-string or whitespace. Paging is not narrowing (``limit`` and
+    ``offset`` are not in ``DLQ_LISTING_FILTERS``), so a page-at-a-time walk has read it whole.
     """
     for entry in run_state.evidence:
         if entry.tool_name != DLQ_LISTING_TOOL:
@@ -1255,21 +806,10 @@ def _refuse_whole_queue_handoff(
 ) -> RunState:
     """Refuse a dead-letter handoff and steer the planner at the whole-queue read.
 
-    Same shape as ``_refuse_handoff`` and for the same reason: the state stays
-    INVESTIGATING, the reason lands in the evidence trail that
-    ``planner_context.format_planner_context`` renders into the next planner
-    turn, and the
-    planner gets to fix its own omission.
-
-    The reason says which call, says what a filtered page is not, and says what
-    the read is FOR — a planner told only "read the queue" after it has already
-    called ``list_dlq_messages`` once will re-read the page it already has.
-    That is the failure mode ADR 0031 hit from the other direction and wrote
-    into its own refusal text.
-
-    Underscore-prefixed marker, per the repo-wide convention: the briefing's
-    evidence trail and the grader's "tools called" set both exclude it, and it
-    spends no tool-call budget.
+    Same shape as ``_refuse_handoff``: the state stays INVESTIGATING and the reason is
+    rendered into the next planner context. It names the call and what the read is FOR —
+    "read the queue" alone makes a planner re-read the page it has (ADR 0031).
+    Underscore-prefixed, so the briefing trail and the grader's tool set exclude it.
     """
     reason = (
         f"handoff refused: this run is about to take a dead-letter action "
@@ -1305,18 +845,9 @@ def _refuse_whole_queue_handoff(
 def _refuse_handoff(run_state: RunState, at: datetime, subject: AlertSubject) -> RunState:
     """Refuse a remediate handoff and steer the planner at the probe it skipped.
 
-    Deliberately NOT a terminal transition. The state stays INVESTIGATING and
-    the loop continues, so the planner gets to fix its own omission — the
-    refusal reason is rendered into the next planner context by
-    ``planner_context.format_planner_context`` like any other evidence line.
-    This mirrors the
-    plan-guard rejections in ``remediation.make_llm_plan``: reject the bad
-    output, say precisely what would make it good, let the model try again.
-
-    Recorded under an underscore-prefixed name per the repo-wide marker
-    convention, so the briefing's evidence trail and the grader's
-    "tools called" set both exclude it — a refusal is bookkeeping, not a
-    probe, and it spends no tool-call budget.
+    NOT a terminal transition: the state stays INVESTIGATING and the refusal is rendered
+    into the next planner context, mirroring ``remediation.make_llm_plan``'s plan guards.
+    Underscore-prefixed, so the briefing trail and the grader's tool set exclude it.
     """
     if subject.match is SubjectMatch.UNFILTERED:
         instruction = (

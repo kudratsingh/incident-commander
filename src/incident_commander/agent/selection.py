@@ -1,98 +1,12 @@
-"""``SelectionResult`` and the ``candidate_selector`` call (plan 02 § 12, WP-6.1).
+"""``SelectionResult``, its context and the ``candidate_selector`` call (plan 02 § 12, WP-6.1).
 
-The selector is the first genuinely new LLM role in the system. It is handed a
-candidate set — several distinct diagnoses of one world, produced by either
-best-of-N arm — and it says which one the run should act on, or that it wants
-another probe, or that it wants a human. It is the agent side of the trust
-boundary: it reads the alert, the evidence ledger and the candidates, and it
-never reads a ground truth.
-
-What this module is, and what WP-6.2 adds
------------------------------------------
-
-Here: the output schema with its validators, the context the selector is shown,
-and the one function that makes the call. There is no strategy here — nothing in
-this module decides a step, emits an action or touches the loop. WP-6.2's
-``strategies/candidate_selector.py`` composes this over a generator arm and is
-where a decision becomes an ``InvestigationStep``.
-
-Four properties are enforced as validators rather than asked for in prose, for
-the same reason ``agent/candidates.py`` gives: a rule the schema enforces is a
-rule that cannot be half-followed.
-
-1. **Every scored id is a real candidate, and every real candidate is scored.**
-   ``scores`` is keyed by ``candidate_id`` and is the only thing that ranks the
-   set, so an id that names no candidate makes ``selected_candidate_id``
-   unresolvable and a candidate with no score is a candidate the selector
-   silently declined to consider. Both fail, and the message names the id.
-2. **A selection is stated exactly when there is one.** ``selected_candidate_id``
-   is ``None`` if and only if the decision is not ``select`` — see "What
-   ``probe_more`` points at" below, which is where the plan's own two sentences
-   about this had to be reconciled.
-3. **The scale is declared.** ``scores`` and ``uncertainty`` are both in
-   ``[0, 1]``. WP-6.3 calibrates the selector's uncertainty against whether it
-   was right, and a number on an undeclared scale cannot be calibrated — 0.8
-   would mean one thing in a run that scored out of 1 and another in a run that
-   scored out of 100, and nothing in the record would say which.
-4. **The candidate set is bound, fail-closed.** Validation happens inside
-   ``selecting_among(candidates)``; with nothing bound it **refuses**. Same
-   mechanism and same reasoning as ``candidates.grounded_in``: the check needs
-   the payload and the set at once, and raising *inside* ``llm_client.call`` is
-   what makes an unresolvable id an ordinary output failure that ADR 0035
-   repairs once and then escalates, rather than a crash outside the repair loop.
-
-The context: one renderer, INC-002's rule from day one
-------------------------------------------------------
-
-The evidence the selector reads is rendered through ``briefing.render_trail`` —
-the function cmd #221 produced for the briefing writer and the briefing judge —
-so each probe appears as ``tool(arguments) -> result`` with its arguments first.
-It is not a fourth renderer and it is not a copy.
-
-INC-002 is why. The briefing judge was shown
-``list_dlq_messages: {"total":0,"items":[]}`` with the
-``remediation_hint='replay_safe'`` that scoped it stripped away, read it as "the
-queue is empty", and scored an honest briefing 0.0 for groundedness. The root
-cause was two halves: the rule went to one reader, and the record dropped the
-arguments so the scope was unrecoverable from the judge's context. The selector
-is a new reader of the same evidence, and it gets the same reading rule in the
-same change — in its prompt, and structurally, by being rendered through the
-same function. ``RunState.evidence`` has carried ``arguments`` all along, so
-this is a renderer choice and not a schema change.
-
-What ``probe_more`` points at
------------------------------
-
-Plan 02 says two things that cannot both be literally true. § 12's schema and
-WO-R3-208's own acceptance say ``selected_candidate_id`` is ``None`` exactly
-when the decision is not ``select``; 02:239 says "if decision == probe_more, the
-selected candidate's next_probe is emitted". If ``probe_more`` carries no
-selected id, there is no "selected candidate" to take a probe from.
-
-Resolved in favour of the acceptance text, with the gap closed by derivation
-rather than by widening the schema: ``select`` means "commit to this diagnosis",
-so it is the only decision that names one, and on ``probe_more`` the candidate
-whose ``next_probe`` is emitted is the **highest-scored** one. ``chosen_candidate_id``
-below is the single spelling of "the candidate this decision points at", so
-WP-6.2 reads one property instead of re-deriving the rule. The divergence is
-reported rather than smoothed over; see this packet's PR body.
-
-Temperature (decision O-24)
----------------------------
-
-Plan 04:161 asks for "temperature 0". Nothing here sends a temperature, and
-nothing here can be configured to. Anthropic's newest model families reject the
-sampling parameters outright (``llm/client.SAMPLING_REJECTED_MODELS``), so a
-selector that *required* ``temperature=0`` would 400 on the first selector call
-under a newer pin — and the headline experiment of the whole buildout would be
-un-runnable for a reason that has nothing to do with selection.
-
-What the plan wanted from temperature 0 is a selector that does not wander, and
-this schema buys that structurally instead: forced tool use against a fixed
-schema, a closed decision set, a declared scale, and an id space bounded by the
-candidate set. ``tests/unit/test_selector_schema.py`` asserts that the call
-sends no temperature at all, which is the assertion this repo can keep under
-every pin.
+No strategy here — WP-6.2's ``strategies/candidate_selector.py`` turns a decision into an
+``InvestigationStep``. Rules are validators: ``scores`` covers the set exactly,
+``selected_candidate_id`` is set iff the decision is ``select``, scores and ``uncertainty`` are
+in ``[0, 1]``, and ``selecting_among`` binds the set fail-closed so a bad id is an ADR-0035
+repair. Evidence renders through ``briefing.render_trail``, arguments first (INC-002);
+``probe_more`` names none, so ``chosen_candidate_id`` derives the highest-scored candidate. No
+temperature is sent (decision O-24), asserted by ``tests/unit/test_selector_schema.py``.
 """
 
 from __future__ import annotations
@@ -118,25 +32,17 @@ from incident_commander.llm.structured import StructuredOutput
 #: suite and the loader all spell it once.
 SELECTOR_PROMPT: Final[str] = "candidate_selector"
 
-#: Role label for the accounting split and the trace. Its own role, not the
-#: planner's: the selector is a different call with a different prompt, and a
-#: cost breakdown that folded it into ``investigation_planner`` could not
-#: answer "what did selection cost" — which is the number WP-6.2's arm is
-#: compared on. ``StepAccounting.selector_calls`` already counts the calls;
-#: this is what charges them.
+#: Role label for the accounting split and the trace — its own role, so selection's cost
+#: is separable from ``investigation_planner``'s. ``StepAccounting.selector_calls`` counts.
 SELECTOR_ROLE: Final[str] = "candidate_selector"
 
-#: The candidate ids one ``SelectionResult`` may refer to, for the duration of
-#: one selector call. ``None`` means nothing is bound, which is a refusal and
-#: not a licence. A ``ContextVar`` rather than a module global so concurrent
-#: runs in one process cannot read each other's candidate set.
+#: The candidate ids one ``SelectionResult`` may cite, for one selector call.
+#: ``None`` refuses; a ``ContextVar``, so runs cannot cross.
 _CANDIDATES: ContextVar[tuple[str, ...] | None] = ContextVar(
     "incident_commander_selector_candidates", default=None
 )
 
-#: Named so a refusal reads the same wherever it is raised from, and so a test
-#: asserts the guard's own marker rather than the fact that something raised
-#: (F-007).
+#: Named so a test asserts the guard's marker, not that something raised (F-007).
 NO_CANDIDATES_BOUND: Final[str] = "no candidate set is bound"
 UNKNOWN_CANDIDATE_ID: Final[str] = "names no candidate in the set you were shown"
 UNSCORED_CANDIDATE: Final[str] = "was not scored"
@@ -148,9 +54,7 @@ SELECT_WITHOUT_SELECTION: Final[str] = "decision is 'select' and no candidate is
 def selecting_among(candidates: Iterable[DiagnosisCandidate]) -> Iterator[None]:
     """Bind the candidate set a ``SelectionResult`` is resolved against.
 
-    Wrap the selector call with ``selecting_among(candidate_set)``. Re-entrant:
-    the previous binding is restored on exit, so a nested call cannot leave a
-    stale set behind.
+    Re-entrant: a nested call leaves no stale set.
     """
     token = _CANDIDATES.set(tuple(candidate.candidate_id for candidate in candidates))
     try:
@@ -172,14 +76,8 @@ def _bound_candidates(subject: str) -> tuple[str, ...]:
 
 
 class SelectionDecision(StrEnum):
-    # No class docstring: this enum is a field type on ``SelectionResult``,
-    # whose JSON schema is shown to the model on the ``record_output`` tool,
-    # and pydantic copies an enum's class docstring into
-    # ``$defs.<Enum>.description`` (LESSONS 2026-09-17, plat #210). The prose
-    # belongs in the module docstring and in the prompt, where a reviewer reads
-    # it. The three members are plan 02 § 12's ``Literal``, as an enum so the
-    # strategy that branches on them has names to branch on rather than three
-    # string literals repeated at three call sites.
+    # No class docstring: pydantic copies an enum's into ``$defs.<Enum>.description``,
+    # which the model reads on ``record_output`` (LESSONS 2026-09-17, plat #210).
     SELECT = "select"
     PROBE_MORE = "probe_more"
     ESCALATE = "escalate"
@@ -230,13 +128,8 @@ class SelectionResult(StructuredOutput):
     def _scores_cover_the_set_exactly(cls, value: dict[str, float]) -> dict[str, float]:
         """Every scored id is a candidate, and every candidate is scored.
 
-        The first half is plan 02 § 12's validator and the packet's red-before
-        case. The second half is a deliberate strengthening: ``scores`` is the
-        only ranking of the set, so a missing entry is a candidate the selector
-        declined to consider without saying so — and after WP-6.2 it is also a
-        candidate that cannot be the one ``probe_more`` points at. Both
-        directions name the id, because the id is what the person (or the
-        repair re-ask) needs.
+        The second half strengthens plan 02 § 12: ``scores`` is the only ranking, so a missing
+        entry is one ``probe_more`` cannot point at. Both directions name the id.
         """
         known = _bound_candidates("scores")
         for candidate_id in value:
@@ -266,11 +159,8 @@ class SelectionResult(StructuredOutput):
     def _a_selection_is_stated_exactly_when_there_is_one(self) -> SelectionResult:
         """``selected_candidate_id`` is ``None`` iff the decision is not ``select``.
 
-        Both directions are failures worth catching. An id on ``escalate`` reads
-        as a diagnosis the run then does not act on; a ``select`` with no id is
-        a commitment to nothing, and the strategy that reads it would have to
-        invent a fallback — which is how a decision the model did not make
-        becomes an action the run takes.
+        An id on ``escalate`` is a diagnosis nobody acts on; a ``select`` with no id
+        forces an invented fallback.
         """
         if self.decision is SelectionDecision.SELECT:
             if self.selected_candidate_id is None:
@@ -298,11 +188,8 @@ class SelectionResult(StructuredOutput):
     def chosen_candidate_id(self) -> str | None:
         """The candidate this decision points at — one spelling, one rule.
 
-        ``select`` points at the candidate it named. ``probe_more`` points at
-        the highest-scored candidate, because it names none and a probe has to
-        come from somewhere (see the module docstring). Ties go to the first
-        such id in ``scores``, which is the order the model stated them in.
-        ``escalate`` points at nothing: the run is over.
+        ``select`` names it; ``probe_more`` takes the highest-scored (ties: first in
+        ``scores``); ``escalate`` nothing.
         """
         if self.decision is SelectionDecision.SELECT:
             return self.selected_candidate_id
@@ -320,17 +207,9 @@ ALERT_PREFIX: Final[str] = "Alert: "
 def format_selection_context(run_state: RunState, candidates: Sequence[DiagnosisCandidate]) -> str:
     """What the ``candidate_selector`` is shown: the alert, the trail, the set.
 
-    The trail comes from ``briefing.render_trail``, so each probe reads
-    ``tool(arguments) -> result`` with its arguments first — the INC-002 rule,
-    applied through the same function the briefing writer and the briefing judge
-    read, not a copy of it.
-
-    Nothing evaluator-side is reachable from here. The three inputs are the
-    alert (``AgentVisibleScenario.alert``), the run's own evidence ledger and
-    the candidate set the model itself produced; ``Scenario.ground_truth`` and
-    ``discriminating_probes`` are not on this function's arguments at all, which
-    is the allow-list projection of ADR 0038 holding one layer further in.
-    ``tests/unit/test_selector_schema.py`` asserts it over the whole corpus.
+    The trail comes from ``briefing.render_trail`` — arguments first, the INC-002 rule.
+    Nothing evaluator-side is reachable: ``ground_truth`` and ``discriminating_probes`` are
+    not arguments at all (ADR 0038, ``tests/unit/test_selector_schema.py``).
     """
     lines = [
         f"{ALERT_PREFIX}{_alert_line(run_state)}",
@@ -359,9 +238,7 @@ def _alert_line(run_state: RunState) -> str:
 def _ids(refs: Sequence[EvidenceRef]) -> str:
     """A candidate's citations, or ``none`` — the word, so silence is visible.
 
-    Same choice ``best_of_n_enumerated.citation_reasoning`` makes: an empty
-    list rendered as nothing at all reads as a rendering gap, and "this
-    candidate cited nothing" is a fact the selector should weigh.
+    Same as ``best_of_n_enumerated.citation_reasoning``.
     """
     return ", ".join(str(ref.evidence_id) for ref in refs) or "none"
 
@@ -369,9 +246,7 @@ def _ids(refs: Sequence[EvidenceRef]) -> str:
 def _probe(candidate: DiagnosisCandidate) -> str:
     """The probe this candidate would run next, with its arguments.
 
-    Arguments included for the same reason the trail carries them: a probe is
-    identified by what it reads, and ``list_dlq_messages`` filtered and
-    unfiltered are two different reads under one name (INC-002).
+    Filtered and unfiltered reads share one tool name (INC-002).
     """
     if candidate.next_probe is None:
         return "none"
@@ -390,19 +265,10 @@ def select_candidate(
 ) -> RepairedCall[SelectionResult]:
     """Ask the ``candidate_selector`` which candidate the run should act on.
 
-    One call, through ``call_with_output_repair`` like every other structured
-    call in this repo, so an unresolvable id or a missing score is an ordinary
-    output failure: ADR 0035 re-asks once with the validation error, and ADR
-    0015 charges both legs. The caller accrues — ``accounting.accrue_structured_call``
-    — because a selector call the ledger did not see would make every cost
-    number for this arm a lower bound.
-
-    No temperature is sent, and there is no parameter to send one with; see the
-    module docstring on decision O-24.
-
-    ``selecting_among`` wraps the call rather than the parse afterwards, which
-    is what puts the validators inside ``llm_client.call`` and so inside the
-    repair loop (``agent/candidates.py`` explains the choice at length).
+    One call through ``call_with_output_repair``, so a bad id is an ordinary output failure:
+    ADR 0035 re-asks once, ADR 0015 charges both legs, the caller accrues via
+    ``accounting.accrue_structured_call``. No temperature (decision O-24), and
+    ``selecting_among`` wraps the call so validators run inside the repair loop.
     """
     if not candidates:
         raise ValueError(

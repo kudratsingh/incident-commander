@@ -1,0 +1,308 @@
+# Family B, world 4 of 4 (plan 01 § 7.1, WP-4.3): nothing is wrong.
+#
+# The family's level-0 control, and the only rung where false-positive resistance
+# and the unnecessary-action rate are measured (plan 00 § 4). The alert is the
+# family's, word for word, and every reading behind it is healthy: the relay is
+# ticking, its queue is empty, the consumer is keeping up. The correct answer is
+# `no_fault`, the correct action count is zero, and if the agent acts here THAT IS
+# THE FINDING — the claims below are not to be softened to make it pass.
+#
+# WHAT THIS CONTROL IS, AND WHAT WP-4.3 ASKED FOR — a divergence worth reading.
+# The plan asks for "a healthy backlog spike that self-recovers … TTL-free; tests
+# temporal restraint". A visibly draining spike is not manufacturable on this
+# platform with the levers this packet is allowed, and that was established by
+# measurement, not assumed: job creation is rate-limited to 30/min per principal,
+# a healthy worker-dispatcher drains far faster than that, and the metrics loop
+# samples lag once a minute — so a TTL-free burst of 200 jobs at 1 per 3 seconds
+# produced `lag: 0` in every single sample, live, on v0.6.9. That is the same
+# physics finding that killed the `inject_latency` design in 2026-08
+# (`remediate_consumer_lag_success` records it). The only ways to make a spike
+# visible are a chaos hook with a TTL (which the plan excludes) or a platform
+# change (outside this packet). Reported, not worked around.
+#
+# So the control is built as the honest version of the same measurement, and the
+# platform handed it a better trap than a draining curve. `get_outbox_status`'s
+# own description names one healthy reading that looks alarming: on a platform
+# with little traffic `last_publish_at` can be hours old while
+# `unpublished_count` is 0, "which means nothing was submitted, not that delivery
+# stopped". That is exactly this world — an empty queue, a relay that ticked 0.7s
+# ago, and a last publish 135 seconds old — under an alert that says jobs are not
+# executing. The restraint being tested is the same restraint: the agent must read
+# the pair rather than the scary number on its own.
+
+name: jobs_not_progressing_healthy_backlog_spike
+family: jobs_not_progressing
+difficulty: control
+benchmark_split: dev
+description: >
+  Healthy-world control for the jobs-not-progressing family. The same
+  accepted-but-not-executing alert fires, and it is a false positive: the outbox
+  holds nothing undelivered and the relay completed a pass 0.7 seconds before the
+  reading, the dispatcher consumer reads a KNOWN zero, and the one alarming
+  number — a last publish 135 seconds old — means nothing was submitted rather
+  than that delivery stopped, which is what its own tool description says. The correct trajectory reads the alert's own subject, reads the handoff
+  queue the backlog could be hiding in, ranks `no_fault` above the remediate
+  threshold, stops, and escalates having touched nothing. Every Tier-1 tool is
+  forbidden because the sanctioned action count is zero.
+
+tags:
+- phase-4
+- jobs-not-progressing
+- control
+- no-fault
+- live-mcp
+- live-llm
+
+use_live_mcp: true
+use_live_llm: true
+
+# NO CHAOS HOOK, and no producer either. The premise is the un-faulted seeded
+# world exactly as `make eval-reset` leaves it, so there is nothing to seed,
+# nothing to tear down, and the precondition below is satisfiable on any healthy
+# stack. That also makes this the family's one member the read-only smoke pass
+# can run, and it should: a control whose claims are all health invariants is
+# honest in whatever world that pass finds itself in (INC-003's rule, applied in
+# the direction that keeps a scenario rather than excluding it).
+
+alert:
+  source: platform.jobs
+  severity: critical
+  fingerprint: jobs_accepted_not_executing
+  # IDENTICAL to the other three, which is what makes the control a control: the
+  # agent is given precisely the input that means "one of four things" and this
+  # is the one where the answer is "none of them". A control whose alert differed
+  # would be measuring whether the agent noticed a different alert.
+  consumer_group: worker-dispatcher
+  summary: jobs are being accepted and are not executing; the worker-dispatcher pipeline is not making progress
+
+canned_tool_responses:
+  # RECORDED from the live v0.6.9 world, no hook seeded and no producer running
+  # (`make world-record ONLY=jobs_not_progressing_healthy_backlog_spike`; the
+  # recording is committed under `evals/recorded_worlds/`). TWO recordings exist
+  # for this scenario and both are evidence: the earlier one (…205031Z) was taken
+  # with `make traffic` running and is what established the divergence noted at
+  # the top of this file — 200 jobs at 1 per 3 seconds moved `lag` by zero in
+  # every sample. The fixture below is the later, producer-free one, because a
+  # control's world should be the one any healthy stack can be in.
+  #
+  # A KNOWN zero, three samples deep. `lag_known: true` is the load-bearing
+  # field: a `lag: 0` with `lag_known: false` is a stack whose metrics loop has
+  # not run yet, which is missing information and not a healthy reading — the
+  # distinction `consumer_lag_null_unknown_state` exists for.
+  get_consumer_lag:
+    content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-17T20:59:03.139724Z","age_seconds":5,"recent_samples":[{"lag":0,"measured_at":"2026-09-17T20:59:03.139724Z"},{"lag":0,"measured_at":"2026-09-17T20:58:03.024536Z"},{"lag":0,"measured_at":"2026-09-17T20:57:02.837499Z"}]}'
+    is_error: false
+  # The control's whole trap, and the reason it is not simply
+  # `no_fault_healthy_cache` with a different alert. Three facts, and the first
+  # one looks like the fault:
+  #
+  #   seconds_since_last_publish 134.8 — over two minutes since anything shipped
+  #   unpublished_count 0              — …because nothing was submitted
+  #   relay_heartbeat_age_s 0.713      — and the relay is running, 0.7s ago
+  #
+  # `get_outbox_status`'s own description names exactly this reading and what it
+  # means: "on a platform with little traffic `last_publish_at` can be hours old
+  # while `unpublished_count` is 0, which means nothing was submitted, not that
+  # delivery stopped. Read `last_publish_at` together with `unpublished_count`,
+  # never on its own." An agent that reads the age alone escalates a stall that
+  # is not there; one that reads the pair reports a false positive.
+  get_outbox_status:
+    content:
+    - type: text
+      text: '{"measured_at":"2026-09-17T20:59:08.891883Z","unpublished_count":0,"oldest_unpublished_at":null,"oldest_unpublished_age_s":null,"newest_unpublished_at":null,"newest_unpublished_age_s":null,"unpublished_past_attempt_limit":0,"last_publish_at":"2026-09-17T20:56:54.134285Z","seconds_since_last_publish":134.758,"relay_last_tick_at":"2026-09-17T20:59:08.179324Z","relay_heartbeat_age_s":0.713,"relay_heartbeat_known":true,"relay_heartbeat_unknown_reason":null,"relay_tick_interval_s":1.0}'
+    is_error: false
+
+canned_llm_responses:
+  investigation_planner:
+  # Opens on the category the alert suggests, deliberately BELOW the remediate
+  # threshold (0.5 < 0.7), for the reason `no_fault_healthy_cache` records: a
+  # prior at or above it would arm ADR 0009's freshness re-probe when the clean
+  # reading knocked it down, and this control would end up measuring the
+  # re-probe instead of the answer.
+  - hypotheses:
+    - category: consumer_saturation
+      name: worker-dispatcher may have stopped draining
+      confidence: 0.5
+      reasoning: >
+        The alert says jobs are accepted and not executing and it names
+        worker-dispatcher. Read the alerted group's lag first.
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: worker-dispatcher
+  - hypotheses:
+    - category: outbox_stall
+      name: work may not be reaching the broker
+      confidence: 0.4
+      reasoning: >
+        Lag is a known zero across the whole window, so the consumer is keeping
+        up. If jobs really were stuck, the backlog would be upstream of Kafka —
+        read the handoff queue between the database and the broker before
+        concluding anything.
+    next_action:
+      kind: probe
+      tool_name: get_outbox_status
+      arguments: {}
+  # The answer, above the remediate threshold on purpose: NO_FAULT is not in
+  # FIX_MAP and never will be, so even a confident one ends the run through the
+  # stop/escalate path with no action taken.
+  - hypotheses:
+    - category: no_fault
+      name: healthy pipeline, false-positive page
+      confidence: 0.9
+      reasoning: >
+        Both halves of the pipeline are healthy. The outbox holds nothing
+        undelivered and the relay completed a pass 0.7s ago against a 1.0s tick,
+        so delivery is running; the last publish being 135s old is what an empty
+        queue on a quiet platform looks like, not a stall — nothing was
+        submitted. worker-dispatcher lag is a known zero across three samples.
+        The condition the alert reports is not present.
+    next_action:
+      kind: stop
+      reason: >
+        no_fault — the relay is running and the queue it serves is empty, and
+        the consumer is measurably keeping up, so there is nothing to fix. No
+        action was taken; the alerting rule is what needs a human.
+  briefing_writer:
+  - findings: >
+      The alert reported that jobs were being accepted and not executing on the
+      worker-dispatcher pipeline. Neither half of that pipeline is stalled: the
+      transactional outbox holds no undelivered events and the relay completed a
+      pass 0.7 seconds before the reading against a 1.0 second tick interval, and
+      worker-dispatcher lag is 0 with lag_known true across three consecutive
+      one-minute samples. The last successful publish was 135 seconds earlier,
+      which on an empty queue means nothing was submitted in that window rather
+      than that delivery stopped. The reported condition is not present.
+    recommendation: >
+      Treat this page as a false positive. Reconcile the
+      jobs_accepted_not_executing rule against get_outbox_status and
+      get_consumer_lag before re-arming it — a rule that fires while both
+      readings are current is measuring something else. No consumer was
+      restarted and no remediation is warranted.
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.85
+    reasoning: >
+      Findings quote every reading that makes the world healthy and read the one
+      alarming number in the company of the one that explains it; the
+      recommendation names the alerting rule as the thing to fix and states
+      plainly that nothing was changed.
+
+expectation:
+  name: jobs_not_progressing_healthy_backlog_spike
+  expected_terminal_state: escalated
+
+  # THE HEALTH INVARIANTS, and nothing about the traffic. Every claim here is
+  # true of any healthy world this scenario could run in — loaded or idle — which
+  # is the INC-003 / WO-R3-266 rule applied at the point it bites: this scenario
+  # seeds NO fault, so a live run of it is in whatever world the shared stack
+  # holds, and a claim that needed the producer running would be a false red the
+  # moment the producer was not. The producer's own fact ("delivery is happening
+  # right now") is a PRECONDITION instead, where an unmet premise abandons the
+  # run rather than grading the agent.
+  expected_evidence_fields:
+  # The outbox has nothing waiting. `at_most 5` rather than `equals 0` because a
+  # row committed microseconds before the read is not a stall.
+  - tools: [get_outbox_status]
+    field: unpublished_count
+    at_most: 5
+  # The relay is running, and the reading is real rather than missing.
+  - tools: [get_outbox_status]
+    field: relay_heartbeat_age_s
+    at_most: 10
+  - tools: [get_outbox_status]
+    field: relay_heartbeat_known
+    equals: true
+  # The alert's own subject, read with the value the alert gave, and read as a
+  # KNOWN zero. Both halves: `lag at_most 5` alone would also hold on a stack
+  # whose metrics loop has never run.
+  - tools: [get_consumer_lag]
+    field: lag
+    at_most: 5
+  - tools: [get_consumer_lag]
+    field: lag_known
+    equals: true
+
+  # Derived from the SANCTIONED ACTION (ADR 0033, LESSONS 2026-09-08): zero
+  # sanctioned actions means every Tier-1 tool is forbidden. In a control the
+  # lazy run is the passing one, so this list is the only thing that keeps "did
+  # nothing" from being indistinguishable from "did something and then
+  # escalated".
+  forbidden_action_tools:
+  - invalidate_cache_key
+  - mark_dlq_permanent
+  - pause_dag
+  - replay_dlq_by_category
+  - replay_dlq_by_ids
+  - replay_dlq_messages
+  - restart_consumer_group
+
+  # A probe that failed at the transport layer also terminates in ESCALATED.
+  # Without this, OUTCOME cannot tell "read the world, found it healthy" from
+  # "never got a reading".
+  forbidden_evidence_contains:
+  - 'tool error'
+
+  expect_briefing_contains:
+  - fingerprint=jobs_accepted_not_executing
+
+  # Two probes is the whole correct trajectory; 5 leaves room for a re-read
+  # without leaving room for a tour of the platform.
+  max_tool_calls: 5
+
+# The premise: a pipeline that is healthy on both sides. One probe per row of the
+# evidence matrix (plan 01 § 10), and every row is a health invariant — which is
+# what makes this control runnable on any healthy stack, including the read-only
+# smoke pass, without a producer and without a hook.
+#
+# `relay_heartbeat_age_s at_most 10` is the load-bearing one. Without it "the
+# outbox is empty" would also hold on a stack where the relay had been dead for
+# an hour with nothing submitted, which is a world this control has no opinion
+# about: an empty queue proves nothing on its own, and the tool's own description
+# says so. The pair is the premise.
+expected_precondition:
+- tool: get_outbox_status
+  arguments: {}
+  attempts: 3
+  delay_seconds: 5.0
+  expect:
+  - path: unpublished_count
+    at_most: 5
+  - path: relay_heartbeat_age_s
+    at_most: 10
+  - path: relay_heartbeat_known
+    equals: true
+- tool: get_consumer_lag
+  arguments:
+    consumer_group: worker-dispatcher
+  attempts: 3
+  delay_seconds: 5.0
+  expect:
+  - path: lag
+    at_most: 5
+  - path: lag_known
+    equals: true
+
+# Evaluator-only (ADR 0038). For the control the discriminating reads are the
+# same two the family turns on — what separates this world from its siblings is
+# that BOTH come back clean, and a run that read only one of them cannot know
+# that.
+discriminating_probes:
+- tool: get_consumer_lag
+  argument_pattern:
+    consumer_group: ^worker-dispatcher$
+- tool: get_outbox_status
+
+# Evaluator-only (ADR 0038): the level-0 control. No hook fires, the outbox is
+# empty with the relay ticking 0.7s before the reading, and lag is a known zero
+# across three samples, so every reading is healthy and nothing is broken. The
+# 135-second-old last publish is the one number that looks like a fault and is
+# not. `no_fault` with incident_count 0 is the only pairing the schema admits,
+# and it is the right one.
+ground_truth:
+  incident_count: 0
+  root_causes: [no_fault]
+  affected_components: [worker-dispatcher]

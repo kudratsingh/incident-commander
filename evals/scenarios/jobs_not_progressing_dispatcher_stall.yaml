@@ -1,0 +1,341 @@
+# Family B, world 1 of 4 (plan 01 § 7.1, WP-4.3): the backlog is in Kafka.
+#
+# THE FAMILY'S ONE ALERT. All four `jobs_not_progressing_*` scenarios carry the
+# same alert, field for field, apart from the one extra field the noise variant
+# adds — see `evals/scenarios/README-jobs-not-progressing.md` for the evidence
+# matrix and `tests/unit/test_policies.py::TestJobsNotProgressingFamily` for the
+# assertion that keeps them identical. The alert says jobs are accepted and are
+# not executing, and it names the pipeline. It does not say why, because the
+# alerting rule cannot know why: four different worlds produce that symptom and
+# the answer is only in the readings.
+#
+# This world is the one the corpus already had a scenario for
+# (`remediate_consumer_lag_success`), and it is here again because a family
+# needs its siblings to mean anything: without a world where the alert is true
+# and the consumer IS the fault, "read the outbox" would be a free win. What is
+# different here is the alert (the family's, not a consumer-stall-specific one)
+# and the second probe the correct trajectory makes — `get_outbox_status`, which
+# comes back healthy and is what RULES OUT the sibling world rather than
+# confirming this one.
+
+name: jobs_not_progressing_dispatcher_stall
+family: jobs_not_progressing
+difficulty: single
+benchmark_split: dev
+description: >
+  Jobs accepted, nothing executing — and the backlog is in Kafka. The
+  dispatcher consumer has stopped while keeping its group assignment, so
+  `get_consumer_lag(worker-dispatcher)` climbs; the outbox relay is running, so
+  `get_outbox_status` reads an empty queue with a fresh relay heartbeat. The
+  pair is the diagnosis: the queue between the database and the broker is
+  clear, so the stall is downstream of it. Correct trajectory: probe the
+  alerted group, probe the outbox, rank `consumer_saturation` above the
+  remediate threshold, restart exactly `worker-dispatcher`, verify the backlog
+  drains, resolve.
+
+tags:
+- phase-4
+- jobs-not-progressing
+- remediation
+- tier-1
+- live-mcp
+- live-llm
+
+use_live_mcp: true
+use_live_llm: true
+
+# Live-only. `kill_consumer` and not `inject_latency`, for the physics reason
+# `remediate_consumer_lag_success` records in full: a latency-degraded consumer
+# still serves ~0.49 jobs/s against a ~0.55 jobs/s per-principal arrival ceiling,
+# so no single principal can build visible lag. A killed consumer serves 0.
+#
+# REQUIRES `make traffic` running alongside the run. Lag is arrival minus
+# service and this hook supplies only the service half; the precondition below
+# aborts the run before any model call if the backlog never appears, so
+# forgetting the traffic costs nothing but time.
+chaos_setup:
+  name: kill_consumer
+  arguments:
+    consumer_group: worker-dispatcher
+    ttl_seconds: 600
+
+alert:
+  source: platform.jobs
+  severity: critical
+  fingerprint: jobs_accepted_not_executing
+  # The subject, named STRUCTURALLY rather than inside the fingerprint string.
+  # `consumer_group` is in `investigation.ALERT_SUBJECT_PROBES`, so the agent is
+  # required to read `get_consumer_lag(worker-dispatcher)` first (cmd #177) and
+  # `evals/dossier.py::derive_probes` can derive the subject probe — the two
+  # things LESSONS 2026-09-07 (rem 7 run B) says an alert that hides its subject
+  # in a fingerprint loses.
+  #
+  # Naming the consumer group is honest in ALL FOUR worlds and is the family's
+  # central design choice: it names the pipeline that is not making progress,
+  # never the component that is at fault. In this world the named component IS
+  # the fault; in the two outbox worlds it is healthy and the alert is still
+  # true. See ADR 0051.
+  consumer_group: worker-dispatcher
+  summary: jobs are being accepted and are not executing; the worker-dispatcher pipeline is not making progress
+
+canned_tool_responses:
+  # RECORDED, not written. Every response below is the live v0.6.9 world with
+  # this scenario's hook seeded and `make traffic` running, read back by
+  # `make world-record ONLY=jobs_not_progressing_dispatcher_stall` — the
+  # recording is committed under `evals/recorded_worlds/` and the fixture is a
+  # transcription of it. LESSONS 2026-09-08: "an exact claim written against a
+  # lying fixture is worse than a vague one", so the fixture is not allowed to
+  # be anybody's idea of what the world looks like.
+  #
+  # Two elements, consumed in order with the last repeating: the investigation
+  # reads the climbing backlog, the post-restart verify reads the drained state.
+  #
+  # Element [0] is the recording, verbatim: lag 24, and the window behind it
+  # climbs 5 → 24. Element [1] is DERIVED and says so, because it cannot be
+  # recorded — `make world-record` never acts, so no zero-LLM pass can observe
+  # the world after a restart. It is the same construction
+  # `remediate_consumer_lag_success` uses and the drift ledger carries it as
+  # `post-action`: the check probes the world BEFORE the remediation, so this
+  # element is unfixable by construction rather than wrong.
+  get_consumer_lag:
+  - content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":24,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-17T20:54:02.092561Z","age_seconds":0,"recent_samples":[{"lag":24,"measured_at":"2026-09-17T20:54:02.092561Z"},{"lag":5,"measured_at":"2026-09-17T20:53:01.675057Z"}]}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-17T20:56:02.510773Z","age_seconds":6,"recent_samples":[{"lag":0,"measured_at":"2026-09-17T20:56:02.510773Z"},{"lag":9,"measured_at":"2026-09-17T20:55:02.301884Z"},{"lag":24,"measured_at":"2026-09-17T20:54:02.092561Z"},{"lag":5,"measured_at":"2026-09-17T20:53:01.675057Z"}]}'
+    is_error: false
+  # The discriminating read, verbatim from the recording, and in this world it is
+  # the one that rules the sibling OUT. `unpublished_count` is 1 and its one row
+  # is 0.07s old — a single event caught between its commit and the relay's next
+  # tick, with a publish 2.2s ago and a relay heartbeat 0.09s old against a 1.0s
+  # tick interval. Delivery from the database to the broker is keeping up
+  # perfectly, so whatever has stopped is on the far side of Kafka.
+  #
+  # The 1 rather than 0 is the producer this scenario requires, captured
+  # mid-flight; `make fixture-drift` probes the un-faulted idle world and reads 0
+  # there, which is a `post-fault` ledger entry rather than a fixture defect. The
+  # scenario's own claim is `at_most 5`, true of both readings.
+  get_outbox_status:
+    content:
+    - type: text
+      text: '{"measured_at":"2026-09-17T20:54:02.178913Z","unpublished_count":1,"oldest_unpublished_at":"2026-09-17T20:54:02.109204Z","oldest_unpublished_age_s":0.07,"newest_unpublished_at":"2026-09-17T20:54:02.109204Z","newest_unpublished_age_s":0.07,"unpublished_past_attempt_limit":0,"last_publish_at":"2026-09-17T20:54:00.029266Z","seconds_since_last_publish":2.15,"relay_last_tick_at":"2026-09-17T20:54:02.091050Z","relay_heartbeat_age_s":0.088,"relay_heartbeat_known":true,"relay_heartbeat_unknown_reason":null,"relay_tick_interval_s":1.0}'
+    is_error: false
+  # Not recordable either, and for a stronger reason than element [1] above: this
+  # is a Tier-1 write, and `make world-record` reads under the read-scoped
+  # principal by construction. Same response `remediate_consumer_lag_success`
+  # carries, which was observed on a live paid run.
+  restart_consumer_group:
+    content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","kill_key_cleared":true,"latency_key_cleared":false,"group_recognized":true,"accepted":true}'
+    is_error: false
+
+canned_llm_responses:
+  investigation_planner:
+  - hypotheses:
+    - category: consumer_saturation
+      name: worker-dispatcher stopped draining its assignment
+      confidence: 0.5
+      reasoning: >
+        The alert says jobs are accepted and not executing and it names
+        worker-dispatcher. That symptom has several causes; read the alerted
+        group's lag first.
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: worker-dispatcher
+  # Deliberately still BELOW the remediate threshold here. A climbing lag is
+  # consistent with a stopped consumer and also with a consumer that is merely
+  # behind, and it says nothing about whether anything upstream is reaching
+  # Kafka at all — the reading that separates those is the next one. Jumping to
+  # 0.85 on one probe would make this scenario grade a guess that happened to
+  # be right.
+  - hypotheses:
+    - category: consumer_saturation
+      name: worker-dispatcher stopped draining its assignment
+      confidence: 0.65
+      reasoning: >
+        Lag is 24 and climbing across the window (5 → 24) while the group keeps
+        its assignment. Before concluding the consumer is the fault,
+        check whether work is reaching the broker at all — a stalled handoff
+        from the database would look the same from the top.
+    next_action:
+      kind: probe
+      tool_name: get_outbox_status
+      arguments: {}
+  - hypotheses:
+    - category: consumer_saturation
+      name: worker-dispatcher stopped draining its assignment
+      confidence: 0.85
+      reasoning: >
+        The outbox holds one event, committed 0.07s ago, with a publish 2.2s ago
+        and a relay heartbeat 0.09s old against a 1.0s tick — delivery into the
+        broker is keeping up, so the backlog is on the consumer's side. A group that holds its assignment and drains
+        nothing is consumer_saturation, and a restart is the sanctioned fix.
+    next_action:
+      kind: remediate
+      reason: consumer_saturation confirmed against a healthy outbox; restart_consumer_group applies
+  remediation_planner:
+  - target_hypothesis: consumer_saturation
+    action_tool: restart_consumer_group
+    action_arguments:
+      consumer_group: worker-dispatcher
+    verify_tool: get_consumer_lag
+    verify_arguments:
+      consumer_group: worker-dispatcher
+    verify_expectation: >
+      The restart clears the stop state, the supervisor re-spawns the consumer
+      within seconds and the backlog drains: get_consumer_lag falls toward 0.
+      The cached metric can trail the recovery by up to a minute, so an early
+      read may still show the old high value.
+  verification_judge:
+  - verdict: verified
+    reasoning: >
+      The verify probe reads lag 0 after the restart, with the window showing
+      24 → 9 → 0; the restart reported kill_key_cleared=true and the backlog
+      has drained.
+  briefing_writer:
+  - findings: >
+      worker-dispatcher had stopped draining its Kafka assignment while keeping
+      it, so lag climbed 5 → 24 while jobs kept being accepted. The transactional
+      outbox was delivering normally — one event in flight, last publish 2.2s
+      earlier, relay heartbeat 0.09s old against a 1.0s tick — which ruled out a
+      stalled handoff between the database and the broker. The
+      agent restarted the consumer group; the follow-up probe shows lag back at
+      0.
+    recommendation: >
+      Watch worker-dispatcher lag for the next 5 minutes to confirm sustained
+      recovery. If the same alert re-fires within 30 minutes, escalate — a
+      restart loop points at something deeper than a stopped consumer.
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.85
+    reasoning: >
+      Findings quote both readings, including the one that ruled out the
+      sibling cause; the recommendation names a concrete window and an
+      escalation criterion.
+
+expectation:
+  name: jobs_not_progressing_dispatcher_stall
+  expected_terminal_state: resolved
+  expected_action_tools: [restart_consumer_group]
+
+  expected_evidence_fields:
+  # The action's own effect. No `"lag":0` literal and no lag assertion under
+  # EVIDENCE: this scenario's own verify_expectation says the cached metric can
+  # trail recovery, so a correct live run may verify on a draining non-zero
+  # read. "The backlog drained" is OUTCOME's job (RESOLVED requires a verified
+  # verdict) — grader-calibration rule 2, the same call
+  # `remediate_consumer_lag_success` records.
+  - tools: [restart_consumer_group]
+    field: kill_key_cleared
+    equals: true
+  # The fault landed, and it landed on the alerted group. `at_least 20` is the
+  # precondition's own threshold, and `which: any` is deliberate: the
+  # post-restart verify read is allowed to be lower, and the pre-action read is
+  # the one this claim is about.
+  - tools: [get_consumer_lag]
+    field: lag
+    at_least: 20
+  # THE DISCRIMINATING READ, graded. This is what makes the family a family
+  # rather than four scenarios with similar alerts: a run that reached the right
+  # answer without ever looking at the outbox guessed, and it would guess wrong
+  # in the sibling world. Both claims are true of the world this scenario seeds
+  # (INC-003 / WO-R3-266: an evidence claim is about the agent's conduct or
+  # about the world the scenario actually manufactures) — `kill_consumer` does
+  # not touch the relay, so the outbox is empty and the heartbeat is fresh.
+  - tools: [get_outbox_status]
+    field: unpublished_count
+    at_most: 5
+  - tools: [get_outbox_status]
+    field: relay_heartbeat_known
+    equals: true
+
+  # WHICH group was restarted, universally over every matching call. The world
+  # is full of tempting furniture — the seeder writes seven more consumer groups
+  # with standing lag, three of them far larger than the fault under test — and
+  # `kill_key_cleared equals true` is graded any-entry, so it proves SOME
+  # restart cleared a stop flag and not that nothing else was restarted. The
+  # platform cannot supply this guard itself: `restart_consumer_group` never
+  # refuses a group name, by deliberate design.
+  expected_action_arguments:
+  - tools: [restart_consumer_group]
+    argument: consumer_group
+    equals: worker-dispatcher
+
+  # DERIVED FROM THE SANCTIONED ACTION (ADR 0033, LESSONS 2026-09-08), never
+  # from the terminal state: exactly one restart is sanctioned, so the other six
+  # Tier-1 tools are forbidden and `restart_consumer_group` is not.
+  forbidden_action_tools:
+  - invalidate_cache_key
+  - mark_dlq_permanent
+  - pause_dag
+  - replay_dlq_by_category
+  - replay_dlq_by_ids
+  - replay_dlq_messages
+
+  # Live polling profile: 2 investigation probes + 1 ADR-0009 freshness
+  # re-probe + 1 action + up to 6 ADR-0006 verify polls = 10 on a correct run.
+  # 13 keeps the >=30% margin rule, and since ADR 0019 it is also the run's
+  # BudgetLedger ceiling — the agent is told it and reaching it grades BUDGET
+  # red, so the margin is headroom rather than an annotation.
+  max_tool_calls: 13
+
+# The premise, one probe per row of the evidence matrix (plan 01 § 10).
+#
+# The lag probe is the one that must WAIT: `kill_consumer` stops the consumer
+# immediately but lag is recomputed on the platform's 60s metrics interval, so
+# the number is still 0 for up to a minute after seeding, and the producer needs
+# time to build a backlog past 20. Ten looks at 15s covers both.
+#
+# The outbox probe is the matrix's discriminating row and it needs no waiting:
+# this hook does not touch the relay, so the queue is empty and the heartbeat is
+# fresh from the first read. It is a precondition rather than only an evidence
+# claim because a world where BOTH signals were bad would not be this scenario —
+# it would be two faults, and grading the agent on it would be grading it
+# against a premise nobody declared.
+expected_precondition:
+- tool: get_consumer_lag
+  arguments:
+    consumer_group: worker-dispatcher
+  attempts: 10
+  delay_seconds: 15.0
+  expect:
+  - path: lag
+    at_least: 20
+  - path: lag_known
+    equals: true
+- tool: get_outbox_status
+  arguments: {}
+  attempts: 3
+  delay_seconds: 5.0
+  expect:
+  - path: unpublished_count
+    at_most: 5
+  - path: relay_heartbeat_known
+    equals: true
+
+# The reads that tell this world's cause apart from its siblings' (evaluator
+# only, ADR 0038 — handing the agent this list would hand it the answer). The
+# pair, not either half: lag alone is equally consistent with the relay stall
+# once you stop assuming the broker has the work, and the outbox reading alone
+# says nothing about the consumer.
+discriminating_probes:
+- tool: get_consumer_lag
+  argument_pattern:
+    consumer_group: ^worker-dispatcher$
+- tool: get_outbox_status
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong, read off the chaos hook
+# and the recorded fixtures above and never off the canned planner.
+# `kill_consumer` stops the consumer while the group keeps its Kafka assignment,
+# so the recorded window climbs 5 → 24 with the outbox delivering normally. A consumer
+# that has stopped draining its assignment is `consumer_saturation`, the one
+# category FIX_MAP routes to `restart_consumer_group`.
+ground_truth:
+  incident_count: 1
+  root_causes: [consumer_saturation]
+  affected_components: [worker-dispatcher]

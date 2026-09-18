@@ -1,0 +1,32 @@
+{
+  "absent_reason": null,
+  "applies": false,
+  "ground_truth": {
+    "affected_components": [
+      "worker-dispatcher"
+    ],
+    "causal_chain": [],
+    "incident_count": 0,
+    "root_causes": [
+      "no_fault"
+    ]
+  },
+  "provenance": {
+    "commander_head": "a9dce8a",
+    "invocation_id": "00b8f2937c03",
+    "platform_mcp_url": "http://localhost:8001/mcp",
+    "read_principal": "PLATFORM_SMOKE_TOKEN (read-scoped)",
+    "recorded_at": "2026-09-17T20:50:31.603291+00:00"
+  },
+  "recording": "jobs_not_progressing_healthy_backlog_spike.20260917T205031Z.00b8f2937c03.json",
+  "scenario": "jobs_not_progressing_healthy_backlog_spike",
+  "schema_version": 1,
+  "why_this_file_is_separate": "ADR 0038: the wall around the answer key is structural. The replay client loads the recording through `recorder.load_recording`, which takes one path and has no way to reach this file; `RecordedWorld` forbids extra keys, so a ground truth cannot ride inside a recording either. Pinned by tests/unit/test_recorder.py.",
+  "world": {
+    "chaos_hooks": [],
+    "chaos_seeded": false,
+    "label": "the live platform as it stood, with NO fault seeded for `jobs_not_progressing_healthy_backlog_spike` \u2014 whatever the shared stack happened to hold. A ground truth written about the scenario's fault is not about this world (ADR 0040, INC-003).",
+    "live_mcp": true,
+    "settle_seconds": 0.0
+  }
+}

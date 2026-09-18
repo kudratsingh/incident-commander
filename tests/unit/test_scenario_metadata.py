@@ -155,13 +155,22 @@ class TestSplitsAreByTemplate:
         }
 
     def test_the_shipped_corpus_loads(self) -> None:
-        """41 scenarios, no straddle. The check is inert until it is not."""
-        assert len(CORPUS) == 41
+        """45 scenarios, no straddle. The check is inert until it is not.
+
+        41 until WO-R3-202 (WP-4.3) added the four `jobs_not_progressing`
+        worlds. The number is a pin rather than a derivation on purpose: a
+        scenario that appears without anybody noticing is the thing this
+        catches.
+        """
+        assert len(CORPUS) == 45
 
 
 class TestClosedVocabularies:
     def test_family_outside_the_enum_is_a_load_error(self, tmp_path: Path) -> None:
-        _write(tmp_path, "solo", extra="family: jobs_not_progressing\n")
+        # Was `jobs_not_progressing`, which WO-R3-202 made real. `workflow_stuck`
+        # is the next of plan 01 § 7's future families and will do the same to
+        # this case when WP-7.2 lands; the test below is what forces the swap.
+        _write(tmp_path, "solo", extra="family: workflow_stuck\n")
         with pytest.raises(ScenarioLoadError, match="family"):
             load_scenarios(tmp_path)
 
@@ -197,10 +206,28 @@ class TestClosedVocabularies:
 
         An empty group in a report reads as a measured zero, which is worse
         than an absent one.
+
+        `jobs_not_progressing` left this set in WO-R3-202 (WP-4.3), which is the
+        rule working: the member landed in the same change as the four scenarios
+        that fill it. `workflow_stuck` goes the same way with WP-7.2, and
+        `api_latency` with Phase 8.
         """
-        assert not {"jobs_not_progressing", "workflow_stuck", "api_latency"} & {
-            member.value for member in ScenarioFamily
-        }
+        assert not {"workflow_stuck", "api_latency"} & {member.value for member in ScenarioFamily}
+
+    def test_the_family_that_arrived_brought_its_scenarios_with_it(self) -> None:
+        """The other direction, and the one that makes the rule above a rule.
+
+        A member removed from the list above is only legitimate while something
+        in the corpus actually manufactures that world — otherwise the exemption
+        was just deleted and the empty group is back.
+        """
+        populated = {s.family.value for s in CORPUS if s.family is not None}
+        unpopulated = sorted({m.value for m in ScenarioFamily} - populated)
+        assert unpopulated == [], (
+            f"these families are in the enum and in no scenario: {unpopulated}. "
+            "A family for a world nobody has built is an empty group that reads "
+            "as a measured zero."
+        )
 
 
 @pytest.mark.parametrize("name", sorted(BY_NAME))
@@ -281,6 +308,35 @@ class TestPromotionIsReconciled:
             "no world; the planner's own stop path",
         ),
         "remediate_verify_fails": ("uncategorized", "consumer_lag", "alert IS consumer lag"),
+        # WO-R3-202 (WP-4.3). The substring rule has no needle for an outbox or
+        # a dispatch pipeline, so it answers `uncategorized` for three of the
+        # four — the rule saying it cannot tell, which is exactly what it should
+        # say about a world that did not exist when it was written.
+        "jobs_not_progressing_dispatcher_stall": (
+            "uncategorized",
+            "jobs_not_progressing",
+            "plan 01 section 7.1's Family B; the symptom is accepted-but-not-executing",
+        ),
+        "jobs_not_progressing_outbox_stall": (
+            "uncategorized",
+            "jobs_not_progressing",
+            "same family, the sibling world where the backlog is in Postgres",
+        ),
+        "jobs_not_progressing_healthy_backlog_spike": (
+            "uncategorized",
+            "jobs_not_progressing",
+            "same family, the level-0 control where nothing is wrong",
+        ),
+        # This one the rule DID answer, and answered wrongly in the most
+        # instructive way available: the name carries `deploy_noise`, the
+        # `deploy` needle matched, and the rule classified the scenario as the
+        # family of its own distractor. The noise is the point of the scenario
+        # and not its subject.
+        "jobs_not_progressing_outbox_stall_deploy_noise": (
+            "deploy",
+            "jobs_not_progressing",
+            "the deploy in the name is the distractor, not the family",
+        ),
     }
 
     #: scenario -> (provisional difficulty, authoritative difficulty, why)
@@ -308,6 +364,19 @@ class TestPromotionIsReconciled:
             "single",
             "multi_hop",
             "dag state -> the root's own DLQ row -> replay",
+        ),
+        # WO-R3-202 (WP-4.3). Same miss as `no_fault_healthy_cache`: the
+        # provisional rule reads the NAME for `noise_`, so a control and a noise
+        # variant that spell themselves otherwise both come back `single`.
+        "jobs_not_progressing_healthy_backlog_spike": (
+            "single",
+            "control",
+            "its own header: level-0 control, every reading is healthy",
+        ),
+        "jobs_not_progressing_outbox_stall_deploy_noise": (
+            "single",
+            "noisy",
+            "a real but unrelated release named in the alert is the variable",
         ),
     }
 

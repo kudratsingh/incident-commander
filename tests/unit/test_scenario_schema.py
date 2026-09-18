@@ -862,16 +862,17 @@ class TestTheGraderSideCanReadTheAnswerKey:
     def test_coverage_is_reportable_over_the_whole_corpus(self) -> None:
         corpus = load_scenarios(_SCENARIOS_DIR)
         graded = [s.name for s in corpus if s.root_cause_graded]
-        # 32 of 41 since WO-R3-261, which wrote a decision for every scenario
-        # from the world it manufactures. The other nine are recorded
-        # abstentions rather than omissions — the tool-failure tests, the
-        # harness control and the noise controls, none of which produces a
-        # diagnosis to grade. WHICH scenarios, and why each one, is pinned by
-        # ``tests/unit/test_ground_truth_corpus.py``; what this asserts is only
-        # that the predicate the report is built from can still be computed
-        # over the whole corpus and is no longer vacuous.
-        assert len(graded) == 32
-        assert len(corpus) >= 41
+        # 36 of 45: 32 of 41 since WO-R3-261, which wrote a decision for every
+        # scenario from the world it manufactures, plus WO-R3-202's four
+        # `jobs_not_progressing` worlds, every one of them labelled. The other
+        # nine are recorded abstentions rather than omissions — the tool-failure
+        # tests, the harness control and the noise controls, none of which
+        # produces a diagnosis to grade. WHICH scenarios, and why each one, is
+        # pinned by ``tests/unit/test_ground_truth_corpus.py``; what this asserts
+        # is only that the predicate the report is built from can still be
+        # computed over the whole corpus and is no longer vacuous.
+        assert len(graded) == 36
+        assert len(corpus) >= 45
 
 
 class TestTheAgentVisibleProjection:

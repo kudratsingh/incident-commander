@@ -237,9 +237,38 @@ def assemble(root: Path, offline_path: Path) -> dict[str, Any]:
         o.live_mcp or o.live_llm for o in parsed_offline.outcomes
     ):
         raise ValueError("offline baseline input must be a full canned report")
+    # A baseline is FROZEN EVIDENCE and the corpus is not, so the two are
+    # checked in the one direction that can be true forever.
+    #
+    # This was an equality test, and equality made the Phase 0 baseline
+    # un-regenerable the moment anybody added a scenario: the archive holds the
+    # 41 that existed when it was taken, WO-R3-202 (WP-4.3) brought the corpus to
+    # 45, and the assembler raised — reporting a corpus that GREW as a broken
+    # baseline. An archive cannot grow, and asking it to is asking for the
+    # baseline to be re-run every time the suite does its job.
+    #
+    # What the check is actually for survives, in both halves:
+    #
+    #   * "this is a full suite pass, not a filtered one" is carried by the
+    #     `only_patterns` refusal above plus the archive's own `total`, which the
+    #     document records;
+    #   * "the baseline does not name a scenario that no longer exists" is the
+    #     direction below, and it is the one that catches a rename or a deletion
+    #     — the failure that would otherwise leave the document quietly citing a
+    #     scenario nobody can look at.
+    #
+    # The scenarios the corpus has gained since are not an error and are not
+    # silently absorbed either: the document's `offline_source.total` is the
+    # number the baseline covers, and a reader comparing it with `make inventory`
+    # sees the gap.
     expected_names = {s.name for s in load_scenarios(root / "evals/scenarios")}
-    if {o.scenario for o in parsed_offline.outcomes} != expected_names:
-        raise ValueError("offline baseline input must cover the current scenario corpus exactly")
+    vanished = sorted({o.scenario for o in parsed_offline.outcomes} - expected_names)
+    if vanished:
+        raise ValueError(
+            "offline baseline input names scenario(s) the corpus no longer has: "
+            f"{vanished}. A baseline citing a scenario nobody can load is not "
+            "evidence; re-assemble it from an archive over today's corpus."
+        )
     if parsed_offline.passed != parsed_offline.total:
         raise ValueError("the offline leg of a baseline must be a clean full-suite pass")
     debt_path = root / "docs/eval-debt.md"

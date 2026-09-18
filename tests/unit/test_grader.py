@@ -5564,21 +5564,25 @@ class TestRootCauseCoverageIsReported:
         assert "1 not graded" in capsys.readouterr().out
 
     def test_the_shipped_corpus_reports_partial_root_cause_coverage(self) -> None:
-        """Coverage is 32 of 41, and the report must say so rather than round it.
+        """Coverage is 36 of 45, and the report must say so rather than round it.
 
-        It was 0 of 41 until WO-R3-261, and the number moving is the packet's
+        It was 0 of 41 until WO-R3-261, and the number moving is that packet's
         whole point — but it did NOT move to 41. Nine scenarios carry a
         recorded decision not to grade them on diagnosis (the tool-failure
         tests, the harness control, the noise controls), because none of them
         produces a diagnosis: a label there would fail the dimension for
-        correct behaviour. Coverage that reads 32/41 and says so is the honest
-        report; 41/41 bought by labelling worlds that have no answer would not
+        correct behaviour. Coverage that reads 36/45 and says so is the honest
+        report; 45/45 bought by labelling worlds that have no answer would not
         be.
+
+        WO-R3-202 (WP-4.3) added four labelled worlds and no abstentions, so the
+        numerator and the denominator both moved by four and the nine stayed
+        nine — which is what ADR 0038 asks of a new scenario.
         """
         shipped = _shipped()
         graded = [s.name for s in shipped if s.root_cause_graded]
-        assert len(shipped) == 41, "the corpus size is read from the loader, never a literal"
-        assert len(graded) == 32, (
+        assert len(shipped) == 45, "the corpus size is read from the loader, never a literal"
+        assert len(graded) == 36, (
             f"{len(graded)} of {len(shipped)} scenarios declare a ground truth — update "
             "this test, ``tests/unit/test_ground_truth_corpus.py``'s record and the "
             "root-cause accuracy reported in the PR body together."

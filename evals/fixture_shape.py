@@ -1,39 +1,11 @@
 """Check Tier-1 canned fixtures against the tool's output model, offline.
 
-The live drift check cannot look at these. Probing ``replay_dlq_by_category``
-to see what it returns would replay the DLQ, and probing ``pause_dag`` would
-pause a DAG, so ``fixture_probe.read_tier_calls`` excludes every Tier-1
-fixture by construction. That exclusion is right, and it left the nine
-Tier-1 recordings in this repo checked by nothing at all — the one class of
-fixture that can invent a field, a type, or a whole response and never be
-contradicted.
-
-This is the half of the question that needs no platform: the committed
-``contracts/platform-tools.snapshot.json`` carries every tool's
-``outputSchema``, so a fixture's KEY SET and TYPES can be compared against
-the model the tool actually returns without executing anything. Three
-findings, mirroring the live check's vocabulary:
-
-``undeclared_field``
-    The fixture carries a key the output model does not have. The platform
-    cannot emit it, so any expectation reading it grades the fixture.
-
-``missing_required_field``
-    The model declares the field required and the fixture omits it. The
-    offline run then serves the agent a response shape no live call
-    produces, and the gap only shows up on the paid live run.
-
-``type``
-    The fixture's value is of a type the field is not declared to hold.
-
-What this deliberately does NOT check is VALUES, and the two defects that
-motivated it were both values: a ``pause_key`` naming a Redis namespace the
-platform has never used, and an ``already_marked`` flag contradicting the
-``previous_hint`` returned beside it. A JSON Schema of plain strings and
-booleans cannot express either. Those needed someone to read the platform's
-code, and that remains the only way to catch their class — this check
-closes the shape hole and names the value hole rather than pretending to
-cover it.
+``fixture_probe.read_tier_calls`` excludes Tier-1 fixtures by construction
+(probing ``replay_dlq_by_category`` would replay the DLQ), leaving them checked by
+nothing. ``contracts/platform-tools.snapshot.json`` carries each tool's
+``outputSchema``, so KEY SETS and TYPES compare with nothing running:
+``undeclared_field``, ``missing_required_field``, ``type``. VALUES stay unchecked —
+a JSON Schema cannot express them, so the hole is named rather than covered.
 """
 
 from __future__ import annotations
@@ -85,9 +57,8 @@ def load_output_schemas(path: Path | None = None) -> dict[str, Mapping[str, Any]
 def write_tier_calls(calls: Iterable[CannedCall]) -> tuple[CannedCall, ...]:
     """The complement of ``fixture_probe.read_tier_calls``: what nothing probes.
 
-    Unregistered names are excluded here for the same reason they are
-    there — ``tier_of`` refuses to classify them, and reporting a typo is
-    ``fixture_probe.unregistered_calls``' job, not this one's.
+    Unregistered names are excluded; reporting a typo belongs to
+    ``fixture_probe.unregistered_calls``.
     """
     return tuple(
         call for call in calls if call.tool in TOOL_REGISTRY and tier_of(call.tool) is not Tier.READ
@@ -173,10 +144,8 @@ def check_call(call: CannedCall, schema: Mapping[str, Any]) -> list[ShapeDefect]
 def _resolve(node: Mapping[str, Any], defs: Mapping[str, Any]) -> Mapping[str, Any]:
     """Follow one ``$ref`` into the schema's own ``$defs``.
 
-    One hop, not a general resolver: the platform's output models nest one
-    level (``replay_dlq_by_ids`` returns a list of ``ReplayResult``), and a
-    ``$ref`` this cannot follow leaves an unconstrained node, which reports
-    nothing rather than reporting a guess.
+    One hop, not a general resolver; an unfollowable ``$ref`` leaves an
+    unconstrained node, which reports nothing rather than a guess.
     """
     ref = node.get("$ref")
     if isinstance(ref, str) and ref.startswith("#/$defs/"):

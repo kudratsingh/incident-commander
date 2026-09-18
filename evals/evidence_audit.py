@@ -1,50 +1,12 @@
 """Cross-tool satisfiability audit for scenario evidence expectations.
 
-``expected_evidence_contains`` is a substring assert over the joined
-evidence corpus, and the corpus does not say which tool produced which
-entry. A token that can appear in the output of more than one tool
-therefore proves nothing about which tool ran: ``failed_traces_scan``
-passed a trusted 26/26 live run without ever calling ``search_traces``,
-because its one token ``trace`` was satisfied by the ``trace_id`` field
-that ``list_dlq_messages`` output happens to carry (live dress-rehearsal
-finding, context/INDEX.md 2026-08-16). The prior hygiene rule — assert a
-field name, never a value — permits that failure class, because field
-names recur across tools.
-
-This module decides, mechanically, which tools could satisfy each token:
-
-* **Field-name skeleton.** Every field name reachable in a tool's output
-  model appears verbatim in a ``model_dump_json`` rendering of it, so a
-  token that is a substring of any reachable field name of tool X is
-  treated as satisfiable by X regardless of values.
-* **Canned-value corpus.** Every canned fixture in the suite, rendered
-  exactly the way the runtime records evidence
-  (``output_model.model_validate(payload).model_dump_json()`` — see
-  ``agent/investigation.py::_summarize_probe`` and
-  ``agent/remediation.py::_summarize_output``), is a rendering that
-  tool's live output is known to be able to take — *whichever scenario
-  it came from*. The DLQ fixtures that satisfied ``failed_traces_scan``
-  live belong to other scenarios entirely, which is why the corpus is
-  suite-wide, never per-scenario.
-
-A token satisfiable by two or more tools is a violation: the scenario
-must scope the assertion to its intended tool via
-``expected_evidence_fields`` (``EvidenceFieldExpectation``), whose
-``tools:`` filter matches ``EvidenceEntry.tool_name`` and cannot be
-satisfied by a substring coincidence. Tokens satisfiable by at most one
-tool stay legal as substrings: they may be unique to one tool's output
-or target bookkeeping prose ("planner stop", "classified as escalated"),
-which no tool corpus contains.
-
-``forbidden_evidence_contains`` and ``expect_briefing_contains`` are out
-of scope on purpose. A forbidden substring that more tools could produce
-is a stronger tripwire, not a weaker one — cross-satisfiability makes a
-negative assert fire more readily, never pass wrongly. Briefing asserts
-grade the handoff prose, where tool attribution is not the claim.
-
-Enforced continuously by ``tests/unit/test_evidence_audit.py`` over the
-committed scenario suite, so the next scenario with a cross-satisfiable
-token fails CI instead of passing a live run for the wrong reason.
+``expected_evidence_contains`` is a substring assert over a corpus that does not
+say which tool produced an entry — ``failed_traces_scan`` passed a live run
+without calling ``search_traces`` because ``trace`` matched ``list_dlq_messages``'
+``trace_id``. A token satisfiable by two or more tools (by reachable field name,
+or by any canned fixture suite-wide) must use ``expected_evidence_fields``
+instead. Forbidden and briefing asserts are out of scope: cross-satisfiability
+only makes a negative assert fire more readily. Pinned by test_evidence_audit.py.
 """
 
 from __future__ import annotations
@@ -83,10 +45,8 @@ def _collect_field_names(model: type[BaseModel], seen: set[type[BaseModel]]) -> 
 def reachable_field_names(model: type[BaseModel]) -> frozenset[str]:
     """Every field name that can appear in a ``model_dump_json`` of ``model``.
 
-    Walks nested models (including through ``list[...]``, ``| None`` and
-    other generic wrappers) because nested field names are serialized
-    verbatim too — ``trace_id`` reached ``failed_traces_scan``'s corpus
-    through ``ListDlqMessagesOutput.items[].trace_id``, two levels down.
+    Walks nested models: ``trace_id`` reached the corpus through
+    ``ListDlqMessagesOutput.items[].trace_id``, two levels down.
     """
     return frozenset(_collect_field_names(model, set()))
 
@@ -94,11 +54,8 @@ def reachable_field_names(model: type[BaseModel]) -> frozenset[str]:
 def _render(output_model: type[BaseModel], result: ToolResult) -> str | None:
     """One fixture rendered as the runtime would record it, or ``None``.
 
-    Mirrors ``agent/investigation.py::_parse_output``: first text block
-    only, parsed as JSON, validated into the output model. Error results
-    and unparsable fixtures return ``None`` — the runtime records those
-    as bookkeeping escalations, never as tool evidence, so they cannot
-    satisfy an evidence substring under any tool's name.
+    Mirrors ``agent/investigation.py::_parse_output``. Error and unparsable
+    fixtures return ``None``; the runtime never records those as tool evidence.
     """
     if result.is_error:
         return None

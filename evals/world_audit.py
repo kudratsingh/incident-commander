@@ -1,6 +1,6 @@
 """Read-only seeded-world audit; the dossier imports the same baseline checks.
 
-No scenario, chaos setup, reset, or LLM is run. The standalone command adds
+No scenario, chaos setup, reset or LLM is run. The standalone command adds
 pre-run checks to the dossier's shared post-reset audit.
 """
 
@@ -23,25 +23,12 @@ from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError, Too
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 
-# --------------------------------------------------------------------------
-# The seeded baseline the world must return to after the reset.
-# --------------------------------------------------------------------------
-#
-# One copy of these numbers, here, mirrored from the runbook's "Pre-run
-# checklist" table (step 4) — and
-# ``tests/unit/test_world_dossier.py::TestBaselineMatchesTheRunbook`` reads
-# that table and fails if the two disagree. LESSONS 2026-09-07: "five places
-# for the same truth means five stale copies"; on that day every context file
-# in the workspace was wrong at once. A second hand-maintained copy of the
-# baseline is exactly that shape, so it is pinned to the document instead.
-#
-# `worker-dispatcher` lag is deliberately NOT re-audited here. It is the
-# fourth line of the runbook's table, but reading it means `get_consumer_lag`,
-# whose response is served from a 60-second staleness window
-# (``CACHED_READ_FRESHNESS_SECONDS``) — so a post-reset reading can predate
-# the reset and report a number about the seeded world. A check that can
-# answer about the wrong moment is worse than an absent one; the coordinator
-# reads lag as part of PROTOCOL step 3, where the timing is theirs to control.
+# The seeded baseline the world must return to after the reset. One copy of these
+# numbers, mirrored from the runbook's "Pre-run checklist" table, which
+# ``tests/unit/test_world_dossier.py::TestBaselineMatchesTheRunbook`` reads.
+# `worker-dispatcher` lag is NOT re-audited: `get_consumer_lag` is served from a
+# 60s window, so a post-reset read can answer about the seeded world — the
+# coordinator reads it at PROTOCOL step 3.
 BASELINE_DLQ_TOTAL: Final[int] = 4
 BASELINE_ACTIVE_ALERTS: Final[int] = 3
 BASELINE_CHAOS_KEYS: Final[int] = 0
@@ -52,17 +39,14 @@ BASELINE_HOT_SET_SIZE: Final[int] = 120
 BASELINE_PROCESSES: Final[int] = 0
 HOT_SET_KEY: Final[str] = "cache:jobs:worker-dispatcher:hot_set"
 
-# The failed_traces_scan probe uses this window; its two seeded jobs are
-# rebaselined to 45 and 30 minutes old by make eval-reset. Check identities,
-# not just a count: two unrelated fresh failures cannot stand in for stale
-# fixtures. A unit test pins these to the scenario's probe and canned rows.
+# The failed_traces_scan probe's window. Identities, not a count: two unrelated
+# fresh failures cannot stand in for stale fixtures.
 TRACE_PROBE_WINDOW_HOURS: Final[int] = 1
 BASELINE_FAILED_TRACE_IDS: Final[frozenset[str]] = frozenset(
     {"0e24ca29-1d47-57e9-b898-4d79bb6da981", "edeeb994-56d2-53e6-88fd-8af47e695dbc"}
 )
 
-#: Compose file and service names for the redis key scan. Defaults match the
-#: Makefile's ``PLATFORM_COMPOSE`` so an override in ``.env`` reaches both.
+#: Redis key scan target; defaults match the Makefile's ``PLATFORM_COMPOSE``.
 _COMPOSE_FILE_ENV: Final[str] = "PLATFORM_COMPOSE"
 _DEFAULT_COMPOSE_FILE: Final[str] = "demo/compose.yml"
 _REDIS_SERVICE: Final[str] = "redis"
@@ -72,12 +56,7 @@ _REDIS_SERVICE: Final[str] = "redis"
 class Probe:
     """One read call to make, and the written reason it is in the set.
 
-    ``origins`` is a tuple rather than a string because two maps often derive
-    the same call — on ``remediate_runaway_saga_success`` the alert's subject
-    probe and the post-replay verify probe are both
-    ``get_dag_state(job_id=<root>)``. Deduplicating them but keeping both
-    reasons is what lets the dossier say why a probe matters twice over,
-    instead of the reader wondering which map put it there.
+    ``origins`` is a tuple because two maps often derive the same call.
     """
 
     tool: str
@@ -116,9 +95,7 @@ class Reading:
 def _payload_of(result: ToolResult) -> tuple[dict[str, Any] | None, str]:
     """First JSON object in the result, plus the full raw text of every block.
 
-    The raw text is kept even when the JSON parses, because the dossier prints
-    it when it does not — and a block that failed to parse is exactly the one
-    a reader needs to see verbatim.
+    The raw text is kept because the dossier prints it when the JSON does not parse.
     """
     blocks: list[str] = []
     payload: dict[str, Any] | None = None
@@ -141,22 +118,9 @@ def _payload_of(result: ToolResult) -> tuple[dict[str, Any] | None, str]:
 def read_result(client: MCPClientProtocol, probe: Probe) -> tuple[Reading, ToolResult | None]:
     """One read call: the ``Reading`` the audit wants, and the ``ToolResult`` itself.
 
-    ``Reading`` keeps the first JSON object plus the joined raw text, which is
-    everything a report needs and strictly less than the platform sent: the
-    content blocks and ``is_error`` are gone. The world recorder
-    (``evals/recorder.py``) needs exactly what is gone, because a replay client
-    has to answer with a ``ToolResult`` and not with a paraphrase of one
-    (divergence F3, WO-R3-196).
-
-    So the loop lives here once and returns both halves. ``read`` below is this
-    function with the second half dropped, so a recording and an audit can
-    never disagree about what one probe returned — a second read loop beside
-    this one would be a second definition of "what the world said".
-
-    ``None`` for the result means the call never reached the platform (an
-    ``MCPError``): there is no answer to record, which is a different fact from
-    an answer that says ``is_error=True``, and the recorder files the two in
-    different places.
+    ``Reading`` drops the content blocks and ``is_error``, which ``recorder.py`` needs
+    to answer a replay with a real ``ToolResult`` (divergence F3, WO-R3-196). A
+    ``None`` result means the call never reached the platform.
     """
     try:
         result = client.call_tool(probe.tool, probe.args)
@@ -192,11 +156,8 @@ def _compose_file() -> str:
 def chaos_key_count() -> tuple[int | None, str]:
     """Number of ``chaos:*`` keys in the demo stack's redis, or why not.
 
-    Read through ``docker compose exec redis redis-cli``, not through an MCP
-    tool, because the platform exposes no read that enumerates its own chaos
-    keys — the runbook's baseline table names this check and the coordinator
-    has always run it by hand. ``--scan`` rather than ``KEYS`` so a large
-    keyspace does not block the server.
+    Via redis-cli ``--scan``: no MCP read enumerates the platform's chaos keys,
+    and ``--scan`` will not block the server.
     """
     command = [
         "docker",

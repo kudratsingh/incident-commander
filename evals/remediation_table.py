@@ -1,9 +1,7 @@
 """Refresh the methodology's current claims from validated scenario models.
 
-Only the current-claim column is generated. Historical failures and the short editorial gloss
-stay verbatim. Row membership is derived too, so a new scenario cannot be
-left out by forgetting to list it; missing rows are added without inventing
-history.
+Only the claim column is generated; history and gloss stay verbatim, and row
+membership is derived rather than listed.
 """
 
 from __future__ import annotations
@@ -41,12 +39,8 @@ def _claim(model: BaseModel) -> str:
 def makes_a_remediation_claim(scenario: Scenario) -> bool:
     """A scenario belongs in the table when it says what to do, or what not to do.
 
-    Derived, never listed. A hand-kept allowlist is the same drift channel the
-    table itself had, and it had already missed `consumer_lag_healthy_zero` and
-    `no_fault_healthy_cache`. A scenario that forbids the action tools is claiming
-    the correct action count is zero (ADR 0033), which is a remediation claim and
-    the one the suite has been wrong about twice (WO-R2-140, WO-R2-160). A
-    scenario that neither acts nor forbids makes no claim here and stays out.
+    Derived, never listed. Forbidding the action tools claims zero correct actions
+    (ADR 0033) — a remediation claim (WO-R2-140, WO-R2-160).
     """
     expectation = scenario.expectation
     return bool(expectation.expected_action_tools or expectation.forbidden_action_tools)

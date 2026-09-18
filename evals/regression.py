@@ -1,43 +1,13 @@
 """Regression gate: compare a fresh RunReport against the committed baseline.
 
-Regression = a scenario that passed in the baseline and fails in ``latest``.
-Improvements and new scenarios are noted for transparency and never fail the
-gate. Regressions fail it (exit 1) — and so do DROPPED scenarios (baseline
-scenarios missing from ``latest``): coverage loss is a gate failure, not a
-pass, and genuinely removing a scenario requires a deliberate re-bless via
-``make baseline`` (A-03). A report produced under ``--only`` is refused
-outright (exit 2) — a filtered report is not a comparable gate input. So is a
-comparison whose two sides name DIFFERENT ``agent_model`` ids: a leaderboard
-row built across two models is a statement about neither of them (WP-0.3,
-plan 02 § 9). A baseline/latest provenance mismatch (``degraded_count``, ADR
-0013) warns and never gates (S-14), and a report containing a
-``development``-role run is MARKED non-closing — printed, never gated: a
-development run is a legitimate comparison input, it just cannot close a
-phase (plan 03 § 14).
-
-"latest" is the NEWEST versioned report under ``evals/reports/``, resolved
-by ``evals.artifacts.newest("report")``. Reports are never overwritten, so
-the file the gate read is still on disk afterwards and the verdict stays
-reproducible; the gate prints which one it used.
-
-Coverage loss also means the two shapes that keep every scenario green
-while the suite proves less (WO-R2-79): a DROPPED DIMENSION (the grader
-stopped scoring something the baseline scored) and a VACATED ASSERTION (a
-dimension that carried a real expectation now passes on an empty one,
-because the expectation left the scenario YAML). ``GradeReport.passed`` is
-an ``all()`` over the dimensions, so deleting a check can only make the
-roll-up greener — a gate that reads pass/fail alone reports "no changes"
-in exactly the case it exists to catch.
-
-Three things here are shared rather than gate-only, and each is imported by
-``evals/research_report.py`` (WP-2.5) rather than copied: ``compare`` (what a
-scenario-level regression IS), ``model_refusal`` (why two models may not share
-a table), and ``GROUPING_KEYS`` (which rows may be set beside which).
-
-Exit codes — the gate's slice of the ADR 0013 contract: 0 = comparable
-full-suite input with no regressions and no coverage loss; 1 = gate failed
-(regression, dropped scenario, dropped dimension, or vacated assertion);
-2 = not a comparable input (missing file, filtered report, two models).
+A regression is a baseline pass that now fails. Coverage loss gates too (A-03):
+dropped scenarios, DROPPED DIMENSIONS and VACATED ASSERTIONS, which keep every
+roll-up green while the suite proves less (WO-R2-79). "latest" is the newest
+versioned report via ``artifacts.newest("report")``, never overwritten, so the
+verdict stays reproducible. ``compare``, ``model_refusal`` and ``GROUPING_KEYS``
+are shared with ``evals/research_report.py`` (WP-2.5). A provenance mismatch warns
+(S-14, ADR 0013); a ``development``-role run is marked non-closing (plan 03 § 14).
+Exits: 0 clean; 1 gate failed; 2 not comparable (missing, filtered, two models).
 """
 
 from __future__ import annotations
@@ -54,22 +24,14 @@ from evals.runner import RunReport, ScenarioOutcome
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _BASELINE = _REPO_ROOT / "evals" / "reports" / "baseline.json"
-# Reports are versioned and never overwritten, so "latest" is resolved, not
-# a fixed path: ``artifacts.newest("report")`` orders by the stamp in the
-# filename and then by invocation_id. Deliberately NOT mtime — a restored or
-# copied reports directory would otherwise gate against whichever file the
-# filesystem happened to touch last.
+# Resolved, not a fixed path: ``artifacts.newest("report")`` orders by the stamp
+# in the filename — never mtime, which a restored directory would re-order.
 _REPORTS_DIR = _REPO_ROOT / "evals" / "reports"
 
-#: The seven keys a result may be grouped by (plan 04 WP-2.5, 03 § 15), in the
-#: order the workplan names them. They live here rather than in the report that
-#: prints them because they answer the same question ``compare`` below answers —
-#: *which rows may be set beside which* — and a second list of grouping keys
-#: somewhere else would be a second answer. ``strategy`` and ``execution_mode``
-#: come off the row's provenance; the middle five come off the row itself
-#: (``ScenarioOutcome``, WP-1.4), never off today's scenario YAML: re-deriving a
-#: 2026-08 run's family from the corpus as it stands now would silently re-label
-#: history.
+#: The seven keys a result may be grouped by (plan 04 WP-2.5, 03 § 15). Here, not
+#: in the report, because they answer ``compare``'s question — which rows may be
+#: set beside which. The middle five come off the row (``ScenarioOutcome``,
+#: WP-1.4), never off today's YAML, which would re-label history.
 GROUPING_KEYS: Final[tuple[str, ...]] = (
     "strategy",
     "scenario",
@@ -80,20 +42,16 @@ GROUPING_KEYS: Final[tuple[str, ...]] = (
     "execution_mode",
 )
 
-#: What a grouping key reads as when the row does not carry it. Archived
-#: reports predate WP-1.4's metadata and ADR 0013's provenance, and both are
-#: append-only, so "unknown" is a permanent value of these keys rather than a
-#: transitional one. It is a bucket, not a drop: a row that fell out of the
-#: grouping would take its pass or fail out of the totals with it.
+#: What a grouping key reads as when the row does not carry it. A permanent value,
+#: not a transitional one, and a bucket rather than a drop — a dropped row would
+#: take its pass or fail out of the totals with it.
 UNKNOWN_GROUP: Final[str] = "unknown"
 
 
 def grouping_values(outcome: ScenarioOutcome) -> dict[str, str]:
     """The seven grouping keys of one row, every value a string.
 
-    Numbers and enums are rendered here rather than by each caller so that two
-    readers cannot disagree about whether ``seed`` 0 and ``"0"`` are the same
-    group. ``None`` becomes ``UNKNOWN_GROUP`` for the reason given above it.
+    Rendered here so no two readers disagree about ``seed`` 0 versus ``"0"``.
     """
     provenance = outcome.provenance
     values = {
@@ -124,9 +82,8 @@ class ComparisonResult:
     improvements: tuple[str, ...]
     new_scenarios: tuple[str, ...]
     dropped_scenarios: tuple[str, ...]
-    # Coverage losses that leave every scenario's roll-up green. Both gate.
-    # Defaulted so a partial construction in a future test cannot silently
-    # assert their absence; ``compare`` always sets them explicitly.
+    # Coverage losses that leave every roll-up green. Both gate. Defaulted so a
+    # partial construction cannot silently assert their absence.
     dropped_dimensions: tuple[str, ...] = ()
     vacated_assertions: tuple[str, ...] = ()
 
@@ -152,17 +109,8 @@ def _dimensions_by_name(outcome: ScenarioOutcome) -> dict[str, DimensionResult]:
 def compare(baseline: RunReport, latest: RunReport) -> ComparisonResult:
     """Diff two reports by scenario name, and by what each scenario checked.
 
-    Scenario pass/fail alone cannot see the failure this gate exists to
-    catch. ``GradeReport.passed`` is ``all(d.passed for d in dimensions)``,
-    so anything that removes a check makes the roll-up *more* likely to be
-    green: delete a grading dimension and it stops being ANDed in; delete an
-    expectation from a scenario YAML and its dimension keeps passing on an
-    empty assertion. Either way every scenario still passes, the diff is
-    empty, and the gate prints "no changes vs baseline" over a suite that
-    now proves strictly less than it did.
-
-    So the diff also walks the dimensions inside each scenario and compares
-    what they actually asserted, not just how they scored.
+    ``GradeReport.passed`` is an ``all()`` over the dimensions, so removing a check
+    makes the roll-up greener and the diff empty. Hence the dimension-level walk.
     """
     baseline_passed = {o.scenario for o in baseline.outcomes if o.report.passed}
     baseline_by_name = {o.scenario: o for o in baseline.outcomes}
@@ -248,9 +196,7 @@ def _print_comparison(result: ComparisonResult) -> None:
 def models_in(report: RunReport) -> frozenset[str]:
     """Every ``agent_model`` id the report's rows name, ignoring the unknown.
 
-    A row with no provenance predates the record (the committed baseline and
-    every archived report do). Absence is not a second model: it is one less
-    thing known about the same one, so it is skipped rather than counted.
+    A row with no provenance predates the record; absence is not a second model.
     """
     return frozenset(
         outcome.provenance.agent_model
@@ -262,24 +208,9 @@ def models_in(report: RunReport) -> frozenset[str]:
 def model_refusal(sides: Mapping[str, frozenset[str]], *, remedy: str) -> str | None:
     """Why these named sides cannot share a table, or ``None`` if they can.
 
-    A leaderboard row is a claim about one model. Put two models' runs on it
-    and every delta it shows — a regression, an improvement, a token count —
-    is unattributable: the reader cannot tell a behaviour change from a model
-    change, which is precisely the class of untrue statement about the agent
-    that ``INCIDENTS.md`` exists to record after the fact. So this REFUSES
-    instead of warning: a warning above a printed table is still a printed
-    table.
-
-    Every model id is named, and so is the side that carries it, because the
-    next action depends on which side is wrong. ``remedy`` is the one sentence
-    that differs between callers — the gate re-runs or re-blesses, the
-    aggregate report splits its scope — and it is the caller's because this
-    module must not guess what the reader is holding.
-
-    Taken out of ``cross_model_refusal`` for WP-2.5: the aggregate research
-    report has to refuse a mixed scope on exactly the same grounds, over N
-    archives rather than two reports, and a second copy of this rule would be
-    a second definition of what a comparable table is.
+    REFUSES rather than warns: a delta across two models is a model change and a
+    behaviour change added together. ``remedy`` is the caller's sentence — the gate
+    re-runs or re-blesses where the research report splits its scope (WP-2.5).
     """
     models = frozenset[str]().union(*sides.values()) if sides else frozenset[str]()
     if len(models) < 2:
@@ -308,12 +239,8 @@ def cross_model_refusal(baseline: RunReport, latest: RunReport) -> str | None:
 def _print_closing_status(latest: RunReport) -> None:
     """Mark a report that cannot close a phase, without gating on it.
 
-    Plan 03 § 14: a phase report generated with any ``development`` run in it
-    is non-closing. That is a statement about what the report may be USED
-    for, not about whether the suite regressed — development runs are the
-    normal way this gate is exercised — so it prints and never changes the
-    exit code. The mark is in the artifact too (``RunReport.closing``); this
-    is the line that puts it in front of whoever ran the gate.
+    Plan 03 § 14: any ``development`` run makes the report non-closing — a
+    statement about use, not about regression, so it prints and never exits.
     """
     if reason := latest.non_closing_reason:
         print(f"NON-CLOSING: latest cannot close a phase — {reason}")
@@ -324,11 +251,8 @@ def _print_closing_status(latest: RunReport) -> None:
 def _print_provenance(baseline: RunReport, latest: RunReport) -> None:
     """Warn-only provenance check (S-14; ADR 0013).
 
-    The baseline blessed on 2026-09-15 carries provenance stamps. This
-    check still only warns on differing ``degraded_count`` values, or on
-    older reports that lack the field. Cross-model comparisons are a
-    separate hard refusal in ``cross_model_refusal``; they require a
-    deliberate re-bless, not a warning override.
+    Warns on differing ``degraded_count``, or on a report predating the field.
+    Cross-model comparisons are refused hard in ``cross_model_refusal``.
     """
     if baseline.degraded_count is None or latest.degraded_count is None:
         unknown = "|".join(
@@ -358,10 +282,8 @@ def main() -> int:
     latest = _load_report(latest_path)
     print(f"gating against {latest_path.name}")
     if latest.only_patterns:
-        # Refused, not diffed: comparing a filtered run against the full
-        # baseline would read the missing scenarios as "dropped" at best
-        # and as green coverage at worst (A-03). Exit 2 = not a comparable
-        # input, same class as a missing file.
+        # Refused, not diffed: against the full baseline the missing scenarios
+        # read as dropped at best and as green coverage at worst (A-03).
         print(
             f"{latest_path.name} is a filtered run (--only={list(latest.only_patterns)}); "
             "the gate requires a full-suite report — re-run 'make eval' without ONLY",
@@ -369,9 +291,8 @@ def main() -> int:
         )
         return 2
     if (refusal := cross_model_refusal(baseline, latest)) is not None:
-        # Exit 2 with the comparison unprinted, for the same reason a
-        # filtered report is refused above: the gate's output IS the table,
-        # so refusing has to happen before it is written.
+        # Unprinted, like the filtered refusal above: the gate's output IS the
+        # table, so refusing has to happen before it is written.
         print(f"GATE REFUSED: {refusal}", file=sys.stderr)
         return 2
     _print_provenance(baseline, latest)

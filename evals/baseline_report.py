@@ -1,11 +1,7 @@
 """Assemble the Phase 0 baseline from immutable archives; never run an eval.
 
-Every number is read out of a committed ``report.json``; nothing is typed in
-and nothing is regraded. The historical archives keep their own scores,
-scenario revisions and (for the nine that predate cmd #223) their absent
-provenance — the report says which leg carries a stamp rather than borrowing
-one from the machine that assembled it. ``--write`` persists the two versioned
-halves through ``evals/artifacts.py``.
+Every number is read from a committed ``report.json`` — nothing typed in, nothing
+regraded. ``--write`` persists the two versioned halves via ``evals/artifacts.py``.
 """
 
 from __future__ import annotations
@@ -157,15 +153,12 @@ def summarize_report(path: Path) -> dict[str, Any]:
     }
 
 
-#: Every field of ``RunProvenance`` that has to be present and answered in the
-#: report's stamp. Read off the model rather than typed out, so a field added
-#: to the record cannot quietly go unstamped here.
+#: Every ``RunProvenance`` field that must be present and answered in the stamp.
+#: Read off the model, so a new field cannot quietly go unstamped.
 PROVENANCE_FIELDS: Final[tuple[str, ...]] = tuple(RunProvenance.model_fields)
 
-#: Values that look like an answer and are not one. ``"unknown"`` is honest in
-#: a run archive (ADR 0013: a claim a reader can act on), but a baseline whose
-#: stamp says "unknown" is the un-attributable artifact divergence D3 names, so
-#: the writer refuses it here.
+#: Values that look like an answer and are not. ``"unknown"`` is honest in a run
+#: archive (ADR 0013) but un-attributable in a baseline (divergence D3).
 _PLACEHOLDERS: Final[frozenset[str]] = frozenset({"", "unknown", "none", "null", "n/a", "tbd"})
 
 #: Provenance fields that legitimately differ row to row within one run.
@@ -175,22 +168,16 @@ _PER_SCENARIO: Final[frozenset[str]] = frozenset({"scenario", "budget", "recorde
 def stamp_of(offline_path: Path) -> dict[str, Any]:
     """The one provenance record every row of the offline suite agrees on.
 
-    Read from the run's own archive, never from today's ``.env``: the stamp has
-    to describe the run that produced the numbers, and a config read at
-    assembly time describes the machine that happened to assemble them. Per
-    ADR 0013 provenance is attached per scenario, so this collapses the 41
-    records to one and refuses if they disagree — two models in one report is
-    not a baseline, it is two.
+    Read from the run's own archive, never today's ``.env``. ADR 0013 stamps
+    provenance per scenario, so this collapses the records and refuses on any
+    disagreement — two models in one report is two baselines.
     """
     raw = json.loads(offline_path.read_text())
     records = [outcome.get("provenance") for outcome in raw["outcomes"]]
     if not records or any(record is None for record in records):
         raise ValueError(f"{offline_path.name}: every outcome must carry a provenance record")
-    # Per-scenario by design: the scenario's own name, its own budget ledger,
-    # and the moment IT was recorded (each row is stamped as it finishes, so
-    # the 41 timestamps differ by milliseconds). Everything else — the code,
-    # the platform image, the models, the role, the strategy, the invocation,
-    # the execution mode — has to be one answer for the whole run.
+    # Per-scenario by design: the scenario's name, its budget ledger and the moment
+    # IT was recorded. Everything else must be one answer for the whole run.
     shared = [
         {key: value for key, value in record.items() if key not in _PER_SCENARIO}
         for record in records
@@ -207,9 +194,8 @@ def stamp_of(offline_path: Path) -> dict[str, Any]:
     if missing:
         raise ValueError(f"provenance field(s) unanswered: {', '.join(sorted(missing))}")
     stamp = dict(shared[0])
-    # The run's own timestamp, not one row's: a baseline is dated by the run
-    # that produced it, and picking a row would date it by whichever scenario
-    # happened to finish first.
+    # The run's timestamp, not one row's — a row would date the baseline by
+    # whichever scenario happened to finish first.
     stamp["recorded_at"] = raw["generated_at"]
     stamp["budgets_seeded_and_used"] = [
         {"scenario": record["scenario"], **record["budget"]} for record in records
@@ -220,9 +206,8 @@ def stamp_of(offline_path: Path) -> dict[str, Any]:
 def assemble(root: Path, offline_path: Path) -> dict[str, Any]:
     """The baseline document. Every value is read from a file under ``root``.
 
-    Nothing here reads the clock, the environment or ``.env``: the whole
-    document is a function of the committed archives plus the offline report,
-    which is what lets a test regenerate it byte for byte.
+    Nothing reads the clock or the environment, so a test regenerates it byte
+    for byte.
     """
     sources = []
     for archive_id in ARCHIVE_IDS:
@@ -237,30 +222,12 @@ def assemble(root: Path, offline_path: Path) -> dict[str, Any]:
         o.live_mcp or o.live_llm for o in parsed_offline.outcomes
     ):
         raise ValueError("offline baseline input must be a full canned report")
-    # A baseline is FROZEN EVIDENCE and the corpus is not, so the two are
-    # checked in the one direction that can be true forever.
-    #
-    # This was an equality test, and equality made the Phase 0 baseline
-    # un-regenerable the moment anybody added a scenario: the archive holds the
-    # 41 that existed when it was taken, WO-R3-202 (WP-4.3) brought the corpus to
-    # 45, and the assembler raised — reporting a corpus that GREW as a broken
-    # baseline. An archive cannot grow, and asking it to is asking for the
-    # baseline to be re-run every time the suite does its job.
-    #
-    # What the check is actually for survives, in both halves:
-    #
-    #   * "this is a full suite pass, not a filtered one" is carried by the
-    #     `only_patterns` refusal above plus the archive's own `total`, which the
-    #     document records;
-    #   * "the baseline does not name a scenario that no longer exists" is the
-    #     direction below, and it is the one that catches a rename or a deletion
-    #     — the failure that would otherwise leave the document quietly citing a
-    #     scenario nobody can look at.
-    #
-    # The scenarios the corpus has gained since are not an error and are not
-    # silently absorbed either: the document's `offline_source.total` is the
-    # number the baseline covers, and a reader comparing it with `make inventory`
-    # sees the gap.
+    # A baseline is FROZEN EVIDENCE and the corpus is not, so the check runs in the
+    # one direction that stays true: the baseline must not name a scenario the
+    # corpus no longer has. Equality made it un-regenerable the moment WO-R3-202
+    # grew the corpus to 45. "Full suite, not filtered" is carried by the
+    # `only_patterns` refusal above, and the gap against `make inventory` stays
+    # visible in `offline_source.total`.
     expected_names = {s.name for s in load_scenarios(root / "evals/scenarios")}
     vanished = sorted({o.scenario for o in parsed_offline.outcomes} - expected_names)
     if vanished:
@@ -430,12 +397,9 @@ def render_markdown(document: dict[str, Any]) -> str:
 def write(document: dict[str, Any], *, root: Path | None = None) -> tuple[Path, Path]:
     """Write the two versioned halves and return their paths.
 
-    The version stamp and the invocation id come from the offline leg's own
-    provenance rather than from the clock, so the filename is as derived from
-    the evidence as the contents are: re-running the writer on the same inputs
-    aims at the same path, which the exclusive-create write then refuses
-    (invariant 9). A baseline that renamed itself every time it was checked
-    could not be checked at all.
+    The stamp and invocation id come from the offline leg's provenance, not the
+    clock, so a re-run aims at the same path and exclusive-create refuses it
+    (invariant 9).
     """
     provenance = document["provenance"]
     recorded_at = datetime.fromisoformat(str(provenance["recorded_at"]))

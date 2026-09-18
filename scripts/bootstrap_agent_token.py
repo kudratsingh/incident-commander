@@ -1,50 +1,26 @@
 #!/usr/bin/env python3
 """Bootstrap a working service-account token against a running incident-platform.
 
-Collapses the manual four-step onboarding (register → promote → login → mint)
-into one command, for all three eval principals. Prints each plaintext token
-and the ``.env`` lines to set.
-
-Assumes the platform is running via its own docker-compose with the standard
-container names (``incident-platform-postgres-1``, ``incident-platform-app-1``).
-Idempotent — safe to rerun.
+Collapses the manual register → promote → login → mint onboarding into one command for
+all three eval principals, printing each plaintext token and the ``.env`` lines to set.
+Idempotent. ``PLATFORM_REST_URL`` and ``PLATFORM_MCP_URL`` are honoured when exported.
 
 Usage:
     uv run python scripts/bootstrap_agent_token.py
     uv run python scripts/bootstrap_agent_token.py --scope actions:execute
-
-Or via Makefile:
     make bootstrap-token
 
-**Three principals, two of them credentials the eval uses on every live run**
-(owner decision O-4, 2026-09-15; platform ADR 0007 § two principals, ADR 0012
-§ "Why two principals"):
+Three principals (owner decision O-4; platform ADR 0007, ADR 0012):
 
-* ``incident-commander`` — the AGENT under test. ``telemetry:read``,
-  ``incidents:read``, ``actions:execute``, and **never** ``chaos:invoke``:
-  platform v0.6.5 withholds the ``chaos.%`` audit rows from principals that
-  cannot fire chaos, so a token holding that scope lets the agent read which
-  fault was injected seconds before its own alert. Printed as
-  ``PLATFORM_TOKEN``. If the account already holds ``chaos:invoke`` this
-  script strips it and says so — the same one narrowing the platform's own
-  ``scripts/seed_incident_commander.py`` performs, for the same reason.
-* ``incident-commander-chaos`` — the EVALUATOR. ``telemetry:read``,
-  ``incidents:read``, ``chaos:invoke``: it seeds a fault world, verifies what
-  it seeded, and tears it down. No ``actions:execute`` — remediation is the
-  agent's job, and this principal must never be able to do it. Printed as
-  ``PLATFORM_CHAOS_TOKEN``.
-* ``incident-commander-smoke`` — the read-only twin for ``make eval-smoke``.
+* ``incident-commander`` — the AGENT, ``PLATFORM_TOKEN``: reads plus ``actions:execute``,
+  and **never** ``chaos:invoke``, the scope v0.6.5 keys the ``chaos.%`` audit withholding
+  on; an account already holding it is stripped, loudly.
+* ``incident-commander-chaos`` — the EVALUATOR, ``PLATFORM_CHAOS_TOKEN``: reads plus
+  ``chaos:invoke``, no ``actions:execute``.
+* ``incident-commander-smoke`` — the read-only twin, ``PLATFORM_SMOKE_TOKEN``.
 
-``--scope`` WIDENS the agent service account, repeatably; it never replaces
-the defaults, because a token that could act and read no telemetry would fail
-one step into the eval it was minted for. Scope names are checked against the
-pinned platform's own contract snapshot, and asking for ``chaos:invoke`` there
-is refused outright: that scope belongs to the chaos account now, and granting
-it to the agent would undo the split rather than widen a principal.
-
-``PLATFORM_REST_URL`` and ``PLATFORM_MCP_URL`` are honoured when exported, so
-the ``.env`` block printed at the end always echoes the stack you are
-actually running rather than this file's localhost defaults.
+``--scope`` WIDENS the agent account rather than replacing the defaults, and refuses
+``chaos:invoke``.
 """
 
 from __future__ import annotations
@@ -66,51 +42,32 @@ _API_VERSION_SUFFIX = "/api/v1"
 DEFAULT_BASE_URL = "http://localhost:8000/api/v1"
 DEFAULT_EMAIL = "agent-demo@example.com"
 DEFAULT_PASSWORD = "demo-agent-pass-123"  # noqa: S105 - dev-only placeholder
-# The DEMO stack's postgres — the one this repo owns and the one
-# docs/runbook.md tells you to boot with `make demo`. It used to default to
-# the platform's own dev-stack container, so the bare `make bootstrap-token`
-# in the live-eval protocol died on a CalledProcessError one line after
-# `make demo` succeeded. CI never noticed: it passes --postgres-container
-# explicitly. Same shape as eval-reset's compose default (ADR 0020).
+# The DEMO stack's postgres (`make demo`), not the platform's dev stack — that default
+# made the protocol's bare `make bootstrap-token` die. Cf. eval-reset's (ADR 0020).
 DEFAULT_POSTGRES_CONTAINER = "incident-commander-demo-postgres-1"
 DEFAULT_MCP_URL = "http://localhost:8001/mcp"
 SERVICE_ACCOUNT_NAME = "incident-commander"
-# The agent under test. Phase 6+ needs actions:execute (Tier-1 remediation)
-# on top of the two read scopes the investigation path uses.
-#
-# chaos:invoke is deliberately absent, and its absence is load-bearing rather
-# than tidy. Platform v0.6.5 hides every `chaos.%` audit row from principals
-# that cannot fire chaos (`hidden_audit_action_prefixes`, keyed on exactly
-# this scope), so while the agent held it `list_audit_events` answered "who
-# broke this?" with the hook name and its arguments — a hidden-label leak that
-# invalidated the diagnosis claim of every live remediation run (divergence
-# G3, owner decision O-4). The filter and the split ship together because
-# either one alone does nothing.
+# The agent under test: reads plus actions:execute. chaos:invoke is absent and that is
+# load-bearing — v0.6.5 keys `hidden_audit_action_prefixes` on it, so while the agent held
+# it `list_audit_events` named the hook that broke it (G3, O-4).
 SERVICE_ACCOUNT_SCOPES = [
     "telemetry:read",
     "incidents:read",
     "actions:execute",
 ]
-# The evaluator / runner. Holds chaos:invoke so it can seed a fault world and
-# then read the rows it seeded; holds the two read scopes for the same reason
-# (verifying its own seeding), and NOT actions:execute — remediating is the
-# thing being measured, so the principal that stages the world must not be
-# able to do it.
+# The evaluator: chaos:invoke to seed a fault world, reads to verify its own seeding, and
+# NOT actions:execute — remediating is the thing being measured.
 CHAOS_SERVICE_ACCOUNT_NAME = "incident-commander-chaos"
 CHAOS_SERVICE_ACCOUNT_SCOPES = [
     "telemetry:read",
     "incidents:read",
     "chaos:invoke",
 ]
-# The scope the AGENT account must never carry. Kept as a set beside the
-# table above so the refusal below, the strip in `_create_or_get_sa` and the
-# scope list cannot drift apart — this is the whole content of the split.
+# The scope the AGENT account must never carry, as one set so the refusal below, the
+# strip in `_create_or_get_sa` and the scope list cannot drift apart.
 AGENT_FORBIDDEN_SCOPES = frozenset({"chaos:invoke"})
-# Read-only twin for the smoke pass: with no actions:execute scope, a
-# Tier-1 attempt 403s at the platform, wraps as MCPError, and grades as
-# an escalation — "read-only smoke" becomes structurally true instead of
-# a property of the scenario list (2026-08-03 campaign: consumer_lag_high
-# fired a real replay during the read-only pass).
+# Read-only twin for the smoke pass: with no actions:execute a Tier-1 attempt 403s and
+# grades as an escalation, so "read-only smoke" is structurally true (2026-08-03).
 SMOKE_SERVICE_ACCOUNT_NAME = "incident-commander-smoke"
 SMOKE_SERVICE_ACCOUNT_SCOPES = [
     "telemetry:read",
@@ -123,16 +80,8 @@ _SAFE_EMAIL = re.compile(r"^[A-Za-z0-9._+@-]+$")
 def known_scopes() -> frozenset[str]:
     """Every scope the pinned platform declares, per the blessed snapshot.
 
-    Read from ``contracts/platform-tools.snapshot.json`` rather than
-    hardcoded here: each tool carries its ``required_scope``, CI's
-    ``contract`` job diffs that snapshot against a live platform on every
-    PR, and WO-R2-130 put ``required_scope`` itself under that diff. So this
-    set cannot drift from the platform without CI saying so — which is what
-    makes rejecting an unknown ``--scope`` safe rather than merely
-    opinionated.
-
-    Returns an empty set if the snapshot is missing or unreadable; the
-    caller then skips validation rather than blocking a bootstrap on it.
+    CI diffs its ``required_scope`` against a live platform (WO-R2-130), which is what makes
+    rejecting an unknown ``--scope`` safe. Empty when unreadable.
     """
     try:
         payload = json.loads(_SNAPSHOT_PATH.read_text(encoding="utf-8"))
@@ -151,12 +100,7 @@ def known_scopes() -> frozenset[str]:
 def base_url_default() -> str:
     """The REST base, honouring ``PLATFORM_REST_URL`` from the operator's .env.
 
-    The runbook's ``.env`` sets ``PLATFORM_REST_URL`` to the host root
-    (``http://localhost:8000``) while this script talks to the versioned API
-    beneath it, so the ``/api/v1`` suffix is appended unless the operator
-    already wrote one. Reading it at all is the point: hardcoding
-    ``localhost:8000`` meant an operator on a non-default port watched this
-    script report success against a stack they were not running.
+    The runbook sets it to the host root, so ``/api/v1`` is appended unless already there.
     """
     raw = os.getenv("PLATFORM_REST_URL")
     if not raw:
@@ -186,11 +130,8 @@ def _register(client: httpx.Client, email: str, password: str) -> None:
 def _promote(container: str, email: str) -> None:
     """Direct SQL: elevate to platform admin so the API grants service-account rights.
 
-    The email reaches the statement only through psql variable binding: the
-    constant SQL is piped on stdin (``-f -``, where ``:'email'`` interpolation
-    happens — ``-c`` never interpolates variables) and the value rides
-    ``-v email=...``. Binding is the primary injection control; the
-    ``_SAFE_EMAIL`` allowlist below stays as a defense-in-depth backstop.
+    The email arrives only by psql binding (``-f -`` on stdin, ``-v email=...``);
+    ``_SAFE_EMAIL`` is a backstop, not the control.
     """
     if not _SAFE_EMAIL.match(email):
         raise ValueError(f"refusing to inject unsafe email into SQL: {email!r}")
@@ -236,27 +177,11 @@ def _create_or_get_sa(
     exact: bool = False,
     forbidden: frozenset[str] = frozenset(),
 ) -> str:
-    """Create the service account, or reuse the existing one — widening
-    its scopes to ``scopes`` if it exists with a narrower set.
+    """Create the service account, or reuse it, widening its scopes to ``scopes``.
 
-    With ``exact=True`` the scopes are corrected in BOTH directions: an
-    existing account with extra scopes is narrowed back down. The smoke
-    SA uses this — a read-only principal that silently kept
-    actions:execute would defeat its whole purpose.
-
-    ``forbidden`` is the one narrowing that happens even on the widening
-    path, and the agent account is the only caller that passes any:
-    ``chaos:invoke``. Widening alone could never reach the state O-4 asks
-    for, because the live ``incident-commander`` account already HOLDS that
-    grant — so a union-only bootstrap would report success and leave the
-    leak open. The removal is announced rather than silent (the platform
-    seeder's D-01 rule), and tokens minted before now keep the scopes they
-    carry, which is why the banner tells the operator to re-paste.
-
-    Scope changes use the platform's ``PATCH /admin/service-accounts/{id}``
-    endpoint (v0.3.0+). Older platforms don't have PATCH — the script
-    falls back to reusing the existing scopes and prints a warning, so a
-    stale platform doesn't crash the whole flow.
+    ``exact=True`` corrects BOTH ways, so the smoke SA cannot keep actions:execute, and
+    ``forbidden`` (only the agent's ``chaos:invoke``, which the live account already holds)
+    comes off even when widening. Correcting scopes needs PATCH (v0.3.0+).
     """
     headers = {"Authorization": f"Bearer {jwt}"}
     wanted = sorted(set(scopes) - forbidden)
@@ -384,10 +309,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    # Deduplicated, order preserved, defaults first: an extra scope WIDENS.
-    # Replacing would mint a principal that can act and read no telemetry —
-    # failing one step later for a reason nobody would trace back to this
-    # command.
+    # Deduplicated, order preserved, defaults first: an extra scope WIDENS. Replacing
+    # would mint a principal that can act and read no telemetry.
     requested = list(dict.fromkeys(args.scopes or []))
     declared = known_scopes()
     unknown = [scope for scope in requested if scope not in declared] if declared else []
@@ -400,10 +323,8 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    # Refused, not quietly dropped. An operator asking for this wants a
-    # principal the split says cannot exist, and finding out later — from a
-    # trajectory that names the chaos hook the agent was never meant to see —
-    # is worse than an exit code now.
+    # Refused, not quietly dropped: an exit code now beats finding out from a trajectory
+    # that names the chaos hook the agent was never meant to see.
     refused = sorted(set(requested) & AGENT_FORBIDDEN_SCOPES)
     if refused:
         print(
@@ -428,11 +349,8 @@ def main(argv: list[str] | None = None) -> int:
             forbidden=AGENT_FORBIDDEN_SCOPES,
         )
         token = _mint_token(client, jwt, sa_id)
-        # Widening, not exact: the chaos account is the evaluator's, and an
-        # operator who has deliberately added a scope to it (a future reset
-        # leg needing more than reads) should not have it silently removed by
-        # the next bootstrap. What it must never gain is actions:execute, and
-        # nothing here grants that.
+        # Widening, not exact: a scope deliberately added to the evaluator account should
+        # not vanish on the next bootstrap. It must never gain actions:execute.
         chaos_sa_id = _create_or_get_sa(
             client, jwt, CHAOS_SERVICE_ACCOUNT_NAME, CHAOS_SERVICE_ACCOUNT_SCOPES
         )
@@ -451,16 +369,13 @@ def main(argv: list[str] | None = None) -> int:
     print("Tokens minted. Copy into .env:")
     print()
     print(f"PLATFORM_MCP_URL={args.mcp_url}")
-    # THREE credentials, three principals, and the labels are the point: an
-    # operator who pasted one value into two variables would have a runner
-    # that cannot seed, or an agent that can read the lab, and neither
-    # failure names itself.
+    # THREE credentials, three principals, and the labels are the point: one value pasted
+    # into two variables gives a runner that cannot seed, or an agent that reads the lab.
     print(f"PLATFORM_TOKEN={token}")
     print(f"PLATFORM_CHAOS_TOKEN={chaos_token}")
     print(f"PLATFORM_SMOKE_TOKEN={smoke_token}")
-    # Ids, not credentials — they scope the post-stage audit guard to the
-    # two service accounts this script just minted, so a shared platform's
-    # other principals cannot fail (or mask) a smoke stage (A-13).
+    # Ids, not credentials: they scope the post-stage audit guard to the two accounts just
+    # minted, so a shared platform's other principals cannot fail or mask a stage (A-13).
     print(f"PLATFORM_AGENT_PRINCIPAL_ID={sa_id}")
     print(f"PLATFORM_SMOKE_PRINCIPAL_ID={smoke_sa_id}")
     print("=" * 60)

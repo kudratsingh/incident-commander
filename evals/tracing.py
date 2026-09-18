@@ -1,17 +1,10 @@
 """Per-scenario JSONL tracer for eval runs.
 
-Every LLM call and every MCP tool call is captured as one JSON line in
-``<EVAL_TRACE_DIR>/<scenario>.jsonl``. Enable by exporting ``EVAL_TRACE_DIR``
-before running ``make eval-live`` (``make eval-live`` sets it by default).
-
-Each line has a ``kind`` from ``TraceKind`` below plus an ``invocation_id``
-that groups the records written by one runner invocation, and includes the
-full request + response payloads for the LLM/MCP variants — enough to
-reconstruct the model's reasoning end-to-end.
-
-Design note: tracer callbacks are plumbed directly through ``LLMClient``
-and ``MCPClient`` (no wrapper class) so we capture the raw Anthropic
-response before parsing, not just the parsed structured output.
+Every LLM and MCP call becomes one JSON line in
+``<EVAL_TRACE_DIR>/<scenario>.jsonl`` (``make eval-live`` sets that variable).
+Each line carries a ``kind`` from ``TraceKind`` plus an ``invocation_id``, and the
+full request and response — the raw Anthropic response, captured before parsing,
+because the callbacks plumb straight through ``LLMClient`` and ``MCPClient``.
 """
 
 from __future__ import annotations
@@ -29,20 +22,9 @@ from typing import Any
 class TraceKind(StrEnum):
     """Every ``kind`` a trace record can carry, and who writes it.
 
-    This is the enumeration the human renderer is held to: every member
-    must have a step formatter (or be one of the two scenario boundaries
-    the header and footer render), enforced by
-    ``tests/unit/test_format_traces.py::TestEveryKindRenders``. Before that
-    guard, ``llm_error`` and ``precondition`` — two kinds the harness has
-    written all along — reached the report as ``STEP N — unknown kind=…``,
-    a raw JSON dump of exactly the records a reader is looking for.
-
-    Every write goes through a member rather than a bare string, so a new
-    kind cannot be introduced without landing here first — and landing here
-    is what makes the renderer's coverage test fail until it can render it.
-
-    ``StrEnum``, so ``json.dumps`` writes the plain string and a record read
-    back from JSONL compares equal to the member.
+    Every member needs a step formatter or is a scenario boundary, enforced by
+    ``tests/unit/test_format_traces.py::TestEveryKindRenders``; a new kind has to
+    land here first. ``StrEnum``, so a record read back from JSONL compares equal.
     """
 
     #: One completed LLM call, request + raw response (``LLMClient``).
@@ -59,12 +41,9 @@ class TraceKind(StrEnum):
     PRECONDITION = "precondition"
     #: The chaos hook a live scenario fires to seed its fault (``runner``).
     CHAOS_SETUP = "chaos_setup"
-    #: One planner step as the inference strategy recorded it — the candidate
-    #: set it considered, the step it emitted, the hypothesis ranking either
-    #: side of it, and what the call billed
-    #: (``agent.strategies.records.StepRecord``, plan 02 § 7). Evaluator-side
-    #: research data: it is written *about* the run and never read back into
-    #: one, which is why it lives here and not on the ``RunState`` checkpoint.
+    #: One planner step as the strategy recorded it: the candidate set, the step,
+    #: the ranking either side, and the bill (``agent.strategies.records
+    #: .StepRecord``, plan 02 § 7). Evaluator-side data, never read back into a run.
     STEP = "step"
     #: Scenario boundaries: the header and footer of one invocation.
     SCENARIO_START = "scenario_start"
@@ -75,15 +54,9 @@ class TraceKind(StrEnum):
 class JsonlTracer:
     """Append-only JSONL writer scoped to one scenario run.
 
-    **Never truncates.** Until 2026-08-07 ``__post_init__`` cleared the file
-    "so re-runs don't concatenate" — which silently deleted the previous
-    attempt's records for that scenario. Run 001's killed first attempt
-    (13 scenarios) was erased in full by its own re-run, and the loss only
-    surfaced when trace-derived cost came in ~1.9x under the console
-    (study/findings.md F-002). Concatenation was never the problem;
-    *indistinguishable* concatenation was. Every record now carries
-    ``invocation_id`` and ``invocation_started_at``, so attempts stay
-    separable while the history stays intact.
+    **Never truncates.** Clearing the file on construction erased Run 001's killed
+    first attempt in full (F-002). Every record carries ``invocation_id`` and
+    ``invocation_started_at``, so attempts stay separable and history stays intact.
     """
 
     path: Path
@@ -94,12 +67,9 @@ class JsonlTracer:
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def write(self, record: dict[str, Any]) -> None:
-        # ``record_id`` identifies ONE record inside an invocation, which
-        # ``invocation_id`` cannot: a repaired LLM call writes two records
-        # for one logical step and the second names the first as
-        # ``repair_of`` (ADR 0035). ``setdefault`` because ``LLMClient``
-        # mints its own before the payload reaches here — it has to hand the
-        # id back to the caller, which only the producer can do.
+        # ``record_id`` identifies ONE record inside an invocation: a repaired
+        # call writes two and the second names the first as ``repair_of``
+        # (ADR 0035). ``setdefault`` because ``LLMClient`` mints its own.
         record.setdefault("record_id", uuid.uuid4().hex[:12])
         record.setdefault("timestamp", datetime.now(UTC).isoformat())
         record.setdefault("invocation_id", self.invocation_id)
@@ -110,14 +80,8 @@ class JsonlTracer:
     def llm_hook(self, role: str) -> Callable[[dict[str, Any]], None]:
         """Return a tracer callable to pass to ``LLMClient(tracer=...)``.
 
-        Mirrors ``mcp_hook``'s discrimination: a payload carrying ``error``
-        is an ``llm_error``. ``llm_error`` was in this module's documented
-        kind set from the start and nothing ever wrote one, so an exhausted
-        429 or a dropped connection left a silent gap exactly where billed
-        work had happened — the trace showed the call before it and the call
-        after it, and nothing in between (invariant 9's concern, one layer
-        down: an artifact that omits a failure is a lower bound presented as
-        a record).
+        A payload carrying ``error`` becomes an ``llm_error``; without that an
+        exhausted 429 left a silent gap where billed work happened (invariant 9).
         """
 
         def hook(payload: dict[str, Any]) -> None:

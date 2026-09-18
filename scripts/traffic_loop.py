@@ -1,37 +1,14 @@
 """Submit jobs at a steady rate so a killed consumer builds real backlog.
 
-Consumer lag is arrival minus service. The eval only ever had the service
-half: `kill_consumer` stops the consumer, but with nothing arriving the
-backlog stays at zero and `get_consumer_lag` keeps reading 0. So
-`remediate_consumer_lag_success` asserts a fault that cannot exist, and
-since preconditions landed it aborts honestly instead of grading the agent
-on a healthy system.
+The eval only ever had the service half of consumer lag: with nothing arriving,
+`kill_consumer` leaves `get_consumer_lag` reading 0 and `remediate_consumer_lag_success`
+asserts a fault that cannot exist. This is the "standard 1-job/2s loop" `docs/runbook.md`
+has described since 2026-08-04. Three platform behaviours shape it: job creation needs a
+USER token (the demo user `bootstrap_agent_token.py` registers); `jobs:create` allows 30
+per 60s, which 1/2s sits exactly on, so the default is 3s; and backpressure rejects new
+jobs once lag passes 1000, so a 503 means the fault is fully manufactured.
 
-`docs/runbook.md` has described "the standard 1-job/2s loop" since the
-2026-08-04 kill-window experiment as though it were a thing you could run.
-It was not — no such script existed anywhere in either repo. This is it.
-
-Three platform behaviours shape the design, and all three are the platform
-being correct rather than obstacles:
-
-* **Job creation needs a USER token**, not the service account the eval
-  uses. `POST /jobs` depends on `get_current_user`, so this logs in the same
-  demo user `bootstrap_agent_token.py` registers.
-
-* **`jobs:create` is rate limited to 30 per 60s.** The runbook's "1 job/2s"
-  is exactly 30/min — precisely at the limit, so half the requests would
-  race the window and 429. The default here is one every 3 seconds (20/min),
-  which leaves headroom and still builds backlog faster than a dead consumer
-  drains it (it drains at zero).
-
-* **Backpressure rejects new jobs once lag passes 1000**, reading
-  `kafka:consumer_lag:worker-dispatcher` — the very key the scenario
-  measures. So a 503 here is not a failure: it is the platform telling you
-  the fault is fully manufactured. The loop reports it that way and keeps
-  going, because lag does not drain while the consumer is dead.
-
-Run it in a second terminal alongside the scenario, or with `--until-lag`
-to stop once the backlog is deep enough and let the scenario take over.
+Run it beside the scenario, or with `--until-lag`.
 """
 
 from __future__ import annotations
@@ -56,9 +33,8 @@ DEFAULT_EMAIL: Final = "agent-demo@example.com"
 DEFAULT_PASSWORD: Final = "demo-agent-pass-123"  # noqa: S105 - dev-only placeholder
 # 20/min against a 30/min limit. See the module docstring for why not 1/2s.
 DEFAULT_INTERVAL_SECONDS: Final = 3.0
-# One of the platform's four JobType values (backend/app/models/enums.py).
-# bulk_api_sync is what the eval fixture pack already uses, so the traffic
-# blends with the seeded rows rather than standing out as a new shape.
+# A platform JobType value (backend/app/models/enums.py), and the one the eval fixture pack
+# uses, so the traffic blends with the seeded rows.
 DEFAULT_JOB_TYPE: Final = "bulk_api_sync"
 
 _BACKPRESSURE_STATUS: Final = 503
@@ -78,12 +54,8 @@ class Tally:
     def submitted(self) -> int:
         """Every request the loop actually sent, whatever came back.
 
-        This feeds the ``--count`` stop condition, so it counts ATTEMPTS —
-        errors included. Summing only the three reportable outcomes meant a
-        run against a dead platform, a stale token, or a rejected job type
-        errored on every request, never advanced the count, and never
-        terminated. ``describe()`` keeps errors in their own bucket, which
-        is the distinction that actually matters to the operator.
+        It feeds ``--count``, so it counts ATTEMPTS: summing only the reportable outcomes
+        left a dead-platform run looping forever.
         """
         return self.created + self.rate_limited + self.backpressured + len(self.errors)
 
@@ -114,9 +86,8 @@ def submit_one(client: httpx.Client, jwt: str, job_type: str, tally: Tally) -> N
         json={
             "type": job_type,
             "payload": {"source": "eval-traffic-loop"},
-            # Unique per submission: an idempotency key that repeated would
-            # have the platform dedupe the traffic away, and a loop that
-            # produces one job however long it runs is not a loop.
+            # Unique per submission: a repeated idempotency key has the platform dedupe the
+            # traffic away, leaving one job however long the loop runs.
             "idempotency_key": f"traffic-{uuid.uuid4()}",
         },
         headers={"Authorization": f"Bearer {jwt}"},
@@ -134,16 +105,10 @@ def submit_one(client: httpx.Client, jwt: str, job_type: str, tally: Tally) -> N
 
 
 class LagReader:
-    """Reads worker-dispatcher lag through the same tool the agent uses.
+    """Reads worker-dispatcher lag through `get_consumer_lag`, the tool the agent uses.
 
-    There is no REST endpoint for it — `get_consumer_lag` is MCP-only — and
-    that is the right surface anyway: the number worth watching is the one
-    the scenario will actually see, not a Redis key this script has no
-    business knowing.
-
-    Read-scoped by construction: it takes PLATFORM_SMOKE_TOKEN, so a bug
-    here cannot mutate the world the traffic is building. Optional — with no
-    MCP url or token the loop still runs, it just cannot report lag.
+    Read-scoped by construction: it takes PLATFORM_SMOKE_TOKEN, so a bug here cannot mutate
+    the world the traffic is building.
     """
 
     def __init__(self, mcp_url: str | None, token: str | None, client: httpx.Client) -> None:
@@ -256,8 +221,8 @@ def main(argv: list[str] | None = None) -> int:
     smoke_token = os.environ.get("PLATFORM_SMOKE_TOKEN")
     can_read_lag = bool(args.mcp_url and smoke_token and smoke_token.strip())
     if args.until_lag is not None and not can_read_lag:
-        # Refuse rather than run forever: --until-lag with no way to read lag
-        # is a loop with no stopping condition, which is worse than no flag.
+        # Refuse rather than run forever: --until-lag with no way to read lag is a loop
+        # with no stopping condition.
         print(
             "ERROR: --until-lag needs PLATFORM_MCP_URL and PLATFORM_SMOKE_TOKEN "
             "so the loop can read the lag it is waiting for. Run "
@@ -291,9 +256,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"traffic loop finished: {tally.describe()}")
     for failure in tally.errors[:5]:
         print(f"  error: {failure}")
-    # Errors that are not backpressure or rate limiting mean the traffic did
-    # not actually arrive, which is the one outcome that leaves the scenario
-    # asserting a fault that was never built.
+    # Errors that are not backpressure or rate limiting mean the traffic never arrived, so
+    # the scenario would assert a fault nobody built.
     return 1 if tally.errors and tally.created == 0 else 0
 
 

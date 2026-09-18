@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
 """Regenerate ``contracts/platform-tools.snapshot.json`` from a live platform.
 
-Runs one ``tools/list`` JSON-RPC call against the platform's MCP endpoint,
-normalizes the response (sorted, only the fields we care to diff), and
-writes it to disk. The committed snapshot is the source of truth for the
-platform contract as of the pinned image digest.
+One ``tools/list`` call, normalized (sorted, only the diffed fields). The committed snapshot
+is the contract at the pinned image digest, so bump that digest in ``demo/compose.yml`` and
+rerun this on each platform release.
 
-Usage:
+Usage (``PLATFORM_MCP_URL``, ``PLATFORM_TOKEN`` when the flags are omitted):
     uv run python scripts/snapshot_platform_tools.py [--mcp-url URL] [--token TOKEN]
-
-Env vars ``PLATFORM_MCP_URL`` and ``PLATFORM_TOKEN`` are consulted when the
-flags are omitted, matching the runner. Prints the tool count and a hint
-to commit the file. Bump the digest in ``demo/compose.yml`` and rerun
-this script whenever the platform ships a new release.
 """
 
 from __future__ import annotations
@@ -81,23 +75,16 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     result = fetch_tools(args.mcp_url, args.token)
-    # v0.4.8+ platform emits outputSchema in tools/list per PR #88; normalize
-    # reads it directly off the wire. Registry consistency is enforced by a
-    # separate unit test — see tests/unit/test_registry_matches_snapshot.py.
+    # v0.4.8+ emits outputSchema in tools/list (PR #88); registry consistency is
+    # tests/unit/test_registry_matches_snapshot.py.
     snapshot = normalize(result)
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n")
 
     tool_count = len(snapshot.get("tools", []))
-    # The file is already on disk by this line, so this print must not be
-    # able to fail. `relative_to` raises for anything outside the repo —
-    # `--out /tmp/x.json` when comparing two platform versions by hand, and
-    # equally a plain `--out out.json`, which is not under the absolute repo
-    # root until it is resolved. Either way the operator got a traceback for
-    # a run that had succeeded. Resolve first, keep the tidy repo-relative
-    # rendering when it applies, and fall back to the full path when it
-    # does not.
+    # The file is on disk by this line, so this print must not be able to fail:
+    # `relative_to` raises for any `--out` outside the repo. Resolve first, then fall back.
     resolved = out_path.resolve()
     try:
         shown: Path = resolved.relative_to(_REPO_ROOT)

@@ -1,22 +1,9 @@
-"""LLM-generated findings and recommendation for an EscalationBriefing.
+"""LLM-generated ``findings`` and ``recommendation`` for an EscalationBriefing.
 
-The deterministic template in ``briefing.py`` produces everything up to
-``findings`` and ``recommendation``. This module fills those with an LLM call
-using the ``briefing_writer`` prompt. The template shape stays authoritative —
-the LLM only writes into the two free-form strings.
-
-**Enrichment is eval-only, on purpose.** ``evals/runner.py`` is the only
-caller; the service path (``api/app.py``) renders the deterministic briefing
-and stops. That used to mean production shipped an emptier artifact than the
-one the eval graded, which is why it is now written down rather than assumed:
-see "Handoff artifact" in ``docs/safety-model.md``. The load-bearing facts —
-why the agent stopped, and which Tier-1 action already fired — are
-deterministic fields on ``EscalationBriefing``, so a production briefing is
-complete without an LLM. ``findings`` and ``recommendation`` are prose *about*
-those facts, and buying them costs an LLM call, a key, and a failure rail on
-the incident path. ``tests/unit/test_briefing_enrichment.py`` pins the
-consequence: the two paths differ in exactly those two strings and nothing
-else.
+Fills the two free-form strings of ``briefing.py``'s deterministic template using the
+``briefing_writer`` prompt. **Eval-only on purpose**: ``evals/runner.py`` is the only
+caller, and a production briefing is complete without it — the load-bearing fields are
+deterministic (``tests/unit/test_briefing_enrichment.py`` pins the difference).
 """
 
 from __future__ import annotations
@@ -48,31 +35,10 @@ def enrich_briefing(
     *,
     budget: BudgetLedger,
 ) -> tuple[EscalationBriefing, BudgetLedger]:
-    """The briefing with ``findings`` and ``recommendation`` filled by an LLM,
-    and the run ledger with what that cost added to it.
+    """Fill ``findings`` and ``recommendation`` by LLM; return the briefing and ledger.
 
-    Gets the same one bounded repair as the two planners (ADR 0035), and both
-    legs are accrued the same way they are (``accrue_structured_call``).
-
-    **This is the agent's own cost and it is metered** (WO-R3-260, ADR 0015 § 4
-    as amended). It is written prose the handoff carries, bought with the
-    agent's model on the agent's behalf, and leaving it out made every
-    cost-per-run comparison undercount the agent by exactly one call. It is
-    **never a gate**: enrichment runs after the state machine has reached a
-    terminal state, so there is no ``is_exhausted`` check left for a ceiling to
-    trip, and the caller keeps this ledger beside the graded run rather than
-    putting it back on ``RunState`` — a post-terminal charge that reached the
-    graded state would be a budget dimension deciding an outcome the agent had
-    already finished.
-
-    Returning the ledger rather than taking a mutable one is the same shape
-    ``investigation._plan_next_step`` uses: the charge is visible in the
-    caller's own code, so a call site that forgets it is a type error rather
-    than a silent under-report.
-
-    On a raised call — a transport failure, or a repair that exhausted — the
-    caller charges what the failure itself billed with ``accrue_llm_error``,
-    exactly as the investigation loop does. Nothing is swallowed here.
+    One bounded repair (ADR 0035), both legs accrued. Metered as the agent's own
+    cost but never a gate (ADR 0015 § 4) — it runs after the terminal state.
     """
     call = call_with_output_repair(
         llm_client,
@@ -101,10 +67,8 @@ def _format_context(briefing: EscalationBriefing) -> str:
         f"Final state: {briefing.final_state.value}",
         f"Alert: {briefing.alert_summary}",
     ]
-    # The reason and the attempted action are the two facts the handoff
-    # exists to deliver. They are deterministic fields, so the writer is
-    # summarizing them, never inventing them — and a writer that never saw
-    # the attempted action can recommend re-running it.
+    # Deterministic fields the writer summarizes, never invents; a writer blind
+    # to the attempted action would re-recommend it.
     if briefing.escalation_reason:
         lines.append(f"Why the run ended: {briefing.escalation_reason}")
     if briefing.attempted_action is not None:

@@ -1,25 +1,9 @@
-"""``StrategyKnobs`` — the inference block a strategy is built with.
+"""``StrategyKnobs`` — the inference block a strategy is built with (WP-5.2).
 
-Configuration is wired at the edge in this repo: nothing under ``agent/``
-calls ``get_settings()``, and the investigation loop already takes its model,
-its budgets and its re-probe knobs as parameters. ``baseline`` needed none of
-this, so ``StrategyRegistry`` built strategies from zero-argument factories.
-WP-5.2 is the first strategy with a knob — N — and the question is where N
-enters.
-
-It enters here: ``evals/runner.py`` reads ``Settings``, builds one of these,
-and hands it to ``STRATEGIES.create``. The alternative — a strategy that reads
-``Settings`` itself — would put configuration inside the thing whose whole
-value is being comparable across configurations, and would make a strategy
-untestable without an environment.
-
-Deliberately importing nothing from this package, for the same reason
-``names.py`` imports nothing: it is reachable from the edge without dragging a
-strategy (and so the investigation loop, and so the MCP client) in behind it.
-
-Defaults are the control group's. ``StrategyKnobs()`` is what ``baseline``
-runs on and what every strategy falls back to when a caller builds one without
-configuration, so a missing knobs block is never a silent change of arm.
+Configuration is wired at the edge: ``evals/runner.py`` reads ``Settings``, builds one of these
+and hands it to ``STRATEGIES.create``, so nothing under ``agent/`` calls ``get_settings()``.
+Imports nothing from this package, so the edge can reach it without dragging a strategy in.
+Defaults are the control group's, so a missing knobs block is never a silent change of arm.
 """
 
 from __future__ import annotations
@@ -31,33 +15,17 @@ from dataclasses import dataclass
 class StrategyKnobs:
     """N and the sampling temperature: the knobs a strategy is built with.
 
-    The budget multipliers are deliberately NOT here. They are read in
-    ``config.py`` and applied once, where ``agent/factory.py::start_run`` seeds
-    the ledger, and ``tests/unit/test_budgets.py::TestNoOtherCallSiteScalesABudget``
-    refuses a second reader anywhere under ``src/``, ``evals/`` or ``scripts/``.
-    An earlier draft of WP-5.2 carried the token ratio through here so the arm
-    could stamp it into ``strategy_config``; that would have been a second
-    reader of a number whose whole guarantee is that it has one, and the guard
-    caught it. A BUDGET result for an N-arm is read beside ``strategy_config.n``
-    and the seeded ledger the provenance record already carries (decision C4).
+    The budget multipliers are deliberately NOT here — they are read once in ``config.py``,
+    where ``agent/factory.py::start_run`` seeds the ledger, and
+    ``tests/unit/test_budgets.py::TestNoOtherCallSiteScalesABudget`` refuses a second reader.
     """
 
-    #: How many candidate diagnoses the strategy generates per planner step
-    #: (plan 02 § 11, N ∈ {1, 2, 4, 8}). 1 is the control group's shape: one
-    #: diagnosis considered, none enumerated behind it.
+    #: Candidate diagnoses generated per planner step (plan 02 § 11, N ∈ {1, 2, 4, 8}).
+    #: 1 is the control group's shape.
     n: int = 1
-    #: Sampling temperature for the strategies that draw several independent
-    #: samples (plan 02 § 11.2). ``None`` means "do not send one", which is
-    #: what every call in this repo has always done — the provider's default.
+    #: Sampling temperature for the arms that draw independent samples (plan 02 § 11.2).
+    #: ``None`` means "do not send one" — the provider's default, as every call here has.
     sample_temperature: float | None = None
-    #: Which generator supplies the set a ``candidate_selector`` decides over
-    #: (plan 02 § 12, WP-6.2). A plain ``str`` rather than ``StrategyName``, for
-    #: the reason this module imports nothing from its own package: it has to be
-    #: reachable from the edge without dragging a strategy in behind it. The
-    #: registry resolves it and refuses a name it does not have, so an
-    #: unresolvable value fails at construction with the known names listed.
-    #:
-    #: The default is the ENUMERATED arm, which is the cheap generator: one call
-    #: per step at ~N× output, against the sampled arm's N calls. A caller who
-    #: forgot to configure this gets the arm that spends least.
+    #: Which generator a ``candidate_selector`` decides over (plan 02 § 12, WP-6.2). A plain
+    #: ``str`` — this module imports nothing from its own package — resolved by the registry.
     selector_generator: str = "best_of_n_enumerated"

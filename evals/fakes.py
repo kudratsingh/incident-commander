@@ -11,14 +11,8 @@ from incident_commander.tools.mcp_client import MCPError, ToolResult
 class CannedMCPClient:
     """Structural ``MCPClientProtocol`` fake — returns pre-scripted responses.
 
-    A tool maps to either one ``ToolResult`` (returned on every call — the
-    Phase 0 shape) or a sequence of them, consumed in order with the last
-    one repeating once exhausted. Sequences exist for scenarios whose
-    canned data must change across the run — e.g. ``get_dag_state`` reads
-    ``paused=false`` during investigation and ``paused=true`` on the
-    post-``pause_dag`` verify probe (v0.4.9 enforced-pause semantics).
-    The last-one-repeats rule keeps extra probes (verify polling, freshness
-    re-probes) from crashing a canned run.
+    A tool maps to one ``ToolResult`` (returned always) or a sequence consumed in
+    order, the last one repeating so verify polling and re-probes do not crash.
     """
 
     def __init__(self, responses: Mapping[str, ToolResult | Sequence[ToolResult]]) -> None:

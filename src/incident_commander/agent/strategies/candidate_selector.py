@@ -1,84 +1,33 @@
 """``candidate_selector`` — a generator arm plus a selection (WP-6.2).
 
-Plan 02 § 12 and plan 03 § 7.3. This is the arm the buildout's headline question
-turns on: is the bottleneck generation or selection? A best-of-N arm produces the
-set and this strategy asks the ``candidate_selector`` role which member of it the
-run should act on. The evaluator then reads ``oracle_gap@k = pass@k − selected@k``
-off the recorded steps: a small gap says generation limits the agent, a large one
-says selection does.
+Plan 02 § 12 and plan 03 § 7.3, and the buildout's headline question: is the bottleneck
+generation or selection? A best-of-N arm produces the set, this strategy asks the
+``candidate_selector`` role which member to act on, and the evaluator reads
+``oracle_gap@k = pass@k − selected@k`` off the recorded steps. The arm is
+``(generator, N, selector)``, all three stamped into ``strategy_config``.
 
-The arm is ``(generator, N, selector)``, so all three are stamped into
-``strategy_config``. Two different generators under one selector are two arms, and
-a report keyed on the strategy name alone would collapse them into one row.
+**Selection is not authorization** (plan 02 § 18). The selector chooses among *diagnoses*,
+never an action: the emitted step still meets the FIX_MAP gate, the 0.7 confidence gate,
+ADR 0041's whole-queue refusal, the ADR-0009 re-probe and ``_execute_probe``'s tier re-check in
+``investigation.py``, and a selected category outside ``FIX_MAP`` gets the gate's ``StopAction``.
 
-Selection is not authorization
-------------------------------
+**``select``** emits the selected candidate **and only it**, because ``InvestigationStep``
+re-sorts by confidence (B-07) and a more-confident *unselected* candidate would otherwise gate
+the run on a diagnosis the selector rejected; the alternatives stay in ``candidate_set``. The
+ranking is then one hypothesis, so a briefing is not comparable with ``baseline``'s (ADR 0044,
+ADR 0049). **``probe_more``** emits the ``next_probe`` of
+``SelectionResult.chosen_candidate_id`` (the highest-scored one, since ``probe_more`` names
+none — ADR 0048); ``ProbeAction.tool_name`` is a ``ReadToolName`` literal, so no non-read tool
+can be smuggled in, and a candidate proposing no probe becomes a ``StopAction`` through
+``_finalize`` rather than the generator's step or a crash. **``escalate``** is a ``StopAction``
+carrying the selector's reasoning, down that same path.
 
-The whole of plan 02 § 18, and it is the property this module is written to
-preserve. The selector chooses among **diagnoses**; it never chooses an action.
-Whatever it selects, the emitted ``InvestigationStep`` goes back to
-``investigation.py`` and meets the ``FIX_MAP`` gate, the 0.7 threshold, the
-subject-probe refusal, ADR 0041's whole-queue refusal, the ADR-0009 freshness
-re-probe, ``max_iterations`` and ``_execute_probe``'s runtime tier re-check,
-exactly as ``baseline``'s step does. A selected candidate whose category is
-outside ``FIX_MAP`` gets a ``StopAction`` from the existing gate; that is correct
-and is not special-cased here.
-
-The three decisions, and what each emits
-----------------------------------------
-
-**``select``** — the emitted step is built from the selected candidate, **and
-only from it**. That is a decision rather than an obvious reading, because
-``InvestigationStep`` re-sorts its ``hypotheses`` by confidence at the schema
-boundary (B-07) and three gates read index 0 as the top pick. Emitting the whole
-set with the selection first would therefore let a more-confident *unselected*
-candidate sort into index 0 — the loop would gate on a diagnosis the selector
-rejected, which is the one failure this arm cannot be allowed to have. So the
-step carries one hypothesis, the selected one, and the alternatives stay where
-research data belongs: the ``StepRecord``'s ``candidate_set``, which holds all N.
-
-The consequence is named rather than hidden. On this arm the run's hypothesis
-ranking after a step is one hypothesis rather than a list, so a briefing written
-on this arm sees the commitment and not the alternatives — the judge's soft
-dimensions are not comparable between this arm and ``baseline``, the same limit
-ADR 0044 records for the enumerated arm's derived ``reasoning``. ADR 0049
-records this one.
-
-**``probe_more``** — the emitted step is the ``next_probe`` of the candidate the
-decision points at (``SelectionResult.chosen_candidate_id``: the highest-scored
-one, since ``probe_more`` names none — ADR 0048). The probe goes through
-``_execute_probe`` and its tier re-check like any other, so the selector cannot
-widen what may be probed; and it cannot smuggle a non-read tool in either, because
-``ProbeAction.tool_name`` is a ``ReadToolName`` literal and a candidate carrying
-anything else fails validation at the generator's own schema boundary.
-
-A ``probe_more`` whose candidate proposes no probe is an incoherent decision — it
-asks for evidence and names no way to get it. It is **not** silently replaced by
-the generator's own step (that would let a strategy overrule a decision the model
-made) and it does not raise (a harness crash for a model's incoherence). It
-becomes a ``StopAction`` naming exactly that, which routes through the loop's
-existing ``_finalize`` and ends the run with a briefing. Fail-safe, visible in the
-trajectory, and nothing is fabricated.
-
-**``escalate``** — a ``StopAction`` carrying the selector's own reasoning, through
-the same ``_finalize`` path ``baseline`` reaches when its planner says stop.
-
-Cost, and the trap ADR 0045 named
----------------------------------
-
-The selector is its own ROLE (``selection.SELECTOR_ROLE``), metered on its own
-client (``StrategyContext.selector_llm_client``) and charged to the run ledger
-through the same ``accrue_structured_call`` every other call uses. Folding it into
-``investigation_planner`` would make "what did selection cost" unanswerable, which
-is the number this arm is compared on.
-
-The failure path is where the accounting is easy to break, and it is ADR 0045's
-trap one layer up: the generation is paid for **before** the selector call, and the
-loop's ``except`` arm charges ``accrue_llm_error`` against the ``RunState`` it held
-*before* ``plan_next_step`` — so a selector that simply let its exception through
-would charge the generation to nobody. It is re-raised as ``SelectorFailed``
-carrying the summed usage of every billed leg of the step, generation included, and
-the loop's single accrual charges all of it exactly once.
+The selector is its own role (``selection.SELECTOR_ROLE``) on its own client
+(``StrategyContext.selector_llm_client``), charged through ``accrue_structured_call``, so its
+cost is not folded into ``investigation_planner``'s. It is paid after the generation, and the
+loop charges ``accrue_llm_error`` against the state held *before* ``plan_next_step``, so a
+failure is re-raised as ``SelectorFailed`` carrying every billed leg's summed usage (ADR 0045's
+trap one layer up).
 """
 
 from __future__ import annotations
@@ -118,14 +67,12 @@ from incident_commander.agent.strategies.records import (
 from incident_commander.llm.client import LLMError, LLMUsage
 from incident_commander.llm.repair import RepairedCall, sum_usage, usage_of
 
-#: Raised when a step is planned with no selector client on the context. Named
-#: so a test asserts the guard's own marker rather than the fact that something
-#: raised (F-007).
+#: Raised when a step is planned with no selector client on the context. Named so a test can
+#: assert the guard's own marker rather than that something raised (F-007).
 NO_SELECTOR_CLIENT: Final[str] = "no selector client is on the strategy context"
 
-#: The stop reason for a ``probe_more`` whose candidate proposes no probe. A
-#: constant because the grader, the briefing and the test all read it, and three
-#: spellings of one reason is how a classifier stops matching what it classifies.
+#: The stop reason for a ``probe_more`` whose candidate proposes no probe. A constant because
+#: the grader, the briefing and the test all read it, and three spellings would not match.
 PROBE_MORE_WITHOUT_A_PROBE: Final[str] = (
     "selector asked for another probe and the candidate it points at proposes none"
 )
@@ -134,15 +81,9 @@ PROBE_MORE_WITHOUT_A_PROBE: Final[str] = (
 class SelectorFailed(LLMError):
     """The selector call failed, and the step's whole bill comes with it.
 
-    An ``LLMError`` subclass so the investigation loop's existing
-    ``except (ValueError, ValidationError, LLMError)`` arm catches it and
-    escalates exactly as it does for ``baseline`` — no new arm and no strategy
-    deciding for itself that a failure is survivable.
-
-    ``usage`` is the sum of every billed leg of the step: the generation's calls
-    and their repairs, plus the selector call and its repair. Same shape and same
-    reason as ``best_of_n_sampled.SampledPlannerFailed`` (ADR 0045); the
-    difference is only which part of the step was already paid for.
+    An ``LLMError`` subclass so the loop's existing ``except`` arm escalates as for
+    ``baseline``. ``usage`` sums every billed leg, generation included — same shape and reason
+    as ``best_of_n_sampled.SampledPlannerFailed`` (ADR 0045).
     """
 
     def __init__(self, generator: str, cause: BaseException, usage: LLMUsage | None) -> None:
@@ -163,18 +104,10 @@ class CandidateSelectorStrategy:
     def __init__(self, knobs: StrategyKnobs | None = None) -> None:
         """Build the arm from its inference block.
 
-        The generator is resolved through the registry, which refuses an unknown
-        name with the known ones listed — and then refuses again here if what it
-        built cannot ``generate``. ``baseline`` is a name the registry has and
-        this arm cannot use: it considers one diagnosis, so a selector over its
-        set is a billed call whose only possible answer is the candidate it was
-        handed.
-
-        Imported inside the constructor rather than at module scope because the
-        registry imports every strategy, this one included: a module-level import
-        would be a cycle. The indirection is the point of the registry — one place
-        resolves a name — so the alternative (importing the two arms directly) would
-        mean a config value this arm accepts that the registry has never heard of.
+        The generator is resolved through the registry, then refused again here if what it
+        built cannot ``generate`` — ``baseline`` is a name the registry has and this arm cannot
+        use. The import is inside the constructor because the registry imports every strategy,
+        this one included, so a module-level import would be a cycle.
         """
         from incident_commander.agent.strategies.registry import STRATEGIES
 
@@ -190,9 +123,8 @@ class CandidateSelectorStrategy:
         self._generator: Final[CandidateGenerator] = built
         self.config: Mapping[str, Any] = MappingProxyType(
             {
-                # All three parts of the arm identity (plan 02 § 12). The
-                # generator's own knobs are folded in rather than restated, so a
-                # report row carries the N and the temperature that actually ran.
+                # All three parts of the arm identity (plan 02 § 12), the generator's own knobs
+                # folded in rather than restated, so a report row carries what actually ran.
                 **dict(built.config),
                 "generator": built.name,
                 "selector": SELECTOR_ROLE,
@@ -209,10 +141,7 @@ class CandidateSelectorStrategy:
     ) -> tuple[RunState, InvestigationStep, StepRecord]:
         """Generate the set, select from it, emit the selection's step.
 
-        Order matters and is not an implementation detail: the generation is
-        charged into ``generation.run_state`` before the selector is asked, so a
-        selector failure carries a bill that already exists (see
-        ``SelectorFailed``).
+        Order matters: the generation is charged before the selector is asked.
         """
         if ctx.selector_llm_client is None:
             raise ValueError(
@@ -253,11 +182,7 @@ class CandidateSelectorStrategy:
     def _step_for(
         self, decision: SelectionResult, generation: CandidateGeneration
     ) -> InvestigationStep:
-        """The decision, as the step the loop runs.
-
-        Three branches and no fourth: ``SelectionDecision`` is a closed set, so
-        a value the schema accepted is one of these.
-        """
+        """The decision, as the step the loop runs (``SelectionDecision`` is closed)."""
         chosen = self._chosen(decision, generation)
         if decision.decision is SelectionDecision.ESCALATE:
             return InvestigationStep(
@@ -265,19 +190,15 @@ class CandidateSelectorStrategy:
                 next_action=StopAction(reason=f"selector escalated: {decision.reasoning}"),
             )
         if chosen is None:
-            # Only reachable if ``scores`` were empty on a ``probe_more``, which
-            # the schema forbids (every candidate is scored). Stated rather than
-            # asserted away: the branch is the honest answer if that rule ever
-            # loosens.
+            # Only reachable if ``scores`` were empty on a ``probe_more``, which the schema
+            # forbids. Stated rather than asserted away, in case that rule ever loosens.
             return InvestigationStep(
                 hypotheses=(_hypothesis_of(generation.candidates[0], decision),),
                 next_action=StopAction(reason=PROBE_MORE_WITHOUT_A_PROBE),
             )
         if decision.decision is SelectionDecision.SELECT:
-            # One hypothesis, the selected one. See the module docstring: the
-            # schema re-sorts by confidence, so a set emitted here could put an
-            # unselected candidate at index 0 and gate the run on a diagnosis
-            # the selector rejected.
+            # One hypothesis, the selected one: the schema re-sorts by confidence, so a set
+            # emitted here could gate the run on a diagnosis the selector rejected.
             return InvestigationStep(
                 hypotheses=(_hypothesis_of(chosen, decision),),
                 next_action=generation.proposed_step.next_action,
@@ -298,12 +219,7 @@ class CandidateSelectorStrategy:
     def _chosen(
         decision: SelectionResult, generation: CandidateGeneration
     ) -> DiagnosisCandidate | None:
-        """The candidate the decision points at, resolved against the set.
-
-        ``chosen_candidate_id`` is validated against the bound set, so a
-        non-``None`` id always resolves; the ``None`` return is the ``escalate``
-        case and the empty-``scores`` case the schema forbids.
-        """
+        """The candidate the decision points at. ``None`` is ``escalate`` or empty ``scores``."""
         chosen_id = decision.chosen_candidate_id
         if chosen_id is None:
             return None
@@ -322,17 +238,10 @@ class CandidateSelectorStrategy:
     ) -> StepRecord:
         """The generator's record, rebuilt with the selector block.
 
-        ``dataclasses.replace`` rather than a second assembly: the generator
-        already measured its own context and its own calls, and a record built
-        twice is two definitions of ``planner_context_chars`` — the number an arm
-        comparison is read off. The whole candidate set stays exactly as the
-        generator recorded it, which is what makes ``pass@k`` and ``selected@k``
-        computable from one record on the same set.
-
-        The ledger delta on the selector's ``LLMCallRecord`` is the selector
-        call's own: ``updated`` minus the state the generation left, so the
-        generation's charge stays on the generator's records and is not counted
-        twice by anyone summing the column.
+        ``dataclasses.replace`` rather than a second assembly, which would be two definitions
+        of ``planner_context_chars``. The candidate set stays as the generator recorded it, so
+        ``pass@k`` and ``selected@k`` come from one record; the selector's ledger delta is its
+        own call's.
         """
         before = generation.run_state
         return replace(
@@ -368,13 +277,9 @@ class CandidateSelectorStrategy:
 def _hypothesis_of(candidate: DiagnosisCandidate, decision: SelectionResult) -> Hypothesis:
     """One candidate, as the ranking the rest of the loop reads.
 
-    ``reasoning`` is the selector's own, prefixed with the decision and the
-    candidate's score, because ``Hypothesis.reasoning`` is required and a
-    ``DiagnosisCandidate`` has none (ADR 0042). Derived rather than invented: every
-    part of the string is something the selector said, so nothing here can be
-    mistaken for model prose about the incident itself. Same limit as the
-    enumerated arm's citation reasoning (ADR 0044), for the same reason, and ADR
-    0047 records it.
+    ``reasoning`` is the selector's own, prefixed with the decision and score, as
+    ``Hypothesis.reasoning`` is required and ``DiagnosisCandidate`` has none (ADR 0042).
+    Derived, not invented (ADR 0047).
     """
     score = decision.scores.get(candidate.candidate_id)
     scored = "unscored" if score is None else f"score {score}"

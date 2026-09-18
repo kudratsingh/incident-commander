@@ -1,14 +1,9 @@
 """LLM-as-judge grader for briefing quality.
 
-Uses the pinned ``JUDGE_MODEL`` from Settings so eval scores stay stable across
-agent-model swaps — a rewritten prompt shouldn't move the judge's rubric. Two
-dimensions, both 0-1: groundedness (no invented facts) and actionability
-(concrete verification step for the human).
-
-Scored per scenario; aggregate stats land in RunReport. Regression gating on
-judge scores is intentionally deferred — Phase 2 exit is "briefings graded,"
-not "briefings all >= 0.8." The bar is set from baseline in Phase 3 once we
-have a real distribution.
+Uses the pinned ``JUDGE_MODEL`` so scores stay stable across agent-model swaps.
+Two dimensions, both 0-1: groundedness (no invented facts) and actionability (a
+concrete verification step). Scored per scenario; regression gating on judge
+scores is deferred until a real distribution exists.
 """
 
 from __future__ import annotations
@@ -25,9 +20,8 @@ from incident_commander.llm.structured import StructuredOutput
 
 USEFUL_THRESHOLD: Final[float] = 0.7
 
-#: The prompt file this judge's rubric lives in. Named once: the judge call
-#: below loads it, and the calibration harness hashes it so a report says which
-#: rubric bytes it calibrated (plan 03 § 110's attribution rule).
+#: The prompt file this judge's rubric lives in. Named once: the call below loads
+#: it and the calibration harness hashes it (plan 03 § 110's attribution rule).
 JUDGE_PROMPT: Final[str] = "briefing_judge"
 
 
@@ -56,18 +50,9 @@ def judge_briefing(
 ) -> JudgeScore:
     """Grade a briefing. Uses the pinned ``JUDGE_MODEL`` at the call site.
 
-    One bounded re-ask on an output-shape failure — the same wrapper and the
-    same cap of 1 as every other structured-output call site (ADR 0035,
-    widened here by WO-R2-174). A score the schema rejects is the envelope
-    failing, not the briefing being bad, and the two must not be confused:
-    the run is already graded on its five deterministic dimensions by the time
-    this is called, so a malformed reply that is *not* repaired must leave the
-    judge column EMPTY and say why. That is what the caller does — a second
-    failure raises ``OutputRepairExhausted``, which is an ``LLMError``, so
-    ``evals/runner.py`` records ``judge_error`` and leaves ``judge_score``
-    ``None``. A default score here would be an invented number in the column
-    that feeds ``judge_mean_overall``, and a metric nobody can tell from a
-    real one.
+    One bounded re-ask on an output-shape failure (ADR 0035, WO-R2-174); a second
+    raises ``OutputRepairExhausted``, so ``evals/runner.py`` records
+    ``judge_error`` and leaves ``judge_score`` ``None`` rather than inventing one.
     """
     call = call_with_output_repair(
         judge_client,
@@ -82,31 +67,12 @@ def judge_briefing(
 def format_briefing_context(briefing: EscalationBriefing) -> str:
     """The context the judge grades against.
 
-    Public since WP-6.3, and it has to be: the calibration harness asks this
-    judge the trap-set questions through this same function. A calibration that
-    built its own copy of the judge's context would be measuring a judge nobody
-    runs, and the two copies would drift the first time a field is added here —
-    which is the shape of INC-002 one level up (a rule given to one reader of
-    the evidence and not to another).
-
+    Public since WP-6.3 so the calibration harness asks through this same function.
     Must show everything the WRITER was shown
-    (``agent/briefing_enrichment.py::_format_context``), because
-    ``groundedness`` asks whether every claim derives from the context. While
-    ``escalation_reason`` and ``attempted_action`` were missing here, a
-    recommendation correctly built on them looked invented to the judge, and
-    one telling the human to re-run an already-attempted Tier-1 action could
-    not be marked down for it — the judge was grading a briefing on strictly
-    less than it was written from. The two lines below are worded exactly as
-    the writer sees them; ``tests/unit/test_llm_judge.py`` pins that.
-
-    The investigation trail comes from ``briefing.render_trail``, shared with
-    the writer, and it renders each probe's ARGUMENTS beside its result. That
-    is INC-002: the judge was shown ``list_dlq_messages`` returning
-    ``{"total":0,"items":[]}`` with the ``remediation_hint='replay_safe'``
-    that scoped the read stripped out, read it as "the whole queue is empty",
-    and scored an honest briefing 0.0 for groundedness — making the exact
-    overclaim the writer prompt had just been told never to make. A result
-    without its arguments is a result whose scope cannot be recovered.
+    (``agent/briefing_enrichment.py::_format_context``), worded as the writer sees
+    it (pinned by ``tests/unit/test_llm_judge.py``), and ``render_trail`` renders
+    each probe's ARGUMENTS — a result without its scope read as "the whole queue is
+    empty" and scored an honest briefing 0.0 (INC-002).
     """
     lines = [
         f"Incident: {briefing.incident_id}",

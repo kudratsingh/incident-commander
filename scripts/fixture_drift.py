@@ -3,13 +3,9 @@
     uv run python scripts/fixture_drift.py            # report
     uv run python scripts/fixture_drift.py --bless    # rewrite the ledger
 
-Needs a live platform: ``PLATFORM_MCP_URL`` plus a READ-SCOPED token. It
-prefers ``PLATFORM_SMOKE_TOKEN`` and refuses to fall back to
-``PLATFORM_TOKEN``, which carries ``actions:execute`` — a drift check has no
-business holding a principal that could mutate the world it is measuring.
-
-Exit codes follow the runner's convention: 0 clean, 1 drift outside the
-ledger (or stale entries in it), 2 missing prerequisite.
+Needs ``PLATFORM_MCP_URL`` plus ``PLATFORM_SMOKE_TOKEN``, and refuses to fall back to
+``PLATFORM_TOKEN``, which carries ``actions:execute``. Exit codes follow the runner: 0
+clean, 1 drift outside the ledger or stale entries in it, 2 missing prerequisite.
 """
 
 from __future__ import annotations
@@ -39,27 +35,11 @@ _SCENARIOS_DIR = _REPO_ROOT / "evals" / "scenarios"
 
 
 def _await_fixtures(calls, mcp_url: str, token: str, budget_seconds: int) -> int:  # type: ignore[no-untyped-def]
-    """Poll until every call the drift check makes resolves.
+    """Poll until every call the drift check makes resolves — a readiness gate, not a retry.
 
-    The platform seeds its fixture pack asynchronously at boot, and CI's
-    readiness loop waits for the REST app's ``/healthz`` — not for the data.
-    ``test-contract`` never noticed because ``tools/list`` needs no rows; the
-    drift check is the first thing in CI that does, and its first run compared
-    every fixture against an empty world.
-
-    This waits for exactly the calls the check will make, so it cannot pass
-    while a fixture the check probes is still missing. It is a readiness gate,
-    not a retry: a failure that survives the budget is reported with the calls
-    still unresolved, never swallowed.
-
-    Both ways a not-yet-ready platform answers are caught. It only caught
-    ``UnseededPlatformError`` — the "up but empty" case — so the connection
-    errors a platform produces while it is *not yet listening* killed the
-    loop on attempt one, which is exactly the window this gate exists for.
-    ``httpx.HTTPError`` is belt to that braces: since the probe converts
-    transport failures into ``ProbeError`` they now arrive as unresolved
-    calls, and a raise from anywhere else in the client must not be fatal
-    to a poll loop either.
+    CI waits for ``/healthz``, not the asynchronously seeded fixture pack. Both not-ready
+    answers count: "up but empty" (``UnseededPlatformError``) and "not yet listening"
+    (``httpx.HTTPError``).
     """
     deadline = time.monotonic() + budget_seconds
     attempt = 0
@@ -153,9 +133,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {err}", file=sys.stderr)
         return 2
 
-    # The Tier-1 half, which needs no platform and so is not gated on one:
-    # those fixtures are never probed (probing pause_dag would pause a DAG),
-    # and their shape is checked against the committed tool snapshot instead.
+    # The Tier-1 half is never probed (probing pause_dag would pause a DAG), so its shape
+    # is checked against the committed tool snapshot instead and needs no platform.
     shape_defects = check_calls(write_tier_calls(calls))
 
     print(
@@ -170,10 +149,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.bless:
         if result.errors:
-            # The ledger IS the burn-down list. Rewriting it from a run that
-            # could not read part of the suite deletes entries nothing
-            # disproved, and the deletion is silent — the file just gets
-            # shorter, which is what progress looks like.
+            # The ledger IS the burn-down list, so rewriting it from a run that could not
+            # read part of the suite silently deletes entries nothing disproved.
             print(
                 f"ERROR: refusing to bless — {len(result.errors)} fixture(s) could not be "
                 "probed (listed above), and a run that did not read them cannot say "
@@ -182,22 +159,11 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        # A fixture this run cannot speak to is dropped from BOTH halves of
-        # the bless: its drift is not written, and its (scenario, tool) pair
-        # is removed from the coverage this run claims, so `split_for_bless`
-        # carries any existing entry rather than disproving it. Same posture
-        # as the probe-error refusal above — a run that holds no opinion may
-        # neither add nor delete — applied to a reading that came back but is
-        # about the volume rather than about the fixture.
-        #
-        # The case it exists for: `failed_traces_scan` probes
-        # `search_traces(status="failed", since_hours=1)`, and a developer
-        # stack that has been up for more than an hour returns nothing for it
-        # while a freshly seeded one (CI's contract job, which is what the
-        # ledger is `_blessed_against`) returns the seeded rows. Blessing that
-        # reading would write an entry CI never observes, and the ratchet
-        # fails on entries no longer observed — so a naive bless from a stale
-        # volume turns CI red in the opposite direction.
+        # A fixture this run cannot speak to is dropped from BOTH halves of the bless: no
+        # drift written, and its pair out of the claimed coverage, so `split_for_bless`
+        # carries any existing entry rather than disproving it. The case: on a stack up
+        # more than an hour `failed_traces_scan` sees nothing where CI's fresh seed sees
+        # rows, and blessing that would write an entry CI never observes.
         not_fresh = _parse_pairs(args.not_fresh)
         unknown = sorted(pair for pair in not_fresh if pair not in set(result.compared))
         if unknown:

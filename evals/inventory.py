@@ -1,31 +1,10 @@
 """Generate the benchmark inventory from the validated scenario corpus.
 
-Family and difficulty are read off the scenario (WP-1.4) and carry
-``provisional: false``. A scenario that declares neither still gets a row,
-from the provisional rule WO-R3-179 wrote down, flagged ``provisional: true``
-— so a half-classified corpus is visible in the manifest instead of absent
-from it, and a reader can tell a promoted value from a guessed one without
-opening 41 YAMLs. Every scenario shipped today declares both, so every row
-today reads ``provisional: false``; the fallback exists for the window
-between a scenario landing and being classified, which
-``tests/unit/test_scenario_metadata.py`` closes at the corpus level.
-
-The provisional rule, kept verbatim because it is what the authoritative
-values were promoted FROM: family takes the first substring match across
-tags, name and alert source, in this order: dlq -> dlq;
-consumer_lag/consumer-lag -> consumer_lag; saga/dag -> workflow;
-cache/redis -> cache_redis; postgres -> postgres; deploy -> deploy;
-trace -> traces; noise/alert_storm -> noise_control; tool_ -> tool_fault;
-otherwise uncategorized. Matching is case-insensitive. Difficulty is
-``control`` for names starting with noise_ and for planner_stops_immediately,
-and ``single`` for everything else. (WO-R3-179 spelled those last two 0 and
-1; WP-1.4's closed vocabulary from plan 03 § 3 is the same two rungs under
-their real names, so the column is a string from here on.) These are legacy
-groups, not future families B (jobs not progressing), C (workflow stuck), or
-A (API latency).
-
-Run ``make inventory`` to regenerate the source-derived manifest. This does
-not run scenarios, call the platform/LLM, or read or write run evidence.
+Family and difficulty are read off the scenario (WP-1.4, ``provisional: false``);
+one declaring neither falls back to WO-R3-179's rule below, flagged
+``provisional: true``, with ``tests/unit/test_scenario_metadata.py`` closing the
+gap at corpus level. ``make inventory`` regenerates it — no scenario runs, no
+platform or LLM call, no run evidence touched.
 """
 
 from __future__ import annotations
@@ -56,10 +35,8 @@ _FAMILY_RULES = (
 class ClassifiedValue(TypedDict):
     """One classification, and whether a human actually made it.
 
-    ``provisional`` is the honest half. A report that groups on ``family``
-    cannot tell a value a scenario author chose from one a substring rule
-    guessed, and the difference decides whether a surprising per-family
-    number is a finding or a typo in a tag.
+    ``provisional`` says whether a surprising per-family number is a finding or a
+    typo in a tag.
     """
 
     value: str
@@ -89,11 +66,7 @@ class InventoryRow(TypedDict):
 def provisional_family(scenario: Scenario) -> str:
     """WO-R3-179's substring rule. The fallback, and the promotion's source.
 
-    Kept as a named function rather than inlined because WP-1.4's
-    reconciliation test reads it: every authoritative value in the corpus
-    must either equal what this rule produced or be a recorded, reasoned
-    exception, so "we promoted the provisional values" stays a checkable
-    claim rather than a sentence in a PR body.
+    Named rather than inlined because WP-1.4's reconciliation test reads it.
     """
     text = " ".join((*scenario.tags, scenario.name, scenario.alert.source)).lower()
     for needles, family in _FAMILY_RULES:

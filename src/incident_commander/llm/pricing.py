@@ -1,21 +1,9 @@
 """Pinned per-model token prices for the USD budget meter (ADR 0015).
 
-Prices are configuration pinned per ADR 0011; verify against
-docs.claude.com when AGENT_MODEL, JUDGE_MODEL, DEVELOPMENT_MODEL or
-BENCHMARK_MODEL change — the same rule CLAUDE.md already applies to the
-model id strings themselves. All four are refused at startup unless the
-id they name has a row below (``config.py::_configured_models_are_priced``),
-so pointing a model role at a new id means adding its four rates here, in
-the same change.
-
-The map is a committed constant, never a runtime lookup: offline eval
-runs must not need network, and a run's reported cost must be
-reproducible from the checkout alone.
-
-Rates are USD per million tokens, verified against docs.claude.com
-2026-08 for the 5-minute ephemeral cache TTL that ``llm/client.py``
-applies to the system prompt — cache write is 1.25x input, cache read
-is 0.1x input.
+Pinned per ADR 0011: verify against docs.claude.com when AGENT_MODEL, JUDGE_MODEL,
+DEVELOPMENT_MODEL or BENCHMARK_MODEL change, and add the four rates in the same change —
+``config.py::_configured_models_are_priced`` refuses an unpriced id at startup. A committed
+constant, not a runtime lookup. USD per million tokens; cache write 1.25x, cache read 0.1x.
 """
 
 from __future__ import annotations
@@ -27,18 +15,15 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    # Type-only: importing the client at runtime would drag the Anthropic SDK
-    # into every module that needs a price row, and `config.py` needs one to
-    # refuse an unpriced model at startup (WO-R2-118). This table is committed
-    # constants and arithmetic; it should cost nothing to import.
+    # Type-only: a runtime import would drag the Anthropic SDK into every
+    # module that needs a price row (WO-R2-118).
     from incident_commander.llm.client import LLMUsage
 
 _LOG: Final = logging.getLogger(__name__)
 
 _TOKENS_PER_MILLION: Final[Decimal] = Decimal(1_000_000)
-# Sub-cent resolution: a single planner call on a cached system prompt can
-# cost well under $0.001, and truncating those to cents would make the meter
-# read zero for an entire investigation.
+# Sub-cent resolution: cents would make the meter read zero for a
+# whole investigation.
 _USD_QUANTUM: Final[Decimal] = Decimal("0.000001")
 
 
@@ -73,17 +58,8 @@ _warned_models: set[str] = set()
 def class_ceiling(table: Mapping[str, ModelPricing]) -> ModelPricing:
     """A synthetic row that is at least as expensive as every row, per class.
 
-    NOT a registered row. Selecting the priciest *registered* row — by the
-    sum of its four rates, which is how this used to work — is not an upper
-    bound: a table can hold a row that is cheaper in total yet dearer in a
-    single class, and an unpinned model billed at the sum-winner's rates is
-    then metered below its real price in that class. That breaks the one
-    guarantee this module and ADR 0015 both state outright, and it breaks it
-    silently, which is the part that matters for an unattended paid run.
-
-    Taking the maximum per class instead makes the guarantee true by
-    construction for any table anyone writes later, rather than true by
-    coincidence for the two rows that happen to be registered today.
+    NOT a registered row: the priciest *registered* row is not an upper bound, so the
+    per-class maximum makes ADR 0015's never-under-report guarantee true by construction.
     """
     rows = tuple(table.values())
     if not rows:
@@ -99,16 +75,8 @@ def class_ceiling(table: Mapping[str, ModelPricing]) -> ModelPricing:
 def pricing_for(model: str) -> ModelPricing:
     """Price row for ``model``, falling back to the per-class ceiling.
 
-    An unpinned model id is an operator error (a changed ``AGENT_MODEL``
-    without a matching price row), but raising here would abort a live
-    incident run over an accounting gap. Charging the per-class maximum
-    keeps the USD ceiling conservative — the meter can over-report, never
-    silently under-report — and warns once per id.
-
-    Derived from ``MODEL_PRICING`` at call time rather than pinned at import:
-    the bound is then a fact about the table as it actually is, and a test
-    can prove the property against a table this module does not ship. The
-    cost is eight Decimal comparisons on a path that is meant to be rare.
+    An unpinned id (a changed ``AGENT_MODEL`` with no price row) is an operator error, but
+    raising would abort a live run, so it is charged the per-class maximum and warned once.
     """
     row = MODEL_PRICING.get(model)
     if row is not None:
@@ -126,19 +94,8 @@ def pricing_for(model: str) -> ModelPricing:
 def cost_of(model: str, usage: LLMUsage) -> Decimal:
     """USD cost of one logical LLM call, quantized to microdollars.
 
-    Takes ``LLMUsage`` rather than ``LLMResult`` so the billed paths that
-    never produce a parsed output — a truncated response, an exhausted
-    retry loop — are priced by the same arithmetic as the happy path.
-    ``LLMResult`` is an ``LLMUsage``, so callers holding one still fit.
-
-    ``discarded_output_tokens`` is billed at the output rate: it is a
-    conservative stand-in for attempts that generated and were thrown
-    away, and the output rate is the dearest of the four classes, so the
-    stand-in cannot under-bill them (ADR 0015).
-
-    Decimal end to end: ``BudgetLedger.usd_used`` is a ``Decimal`` and a
-    float intermediate would leak binary-rounding noise into every
-    briefing that renders it.
+    Takes ``LLMUsage``, not ``LLMResult``, so billed paths with no parsed output price the
+    same way; ``discarded_output_tokens`` bills at the output rate, never under (ADR 0015).
     """
     row = pricing_for(model)
     raw = (

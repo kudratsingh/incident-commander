@@ -1,13 +1,8 @@
 """Anthropic-backed LLM client with typed structured outputs.
 
-Structured outputs use the tool-use pattern: we advertise a single tool whose
-input schema is the caller's Pydantic model, and force the model to call it.
-That gives us JSON-schema-validated output for free — the SDK rejects any
-tool-call payload that violates the schema.
-
-Prompt caching is applied to the system prompt so repeat calls with the same
-system content pay the cheap cache-read rate. Reported usage separates
-cache_creation from cache_read so we can graph hit-rate over time.
+Structured output is one forced tool whose schema is the caller's Pydantic model.
+The system prompt is cache-controlled; usage splits cache_creation from
+cache_read.
 """
 
 from __future__ import annotations
@@ -25,16 +20,8 @@ from pydantic import BaseModel, ValidationError
 
 _STRUCTURED_TOOL_NAME: Final[str] = "record_output"
 
-# Explicit SDK bounds (C-07): the outer loop below owns retry policy, so the
-# SDK's own retries are off — SDK defaults (max_retries=2, 600s read timeout)
-# would otherwise layer under the 3-attempt loop for up to 9 HTTP requests
-# x 600s per logical call. The 120s read bound leaves room for a slow
-# structured generation at max_tokens=4096 (60s is too tight for that);
-# worst case per logical call is 3 attempts x ~120s ~= 6 min, well inside
-# budget_max_seconds=1800. The bound still matters even though
-# wall_seconds_used now accrues (ADR 0015): the wall meter is read
-# between transitions, so a call stalled inside one is only noticed at
-# the next loop step — this timeout is what makes that step arrive.
+# Explicit SDK bounds (C-07): the outer loop owns retry policy, so SDK retries are off.
+# The 120s read bound is what makes a stalled call reach the wall meter (ADR 0015).
 _SDK_MAX_RETRIES: Final[int] = 0
 _SDK_TIMEOUT: Final[httpx.Timeout] = httpx.Timeout(120.0, connect=5.0)
 # Preflight is one models.list call — it should fail on a dead network in
@@ -45,23 +32,10 @@ _PREFLIGHT_TIMEOUT: Final[httpx.Timeout] = httpx.Timeout(30.0, connect=5.0)
 _MAX_RETRY_AFTER_SECONDS: Final[float] = 60.0
 
 
-#: Model ids that **reject** ``temperature`` (and ``top_p`` / ``top_k``) with a
-#: 400. Anthropic removed the sampling parameters on the Fable/Mythos 5 family,
-#: Opus 5 / 4.8 / 4.7 and Sonnet 5; Opus 4.6, Sonnet 4.6 and Haiku 4.5 still
-#: accept them. This repo is pinned to ``claude-sonnet-4-6`` with
-#: ``claude-haiku-4-5`` as the judge, so the sampled inference strategy
-#: (WP-5.3) can send one today — and would 400 on the first planner call under
-#: a newer pin.
-#:
-#: DECLARED rather than derived, and deliberately **not** a refusal. Nothing
-#: here blocks a model that is not on the list: a wrong refusal stops a
-#: legitimate run, while a wrong allow surfaces as a rejected request — which
-#: the provider does not bill and which ``LLMClient.call`` already turns into
-#: one escalation with the reason in it, before any spend. What the list is for
-#: is the tripwire in ``tests/unit/test_best_of_n_sampled.py``: no id in
-#: ``MODEL_PRICING`` may appear here, so the day someone prices one of these
-#: models the suite fails and names the sampled arm, instead of a paid sweep
-#: discovering it.
+#: Model ids that **reject** ``temperature`` with a 400, so the sampled inference
+#: strategy (WP-5.3) would 400 under a newer pin. DECLARED, not a refusal: it is
+#: the tripwire in ``tests/unit/test_best_of_n_sampled.py`` — no id in
+#: ``MODEL_PRICING`` may appear here.
 SAMPLING_REJECTED_MODELS: Final[frozenset[str]] = frozenset(
     {
         "claude-fable-5",
@@ -79,10 +53,7 @@ SAMPLING_REJECTED_MODELS: Final[frozenset[str]] = frozenset(
 def elapsed_ms_of(seconds: float) -> int:
     """Whole milliseconds, never negative. ``0`` is a measurement, not a gap.
 
-    One definition, here rather than beside each caller, because there are two:
-    this client times the logical call it makes, and ``agent/accounting.py``
-    times the same call from outside its metering wrapper. Two roundings of the
-    same quantity is how a latency column stops agreeing with itself.
+    One definition for its two callers (here and ``agent/accounting.py``).
     """
     return max(round(seconds * 1000), 0)
 
@@ -91,21 +62,9 @@ def elapsed_ms_of(seconds: float) -> int:
 class LLMUsage:
     """What one logical ``call`` billed — including work that never came back.
 
-    ADR 0015's rule is that the meter may over-report but never
-    under-report, and the four token counters alone cannot honor it: they
-    describe the one attempt that returned. A logical call can bill up to
-    ``max_attempts`` times (a 5xx after the model has already generated is
-    billed, then discarded and retried), and none of that reached the
-    ledger.
-
-    ``discarded_attempts`` counts the billed attempts whose response was
-    thrown away. There is no usage block for them — the exception carries
-    no ``Message`` — so they are charged the only conservative bound the
-    client has: the request's own ``max_tokens`` at the model's output
-    rate, which is the most a single attempt could have generated. That
-    deliberately over-charges an attempt that failed before generating
-    (a 429, a dropped connection). Over-reporting keeps the ceiling safe;
-    under-reporting is what lets an unattended run outspend its budget.
+    ADR 0015: the meter may over-report, never under-report. ``discarded_attempts``
+    counts billed attempts whose response was thrown away; they carry no usage
+    block, so they are charged ``max_tokens`` at the output rate.
     """
 
     input_tokens: int = 0
@@ -141,12 +100,8 @@ class LLMUsage:
 class LLMError(RuntimeError):
     """The response could not be parsed into the caller's output model.
 
-    ``usage`` carries what the failed call already billed, when the client
-    knows it. A call that is billed and then raises is still money spent:
-    raising bare meant a parse failure or an exhausted retry loop charged
-    the run nothing, and ``BUDGET_MAX_USD`` was enforced against a number
-    that had a hole in it. Callers that swallow this exception into an
-    escalation charge it with ``accounting.accrue_llm_error``.
+    ``usage`` carries what the call already billed, so callers can charge it with
+    ``accounting.accrue_llm_error`` rather than lose the spend.
     """
 
     def __init__(
@@ -158,23 +113,17 @@ class LLMError(RuntimeError):
     ) -> None:
         super().__init__(message)
         self.usage = usage
-        #: Trace-record id of the call that failed, when the client wrote one.
-        #: A repair re-ask carries it as ``repair_of`` so the two records are
-        #: linked in the JSONL and in the human report (ADR 0035).
+        #: Trace-record id of the failed call; a repair re-ask carries it as
+        #: ``repair_of`` (ADR 0035).
         self.record_id = record_id
 
 
 class LLMOutputError(LLMError):
     """The call RETURNED and was billed; its payload did not fit the model.
 
-    Split out of ``LLMError`` because the two failures want opposite
-    dispositions and the caller could not tell them apart. A transport
-    failure (429, dropped connection, exhausted retries) is the client's
-    business and it has already retried; re-asking it with a "your JSON was
-    malformed" turn would be nonsense. An output-shape failure is a harness
-    event the model itself can repair, and ADR 0035 gives it exactly one
-    bounded re-ask. Every ``except LLMError`` still catches this — it is a
-    subclass — so nothing that used to escalate stops escalating.
+    Split from ``LLMError``: a transport failure is the client's business, while
+    an output-shape failure gets one bounded re-ask (ADR 0035). Still a subclass,
+    so nothing that escalated stops escalating.
     """
 
 
@@ -186,32 +135,18 @@ class LLMResult[T: BaseModel](LLMUsage):
     stop_reason: str
     #: Trace-record id this call was written under, or "" when untraced.
     record_id: str = ""
-    #: Wall time of the whole logical call that produced this result —
-    #: every retried attempt and every backoff sleep inside it included,
-    #: because that is the latency the loop actually waited out.
-    #:
-    #: ``None`` means **not measured**, and only a fake can report it: a
-    #: client that does not time its calls says so rather than reporting a
-    #: zero a reader would take for a sub-millisecond call. ``LLMClient``
-    #: always fills it.
+    #: Wall time of the whole logical call, retries and backoff sleeps included.
+    #: ``None`` means **not measured** and only a fake can report it;
+    #: ``LLMClient`` always fills it.
     elapsed_ms: int | None = None
 
 
 class LLMClientProtocol(Protocol):
     """Structural type for anything the agent can use as an LLM.
 
-    ``repair_of`` is trace correlation only: when this call is the one
-    bounded re-ask of a call whose output failed validation (ADR 0035), it
-    carries that call's trace-record id so the JSONL and the human report
-    can show the pair as one repaired step rather than two unrelated ones.
-    It changes nothing about what is sent to the model.
-
-    ``temperature`` is the sampling temperature for this one call (WP-5.3,
-    plan 02 § 11.2). ``None`` — the default, and what every call in this repo
-    made before ``best_of_n_sampled`` existed — sends **no** temperature field
-    at all, so the request bytes of every other call are unchanged and the
-    provider's own default applies. See ``SAMPLING_REJECTED_MODELS`` above for
-    the models that refuse it.
+    ``repair_of`` is trace correlation only (ADR 0035) and changes nothing sent to
+    the model. ``temperature`` (WP-5.3) defaults to ``None``, which sends no
+    temperature field at all — see ``SAMPLING_REJECTED_MODELS``.
     """
 
     def call[T: BaseModel](
@@ -230,11 +165,7 @@ class LLMClientProtocol(Protocol):
 class LLMClient:
     """Real Anthropic client. Tests use ``CannedLLMClient`` from ``llm.fakes``.
 
-    Pass ``tracer`` to capture per-call payloads for offline inspection —
-    used by the eval runner to write JSONL trace files under
-    ``EVAL_TRACE_DIR``. The tracer receives a dict with ``request``,
-    ``response`` (raw Anthropic Message), ``output`` (parsed dict), and
-    ``duration_seconds`` after every successful call.
+    ``tracer`` receives one dict per call, written as JSONL under ``EVAL_TRACE_DIR``.
     """
 
     def __init__(
@@ -256,10 +187,8 @@ class LLMClient:
         self._retry_base_delay = retry_base_delay
         self._sleep = sleep
         self._tracer = tracer
-        # Injectable for the same reason ``sleep`` is: a duration measured
-        # against the real monotonic clock cannot be asserted on, so without
-        # this seam the one test that could pin ``elapsed_ms`` to a number
-        # would have to assert ">= 0" and pass against a broken measurement.
+        # Injectable like ``sleep``: a real monotonic duration cannot be
+        # asserted on, so ``elapsed_ms`` could only be pinned to ">= 0".
         self._clock = clock
 
     def call[T: BaseModel](
@@ -275,16 +204,8 @@ class LLMClient:
     ) -> LLMResult[T]:
         """Make one structured-output call and return the parsed output with what it billed.
 
-        The model must answer through a single forced tool whose schema is the
-        output model, so nothing here parses free text. Transient failures are
-        retried; every attempt, successful or not, reaches the tracer.
-
-        ``elapsed_ms`` on the result is measured from HERE, across the whole
-        retry loop, not from the attempt that returned: a logical call that
-        spent two 5xx attempts and a backoff sleep before succeeding took all
-        of that time, and a per-attempt duration would report the loop's worst
-        latency as its fastest leg. The per-attempt ``duration_seconds`` the
-        tracer already writes is the other number and stays what it was.
+        One forced tool carries the output schema; transient failures are retried.
+        ``elapsed_ms`` spans the whole retry loop, not the attempt that returned.
         """
         call_started = self._clock()
         request_body: dict[str, Any] = {
@@ -307,27 +228,16 @@ class LLMClient:
             ],
             "tool_choice": {"type": "tool", "name": _STRUCTURED_TOOL_NAME},
         }
-        # Added only when asked for, never as an explicit default. Two reasons,
-        # and the first is the load-bearing one: the request body is what the
-        # tracer writes and what the provider reads, so a ``"temperature": 1.0``
-        # appearing on every call would change the recorded request of every
-        # existing role — including the ones the campaign's eight green live runs
-        # were made with — for no behavioural gain. The second is that the field
-        # is rejected outright by newer models (``SAMPLING_REJECTED_MODELS``), so
-        # sending it unasked would break those pins for callers that never wanted
-        # it. Forced tool use is unaffected by temperature: the schema still
-        # constrains the payload, and temperature only varies what goes in it.
+        # Added only when asked for, never as a default: the request body is what the
+        # tracer writes, and newer models reject the field (``SAMPLING_REJECTED_MODELS``).
         if temperature is not None:
             request_body["temperature"] = temperature
 
         def _trace_error(err: Exception, attempt: int, *, terminal: bool) -> None:
             """Record a call that was billed (or attempted) and did not return.
 
-            `llm_error` was in tracing.py's documented kind set from the
-            start and nothing ever wrote one, so an exhausted 429 or a
-            dropped connection left a silent gap exactly where billed work
-            had happened. A cost or forensics pass saw the call before and
-            the call after, and nothing in between.
+            Without it an exhausted 429 or dropped connection left a silent gap
+            exactly where billed work happened.
             """
             if self._tracer is None:
                 return
@@ -345,17 +255,14 @@ class LLMClient:
 
         last_exc: Exception | None = None
         retry_after: float | None = None
-        # One id per ATTEMPT, not per logical call: a logical call can write
-        # several trace records (a retried 5xx writes one per attempt), and
-        # ``repair_of`` has to name the exact record whose payload failed.
+        # One id per ATTEMPT: ``repair_of`` has to name the exact record
+        # whose payload failed.
         record_id = ""
         for attempt in range(self._max_attempts):
             started = self._clock()
             record_id = uuid.uuid4().hex[:12]
-            # `attempt` doubles as the count of attempts already billed and
-            # thrown away: on attempt 2, two responses have been discarded.
-            # Every exit below carries that count out so the ledger charges
-            # the whole logical call, not just the leg that returned.
+            # `attempt` is also the count already billed and discarded; every
+            # exit carries it so the whole logical call is charged.
             discarded = LLMUsage(discarded_attempts=attempt, discarded_max_tokens=max_tokens)
             try:
                 response = self._client.messages.create(**request_body)
@@ -365,12 +272,8 @@ class LLMClient:
                 retry_after = None
             except anthropic.APIStatusError as err:
                 if err.status_code != 429 and err.status_code < 500:
-                    # Client-side error (bad request, auth). Retrying can't
-                    # help; wrap so the transition escalates-with-reason
-                    # instead of the scenario crashing on a raw SDK error.
-                    # Charges `attempt` discarded attempts, not `attempt + 1`:
-                    # a rejected request never reached the model, so this is
-                    # the one arm where the current attempt is known unbilled.
+                    # Client-side (bad request, auth): retrying can't help, so wrap
+                    # it. Charges `attempt`: a rejected request is known unbilled.
                     _trace_error(err, attempt, terminal=True)
                     raise LLMError(
                         f"LLM API error {err.status_code}: {err}",
@@ -384,28 +287,16 @@ class LLMClient:
                 retry_after = _retry_after_seconds(err)
             except anthropic.APIError as err:
                 _trace_error(err, attempt, terminal=True)
-                # The catch-all arm, and it is load-bearing rather than
-                # defensive. APIError has siblings the two arms above do not
-                # cover — APIResponseValidationError is the live one: the SDK
-                # got a 200 whose body it could not validate. Uncaught, it
-                # left LLMClient as a raw SDK exception, escaped every
-                # `except LLMError` in the transitions, and took out an
-                # already-graded run at the briefing or judge step. Wrapped,
-                # it escalates with a reason like any other transport failure.
-                # `attempt + 1`: APIResponseValidationError is a 200 the SDK
-                # could not validate, so this attempt generated and billed.
+                # Load-bearing catch-all: an APIResponseValidationError (a 200 the SDK
+                # could not validate) escapes every `except LLMError`, and it billed.
                 raise LLMError(
                     f"LLM API error: {type(err).__name__}: {err}",
                     usage=LLMUsage(discarded_attempts=attempt + 1, discarded_max_tokens=max_tokens),
                     record_id=record_id,
                 ) from err
             else:
-                # Trace BEFORE parsing: the API call is already billed at
-                # this point, and a response we fail to parse (no
-                # record_output block, max_tokens truncation) is exactly
-                # the call a cost or debugging audit most wants to see.
-                # Tracing after the parse meant those spent money and left
-                # no record (study/findings.md F-002).
+                # Trace BEFORE parsing: the call is already billed, and tracing
+                # after the parse left unparseable calls with no record (F-002).
                 trace: dict[str, Any] | None = None
                 if self._tracer is not None:
                     trace = {
@@ -438,9 +329,7 @@ class LLMClient:
                     delay = max(delay, min(retry_after, _MAX_RETRY_AFTER_SECONDS))
                 self._sleep(delay)
         assert last_exc is not None
-        # Every attempt was discarded, so every attempt is charged. This is
-        # the path that under-reported worst: three billed 5xx retries used
-        # to charge the run exactly nothing.
+        # Every attempt was discarded, so every attempt is charged.
         raise LLMError(
             f"LLM transport failure after {self._max_attempts} attempts: "
             f"{type(last_exc).__name__}: {last_exc}",
@@ -462,13 +351,8 @@ class LLMClient:
                 try:
                     output = output_model.model_validate(block.input)
                 except ValidationError as err:
-                    # ADR 0007: only the domain exception crosses this
-                    # boundary. Constrained decoding enforces the JSON
-                    # schema's shape but not Pydantic's own constraints
-                    # (ge/le bounds, min_length), so a well-formed payload
-                    # can still fail validation — and a raw ValidationError
-                    # here also skipped the parse_failed trace below,
-                    # leaving billed calls with no record (F-002).
+                    # ADR 0007: only the domain exception crosses this boundary.
+                    # A raw ValidationError also skipped the trace below (F-002).
                     raise LLMOutputError(
                         f"output failed schema validation for {output_model.__name__}: {err}",
                         usage=usage,
@@ -477,11 +361,8 @@ class LLMClient:
                 return usage.with_output(
                     output, response.stop_reason or "unknown", record_id, elapsed_ms
                 )
-        # Billed and unreturned. This is the max_tokens-truncation case:
-        # the model generated a full response, the platform charged for it,
-        # and there is no `record_output` block to parse. Raising without
-        # `usage` meant the most expensive failure the client has — a full
-        # output-token bill for nothing — was the one it charged the least.
+        # Billed and unreturned — the max_tokens-truncation case. Raising without
+        # `usage` charged the client's most expensive failure the least.
         raise LLMOutputError(
             f"no {_STRUCTURED_TOOL_NAME} tool_use in response; stop_reason={response.stop_reason}",
             usage=usage,
@@ -492,9 +373,7 @@ class LLMClient:
 def _repair_keys(record_id: str, repair_of: str | None) -> dict[str, Any]:
     """Identity keys for one trace record: its own id, and what it repairs.
 
-    ``repair_of`` is omitted rather than written as ``null`` on an ordinary
-    call, so the JSONL shape of every non-repair record is unchanged and
-    ``"repair_of" in record`` is a straight answer to "is this a re-ask?".
+    ``repair_of`` is omitted rather than ``null`` on an ordinary call.
     """
     keys: dict[str, Any] = {"record_id": record_id}
     if repair_of is not None:
@@ -527,11 +406,7 @@ def _retry_after_seconds(err: anthropic.APIStatusError) -> float | None:
 def preflight_auth(api_key: str) -> None:
     """One cheap authenticated call; raises ``LLMError`` if the key is bad.
 
-    The 2026-08-03 campaign discovered an expired key as 24 identical
-    per-scenario crash rows across a whole smoke pass. models.list is
-    free, instant, and fails with the same 401 the first real call
-    would — so the runner can turn that failure mode into one labeled
-    line before anything runs.
+    An expired key once cost 24 identical crash rows before anything ran.
     """
     client = anthropic.Anthropic(
         api_key=api_key,
@@ -545,10 +420,6 @@ def preflight_auth(api_key: str) -> None:
     except anthropic.APIConnectionError as err:
         raise LLMError(f"auth preflight failed: connection error: {err}") from err
     except anthropic.APIError as err:
-        # The catch-all arm, for the same reason `call` has one. APIError has
-        # siblings the two arms above do not cover (APIResponseValidationError
-        # is the live one), and any of them escaped as a raw SDK exception —
-        # crashing the eval runner with a traceback and defeating the one
-        # thing this function exists to do: turn a preflight failure into one
-        # labeled line before 24 scenarios burn against a dead key.
+        # Catch-all, like `call`: an uncaught APIResponseValidationError crashed the
+        # eval runner with a traceback instead of one labeled line.
         raise LLMError(f"auth preflight failed: {type(err).__name__}: {err}") from err

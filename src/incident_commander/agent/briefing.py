@@ -1,13 +1,8 @@
 """Escalation briefing: what a human sees when the agent hands off.
 
-Phase 2 v0 is deterministic. It captures the load-bearing shape (alert summary,
-investigation trail, evidence highlights) so ``findings`` and ``recommendation``
-can later be filled by an LLM without moving the surface everyone else consumes.
-
-Everything a briefing carries comes from ``RunState`` — never from external
-input at render time. That's important: alert content, tool output, and error
-strings are all untrusted (CLAUDE.md invariant 4) and stay quoted-not-executed
-inside the ``ProbeSummary`` records.
+Deterministic template; ``briefing_enrichment.py`` fills ``findings`` and
+``recommendation``. Everything comes from ``RunState``; alert and tool content is
+untrusted (invariant 4).
 """
 
 from __future__ import annotations
@@ -23,17 +18,8 @@ from incident_commander.agent.state import EvidenceEntry, IncidentState, RunStat
 class ProbeSummary(BaseModel):
     """One entry in the investigation trail: the call, and what it returned.
 
-    ``arguments`` is carried, not dropped. It used to be dropped, and the
-    result was INC-002: one tool serves several shapes of the same read —
-    ``list_dlq_messages`` is the whole queue *or* one slice under one name —
-    so a result read without its arguments is a result whose scope is
-    unknowable. Paid run ``54ab08425f82`` is the reference case: the briefing
-    judge was shown ``list_dlq_messages: {"total":0,"items":[]}`` with the
-    ``remediation_hint='replay_safe'`` that scoped it stripped away, read it
-    as "the queue is empty", and scored an honest briefing 0.0 for
-    groundedness. The deterministic grader had already been given the same
-    ability in cmd #218 (``call_arguments``); a rule about how evidence may
-    be read belongs to every reader of it.
+    ``arguments`` is carried, not dropped: a result read without the arguments
+    that scoped it has an unknowable scope (INC-002).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -50,17 +36,9 @@ NO_TRAIL_LINE: Final = "No probes were run before escalation."
 def trail_of(evidence: Sequence[EvidenceEntry]) -> tuple[ProbeSummary, ...]:
     """The probes out of a run's evidence ledger, for any reader of the trail.
 
-    The projection half of what ``render_trail`` renders, extracted by WP-6.1
-    because the ``candidate_selector`` is a third reader of the same evidence
-    and the packet's rule is that a new reader gets the rule through the same
-    code, not a copy of it (INC-002). ``render_briefing`` below builds its
-    trail from this, so the briefing writer, the briefing judge and the
-    selector are shown one projection of one ledger.
-
-    Bookkeeping markers are underscore-prefixed by convention and no registry
-    tool name is, so the filter is structural: a new evidence writer cannot
-    drift out of a hand-maintained exclusion list. ``evals/graders/deterministic.py``
-    filters the same way.
+    One projection for the briefing writer, the briefing judge and the selector
+    (INC-002). The underscore prefix filters bookkeeping markers structurally;
+    ``evals/graders/deterministic.py`` filters the same way.
     """
     return tuple(
         ProbeSummary(
@@ -76,13 +54,8 @@ def trail_of(evidence: Sequence[EvidenceEntry]) -> tuple[ProbeSummary, ...]:
 def render_trail(trail: Sequence[ProbeSummary]) -> list[str]:
     """The investigation-trail block, as both LLM readers are shown it.
 
-    Shared rather than duplicated: the briefing writer
-    (``briefing_enrichment._format_context``) and the briefing judge
-    (``evals/graders/llm_judge.py::format_briefing_context``) render two overlapping
-    contexts on purpose, but the trail is the half they share, and a judge
-    grading groundedness against different phrasing than the writer received
-    is grading a different briefing. One function means the two cannot drift;
-    ``tests/unit/test_llm_judge.py`` pins that they still don't.
+    One function for the briefing writer and the briefing judge, so the two cannot
+    drift; ``tests/unit/test_llm_judge.py`` pins that.
     """
     if not trail:
         return [NO_TRAIL_LINE]
@@ -92,10 +65,7 @@ def render_trail(trail: Sequence[ProbeSummary]) -> list[str]:
 def render_probe(probe: ProbeSummary) -> str:
     """One trail line: the call with its arguments, then what it returned.
 
-    Arguments come first because that is the reading order the rubric asks
-    for — the call's scope, then its result. A result read without the
-    arguments that scoped it is a result whose scope is unknowable, which is
-    the whole of INC-002.
+    Arguments first: the call's scope, then its result (INC-002).
     """
     return f"  - {probe.tool}({_render_arguments(probe.arguments)}) -> {probe.summary}"
 
@@ -103,11 +73,8 @@ def render_probe(probe: ProbeSummary) -> str:
 def _render_arguments(arguments: Mapping[str, Any]) -> str:
     """``key=value`` pairs, ``repr``'d, in the order the agent sent them.
 
-    Every argument, including the ``None`` ones: an unfiltered read is
-    ``remediation_hint=None`` and that is the fact that distinguishes it from
-    the filtered one. Dropping "noisy" keys would be a hand-maintained
-    exclusion list of exactly the kind the trail filter in ``render_briefing``
-    avoids, and the key it dropped would eventually be the load-bearing one.
+    Every argument, ``None`` ones included: ``remediation_hint=None`` is what
+    distinguishes an unfiltered read from a filtered one.
     """
     return ", ".join(f"{key}={value!r}" for key, value in arguments.items())
 
@@ -115,10 +82,7 @@ def _render_arguments(arguments: Mapping[str, Any]) -> str:
 class AttemptedAction(BaseModel):
     """A Tier-1 action that was invoked before the agent escalated.
 
-    Present only when the call was made and did not land a normal evidence
-    entry of its own — the platform errored, refused it, or returned a
-    response we could not parse. The human must be told: an action they
-    believe never fired is an action they may fire again.
+    Recorded because an action a human believes never fired is one they may fire again.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -152,12 +116,8 @@ def render_briefing(run_state: RunState) -> EscalationBriefing:
         alert_summary=_render_alert_summary(run_state),
         escalation_reason=_escalation_reason(terminal_marker),
         attempted_action=_attempted_action(terminal_marker),
-        # ``trail_of`` holds the filter, shared with every other reader of this
-        # ledger. The filter is right about the trail and used to be wrong
-        # about the *reason*: the escalation marker is the only carrier of why
-        # the agent gave up, so filtering it here deleted that line from the
-        # handoff entirely. It is read back out above into its own field
-        # instead of being smuggled into the trail as a fake probe.
+        # ``trail_of`` filters out the escalation marker; the reason it carries
+        # is read back out above into its own field, never faked as a probe.
         investigation_trail=trail_of(run_state.evidence),
         findings="",
         recommendation="",
@@ -173,20 +133,9 @@ def render_briefing(run_state: RunState) -> EscalationBriefing:
 def _terminal_marker(run_state: RunState) -> EvidenceEntry | None:
     """The bookkeeping entry that ended the run, if the run ended badly.
 
-    Structural, like the trail filter above, so no writer has to be listed
-    anywhere: every escalation path (``_remediation_escalate``, ``_escalate``,
-    ``_planner_escalate``, ``_planner_stop``) and the crash rail's
-    ``_run_failure`` finish by appending their marker and transitioning to a
-    terminal state, so the marker is the *last* evidence entry. A new writer
-    that follows the same convention is picked up for free.
-
-    Two states are excluded rather than named as exceptions. RESOLVED: its
-    last entry is ``_verify_judge``, a verdict — a real reason string, but not
-    a reason the agent escalated, and labelling it one would put "verified:
-    lag is zero" under a heading that says the handoff needs a human.
-    Non-terminal: mid-run, the last marker is a handoff note like
-    ``_planner_remediate``, which reads as a reason and is not one. The run
-    has not ended, so nothing ended it.
+    Structural: every escalation path appends its marker last, so the marker is the
+    last evidence entry. RESOLVED and non-terminal states are excluded — their last
+    marker is a verdict or a handoff note, not a reason the agent escalated.
     """
     if not run_state.state.is_terminal or run_state.state is IncidentState.RESOLVED:
         return None
@@ -199,11 +148,7 @@ def _terminal_marker(run_state: RunState) -> EvidenceEntry | None:
 def _escalation_reason(marker: EvidenceEntry | None) -> str:
     """Why the agent stopped, in the words the writer recorded.
 
-    Read from ``result_summary`` rather than ``arguments["reason"]``: every
-    writer sets the summary (``_triage`` classifies a noise alert straight to
-    ESCALATED with no ``reason`` argument at all), and the summary is the
-    rendered line — ``"planner stop: ..."``, ``"escalated: ..."`` — which is
-    what a human wants to read.
+    From ``result_summary``, not ``arguments["reason"]``: every writer sets it.
     """
     return marker.result_summary if marker is not None else ""
 
@@ -211,10 +156,7 @@ def _escalation_reason(marker: EvidenceEntry | None) -> str:
 def _attempted_action(marker: EvidenceEntry | None) -> AttemptedAction | None:
     """The Tier-1 call recorded on the marker, if one was made.
 
-    Mirrors ``_effective_call`` in ``evals/graders/deterministic.py``: the
-    grader reads these same two argument keys to charge a refused attempt to
-    the SAFETY dimension. The human handoff should not know less than the
-    grader does.
+    The same two argument keys ``evals/graders/deterministic.py`` reads.
     """
     if marker is None:
         return None
@@ -231,9 +173,7 @@ def _render_alert_summary(run_state: RunState) -> str:
     source = str(alert.get("source", "unknown"))
     severity = str(alert.get("severity", "unknown"))
     fingerprint = alert.get("fingerprint")
-    # Accept legacy `group` field for backward-compat with older alert
-    # producers; platform's tool arg is `consumer_group`. Mirrors
-    # investigation.py's fallback.
+    # Legacy `group`; the tool arg is `consumer_group` (investigation.py too).
     group = alert.get("consumer_group") or alert.get("group")
     parts = [f"source={source}", f"severity={severity}"]
     if fingerprint is not None:

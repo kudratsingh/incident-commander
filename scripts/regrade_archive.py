@@ -1,45 +1,21 @@
 #!/usr/bin/env python3
 """Re-grade one locked run archive from its own trajectories. Never touches it.
 
-A run archive is evidence: read-only on disk, `uchg` where the filesystem
-supports it, never rewritten (CLAUDE.md invariant 9, ADR 0021). That rule is
-what makes an archive worth anything, and it is also why a grading rule that
-was wrong when the archive was written cannot be fixed in place.
+An archive is evidence — read-only, never rewritten (invariant 9, ADR 0021) — so a grading
+rule that was wrong when it was written cannot be fixed in place. INC-003: the paid pass
+`0db6fe722f7c` failed seven scenarios on ROOT_CAUSE against labels read off CANNED fixtures
+while it ran against the UNSEEDED live stack (WO-R3-265).
 
-INC-003 is the case this exists for. The paid read-only pass `0db6fe722f7c`
-($2.15, 27 scenarios) failed seven of them on ROOT_CAUSE against ground-truth
-labels that were read off each scenario's CANNED fixtures, while the pass ran
-against the UNSEEDED live stack — `postgres_slow` was graded wrong for saying
-`no_fault` about a database that answered in 1.6 ms. WO-R3-265 scoped the
-label to the world it describes. This script says what that archive's numbers
-are under the fixed rule, and writes the answer as a NEW versioned report
-beside the untouched original.
-
-Three properties, each load-bearing:
-
-**It re-grades, it does not re-run.** Every input is already in the archive:
-the final `RunState` is the last checkpoint of that scenario's trajectory, the
-briefing is the archived briefing, and the world the run was in is
-`ScenarioOutcome.live_mcp` plus its `chaos_hooks`. Nothing is replayed, no
-model is called, no platform is touched, and nothing is spent.
-
-**The rule is imported, never restated.** `label_describes_this_world` and
-`grade()` are the same functions `evals/runner.py` calls, so a re-grade is the
-grade the runner would give today — a second copy of the rule here would be a
-second definition of what a correct diagnosis is.
-
-**The archive is verified unchanged.** Every file is sha256'd before the
-re-grade and again after, and the digests go into the document, so "nothing
-was touched" is something a reader can check rather than a claim to trust.
+Nothing is replayed and nothing is spent; `label_describes_this_world` and `grade()` are
+imported rather than restated, so this is the grade the runner would give today.
 
 Usage:
 
     make regrade-archive ARCHIVE=0db6fe722f7c            # print the summary
     make regrade-archive ARCHIVE=0db6fe722f7c WRITE=1    # and persist the pair
 
-The archive may live in another checkout (the one that holds the locked
-original): `--runs-dir` points at its `evals/runs/`, while `--root` decides
-where the report is written.
+`--runs-dir` points at the checkout holding the locked original; `--root` decides where
+the report is written.
 """
 
 from __future__ import annotations
@@ -75,9 +51,8 @@ REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 RUNS_DIR: Final[Path] = REPO_ROOT / "evals" / "runs"
 SCENARIOS_DIR: Final[Path] = REPO_ROOT / "evals" / "scenarios"
 
-#: What the row's world is called in the document. Three values, because
-#: there are three worlds a run can be in and the middle one is the whole
-#: reason this script exists.
+#: What the row's world is called in the document — three, because a run can be in three
+#: and the middle one is the whole reason this script exists.
 _CANNED: Final[str] = "canned"
 _LIVE_SEEDED: Final[str] = "live, fault seeded"
 _LIVE_UNSEEDED: Final[str] = "live, no fault seeded"
@@ -122,13 +97,9 @@ def read_report(archive: Path) -> RunReport:
 
 
 def _final_state(archive: Path, scenario: str) -> RunState | None:
-    """The last checkpoint of a scenario's archived trajectory.
+    """The last checkpoint of a scenario's archived trajectory — the graded run itself.
 
-    The final checkpoint IS the graded run: the runner grades the state the
-    loop returned, and the checkpointer's history ends with it. ``None`` when
-    the trajectory is absent or empty — a scenario that crashed before its
-    first checkpoint cannot be re-graded, and the row says so rather than
-    being silently dropped.
+    ``None`` when the trajectory is absent or empty, which the row reports.
     """
     path = archive / "trajectories" / f"{scenario}.json"
     if not path.is_file():
@@ -157,11 +128,8 @@ def regrade_outcome(
 ) -> GradeReport:
     """One row, graded again under today's rules and today's corpus.
 
-    The world fact comes off the ROW (``live_mcp`` + ``chaos_hooks``), never
-    off the scenario file: the question is what world that run was actually
-    in, and a scenario may have gained or lost a chaos hook since. The label
-    itself comes off the corpus, because re-grading under today's rules means
-    today's labels.
+    The world fact comes off the ROW (``live_mcp`` + ``chaos_hooks``), never the scenario
+    file, which may have gained or lost a hook since.
     """
     return grade(
         run,
@@ -284,10 +252,8 @@ def regrade(
             "archived": _coverage(archived_root_cause, total=len(rows)),
             "regraded": _coverage(regraded_root_cause, total=len(rows)),
         },
-        # Said in the document rather than left for a reader to work out. The
-        # re-grade REMOVES an invalid number; it does not supply a valid one
-        # in its place, and a small denominator printed as a percentage is how
-        # the invalid number got quoted in the first place.
+        # Said in the document, not left for the reader: the re-grade REMOVES an invalid
+        # number without supplying a valid one.
         "limits": (
             "A re-graded root-cause accuracy covers only the rows whose world carries their "
             f"label — {_coverage(regraded_root_cause, total=len(rows))['graded']} of "
@@ -371,11 +337,8 @@ def render_markdown(document: dict[str, Any]) -> str:
 def write(document: dict[str, Any], *, root: Path | None = None) -> tuple[Path, Path]:
     """Write the two versioned halves and return their paths.
 
-    Stamped from the ARCHIVE's own recorded time and id rather than from the
-    clock, exactly as ``phase_close_report.write`` is: the filename is then as
-    derived from the evidence as the contents are, and a second re-grade of
-    the same archive under the same rules aims at the same path, where the
-    exclusive-create write refuses it (invariant 9).
+    Stamped from the ARCHIVE's own time and id, so a second re-grade of it aims at the same
+    path and is refused (invariant 9).
     """
     timestamp = datetime.fromisoformat(str(document["archive_generated_at"]))
     invocation_id = str(document["archive"])

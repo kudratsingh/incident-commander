@@ -1,17 +1,8 @@
 """Constant-time HMAC verification for platform webhooks.
 
-Two schemes are accepted, because the emitter and this receiver live in
-different repos and re-pin on different days (ADR 0023):
-
-* **nonce-bound** — what the platform emits since plat #183. The MAC covers
-  ``{timestamp}.{nonce}.{body}``, and the presence of ``X-Alert-Nonce`` is
-  what selects it. This is the scheme to prefer.
-* **legacy body-only** — what the pinned image still emits until the wave-9
-  re-pin, plus pre-fix tooling. The MAC covers the body alone.
-
-Both carry the digest as ``sha256=<hex>``: the platform kept the prefix and
-added a header rather than versioning the value, so the prefix cannot be used
-to tell the schemes apart.
+Two schemes (ADR 0023): nonce-bound over ``{timestamp}.{nonce}.{body}``, selected
+by the presence of ``X-Alert-Nonce`` and preferred; and legacy body-only. Both
+carry the digest as ``sha256=<hex>``, so the prefix cannot tell them apart.
 """
 
 from __future__ import annotations
@@ -32,8 +23,7 @@ def sign(body: bytes, secret: str) -> str:
 def verify(body: bytes, signature_header: str, secret: str) -> bool:
     """True iff ``signature_header`` matches an HMAC-SHA256 of ``body`` with ``secret``.
 
-    The header is expected in ``sha256=<hex>`` form (GitHub-style). Rejects
-    unprefixed values, wrong-length digests, and mismatches — all in constant time.
+    Header in ``sha256=<hex>`` form. Every rejection is in constant time.
     """
     return _matches(signature_header, body, secret)
 
@@ -41,11 +31,8 @@ def verify(body: bytes, signature_header: str, secret: str) -> bool:
 def signed_material(timestamp: str, nonce: str, body: bytes) -> bytes:
     """The exact bytes the nonce-bound signature covers: ``{timestamp}.{nonce}.{body}``.
 
-    Transcribed from the emitter's ``alerts.signed_material``, which is the
-    canonical composition — a signature scheme whose two ends disagree about
-    what is being signed verifies nothing. The separators are unambiguous
-    because both prefixes are fixed-alphabet (digits, hex) and contain no
-    ``.`` themselves, so no length prefix is needed to keep the parse honest.
+    Transcribed from the emitter's ``alerts.signed_material`` — two ends that
+    disagree verify nothing.
     """
     return f"{timestamp}.{nonce}.".encode() + body
 
@@ -53,8 +40,7 @@ def signed_material(timestamp: str, nonce: str, body: bytes) -> bytes:
 def sign_delivery(secret: str, timestamp: str, nonce: str, body: bytes) -> str:
     """Compute the nonce-bound signature the platform sends. For tests and demos.
 
-    Argument order mirrors the emitter's ``alerts.sign_delivery`` so the two
-    can be read side by side.
+    Argument order mirrors the emitter's ``alerts.sign_delivery``.
     """
     digest = hmac.new(
         secret.encode(), signed_material(timestamp, nonce, body), hashlib.sha256
@@ -71,11 +57,8 @@ def verify_delivery(
 ) -> bool:
     """True iff ``signature_header`` is a valid MAC over timestamp, nonce and body.
 
-    Same constant-time discipline as ``verify``: prefix check, length
-    pre-check, ``hmac.compare_digest``. Because the timestamp is inside the
-    MAC, a captured signature cannot be paired with a fresh timestamp, which
-    is what lets the caller's skew window genuinely bound replay; the nonce
-    then makes a replay *inside* the window detectable too.
+    Constant-time, like ``verify``. The timestamp inside the MAC is what bounds
+    replay.
     """
     return _matches(signature_header, signed_material(timestamp_header, nonce_header, body), secret)
 
@@ -83,9 +66,7 @@ def verify_delivery(
 def _matches(signature_header: str, material: bytes, secret: str) -> bool:
     """Shared constant-time comparison for both schemes.
 
-    One implementation so the two acceptance paths cannot drift into
-    different comparison discipline — the length pre-check and
-    ``compare_digest`` are the audited part, and they should be audited once.
+    One implementation so the two acceptance paths cannot drift apart.
     """
     if not signature_header.startswith(_SIGNATURE_PREFIX):
         return False

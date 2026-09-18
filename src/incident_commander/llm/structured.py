@@ -1,42 +1,9 @@
 """Decoding rules for the agent's OWN structured output (ADR 0035).
 
-Every ``record_output`` model in this repo inherits :class:`StructuredOutput`.
-It adds exactly one thing: a ``mode="before"`` model validator that accepts a
-nested object or array which arrived as a **JSON string** instead of as JSON,
-decodes it, and hands the decoded value to the normal validation path.
-
-Why this exists. Paid run ``779b19a287a7`` (2026-09-08, scenario
-``remediate_dlq_backlog_success``) reached the right decision — replay the one
-confirmed-safe DLQ row — and then emitted it like this::
-
-    "next_action": "{\\"kind\\": \\"remediate\\", \\"reason\\": \\"…\\"}]"
-
-The nested discriminated union came back serialised as a string with the
-enclosing array's ``]`` still attached. ``InvestigationStep`` rejected it, the
-run escalated on the first failure, and the scenario graded RED on three
-dimensions. Nothing about the agent's *judgement* was wrong; the harness threw
-away a correct answer over its wrapping.
-
-What this validator does and does not do:
-
-* It substitutes the decoded value **only** when the decode succeeds *and* the
-  decoded type matches the shape the field declares (object for a nested
-  model / union / mapping, array for a sequence). Anything else is left
-  exactly as it arrived, so the model's own error is the one that fires and
-  the diagnosis stays honest.
-* It does not touch ``extra="forbid"``, enum members, tier checks, or any
-  other constraint. A field that was going to be rejected on its contents is
-  still rejected on its contents.
-* It applies to the agent's own structured output only. Tool output is
-  untrusted data (CLAUDE.md invariant 4) and is parsed elsewhere, unchanged.
-
-The trailing-delimiter tolerance is deliberately narrow. After a strict
-``json.loads`` fails, one more attempt decodes the leading JSON value and
-accepts it **only when everything after it is whitespace and closing
-delimiters** (``]`` / ``}``) — characters that cannot carry content and can
-only be a container delimiter that leaked into the string, which is precisely
-the live shape. A trailing comma, a second value, or any prose leaves the
-string untouched.
+Every ``record_output`` model inherits :class:`StructuredOutput`: a ``mode="before"``
+validator that decodes a nested object or array which arrived as a JSON string — the
+shape that cost paid run ``779b19a287a7`` a RED scenario. It substitutes only on a
+type match, tolerates trailing ``]``/``}`` alone, and never sees tool output.
 """
 
 from __future__ import annotations
@@ -49,9 +16,8 @@ from typing import Any, Final, Literal, get_args, get_origin
 
 from pydantic import BaseModel, model_validator
 
-#: Characters allowed to trail a decoded value. Both are container
-#: terminators: neither can begin or continue a JSON value, so their presence
-#: after a complete value is a delimiter leak, never truncated content.
+#: Allowed to trail a decoded value: container terminators, so a
+#: delimiter leak, never content.
 TRAILING_DELIMITERS: Final[str] = "]}"
 
 _WHITESPACE: Final[str] = " \t\r\n"
@@ -67,15 +33,8 @@ _SEQUENCE_ORIGINS: Final[frozenset[Any]] = frozenset({list, tuple, set, frozense
 def expected_container(annotation: Any) -> type | None:
     """``dict``, ``list``, or ``None`` for "not a container field".
 
-    Derived from the field's own annotation rather than declared per model,
-    so a new nested field on any ``record_output`` model is covered the day
-    it lands (architecture-principles rule 2: one source of truth, read from
-    both places, not two lists to keep in sync).
-
-    A union counts as a container only when every non-``None`` member agrees
-    on the same container — ``ProbeAction | StopAction | RemediateAction``
-    does; ``str | None`` does not, and a stringified value there is a
-    perfectly good ``str``.
+    Derived from the annotation, so a new nested field is covered the day it lands. A union
+    counts only when every non-``None`` member agrees on one container.
     """
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return dict
@@ -102,9 +61,7 @@ def _is_union(origin: Any) -> bool:
 def decode_stringified(value: str, expected: type) -> Any:
     """Decode ``value`` to ``expected`` (``dict`` or ``list``), or ``_UNDECODED``.
 
-    Returns the module sentinel — never a partial or coerced value — when the
-    string is not a JSON container of the expected shape. Callers leave the
-    original string in place on the sentinel so the model's own error fires.
+    On the sentinel the caller leaves the string in place.
     """
     text = value.strip()
     if not text:
@@ -123,10 +80,7 @@ def decode_stringified(value: str, expected: type) -> Any:
 def _decode_leading_value(text: str) -> Any:
     """The one tolerated malformation: a complete value plus stray closers.
 
-    ``json.JSONDecoder().raw_decode`` reads the leading value and reports
-    where it stopped. The remainder is accepted only if it is whitespace and
-    ``TRAILING_DELIMITERS`` — see the module docstring for why that set and
-    no wider one.
+    The remainder is accepted only if whitespace and ``TRAILING_DELIMITERS``.
     """
     try:
         decoded, end = json.JSONDecoder().raw_decode(text)
@@ -141,9 +95,7 @@ def _decode_leading_value(text: str) -> Any:
 class StructuredOutput(BaseModel):
     """Base class for every model the LLM fills in via ``record_output``.
 
-    Carries no configuration of its own — subclasses keep their own
-    ``model_config`` (``frozen``, ``extra="forbid"``) untouched. It adds one
-    inherited ``mode="before"`` model validator and nothing else.
+    Adds one ``mode="before"`` validator, no ``model_config``.
     """
 
     @model_validator(mode="before")
@@ -151,11 +103,8 @@ class StructuredOutput(BaseModel):
     def _decode_stringified_containers(cls, data: Any) -> Any:
         """Substitute a decoded object/array for a field that arrived as a string.
 
-        Model-level rather than a per-field validator on each nested field:
-        a per-field list is a second copy of the schema that drifts the first
-        time somebody adds a field (the failure mode architecture-principles
-        rule 2 is about). This reads ``cls.model_fields``, so it covers every
-        field the model actually declares.
+        Model-level, reading ``cls.model_fields``, so no per-field list can drift
+        (architecture-principles rule 2).
         """
         if not isinstance(data, dict):
             return data

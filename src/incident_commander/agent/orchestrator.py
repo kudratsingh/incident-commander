@@ -1,9 +1,7 @@
 """Explicit state-machine dispatch for the incident run loop (ADR-0002).
 
-Transitions are functions that take a ``RunState`` and return the next ``RunState``.
-Dispatch validates that the returned state is in the allowed-successor set for the
-current state; anything else is a bug that surfaces as a raised exception, not a
-silent transition. Transition bodies are stubbed here and land in follow-on PRs.
+A transition returns the next ``RunState``; dispatch raises on any successor
+outside ``ALLOWED_TRANSITIONS``.
 """
 
 from __future__ import annotations
@@ -40,11 +38,8 @@ ALLOWED_TRANSITIONS: dict[IncidentState, frozenset[IncidentState]] = {
     IncidentState.REMEDIATING: frozenset(
         {IncidentState.VERIFYING, IncidentState.ESCALATED, IncidentState.FAILED}
     ),
-    # VERIFYING has no PLANNING successor: per ADR 0008, one Tier-1
-    # attempt per incident. A ``not_verified`` verdict escalates for
-    # human review rather than re-planning autonomously. Reintroducing
-    # this edge for retry-with-reinvestigation is a future phase — see
-    # ADR 0008's deferred-design section.
+    # No PLANNING successor: one Tier-1 attempt per incident (ADR 0008).
+    # A ``not_verified`` verdict escalates instead of re-planning.
     IncidentState.VERIFYING: frozenset(
         {IncidentState.RESOLVED, IncidentState.ESCALATED, IncidentState.FAILED}
     ),
@@ -96,9 +91,7 @@ def dispatch(
 ) -> RunState:
     """Run one transition from the current state.
 
-    ``transitions`` overrides the module-level registry so callers can wire
-    dependency-bound transitions (e.g. a factory-produced ``INVESTIGATING``
-    closure) without mutating the global. Defaults to ``TRANSITIONS``.
+    ``transitions`` overrides the module registry without mutating the global.
     """
     if run_state.state.is_terminal:
         raise TerminalStateError(f"dispatch called on terminal state {run_state.state.value}")

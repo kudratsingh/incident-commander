@@ -1,21 +1,9 @@
 """Tier policy: which tools the agent may call in which state.
 
-Every tool in ``TOOL_REGISTRY`` is classified into one of:
-
-- ``READ``: safe to call any time. Investigation planner uses these to
-  gather evidence.
-- ``TIER_1``: state-mutating but the platform-side blast radius is
-  bounded and reversible (idempotent restart, single-key cache flush,
-  DLQ replay with TTL-scoped pause). Remediation planner may propose;
-  agent executes directly, no human approval required.
-- ``TIER_2``: state-mutating with wide blast radius or hard to reverse.
-  Requires propose → approve (human) → execute against a platform
-  approval object. **Not populated yet** — lands with Wave 3 PR F on
-  the platform side.
-
-This module is the *agent-side* first filter. The platform enforces the
-final authorization decision (per invariant 2 in CLAUDE.md). Both layers
-must agree before any Tier-1+ call succeeds.
+``READ`` is safe any time. ``TIER_1`` mutates with a bounded, reversible blast
+radius the remediation planner may execute directly. ``TIER_2`` needs propose →
+approve → execute against a platform approval object, and is not populated yet.
+This is the agent-side first filter — the platform decides (CLAUDE.md invariant 2).
 """
 
 from __future__ import annotations
@@ -27,11 +15,7 @@ from incident_commander.tools.registry import TOOL_REGISTRY
 
 
 class Tier(StrEnum):
-    """Blast-radius classification for one tool.
-
-    Ordered from least to most privileged. Comparisons like
-    ``tier > Tier.READ`` are used to guard proposal paths.
-    """
+    """Blast-radius classification for one tool, least to most privileged."""
 
     READ = "read"
     TIER_1 = "tier_1"
@@ -41,24 +25,16 @@ class Tier(StrEnum):
 class PolicyCoverageError(RuntimeError):
     """A registered tool has no tier decision, or has more than one.
 
-    Deliberately not a ``KeyError``: an unclassified tool is not a lookup
-    miss the caller might reasonably paper over, it is a missing safety
-    decision. Raised by ``tier_of`` at the point of classification and by
-    ``ensure_covered`` over the whole registry.
+    Not a ``KeyError``: an unclassified tool is a missing safety decision.
     """
 
 
-# Explicit map — every tool the registry knows about is classified, in
-# exactly one of the three sets below. Adding a tool to the registry
-# without adding it here fails ``ensure_covered`` AND ``tier_of``.
+# Explicit map — every tool the registry knows about is classified in exactly
+# one of the three sets below. A tool added to the registry but not here
+# fails ``ensure_covered`` AND ``tier_of``.
 #
-# The read set is written out rather than inferred as "everything else".
-# It used to be inferred: ``tier_of`` returned ``Tier.READ`` for any name
-# it did not recognise, which made the guarantee this comment claims a
-# fiction — ``ensure_covered`` iterated the registry's own keys and could
-# not fail, and a new tool landed as a read tool with no decision taken
-# and nothing raised. The default answer to "what may this tool do" is
-# now "refuse to say", which is the only safe one (ADR 0003).
+# The read set is written out, not inferred as "everything else": the default
+# answer to "what may this tool do" is "refuse to say" (ADR 0003).
 _READ_TOOLS: Final[frozenset[str]] = frozenset(
     {
         "get_cache_key_info",
@@ -98,11 +74,8 @@ _TIER_2_TOOLS: Final[frozenset[str]] = frozenset()
 class Resolution(StrEnum):
     """Whether a Tier-1 action can END an incident, or only hold it still.
 
-    Tier says how much damage an action can do. This says what a *successful*
-    one is worth. They are independent questions and conflating them is what
-    produced the bug this class exists to close: every Tier-1 tool was
-    implicitly a resolution, so any verified action could carry a run to
-    RESOLVED — including one whose entire effect is to stop the clock.
+    Independent of tier (how much damage it can do). Tier-1 used to imply
+    resolution, so a stabilizer could carry a run to RESOLVED.
     """
 
     RESOLVES = "resolves"
@@ -120,10 +93,7 @@ class Resolution(StrEnum):
 class ResolutionPolicy(NamedTuple):
     """One tool's resolution class plus the written reason for it.
 
-    The rationale is not decoration. It is the sentence a human reads in the
-    escalation briefing when a stabilizer fires (``remediation.py`` quotes it
-    verbatim), so it has to say what is still wrong and what will happen if
-    nobody acts.
+    ``remediation.py`` quotes the rationale verbatim to a human — say what is still wrong.
     """
 
     resolution: Resolution
@@ -132,24 +102,14 @@ class ResolutionPolicy(NamedTuple):
 
 # Single source of truth for "can this action end an incident?".
 #
-# TOTAL over the Tier-1 slice, deliberately, and for the same reason
-# ``VERIFY_PROBE_FOR_ACTION`` is: an absent entry is a safety decision
-# nobody took. ``resolution_class_of`` raises rather than defaulting, and
-# ``tests/unit/test_policies.py::TestResolutionClass`` fails on any Tier-1
-# tool with no entry — so a tool shipped tomorrow cannot inherit "of course
-# it resolves" by silence.
+# TOTAL over the Tier-1 slice, like ``VERIFY_PROBE_FOR_ACTION``: an absent entry
+# is a safety decision nobody took, so ``resolution_class_of`` raises and
+# ``tests/unit/test_policies.py::TestResolutionClass`` fails on a Tier-1 tool
+# with no entry.
 #
-# What this closes. Until 2026-09-07 the remediation loop had exactly one
-# RESOLVED transition and one condition on it: the verification judge said
-# `verified`. For `pause_dag` that condition is trivially satisfiable — the
-# platform's own tool description says a successful pause "reads as
-# paused=true with children still in `waiting`", so a judge handed
-# "paused=true, children waiting" against an expectation of "children stop
-# advancing" answers `verified`, correctly, and the run reported RESOLVED on
-# a chain that was exactly as stuck as before and would be stuck again the
-# moment the 10-minute TTL lapsed. The judge was right; the question was
-# wrong. No amount of judge prompting fixes that, because the judge is being
-# asked whether the action worked, and it did.
+# What this closes (2026-09-07): the one RESOLVED transition asked only whether
+# the judge said `verified`, which `pause_dag` satisfies trivially — the judge
+# was right, the question was wrong.
 RESOLUTION_CLASS: Final[dict[str, ResolutionPolicy]] = {
     "pause_dag": ResolutionPolicy(
         Resolution.STABILIZES,
@@ -188,40 +148,19 @@ RESOLUTION_CLASS: Final[dict[str, ResolutionPolicy]] = {
         "legacy bulk re-submit. Kept resolving for parity with the two "
         "targeted replay tools it predates.",
     ),
-    # STABILIZES since 2026-09-08 (WO-R2-140, decided by the user). ADR 0026
-    # shipped this entry as RESOLVES with the disagreement recorded here
-    # rather than settled, because flipping it would have turned a green
-    # scenario red and that scenario was queued for a paid live run. The
-    # decision is taken now, and it went the way the platform's own words
-    # point: **fence, then escalate.**
+    # STABILIZES since 2026-09-08 (WO-R2-140, decided by the user); ADR 0026
+    # shipped it as RESOLVES with the disagreement recorded rather than
+    # settled. The platform's own words point one way — fence, then escalate:
+    # the mark "doesn't change job.status — the entry stays in DLQ, just won't
+    # be auto-replayed", the planner prompt routes `human_required` to
+    # "`mark_dlq_permanent` … then `stop`", and the scenario is named
+    # `dlq_human_required_escalates`.
     #
-    # Three readings, all agreeing, none of which were in doubt — what was
-    # missing was the decision, not the evidence:
-    #
-    # * The platform's tool description: the mark "Doesn't change
-    #   job.status — the entry stays in DLQ, just won't be auto-replayed."
-    #   The handler backs that up: it flips `remediation_hint` to
-    #   `human_required` and writes an audit row, and touches nothing else
-    #   (platform `mcp/tools/actions/mark_dlq_permanent.py`).
-    # * The remediation planner prompt routes `human_required` as
-    #   "`mark_dlq_permanent` … then `stop` (escalate)".
-    # * The scenario exercising it is named `dlq_human_required_escalates`
-    #   and its own description says "correct action is mark_dlq_permanent
-    #   per job + escalate".
-    #
-    # So the fence is the `pause_dag` shape in a different dress: a verified
-    # success that holds the incident still. The poisoned row cannot re-fail
-    # a replay it is now excluded from — that is real and worth doing first,
-    # because a later bulk replay by another operator (or by this agent on a
-    # later incident) would otherwise re-run it — and the job is still dead,
-    # its work still undone, its source data still wrong. Nothing about the
-    # cause moved. A human fixes the CSV, the producer, or the schema; the
-    # mark only makes sure nobody re-runs the poison in the meantime.
-    #
-    # It differs from a pause in one way worth stating: it does NOT
-    # self-expire, and it does not block the real fix. That makes it a
-    # *better* stabilizer than a pause and not a resolution — "permanent"
-    # names the durability of the fence, never the end of the incident.
+    # So it is the `pause_dag` shape in a different dress: a verified success
+    # that holds the incident still. The fence stops a later bulk replay from
+    # re-running the poison; the job is still dead and a human fixes the CSV,
+    # the producer or the schema. Unlike a pause it does not self-expire and
+    # does not block the real fix — a better stabilizer, not a resolution.
     "mark_dlq_permanent": ResolutionPolicy(
         Resolution.STABILIZES,
         "fences one dead-lettered job out of auto-replay — it sets "
@@ -241,15 +180,8 @@ RESOLUTION_CLASS: Final[dict[str, ResolutionPolicy]] = {
 def resolution_class_of(tool_name: str) -> ResolutionPolicy:
     """Classify one Tier-1 action's worth. Unclassified raises, never defaults.
 
-    Mirrors ``tier_of``'s posture exactly. Three closed failure modes:
-
-    * not in ``TOOL_REGISTRY`` → ``KeyError``;
-    * in the registry but not Tier-1 → ``PolicyCoverageError``, because the
-      question is meaningless for a read tool and answering it anyway would
-      let a caller ask it of one and act on the answer;
-    * Tier-1 with no entry → ``PolicyCoverageError``. This is the case that
-      must not default: "of course a successful action resolves the
-      incident" is precisely the assumption ``pause_dag`` disproved.
+    Not in ``TOOL_REGISTRY`` → ``KeyError``; not Tier-1 or no entry →
+    ``PolicyCoverageError``, because "of course it resolves" must not default.
     """
     if tool_name not in TOOL_REGISTRY:
         raise KeyError(f"unknown tool: {tool_name}")
@@ -282,15 +214,10 @@ def stabilize_only_tools() -> frozenset[str]:
     )
 
 
-# Read tools whose responses come from a cache rather than a live read,
-# with the platform-declared staleness window in seconds. A reading from
-# one of these taken inside its window may predate the fault entirely —
-# the 2026-08-03 live campaign watched a 60s-cached lag value of 0, read
-# 10s after chaos injection, kill a correct consumer_saturation hypothesis
-# at 0.75 confidence (ADR 0009). The investigation loop uses this map to
-# decide when a contradicting probe deserves one fresh re-read before the
-# hypothesis dies. Extend as the platform declares freshness on more tools;
-# instant DB-backed reads do not belong here.
+# Read tools served from a cache, with the declared staleness window in seconds:
+# a reading inside its window may predate the fault — a 60s-cached lag of 0 once
+# killed a correct consumer_saturation hypothesis (ADR 0009). The loop uses this
+# to decide when a contradicting probe deserves a fresh re-read.
 CACHED_READ_FRESHNESS_SECONDS: Final[dict[str, int]] = {
     "get_consumer_lag": 60,
 }
@@ -301,32 +228,20 @@ def is_cached_read(tool_name: str) -> bool:
     return tool_name in CACHED_READ_FRESHNESS_SECONDS
 
 
-# Per-tool argument fields whose values NAME a specific platform resource
-# (a cache key, a job id, a consumer group, a trace id) — as opposed to
-# filters, enums, counts, and free text. A remediation plan may only fill
-# these fields with values copied verbatim from the alert or from tool
-# results (the evidence ledger): the 2026-08-03 live campaign watched the
-# remediation planner re-type an alert's cache key minus its `cache:jobs:`
-# prefix, and only the platform's key-prefix allowlist stopped the call
-# (ADR 0009's sibling fix; see `remediation._unsourced_resource_args`).
-# Copy, don't re-type — enforced structurally, not by prompt prose.
-#
-# Every tool in TOOL_REGISTRY has an entry, empty when it takes no
-# resource-naming args; `tests/unit/test_policies.py` fails if a new tool
-# lands without classifying its fields here.
+# Per-tool argument fields whose values NAME a platform resource (a cache key, a
+# job id) rather than filter. A remediation plan may fill these only from values
+# copied verbatim out of the alert or the evidence ledger — the planner once
+# re-typed a key minus its `cache:jobs:` prefix (ADR 0009). Total over
+# TOOL_REGISTRY, and `tests/unit/test_policies.py` fails on an unclassified tool.
 RESOURCE_ARG_FIELDS: Final[dict[str, frozenset[str]]] = {
-    # `key` NAMES a resource: same copy-don't-re-type rule as
-    # `invalidate_cache_key` below. The read tool is the more likely place
-    # for a re-typed key to look harmless, since nothing is mutated.
+    # `key` NAMES a resource — same copy-don't-re-type rule as the write tool.
     "get_cache_key_info": frozenset({"key"}),
     "get_consumer_lag": frozenset({"consumer_group"}),
     "get_dag_state": frozenset({"job_id"}),
     "get_deploy_history": frozenset(),
     "get_incident": frozenset({"id"}),
-    # Takes no arguments at all, so there is nothing that could name a
-    # resource. Declared empty rather than omitted: the entry is the record
-    # that the question was asked (ADR 0003's posture — silence is never an
-    # answer here).
+    # No arguments, so nothing can name a resource. Declared empty, not
+    # omitted (ADR 0003).
     "get_outbox_status": frozenset(),
     "get_postgres_health": frozenset(),
     "get_redis_health": frozenset(),
@@ -349,28 +264,8 @@ RESOURCE_ARG_FIELDS: Final[dict[str, frozenset[str]]] = {
 def _derive_uuid_resource_fields() -> dict[str, frozenset[str]]:
     """Which ``RESOURCE_ARG_FIELDS`` entries the platform types as a UUID.
 
-    DERIVED, not declared, and that is the whole point (architecture
-    principle #2). The platform's own input schema already carries the
-    answer — ``replay_dlq_by_ids.job_ids`` is ``list[UUID]`` and its JSON
-    schema says ``items.format == "uuid"``, ``pause_dag.root_job_id`` says
-    ``format == "uuid"`` — and ``tests/unit/test_registry_matches_snapshot.py``
-    holds every input model to exact equality with
-    ``contracts/platform-tools.snapshot.json``. A hand-written second copy
-    of that fact would be a list to keep in sync with a contract that moves
-    on the platform's schedule, and the first time it drifted the guard
-    reading it would either demand a UUID of a field that is not one or stop
-    demanding one of a field that is.
-
-    The distinction it buys is real and narrow: ``get_trace.trace_id`` and
-    ``invalidate_cache_key.key`` are resource names with no canonical form —
-    the platform accepts any string of the right length — so nothing may be
-    asserted about their shape. Six fields across five tools are UUIDs and
-    can be checked before the call is ever wired.
-
-    Both shapes are read because a resource field is either scalar
-    (``job_id``) or a list of them (``job_ids``); ``anyOf`` is walked so an
-    optional UUID field added tomorrow is picked up rather than silently
-    dropped.
+    DERIVED from the input schemas, not declared (architecture principle #2), and
+    ``anyOf``/``items`` are walked so a list or optional UUID field is picked up.
     """
 
     def _is_uuid(schema: object) -> bool:
@@ -389,26 +284,17 @@ def _derive_uuid_resource_fields() -> dict[str, frozenset[str]]:
     return derived
 
 
-# Resource-naming fields whose values must be canonical UUIDs, per tool.
-# Total over ``TOOL_REGISTRY`` (empty frozenset where no resource field is a
-# UUID) for the same reason its three sibling maps in ``remediation.py`` are:
-# an empty entry is a *declared* "nothing to check here", so a tool shipped
-# tomorrow cannot inherit "of course any string is a valid id" by silence.
+# Resource-naming fields whose values must be canonical UUIDs, per tool. Total
+# over ``TOOL_REGISTRY``, where an empty entry is a *declared* "nothing to
+# check" rather than silence.
 UUID_RESOURCE_FIELDS: Final[dict[str, frozenset[str]]] = _derive_uuid_resource_fields()
 
 
 def tier_of(tool_name: str) -> Tier:
     """Classify one tool. Anything unclassified raises, never defaults.
 
-    Two failure modes, both closed:
-
-    * Not in ``TOOL_REGISTRY`` → ``KeyError``. Callers should validate
-      against the registry first.
-    * In the registry but in none of the tier sets →
-      ``PolicyCoverageError``. This is the case that used to return
-      ``Tier.READ``, which handed an unclassified tool to the
-      investigation planner as though someone had decided it was safe.
-      Nobody had.
+    Not in ``TOOL_REGISTRY`` → ``KeyError``; in it but in no tier set →
+    ``PolicyCoverageError``, which used to be a silent ``Tier.READ``.
     """
     if tool_name not in TOOL_REGISTRY:
         raise KeyError(f"unknown tool: {tool_name}")
@@ -427,11 +313,7 @@ def tier_of(tool_name: str) -> Tier:
 
 
 def tools_at_or_below(max_tier: Tier) -> frozenset[str]:
-    """Every registered tool at or below the given tier.
-
-    Investigation planner asks for ``READ`` — only read tools returned.
-    Remediation planner asks for ``TIER_1`` — read + tier-1 returned.
-    """
+    """Every tool at or below a tier: ``READ`` investigates, ``TIER_1`` remediates."""
     order = {Tier.READ: 0, Tier.TIER_1: 1, Tier.TIER_2: 2}
     cutoff = order[max_tier]
     return frozenset(name for name in TOOL_REGISTRY if order[tier_of(name)] <= cutoff)
@@ -440,16 +322,8 @@ def tools_at_or_below(max_tier: Tier) -> frozenset[str]:
 def ensure_covered() -> None:
     """Assert the tier sets partition ``TOOL_REGISTRY`` exactly. From tests.
 
-    Guards against silent drift in both directions: a new tool added to
-    the registry with no policy decision, and a tier entry left behind by
-    a tool that has since been retired. Also rejects a tool claimed by two
-    tiers — ``tier_of`` would quietly answer with the more privileged one
-    and every reader of the other set would be wrong.
-
-    This used to iterate the registry's own keys calling ``tier_of``,
-    which could not fail while ``tier_of`` defaulted to ``Tier.READ``: the
-    check, the comment above ``_READ_TOOLS`` and ADR 0003 all promised a
-    coverage guarantee that no code enforced.
+    Catches drift both ways — a new tool with no decision, a tier entry left by
+    a retired tool — and a tool claimed by two tiers (ADR 0003's guarantee).
     """
     registered = set(TOOL_REGISTRY)
     classified = _READ_TOOLS | _TIER_1_TOOLS | _TIER_2_TOOLS

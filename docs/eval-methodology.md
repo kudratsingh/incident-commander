@@ -280,7 +280,7 @@ A separate LLM judge (`evals/graders/llm_judge.py`, Haiku) scores briefing quali
 
 A rule about how evidence may be read is given to **every** reader of that evidence — the briefing writer, the briefing judge, and the deterministic grader — in the same change. A rule given to the writer and not to its judge is half a rule, and the half that is missing is the half that grades.
 
-The case that produced this is [INC-002](../../context/INCIDENTS.md) / [F-016](../study/findings.md), paid run `54ab08425f82`. Cmd #218 gave the writer "a verify read proves only what it read; a filtered read proves that slice and nothing outside it", and gave the deterministic grader the `call_arguments` selector that says the same thing in the grammar. The judge got neither. It then read the run's final probe — `list_dlq_messages` returning `{"total":0,"items":[]}` — without the `remediation_hint='replay_safe'` that scoped it, concluded "all 5 messages are gone", and scored an honest briefing 0.0 for groundedness. **The judge made the exact overclaim the writer had just been forbidden to make.**
+The case that produced this is INC-002 / [F-016](../study/findings.md), paid run `54ab08425f82`. Cmd #218 gave the writer "a verify read proves only what it read; a filtered read proves that slice and nothing outside it", and gave the deterministic grader the `call_arguments` selector that says the same thing in the grammar. The judge got neither. It then read the run's final probe — `list_dlq_messages` returning `{"total":0,"items":[]}` — without the `remediation_hint='replay_safe'` that scoped it, concluded "all 5 messages are gone", and scored an honest briefing 0.0 for groundedness. **The judge made the exact overclaim the writer had just been forbidden to make.**
 
 Two halves are needed, and neither works alone:
 
@@ -926,7 +926,7 @@ Not every RED is a measurement of the agent. When a run ends because the harness
 
 The runner names the bucket (`failure_class: grader-brittleness`) and, since WO-R2-175, carries the diagnosis with it in `failure_class_detail`: the failing claim and, beside it, the argument shapes the run actually used for the tools that claim names. The comparison a reader has to make — "the claim wants THIS shape, the agent used THAT one" — is then in `report.json`, not only in the trace.
 
-Reference case: paid run `4974811d236f`, `remediate_dlq_backlog_success` run D, 2026-09-08 ([INC-001](../../context/INCIDENTS.md), [F-015](../study/findings.md)). ≈$0.13 for a false red, the paid sequence stopped, and one more re-run to come. Had the red been trusted, the next step would have been "fixing" an agent that did not need it.
+Reference case: paid run `4974811d236f`, `remediate_dlq_backlog_success` run D, 2026-09-08 (INC-001, [F-015](../study/findings.md)). ≈$0.13 for a false red, the paid sequence stopped, and one more re-run to come. Had the red been trusted, the next step would have been "fixing" an agent that did not need it.
 
 ## Verify claims and verify shapes
 

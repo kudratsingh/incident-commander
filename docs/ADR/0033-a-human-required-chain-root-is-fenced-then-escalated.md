@@ -1,6 +1,6 @@
 # ADR 0033: A `human_required` chain root is fenced, then escalated
 
-- Status: accepted
+- Status: accepted · implemented (2026-09-17 documentation sweep)
 - Date: 2026-09-08
 - Deciders: repository owner (WO-R2-160)
 - Supersedes: the "What was deliberately NOT changed: `saga_stuck`" consequence of

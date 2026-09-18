@@ -341,3 +341,19 @@ class TestRemediationScenarioCoverage:
         # Margin, stated so a future edit can see what it is spending: one
         # whole extra delay beyond the interval at the shipped 6 x 15s.
         assert window - PLATFORM_METRICS_INTERVAL_SECONDS >= probe.delay_seconds
+
+
+def test_consumer_lag_content_claims_are_established_before_spend() -> None:
+    """Live consumer-lag scenarios do not grade canned contents as a world fact."""
+    scenarios = {scenario.name: scenario for scenario in load_scenarios(_SCENARIOS_DIR)}
+    expected = {
+        "consumer_lag_missing_group": ("unknown-consumer", "is_null"),
+        "consumer_lag_null_unknown_state": ("ledger-consumer", "is_null"),
+        "consumer_lag_healthy_zero": ("healthy-consumer", "equals"),
+        "consumer_lag_shipping_extreme": ("shipping-consumer", "at_least"),
+    }
+    for name, (group, comparator) in expected.items():
+        probe = scenarios[name].expected_precondition[0]
+        assert probe.tool == "get_consumer_lag"
+        assert probe.arguments == {"consumer_group": group}
+        assert getattr(probe.expect[0], comparator) is not None

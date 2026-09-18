@@ -14,6 +14,14 @@ tags:
 - live-llm
 use_live_mcp: true
 use_live_llm: true
+# The false-positive claim applies only after the named group is observed at
+# zero. Abort before a model call when a live world has a real backlog.
+expected_precondition:
+- tool: get_consumer_lag
+  arguments: {consumer_group: healthy-consumer}
+  expect:
+  - path: lag
+    equals: 0
 alert:
   source: platform.kafka
   severity: critical

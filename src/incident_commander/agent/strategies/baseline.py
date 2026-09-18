@@ -1,20 +1,10 @@
 """``baseline`` — the current behaviour, behind the seam and otherwise untouched.
 
-``plan_next_step`` calls ``investigation._plan_next_step`` **verbatim**: one
+``plan_next_step`` calls the private ``investigation._plan_next_step`` **verbatim** — one
 planner call, wrapped by ``call_with_output_repair`` (ADR 0035) and accrued by
-``accrue_structured_call`` (ADR 0015), returning the same ``RunState`` and the
-same ``InvestigationStep`` the loop has always received. No prompt, no context
-rendering, no schema and no retry policy is re-implemented here — a second copy
-of that body would be a second thing to keep in step with the first, and the
-whole value of ``baseline`` is that it is not a re-implementation. It is the
-control group: the canned suite comes out byte-identical, which is the proof
-that nothing moved (plan 04 working rule 5).
-
-Importing the private ``_plan_next_step`` is deliberate. The alternative — move
-the body here — would take the planner call out of the module that owns the
-loop, the gates and the re-probe, for no behavioural gain, and it would put a
-packet whose acceptance is "byte-identical" in the business of moving code the
-live campaign's eight green runs were made with.
+``accrue_structured_call`` (ADR 0015) — rather than copying it: the control group's whole value
+is that it is not a re-implementation, and the canned suite comes out byte-identical (plan 04
+working rule 5).
 """
 
 from __future__ import annotations
@@ -37,13 +27,12 @@ from incident_commander.agent.strategies.records import (
     StepRecord,
 )
 
-#: The prompt role the planner call is made under, and the label the tracer
-#: writes its LLM records with (``evals/runner.py``'s ``llm_hook``). One string,
-#: so a record's ``role`` and the trace's ``role`` cannot drift apart.
+#: The planner call's prompt role, and the label the tracer writes its LLM records with. One
+#: string, so a record's ``role`` and the trace's ``role`` cannot drift apart.
 _PLANNER_ROLE: Final[str] = "investigation_planner"
 
-#: Nothing to configure. Read-only so the empty block cannot be filled in by a
-#: caller and then stamped into a provenance record as if it were a setting.
+#: Nothing to configure. Read-only so a caller cannot fill the empty block and have it stamped
+#: into a provenance record as if it were a setting.
 _NO_CONFIG: Final[Mapping[str, Any]] = MappingProxyType({})
 
 
@@ -54,15 +43,10 @@ class BaselineStrategy:
     config: Mapping[str, Any] = _NO_CONFIG
 
     def __init__(self, knobs: StrategyKnobs | None = None) -> None:
-        """Takes the inference block every registry factory is handed, and reads
-        nothing from it.
+        """Takes the inference block every registry factory is handed, and reads nothing.
 
-        The parameter exists so ``StrategyRegistry`` has one factory shape
-        (``StrategyKnobs -> InvestigationStrategy``) rather than a special case
-        for the strategies with no knobs. ``baseline`` has none to read: it is
-        the current behaviour, and a knob that changed it would make it
-        something else. ``BaselineStrategy()`` therefore still constructs, and
-        behaves identically whatever is passed.
+        The parameter exists so ``StrategyRegistry`` has one factory shape; ``baseline`` has no
+        knob, since one that changed it would make it a different arm.
         """
 
     def plan_next_step(
@@ -70,11 +54,8 @@ class BaselineStrategy:
     ) -> tuple[RunState, InvestigationStep, StepRecord]:
         """One planner call, plus the record of it.
 
-        Exceptions propagate exactly as they did before the seam existed: the
-        loop's own ``except (ValueError, ValidationError, LLMError)`` arm
-        charges what the failed call billed and escalates (ADR 0015, ADR 0035).
-        Catching anything here would move that accounting behind a strategy,
-        where each new strategy would have to remember to repeat it.
+        Exceptions propagate as before the seam: the loop's ``except`` arm charges what the
+        failed call billed and escalates (ADR 0015, ADR 0035).
         """
         updated, step, call = _plan_next_step(run_state, at, ctx.llm_client, ctx.model)
         record = self._record(run_state, updated, step, call, ctx)
@@ -92,19 +73,8 @@ class BaselineStrategy:
     ) -> StepRecord:
         """Build the step's ``StepRecord``.
 
-        The candidate set holds exactly one entry: the hypothesis the planner
-        put on top, which for ``baseline`` is the whole of what it considered —
-        one call, one ranking, no alternatives generated and none discarded.
-        The rest of the ranking is not dropped; it is what
-        ``hypothesis_state_after`` is. A best-of-N strategy is the one that
-        makes this set longer, and the difference between the two lengths is the
-        measurement Phases 5 and 6 are built on.
-
-        The numbers come from ``call`` — the planner call's own report — not
-        from anything rebuilt here. ``planner_input_tokens`` is the provider's
-        count of the context it was fed (zero on a canned run, which bills
-        nothing), and ``planner_context_chars`` is that same context measured
-        locally, so an offline record is not silently all-zero.
+        One candidate — the planner's top hypothesis, the whole of what ``baseline``
+        considered; the rest of the ranking is ``hypothesis_state_after``.
         """
         action = step.next_action
         top = step.hypotheses[0]
@@ -113,9 +83,7 @@ class BaselineStrategy:
             name=top.name,
             confidence=top.confidence,
             proposed_probe=(action.tool_name if isinstance(action, ProbeAction) else None),
-            # One call generated the whole ranking, so the one candidate names
-            # it. For a strategy that generates candidates in separate calls
-            # this is what says which call produced which candidate.
+            # One call generated the whole ranking, so the one candidate names it.
             generation_call_id=call.record_id,
         )
         return StepRecord(
@@ -134,10 +102,8 @@ class BaselineStrategy:
                 LLMCallRecord(
                     role=_PLANNER_ROLE,
                     model=ctx.model,
-                    # The ledger's own delta across the call — which is the
-                    # number ADR 0015 holds the run to. It already includes a
-                    # repair's second call and any billed-then-discarded
-                    # attempt, which the counters below cannot see.
+                    # The ledger's own delta, the number ADR 0015 holds the run to: it includes
+                    # billed-then-discarded attempts, which the counters below cannot see.
                     tokens_used=after.budget.tokens_used - before.budget.tokens_used,
                     usd_used=after.budget.usd_used - before.budget.usd_used,
                     input_tokens=call.input_tokens,
@@ -145,10 +111,8 @@ class BaselineStrategy:
                     cache_read_tokens=call.cache_read_tokens,
                     cache_creation_tokens=call.cache_creation_tokens,
                     call_id=call.record_id,
-                    # Filled since WO-R3-260, from the client's own stopwatch.
-                    # ``None`` here is still a real answer — a canned client
-                    # does not time itself — and it is the strategy's job to
-                    # carry the measurement through, never to invent one.
+                    # Filled since WO-R3-260, from the client's own stopwatch. ``None`` is a
+                    # real answer (a canned client does not time itself); never invent one.
                     elapsed_ms=call.elapsed_ms,
                 ),
             ),

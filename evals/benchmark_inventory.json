@@ -708,6 +708,164 @@
     ]
   },
   {
+    "name": "jobs_not_progressing_dispatcher_stall",
+    "template_id": "jobs_not_progressing_dispatcher_stall",
+    "seed": 0,
+    "family": {
+      "value": "jobs_not_progressing",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "single",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hooks": [
+      "kill_consumer"
+    ],
+    "expected_terminal_state": "resolved",
+    "expected_action_tools": [
+      "restart_consumer_group"
+    ],
+    "forbidden_action_tools": [
+      "invalidate_cache_key",
+      "mark_dlq_permanent",
+      "pause_dag",
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids",
+      "replay_dlq_messages"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-4",
+      "jobs-not-progressing",
+      "remediation",
+      "tier-1",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "jobs_not_progressing_healthy_backlog_spike",
+    "template_id": "jobs_not_progressing_healthy_backlog_spike",
+    "seed": 0,
+    "family": {
+      "value": "jobs_not_progressing",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "control",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hooks": [],
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [
+      "invalidate_cache_key",
+      "mark_dlq_permanent",
+      "pause_dag",
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids",
+      "replay_dlq_messages",
+      "restart_consumer_group"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-4",
+      "jobs-not-progressing",
+      "control",
+      "no-fault",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "jobs_not_progressing_outbox_stall",
+    "template_id": "jobs_not_progressing_outbox_stall",
+    "seed": 0,
+    "family": {
+      "value": "jobs_not_progressing",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "single",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hooks": [
+      "pause_control_loop"
+    ],
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [
+      "invalidate_cache_key",
+      "mark_dlq_permanent",
+      "pause_dag",
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids",
+      "replay_dlq_messages",
+      "restart_consumer_group"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-4",
+      "jobs-not-progressing",
+      "escalation",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "jobs_not_progressing_outbox_stall_deploy_noise",
+    "template_id": "jobs_not_progressing_outbox_stall_deploy_noise",
+    "seed": 0,
+    "family": {
+      "value": "jobs_not_progressing",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "noisy",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hooks": [
+      "pause_control_loop"
+    ],
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [
+      "invalidate_cache_key",
+      "mark_dlq_permanent",
+      "pause_dag",
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids",
+      "replay_dlq_messages",
+      "restart_consumer_group"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-4",
+      "jobs-not-progressing",
+      "escalation",
+      "noise",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
     "name": "multi_probe_billing",
     "template_id": "multi_probe_billing",
     "seed": 0,

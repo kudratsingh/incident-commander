@@ -182,6 +182,58 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
     # ledger records, and both are a fixture describing a LATER world than
     # the walk can probe (the seeded fault, and the post-delete read).
     "get_cache_key_info": frozenset({"ttl_seconds"}),
+    # `get_outbox_status` arrived with the v0.6.9 re-pin (plat #211, WO-R3-201)
+    # and had no canned fixture until WO-R3-202 wrote the `jobs_not_progressing`
+    # family. The re-pin recorded the volatility call from two live readings 25s
+    # apart and left it for whoever wrote the first fixture; this is that entry,
+    # and the readings it is made from are the four recordings under
+    # `evals/recorded_worlds/jobs_not_progressing_*`.
+    #
+    # Nine fields, and they divide on the one question this file asks: does the
+    # fixture pack FIX the value?
+    #
+    #   `measured_at` is the database server's clock at call time, and
+    #   `relay_last_tick_at` is the worker's clock at the relay's last pass. No
+    #   recording can match either — the `get_consumer_lag.measured_at` case,
+    #   one tool along.
+    #
+    #   `relay_heartbeat_age_s` and `seconds_since_last_publish` are those two
+    #   clocks minus `measured_at`, so they move for the same reason and land
+    #   anywhere. `age_seconds`'s note above applies verbatim: pinning one
+    #   reading makes the ledger FLAP rather than merely disagree.
+    #
+    #   `last_publish_at` is when the relay last delivered, which is a fact
+    #   about when the platform last had traffic, not about the fixture pack.
+    #   The seeder writes no outbox rows at all.
+    #
+    #   The four `oldest_/newest_unpublished_{at,age_s}` fields exist only while
+    #   a backlog exists, so they flip between a value and `null` with load
+    #   rather than with contract. `_differs_in_type` already treats null as a
+    #   legal value rather than a type change, so the entry silences the value
+    #   and keeps the type claim — which is what a recording can honour.
+    #
+    # DELIBERATELY OUT, and this is the load-bearing half: `unpublished_count`,
+    # `unpublished_past_attempt_limit`, `relay_heartbeat_known` and
+    # `relay_tick_interval_s`. The count IS the outbox family's evidence — the
+    # whole contrast is "the queue grew while lag stayed flat" — so silencing it
+    # would silence the measurement. It disagrees with the un-faulted world by
+    # construction (the fault is what fills the queue), and that disagreement is
+    # a `post-fault` ledger entry, which is a statement someone wrote down. The
+    # other three are stable: 0 on a drainable backlog, true on any stack with a
+    # relay, and 1.0 from configuration.
+    "get_outbox_status": frozenset(
+        {
+            "measured_at",
+            "last_publish_at",
+            "seconds_since_last_publish",
+            "relay_last_tick_at",
+            "relay_heartbeat_age_s",
+            "oldest_unpublished_at",
+            "oldest_unpublished_age_s",
+            "newest_unpublished_at",
+            "newest_unpublished_age_s",
+        }
+    ),
     # `items.dead_lettered_at` arrived with the v0.6.0 re-pin (plat #180,
     # R2-53) and is the third clock on this tool, not a new species: the
     # seeder stamps it fresh at seed time, exactly like the two beside it,

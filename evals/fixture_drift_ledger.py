@@ -40,6 +40,23 @@ FIXTURE_DEFECT: Final = "fixture-defect"
 POST_FAULT: Final = "post-fault"
 POST_ACTION: Final = "post-action"
 CANNED_ONLY: Final = "canned-only"
+#: The recording is of a WARM stack and the check ran on a cold one. Added by
+#: WO-R3-202, which shipped the first canned `get_consumer_lag` response that
+#: pins a MEASURED zero on `worker-dispatcher`. That group is the one the metrics
+#: loop refreshes continuously, and for roughly the first minute of a freshly
+#: booted platform it has no measurement at all: the honest reading is
+#: `lag: null, lag_known: false`, which flips to `0, true` once the loop emits.
+#: `fixture_drift._VOLATILE` already forgives the `lag_known` half and
+#: deliberately does NOT forgive `lag` — that value is what every lag scenario
+#: rests on — so the value half lands here.
+#:
+#: Distinct from POST_FAULT, and the distinction is the reason this word exists
+#: rather than a fifth reuse of that one: post-fault drift is the chaos hook's
+#: doing and would vanish if the walk ran after seeding. This is neither the
+#: hook's nor the agent's doing — it is the platform's uptime, and no seeding or
+#: reset changes it. Calling it post-fault would claim a mechanism that is not
+#: there, which the note above `_JUSTIFIED` is explicitly about.
+COLD_STACK: Final = "cold-stack"
 
 # Entries that are NOT fixture defects, each with the claim that makes it so.
 #
@@ -67,6 +84,80 @@ _JUSTIFIED: Final[dict[DriftKey, tuple[str, str]]] = {
         POST_FAULT,
         "poison_message adds a dead-letter row, so the canned total counts a "
         "row the un-faulted world has not produced yet",
+    ),
+    # The `jobs_not_progressing` family (WO-R3-202, WP-4.3). Four rows, and each
+    # one is a named mechanism rather than "the scenario seeds a fault".
+    #
+    # What is NOT here is the point: every other field of `get_outbox_status` is
+    # either declared volatile in `fixture_drift._VOLATILE` (the clocks and the
+    # ages) or matches live with no entry at all
+    # (`unpublished_past_attempt_limit`, `relay_heartbeat_known`,
+    # `relay_tick_interval_s`). `unpublished_count` is the one field the outbox
+    # scenarios actually grade, so it stays guarded and its disagreement is
+    # written down here.
+    ("jobs_not_progressing_dispatcher_stall", "get_consumer_lag", "lag", "value"): (
+        POST_FAULT,
+        "kill_consumer makes worker-dispatcher's lag climb; the check probes "
+        "the un-faulted world, so the canned backlog cannot match by design — "
+        "the same mechanism as consumer_lag_high, in this family's world. The "
+        "second element of the sequence is the post-restart read and shares "
+        "this key (the ledger excludes the index on purpose)",
+    ),
+    ("jobs_not_progressing_dispatcher_stall", "get_outbox_status", "unpublished_count", "value"): (
+        POST_FAULT,
+        "this scenario's premise needs a producer running (lag is arrival minus "
+        "service and kill_consumer supplies only the service half), so its "
+        "recording caught one event between its commit and the relay's next "
+        "tick. The check probes the un-faulted world, which has no producer and "
+        "reads 0. Both satisfy the scenario's own claim, `at_most 5`",
+    ),
+    ("jobs_not_progressing_outbox_stall", "get_outbox_status", "unpublished_count", "value"): (
+        POST_FAULT,
+        "pause_control_loop(outbox_relay) stops the relay, so committed events "
+        "accumulate undelivered; that queue IS the fault, and the check probes "
+        "the world before the hook fires, where it is empty. Both elements of "
+        "the sequence (11 growing to 19) share this key",
+    ),
+    (
+        "jobs_not_progressing_outbox_stall_deploy_noise",
+        "get_outbox_status",
+        "unpublished_count",
+        "value",
+    ): (
+        POST_FAULT,
+        "same hook, same world, same reason — this scenario differs from its "
+        "quiet sibling only in the alert it hands the agent",
+    ),
+    # The three cold-stack rows, and they are the only entries in this file that
+    # a warm developer stack cannot observe. `_blessed_against` above is what
+    # settles which side is authoritative: this file is blessed against CI's
+    # freshly seeded stack, so on a developer volume whose metrics loop has been
+    # running for minutes these three read as "already fixed". They are not —
+    # deleting them reds CI's contract job, which is where the cold reading is.
+    #
+    # Each scenario's world is the WARM one: its precondition asserts
+    # `lag_known equals true` beside `lag at_most 5`, so a cold stack fails the
+    # premise BEFORE any model call and reports that the world was never
+    # manufactured, rather than grading the agent against a missing reading.
+    # `make world-audit` (PROTOCOL step 3) checks `lag_known` too, so the paid
+    # path cannot reach a cold stack either.
+    ("jobs_not_progressing_healthy_backlog_spike", "get_consumer_lag", "lag", "value"): (
+        COLD_STACK,
+        "the recording pins worker-dispatcher's MEASURED zero; a freshly seeded "
+        "stack has taken no measurement yet and answers null, which lag_known "
+        "declares (and _VOLATILE already forgives). The scenario's premise is the "
+        "warm reading and its precondition asserts lag_known, so a cold stack "
+        "abandons the run instead of grading it",
+    ),
+    ("jobs_not_progressing_outbox_stall", "get_consumer_lag", "lag", "value"): (
+        COLD_STACK,
+        "same reading, same mechanism — this scenario's hook pauses the outbox "
+        "relay and never touches the lag metric, so the fault explains nothing "
+        "here and post-fault would be a claim about a mechanism that is absent",
+    ),
+    ("jobs_not_progressing_outbox_stall_deploy_noise", "get_consumer_lag", "lag", "value"): (
+        COLD_STACK,
+        "same hook, same world, same reason as its quiet sibling",
     ),
     # The first POST_ACTION rows. The constant has existed since the ledger
     # did, describing exactly this and matching nothing — because until ADR 0025
@@ -724,6 +815,12 @@ def dump_ledger(
                 CANNED_ONLY: (
                     "the scenario never runs live, so its recordings are its premise "
                     "rather than a recording of anything"
+                ),
+                COLD_STACK: (
+                    "the recording is of a warm stack and the check ran on a cold one: "
+                    "worker-dispatcher's lag is unmeasured for about the first minute "
+                    "after boot, so a fresh platform answers null where the recording "
+                    "says 0. Timing, not contract, and not fixable from either side"
                 ),
             },
             "_counts": {

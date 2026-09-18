@@ -1,0 +1,39 @@
+{
+  "absent_reason": null,
+  "applies": true,
+  "ground_truth": {
+    "affected_components": [
+      "outbox_relay"
+    ],
+    "causal_chain": [
+      "the outbox relay stops completing passes over outbox_events",
+      "committed job events accumulate undelivered in Postgres and age",
+      "nothing new reaches Kafka, so worker-dispatcher consumer lag stays flat",
+      "accepted jobs never execute, while every queue-depth dashboard reads green"
+    ],
+    "incident_count": 1,
+    "root_causes": [
+      "outbox_stall"
+    ]
+  },
+  "provenance": {
+    "commander_head": "a9dce8a",
+    "invocation_id": "0f6564392048",
+    "platform_mcp_url": "http://localhost:8001/mcp",
+    "read_principal": "PLATFORM_SMOKE_TOKEN (read-scoped)",
+    "recorded_at": "2026-09-17T20:50:51.198748+00:00"
+  },
+  "recording": "jobs_not_progressing_outbox_stall.20260917T205051Z.0f6564392048.json",
+  "scenario": "jobs_not_progressing_outbox_stall",
+  "schema_version": 1,
+  "why_this_file_is_separate": "ADR 0038: the wall around the answer key is structural. The replay client loads the recording through `recorder.load_recording`, which takes one path and has no way to reach this file; `RecordedWorld` forbids extra keys, so a ground truth cannot ride inside a recording either. Pinned by tests/unit/test_recorder.py.",
+  "world": {
+    "chaos_hooks": [
+      "pause_control_loop"
+    ],
+    "chaos_seeded": true,
+    "label": "the live platform with `jobs_not_progressing_outbox_stall`'s fault plan seeded (1 hook(s): `pause_control_loop`), settled 0.0s, read under the read-scoped principal",
+    "live_mcp": true,
+    "settle_seconds": 0.0
+  }
+}

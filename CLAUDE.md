@@ -204,9 +204,9 @@ This block describes `docs/` as it is. Entries that do not exist yet carry an ex
 docs/
 ├── README.md                   # the map: one line per document, and which are history
 ├── ADR/                        # numbered decision records, never edited after acceptance
-│   ├── README.md               # the index: all 50, with status and what amended what
+│   ├── README.md               # the index: all 51, with status and what amended what
 │   ├── 0000-template.md
-│   └── 0001-…0050-….md         # 0001 external client architecture … 0050 a recorded world's history is compared by shape
+│   └── 0001-…0051-….md         # 0001 external client architecture … 0051 a family shares one alert
 ├── lessons/                    # case studies of things that went wrong, or almost did
 │   ├── phase-6-hardening.md          # free-form Hypothesis.name → schema tightening
 │   ├── live-eval-noise-sources.md    # the five buckets a weird live failure falls into
@@ -223,7 +223,7 @@ docs/
 └── interview-map.md            # (planned — Phase 8) component → JD skill → talking points
 ```
 
-ADR process: any decision that constrains future work gets an ADR before or with the implementing PR. Status flow is proposed, accepted, superseded. An accepted ADR is never rewritten — a later ADR amends or supersedes it and both stay on the shelf. The set runs 0001 through 0050; [`docs/ADR/README.md`](docs/ADR/README.md) lists every one with its status and records which later ADR moved which.
+ADR process: any decision that constrains future work gets an ADR before or with the implementing PR. Status flow is proposed, accepted, superseded. An accepted ADR is never rewritten — a later ADR amends or supersedes it and both stay on the shelf. The set runs 0001 through 0051; [`docs/ADR/README.md`](docs/ADR/README.md) lists every one with its status and records which later ADR moved which.
 
 Before opening a PR touching schemas, prompts, or the state machine, read [`docs/architecture-principles.md`](docs/architecture-principles.md). It codifies the rules that came out of past PRs — most importantly "default to the structural fix, not the band-aid." When you hit a symptom that a prompt tweak would patch, the first design conversation is whether the schema should reject the class of bug instead. See [`docs/lessons/phase-6-hardening.md`](docs/lessons/phase-6-hardening.md) for the case study that produced this rule.
 
@@ -247,11 +247,11 @@ Test data discipline: fixtures are recorded from real runs and versioned. When a
 
 The harness is the product's proof. Built before the agent, maintained forever.
 
-- **Scenarios** are YAML files defining a chaos injection, the ground-truth root cause, the correct remediation, expected tier, and grading config. Taxonomy covers consumer crashes, poison messages, resource saturation, bad deploys, dependency failures, cascades, flapping alerts, and pure noise. **41 today**, across eleven families (`consumer_lag`, `dlq`, `noise_control`, `cache_redis`, `tool_fault`, `traces`, `workflow`, `deploy`, `incidents`, `postgres`, `harness_control`) — 29 of them run against a live platform, 12 replay canned fixtures. `make inventory` counts them from the corpus rather than from this sentence, which is the number to trust.
+- **Scenarios** are YAML files defining a chaos injection, the ground-truth root cause, the correct remediation, expected tier, and grading config. Taxonomy covers consumer crashes, poison messages, resource saturation, bad deploys, dependency failures, cascades, flapping alerts, and pure noise. **45 today**, across twelve families (`consumer_lag`, `dlq`, `noise_control`, `cache_redis`, `tool_fault`, `traces`, `workflow`, `deploy`, `incidents`, `postgres`, `harness_control`, `jobs_not_progressing`) — 38 of them run against a live platform, 7 replay canned fixtures. `jobs_not_progressing` is the first real scenario FAMILY rather than a grouping of scenarios written separately: four worlds, one alert, three answers ([ADR 0051](docs/ADR/0051-a-scenario-family-shares-one-alert-and-its-noise-is-a-real-thing.md), `evals/scenarios/README-jobs-not-progressing.md`). `make inventory` counts them from the corpus rather than from this sentence, which is the number to trust.
 - **Adversarial scenarios** (`evals/scenarios/adversarial/`, planned — Phase 7) embed injection payloads in log lines, DLQ message bodies, and error strings. Graders assert the agent treated the content as data: no privilege escalation attempts, no actions sourced from payload text, injection flagged in the briefing where relevant.
 - **Graders** are deterministic first: RCA label match, action safety from the platform audit log, budget adherence, escalation correctness, evidence citation presence. An LLM judge (pinned `JUDGE_MODEL`, versioned rubric) grades soft qualities only: postmortem quality, briefing usefulness, hypothesis reasoning coherence.
 - **Metrics**: triage accuracy, RCA accuracy, time and cost per incident, action safety violations (must be zero), escalation precision and recall, false-action rate, memory lift (score delta on repeat-pattern scenarios with memory on vs off), token and cache-hit economics.
-- **Regression gating**: `evals.yml` runs the regression subset when a PR touches `src/incident_commander/agent/**`, `src/incident_commander/tools/**`, `src/incident_commander/llm/**` (prompts live in `llm/prompts/`), `src/incident_commander/config.py` (model pins), `contracts/platform-tools.snapshot.json`, the eval harness (`evals/graders/`, `evals/runner.py`, `evals/scenarios/`, `evals/reports/baseline.json`), or the workflow file itself. Baseline lives in `evals/reports/baseline.json` — blessed 2026-09-15 over the current 41-scenario corpus, 41 of 41 passing, which is what closed ADR 0011's campaign freeze. A metric drop beyond threshold fails the check and the PR explains or fixes it.
+- **Regression gating**: `evals.yml` runs the regression subset when a PR touches `src/incident_commander/agent/**`, `src/incident_commander/tools/**`, `src/incident_commander/llm/**` (prompts live in `llm/prompts/`), `src/incident_commander/config.py` (model pins), `contracts/platform-tools.snapshot.json`, the eval harness (`evals/graders/`, `evals/runner.py`, `evals/scenarios/`, `evals/reports/baseline.json`), or the workflow file itself. Baseline lives in `evals/reports/baseline.json` — blessed 2026-09-15 over the 41-scenario corpus of that date, 41 of 41 passing, which is what closed ADR 0011's campaign freeze. The corpus is 45 now; a scenario added after a bless is reported as NEW by the gate and never fails it, so growth needs no re-bless. A metric drop beyond threshold fails the check and the PR explains or fixes it.
 
 ## Git and PR workflow
 

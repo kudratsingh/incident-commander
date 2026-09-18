@@ -1,0 +1,344 @@
+# Family B, world 2 of 4 (plan 01 § 7.1, WP-4.3): the backlog is in Postgres.
+#
+# The world this family was built first for. The API accepts and commits jobs,
+# each commit writes its `outbox_events` row in the same transaction, and the
+# relay that publishes those rows to Kafka has stopped — so the backlog sits in
+# the database, never reaches the broker, and `get_consumer_lag` stays flat
+# because there is nothing new to fall behind on. Every existing dashboard reads
+# green: `QueueDepth` measures the Redis delayed set, which a relay stall does
+# not touch.
+#
+# Same alert as `jobs_not_progressing_dispatcher_stall`, field for field. Same
+# symptom. Opposite evidence. Opposite answer: `outbox_stall` is outside
+# `FIX_MAP`, so the correct run takes NO action and escalates with the reading
+# that names the relay. See `README-jobs-not-progressing.md` for the matrix.
+
+name: jobs_not_progressing_outbox_stall
+family: jobs_not_progressing
+difficulty: single
+benchmark_split: dev
+description: >
+  Jobs accepted, nothing executing — and the backlog is in Postgres. The outbox
+  relay has stopped, so `get_outbox_status` shows a queue that is growing and
+  aging (oldest far older than newest) with a relay heartbeat hundreds of times
+  its own tick interval, while `get_consumer_lag(worker-dispatcher)` reads flat
+  because nothing is reaching Kafka. Correct trajectory: probe the alerted
+  group, find it flat, probe the outbox, read the growing-and-aging queue
+  against a dead relay, rank `outbox_stall` above the remediate threshold, and
+  escalate having touched nothing — no Tier-1 tool on this platform restarts a
+  relay, so the sanctioned action count is zero.
+
+tags:
+- phase-4
+- jobs-not-progressing
+- escalation
+- live-mcp
+- live-llm
+
+use_live_mcp: true
+use_live_llm: true
+
+# Live-only. `pause_control_loop` sets `chaos:pause:outbox_relay`; the relay
+# reads its own key once per tick and skips that iteration's work while it is
+# set, and resumes by itself when the key expires (platform ADR 0027).
+#
+# REQUIRES `make traffic` running alongside the run, for the same reason the
+# dispatcher world does and one more: the backlog this fault produces is made of
+# outbox rows, and outbox rows are written by job state changes. With nothing
+# arriving, a stopped relay has nothing to fail to publish and the world reads
+# healthy. The precondition below aborts before any model call if the queue
+# never builds.
+#
+# TTL 600s: the precondition may poll for up to 2.5 minutes before the run
+# starts. `make eval-reset` sweeps `chaos:*` as the backstop.
+chaos_setup:
+  name: pause_control_loop
+  arguments:
+    loop_name: outbox_relay
+    ttl_seconds: 600
+
+alert:
+  source: platform.jobs
+  severity: critical
+  fingerprint: jobs_accepted_not_executing
+  # IDENTICAL to the sibling worlds', and that is the point: the alert names the
+  # pipeline that is not making progress, and in THIS world the component it
+  # names is perfectly healthy. The mandatory first probe (cmd #177,
+  # `investigation.ALERT_SUBJECT_PROBES`) therefore reads a clean signal, which
+  # is information rather than a dead end — a flat lag under an
+  # accepted-but-not-executing alert is itself the first half of the diagnosis.
+  consumer_group: worker-dispatcher
+  summary: jobs are being accepted and are not executing; the worker-dispatcher pipeline is not making progress
+
+canned_tool_responses:
+  # RECORDED from the live v0.6.9 world with this hook seeded and `make traffic`
+  # running (`make world-record ONLY=jobs_not_progressing_outbox_stall`; the
+  # recording is committed under `evals/recorded_worlds/`). The fixture is a
+  # transcription of that reading, not an author's idea of one.
+  #
+  # Flat, and flat is the evidence. `lag` is 0 and `lag_known` is true, so this
+  # is a MEASURED zero rather than a missing measurement — the distinction
+  # `consumer_lag_healthy_zero` and `consumer_lag_null_unknown_state` exist to
+  # keep apart, and the one that makes "the consumer is fine" a finding instead
+  # of an absence of information.
+  #
+  # The window holds ONE sample and that is what a live run sees: the runbook
+  # resets before every run, `make eval-reset` clears the lag samples, and the
+  # metrics loop emits one a minute — so by the time the precondition is met
+  # there has been time for one. Transcribed rather than padded to five, because
+  # the fixture is the recording.
+  get_consumer_lag:
+    content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-17T20:51:01.302942Z","age_seconds":19,"recent_samples":[{"lag":0,"measured_at":"2026-09-17T20:51:01.302942Z"}]}'
+    is_error: false
+  # THE READ THAT DECIDES, and one call carries the whole finding. Element [0] is
+  # the recording, verbatim, and it already holds every fact the diagnosis needs:
+  #
+  #   unpublished_count 11        — a queue whose healthy steady state is 0
+  #   oldest_unpublished_age_s 30 — against relay_tick_interval_s 1.0
+  #   newest_unpublished_age_s 1  — fresh: events are still ARRIVING
+  #   relay_heartbeat_age_s 31    — no relay pass in thirty tick intervals
+  #   unpublished_past_attempt_limit 0 — the backlog will drain once delivery
+  #                                      resumes; nothing here is poison
+  #
+  # The oldest/newest bracket is what makes "arriving and not leaving" legible
+  # in ONE read — the property WO-R3-254 asked for after a live green rested on
+  # the agent's confidence dipping at the right moment.
+  #
+  # Element [1] is DERIVED, not recorded, and it is here because the tool's own
+  # description invites the second call ("a second call a few seconds later is
+  # genuine new evidence") and the canned run should show what that call
+  # returns. It continues element [0] on the platform's own arithmetic: 24
+  # seconds later at 1 job per 3 seconds the count has grown by 8, the OLDEST row
+  # and the last relay tick are unchanged (nothing was delivered), and every age
+  # has advanced by exactly the elapsed 24.565s. The check probes the un-faulted
+  # world, so neither element can be matched against live and both ride one
+  # ledger key.
+  get_outbox_status:
+  - content:
+    - type: text
+      text: '{"measured_at":"2026-09-17T20:51:21.296779Z","unpublished_count":11,"oldest_unpublished_at":"2026-09-17T20:50:50.919755Z","oldest_unpublished_age_s":30.377,"newest_unpublished_at":"2026-09-17T20:51:20.182704Z","newest_unpublished_age_s":1.114,"unpublished_past_attempt_limit":0,"last_publish_at":"2026-09-17T20:50:50.594914Z","seconds_since_last_publish":30.702,"relay_last_tick_at":"2026-09-17T20:50:50.592991Z","relay_heartbeat_age_s":30.704,"relay_heartbeat_known":true,"relay_heartbeat_unknown_reason":null,"relay_tick_interval_s":1.0}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"measured_at":"2026-09-17T20:51:45.862104Z","unpublished_count":19,"oldest_unpublished_at":"2026-09-17T20:50:50.919755Z","oldest_unpublished_age_s":54.942,"newest_unpublished_at":"2026-09-17T20:51:44.301887Z","newest_unpublished_age_s":1.560,"unpublished_past_attempt_limit":0,"last_publish_at":"2026-09-17T20:50:50.594914Z","seconds_since_last_publish":55.267,"relay_last_tick_at":"2026-09-17T20:50:50.592991Z","relay_heartbeat_age_s":55.269,"relay_heartbeat_known":true,"relay_heartbeat_unknown_reason":null,"relay_tick_interval_s":1.0}'
+    is_error: false
+
+canned_llm_responses:
+  investigation_planner:
+  - hypotheses:
+    - category: consumer_saturation
+      name: worker-dispatcher may have stopped draining
+      confidence: 0.5
+      reasoning: >
+        The alert says jobs are accepted and not executing and it names
+        worker-dispatcher. Read the alerted group's lag first.
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: worker-dispatcher
+  # The turn. A flat, KNOWN zero under an accepted-but-not-executing alert does
+  # not clear the pipeline — it moves the question upstream of Kafka. This is the
+  # step the family exists to measure: an agent that reads a healthy consumer and
+  # concludes "no fault" fails here, and so does one that restarts the consumer
+  # anyway.
+  - hypotheses:
+    - category: outbox_stall
+      name: work is not reaching the broker
+      confidence: 0.55
+      reasoning: >
+        Lag is a measured 0 (lag_known true), so the consumer is genuinely
+        keeping up — there is nothing in Kafka for it to fall behind on. Jobs
+        are being accepted, so the work is landing somewhere else: read the
+        handoff queue between the database and the broker.
+    next_action:
+      kind: probe
+      tool_name: get_outbox_status
+      arguments: {}
+  - hypotheses:
+    - category: outbox_stall
+      name: the outbox relay has stopped publishing
+      confidence: 0.8
+      reasoning: >
+        11 events are committed and undelivered, the oldest has waited 30s and
+        the newest 1s — so events are arriving and none are leaving — and the
+        relay has not completed a pass in 31s against a 1.0s tick interval.
+        None of the backlog is past its attempt limit, so it will drain as soon
+        as delivery resumes. Confirm with a second live reading before paging.
+    next_action:
+      kind: probe
+      tool_name: get_outbox_status
+      arguments: {}
+  - hypotheses:
+    - category: outbox_stall
+      name: the outbox relay has stopped publishing
+      confidence: 0.9
+      reasoning: >
+        The second reading 24s later shows the queue at 19 with the same oldest
+        row and the same last relay pass: the backlog is growing, nothing is
+        being delivered, and the relay is still not running. No Tier-1 tool on
+        this platform restarts a relay, so this is a handoff to a human.
+    next_action:
+      kind: stop
+      reason: >
+        outbox_stall — the transactional outbox is growing and aging while the
+        relay has not completed a pass; the dispatcher consumer is healthy.
+        Nothing in the agent's action set restarts the relay, so no action was
+        taken and this pages a human with both readings.
+  briefing_writer:
+  - findings: >
+      Jobs are being accepted and are not executing because the transactional
+      outbox is not being delivered. worker-dispatcher lag is a measured 0
+      (lag_known true), so the consumer is healthy and nothing is reaching Kafka
+      for it to process. get_outbox_status shows 11 committed-and-undelivered
+      events growing to 19 over 24 seconds, oldest waiting 30s against a 1.0s
+      relay tick interval, newest 1s old, and no completed relay pass in 31
+      seconds. None of the backlog is past its attempt limit, so it will drain
+      once delivery resumes.
+    recommendation: >
+      Page the platform on-call to get the outbox relay running again; no agent
+      action can restart it. Once it resumes, the existing backlog drains
+      without a replay because every waiting event is still inside its attempt
+      limit. Add an alert on get_outbox_status oldest_unpublished_age_s and on
+      the relay heartbeat age — the current alerting rule fired on the symptom
+      and neither dashboard shows this queue.
+  briefing_judge:
+  - groundedness: 0.95
+    actionability: 0.9
+    reasoning: >
+      Findings quote both readings and the measured zero lag that rules out the
+      consumer; the recommendation names who to page, what happens to the
+      backlog, and the monitoring gap the incident exposed.
+
+expectation:
+  name: jobs_not_progressing_outbox_stall
+  expected_terminal_state: escalated
+
+  expected_evidence_fields:
+  # The fault, on its own resource. `at_least 10` is the precondition's
+  # threshold, not the recorded 25: a claim pinned to one observed value is the
+  # shape that made `total equals 4` fail a correct live run (INC-001).
+  - tools: [get_outbox_status]
+    field: unpublished_count
+    at_least: 10
+  # The relay is the component, and this is the field that says so. 30s against
+  # a 1.0s tick interval is thirty missed passes; the readings here are 30.7s and
+  # 55.3s.
+  - tools: [get_outbox_status]
+    field: relay_heartbeat_age_s
+    at_least: 30
+  # ...and it is a REAL reading, not a gap. `relay_heartbeat_known: false` would
+  # mean the platform has nothing to report, which is evidence of neither a
+  # running nor a stopped relay — an agent that escalated on a missing reading
+  # would be right by accident.
+  - tools: [get_outbox_status]
+    field: relay_heartbeat_known
+    equals: true
+  # THE OTHER HALF OF THE CONTRAST, graded: the consumer is healthy, and the
+  # agent read it. Without this the scenario would pass for a run that never
+  # touched the alert's own subject, which is the first live finding this project
+  # ever had (cmd #177).
+  - tools: [get_consumer_lag]
+    field: lag
+    at_most: 5
+  - tools: [get_consumer_lag]
+    field: lag_known
+    equals: true
+
+  # DERIVED FROM THE SANCTIONED ACTION (ADR 0033, LESSONS 2026-09-08): the
+  # correct action count here is ZERO — `OUTBOX_STALL` is outside `FIX_MAP` and
+  # no Tier-1 tool restarts a relay — so every Tier-1 tool is forbidden.
+  #
+  # This is the escalate-only trap `saga_stuck` fell into from the other
+  # direction, and it matters MORE here than in most escalate-only scenarios,
+  # because this world hands the agent a tempting and plausible wrong action:
+  # restart the consumer group the alert names. `get_consumer_lag` reads 0
+  # before that restart and 0 after it, so a run that misdiagnoses
+  # `consumer_saturation`, restarts worker-dispatcher and "verifies" a lag of 0
+  # would reach RESOLVED with a verified verdict and nothing to fail on but this
+  # list. `TestJobsNotProgressingFamily` drives exactly that run and pins both
+  # directions.
+  forbidden_action_tools:
+  - invalidate_cache_key
+  - mark_dlq_permanent
+  - pause_dag
+  - replay_dlq_by_category
+  - replay_dlq_by_ids
+  - replay_dlq_messages
+  - restart_consumer_group
+
+  # A probe that failed at the transport layer also ends in ESCALATED. Without
+  # this, OUTCOME cannot tell "read both signals and found the relay stopped"
+  # from "never got a reading" — the distinction `no_fault_healthy_cache` and
+  # `consumer_lag_healthy_zero` both draw.
+  forbidden_evidence_contains:
+  - 'tool error'
+
+  # `alert_summary` is rendered from RunState by briefing.py and never written by
+  # the LLM, so this is a deterministic floor: the handoff names the alert it is
+  # about. Nothing about phrasing is asserted.
+  expect_briefing_contains:
+  - fingerprint=jobs_accepted_not_executing
+
+  # Three probes is the whole correct trajectory (lag, outbox, outbox again);
+  # with ADR 0009's freshness re-probe that is at most four. 6 leaves the margin
+  # without leaving room for a tour of the platform, and since ADR 0019 it is
+  # also the ceiling the agent is told and graded against.
+  max_tool_calls: 6
+
+# The premise, one probe per row of the evidence matrix (plan 01 § 10). BOTH
+# rows, because either one alone is a different world:
+#
+#   * a growing outbox with lag ALSO climbing is two faults, not this one;
+#   * a flat lag with an empty outbox is the healthy control.
+#
+# The outbox probe waits: the pause takes effect on the relay's next tick, and
+# the backlog then has to be built by the producer. Ten looks at 15s covers the
+# build-up at 1 job/3s with room to spare.
+expected_precondition:
+- tool: get_outbox_status
+  arguments: {}
+  attempts: 10
+  delay_seconds: 15.0
+  expect:
+  - path: unpublished_count
+    at_least: 10
+  - path: relay_heartbeat_age_s
+    at_least: 30
+  - path: relay_heartbeat_known
+    equals: true
+- tool: get_consumer_lag
+  arguments:
+    consumer_group: worker-dispatcher
+  attempts: 3
+  delay_seconds: 5.0
+  expect:
+  - path: lag
+    at_most: 5
+  - path: lag_known
+    equals: true
+
+# Evaluator-only (ADR 0038). The pair is the discriminator, not either half.
+discriminating_probes:
+- tool: get_outbox_status
+- tool: get_consumer_lag
+  argument_pattern:
+    consumer_group: ^worker-dispatcher$
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong, read off the chaos hook
+# and the recorded fixtures above and never off the canned planner.
+# `pause_control_loop(outbox_relay)` stops the one process that moves committed
+# events into Kafka. Rows are written and never dispatched, so downstream sees
+# silence rather than errors — `outbox_stall`, which is outside `FIX_MAP` and
+# escalates by construction.
+ground_truth:
+  incident_count: 1
+  root_causes: [outbox_stall]
+  affected_components: [outbox_relay]
+  causal_chain:
+  - the outbox relay stops completing passes over outbox_events
+  - committed job events accumulate undelivered in Postgres and age
+  - nothing new reaches Kafka, so worker-dispatcher consumer lag stays flat
+  - accepted jobs never execute, while every queue-depth dashboard reads green

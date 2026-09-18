@@ -19,6 +19,7 @@ from evals.fixture_drift_ledger import (
     _JUSTIFIED,
     FIXTURE_DEFECT,
     POST_FAULT,
+    DriftKey,
     classify,
     context_of,
     defect_count,
@@ -389,8 +390,12 @@ class TestCommittedLedger:
         from evals.fixture_drift_ledger import LEDGER_PATH
 
         rows = json.loads(LEDGER_PATH.read_text())["known_drift"]
-        keys = [(r["scenario"], r["tool"], r["path"], r["kind"]) for r in rows]
-        assert keys == sorted(set(keys)), (
+        keys = [(r["scenario"], r["tool"], r["path"], r["kind"], r.get("index")) for r in rows]
+
+        def sort_key(key: tuple[str, str, str, str, int | None]) -> tuple[str, str, str, str, int]:
+            return (*key[:4], -1 if key[4] is None else key[4])
+
+        assert keys == sorted(set(keys), key=sort_key), (
             "ledger is unsorted or has duplicates — regenerate with `make fixture-drift-bless`"
         )
 
@@ -784,7 +789,7 @@ class TestBlessOnlyDropsWhatTheRunDisproved:
         )
 
         assert unreached in load_ledger(path), "an unprobed entry was deleted without evidence"
-        assert reached in load_ledger(path)
+        assert (*reached, 0) in load_ledger(path)
 
     def test_an_entry_this_run_disproved_is_dropped(self, tmp_path: Path) -> None:
         # The ratchet still turns: a fixture that WAS probed and no longer
@@ -872,7 +877,7 @@ class TestLedgerContext:
 
     def test_every_justification_names_a_shipped_scenario(self) -> None:
         shipped = {s.name for s in load_scenarios(_SCENARIOS_DIR)}
-        orphans = sorted({key[0] for key in _JUSTIFIED} - shipped)
+        orphans = sorted({str(key[0]) for key in _JUSTIFIED} - shipped)
         assert orphans == []
 
     def test_the_burn_down_number_excludes_the_explained_ones(self) -> None:
@@ -902,7 +907,9 @@ class TestLedgerContext:
 
         stale = []
         for row in json.loads(LEDGER_PATH.read_text())["known_drift"]:
-            key = (row["scenario"], row["tool"], row["path"], row["kind"])
+            key: DriftKey = (row["scenario"], row["tool"], row["path"], row["kind"])
+            if row.get("index") is not None:
+                key = (*key, row["index"])
             recorded = (row["context"], row.get("why", ""))
             if recorded != context_of(key):
                 stale.append((key, recorded, context_of(key)))

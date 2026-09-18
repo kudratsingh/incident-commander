@@ -17,7 +17,7 @@ alert:
   severity: critical
   fingerprint: job_failed
   trace_id: 0e24ca29-1d47-57e9-b898-4d79bb6da981
-  job_type: process_payment
+  job_type: report_gen
 canned_tool_responses:
   # Re-pointed at a trace that exists. The probe asked for `trace-abc-123`,
   # which is in no seeded row, so the live tool answered with empty `jobs`

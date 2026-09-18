@@ -13,6 +13,7 @@ An archive listed as *transcript only* means the raw session data is on disk und
 | Date | Archive | What this session established |
 |---|---|---|
 | 2026-09-17 | — | **WO-R3-258:** Documentation sweep closes stale freeze wording, localizes incident references, corrects the baseline-count comment, and makes ADR 0029/0033/0034 implementation status explicit. The named v0.6.3 runbook/schema references remain as accurate historical records. |
+| 2026-09-17 | — | **WO-R3-270:** `run_to_completion` accrues and checkpoints elapsed wall time after successful and failed transitions, so terminal and crash exits retain their duration. Existing archives remain historical records. |
 | 2026-08-08 → 08-10 | *transcript only* | **The audit.** 503 files read, 129 defects found and verified adversarially. Root-caused why the eval suite went green without meaning it: 32 of 37 scenarios silently fell back to canned responses. `AUDIT_REPORT.md`, `findings.json`. |
 | 2026-08-10 → 08-12 | *transcript only* | **The fix campaign.** 75 of 77 work orders merged across both repos by two implementation agents working in parallel. Platform cut **v0.5.0**; commander re-pinned to it by index digest. 2 work orders deferred by ADR. |
 | 2026-08-11 | *transcript only* | **First honest live run.** Read-only eval stage: 26/26 passed with `degraded_count: 0`, 16m28s, $1.86, archived at `e5f7fc0`. First run in the project's history whose report can prove what it exercised. |

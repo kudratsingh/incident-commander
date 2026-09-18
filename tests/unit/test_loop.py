@@ -109,7 +109,41 @@ class TestRunToCompletion:
         clock = _make_clock(now + timedelta(seconds=5), step_seconds=5.0)
         result = run_to_completion(run, clock=clock)
         assert result.state is IncidentState.ESCALATED
-        assert result.budget.wall_seconds_used == 5.0
+        assert result.budget.wall_seconds_used == 10.0
+
+    @pytest.mark.parametrize("terminal", [IncidentState.RESOLVED, IncidentState.ESCALATED])
+    def test_terminal_transition_accrues_its_own_elapsed_time(
+        self, run_state: RunState, now: datetime, terminal: IncidentState
+    ) -> None:
+        def finish(rs: RunState, at: datetime) -> RunState:
+            return rs.with_state(terminal, at)
+
+        state = (
+            IncidentState.VERIFYING if terminal is IncidentState.RESOLVED else IncidentState.TRIAGE
+        )
+        run = run_state.model_copy(update={"state": state})
+        clock = _make_clock(now, step_seconds=58)
+        result = run_to_completion(run, clock=clock, transitions={state: finish})
+        assert result.state is terminal
+        assert result.budget.wall_seconds_used == 58.0
+
+    def test_crashed_transition_checkpoints_elapsed_wall_time(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        def crash(_rs: RunState, _at: datetime) -> RunState:
+            raise RuntimeError("transition failed")
+
+        checkpointer = InMemoryCheckpointer()
+        with pytest.raises(RuntimeError, match="transition failed"):
+            run_to_completion(
+                run_state,
+                clock=_make_clock(now, step_seconds=58),
+                checkpointer=checkpointer,
+                transitions={IncidentState.TRIAGE: crash},
+            )
+        saved = checkpointer.load(run_state.incident_id)
+        assert saved is not None
+        assert saved.budget.wall_seconds_used == 58.0
 
     def test_slow_clock_trips_the_wall_budget_and_escalates(
         self, budget: BudgetLedger, now: datetime

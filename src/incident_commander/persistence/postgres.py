@@ -37,14 +37,8 @@ class PostgresCheckpointer:
     def write(self, run_state: RunState) -> None:
         """Append one snapshot. One connection, one transaction, one attempt.
 
-        The version read used to happen on its own connection, checked out and
-        returned before the INSERT took a second one. Two checkouts per write,
-        and a window between them in which another writer could take the
-        version this one had just read. Doing both inside ``begin()`` closes
-        the window and halves the checkout traffic — which matters because a
-        run doing this is already holding a lease connection (ADR 0016), so
-        every checkout it makes is one the pool cannot give to anybody else
-        (ADR 0022).
+        The version read is inside ``begin()`` so no other writer can take it
+        (ADR 0016, ADR 0022).
         """
         payload = json.loads(run_state.model_dump_json())
         for attempt in range(3):
@@ -68,13 +62,8 @@ class PostgresCheckpointer:
                 return
             except IntegrityError:
                 # Concurrent writer took our version. Retry with a fresh one.
-                #
-                # The single-flight lease (ADR 0016) does NOT demote this to
-                # belt-and-suspenders: it fences the run loop, but the two
-                # ingress writes of a simultaneous double-delivery both happen
-                # OUTSIDE the lease — both derive the same incident id, both
-                # find no snapshot, both write TRIAGE. This retry is what
-                # absorbs that collision, and it stays a live requirement.
+                # Still required: a double-delivery's two ingress writes happen
+                # OUTSIDE the single-flight lease (ADR 0016) and do collide.
                 if attempt == 2:
                     raise
 
@@ -92,20 +81,14 @@ class PostgresCheckpointer:
         return [RunState.model_validate(row[0]) for row in rows]
 
     def reconcile(self, incident_id: UUID) -> RunState | None:
-        """Reconciliation entry point.
+        """Reconciliation entry point — today just ``load``.
 
-        Today: returns the latest snapshot (same as ``load``). When Tier 1 actions
-        land in Phase 6, this also queries the platform's audit log to check
-        whether the last proposed action actually executed before resume-planning.
+        Phase 6: also check the platform audit log for the last proposed action.
         """
         return self.load(incident_id)
 
     def _next_version(self, conn: Connection, incident_id: UUID) -> int:
-        """Next free version, read on the CALLER's connection.
-
-        Takes a connection rather than opening one so ``write`` can read the
-        version and insert the row in a single transaction.
-        """
+        """Next free version, on the CALLER's connection (one transaction with the INSERT)."""
         row = conn.execute(
             text(
                 "SELECT COALESCE(MAX(version), -1) + 1 AS next "

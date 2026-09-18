@@ -8,13 +8,13 @@ from pydantic import ValidationError
 from evals.graders.deterministic import ScenarioExpectation
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import (
+    _SNAPSHOT_PATH,
     ChaosHook,
     ChaosPlan,
     DiscriminatingProbe,
     GroundTruth,
     Scenario,
     _chaos_names_from_snapshot,
-    _SNAPSHOT_PATH,
     chaos_argument_errors,
     chaos_tool_names,
     chaos_tool_schemas,

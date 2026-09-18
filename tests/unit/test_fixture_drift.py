@@ -19,6 +19,7 @@ from evals.fixture_drift_ledger import (
     _JUSTIFIED,
     FIXTURE_DEFECT,
     POST_FAULT,
+    DriftKey,
     classify,
     context_of,
     defect_count,
@@ -876,7 +877,7 @@ class TestLedgerContext:
 
     def test_every_justification_names_a_shipped_scenario(self) -> None:
         shipped = {s.name for s in load_scenarios(_SCENARIOS_DIR)}
-        orphans = sorted({key[0] for key in _JUSTIFIED} - shipped)
+        orphans = sorted({str(key[0]) for key in _JUSTIFIED} - shipped)
         assert orphans == []
 
     def test_the_burn_down_number_excludes_the_explained_ones(self) -> None:
@@ -906,7 +907,7 @@ class TestLedgerContext:
 
         stale = []
         for row in json.loads(LEDGER_PATH.read_text())["known_drift"]:
-            key = (row["scenario"], row["tool"], row["path"], row["kind"])
+            key: DriftKey = (row["scenario"], row["tool"], row["path"], row["kind"])
             if row.get("index") is not None:
                 key = (*key, row["index"])
             recorded = (row["context"], row.get("why", ""))

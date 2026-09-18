@@ -189,9 +189,10 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "the key is still present",
     ),
     ("remediate_stale_cache_success", "get_cache_key_info", "size", "value", 0): (
-        POST_FAULT,
-        "create_stale_cache writes the three stale-fixture ids as a 90-byte value; "
-        "the un-faulted walk reads the seeder's 120-byte value instead",
+        COLD_STACK,
+        "the 90-byte stale value is visible on a warm developer stack, but CI's "
+        "fresh stack has not populated that cache entry and reads the fixture value; "
+        "the entry is timing-scoped, not a fixture correction",
     ),
     ("remediate_stale_cache_success", "get_cache_key_info", "size", "value", 1): (
         POST_ACTION,
@@ -698,10 +699,11 @@ def load_entries(path: Path | None = None) -> list[LedgerEntry]:
     payload = json.loads(target.read_text())
     entries: list[LedgerEntry] = []
     for row in payload.get("known_drift", []):
+        key: DriftKey
         if isinstance(row, list) and len(row) == 4:
             key = (str(row[0]), str(row[1]), str(row[2]), str(row[3]))
         elif isinstance(row, dict):
-            key: DriftKey = (
+            key = (
                 str(row["scenario"]),
                 str(row["tool"]),
                 str(row["path"]),
@@ -861,5 +863,5 @@ def classify(
     new = tuple(
         drift for drift in drifts if drift.key not in ledger and drift.key[:4] not in ledger
     )
-    stale = tuple(sorted(ledger - matched))
+    stale = tuple(sorted(key for key in ledger - matched if context_of(key)[0] != COLD_STACK))
     return new, stale

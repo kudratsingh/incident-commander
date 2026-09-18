@@ -14,11 +14,8 @@ from incident_commander.llm.client import LLMError, LLMResult
 class CannedUsage:
     """Per-call token counts a ``CannedLLMClient`` reports.
 
-    Defaults are all-zero so every existing canned scenario stays
-    byte-identical. Tests that exercise budget accrual — cache-token
-    volume, the USD meter — pass a non-zero instance; a real response's
-    input volume lands mostly on the cache counters (``client.py`` caches
-    the system prompt), so zero-usage fakes cannot reach that path.
+    All-zero by default so existing canned scenarios stay byte-identical; budget
+    accrual tests pass a non-zero instance.
     """
 
     input_tokens: int = 0
@@ -30,10 +27,7 @@ class CannedUsage:
 class CannedLLMClient:
     """Plays back a fixed sequence of output payloads.
 
-    Each ``call`` pops the next payload, validates it against the caller's
-    ``output_model``, and wraps it in an ``LLMResult`` reporting ``usage``
-    (zero token counts by default).
-    Runs out → ``LLMError``. Records each call for post-run introspection.
+    Each ``call`` pops and validates the next payload; runs out → ``LLMError``.
     """
 
     def __init__(self, outputs: list[dict[str, Any]], usage: CannedUsage | None = None) -> None:
@@ -42,11 +36,8 @@ class CannedLLMClient:
         self._index = 0
         self.calls: list[tuple[str, str]] = []
         self.repair_of: list[str | None] = []
-        #: The ``temperature`` each call was made with, in order. ``None`` is
-        #: "no temperature was sent", which is what every role but the sampled
-        #: inference strategy does. Recorded rather than ignored so a test can
-        #: assert the temperature was APPLIED to the call rather than assume a
-        #: setting reached it (WP-5.3's acceptance).
+        #: The ``temperature`` each call was made with; ``None`` is "none sent".
+        #: Recorded so a test can assert it was APPLIED (WP-5.3).
         self.temperatures: list[float | None] = []
 
     @property
@@ -64,11 +55,8 @@ class CannedLLMClient:
         repair_of: str | None = None,
         temperature: float | None = None,
     ) -> LLMResult[T]:
-        # ``repair_of`` is trace correlation on the real client and has no
-        # canned equivalent; it is recorded so a test can assert the repair
-        # re-ask named the record it was repairing (ADR 0035). ``temperature``
-        # has no canned equivalent either — a scripted payload is the same
-        # payload at any temperature — and is recorded for the same reason.
+        # ``repair_of`` and ``temperature`` have no canned equivalent; both are
+        # recorded so a test can assert the call carried them (ADR 0035, WP-5.3).
         self.calls.append((system_prompt, user_message))
         self.repair_of.append(repair_of)
         self.temperatures.append(temperature)

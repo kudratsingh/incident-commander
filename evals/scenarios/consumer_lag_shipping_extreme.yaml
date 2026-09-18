@@ -13,6 +13,14 @@ tags:
 - live-llm
 use_live_mcp: true
 use_live_llm: true
+# The agent may be graded for this catastrophic-backlog case only after the
+# named group still has an extreme reading in the live world.
+expected_precondition:
+- tool: get_consumer_lag
+  arguments: {consumer_group: shipping-consumer}
+  expect:
+  - path: lag
+    at_least: 50000
 alert:
   source: platform.kafka
   severity: critical

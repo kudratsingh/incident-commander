@@ -12,6 +12,14 @@ tags:
 - live-llm
 use_live_mcp: true
 use_live_llm: true
+# The live stack is unseeded. Establish the null premise before any model call
+# so a normal live group cannot be graded as this unresolvable-group case.
+expected_precondition:
+- tool: get_consumer_lag
+  arguments: {consumer_group: unknown-consumer}
+  expect:
+  - path: lag
+    is_null: true
 alert:
   # The group is named, and it is one the platform cannot resolve. It used to
   # be absent entirely, which made the expectation below unsatisfiable by a

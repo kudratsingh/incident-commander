@@ -15,6 +15,14 @@ tags:
 - live-llm
 use_live_mcp: true
 use_live_llm: true
+# A null must be established before spending: it is an unknown reading, not a
+# condition an unseeded live stack is allowed to substitute with a number.
+expected_precondition:
+- tool: get_consumer_lag
+  arguments: {consumer_group: ledger-consumer}
+  expect:
+  - path: lag
+    is_null: true
 alert:
   source: platform.kafka
   severity: critical

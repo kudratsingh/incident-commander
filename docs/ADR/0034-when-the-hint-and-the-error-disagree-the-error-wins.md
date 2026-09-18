@@ -1,6 +1,6 @@
 # ADR 0034: When a row's hint and its error disagree, the error wins — and that stays a prompt rule
 
-- Status: accepted
+- Status: accepted · implemented (2026-09-17 documentation sweep)
 - Date: 2026-09-08
 - Deciders: repository owner (WO-R2-167)
 - Related: [ADR 0027](0027-read-the-row-before-you-replay-it.md) (the read this decision acts on),

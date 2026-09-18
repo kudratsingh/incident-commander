@@ -319,7 +319,7 @@
     },
     {
       "name": "create_stuck_dag",
-      "description": "[chaos: environment_wide] Manufacture a genuinely stuck dependency chain: a completed upstream parent, a dead-lettered root (retries exhausted), and N descendants held in `waiting` behind it. Stuck by the platform's own rules — the resolver promotes a child only when every parent is `completed`, and `dead_letter` is terminal — so the chain will not drain on its own. Observe with `get_dag_state(root_job_id)`. Compensators: `pause_dag` stabilizes (TTL self-cleans) and `replay_dlq_by_ids` on `root_job_id` genuinely unsticks the chain (the replayed root completes and the resolver promotes the descendants). Ids derive deterministically from the calling tenant and `chain_name`, so the same name in another tenant is a separate chain; rows are tagged as seeded fixtures and deleted by the next environment reset.",
+      "description": "[chaos: environment_wide] Manufacture a stuck dependency chain, in one of three shapes. DEFAULT (`root_status='dead_letter'`): a completed upstream parent, a dead-lettered root (retries exhausted), and N descendants held in `waiting` behind it. Stuck by the platform's own rules — the resolver promotes a child only when every parent is `completed`, and `dead_letter` is terminal — so the chain will not drain on its own. Compensators: `pause_dag` stabilizes (TTL self-cleans) and `replay_dlq_by_ids` on `root_job_id` genuinely unsticks it (the replayed root completes and the resolver promotes the descendants).\nSTRANDED (`root_status='completed'`): root `completed`, descendants `waiting`, and no dead-letter row anywhere in the chain — so nothing in it can be replayed. This shape does NOT hold by itself: the root being `completed` leaves step-1 with no unmet parent, so the `dependency-resolver` consumer group promotes it on the next `job.completed` and the resume sweep promotes it within about ten seconds regardless. It needs BOTH `kill_consumer('dependency-resolver')` and `pause_control_loop('resume_unblocked_waiting')` to stay stranded, and only the second one's TTL heals it.\nDOWNSTREAM FAILURE (`root_status='completed'` + `failed_step=N`): the same, except descendant N is dead-lettered and the descendants before it are `completed` — exactly one dead-letter row, under a root that succeeded. This shape holds on its own.\n`child_age_seconds` backdates the whole chain so it reads as long-waiting on the first probe. Observe any of them with `get_dag_state(root_job_id)`, `search_traces(status='waiting')` and `list_dlq_messages`. Ids derive deterministically from the calling tenant and `chain_name` — and NOT from the shape, so re-invoking an existing `chain_name` with a different `root_status` is refused as drift rather than rewriting it. The same name in another tenant is a separate chain; rows are tagged as seeded fixtures and deleted by the next environment reset.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -363,8 +363,41 @@
               }
             ],
             "default": null,
-            "description": "Error string on the dead-lettered root. Defaults to a realistic string matching the declared remediation_hint.",
+            "description": "Error string on the chain's dead-lettered row. Defaults to a realistic string matching the declared remediation_hint. Unused when the chain has no dead-lettered row (`root_status='completed'` with no `failed_step`).",
             "title": "Error Message"
+          },
+          "root_status": {
+            "default": "dead_letter",
+            "description": "What the root is. `dead_letter` (default) is the original chain: retries exhausted, descendants held behind a terminal row, stuck by the platform's own rules. `completed` strands the chain instead — root `completed`, descendants `waiting`, and NO dead-letter row anywhere in it, so there is nothing to replay. That shape does NOT hold by itself: with the root completed, step-1 has no unmet parent, so the `dependency-resolver` consumer group and the resume sweep each promote it within seconds. Pair it with `kill_consumer('dependency-resolver')` AND `pause_control_loop('resume_unblocked_waiting')`.",
+            "enum": [
+              "dead_letter",
+              "completed"
+            ],
+            "title": "Root Status",
+            "type": "string"
+          },
+          "child_age_seconds": {
+            "default": 0,
+            "description": "Backdate `created_at` (and `updated_at`) on every row in the chain by this many seconds, so 'this child has been waiting a long time' is true on the first read rather than after a wait. 0 (default) writes the rows at the current time, as before. The whole chain moves together, not only the descendants: a child that is older than its own parent is a graph the platform cannot produce. Dispatch times (`started_at`, `completed_at`) stay NULL on every row either way. Max one day.",
+            "maximum": 86400,
+            "minimum": 0,
+            "title": "Child Age Seconds",
+            "type": "integer"
+          },
+          "failed_step": {
+            "anyOf": [
+              {
+                "maximum": 10,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Dead-letter descendant N instead of the root, leaving exactly one dead-letter row in the chain, below a root that succeeded. Only valid with `root_status=\"completed\"`, and must be within `waiting_steps`; anything else is an invalid argument. The descendants before it are `completed` — a job cannot have been dispatched before its own parent finished — and the descendants after it stay `waiting` behind a terminal row. Unlike the bare `completed` chain, this one holds on its own.",
+            "title": "Failed Step"
           }
         },
         "title": "CreateStuckDagInput",
@@ -373,7 +406,7 @@
       "outputSchema": {
         "properties": {
           "root_job_id": {
-            "description": "The dead-lettered job holding the chain — the id to alert on, probe with `get_dag_state`, pause, or replay.",
+            "description": "The job holding the chain — the id to alert on, probe with `get_dag_state`, pause, or (when it is the dead-lettered one) replay.",
             "title": "Root Job Id",
             "type": "string"
           },
@@ -382,11 +415,33 @@
             "type": "string"
           },
           "waiting_job_ids": {
+            "description": "The descendants this call left in status `waiting`, in chain order. Equal to `step_job_ids` unless `failed_step` took some of them out of `waiting`.",
             "items": {
               "type": "string"
             },
             "title": "Waiting Job Ids",
             "type": "array"
+          },
+          "step_job_ids": {
+            "description": "Every descendant id, in chain order, whatever status it carries — `waiting_job_ids` plus the ones `failed_step` made `completed` or `dead_letter`.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Step Job Ids",
+            "type": "array"
+          },
+          "dead_letter_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The chain's one dead-lettered row: the root by default, descendant `failed_step` when asked for, and null when the chain deliberately has none.",
+            "title": "Dead Letter Job Id"
           },
           "chain_name": {
             "title": "Chain Name",
@@ -406,6 +461,7 @@
           "root_job_id",
           "completed_parent_id",
           "waiting_job_ids",
+          "step_job_ids",
           "chain_name",
           "created",
           "accepted"
@@ -2734,6 +2790,64 @@
       },
       "required_scope": "actions:execute",
       "is_idempotent": true
+    },
+    {
+      "name": "pause_dag_chaos",
+      "description": "[chaos: environment_wide] Pause promotion of WAITING children in the DAG rooted at `root_job_id`, producing a pause that is indistinguishable from an operator pause: the same Redis flag `pause_dag` writes, with a TTL, so `get_dag_state(root_job_id)` reads `paused: true` with `paused_expires_in_seconds`, a held descendant names this root as its `paused_by`, and children stay in status `waiting`. Nothing in what a reader gets back says the pause came from here. Self-cleans on TTL (default 600 s, max 3600), after which held children promote automatically, so the fault is bounded with nothing to call; the environment reset also clears every DAG pause. Exists because `pause_dag` needs `actions:execute`. Use `pause_control_loop` to stop a background loop instead — that is a different fault with the opposite meaning.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "root_job_id": {
+            "description": "Root of the DAG to pause. Any WAITING child whose chain of parents reaches this root won't be promoted while the flag is set.",
+            "format": "uuid",
+            "title": "Root Job Id",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 600,
+            "description": "How long the pause is active. Default 10 minutes — the same default and the same bounds the operator action uses, so a pause taken here with default arguments is identical to one an operator took.",
+            "maximum": 3600,
+            "minimum": 1,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "root_job_id"
+        ],
+        "title": "PauseDagChaosInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "root_job_id": {
+            "title": "Root Job Id",
+            "type": "string"
+          },
+          "pause_key": {
+            "title": "Pause Key",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "title": "Ttl Seconds",
+            "type": "integer"
+          },
+          "accepted": {
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "root_job_id",
+          "pause_key",
+          "ttl_seconds",
+          "accepted"
+        ],
+        "title": "PauseDagChaosOutput",
+        "type": "object"
+      },
+      "required_scope": "chaos:invoke",
+      "is_idempotent": false
     },
     {
       "name": "poison_message",

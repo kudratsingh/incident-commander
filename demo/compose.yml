@@ -1,6 +1,6 @@
 # Live demo: full platform footprint sufficient for remediation eval.
 #
-# Pinned to the incident-platform v0.6.9 release by digest so the agent's
+# Pinned to the incident-platform v0.6.10 release by digest so the agent's
 # contract expectations don't shift under us. Every platform-code service
 # below uses the SAME pinned digest. Bump the digest whenever the platform
 # ships a new release and rerun `make eval-live` to catch drift.
@@ -132,7 +132,7 @@ services:
     # One-shot schema migration, mirroring the dev compose's migrate
     # service: with two app-code services (mcp + api) neither should
     # race `alembic upgrade head` at boot.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.9@sha256:b85e3f0bf607ef6f55cb30a6f040af753e906048f341c4fdf138f386afab2364
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.10@sha256:5ff8da7917aa0c5d1eea948db6a68820beeef1029396f955a238d0895ab5d7fd
     platform: linux/amd64
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
@@ -144,18 +144,9 @@ services:
     restart: "no"
 
   platform:
-    # incident-platform v0.6.9 (INDEX digest published by the platform
+    # incident-platform v0.6.10 (INDEX digest published by the platform
     # release, confirmed with `docker buildx imagetools inspect` — the
     # top-level `Digest:`, not a per-platform child manifest).
-    #
-    # What v0.6.8 changed (plat #209, WO-R3-267): `get_cache_key_info` now
-    # says whether the records the entry names still exist —
-    # `records_referenced` (how many job records the entry is meant to name)
-    # and `records_found` (how many of those the caller's tenant holds now)
-    # — plus a `THE RECORD CHECK` description paragraph. A healthy seeded
-    # hot set reads 3 / 3; after the stale-cache hook it reads 3 / 0. Both
-    # are null when the platform cannot tell what the entry refers to, and
-    # null is not zero.
     #
     # What v0.6.9 changed (plat #210 + #211 + #212): TWO NEW TOOLS, and no
     # existing tool's name, description or schema moved.
@@ -172,11 +163,37 @@ services:
     # Tool count with CHAOS_ENABLED=true: 30 → 32. The new Redis key
     # `outbox:relay:last_tick` sits outside `chaos:*` and so is untouched by
     # `make eval-reset`.
+    #
+    # What v0.6.10 changed (plat #214, platform ADR 0029): ONE NEW LAB HOOK
+    # and one lab hook's inputs widened. NOTHING joins the agent's read
+    # surface, and no existing agent-facing tool moved.
+    #   * `pause_dag_chaos` — a LAB hook (`chaos:invoke`, description
+    #     prefixed `[chaos: environment_wide]`), the 12th. It writes the same
+    #     `dag:paused:<root>` flag the Tier-1 action `pause_dag` writes, with
+    #     a TTL, so `get_dag_state` reads `paused: true` exactly as after an
+    #     operator pause — a pause set by the lab is indistinguishable from
+    #     one set by a human (ADR 0012). The agent's own token cannot reach
+    #     the hook; `pause_dag` itself is unchanged.
+    #   * `create_stuck_dag` — INPUT gains `root_status` (`dead_letter`
+    #     default = today's chain, or `completed` = a STRANDED chain: root
+    #     completed, descendants still `waiting`, and NO dead-letter row at
+    #     all), `child_age_seconds` (0..86400, backdates the whole chain) and
+    #     `failed_step` (1..10, only with `completed`: the descendants before
+    #     it complete, that one dead-letters, the rest wait). OUTPUT gains
+    #     `step_job_ids` and `dead_letter_job_id`, and `waiting_job_ids` now
+    #     lists only the descendants actually waiting. Description rewritten
+    #     for the two shapes. Every new input is OPTIONAL with its old
+    #     behaviour as the default, so no scenario's wired arguments move
+    #     (ADR 0043 keys a recorded world by those arguments). A repeat call
+    #     with a different shape under the same `chain_name` is refused
+    #     `stuck_chain_name_in_use` — the code the hook already raised for a
+    #     drifted chain, so no new refusal and no new `BlastRadius` member.
+    # Tool count with CHAOS_ENABLED=true: 32 → 33 (12 of them chaos).
     # Do not switch to `:latest` — the whole point of pinning by digest is
     # that a platform-side prompt or schema change can't shift agent
     # behavior without an explicit bump here.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.9@sha256:b85e3f0bf607ef6f55cb30a6f040af753e906048f341c4fdf138f386afab2364
-    # v0.6.9 is an OCI index, but it still lists linux/amd64 ONLY (plus an
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.10@sha256:5ff8da7917aa0c5d1eea948db6a68820beeef1029396f955a238d0895ab5d7fd
+    # v0.6.10 is an OCI index, but it still lists linux/amd64 ONLY (plus an
     # attestation manifest) — being an index is not the same as being
     # multi-arch, and this one is not. On Apple Silicon this runs under
     # Rosetta (slower cold start, correct output) — REQUIRED there; without
@@ -280,7 +297,7 @@ services:
     # Env copied deliberately from the dev compose's `app` service
     # (drift between services is platform bug #69's class); minio/jaeger
     # endpoints omitted with the services (see header note).
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.9@sha256:b85e3f0bf607ef6f55cb30a6f040af753e906048f341c4fdf138f386afab2364
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.10@sha256:5ff8da7917aa0c5d1eea948db6a68820beeef1029396f955a238d0895ab5d7fd
     platform: linux/amd64
     ports:
       - "${DEMO_API_HOST_PORT:-8000}:8000"

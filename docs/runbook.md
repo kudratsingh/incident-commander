@@ -1090,7 +1090,9 @@ Exit codes: `0` no drift, `1` drift, `2` selection refusal, `3` preflight, `4` p
 
 A fourth reading, found on the v0.6.9 re-pin (WO-R3-201): **the world's own history moved, and no reset undoes that.** All four of WP-3.1's committed recordings reported drift about two hours after they were taken, on a freshly reset world, and every one of the 217–262 disagreements was in exactly two tools — `list_audit_events` (its `total` had grown 3,770 → 3,946, so the 50-row page returns different rows) and `search_traces` (job and trace ids, re-seeded by the resets in between). Not one disagreement touched a field v0.6.9 changed, which is what says the platform release was not the cause: v0.6.9 added two tools and moved no existing schema, and no recording contains a call to either. Every read the harness itself makes is an audit event, so this reading appears on its own, without anyone touching the platform. Tell it apart by asking which tools the disagreements are in: a release moves the tool whose schema moved, while history moves the audit listing and the trace ids and nothing else.
 
-**That fourth reading is now the check's own answer, not a reader's job** (WO-R3-271, ADR 0050). Those paths are compared by shape, so history alone no longer produces a single disagreement, and an exit 1 on a recording is once again one of the first three readings. If you see drift inside `list_audit_events` or `search_traces` *now*, it is one of three real things and none of them is churn: a column changed type, the listing lost all its rows, or a field the recording held is gone. The one number that moved on this — the first drift run of the four committed recordings — is **free and still not run**; it needs the stack.
+**That fourth reading is now the check's own answer, not a reader's job** (WO-R3-271, ADR 0050). Those paths are compared by shape, so history alone no longer produces a single disagreement, and an exit 1 on a recording is once again one of the first three readings. If you see drift inside `list_audit_events` or `search_traces` *now*, it is one of three real things and none of them is churn: a column changed type, the listing lost all its rows, or a field the recording held is gone. **That number is now run** (the v0.6.10 re-pin, on the stack, at $0). ADR 0050 holds: on a reset, quiet world the three WP-3.1 recordings whose premise that world satisfies — `dlq_backlog`, `dlq_mislabeled_replay_safe`, `remediate_dlq_backlog_success` — each read `DRIFT: none`, where the same three produced 217–262 disagreements before the history paths were compared by shape. `jobs_not_progressing_healthy_backlog_spike` read `DRIFT: none` too.
+
+**The other half of the eight is a different verdict and worth naming: exit 7, "not compared."** Four of the eight recorded worlds have a precondition a quiet world cannot meet — `remediate_consumer_lag_success` and `jobs_not_progressing_dispatcher_stall` want `lag ≥ 20`, the two `jobs_not_progressing_outbox_stall*` worlds want `unpublished_count ≥ 10` — because a killed consumer builds no backlog and a paused relay holds no rows unless something is arriving. Run `make traffic` in a second shell for those (the same rule as a live consumer-lag run) and they compare. When they do, expect exit 1 with the disagreements **in the live counters only**: `lag` 33 → 31 and 24 → 20, `unpublished_count` 1 → 0 and 11 → 24, plus whichever `search_traces` rows your traffic put inside the probe window. Those are arrival-rate artifacts, not drift in the pinned artifact: nothing says how deep a backlog was when the recording's read landed. `jobs_not_progressing_outbox_stall` cannot be compared in the same traffic window as `dispatcher_stall` at all — its precondition wants `lag ≤ 5`, which is the opposite request — so a full pass over the corpus needs two traffic profiles, not one. **Read the verdict by which KIND of path disagrees:** a counter is the world's arrival rate, an id or an audit total is history (ADR 0050 now absorbs those), and a schema or a missing field is the release.
 
 If the drift check and `make fixture-drift` disagree, re-run `make fixture-drift` first and compare its numbers — the recorded caution in `context/INDEX.md` applies here unchanged. On the v0.6.9 pin they disagreed exactly this way and both were right: `make fixture-drift` read `0 new / 0 stale` (the canned pack is not the audit log) while all four recordings drifted.
 
@@ -1122,16 +1124,20 @@ For deeper introspection, the newest `evals/trajectories/<scenario>.<stamp>.<inv
 ## Contract-test target (constraint in force)
 
 **Run contract tests ONLY against the pinned demo stack.** The pin is
-v0.6.9 by index digest (`sha256:b85e3f0bf607…`) and the committed snapshot
-carries its **32** tools, blessed from that stack with the full 4-scope
-service-account token. v0.6.9 is the first bump since v0.5.0 to move the
-count, and it moved it by two at once: `get_outbox_status` (an agent-facing
-read tool) and `pause_control_loop` (a lab hook). v0.6.4 through v0.6.8 all
-held at 30 — they changed descriptions and added optional response fields,
-which is a contract delta with no count change, and is why the count is
-never the check.
+v0.6.10 by index digest (`sha256:5ff8da7917aa…`) and the committed snapshot
+carries its **33** tools, blessed from that stack with the full 4-scope
+service-account token. v0.6.9 moved the count by two at once —
+`get_outbox_status` (an agent-facing read tool) and `pause_control_loop` (a
+lab hook) — and v0.6.10 moved it by one, `pause_dag_chaos`, which is a lab
+hook as well, so the agent's own read surface is unchanged at 14 tools
+across both. v0.6.4 through v0.6.8 all held at 30 — they changed
+descriptions and added optional response fields, which is a contract delta
+with no count change, and is why the count is never the check. v0.6.10
+makes the same point from the other side: it also rewrote
+`create_stuck_dag`'s description and widened its input and output schemas,
+which the count cannot show.
 
-The rule outlives the v0.4.9 → v0.5.0 → v0.6.0 → … → v0.6.9 bumps that motivated it: platform
+The rule outlives the v0.4.9 → v0.5.0 → v0.6.0 → … → v0.6.10 bumps that motivated it: platform
 master moves ahead of whatever tag is pinned, so a contract check against
 a master-built dev stack can fail **by design**. That is master drift, not
 drift in the pinned artifact, and it must never trigger a snapshot rebless
@@ -1241,7 +1247,24 @@ Platform ships a new digest → five steps on the agent side:
    `get_outbox_status`, WO-R3-201). Record the live readings in the PR anyway
    and say which fields are volatile, because whoever writes the first fixture
    inherits that decision and a wrong one flaps the ledger (the v0.6.7
-   lesson).
+   lesson). A LAB-only pin is the same case for a stronger reason — the agent
+   has no fixture of a hook it cannot call — and v0.6.10 read `0 new` exactly
+   so.
+
+   **`0 new` and a red `make test-drift` are not a contradiction, and neither
+   is a reason to bless.** The ledger is blessed against a FRESHLY SEEDED
+   stack (its own `_blessed_against` says so), and a developer volume that has
+   been running for a day disagrees with it in the *other* direction: the
+   three `cold-stack` entries on `jobs_not_progressing_*`'s
+   `get_consumer_lag.lag` say a fresh stack has taken no measurement and
+   answers null, while a warm volume answers a measured `0` and so matches its
+   fixture. `make fixture-drift` reports those as STALE ("no longer drifted;
+   delete this line") and `test_drift` fails on them — on v0.6.10, three of
+   them, with `0 new`. Blessing there would SHRINK the ledger by three lines
+   that CI's fresh stack still needs, turning a green local run into a red
+   required check. Report it as a local-volume divergence and leave the ledger
+   alone. The way to tell the two apart in one look: a real fixture defect
+   shows up under `new`, a warm-volume artifact under `stale`.
 5. Re-pin the planner's tool listing, which is the OTHER prompt the agent
    reads:
    ```bash
@@ -1258,6 +1281,14 @@ Platform ships a new digest → five steps on the agent side:
    the three legitimate causes. v0.6.9 grew it 16,689 → 21,420 characters on
    one added read tool; v0.6.7 and v0.6.8 each moved a description with
    nothing to notice it, which is why this step exists.
+
+   A hash that does NOT move is a result too, and on a lab-only pin it is the
+   expected one: the block is assembled from the typed tool registry, which the
+   `[chaos:` description filter keeps every hook out of, so v0.6.10 — one new
+   chaos tool and one chaos tool's schema widened — left it byte-identical at
+   21,420 characters. Say so in the PR body rather than leaving the step
+   unmentioned: "the hash did not move, and here is why it should not have" is
+   the difference between a checked step and a skipped one.
 
 ## Connection pool and run capacity ([ADR 0022](ADR/0022-connection-pool-sizing-and-the-run-concurrency-ceiling.md))
 

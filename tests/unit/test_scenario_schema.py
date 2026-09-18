@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +8,7 @@ from pydantic import ValidationError
 from evals.graders.deterministic import ScenarioExpectation
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import (
+    _SNAPSHOT_PATH,
     ChaosHook,
     ChaosPlan,
     DiscriminatingProbe,
@@ -348,6 +350,128 @@ class TestPauseControlLoopIsDeclarable:
         from incident_commander.tools.registry import TOOL_REGISTRY
 
         assert "pause_control_loop" not in TOOL_REGISTRY
+
+
+class TestPauseDagChaosIsDeclarable:
+    """v0.6.10's 12th chaos hook, proven declarable without shipping a scenario.
+
+    WP-7.2 is what adds the `workflow_stuck` family; this packet only
+    re-pins. But the closed set is derived from the snapshot at load time, so
+    "a scenario could declare it" is a property of THIS commit and testable
+    here — the same shape as ``TestPauseControlLoopIsDeclarable`` above.
+
+    The hook writes the same ``dag:paused:<root>`` flag the Tier-1 action
+    ``pause_dag`` writes, so ``get_dag_state`` reads ``paused: true`` exactly
+    as after an operator pause (platform ADR 0029). Nothing here is
+    agent-facing: the pause the agent can see is indistinguishable from an
+    operator's, and the hook that set it is not in the agent's registry.
+
+    No scenario YAML is added.
+    """
+
+    def test_the_hook_is_in_the_closed_set(self) -> None:
+        assert "pause_dag_chaos" in chaos_tool_names()
+
+    def test_a_scenario_could_declare_it(self) -> None:
+        hook = ChaosHook(
+            name="pause_dag_chaos",
+            arguments=_minimal_arguments("pause_dag_chaos"),
+        )
+        assert hook.name == "pause_dag_chaos"
+
+    def test_the_hook_is_marked_chaos_and_scoped_to_the_evaluator(self) -> None:
+        # Selected into the closed set by the structural `[chaos:` prefix, not
+        # by a hand-list — and the scope is what keeps the agent out.
+        entry = next(
+            t
+            for t in json.loads(_SNAPSHOT_PATH.read_text())["tools"]
+            if t["name"] == "pause_dag_chaos"
+        )
+        assert entry["description"].startswith("[chaos: environment_wide]")
+        assert entry["required_scope"] == "chaos:invoke"
+
+    def test_the_hook_never_reaches_the_agents_typed_registry(self) -> None:
+        # ADR 0012: the lab's own name must not appear in the registry the
+        # planner picks from. `pause_dag` (the Tier-1 action) still does.
+        from incident_commander.tools.registry import TOOL_REGISTRY
+
+        assert "pause_dag_chaos" not in TOOL_REGISTRY
+        assert "pause_dag" in TOOL_REGISTRY
+
+
+class TestStrandedChainIsDeclarable:
+    """v0.6.10's ``create_stuck_dag`` gains three optional inputs (plat #214).
+
+    ``root_status: completed`` + ``child_age_seconds`` + ``failed_step`` are
+    what make the `workflow_stuck` family's three-way contrast manufacturable
+    (WO-R3-274): a chain whose root COMPLETED and whose descendants are still
+    `waiting`, backdated, with no dead-letter row at all. Proven declarable
+    here; the family itself is WP-7.2's.
+
+    The other half of the proof is that the defaults did not move. ADR 0043
+    keys a recorded world by the wired arguments of the hooks that made it, so
+    a new optional argument that changed a default — or that a scenario had to
+    start passing — would move every committed recording's key. The two
+    shipped `create_stuck_dag` scenarios pass three arguments each, and they
+    still validate byte-identically.
+    """
+
+    def test_the_three_new_arguments_are_declarable_together(self) -> None:
+        hook = ChaosHook(
+            name="create_stuck_dag",
+            arguments={
+                "chain_name": "resolver-stall-eval",
+                "waiting_steps": 3,
+                "root_status": "completed",
+                "child_age_seconds": 2820,
+                "failed_step": 2,
+            },
+        )
+        assert hook.arguments["root_status"] == "completed"
+        assert hook.arguments["child_age_seconds"] == 2820
+        assert hook.arguments["failed_step"] == 2
+
+    def test_root_status_is_a_closed_set_holding_both_worlds(self) -> None:
+        schema = chaos_tool_schemas()["create_stuck_dag"]
+        members = enum_values_for(resolve_schema_ref(schema["properties"]["root_status"], schema))
+        assert members is not None
+        assert {"dead_letter", "completed"} <= set(members)
+
+    def test_a_root_status_outside_the_closed_set_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="closed set"):
+            ChaosHook(name="create_stuck_dag", arguments={"root_status": "waiting"})
+
+    def test_the_backdate_and_the_failed_step_are_integer_typed(self) -> None:
+        schema = chaos_tool_schemas()["create_stuck_dag"]
+        for argument in ("child_age_seconds", "failed_step"):
+            admitted = json_types_for(resolve_schema_ref(schema["properties"][argument], schema))
+            assert "integer" in admitted, argument
+            with pytest.raises(ValidationError, match="compatible with the snapshot"):
+                ChaosHook(name="create_stuck_dag", arguments={argument: "large"})
+
+    def test_all_three_are_optional_so_no_wired_argument_has_to_move(self) -> None:
+        required = chaos_tool_schemas()["create_stuck_dag"].get("required") or []
+        assert not ({"root_status", "child_age_seconds", "failed_step"} & set(required))
+        # The two shipped scenarios' wired arguments, verbatim from their YAML.
+        # If a new input were required, these would stop validating and every
+        # recording keyed on them (ADR 0043) would need a new key.
+        for chain in ("runaway-saga-eval", "saga-stuck-eval"):
+            assert ChaosHook(
+                name="create_stuck_dag",
+                arguments={
+                    "chain_name": chain,
+                    "waiting_steps": 2,
+                    "remediation_hint": "replay_safe",
+                },
+            )
+
+    def test_the_stranded_chains_refusal_is_already_ledgered(self) -> None:
+        # A repeat call with a different shape under the same chain_name is
+        # refused `stuck_chain_name_in_use` — the code the hook already
+        # raised for a drifted chain, so no new refusal joins the ledger.
+        from evals.chaos_hooks import _REFUSAL_MEANINGS
+
+        assert "stuck_chain_name_in_use" in _REFUSAL_MEANINGS
 
 
 class TestSchemaRefResolution:

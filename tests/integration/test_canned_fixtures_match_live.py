@@ -74,7 +74,7 @@ def probe():  # type: ignore[no-untyped-def]
 
 
 def test_no_fixture_drift_outside_the_ledger(probe) -> None:  # type: ignore[no-untyped-def]
-    new, _ = classify(probe.drifts, load_ledger())
+    new, _ = classify(probe.drifts, load_ledger(), stack_context=probe.stack_context)
     if new:
         listing = "\n".join(f"  {drift.describe()}" for drift in new)
         pytest.fail(
@@ -95,12 +95,13 @@ def test_ledger_holds_no_entry_that_is_already_fixed(probe) -> None:  # type: ig
     would only ever grow, and a guard whose exception list grows is not a
     guard.
     """
-    _, stale = classify(probe.drifts, load_ledger())
+    _, stale = classify(probe.drifts, load_ledger(), stack_context=probe.stack_context)
     if stale:
         listing = "\n".join(f"  {key}" for key in stale)
         pytest.fail(
             f"{len(stale)} ledger entr(ies) no longer drift — the fixture was fixed. "
-            f"Delete these lines from {LEDGER_PATH.name} (or run `{_BLESS}`):\n{listing}"
+            f"Stack context was {probe.stack_context}; delete these lines from {LEDGER_PATH.name} "
+            f"(or run `{_BLESS}`):\n{listing}"
         )
 
 

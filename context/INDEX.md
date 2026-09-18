@@ -12,6 +12,7 @@ An archive listed as *transcript only* means the raw session data is on disk und
 
 | Date | Archive | What this session established |
 |---|---|---|
+| 2026-09-18 | — | **WO-R3-273:** Fixture-drift classification derives stack warmth from worker-dispatcher `lag_known` and `measured_at`; cold-stack entries remain ratcheted on cold stacks and are reported as context-fixed on warm stacks. |
 | 2026-09-17 | `0db6fe722f7c` (re-graded) | **WO-R3-266:** Four read-only consumer-lag scenarios establish their named live-world premise before a model call; an unmet premise aborts pre-spend rather than grading canned contents as live fact. The archive's missing-group evidence red remains a named historical hold-back because it predates that gate. |
 | 2026-09-18 | — | **WO-R3-269:** Fixture-drift ledger keys may identify a fixture element; stale-cache `size` records element 0's 90-byte fault and element 1's post-action absence separately. Legacy keys remain generic. |
 | 2026-09-17 | — | **WO-R3-258:** Documentation sweep closes stale freeze wording, localizes incident references, corrects the baseline-count comment, and makes ADR 0029/0033/0034 implementation status explicit. The named v0.6.3 runbook/schema references remain as accurate historical records. |

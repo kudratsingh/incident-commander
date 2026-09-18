@@ -57,6 +57,7 @@ CANNED_ONLY: Final = "canned-only"
 #: reset changes it. Calling it post-fault would claim a mechanism that is not
 #: there, which the note above `_JUSTIFIED` is explicitly about.
 COLD_STACK: Final = "cold-stack"
+WARM_STACK: Final = "warm-stack"
 
 # Entries that are NOT fixture defects, each with the claim that makes it so.
 #
@@ -189,7 +190,7 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "the key is still present",
     ),
     ("remediate_stale_cache_success", "get_cache_key_info", "size", "value", 0): (
-        COLD_STACK,
+        WARM_STACK,
         "the 90-byte stale value is visible on a warm developer stack, but CI's "
         "fresh stack has not populated that cache entry and reads the fixture value; "
         "the entry is timing-scoped, not a fixture correction",
@@ -849,7 +850,7 @@ def dump_ledger(
 
 
 def classify(
-    drifts: Iterable[Drift], ledger: frozenset[DriftKey]
+    drifts: Iterable[Drift], ledger: frozenset[DriftKey], *, stack_context: str = "unknown"
 ) -> tuple[tuple[Drift, ...], tuple[DriftKey, ...]]:
     """Split observed drift into ``(new, stale_ledger_entries)``.
 
@@ -863,5 +864,12 @@ def classify(
     new = tuple(
         drift for drift in drifts if drift.key not in ledger and drift.key[:4] not in ledger
     )
-    stale = tuple(sorted(key for key in ledger - matched if context_of(key)[0] != COLD_STACK))
+    stale = tuple(
+        sorted(
+            key
+            for key in ledger - matched
+            if context_of(key)[0] not in {COLD_STACK, WARM_STACK}
+            or context_of(key)[0].removesuffix("-stack") == stack_context
+        )
+    )
     return new, stale

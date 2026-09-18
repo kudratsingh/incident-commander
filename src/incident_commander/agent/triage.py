@@ -21,10 +21,7 @@ def _severity(alert: Mapping[str, object]) -> str:
 def dedup_key(alert: Mapping[str, object]) -> str:
     """Stable fingerprint over (source, fingerprint). Untrusted input; str-coerced.
 
-    Public because the incident identity derived at ingress
-    (``agent.factory.derive_incident_id``, ADR 0016) is a ``uuid5`` over this
-    exact string. One definition, one hash: the key TRIAGE files as evidence
-    and the key the incident id is built from can never drift apart.
+    ``factory.derive_incident_id`` (ADR 0016) is a ``uuid5`` over this exact string.
     """
     source = str(alert.get("source", ""))
     fingerprint = str(alert.get("fingerprint", ""))

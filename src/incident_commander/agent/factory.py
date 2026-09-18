@@ -1,8 +1,6 @@
-"""Factories that build a fresh ``RunState``, and the ingress incident identity.
+"""Build a fresh ``RunState``; derive the ingress incident identity (ADR 0016).
 
-``start_run`` is the state constructor; ``derive_incident_id`` is the ADR 0016
-identity rule the webhook ingress opts into. They are deliberately separate —
-see ``start_run``.
+Deliberately separate — see ``start_run``.
 """
 
 from __future__ import annotations
@@ -32,24 +30,13 @@ _MAX_RECURRENCE_GENERATIONS: Final[int] = 64
 def derive_incident_id(alert: Mapping[str, object], checkpointer: Checkpointer) -> UUID:
     """Deterministic incident id for an alert carrying ``(source, fingerprint)``.
 
-    ADR 0016. Generation 0 is ``uuid5(namespace, dedup_key(alert))``; a
-    generation whose run already reached a terminal state is closed, so the
-    walk advances to ``uuid5(namespace, f"{dedup_key}|{n}")`` — a fingerprint
-    that fires again after its incident resolved opens a NEW incident, while
-    every at-least-once redelivery of the same occurrence still resolves to the
-    same id. An absent, empty, or whitespace-only fingerprint declines to
-    dedupe at all and returns ``uuid4()``.
-
-    Opt-in at the ingress call site only: ``start_run`` keeps minting ``uuid4``
-    by default so ``evals/runner.py`` and every test that builds a ``RunState``
-    stay isolated per scenario.
+    ADR 0016: ``uuid5`` over ``dedup_key``, advancing a generation each time the
+    previous one's run has already terminated, so a recurrence opens a NEW incident.
+    No usable fingerprint means no dedupe at all: ``uuid4()``.
     """
     raw_fingerprint = alert.get("fingerprint")
     if not isinstance(raw_fingerprint, str) or not raw_fingerprint.strip():
-        # Keyed on the RAW field, never on the hash: ``dedup_key`` hashes
-        # "billing|" into a perfectly stable value, and returning it would
-        # collapse every fingerprint-less alert from that source into one
-        # immortal incident.
+        # Keyed on the RAW field: the hash would fuse every fingerprint-less alert.
         return uuid4()
 
     key = dedup_key(alert)
@@ -79,43 +66,9 @@ def start_run(
 ) -> RunState:
     """Build a fresh TRIAGE-state run with a BudgetLedger seeded from settings.
 
-    The ``uuid4`` default is load-bearing and must stay (ADR 0016): every
-    caller other than the webhook ingress — ``evals/runner.py`` above all —
-    depends on a distinct incident per invocation. Folding
-    ``derive_incident_id`` in here would collapse the canned scenarios that
-    share a ``(source, fingerprint)`` pair onto one checkpointer history.
-
-    ``max_tool_calls`` overrides ``settings.budget_max_tool_calls`` for this
-    run only (ADR 0019). The eval runner passes the scenario's declared cap,
-    so the agent is bounded by — and told about — the budget the scenario
-    actually allots it, instead of the fleet default. Ingress does not pass
-    it: a production incident is bounded by configuration, not by a caller.
-
-    A ``max_tool_calls`` of 0 is deliberately ignored, and the setting
-    default stands. ``BudgetLedger.is_exhausted`` is ``used >= max``, so a
-    zero ledger is born exhausted and ``run_to_completion`` escalates before
-    TRIAGE ever classifies the alert — the run would end before doing the
-    thing such a scenario exists to observe. A cap of 0 means "a correct run
-    makes no tool call", which is a claim about the outcome and is graded
-    post-hoc by the BUDGET dimension; it is not a runtime ceiling that this
-    ledger can express.
-
-    This is also the one place a strategy's budget multipliers are applied
-    (plan 02 § 8, WP-2.4). ``settings.seeded_max_tokens`` and
-    ``settings.seeded_max_usd`` are the configured ceilings already scaled by
-    ``TOKEN_BUDGET_MULTIPLIER`` / ``USD_BUDGET_MULTIPLIER``; both are 1 for
-    ``baseline``, so the control group's ledger is unchanged. A second site
-    that scaled a budget would fail no behavioural test — both would look
-    right — and every cost number in every report would quietly mean two
-    different things, so ``tests/unit/test_budgets.py`` reads the source and
-    refuses one.
-
-    Two dimensions are pointedly seeded raw. The tool-call ceiling is what
-    the strategies compete on and is also the scenario's grading cap (ADR
-    0019), so multiplying it would both fund one strategy's extra probing and
-    move the bar it is graded against. Wall seconds have no multiplier at
-    all: a strategy that needs longer gets it from ``BUDGET_MAX_SECONDS``,
-    for the whole invocation and in plain sight.
+    The ``uuid4`` default must stay (ADR 0016): callers other than ingress need a
+    distinct incident each time. ``max_tool_calls`` overrides the setting for this run
+    only (ADR 0019); 0 is ignored, and the strategy budget multipliers apply only here.
     """
     return RunState(
         incident_id=incident_id or uuid4(),

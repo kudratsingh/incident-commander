@@ -61,11 +61,7 @@ class BudgetLedger(BaseModel):
 
 
 class EvidenceEntry(BaseModel):
-    """One tool-call outcome recorded in the evidence ledger.
-
-    ``result_summary`` is a compact string; raw tool output is untrusted data
-    (CLAUDE.md invariant 4) and lives in the trajectory store, not here.
-    """
+    """One tool-call outcome, summarized: raw tool output is untrusted (invariant 4)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -90,13 +86,9 @@ class RunState(BaseModel):
     evidence: tuple[EvidenceEntry, ...] = ()
     hypotheses: tuple[Hypothesis, ...] = ()
     pending_approval_id: str | None = None
-    # v3+: set by the PLANNING transition, consumed by REMEDIATING + VERIFYING.
-    # Untyped ``dict`` here (not ``RemediationPlan``) so state.py stays free of
-    # remediation-loop imports; remediation.py validates it on read.
+    # v3+: untyped so state.py stays free of remediation imports; validated on read.
     remediation_plan: dict[str, object] | None = None
-    # v3+: incremented each time REMEDIATING actually executes an action.
-    # Cap enforced by the remediation loop — after the max is hit, PLANNING
-    # forces ESCALATED instead of proposing a retry.
+    # v3+: incremented per executed action; at the cap PLANNING forces ESCALATED.
     remediation_attempts: int = Field(default=0, ge=0)
     created_at: datetime
     updated_at: datetime

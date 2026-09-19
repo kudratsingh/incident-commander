@@ -253,6 +253,29 @@ class TestEveryFailurePathResetsAndAudits:
         assert stack.traffic_started == 1
         assert stack.traffic_stopped >= 1
 
+    def test_an_unexpected_exception_also_resets(
+        self, monkeypatch: pytest.MonkeyPatch, stack: _FakeStack, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The first rehearsal's own bug, as a test.
+
+        It died at step 3 with a ModuleNotFoundError — after the countdown had run — and
+        because only DemoFailed was caught it printed a raw traceback and left without
+        resetting. A demo's own bug must not be the thing that leaves the world dirty.
+        """
+
+        def _explode(scenario: str) -> list[str]:
+            raise ModuleNotFoundError("No module named 'evals'")
+
+        monkeypatch.setattr(demo_live, "_seed", _explode)
+
+        assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 1
+
+        out = capsys.readouterr().out
+        assert "UNEXPECTED FAILURE" in out
+        assert "bug in the demo machine" in out
+        assert stack.make_targets().count("eval-reset") >= 2
+        assert stack.traffic_stopped >= 1
+
     def test_a_fault_that_never_appears_stops_the_demo(
         self, monkeypatch: pytest.MonkeyPatch, stack: _FakeStack
     ) -> None:

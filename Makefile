@@ -703,8 +703,12 @@ ifndef MODE
 demo-live:
 	$(error 'make demo-live' needs a MODE: make demo-live MODE=consumer_outage|dlq_backlog)
 else
+# PYTHONPATH=. because the script imports `evals` (the scenario loader, the seeding
+# path, the artifact resolver). Only `incident_commander` is installed from src/; every
+# other script that reaches into `evals` carries the same prefix. Without it the machine
+# dies at step 3 with ModuleNotFoundError, AFTER the countdown has run on camera.
 demo-live:
-	uv run python scripts/demo_live.py --mode $(MODE) \
+	PYTHONPATH=. uv run python scripts/demo_live.py --mode $(MODE) \
 		$(if $(LIVE),--live) $(if $(YES_SPEND),--yes-spend) $(if $(AUTO),--auto)
 endif
 

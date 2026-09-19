@@ -310,6 +310,20 @@ def main(argv: list[str] | None = None) -> int:
         _put_the_world_back(console)
         console.say(console.timings())
         return 130
+    except Exception as err:  # noqa: BLE001 - see below; a bare traceback is the bug
+        # The catch-all is deliberate and it was earned. The first rehearsal died at step 3
+        # with a ModuleNotFoundError — after the ten-second countdown had run — and because
+        # only DemoFailed was caught, the script printed a raw traceback and left without
+        # resetting. "Every failure path resets and audits" has to mean EVERY failure, not
+        # only the ones this script thought to name; a demo's own bug must not be the thing
+        # that leaves the shared world dirty.
+        console.say()
+        console.say(f"UNEXPECTED FAILURE: {type(err).__name__}: {err}")
+        console.say("  (this is a bug in the demo machine, not a finding about the agent)")
+        traffic.stop(console)
+        _put_the_world_back(console)
+        console.say(console.timings())
+        return 1
     console.say(console.timings())
     return 0
 

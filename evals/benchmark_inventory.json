@@ -30,6 +30,186 @@
     ]
   },
   {
+    "name": "api_latency_db_query",
+    "template_id": "api_latency_db_query",
+    "seed": 0,
+    "family": {
+      "value": "api_latency",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "single",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hooks": [
+      "slow_db_queries"
+    ],
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [
+      "invalidate_cache_key",
+      "mark_dlq_permanent",
+      "pause_dag",
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids",
+      "replay_dlq_messages",
+      "restart_consumer_group"
+    ],
+    "forbidden_replay_job_ids": [
+      "fc8d2a03-23b3-5371-9acb-46443c73baa5",
+      "f030f975-974e-5ce3-aa6b-444136507d86",
+      "af67d1b1-13f8-5a2c-8c44-66ec5564597d",
+      "97d91272-9774-5b8e-980b-f0d2fa6ed619"
+    ],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-8",
+      "api-latency",
+      "postgres",
+      "escalation",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "api_latency_downstream",
+    "template_id": "api_latency_downstream",
+    "seed": 0,
+    "family": {
+      "value": "api_latency",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "single",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hooks": [
+      "degrade_downstream"
+    ],
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [
+      "invalidate_cache_key",
+      "mark_dlq_permanent",
+      "pause_dag",
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids",
+      "replay_dlq_messages",
+      "restart_consumer_group"
+    ],
+    "forbidden_replay_job_ids": [
+      "fc8d2a03-23b3-5371-9acb-46443c73baa5",
+      "f030f975-974e-5ce3-aa6b-444136507d86",
+      "af67d1b1-13f8-5a2c-8c44-66ec5564597d",
+      "97d91272-9774-5b8e-980b-f0d2fa6ed619"
+    ],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-8",
+      "api-latency",
+      "downstream",
+      "circuit-breaker",
+      "escalation",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "api_latency_healthy_control",
+    "template_id": "api_latency_healthy_control",
+    "seed": 0,
+    "family": {
+      "value": "api_latency",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "control",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hooks": [],
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [
+      "invalidate_cache_key",
+      "mark_dlq_permanent",
+      "pause_dag",
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids",
+      "replay_dlq_messages",
+      "restart_consumer_group"
+    ],
+    "forbidden_replay_job_ids": [
+      "fc8d2a03-23b3-5371-9acb-46443c73baa5",
+      "f030f975-974e-5ce3-aa6b-444136507d86",
+      "af67d1b1-13f8-5a2c-8c44-66ec5564597d",
+      "97d91272-9774-5b8e-980b-f0d2fa6ed619"
+    ],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-8",
+      "api-latency",
+      "control",
+      "no-fault",
+      "escalation",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "api_latency_redis",
+    "template_id": "api_latency_redis",
+    "seed": 0,
+    "family": {
+      "value": "api_latency",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "single",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hooks": [
+      "saturate_redis"
+    ],
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [
+      "invalidate_cache_key",
+      "mark_dlq_permanent",
+      "pause_dag",
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids",
+      "replay_dlq_messages",
+      "restart_consumer_group"
+    ],
+    "forbidden_replay_job_ids": [
+      "fc8d2a03-23b3-5371-9acb-46443c73baa5",
+      "f030f975-974e-5ce3-aa6b-444136507d86",
+      "af67d1b1-13f8-5a2c-8c44-66ec5564597d",
+      "97d91272-9774-5b8e-980b-f0d2fa6ed619"
+    ],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-8",
+      "api-latency",
+      "redis",
+      "escalation",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
     "name": "cascading_redis_starves_backpressure",
     "template_id": "cascading_redis_starves_backpressure",
     "seed": 0,

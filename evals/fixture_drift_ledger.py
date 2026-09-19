@@ -36,7 +36,32 @@ CANNED_ONLY: Final = "canned-only"
 #: uptime — calling it post-fault would claim a mechanism that is not there.
 COLD_STACK: Final = "cold-stack"
 WARM_STACK: Final = "warm-stack"
-#: The fixture describes a fault NO LAB HOOK CAN PRODUCE (WO-R3-217, v0.6.11):
+#: The recording is of a stack under SUBMITTED TRAFFIC and the check probes a quiet one
+#: (WO-R3-221, WP-8.5). `get_slo_status` computes both objectives over a rolling 24h of the
+#: jobs table, so `objectives[].total` is a count of how much `make traffic` had submitted
+#: when the recording was taken — 154, 155, 186 and 221 across four worlds that differ in
+#: nothing else — and a quiet stack answers 0. The `api_latency` family REQUIRES sustained
+#: traffic (its own preconditions assert `total >= 1`, because `total: 0` is an absence of
+#: evidence rather than health) and the drift walk does not run it, so the two cannot
+#: agree. Its own word rather than POST_FAULT for COLD_STACK's exact reason: POST_FAULT
+#: claims a hook produced the value, and no hook submits a job. Like COLD_STACK and
+#: WARM_STACK it describes what the STACK was doing, so `classify` exempts it from the
+#: stale check — a row here is not a fixture anyone can fix, and deleting it would red
+#: CI's own quiet stack.
+TRAFFIC_STACK: Final = "traffic-stack"
+#: **THE HOOK NOW EXISTS, and this context's own note said what to do about it**
+#: (WO-R3-221, v0.6.12). It said "the work, if this scenario is ever to be run live,
+#: is a platform hook", and v0.6.12's `slow_db_queries` is precisely that hook — so
+#: `postgres_slow` could now be a LIVE scenario that seeds its own fault, and its two
+#: entries below would become ordinary `POST_FAULT` rows. That conversion is a
+#: scenario change with its own first-paid-run review and is deliberately not part of
+#: WP-8.5; the entries stay `NO_HOOK` until it happens, because the word describes
+#: the scenario as it is shipped rather than as it could be. The general lesson is in
+#: the runbook's bump walk: **a ledger context whose premise a platform release can
+#: retire has to be re-read at every re-pin.**
+#:
+#: The original note: the fixture describes a fault NO LAB HOOK CAN PRODUCE
+#: (WO-R3-217, v0.6.11):
 #: `postgres_slow` is about queries running long, and nothing in the chaos surface
 #: makes a query slow — `saturate_db_pool` holds connections, which is the other
 #: fault. So the reading is the scenario's premise and the check probes a world
@@ -1188,6 +1213,165 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "climb and the check probes the world before the kill. Both elements share this "
         "row — the investigation probe and the post-restart verify",
     ),
+    # WO-R3-221 (WP-8.5, ADR 0066) — the `api_latency` family's four worlds. The
+    # control needs no entry at all (its world IS the un-faulted one), and the redis
+    # world needs none either: its whole evidence is `used_memory_bytes`, which has
+    # been volatile since v0.6.0. Six rows, across two worlds.
+    #
+    # First the db_query world. These two are the pair `postgres_slow` below ledgers
+    # for a DIFFERENT reason — there because no hook is called, here because one is.
+    # `_VOLATILE` was tried for them and rejected: a field a hook drives into a
+    # bounded range is ledgered post-fault, and the reasoning (including the
+    # committed INC-003 re-grade it broke) is in `fixture_drift._VOLATILE`'s own note.
+    ("api_latency_db_query", "get_postgres_health", "longest_active_query_ms", "value"): (
+        POST_FAULT,
+        "`slow_db_queries(query_ms=2000)` holds two real reads of the jobs relation "
+        "open at once, offset by half a chunk, so the server always has one past its "
+        "500ms threshold; the check probes the un-faulted world, where nothing is "
+        "running and pg_stat_activity answers null. The canned 772.4 is one sample of "
+        "a range six observations put at 772..1973ms, which is why the scenario grades "
+        "it `at_least: 500.0` — the platform's threshold, the hook's own guarantee — "
+        "and never the literal",
+    ),
+    (
+        "api_latency_db_query",
+        "get_postgres_health",
+        "active_queries_over_slow_threshold",
+        "value",
+    ): (
+        POST_FAULT,
+        "the other half of the same pair and the load-bearing one: it is the "
+        "platform's own count of queries past its own threshold, read from "
+        "pg_stat_activity rather than sampled by us, and an un-faulted world counts 0. "
+        "1 or 2 depending which half of the offset the read caught, so the scenario "
+        "grades `at_least: 1`",
+    ),
+    # The traffic premise, in four worlds. `objectives[].total` is a count over what
+    # `make traffic` had submitted when each recording was taken, so no canned value can
+    # agree with a quiet check — see TRAFFIC_STACK above for why that is its own word and
+    # not POST_FAULT. Four rows, one per world, all the same sentence.
+    ("api_latency_db_query", "get_slo_status", "objectives[].total[]", "not_live_reachable"): (
+        TRAFFIC_STACK,
+        "the recording was taken under sustained `make traffic`, which this family's "
+        "preconditions require (`total >= 1`, because `total: 0` is an absence of evidence "
+        "rather than health); the drift walk probes a quiet stack, which answers 0",
+    ),
+    (
+        "api_latency_downstream",
+        "get_slo_status",
+        "objectives[].total[]",
+        "not_live_reachable",
+    ): (
+        TRAFFIC_STACK,
+        "same premise, same walk: 186 submitted jobs against a quiet stack's 0. Here the "
+        "count also scopes the failure claims beside it — 28 of 186 is a statement about "
+        "these dispatches",
+    ),
+    (
+        "api_latency_healthy_control",
+        "get_slo_status",
+        "objectives[].total[]",
+        "not_live_reachable",
+    ): (
+        TRAFFIC_STACK,
+        "same premise, and on the control it is load-bearing twice: without traffic the "
+        "world's central claim (both budgets intact) would be asserted over no samples, "
+        "which is INC-003's mistake in its strongest form",
+    ),
+    ("api_latency_redis", "get_slo_status", "objectives[].total[]", "not_live_reachable"): (
+        TRAFFIC_STACK,
+        "same premise, same walk: 154 submitted jobs against a quiet stack's 0",
+    ),
+    (
+        "api_latency_downstream",
+        "get_slo_status",
+        "objectives[].failed[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "the count of jobs the degraded dependency failed — 28 where an un-faulted world "
+        "has 0. Unlike `total` beside it this IS produced by the hook, which is why it is "
+        "post-fault and not traffic-stack",
+    ),
+    (
+        "api_latency_downstream",
+        "get_slo_status",
+        "objectives[].current_success_rate[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "the same failures as a ratio: 0.849 where an un-faulted world reads 1.0. The "
+        "scenario grades neither this nor `burn_rate` below — they slide continuously while "
+        "the window fills — but the fixture carries them because the reading does",
+    ),
+    (
+        "api_latency_downstream",
+        "get_slo_status",
+        "objectives[].burn_rate[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "the same failures as a burn: 15.05 against the fixed 14.4 threshold where an "
+        "un-faulted world reads 0.0. `fast_burn` is the boolean over it and is what the "
+        "scenario actually grades",
+    ),
+    # Then the downstream world, whose canned values a healthy world contradicts in
+    # four places — one mechanism read through two tools. Unlike the cascading world's
+    # rows above, these ARE post-fault: `degrade_downstream` reaches the job surface on
+    # its own, so the chain from hook to breached objective is one the lab can seed.
+    (
+        "api_latency_downstream",
+        "get_circuit_breakers",
+        "breakers[].state[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "`degrade_downstream(mode=fail)` makes every endpoint behind the "
+        "bulk-api-sync dependency answer 503 and the shipped breaker opens itself "
+        "at its own threshold of three; the check probes a world where nothing has "
+        "called that dependency, so the breaker reads `closed`. This is the "
+        "world's central reading and the scenario grades it `not_equals: closed`, "
+        "because `half_open` during a recovery probe is equally correct",
+    ),
+    (
+        "api_latency_downstream",
+        "get_slo_status",
+        "objectives[].budget_remaining_pct[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "the same hook fails the bulk_api_sync jobs themselves, so they retry and "
+        "dead-letter and spend the job-completion-rate error budget; the fixture "
+        "reads -100.0 (the floor, on a budget spent and then some) where a healthy "
+        "world reads 100.0. The value is CLAMPED rather than continuous, which is "
+        "why it can be canned at all while `total`, `failed`, `burn_rate` and "
+        "`current_success_rate` are volatile",
+    ),
+    (
+        "api_latency_downstream",
+        "get_slo_status",
+        "objectives[].fast_burn[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "same mechanism, and this is the platform's own verdict on it: 27 failed "
+        "of 140 is a burn rate of 19.3 against the fixed 14.4 threshold, so the "
+        "evaluator calls it fast-burning where a healthy world says false. The "
+        "boolean is what the scenario grades; the rate behind it is volatile",
+    ),
+    (
+        "api_latency_downstream",
+        "get_slo_status",
+        "objectives[].healthy[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "the same reading's other boolean — an objective below its target is not "
+        "healthy — false in the fault world and true in an idle one. Ledgered "
+        "beside `fast_burn` rather than folded into it because they answer "
+        "different questions (below target now, versus burning fast enough to "
+        "page) and a world can be one without the other",
+    ),
     # v0.6.11 (plat #218, WO-R3-217) gave `get_postgres_health` twelve fields, and
     # `postgres_slow`'s fixture now writes all twelve — an absent pool counter parses
     # as null, null means UNKNOWN, and a reading of unknowns with both
@@ -1198,14 +1382,15 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         NO_HOOK,
         "the fixture's world is a database serving slowly, so its longest "
         "running query is 1.84s; the check probes a world where nothing is "
-        "running at all and pg_stat_activity answers null. Nothing in the lab "
-        "makes a query slow — `inject_latency` delays a consumer and "
-        "`saturate_db_pool` holds connections, which is the fault this one is "
-        "deliberately NOT about",
+        "running at all and pg_stat_activity answers null. `inject_latency` "
+        "delays a consumer and `saturate_db_pool` holds connections, which is the "
+        "fault this one is deliberately NOT about; v0.6.12's `slow_db_queries` "
+        "would produce it, and converting this scenario to seed it is a change of "
+        "its own (WO-R3-221 declined to bundle it)",
     ),
     ("postgres_slow", "get_postgres_health", "active_queries_over_slow_threshold", "value"): (
         NO_HOOK,
-        "same reading, same absent hook: two queries past the platform's fixed "
+        "same reading, same unused hook: two queries past the platform's fixed "
         "500ms threshold is the fault, and an idle world counts 0. The "
         "threshold itself (`slow_query_threshold_ms`) matches live and is not "
         "here, which is the pair worth reading together — the yardstick is the "
@@ -1545,7 +1730,7 @@ def classify(
         sorted(
             key
             for key in ledger - matched
-            if context_of(key)[0] not in {COLD_STACK, WARM_STACK}
+            if context_of(key)[0] not in {COLD_STACK, WARM_STACK, TRAFFIC_STACK}
             or context_of(key)[0].removesuffix("-stack") == stack_context
         )
     )

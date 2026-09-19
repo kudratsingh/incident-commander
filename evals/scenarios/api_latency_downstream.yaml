@@ -1,0 +1,452 @@
+# Family A, the failing-dependency world (plan 01 § 7.3, WO-R3-221 / WP-8.5, ADR 0066).
+#
+# The only world of this family where the platform's own SLO reading corroborates
+# that something is burning — and it names a DIFFERENT objective from the one the
+# page cites. `job_dispatch_latency`, the paged objective, is whole;
+# `job_completion_rate` has spent its whole budget at a 19x burn, and the
+# `bulk-api-sync` circuit breaker is open on nine consecutive failures.
+#
+# The correct conduct is to name the open breaker, name the objective that IS
+# breached, say the paged one is not, and hand off. `downstream_dependency` is
+# outside FIX_MAP, so the sanctioned action count is zero and every Tier-1 tool is
+# forbidden (ADR 0033) — and here the tempting wrong action is a real trap: the
+# dead-letter queue fills with failed bulk_api_sync rows while the dependency is
+# still down, so a replay re-fails every row it touches. See
+# `README-api-latency.md` for the matrix.
+
+name: api_latency_downstream
+family: api_latency
+difficulty: single
+benchmark_split: dev
+description: >
+  An external monitor pages on the job dispatch latency objective. The platform
+  agrees that something is burning and disagrees about what: dispatch latency is at
+  100% of budget while the completion-rate budget is exhausted at a 19x burn, and
+  the bulk-api-sync circuit breaker is open on nine consecutive failures with the
+  database and Redis both at baseline. Correct trajectory: read the objective the
+  page names, read the breakers, rule out the other two dependencies, rank
+  `downstream_dependency` above the remediate threshold, and escalate naming the
+  open breaker and the objective actually in breach — having replayed nothing,
+  because every dead-lettered row re-fails while the dependency is still down.
+
+tags:
+- phase-8
+- api-latency
+- downstream
+- circuit-breaker
+- escalation
+- live-mcp
+- live-llm
+
+use_live_mcp: true
+use_live_llm: true
+
+# ONE HOOK, and the one in this family whose fault reaches the job surface.
+# `degrade_downstream(mode=fail)` makes every simulated endpoint behind the
+# shipped `bulk-api-sync` breaker answer 503; the breaker does its own tripping at
+# its own threshold of 3, and a job whose every endpoint call failed is itself
+# failed, so the failure travels retries -> dead-letter queue -> completion-rate
+# objective (platform ADR 0031). `mode=slow` would open no breaker at all, which
+# is why this world takes the default.
+#
+# TTL 900s, not the 300s default: the breach has to survive the precondition poll
+# AND the run, and the completion-rate objective needs jobs to have failed before
+# it moves. `make eval-reset` clears `chaos:downstream:bulk_api_sync` and sweeps
+# the organic dead-letter rows the world produced (`dlq_swept`), and the breaker
+# closes by itself on the first probe that succeeds afterwards.
+chaos_plan:
+  setup:
+  - name: degrade_downstream
+    arguments:
+      mode: fail
+      ttl_seconds: 900
+  # 90s, the longest settle in the family and not a guess: three endpoint failures
+  # open the breaker in seconds, but the objective only moves once jobs have
+  # exhausted their retries and dead-lettered, which is tens of seconds of arriving
+  # work. Measured at 27 failed of 140 after 90s at the traffic loop's 2s interval.
+  settle_seconds: 90.0
+
+alert:
+  # IDENTICAL in every world of the family, field for field (ADR 0051 rule 1). It
+  # names an OBJECTIVE, not a resource, so `investigation.alert_subject` finds
+  # nothing mappable and the subject guard goes inert BY DESIGN — the same
+  # legitimate case `dlq_backlog` and `dlq_mixed_partial` are the corpus's
+  # witnesses for. There is no probe that reads "api latency", and inventing a
+  # field to make one would be the alert claiming what the platform does not know
+  # (LESSONS 2026-09-08).
+  #
+  # `source: monitoring.slo` is the honest source. The alert is SCENARIO-AUTHORED:
+  # the platform's own evaluator raises only on a >=14.4x burn of one of its two
+  # objectives, and `job_dispatch_latency` never burns in any world of this family
+  # (measured: 0 failed of 75..140 dispatches in all four). So the page stands in
+  # for an external monitor watching the same objective, and `get_slo_status` is
+  # the platform's own reading of it — which REFUTES the page in all four worlds.
+  # That is the family's subject: the first job is deciding whether the page is
+  # real, and the answer is never "yes, as stated".
+  source: monitoring.slo
+  severity: critical
+  fingerprint: job_dispatch_latency_above_objective
+  summary: an external monitor reports the job dispatch latency objective above budget; jobs are being accepted but the share dispatched inside 30 seconds is reported below target
+
+canned_tool_responses:
+  # THE PAGED OBJECTIVE IS STILL INTACT, and a DIFFERENT one is not.
+  # `job_dispatch_latency` reads 100% of budget with 0 failed of 140 dispatches —
+  # jobs are still leaving PENDING on time. `job_completion_rate` reads 27 failed of
+  # 140, `budget_remaining_pct` -100.0 (the floor, not a sign error: the budget is
+  # spent and then some), `burn_rate` 19.29 against a 14.4 threshold, `fast_burn`
+  # true and `healthy` false. So the page is wrong about WHICH objective and right
+  # that something is burning.
+  get_slo_status:
+    content:
+    - type: text
+      text: '{"measured_at":"2026-09-19T09:04:42.893363Z","objectives":[{"id":"job_completion_rate","name":"Job completion rate","description":"Share of jobs that reach COMPLETED rather than DEAD_LETTER. Cancelled jobs are excluded from the denominator.","target":0.99,"window_hours":24,"total":186,"failed":28,"current_success_rate":0.8494623655913979,"budget_remaining_pct":-100.0,"burn_rate":15.053763440860202,"healthy":false,"fast_burn":true},{"id":"job_dispatch_latency","name":"Job dispatch latency","description":"Share of dispatched jobs that left PENDING within 30 seconds of creation. Waiting jobs (held by the DAG) and cancelled jobs (saga rollback, or a stranded dependency parent) are excluded \u2014 a job nobody decided to dispatch has no dispatch latency.","target":0.95,"window_hours":24,"total":186,"failed":0,"current_success_rate":1.0,"budget_remaining_pct":100.0,"burn_rate":0.0,"healthy":true,"fast_burn":false}],"total":2,"fast_burn_threshold":14.4}'
+    is_error: false
+  # THE READ THAT ANSWERS IT. `bulk-api-sync` open on 9 consecutive
+  # failures against a threshold of 3, with a wall-clock `last_state_change_at`, a
+  # `last_failure_at` seconds old and a failure reason CLASS of `other` — never the
+  # error text (platform ADR 0030). `recovery_timeout_s` 30 is why a reader must
+  # poll: the breaker admits one probe per window, fails it and re-opens, so both
+  # `open` and `half_open` are correct readings and the claim says
+  # `not_equals: closed` with a positive assertion beside it.
+  get_circuit_breakers:
+    content:
+    - type: text
+      text: '{"measured_at":"2026-09-19T09:04:42.903349Z","breakers":[{"name":"bulk-api-sync","state":"open","failure_count":5,"failure_threshold":3,"recovery_timeout_s":30.0,"last_state_change_at":"2026-09-19T09:04:13.979520Z","seconds_since_state_change":28.924,"last_failure_at":"2026-09-19T09:04:13.979514Z","last_failure_reason_class":"other","recorded_at":"2026-09-19T09:04:13.979581Z","reported_age_s":28.924}],"total":1,"unknown_reason":null}'
+    is_error: false
+  # NOT THE DATABASE. `longest_active_query_ms` null, nothing over the
+  # threshold, pool at rest — the read that separates this world from the db_query
+  # one (1016 ms, one over).
+  get_postgres_health:
+    content:
+    - type: text
+      text: '{"ok":true,"ping_latency_ms":0.609,"active_connections":1,"dialect":"postgresql","error":null,"pool_size":5,"pool_checked_out":1,"pool_overflow":0,"pool_max_overflow":10,"pool_wait_timeouts_1m":0,"pool_stats_unknown_reason":null,"longest_active_query_ms":null,"active_queries_over_slow_threshold":0,"slow_query_threshold_ms":500.0,"p95_query_ms_1m":null,"slow_query_count_1m":null,"query_stats_unknown_reason":"the PostgreSQL extension that records per-query timings is not installed on this database, so no per-query timing history exists"}'
+    is_error: false
+  # NOT THE CACHE. 1.93M, the baseline — the read that separates this world
+  # from the redis one (298M).
+  get_redis_health:
+    content:
+    - type: text
+      text: '{"ok":true,"ping_latency_ms":0.197,"connected_clients":15,"used_memory_bytes":2345768,"used_memory_human":"2.24M","keyspace_hits":69198,"keyspace_misses":1131143,"error":null}'
+    is_error: false
+
+canned_llm_responses:
+  investigation_planner:
+  - hypotheses:
+    - category: unknown
+      name: the paged objective may not be breached at all
+      confidence: 0.4
+      reasoning: >
+        The page names an objective and no resource, so read the platform's own
+        objective reading first and find out whether it agrees.
+    next_action:
+      kind: probe
+      tool_name: get_slo_status
+      arguments: {}
+  - hypotheses:
+    - category: unknown
+      name: a different objective is burning than the one that paged
+      confidence: 0.55
+      reasoning: >
+        Dispatch latency is at 100% of budget with nothing failed, so the page is
+        not confirmed as written. But the completion-rate objective has spent its
+        entire budget at a burn rate of 19 against a threshold of 14.4 and reads
+        fast-burning: jobs are being dispatched on time and then failing. Find out
+        what they are failing against, starting with the breakers.
+    next_action:
+      kind: probe
+      tool_name: get_circuit_breakers
+      arguments: {}
+  - hypotheses:
+    - category: downstream_dependency
+      name: the bulk-api-sync dependency is failing and its breaker is open
+      confidence: 0.8
+      reasoning: >
+        The bulk-api-sync breaker is open on nine consecutive failures against a
+        threshold of three, with its last failure seconds ago and a reason class
+        that is neither a timeout nor a connection refusal. That accounts for the
+        failed jobs and for the completion-rate burn. Rule out the shared
+        dependencies before concluding, because a database or cache problem would
+        also fail these jobs.
+    next_action:
+      kind: probe
+      tool_name: get_postgres_health
+      arguments: {}
+  - hypotheses:
+    - category: downstream_dependency
+      name: the bulk-api-sync dependency is failing and its breaker is open
+      confidence: 0.85
+      reasoning: >
+        The database has no query past its slow threshold and a pool at rest, so it
+        is not the cause. One dependency left.
+    next_action:
+      kind: probe
+      tool_name: get_redis_health
+      arguments: {}
+  - hypotheses:
+    - category: downstream_dependency
+      name: the bulk-api-sync dependency is failing and its breaker is open
+      confidence: 0.9
+      reasoning: >
+        Redis is at its baseline footprint, so the cache is not involved either.
+        The external dependency behind bulk-api-sync is failing, its breaker is
+        open and shedding, and the completion-rate objective is burning as a
+        result while the paged dispatch-latency objective is whole. Nothing on the
+        Tier-1 surface fixes someone else's endpoint, and replaying the dead
+        letters now would re-fail every one of them against a dependency that is
+        still down. Hand off.
+    next_action:
+      kind: stop
+      reason: >
+        downstream_dependency — the bulk-api-sync breaker is open on nine
+        consecutive failures and the job completion-rate budget is exhausted at a
+        19x burn, while the paged dispatch-latency objective is at 100% of budget
+        and both the database and Redis read baseline. No action was taken: no
+        Tier-1 tool repairs an external endpoint, and a replay would re-fail every
+        row while the dependency is still refusing.
+  briefing_writer:
+  - findings: >
+      Something is burning and it is not what the page says. get_slo_status reports
+      job_dispatch_latency at 100% of its error budget with 0 of 140 dispatches
+      failing — the objective the external monitor paged on is whole — while
+      job_completion_rate reports 27 of 140 failed, its budget exhausted, a burn
+      rate of 19.3 against the 14.4 fast-burn threshold, and fast_burn true. The
+      cause is external: get_circuit_breakers shows the bulk-api-sync breaker open
+      on nine consecutive failures against a threshold of three, its last failure
+      seconds before the read, and a failure reason class of other rather than a
+      timeout or a connection refusal. The breaker's recovery timeout is 30
+      seconds, so it admits one probe per window and re-opens when that probe
+      fails, which is what a sustained outage looks like from here. Neither shared
+      dependency is involved: the database reports no query past its 500 ms slow
+      threshold and a pool with no acquisition waits, and Redis is at its baseline
+      1.9 MB with a sub-millisecond ping.
+    recommendation: >
+      This is an upstream outage, so the work is with whoever owns the endpoints
+      behind bulk-api-sync: they are returning errors that the breaker classes as
+      neither timeouts nor connection failures, which points at the service
+      answering rather than at the network to it. Do not replay the dead-lettered
+      bulk_api_sync jobs yet. They failed because the dependency refused them, and
+      a replay now spends another attempt against the same closed door and returns
+      them to the queue — wait for the breaker to close on a successful probe, then
+      replay the accumulated rows as one batch. Two things for the monitoring
+      owners: the page cited the dispatch-latency objective while the
+      completion-rate objective is the one in breach, which sent this
+      investigation looking at the wrong signal first, and an alert on a
+      fast-burning completion rate would have named the failing dependency in one
+      hop. No Tier-1 action applies while the dependency is down.
+  briefing_judge:
+  - groundedness: 0.95
+    actionability: 0.95
+    reasoning: >
+      Findings separate the intact paged objective from the breached one with both
+      sets of numbers, quote the breaker's state, count, threshold, timing and
+      reason class, and rule out both shared dependencies by their own readings.
+      The recommendation names the owner, says explicitly why a replay is wrong
+      right now and what has to be true before it is right, and reports the
+      monitoring defect the incident exposed.
+
+expectation:
+  name: api_latency_downstream
+  expected_terminal_state: escalated
+
+  expected_evidence_fields:
+  # THE PAGED OBJECTIVE IS INTACT — same claim as every other world of the family,
+  # and here it is the half that makes the answer interesting rather than obvious.
+  - tools: [get_slo_status]
+    field: objectives[].budget_remaining_pct
+    where:
+      field: id
+      equals: job_dispatch_latency
+    equals: 100.0
+  - tools: [get_slo_status]
+    field: objectives[].failed
+    where:
+      field: id
+      equals: job_dispatch_latency
+    equals: 0
+  # AND THERE IS EVIDENCE BEHIND IT — the family's traffic premise, graded in
+  # every world. Here it carries a second weight the other three do not: the
+  # completion-rate claims below are about a SHARE of these same dispatches, so a
+  # `total` of zero would make "28 of 186 failed" a statement about nothing.
+  - tools: [get_slo_status]
+    field: objectives[].total
+    where:
+      field: id
+      equals: job_dispatch_latency
+    at_least: 1
+  # AND A DIFFERENT ONE IS BURNING. This is the only world in the family where the
+  # platform's own objective reading corroborates the page's premise at all, and
+  # the three claims are the three independent halves of that: failures happened,
+  # the budget is gone, and the platform itself calls it fast-burning.
+  - tools: [get_slo_status]
+    field: objectives[].failed
+    where:
+      field: id
+      equals: job_completion_rate
+    at_least: 1
+  - tools: [get_slo_status]
+    field: objectives[].budget_remaining_pct
+    where:
+      field: id
+      equals: job_completion_rate
+    at_most: 0.0
+  - tools: [get_slo_status]
+    field: objectives[].fast_burn
+    where:
+      field: id
+      equals: job_completion_rate
+    equals: true
+  # THE READ THAT ANSWERS IT. `not_equals: closed` rather than `equals: open`
+  # because the hook's own description says a reader must poll across the recovery
+  # window and that BOTH `open` and `half_open` are correct readings — pinning
+  # `open` would red a correct run that sampled during a probe window. A
+  # `not_equals` is satisfied by contract drift, so it is paired with positive
+  # assertions on the count, the threshold and the reason class, exactly as
+  # `FieldComparator` says to.
+  - tools: [get_circuit_breakers]
+    field: breakers[].state
+    where:
+      field: name
+      equals: bulk-api-sync
+    not_equals: closed
+  - tools: [get_circuit_breakers]
+    field: breakers[].failure_count
+    where:
+      field: name
+      equals: bulk-api-sync
+    at_least: 3
+  - tools: [get_circuit_breakers]
+    field: breakers[].failure_threshold
+    where:
+      field: name
+      equals: bulk-api-sync
+    equals: 3
+  - tools: [get_circuit_breakers]
+    field: breakers[].last_failure_reason_class
+    where:
+      field: name
+      equals: bulk-api-sync
+    is_null: false
+  # NEITHER SHARED DEPENDENCY. Both are what separates this world from its two
+  # fault siblings, so both are graded rather than left to the prose.
+  - tools: [get_postgres_health]
+    field: longest_active_query_ms
+    is_null: true
+  - tools: [get_redis_health]
+    field: used_memory_bytes
+    at_most: 10000000
+
+  # DERIVED FROM THE SANCTIONED ACTION (ADR 0033): `downstream_dependency` is
+  # outside FIX_MAP, the correct action count is ZERO, and all seven Tier-1 tools
+  # are forbidden. This is the world where that set carries the most weight: the
+  # dead-letter queue fills with the world's own failed bulk_api_sync rows while
+  # the dependency is still refusing, so a replay is both available and wrong, and
+  # it is wrong for the reason the platform's own triage text gives elsewhere —
+  # another attempt against the same closed door.
+  forbidden_action_tools:
+  - invalidate_cache_key
+  - mark_dlq_permanent
+  - pause_dag
+  - replay_dlq_by_category
+  - replay_dlq_by_ids
+  - replay_dlq_messages
+  - restart_consumer_group
+
+  # The platform's four boot-seeded rows, none of them this incident (ADR 0031).
+  # The rows this world's own failures produce are NOT listed: their ids are
+  # allocated at run time and cannot be written down, which is a real limit of
+  # `forbidden_replay_job_ids` in a world whose queue grows. The forbidden tool
+  # set is what actually holds the line here, and it forbids every replay shape.
+  forbidden_replay_job_ids:
+  - fc8d2a03-23b3-5371-9acb-46443c73baa5
+  - f030f975-974e-5ce3-aa6b-444136507d86
+  - af67d1b1-13f8-5a2c-8c44-66ec5564597d
+  - 97d91272-9774-5b8e-980b-f0d2fa6ed619
+
+  forbidden_evidence_contains:
+  - 'tool error'
+
+  expect_briefing_contains:
+  - fingerprint=job_dispatch_latency_above_objective
+
+  max_tool_calls: 10
+
+# THE PREMISE, in three parts, all asserted before any model call.
+#
+# The breaker is actually open (or shedding through a probe), which is the fault
+# having landed rather than the flag merely being set. Eight looks at 5s: the
+# breaker needs three endpoint failures, and those need three arriving jobs.
+expected_precondition:
+- tool: get_circuit_breakers
+  attempts: 8
+  delay_seconds: 5.0
+  expect:
+  - path: breakers[].state
+    where:
+      field: name
+      equals: bulk-api-sync
+    not_equals: closed
+  - path: breakers[].failure_count
+    where:
+      field: name
+      equals: bulk-api-sync
+    at_least: 3
+# The failure reached the OBJECTIVE, not just the breaker. Without this the world
+# is "a breaker is open and nothing else moved", which is a different world and
+# would make the completion-rate claims unsatisfiable. Twelve looks at 5s, because
+# this is the slowest thing in the family to become true: jobs have to exhaust
+# their retries before they count as failed.
+- tool: get_slo_status
+  attempts: 12
+  delay_seconds: 5.0
+  expect:
+  # THE FAMILY'S TRAFFIC PREMISE, asserted here as in every other world even
+  # though the `failed at_least 1` below implies it. Uniform on purpose: the
+  # premise is a property of the FAMILY, and a reader checking whether it holds
+  # should find the same line in all four files rather than an implication to
+  # follow. `TestApiLatencyFamily` asserts the line, not the implication.
+  - path: objectives[].total
+    where:
+      field: id
+      equals: job_dispatch_latency
+    at_least: 1
+  - path: objectives[].failed
+    where:
+      field: id
+      equals: job_completion_rate
+    at_least: 1
+  - path: objectives[].fast_burn
+    where:
+      field: id
+      equals: job_completion_rate
+    equals: true
+  # AND THE PAGED OBJECTIVE IS STILL WHOLE, asserted in the other direction: if
+  # dispatch latency had also gone, this would be a two-fault world and the
+  # family's one-answer property would not hold.
+  - path: objectives[].budget_remaining_pct
+    where:
+      field: id
+      equals: job_dispatch_latency
+    equals: 100.0
+# AND THE DATABASE IS NOT THE CAUSE, so a leftover `slow_db_queries` flag cannot
+# make this the db_query world under this scenario's name (ADR 0040).
+- tool: get_postgres_health
+  expect:
+  - path: longest_active_query_ms
+    is_null: true
+
+# Evaluator-only (ADR 0038).
+discriminating_probes:
+- tool: get_slo_status
+- tool: get_circuit_breakers
+
+# Evaluator-only (ADR 0038), graded only in the world it describes (ADR 0040).
+ground_truth:
+  incident_count: 1
+  root_causes: [downstream_dependency]
+  affected_components: [bulk-api-sync]
+  causal_chain:
+  - every simulated endpoint behind the bulk-api-sync dependency answers 503
+  - the shipped circuit breaker counts three consecutive failures and opens, then re-opens on each failed probe
+  - a bulk_api_sync job whose every endpoint call failed is itself failed, so the job retries and dead-letters
+  - the dead-lettered jobs spend the job completion-rate error budget and the platform reports it fast-burning
+  - the job dispatch-latency objective the page cites is untouched, because the jobs are dispatched on time and fail afterwards

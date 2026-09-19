@@ -1,0 +1,349 @@
+{
+  "schema_version": 1,
+  "scenario": "api_latency_db_query",
+  "world": {
+    "label": "the live platform with `api_latency_db_query`'s fault plan seeded (1 hook(s): `slow_db_queries`), settled 5.0s, read under the read-scoped principal",
+    "live_mcp": true,
+    "chaos_seeded": true,
+    "chaos_hooks": [
+      "slow_db_queries"
+    ],
+    "settle_seconds": 5.0
+  },
+  "calls": [
+    {
+      "tool": "get_circuit_breakers",
+      "arguments": {},
+      "key": "get_circuit_breakers 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"measured_at\":\"2026-09-19T09:02:25.068830Z\",\"breakers\":[{\"name\":\"bulk-api-sync\",\"state\":\"closed\",\"failure_count\":0,\"failure_threshold\":3,\"recovery_timeout_s\":30.0,\"last_state_change_at\":\"2026-09-19T09:01:32.753272Z\",\"seconds_since_state_change\":52.316,\"last_failure_at\":\"2026-09-19T09:01:01.390098Z\",\"last_failure_reason_class\":\"other\",\"recorded_at\":\"2026-09-19T09:01:32.753295Z\",\"reported_age_s\":52.316}],\"total\":1,\"unknown_reason\":null}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-09-19T09:02:25.064542+00:00",
+      "completed_at": "2026-09-19T09:02:25.071788+00:00",
+      "duration_ms": 7,
+      "origins": [
+        "evidence claim: `get_circuit_breakers.breakers[].state` equals 'closed' — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "get_deploy_history",
+      "arguments": {
+        "environment": null,
+        "limit": 20
+      },
+      "key": "get_deploy_history 90888d4cf190562bc38b4cd4c9183c2f643847d44602498c9db191ac6201db65",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-19T07:01:04.543932Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-09-19T06:01:04.543932Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-09-19T03:01:04.543932Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-09-18T15:01:04.543932Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-09-18T11:01:04.543932Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-09-17T09:01:04.543932Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-09-19T09:02:25.077921+00:00",
+      "completed_at": "2026-09-19T09:02:25.085464+00:00",
+      "duration_ms": 7,
+      "origins": [
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "get_outbox_status",
+      "arguments": {},
+      "key": "get_outbox_status 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"measured_at\":\"2026-09-19T09:02:25.086747Z\",\"unpublished_count\":1,\"oldest_unpublished_at\":\"2026-09-19T09:02:24.804182Z\",\"oldest_unpublished_age_s\":0.283,\"newest_unpublished_at\":\"2026-09-19T09:02:24.804182Z\",\"newest_unpublished_age_s\":0.283,\"unpublished_past_attempt_limit\":0,\"last_publish_at\":\"2026-09-19T09:02:24.557311Z\",\"seconds_since_last_publish\":0.529,\"relay_last_tick_at\":\"2026-09-19T09:02:24.555746Z\",\"relay_heartbeat_age_s\":0.531,\"relay_heartbeat_known\":true,\"relay_heartbeat_unknown_reason\":null,\"relay_tick_interval_s\":1.0}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-09-19T09:02:25.085509+00:00",
+      "completed_at": "2026-09-19T09:02:25.095093+00:00",
+      "duration_ms": 9,
+      "origins": [
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "get_postgres_health",
+      "arguments": {},
+      "key": "get_postgres_health 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"ok\":true,\"ping_latency_ms\":0.61,\"active_connections\":3,\"dialect\":\"postgresql\",\"error\":null,\"pool_size\":5,\"pool_checked_out\":1,\"pool_overflow\":0,\"pool_max_overflow\":10,\"pool_wait_timeouts_1m\":0,\"pool_stats_unknown_reason\":null,\"longest_active_query_ms\":1008.784,\"active_queries_over_slow_threshold\":1,\"slow_query_threshold_ms\":500.0,\"p95_query_ms_1m\":null,\"slow_query_count_1m\":null,\"query_stats_unknown_reason\":\"the PostgreSQL extension that records per-query timings is not installed on this database, so no per-query timing history exists\"}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-09-19T09:02:25.056434+00:00",
+      "completed_at": "2026-09-19T09:02:25.064498+00:00",
+      "duration_ms": 8,
+      "origins": [
+        "evidence claim: `get_postgres_health.longest_active_query_ms` at_least 1000.0 — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "evidence claim: `get_postgres_health.active_queries_over_slow_threshold` at_least 1.0 — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "evidence claim: `get_postgres_health.slow_query_threshold_ms` equals 500.0 — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "evidence claim: `get_postgres_health.pool_wait_timeouts_1m` equals 0 — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "evidence claim: `get_postgres_health.pool_checked_out` at_most 2.0 — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "evidence claim: `get_postgres_health.p95_query_ms_1m` is_null True — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "expected_precondition: get_postgres_health must show longest_active_query_ms at_least 1000.0; active_queries_over_slow_threshold at_least 1.0; slow_query_threshold_ms equals 500.0; pool_wait_timeouts_1m at_most 0.0",
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "get_redis_health",
+      "arguments": {},
+      "key": "get_redis_health 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"ok\":true,\"ping_latency_ms\":0.172,\"connected_clients\":14,\"used_memory_bytes\":2309792,\"used_memory_human\":\"2.20M\",\"keyspace_hits\":64095,\"keyspace_misses\":1118233,\"error\":null}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-09-19T09:02:25.071819+00:00",
+      "completed_at": "2026-09-19T09:02:25.077886+00:00",
+      "duration_ms": 6,
+      "origins": [
+        "evidence claim: `get_redis_health.used_memory_bytes` at_most 10000000.0 — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "get_slo_status",
+      "arguments": {},
+      "key": "get_slo_status 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"measured_at\":\"2026-09-19T09:02:25.053300Z\",\"objectives\":[{\"id\":\"job_completion_rate\",\"name\":\"Job completion rate\",\"description\":\"Share of jobs that reach COMPLETED rather than DEAD_LETTER. Cancelled jobs are excluded from the denominator.\",\"target\":0.99,\"window_hours\":24,\"total\":143,\"failed\":0,\"current_success_rate\":1.0,\"budget_remaining_pct\":100.0,\"burn_rate\":0.0,\"healthy\":true,\"fast_burn\":false},{\"id\":\"job_dispatch_latency\",\"name\":\"Job dispatch latency\",\"description\":\"Share of dispatched jobs that left PENDING within 30 seconds of creation. Waiting jobs (held by the DAG) and cancelled jobs (saga rollback, or a stranded dependency parent) are excluded — a job nobody decided to dispatch has no dispatch latency.\",\"target\":0.95,\"window_hours\":24,\"total\":143,\"failed\":0,\"current_success_rate\":1.0,\"budget_remaining_pct\":100.0,\"burn_rate\":0.0,\"healthy\":true,\"fast_burn\":false}],\"total\":2,\"fast_burn_threshold\":14.4}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-09-19T09:02:25.047910+00:00",
+      "completed_at": "2026-09-19T09:02:25.056374+00:00",
+      "duration_ms": 8,
+      "origins": [
+        "evidence claim: `get_slo_status.objectives[].budget_remaining_pct` equals 100.0 — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "evidence claim: `get_slo_status.objectives[].failed` equals 0 — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "evidence claim: `get_slo_status.objectives[].total` at_least 1.0 — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "expected_precondition: get_slo_status must show objectives[].total at_least 1.0; objectives[].budget_remaining_pct equals 100.0",
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "list_active_alerts",
+      "arguments": {
+        "limit": 50,
+        "severity": null
+      },
+      "key": "list_active_alerts 1a18583a9f5a31fdbbaca25c3c3ef4a780199ae2808165311be14e9c631b3453",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"total\":3,\"alerts\":[{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-09-19T08:53:04.550182Z\",\"extra_data\":null},{\"id\":\"c6c4e180-f625-53c2-85c2-2d505fec61e5\",\"severity\":\"warning\",\"source\":\"dlq\",\"title\":\"DLQ backlog growing\",\"description\":\"3 send_email jobs dead-lettered in last hour.\",\"fired_at\":\"2026-09-19T08:46:04.550182Z\",\"extra_data\":null},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-09-19T08:36:04.550182Z\",\"extra_data\":null}]}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-09-19T09:02:25.095136+00:00",
+      "completed_at": "2026-09-19T09:02:25.102825+00:00",
+      "duration_ms": 7,
+      "origins": [
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "list_audit_events",
+      "arguments": {
+        "action": null,
+        "action_prefix": null,
+        "limit": 50,
+        "principal_type": null
+      },
+      "key": "list_audit_events f175a5040f1c7a5d173162493cecf76e45237f98df6fb15af5343a4100cceaeb",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"total\":12916,\"events\":[{\"id\":\"6f201575-9f41-4c6b-88f6-913ebc825ef3\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"list_active_alerts\",\"request_id\":\"b8c7ff3b-8830-4ea7-ac3e-5f2126b59624\",\"created_at\":\"2026-09-19T09:02:25.096505Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{\"limit\":50,\"severity\":null},\"tool_name\":\"list_active_alerts\",\"latency_ms\":2.011,\"scope_used\":\"incidents:read\"}},{\"id\":\"0ea6f3b2-dd9f-439a-9339-8323a07a0a46\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_outbox_status\",\"request_id\":\"5596f127-ae30-4296-8910-b5309af4eecd\",\"created_at\":\"2026-09-19T09:02:25.086747Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{},\"tool_name\":\"get_outbox_status\",\"latency_ms\":3.865,\"scope_used\":\"telemetry:read\"}},{\"id\":\"4b3b0ecc-ab07-4611-b402-e04863f6338f\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_deploy_history\",\"request_id\":\"ec24d687-ff74-49e1-8fc3-3337c5a08610\",\"created_at\":\"2026-09-19T09:02:25.079047Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{\"limit\":20,\"environment\":null},\"tool_name\":\"get_deploy_history\",\"latency_ms\":2.229,\"scope_used\":\"telemetry:read\"}},{\"id\":\"d4cb18b1-6d3c-4ccd-b0cc-82f3d8c00ce0\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_redis_health\",\"request_id\":\"9896c802-66f8-4228-87ed-f906e859572e\",\"created_at\":\"2026-09-19T09:02:25.072869Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{},\"tool_name\":\"get_redis_health\",\"latency_ms\":1.126,\"scope_used\":\"telemetry:read\"}},{\"id\":\"dffb721a-f976-4f26-a0b4-b3203a543efb\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_circuit_breakers\",\"request_id\":\"37955220-d07d-47d1-82f7-56ced36e0ac4\",\"created_at\":\"2026-09-19T09:02:25.065730Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{},\"tool_name\":\"get_circuit_breakers\",\"latency_ms\":2.022,\"scope_used\":\"telemetry:read\"}},{\"id\":\"cd0e6e01-8886-47af-9c02-acb8527020b4\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_postgres_health\",\"request_id\":\"345c36a2-d86f-409d-af2a-98001dd34f90\",\"created_at\":\"2026-09-19T09:02:25.057764Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{},\"tool_name\":\"get_postgres_health\",\"latency_ms\":2.544,\"scope_used\":\"telemetry:read\"}},{\"id\":\"c13acb6e-d024-4cf1-89c3-9e337c85bf69\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_slo_status\",\"request_id\":\"4d9ef86d-2845-4a78-a343-7290061280c1\",\"created_at\":\"2026-09-19T09:02:25.049312Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{},\"tool_name\":\"get_slo_status\",\"latency_ms\":2.988,\"scope_used\":\"telemetry:read\"}},{\"id\":\"d60d47f8-6d67-45c0-b798-af039a4254ab\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_slo_status\",\"request_id\":\"aaf7ec57-6725-4a7d-9e17-9c046b8dd559\",\"created_at\":\"2026-09-19T09:02:25.039171Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{},\"tool_name\":\"get_slo_status\",\"latency_ms\":3.865,\"scope_used\":\"telemetry:read\"}},{\"id\":\"ff7b603e-d091-4755-bd11-233aedc7476b\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_postgres_health\",\"request_id\":\"20538f46-a6a5-40dc-9a0d-ab8a3a496fef\",\"created_at\":\"2026-09-19T09:02:25.011247Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{},\"tool_name\":\"get_postgres_health\",\"latency_ms\":5.783,\"scope_used\":\"telemetry:read\"}},{\"id\":\"44d5cd44-5a01-4549-b5f3-c43b2279ad01\",\"action\":\"job.completed\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-09-19T09:02:24.804182Z\",\"extra_data\":{\"type\":\"bulk_api_sync\",\"retry_count\":0}},{\"id\":\"40c07ce7-e149-4129-be5c-aae93bbcc803\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"b08f4b95-0857-4f2f-999c-75223093d236\",\"request_id\":null,\"created_at\":\"2026-09-19T09:02:24.588385Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-37f0d8a9315ff0f63fc5db4ec4388ea6-e6c7b35569df69df-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"702eda94-6379-4967-84cf-f95132b3db75\"}},{\"id\":\"d0fe167f-1bfb-4381-9d43-55e6c4fb7f6f\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_consumer_lag\",\"request_id\":\"7fd96654-372b-4c5f-841e-be3c937e68f3\",\"created_at\":\"2026-09-19T09:02:24.076956Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{\"consumer_group\":\"worker-dispatcher\"},\"tool_name\":\"get_consumer_lag\",\"latency_ms\":1.344,\"scope_used\":\"telemetry:read\"}},{\"id\":\"186c817f-75bf-4350-bdbc-80530e64a57e\",\"action\":\"job.created\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"b08f4b95-0857-4f2f-999c-75223093d236\",\"request_id\":\"702eda94-6379-4967-84cf-f95132b3db75\",\"created_at\":\"2026-09-19T09:02:24.056810Z\",\"extra_data\":{\"type\":\"bulk_api_sync\",\"priority\":0,\"dependencies\":[],\"initial_status\":\"pending\"}},{\"id\":\"012855dc-0296-4e1e-86e4-538df1af9ad0\",\"action\":\"event.job.completed\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"c86c7495-3fa8-4c95-a381-d0df0bf0e7ce\",\"request_id\":null,\"created_at\":\"2026-09-19T09:02:22.527283Z\",\"extra_data\":{\"result\":{\"total\":5,\"errors\":0,\"results\":[{\"status\":\"ok\",\"endpoint\":2,\"records_synced\":349},{\"status\":\"ok\",\"endpoint\":4,\"records_synced\":168},{\"status\":\"ok\",\"endpoint\":1,\"records_synced\":191},{\"status\":\"ok\",\"endpoint\":3,\"records_synced\":416},{\"status\":\"ok\",\"endpoint\":0,\"records_synced\":58}],\"endpoints_synced\":5},\"job_type\":\"bulk_api_sync\",\"retry_count\":0}},{\"id\":\"44fcb14c-9916-4db1-b068-9e1d44ebf318\",\"action\":\"job.completed\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-09-19T09:02:21.740162Z\",\"extra_data\":{\"type\":\"bulk_api_sync\",\"retry_count\":0}},{\"id\":\"08fb6009-9210-426f-b1e1-43dd05e88211\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"c86c7495-3fa8-4c95-a381-d0df0bf0e7ce\",\"request_id\":null,\"created_at\":\"2026-09-19T09:02:21.446980Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-cae117dcf28e6feb981aa708ad786f5d-00eef651561ee691-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"b90af875-2d9c-4666-b0c5-aae8648e3290\"}},{\"id\":\"8712e756-1577-4ec5-829f-379d9d96a581\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_consumer_lag\",\"request_id\":\"81d014ee-862c-4a88-84d9-477e93c9aad6\",\"created_at\":\"2026-09-19T09:02:21.040471Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{\"consumer_group\":\"worker-dispatcher\"},\"tool_name\":\"get_consumer_lag\",\"latency_ms\":1.168,\"scope_used\":\"telemetry:read\"}},{\"id\":\"07994706-ef56-4530-9840-b9cfda937282\",\"action\":\"job.created\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"c86c7495-3fa8-4c95-a381-d0df0bf0e7ce\",\"request_id\":\"b90af875-2d9c-4666-b0c5-aae8648e3290\",\"created_at\":\"2026-09-19T09:02:21.020812Z\",\"extra_data\":{\"type\":\"bulk_api_sync\",\"priority\":0,\"dependencies\":[],\"initial_status\":\"pending\"}},{\"id\":\"9dd12536-6c61-440a-9e18-7cbd89093ead\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"list_dlq_messages\",\"request_id\":\"2269e9f3-00ec-42b7-bca2-7e14a49a9ebf\",\"created_at\":\"2026-09-19T09:02:19.962492Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{},\"tool_name\":\"list_dlq_messages\",\"latency_ms\":9.953,\"scope_used\":\"incidents:read\"}},{\"id\":\"c2c8cfbb-6eeb-41ab-b5bd-fdc5b1264dcf\",\"action\":\"event.job.completed\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"99cc1e59-1da6-4ce9-9bde-eccfaed58d26\",\"request_id\":null,\"created_at\":\"2026-09-19T09:02:19.369145Z\",\"extra_data\":{\"result\":{\"total\":5,\"errors\":0,\"results\":[{\"status\":\"ok\",\"endpoint\":2,\"records_synced\":275},{\"status\":\"ok\",\"endpoint\":0,\"records_synced\":192},{\"status\":\"ok\",\"endpoint\":1,\"records_synced\":399},{\"status\":\"ok\",\"endpoint\":3,\"records_synced\":459},{\"status\":\"ok\",\"endpoint\":4,\"records_synced\":276}],\"endpoints_synced\":5},\"job_type\":\"bulk_api_sync\",\"retry_count\":0}},{\"id\":\"eea08020-287d-4f2a-8d5c-b0fbf3d8091a\",\"action\":\"job.completed\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-09-19T09:02:18.580039Z\",\"extra_data\":{\"type\":\"bulk_api_sync\",\"retry_count\":0}},{\"id\":\"05d3884e-9084-43e0-ae17-b614dea3e187\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"99cc1e59-1da6-4ce9-9bde-eccfaed58d26\",\"request_id\":null,\"created_at\":\"2026-09-19T09:02:18.311903Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-4b70efcdf015eb8bc48920bc3f56960a-260c8433f52cfaef-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"0023a727-9e53-48f3-9ae5-337026ae8ae0\"}},{\"id\":\"443da381-8e16-4ad7-b9b8-ea0cf0cc8930\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_consumer_lag\",\"request_id\":\"11190aac-e728-4fc0-a58c-0030d720ac32\",\"created_at\":\"2026-09-19T09:02:17.995964Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{\"consumer_group\":\"worker-dispatcher\"},\"tool_name\":\"get_consumer_lag\",\"latency_ms\":1.208,\"scope_used\":\"telemetry:read\"}},{\"id\":\"92ecdc01-0edd-4c5a-a1d1-d9f1aad2d955\",\"action\":\"job.created\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"99cc1e59-1da6-4ce9-9bde-eccfaed58d26\",\"request_id\":\"0023a727-9e53-48f3-9ae5-337026ae8ae0\",\"created_at\":\"2026-09-19T09:02:17.982926Z\",\"extra_data\":{\"type\":\"bulk_api_sync\",\"priority\":0,\"dependencies\":[],\"initial_status\":\"pending\"}},{\"id\":\"73283912-4347-4e21-a51d-e3c7d0cb753f\",\"action\":\"event.job.completed\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"d0e67a1a-adff-4b60-bf89-5003955d3711\",\"request_id\":null,\"created_at\":\"2026-09-19T09:02:16.251827Z\",\"extra_data\":{\"result\":{\"total\":5,\"errors\":0,\"results\":[{\"status\":\"ok\",\"endpoint\":1,\"records_synced\":177},{\"status\":\"ok\",\"endpoint\":3,\"records_synced\":97},{\"status\":\"ok\",\"endpoint\":4,\"records_synced\":79},{\"status\":\"ok\",\"endpoint\":2,\"records_synced\":144},{\"status\":\"ok\",\"endpoint\":0,\"records_synced\":37}],\"endpoints_synced\":5},\"job_type\":\"bulk_api_sync\",\"retry_count\":0}},{\"id\":\"1458b229-0ad0-4364-aa66-795c77b794ec\",\"action\":\"job.completed\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-09-19T09:02:15.473387Z\",\"extra_data\":{\"type\":\"bulk_api_sync\",\"retry_count\":0}},{\"id\":\"9ac764dc-8f9f-40cb-ae28-57f12bfb795b\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"d0e67a1a-adff-4b60-bf89-5003955d3711\",\"request_id\":null,\"created_at\":\"2026-09-19T09:02:15.191681Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-ec782f6e6890e5ab65866a1bfd2d70bc-78a8ebeff9f9532f-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"166e2071-f976-4dbf-bd2b-ec270e969ba7\"}},{\"id\":\"a8426990-e3b1-4e3e-b74d-b5c98a9381e7\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_consumer_lag\",\"request_id\":\"33222142-1a9a-4637-a425-1dfd93058b64\",\"created_at\":\"2026-09-19T09:02:14.970075Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{\"consumer_group\":\"worker-dispatcher\"},\"tool_name\":\"get_consumer_lag\",\"latency_ms\":1.075,\"scope_used\":\"telemetry:read\"}},{\"id\":\"009c3e8f-d20a-425e-b990-302b69ef398e\",\"action\":\"job.created\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"d0e67a1a-adff-4b60-bf89-5003955d3711\",\"request_id\":\"166e2071-f976-4dbf-bd2b-ec270e969ba7\",\"created_at\":\"2026-09-19T09:02:14.952297Z\",\"extra_data\":{\"type\":\"bulk_api_sync\",\"priority\":0,\"dependencies\":[],\"initial_status\":\"pending\"}},{\"id\":\"96fa9b94-603f-4646-b557-50ece5b3f87f\",\"action\":\"event.job.completed\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"89d52b59-788c-499a-ae1c-5d911d03e482\",\"request_id\":null,\"created_at\":\"2026-09-19T09:02:13.149911Z\",\"extra_data\":{\"result\":{\"total\":5,\"errors\":1,\"results\":[{\"status\":\"ok\",\"endpoint\":1,\"records_synced\":106},{\"status\":\"ok\",\"endpoint\":2,\"records_synced\":240},{\"status\":\"ok\",\"endpoint\":4,\"records_synced\":143},{\"code\":503,\"status\":\"error\",\"endpoint\":3},{\"status\":\"ok\",\"endpoint\":0,\"records_synced\":288}],\"endpoints_synced\":4},\"job_type\":\"bulk_api_sync\",\"retry_count\":0}},{\"id\":\"690a422c-ac81-4762-a175-bf69faacc136\",\"action\":\"job.completed\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-09-19T09:02:12.411072Z\",\"extra_data\":{\"type\":\"bulk_api_sync\",\"retry_count\":0}},{\"id\":\"8a335c9f-f30e-42af-a7bf-48b9121bd212\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"89d52b59-788c-499a-ae1c-5d911d03e482\",\"request_id\":null,\"created_at\":\"2026-09-19T09:02:12.084069Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-b024b19788f676c5e51528fe878ee23a-94b216b7c4f01b0a-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"899c1749-c6f6-4e05-bc99-68bf9d698322\"}},{\"id\":\"60861866-106d-43f7-9ca8-ff7ee41461fa\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_consumer_lag\",\"request_id\":\"1e9c0cf8-f0a0-4d13-995d-49002ea520c8\",\"created_at\":\"2026-09-19T09:02:11.924562Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{\"consumer_group\":\"worker-dispatcher\"},\"tool_name\":\"get_consumer_lag\",\"latency_ms\":1.028,\"scope_used\":\"telemetry:read\"}},{\"id\":\"35dc4e30-b889-4071-b898-bd274aa9c1da\",\"action\":\"job.created\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"89d52b59-788c-499a-ae1c-5d911d03e482\",\"request_id\":\"899c1749-c6f6-4e05-bc99-68bf9d698322\",\"created_at\":\"2026-09-19T09:02:11.907257Z\",\"extra_data\":{\"type\":\"bulk_api_sync\",\"priority\":0,\"dependencies\":[],\"initial_status\":\"pending\"}},{\"id\":\"68f9746a-7f2e-48dc-887a-61423fdc2958\",\"action\":\"event.job.completed\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"6b0ffa87-7f76-40aa-a115-4326a2203430\",\"request_id\":null,\"created_at\":\"2026-09-19T09:02:10.033236Z\",\"extra_data\":{\"result\":{\"total\":5,\"errors\":1,\"results\":[{\"status\":\"ok\",\"endpoint\":4,\"records_synced\":89},{\"status\":\"ok\",\"endpoint\":0,\"records_synced\":325},{\"code\":503,\"status\":\"error\",\"endpoint\":2},{\"status\":\"ok\",\"endpoint\":1,\"records_synced\":328},{\"status\":\"ok\",\"endpoint\":3,\"records_synced\":295}],\"endpoints_synced\":4},\"job_type\":\"bulk_api_sync\",\"retry_count\":0}},{\"id\":\"868168c5-0241-4412-a394-ad8f2a70c2b7\",\"action\":\"job.completed\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-09-19T09:02:09.179915Z\",\"extra_data\":{\"type\":\"bulk_api_sync\",\"retry_count\":0}},{\"id\":\"ae1edc2e-4962-4640-be70-88d7808681c6\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"6b0ffa87-7f76-40aa-a115-4326a2203430\",\"request_id\":null,\"created_at\":\"2026-09-19T09:02:08.973902Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-0700e39ae1501e392b5be411599dd93f-99da3c6749823ffa-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"bd02d973-da71-442a-9e36-4e972cf82a1b\"}},{\"id\":\"0ab2da03-d345-4843-b22e-6c71adba0c63\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_consumer_lag\",\"request_id\":\"c98e61ab-f919-49e6-bc7f-7db4cb6326db\",\"created_at\":\"2026-09-19T09:02:08.881352Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{\"consumer_group\":\"worker-dispatcher\"},\"tool_name\":\"get_consumer_lag\",\"latency_ms\":1.43,\"scope_used\":\"telemetry:read\"}},{\"id\":\"5f47fd9e-fb25-4d32-99fa-136338261459\",\"action\":\"job.created\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"6b0ffa87-7f76-40aa-a115-4326a2203430\",\"request_id\":\"bd02d973-da71-442a-9e36-4e972cf82a1b\",\"created_at\":\"2026-09-19T09:02:08.861783Z\",\"extra_data\":{\"type\":\"bulk_api_sync\",\"priority\":0,\"dependencies\":[],\"initial_status\":\"pending\"}},{\"id\":\"2a40961b-1cd4-4385-ab11-a7efbf5e6cfb\",\"action\":\"event.job.completed\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"47eeb721-e30a-4223-ba92-bc2768f80942\",\"request_id\":null,\"created_at\":\"2026-09-19T09:02:06.948310Z\",\"extra_data\":{\"result\":{\"total\":5,\"errors\":0,\"results\":[{\"status\":\"ok\",\"endpoint\":3,\"records_synced\":278},{\"status\":\"ok\",\"endpoint\":2,\"records_synced\":420},{\"status\":\"ok\",\"endpoint\":0,\"records_synced\":65},{\"status\":\"ok\",\"endpoint\":1,\"records_synced\":244},{\"status\":\"ok\",\"endpoint\":4,\"records_synced\":420}],\"endpoints_synced\":5},\"job_type\":\"bulk_api_sync\",\"retry_count\":0}},{\"id\":\"f4d12284-3e5f-4efe-9303-378c8e42050a\",\"action\":\"job.completed\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-09-19T09:02:06.115027Z\",\"extra_data\":{\"type\":\"bulk_api_sync\",\"retry_count\":0}},{\"id\":\"8554bf9d-e215-4ef7-88e9-b15c5ebe7d6d\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"47eeb721-e30a-4223-ba92-bc2768f80942\",\"request_id\":null,\"created_at\":\"2026-09-19T09:02:05.883164Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-287a6cce17906a65429fea1aafc437d9-d6fd9fb8ac3c090f-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"996ca92e-bd65-440e-a230-76a7d609b115\"}},{\"id\":\"a62f1785-01ca-498b-84b9-59250ada55cf\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_consumer_lag\",\"request_id\":\"3350b9c0-9c85-4968-bf08-5633dbe6d0d9\",\"created_at\":\"2026-09-19T09:02:05.844572Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{\"consumer_group\":\"worker-dispatcher\"},\"tool_name\":\"get_consumer_lag\",\"latency_ms\":1.0,\"scope_used\":\"telemetry:read\"}},{\"id\":\"ebe815b6-54e8-40d4-93f6-6f6258993531\",\"action\":\"job.created\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"47eeb721-e30a-4223-ba92-bc2768f80942\",\"request_id\":\"996ca92e-bd65-440e-a230-76a7d609b115\",\"created_at\":\"2026-09-19T09:02:05.820695Z\",\"extra_data\":{\"type\":\"bulk_api_sync\",\"priority\":0,\"dependencies\":[],\"initial_status\":\"pending\"}},{\"id\":\"c7b15e9f-583c-4e46-ad7a-1c8b300eda27\",\"action\":\"event.job.completed\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"c96ef60a-87c7-4999-9eb1-70bf7bcc2b98\",\"request_id\":null,\"created_at\":\"2026-09-19T09:02:04.864372Z\",\"extra_data\":{\"result\":{\"total\":5,\"errors\":0,\"results\":[{\"status\":\"ok\",\"endpoint\":1,\"records_synced\":275},{\"status\":\"ok\",\"endpoint\":0,\"records_synced\":448},{\"status\":\"ok\",\"endpoint\":3,\"records_synced\":223},{\"status\":\"ok\",\"endpoint\":2,\"records_synced\":260},{\"status\":\"ok\",\"endpoint\":4,\"records_synced\":386}],\"endpoints_synced\":5},\"job_type\":\"bulk_api_sync\",\"retry_count\":0}},{\"id\":\"0fb80be0-c853-4efb-8061-7561a9f39e55\",\"action\":\"job.completed\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-09-19T09:02:04.113456Z\",\"extra_data\":{\"type\":\"bulk_api_sync\",\"retry_count\":0}},{\"id\":\"1446fc8f-f3fc-4e19-966d-75ffffa9d2fb\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"c96ef60a-87c7-4999-9eb1-70bf7bcc2b98\",\"request_id\":null,\"created_at\":\"2026-09-19T09:02:03.808816Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-a211efa3e351f5c2715d3f46dbd9084a-2db021c1bcf79db6-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"11645cb9-46bf-4dd9-baef-3126f4da0330\"}},{\"id\":\"c75c7f19-f1ac-4300-a00c-0e04e2a0d602\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_consumer_lag\",\"request_id\":\"e8e5b5ef-d2c5-4596-a136-afee867f0f4e\",\"created_at\":\"2026-09-19T09:02:02.795649Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{\"consumer_group\":\"worker-dispatcher\"},\"tool_name\":\"get_consumer_lag\",\"latency_ms\":1.172,\"scope_used\":\"telemetry:read\"}},{\"id\":\"e4513556-4835-4975-b5a3-055c358ef220\",\"action\":\"job.created\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"c96ef60a-87c7-4999-9eb1-70bf7bcc2b98\",\"request_id\":\"11645cb9-46bf-4dd9-baef-3126f4da0330\",\"created_at\":\"2026-09-19T09:02:02.781219Z\",\"extra_data\":{\"type\":\"bulk_api_sync\",\"priority\":0,\"dependencies\":[],\"initial_status\":\"pending\"}},{\"id\":\"cb23f04b-8804-42ca-8896-e863eaca646d\",\"action\":\"event.job.completed\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"fe269e8b-054b-41a6-bfed-d7713ebff229\",\"request_id\":null,\"created_at\":\"2026-09-19T09:02:01.747199Z\",\"extra_data\":{\"result\":{\"total\":5,\"errors\":0,\"results\":[{\"status\":\"ok\",\"endpoint\":3,\"records_synced\":366},{\"status\":\"ok\",\"endpoint\":4,\"records_synced\":333},{\"status\":\"ok\",\"endpoint\":1,\"records_synced\":263},{\"status\":\"ok\",\"endpoint\":0,\"records_synced\":274},{\"status\":\"ok\",\"endpoint\":2,\"records_synced\":378}],\"endpoints_synced\":5},\"job_type\":\"bulk_api_sync\",\"retry_count\":0}}]}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-09-19T09:02:25.102861+00:00",
+      "completed_at": "2026-09-19T09:02:25.120855+00:00",
+      "duration_ms": 17,
+      "origins": [
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "list_dlq_messages",
+      "arguments": {
+        "job_type": null,
+        "limit": 50,
+        "offset": 0,
+        "remediation_hint": null
+      },
+      "key": "list_dlq_messages a3408295961d541f66d7a266e2fd218ad6fe7ffe40d6912daeea90ce2215348d",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"total\":4,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"remediation_hint\":\"replay_safe\",\"created_at\":\"2026-09-19T08:53:04.543928Z\",\"dead_lettered_at\":\"2026-09-19T08:53:10.543928Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-09-19T08:53:10.543928Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"remediation_hint\":\"human_required\",\"created_at\":\"2026-09-19T08:49:04.543928Z\",\"dead_lettered_at\":\"2026-09-19T08:49:26.543928Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-09-19T08:49:26.543928Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"remediation_hint\":\"wait_and_replay\",\"created_at\":\"2026-09-19T08:36:04.543928Z\",\"dead_lettered_at\":\"2026-09-19T08:36:38.543928Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-09-19T08:36:38.543928Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"remediation_hint\":\"wait_and_replay\",\"created_at\":\"2026-09-19T08:21:04.543928Z\",\"dead_lettered_at\":\"2026-09-19T08:21:20.543928Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-09-19T08:21:20.543928Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"extra\":null}]}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-09-19T09:02:25.120900+00:00",
+      "completed_at": "2026-09-19T09:02:25.129983+00:00",
+      "duration_ms": 9,
+      "origins": [
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "list_incidents",
+      "arguments": {
+        "include_resolved": false,
+        "limit": 50,
+        "severity": null,
+        "source": null
+      },
+      "key": "list_incidents 02a360ce275b4d4d73ac4305d9b6c8f429a4619fc02fda559a3dc9653a8d7f28",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"total\":3,\"incidents\":[{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-09-19T08:53:04.550182Z\",\"resolved_at\":null,\"is_active\":true},{\"id\":\"c6c4e180-f625-53c2-85c2-2d505fec61e5\",\"severity\":\"warning\",\"source\":\"dlq\",\"title\":\"DLQ backlog growing\",\"description\":\"3 send_email jobs dead-lettered in last hour.\",\"fired_at\":\"2026-09-19T08:46:04.550182Z\",\"resolved_at\":null,\"is_active\":true},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-09-19T08:36:04.550182Z\",\"resolved_at\":null,\"is_active\":true}]}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-09-19T09:02:25.130017+00:00",
+      "completed_at": "2026-09-19T09:02:25.136999+00:00",
+      "duration_ms": 6,
+      "origins": [
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "search_traces",
+      "arguments": {
+        "job_type": null,
+        "limit": 50,
+        "since_hours": null,
+        "status": null
+      },
+      "key": "search_traces 3a189ce082f91f98d976a60f8eabe08012dcfe7d5dac2a2b87c6ce8be3848735",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"matches\":[{\"trace_id\":\"702eda94-6379-4967-84cf-f95132b3db75\",\"job_id\":\"b08f4b95-0857-4f2f-999c-75223093d236\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:02:24.056810Z\"},{\"trace_id\":\"b90af875-2d9c-4666-b0c5-aae8648e3290\",\"job_id\":\"c86c7495-3fa8-4c95-a381-d0df0bf0e7ce\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:02:21.020812Z\"},{\"trace_id\":\"0023a727-9e53-48f3-9ae5-337026ae8ae0\",\"job_id\":\"99cc1e59-1da6-4ce9-9bde-eccfaed58d26\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:02:17.982926Z\"},{\"trace_id\":\"166e2071-f976-4dbf-bd2b-ec270e969ba7\",\"job_id\":\"d0e67a1a-adff-4b60-bf89-5003955d3711\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:02:14.952297Z\"},{\"trace_id\":\"899c1749-c6f6-4e05-bc99-68bf9d698322\",\"job_id\":\"89d52b59-788c-499a-ae1c-5d911d03e482\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:02:11.907257Z\"},{\"trace_id\":\"bd02d973-da71-442a-9e36-4e972cf82a1b\",\"job_id\":\"6b0ffa87-7f76-40aa-a115-4326a2203430\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:02:08.861783Z\"},{\"trace_id\":\"996ca92e-bd65-440e-a230-76a7d609b115\",\"job_id\":\"47eeb721-e30a-4223-ba92-bc2768f80942\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:02:05.820695Z\"},{\"trace_id\":\"11645cb9-46bf-4dd9-baef-3126f4da0330\",\"job_id\":\"c96ef60a-87c7-4999-9eb1-70bf7bcc2b98\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:02:02.781219Z\"},{\"trace_id\":\"f8f74bb7-536e-45e0-b9b6-b639b92f8320\",\"job_id\":\"fe269e8b-054b-41a6-bfed-d7713ebff229\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:59.744984Z\"},{\"trace_id\":\"69707e14-bbc3-45dd-868a-94447c8048e0\",\"job_id\":\"592be91e-0e33-41e5-95df-a70959fa6594\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:56.716622Z\"},{\"trace_id\":\"0b5ab903-afa1-4b8b-b2a9-b1d759df36de\",\"job_id\":\"e0905090-80da-412d-81a5-36cb0fb89581\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:53.689346Z\"},{\"trace_id\":\"40c48116-a258-42cd-866a-ebac7837a3d7\",\"job_id\":\"e0bc974d-e78f-440a-a2bf-196a81872fa5\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:50.656113Z\"},{\"trace_id\":\"ea9527ab-fb52-429d-b2e1-eff09f266dfa\",\"job_id\":\"43319513-434f-44e3-a491-95f2b9980559\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:47.607722Z\"},{\"trace_id\":\"0cff2101-721e-439f-baa7-7c4921bd3b38\",\"job_id\":\"18d1dcff-ca8f-4431-978e-19d1f6fcab74\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:44.554146Z\"},{\"trace_id\":\"0ff54b9a-d12f-4759-b761-86597041117c\",\"job_id\":\"0ab9632d-246e-4a79-b7a2-7f1b9e6a1f96\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:41.499144Z\"},{\"trace_id\":\"077c6778-ffbe-4f58-833d-1544975a4870\",\"job_id\":\"ae6eebf1-5ec9-4c34-94d8-faaddb7e7fd8\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:38.433205Z\"},{\"trace_id\":\"cdb77db8-9d79-43b5-9609-c7036443eae0\",\"job_id\":\"e3a83f3c-b0ec-4b0c-990b-986e2535bf19\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:35.390451Z\"},{\"trace_id\":\"7dfd4efe-b355-4e99-9a06-2569088784b8\",\"job_id\":\"f2a79b47-469f-48b6-9f72-5503095ee2d9\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:32.345517Z\"},{\"trace_id\":\"cf2c81a5-295f-4503-abee-8e03f7593750\",\"job_id\":\"a9cac9a5-cd1d-4eca-a7d9-4d9385271f44\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:29.303113Z\"},{\"trace_id\":\"975117f8-2cfa-47ca-af37-52a823085399\",\"job_id\":\"22b58745-90a7-4df1-9213-1383a1857df9\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:26.262124Z\"},{\"trace_id\":\"e59bf077-4176-4294-b212-918639e4ff1b\",\"job_id\":\"5cd6606d-b4fb-428f-90f6-1f03c9f59e78\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:23.226009Z\"},{\"trace_id\":\"45dc9d76-1044-43f5-a391-e4f2aa1e47f7\",\"job_id\":\"1b9e213c-c6c3-49f1-963a-0e22e8cb6da1\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:20.192965Z\"},{\"trace_id\":\"ebc1ea64-887a-4cb4-b5e8-0e925f7156fb\",\"job_id\":\"7c39402f-3892-475a-a969-95eb368d5928\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:17.157824Z\"},{\"trace_id\":\"8f1bfce0-3111-4e2b-812b-b542bf251d67\",\"job_id\":\"73920d91-6d92-4e98-868f-49bc133c46db\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:14.113363Z\"},{\"trace_id\":\"6ea23a5a-fe33-489c-b1ed-ef5d925ade7d\",\"job_id\":\"4615375e-fe09-44b1-8257-0577956a97b2\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:11.069469Z\"},{\"trace_id\":\"5b8d3388-079f-4c17-9b4b-fced6ad3d12b\",\"job_id\":\"d8b77a48-e747-4feb-a789-fa31c58df07f\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:08.026941Z\"},{\"trace_id\":\"5009a5f0-8321-4280-a3c7-15699c2209f0\",\"job_id\":\"263263a1-c944-4472-b5ca-6d631195afa1\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:04.984886Z\"},{\"trace_id\":\"54e70f58-d571-418b-b671-591339e64701\",\"job_id\":\"6c01278b-6550-4c07-b1fd-b2a479c2dabb\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:01:01.946829Z\"},{\"trace_id\":\"3cd36f85-9191-4e9e-ab3e-41cc4cb0c789\",\"job_id\":\"c4506571-4674-4e58-b7d7-3b6a1b64961a\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:00:58.904267Z\"},{\"trace_id\":\"e898cec7-755d-43ba-9892-4efc8da8e665\",\"job_id\":\"86bb2fae-1c1e-4be6-bae0-bad7ec1ae936\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-09-19T09:00:55.867569Z\"},{\"trace_id\":\"31820b36-d386-4a10-b909-9debcfdf1656\",\"job_id\":\"8cc006f8-b5c4-42df-975b-634f0c41ccc8\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:52.819572Z\"},{\"trace_id\":\"7f67fe8b-83f5-40c0-a1d7-2c63c1a223f5\",\"job_id\":\"398a2079-cfa9-4f4f-a132-acbfcee0b87f\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:49.732584Z\"},{\"trace_id\":\"53c10533-495d-4646-8a96-996fd4eaf4dc\",\"job_id\":\"e7d13a8d-65e4-459d-9b16-3785cbaf824f\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:46.685778Z\"},{\"trace_id\":\"e00ed154-1ecc-41a8-9137-f6e6f6166ad4\",\"job_id\":\"89e1ecb2-b087-448d-a3c6-ee5af1a18eaf\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:43.657421Z\"},{\"trace_id\":\"37744960-794d-4e88-ae49-330538db0c2f\",\"job_id\":\"973630d1-e661-4a87-a3c0-eee23bacb122\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:40.611435Z\"},{\"trace_id\":\"d02574a7-5641-41e3-9d50-4f8845fed9df\",\"job_id\":\"73fe9cd4-74b1-469a-9c37-cddabb5bf9bb\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:37.561968Z\"},{\"trace_id\":\"7f132212-c894-47fc-80ce-e43580da34bc\",\"job_id\":\"42f23e5c-c5b7-4f77-893c-864fb42620c5\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:34.511320Z\"},{\"trace_id\":\"4de6fc90-60fb-4e33-a9fa-cfb3c14f3944\",\"job_id\":\"4e1afd41-9da8-4133-8f08-2125991400dd\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:31.449366Z\"},{\"trace_id\":\"a39815ab-437f-4e15-a596-10c84c5e0af9\",\"job_id\":\"7d9aab2f-0ae1-4a20-9ac2-7a6059929644\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:28.388508Z\"},{\"trace_id\":\"a4e8795b-5106-4ada-a72c-50750afe2095\",\"job_id\":\"c625bc31-3ce8-4108-a2bf-767edc0e3015\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:25.347968Z\"},{\"trace_id\":\"0c451a9b-8bd9-4959-83c4-036ef1e8190c\",\"job_id\":\"80553903-395a-46e7-b2de-e2552921a523\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:22.265139Z\"},{\"trace_id\":\"5ec585f3-f1a3-4036-b48e-87f906718ae3\",\"job_id\":\"e9c86bca-5346-4960-8782-77e9ff123754\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:19.218843Z\"},{\"trace_id\":\"e0de2ee2-a055-4267-9a22-9b1e2530b96e\",\"job_id\":\"6f7b3b52-17cf-425d-ad6f-aa3a687703ab\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:16.170387Z\"},{\"trace_id\":\"68b40d10-8755-44a3-988f-557ac7a42aeb\",\"job_id\":\"47fffacf-6080-4379-be54-44909d5a6c46\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:13.113746Z\"},{\"trace_id\":\"1dcc238f-a8d4-4138-a599-29ce71b24168\",\"job_id\":\"beca8aa9-3731-4e6d-8742-7efce2909dab\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:10.047892Z\"},{\"trace_id\":\"13528845-3ab7-49f8-b918-eba5f0e116ce\",\"job_id\":\"09fb6c13-ed59-4187-ba7c-0b3a72598d73\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:06.985383Z\"},{\"trace_id\":\"daa13191-eda1-48b7-b83c-7c34ee991d39\",\"job_id\":\"71878259-4ea5-4a55-acb8-eee81f166923\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:03.925401Z\"},{\"trace_id\":\"b183184f-fcb8-4d99-9a05-48ab0a5f1dae\",\"job_id\":\"ae21b016-4a03-4960-8d1d-e57f0c753ba3\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T09:00:00.867384Z\"},{\"trace_id\":\"e38d6701-dfdf-428d-9f9b-24c9010d35a8\",\"job_id\":\"bf654eae-9e1d-4579-9001-44047545abf9\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T08:59:57.826398Z\"},{\"trace_id\":\"dd2a969a-5e13-40d0-9de1-ea108638d9b9\",\"job_id\":\"b525494a-c337-441a-abc8-7bc3134f4cc8\",\"job_type\":\"bulk_api_sync\",\"status\":\"cancelled\",\"created_at\":\"2026-09-19T08:59:54.778648Z\"}]}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-09-19T09:02:25.137030+00:00",
+      "completed_at": "2026-09-19T09:02:25.146390+00:00",
+      "duration_ms": 9,
+      "origins": [
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    }
+  ],
+  "failures": [],
+  "notes": [
+    "The alert names no resource in ALERT_SUBJECT_PROBES, so there is no subject probe to derive. Legitimate and common — a DLQ-depth alert names a condition, not a resource (see `alert_subject`).",
+    "The scenario declares no `expected_action_tools`, so no source-row read and no verify probe are derivable. Read-only and escalate-only scenarios look like this.",
+    "The recorded-world sweep could not fill an argument for `get_cache_key_info`, `get_consumer_lag`, `get_dag_state`, `get_incident`, `get_trace` — this scenario names no resource of the kind those tools require, so they are NOT recorded and a replayed agent calling one gets a `not_recorded` miss. Expected for tools irrelevant to the scenario; give the scenario the value it grades on if one of them is not."
+  ],
+  "findings": [
+    {
+      "kind": "forbidden value present in the world (informational)",
+      "subject": "forbidden_replay_job_ids: `fc8d2a03-23b3-5371-9acb-46443c73baa5`",
+      "detail": "read back by list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None). Expected for most scenarios — it is the furniture the agent must not touch. Confirm the agent has an honest way to tell it apart from the thing it IS supposed to act on."
+    },
+    {
+      "kind": "forbidden value present in the world (informational)",
+      "subject": "forbidden_replay_job_ids: `f030f975-974e-5ce3-aa6b-444136507d86`",
+      "detail": "read back by list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None). Expected for most scenarios — it is the furniture the agent must not touch. Confirm the agent has an honest way to tell it apart from the thing it IS supposed to act on."
+    },
+    {
+      "kind": "forbidden value present in the world (informational)",
+      "subject": "forbidden_replay_job_ids: `af67d1b1-13f8-5a2c-8c44-66ec5564597d`",
+      "detail": "read back by list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None). Expected for most scenarios — it is the furniture the agent must not touch. Confirm the agent has an honest way to tell it apart from the thing it IS supposed to act on."
+    },
+    {
+      "kind": "forbidden value present in the world (informational)",
+      "subject": "forbidden_replay_job_ids: `97d91272-9774-5b8e-980b-f0d2fa6ed619`",
+      "detail": "read back by list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None). Expected for most scenarios — it is the furniture the agent must not touch. Confirm the agent has an honest way to tell it apart from the thing it IS supposed to act on."
+    },
+    {
+      "kind": "forbidden value absent from the world (informational)",
+      "subject": "forbidden_evidence_contains: `tool error`",
+      "detail": "no read output contains it, so the assertion guarding it cannot fire in this world. Not wrong — just not measured by the run you are about to buy."
+    },
+    {
+      "kind": "forbidden value absent from the world (informational)",
+      "subject": "forbidden_action_tools: `invalidate_cache_key`",
+      "detail": "no read output contains it, so the assertion guarding it cannot fire in this world. Not wrong — just not measured by the run you are about to buy."
+    },
+    {
+      "kind": "forbidden value absent from the world (informational)",
+      "subject": "forbidden_action_tools: `mark_dlq_permanent`",
+      "detail": "no read output contains it, so the assertion guarding it cannot fire in this world. Not wrong — just not measured by the run you are about to buy."
+    },
+    {
+      "kind": "forbidden value absent from the world (informational)",
+      "subject": "forbidden_action_tools: `pause_dag`",
+      "detail": "no read output contains it, so the assertion guarding it cannot fire in this world. Not wrong — just not measured by the run you are about to buy."
+    },
+    {
+      "kind": "forbidden value absent from the world (informational)",
+      "subject": "forbidden_action_tools: `replay_dlq_by_category`",
+      "detail": "no read output contains it, so the assertion guarding it cannot fire in this world. Not wrong — just not measured by the run you are about to buy."
+    },
+    {
+      "kind": "forbidden value absent from the world (informational)",
+      "subject": "forbidden_action_tools: `replay_dlq_by_ids`",
+      "detail": "no read output contains it, so the assertion guarding it cannot fire in this world. Not wrong — just not measured by the run you are about to buy."
+    },
+    {
+      "kind": "forbidden value absent from the world (informational)",
+      "subject": "forbidden_action_tools: `replay_dlq_messages`",
+      "detail": "no read output contains it, so the assertion guarding it cannot fire in this world. Not wrong — just not measured by the run you are about to buy."
+    },
+    {
+      "kind": "forbidden value absent from the world (informational)",
+      "subject": "forbidden_action_tools: `restart_consumer_group`",
+      "detail": "no read output contains it, so the assertion guarding it cannot fire in this world. Not wrong — just not measured by the run you are about to buy."
+    }
+  ],
+  "provenance": {
+    "recorded_at": "2026-09-19T09:02:19.979931+00:00",
+    "invocation_id": "790323cfac09",
+    "commander_head": "ceee91f",
+    "platform_mcp_url": "http://localhost:8001/mcp",
+    "read_principal": "PLATFORM_SMOKE_TOKEN (read-scoped)"
+  }
+}

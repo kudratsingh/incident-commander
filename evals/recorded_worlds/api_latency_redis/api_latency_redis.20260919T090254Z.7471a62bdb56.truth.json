@@ -1,0 +1,39 @@
+{
+  "absent_reason": null,
+  "applies": true,
+  "ground_truth": {
+    "affected_components": [
+      "redis"
+    ],
+    "causal_chain": [
+      "30,000 keys of 8 KiB each are written to Redis, taking the footprint from under 2 MiB to 298 MiB",
+      "Redis stays up and answers in under a millisecond, so no job fails and no objective moves",
+      "the pressure is visible only in the dependency's own reading, which is the whole evidence",
+      "the paged job dispatch-latency objective is whole, so the page is not confirmed"
+    ],
+    "incident_count": 1,
+    "root_causes": [
+      "redis_saturation"
+    ]
+  },
+  "provenance": {
+    "commander_head": "ceee91f",
+    "invocation_id": "7471a62bdb56",
+    "platform_mcp_url": "http://localhost:8001/mcp",
+    "read_principal": "PLATFORM_SMOKE_TOKEN (read-scoped)",
+    "recorded_at": "2026-09-19T09:02:54.105407+00:00"
+  },
+  "recording": "api_latency_redis.20260919T090254Z.7471a62bdb56.json",
+  "scenario": "api_latency_redis",
+  "schema_version": 1,
+  "why_this_file_is_separate": "ADR 0038: the wall around the answer key is structural. The replay client loads the recording through `recorder.load_recording`, which takes one path and has no way to reach this file; `RecordedWorld` forbids extra keys, so a ground truth cannot ride inside a recording either. Pinned by tests/unit/test_recorder.py.",
+  "world": {
+    "chaos_hooks": [
+      "saturate_redis"
+    ],
+    "chaos_seeded": true,
+    "label": "the live platform with `api_latency_redis`'s fault plan seeded (1 hook(s): `saturate_redis`), settled 5.0s, read under the read-scoped principal",
+    "live_mcp": true,
+    "settle_seconds": 5.0
+  }
+}

@@ -145,7 +145,7 @@ is a documented substring override, and neither path spends or shares state).
 
 Trace files land in `evals/traces/*.jsonl`; the formatter turns them into readable stepwise trajectories in `evals/reports/human/<scenario>/*.txt` — one folder per scenario, and one new file per run, not one per scenario per run (WO-R3-257). `evals/reports/README.md` maps the whole folder.
 
-**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 58 (~44 live: 30 read-only, 14 remediation) is ~$2.48 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
+**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 62 (~48 live: 34 read-only, 14 remediation) is ~$2.68 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
 
 **Side effects:** remediation scenarios fire real Tier-1 mutations against the platform. Idempotent — repeat runs with the same `(incident_id, tool, args)` hash return the cached result. But the *first* run of a scenario does apply changes.
 
@@ -1344,6 +1344,21 @@ with v0.6.11, the first pin to make an existing tool's output field required):
    answer is "local volume", never "delete these lines". The tell that it is
    something else is a non-empty `new` list — the one half of this check that
    cannot be wrong about the ledger in the shrinking direction.
+
+   One more way the stale half lies, found by WP-8.5 and worth knowing before you
+   believe a long list: **a rate-limited probe makes ledger rows look fixed.** The
+   MCP server rate-limits per principal (`MCP_RATE_LIMIT_PER_PRINCIPAL`, 120/min),
+   `make test-drift`'s walk makes roughly fifty calls against the running
+   platform, and a session that has been
+   probing the world by hand will trip it. When it does, the calls that got a 429
+   contribute no drift, so every ledger row those calls would have matched is
+   reported as "no longer drifts". Seen as **42 stale entries** on one run and
+   **1** on the next, minutes apart, with the same ledger and the same stack — the
+   42 was a rate limit and the 1 is the real, documented local-volume row. The tell
+   is a stale list spanning scenarios you did not touch, and the fix is to wait a
+   minute and run it again. `evals/fixture_probe.py::assert_seeded` catches the
+   case where the FIRST call is refused (`UnseededPlatformError: HTTP 429`); a
+   refusal partway through is silent.
 5. Re-pin the planner's tool listing, which is the OTHER prompt the agent
    reads:
    ```bash

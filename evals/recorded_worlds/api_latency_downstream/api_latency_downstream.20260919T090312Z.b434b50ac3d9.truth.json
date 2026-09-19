@@ -1,0 +1,40 @@
+{
+  "absent_reason": null,
+  "applies": true,
+  "ground_truth": {
+    "affected_components": [
+      "bulk-api-sync"
+    ],
+    "causal_chain": [
+      "every simulated endpoint behind the bulk-api-sync dependency answers 503",
+      "the shipped circuit breaker counts three consecutive failures and opens, then re-opens on each failed probe",
+      "a bulk_api_sync job whose every endpoint call failed is itself failed, so the job retries and dead-letters",
+      "the dead-lettered jobs spend the job completion-rate error budget and the platform reports it fast-burning",
+      "the job dispatch-latency objective the page cites is untouched, because the jobs are dispatched on time and fail afterwards"
+    ],
+    "incident_count": 1,
+    "root_causes": [
+      "downstream_dependency"
+    ]
+  },
+  "provenance": {
+    "commander_head": "ceee91f",
+    "invocation_id": "b434b50ac3d9",
+    "platform_mcp_url": "http://localhost:8001/mcp",
+    "read_principal": "PLATFORM_SMOKE_TOKEN (read-scoped)",
+    "recorded_at": "2026-09-19T09:03:12.782836+00:00"
+  },
+  "recording": "api_latency_downstream.20260919T090312Z.b434b50ac3d9.json",
+  "scenario": "api_latency_downstream",
+  "schema_version": 1,
+  "why_this_file_is_separate": "ADR 0038: the wall around the answer key is structural. The replay client loads the recording through `recorder.load_recording`, which takes one path and has no way to reach this file; `RecordedWorld` forbids extra keys, so a ground truth cannot ride inside a recording either. Pinned by tests/unit/test_recorder.py.",
+  "world": {
+    "chaos_hooks": [
+      "degrade_downstream"
+    ],
+    "chaos_seeded": true,
+    "label": "the live platform with `api_latency_downstream`'s fault plan seeded (1 hook(s): `degrade_downstream`), settled 90.0s, read under the read-scoped principal",
+    "live_mcp": true,
+    "settle_seconds": 90.0
+  }
+}

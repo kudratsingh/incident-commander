@@ -1,4 +1,4 @@
-.PHONY: traffic demo-destroy help setup check lint types test test-unit test-integration test-contract test-drift test-idempotency fixture-drift fixture-drift-bless test-e2e eval eval-live eval-smoke eval-reg eval-reset world-dossier world-record world-drift trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
+.PHONY: traffic demo-destroy demo-live help setup check lint types test test-unit test-integration test-contract test-drift test-idempotency fixture-drift fixture-drift-bless test-e2e eval eval-live eval-smoke eval-reg eval-reset world-dossier world-record world-drift trace-report chaos-help chaos-kill-consumer chaos-poison chaos-saturate chaos-latency chaos-bad-deploy chaos-restore chaos-bad-data-job demo demo-down bootstrap-token snapshot baseline clean
 
 # Make does not read .env on its own — only the Python side does, via
 # dotenv. Without this include, a make-level var like PLATFORM_COMPOSE
@@ -83,7 +83,11 @@ help:
 	@echo "  eval-reg         full offline eval + regression gate vs baseline (refuses ONLY=)"
 	@echo "  eval-reset       clear leftover chaos state between live scenarios;"
 	@echo "                   also clears the chaos teardown latch on success"
-	@echo "  demo             compose up only (platform pinned by digest); no eval runs"
+	@echo "  demo             compose up only (platform + console pinned by digest); no eval runs"
+	@echo "  demo-live        drive the recorded demo as six printed steps;"
+	@echo "                   MODE=consumer_outage|dlq_backlog REQUIRED. FREE by default"
+	@echo "                   (real platform, real fault, scripted planner). AUTO=1 skips the"
+	@echo "                   pauses. LIVE=1 is the PAID take and also needs YES_SPEND=1"
 	@echo "  demo-down        stop demo compose services"
 	@echo "  bootstrap-token  mint a service-account token against a running platform"
 	@echo "  snapshot         regenerate contracts/platform-tools.snapshot.json from live"
@@ -681,6 +685,32 @@ demo-destroy:
 	@echo "the audit log used to grade safety. Re-run with CONFIRM=1 to proceed."
 	@test "$(CONFIRM)" = "1" || exit 2
 	docker compose -f demo/compose.yml down -v
+
+# The live demo's step machine (ADR 0068). MODE is required and closed:
+#   make demo-live MODE=consumer_outage
+#   make demo-live MODE=dlq_backlog AUTO=1          # rehearsal, no Enter between steps
+#   make demo-live MODE=… LIVE=1 YES_SPEND=1        # the one PAID take
+#
+# The default path is FREE: the real platform, the real hooks, the real Tier-1 action,
+# and a scripted planner. LIVE=1 alone REFUSES (exit 2) — spending needs YES_SPEND=1 as
+# well, and the owner's explicit yes for that scenario, every time (PROTOCOL step 0).
+# YES_SPEND is deliberately NOT set by any target here: a make target that could grant
+# its own spending authorization is the thing the two-flag gate exists to prevent.
+#
+# Same parse-time refusal shape as eval-live's ONLY guard, so a missing MODE fails before
+# anything is started, seeded or spent rather than inside the script.
+ifndef MODE
+demo-live:
+	$(error 'make demo-live' needs a MODE: make demo-live MODE=consumer_outage|dlq_backlog)
+else
+# PYTHONPATH=. because the script imports `evals` (the scenario loader, the seeding
+# path, the artifact resolver). Only `incident_commander` is installed from src/; every
+# other script that reaches into `evals` carries the same prefix. Without it the machine
+# dies at step 3 with ModuleNotFoundError, AFTER the countdown has run on camera.
+demo-live:
+	PYTHONPATH=. uv run python scripts/demo_live.py --mode $(MODE) \
+		$(if $(LIVE),--live) $(if $(YES_SPEND),--yes-spend) $(if $(AUTO),--auto)
+endif
 
 bootstrap-token:
 	uv run python scripts/bootstrap_agent_token.py

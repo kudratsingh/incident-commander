@@ -13,6 +13,8 @@ One line per document, so you can find the right one without opening five.
 | [eval-methodology.md](eval-methodology.md) | How the harness measures: scenario taxonomy, grader design, metric definitions, judge pinning, the regression gate |
 | [reward-spec.md](reward-spec.md) | Reward v0: its five components, where each number comes from, the ordering proofs that make "always escalate" and "probe nothing, escalate" strictly dominated, and what it refuses to score |
 | [runbook.md](runbook.md) | Operating the agent: live-eval procedure, bumping the pinned platform image, rollbacks, the kill switch |
+| [demo-runbook.md](demo-runbook.md) | Recording the live demo: the six steps `make demo-live` prints, what to say per phase, the measured timings, the one paid take, and the runner gap that stops a free scripted-planner run reaching the real platform |
+| [demo/README.md](demo/README.md) | Where the recording goes, and the decision to make before committing a video to this repo |
 
 ## Decisions
 

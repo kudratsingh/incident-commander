@@ -81,6 +81,13 @@ from incident_commander.agent.remediation import (
     make_llm_verify,
     make_remediate,
 )
+from incident_commander.agent.run_reporting import (
+    ReportingCheckpointer,
+    RunReporter,
+)
+from incident_commander.agent.run_reporting import (
+    summarize as summarize_reporting,
+)
 from incident_commander.agent.search import SEARCH_IS_RECORDED_MODE_ONLY
 from incident_commander.agent.selection import SELECTOR_ROLE
 from incident_commander.agent.state import BudgetLedger, EvidenceEntry, IncidentState, RunState
@@ -1316,6 +1323,48 @@ def recorded_not_applicable(*, truncated: bool) -> dict[GradeDimension, str]:
     return reasons
 
 
+#: Namespace for deriving a run's reported id from its invocation id. A fixed constant, so
+#: the derivation is reproducible by anyone holding the invocation id and the scenario name.
+_RUN_ID_NAMESPACE: Final[uuid.UUID] = uuid.UUID("6f3f0f29-0d9e-5a1e-9a0a-1f1bd5a9a7c1")
+
+
+def _reporting_run_id(invocation_id: str, scenario: str) -> uuid.UUID:
+    """The ``run_id`` every report of one run shares (ADR 0068).
+
+    DERIVED, not random, and the reason is a small mismatch worth naming: the harness's
+    ``invocation_id`` is ``uuid4().hex[:12]`` — twelve hex characters, not a UUID — while
+    ``report_agent_run.run_id`` is typed ``format: uuid``. Sending the invocation id would
+    be refused at the first report and leave the console empty for a reason nobody could
+    see; sending a fresh ``uuid4()`` would work and leave the console record joinable to
+    nothing.
+
+    So it is a UUID5 over (invocation id, scenario), which is both valid and recomputable:
+    given the two facts an archive already records, an operator can derive the id the
+    console holds. ``make demo-live`` prints it. A run with no invocation id (a direct
+    ``run_scenario`` call) still gets a stable id from the scenario name alone.
+    """
+    return uuid.uuid5(_RUN_ID_NAMESPACE, f"{invocation_id}:{scenario}")
+
+
+def _briefing_prose(briefing: EscalationBriefing) -> str | None:
+    """The written-out half of the briefing, for the console's own prose slot.
+
+    ``findings`` and ``recommendation`` are the two strings the briefing writer fills
+    (``briefing_enrichment.py``); everything else in the briefing is deterministic and
+    travels as structure. ``None`` on an unenriched run, which is honest — there is no
+    prose, rather than an empty one.
+    """
+    parts = [
+        f"{label}: {text}"
+        for label, text in (
+            ("Findings", briefing.findings),
+            ("Recommendation", briefing.recommendation),
+        )
+        if text
+    ]
+    return "\n\n".join(parts) if parts else None
+
+
 def run_scenario(
     scenario: Scenario,
     settings: Settings,
@@ -1676,6 +1725,34 @@ def run_scenario(
     # Outside the try so a crash can still read what the run had spent when
     # it died — see ScenarioCrash.
     checkpointer = InMemoryCheckpointer()
+    # AGENT_RUN_REPORTING (ADR 0068): hang a reporter off the checkpoint seam so a human
+    # watching the console can follow the run. Three conditions, all of them structural:
+    #
+    #   * the setting is on (default false, and `make demo-live` is its only caller);
+    #   * there is a LIVE platform to report to — a canned run has no MCP endpoint, and a
+    #     RECORDED run must not touch one at all, which `live_mcp_available` already
+    #     answers for both cases;
+    #   * `live_mcp_client` is the client, i.e. the agent's own principal. Reports go under
+    #     the SAME token the agent acts with, never the chaos one: a report is the agent's
+    #     own statement about its own run, and the evaluator's principal making it would
+    #     be a different claim.
+    #
+    # The decorator writes the checkpoint first and reports second, so this cannot cost the
+    # run a checkpoint, and `run_to_completion` needed no change at all to gain telemetry.
+    reporter: RunReporter | None = None
+    reporting_checkpointer: ReportingCheckpointer | None = None
+    if settings.agent_run_reporting and live_mcp_available and live_mcp_client is not None:
+        reporter = RunReporter(
+            live_mcp_client,
+            # The run id the console keys on. `invocation_id` when the harness supplied
+            # one, so a console record joins the trace and the trajectory of the same run;
+            # a fresh uuid otherwise, because the id must exist before the first report.
+            run_id=_reporting_run_id(invocation_id, scenario.name),
+            # `run_label`, not `scenario`: the tool's input model forbids unknown fields,
+            # so the wrong spelling is a refused report rather than an ignored argument.
+            run_label=scenario.name,
+        )
+        reporting_checkpointer = ReportingCheckpointer(checkpointer, reporter)
     run: RunState | None = None
     # Same reason one field further: the post-terminal briefing charge is in no
     # checkpoint, so a crash after enrichment would reconcile a split containing that
@@ -1695,7 +1772,11 @@ def run_scenario(
             run,
             clock=tick,
             transitions=transitions,
-            checkpointer=checkpointer,
+            # The decorator when reporting is on, the bare store otherwise: the seam is
+            # the same object either way, so the loop has no idea which it got.
+            checkpointer=(
+                checkpointer if reporting_checkpointer is None else reporting_checkpointer
+            ),
         )
         trajectory = Trajectory(
             invocation_id=invocation_id,
@@ -1727,6 +1808,12 @@ def run_scenario(
                 # which is honest. ValidationError because ``CannedLLMClient``
                 # validates its own payloads and never reaches ``_parse``.
                 briefing_error = f"briefing enrichment failed: {err}"
+        if reporter is not None:
+            # AFTER enrichment, so the console shows the handoff a human would receive
+            # rather than the bare template — and outside the enrichment try, so a failed
+            # enrichment still reports the deterministic briefing, which is the load-bearing
+            # half. Once per run by the tool's own contract; fail-open like every report.
+            reporter.report_briefing(briefing, prose=_briefing_prose(briefing))
         # Which world this run was actually in (INC-003, ADR 0040). Only the runner
         # knows: ``grade()`` is a pure function of its arguments and must stay one.
         if replay_client is not None:
@@ -1810,6 +1897,11 @@ def run_scenario(
             live_mcp_client.close()
             live_mcp_client = None
 
+    if reporter is not None:
+        # Printed, not carried on the row: reporting says nothing about the agent's
+        # behaviour and belongs in no measurement (ADR 0068). It is operator output — the
+        # run id to open the console with, and a named reason when the console is empty.
+        print(f"  {summarize_reporting(reporter)}")
     # After the run, before the row that reports it: the outcome carries
     # ``teardown_error``, so the teardown has to have happened by now.
     teardown_error = _tear_down()

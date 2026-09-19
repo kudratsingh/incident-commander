@@ -1124,20 +1124,31 @@ For deeper introspection, the newest `evals/trajectories/<scenario>.<stamp>.<inv
 ## Contract-test target (constraint in force)
 
 **Run contract tests ONLY against the pinned demo stack.** The pin is
-v0.6.10 by index digest (`sha256:5ff8da7917aa…`) and the committed snapshot
-carries its **33** tools, blessed from that stack with the full 4-scope
+v0.6.11 by index digest (`sha256:08522d48ef07…`) and the committed snapshot
+carries its **37** tools, blessed from that stack with the full 4-scope
 service-account token. v0.6.9 moved the count by two at once —
 `get_outbox_status` (an agent-facing read tool) and `pause_control_loop` (a
-lab hook) — and v0.6.10 moved it by one, `pause_dag_chaos`, which is a lab
-hook as well, so the agent's own read surface is unchanged at 14 tools
-across both. v0.6.4 through v0.6.8 all held at 30 — they changed
-descriptions and added optional response fields, which is a contract delta
-with no count change, and is why the count is never the check. v0.6.10
-makes the same point from the other side: it also rewrote
-`create_stuck_dag`'s description and widened its input and output schemas,
-which the count cannot show.
+lab hook) — v0.6.10 moved it by one, `pause_dag_chaos`, a lab hook as well,
+and v0.6.11 moved it by four: two agent-facing read tools
+(`get_slo_status`, `get_circuit_breakers`) and two lab hooks
+(`saturate_db_pool`, `degrade_downstream`). So the agent's read surface held
+at 14 across the first two bumps and is **16** now. v0.6.4 through v0.6.8
+all held at 30 — they changed descriptions and added optional response
+fields, which is a contract delta with no count change, and is why the count
+is never the check. v0.6.10 makes the same point from the other side: it
+also rewrote `create_stuck_dag`'s description and widened its input and
+output schemas, which the count cannot show. v0.6.11 makes it twice more.
+Once loudly: `get_postgres_health` kept its name and gained TWELVE output
+properties, one of them (`slow_query_threshold_ms`) REQUIRED — the first pin
+to make an existing tool's output field required, which is a different kind
+of delta from an optional add and the reason the recorded-mode note below
+exists. Once quietly: `get_dag_state`'s nested `DagEdge` description moved,
+because the platform's comment-trim PR (plat #216) shortened that model's
+class docstring and a Pydantic docstring IS its schema description. A
+docs-only PR is a contract delta when it edits a model's docstring; read the
+mechanical diff, not the release notes.
 
-The rule outlives the v0.4.9 → v0.5.0 → v0.6.0 → … → v0.6.10 bumps that motivated it: platform
+The rule outlives the v0.4.9 → v0.5.0 → v0.6.0 → … → v0.6.11 bumps that motivated it: platform
 master moves ahead of whatever tag is pinned, so a contract check against
 a master-built dev stack can fail **by design**. That is master drift, not
 drift in the pinned artifact, and it must never trigger a snapshot rebless
@@ -1156,7 +1167,8 @@ and on `main` until the other half lands. Bless the new snapshot locally
 from the new pinned stack, then commit the compose bump, the snapshot, and
 any registry realignment together.
 
-Platform ships a new digest → five steps on the agent side:
+Platform ships a new digest → six steps on the agent side (the sixth arrived
+with v0.6.11, the first pin to make an existing tool's output field required):
 
 1. Update `demo/compose.yml` — **all THREE platform-code services**
    (`migrate`, `platform`, `api`) and the prose that names the version:
@@ -1251,6 +1263,22 @@ Platform ships a new digest → five steps on the agent side:
    has no fixture of a hook it cannot call — and v0.6.10 read `0 new` exactly
    so.
 
+   A pin that adds OUTPUT FIELDS to a tool a fixture already cans is the case
+   that does move the ledger, and v0.6.11 is the worked example.
+   `get_postgres_health` gained twelve, one canned fixture exists
+   (`postgres_slow`), and the walk read all twelve as `live_only_field` — the
+   key-set diff, before any value is compared. **Write all twelve into the
+   fixture, not just the required one.** An absent optional field parses as
+   `null`, `null` on these means UNKNOWN, and a reading of unknowns whose two
+   `*_unknown_reason` strings are also null is a response the platform cannot
+   produce: a world that contradicts itself, which is a fixture defect however
+   few lines it took. Ten of the twelve were what a reset stack answers and
+   needed no entry; the two that ARE the scenario's fault needed one each.
+   Then re-read the canned planner script beside it: two of its sentences
+   reasoned from what the OLD reading could not say ("no pool ceiling to
+   compare against"), and a pin that answers a question the script called
+   unanswerable leaves the script misdescribing its own world (WO-R3-261).
+
    **`0 new` and a red `make test-drift` are not a contradiction, and neither
    is a reason to bless.** The ledger is blessed against a FRESHLY SEEDED
    stack (its own `_blessed_against` says so), and a developer volume that has
@@ -1265,6 +1293,21 @@ Platform ships a new digest → five steps on the agent side:
    required check. Report it as a local-volume divergence and leave the ledger
    alone. The way to tell the two apart in one look: a real fixture defect
    shows up under `new`, a warm-volume artifact under `stale`.
+
+   v0.6.11 hit the mirror image and it is worth knowing that the two tools
+   disagree here. Its `make fixture-drift` read `0 new / 0 stale` while
+   `make test-drift` failed on ONE entry — the single `warm-stack` row, on
+   `remediate_stale_cache_success`'s `get_cache_key_info.size`. Both are
+   right about different questions. `classify()` exempts a `cold-stack` or
+   `warm-stack` entry from the stale check unless the stack it ran on IS that
+   kind, and `scripts/fixture_drift.py` never passes `stack_context`, so the
+   human-readable walk cannot see this class at all (it defaults to
+   "unknown"). The integration test does pass it. Our volume had taken a lag
+   measurement, so it read `warm` and the warm-scoped row was held to the
+   ratchet; CI's just-booted stack reads `cold` and the row is exempt, which
+   is why main is green. Same verdict as above — local-volume divergence,
+   leave the ledger alone — and one more reason not to decide a bless from
+   `make fixture-drift` alone.
 5. Re-pin the planner's tool listing, which is the OTHER prompt the agent
    reads:
    ```bash
@@ -1279,8 +1322,10 @@ Platform ships a new digest → five steps on the agent side:
    one on failure. Update the hash, and say in the PR body what moved: a new
    read tool, a tool the platform re-described, or a tier reclassification are
    the three legitimate causes. v0.6.9 grew it 16,689 → 21,420 characters on
-   one added read tool; v0.6.7 and v0.6.8 each moved a description with
-   nothing to notice it, which is why this step exists.
+   one added read tool; v0.6.11 grew it 21,420 → 28,323 on two added read
+   tools and one rewritten description — a third more tool text on every
+   planner call, and both causes at once; v0.6.7 and v0.6.8 each moved a
+   description with nothing to notice it, which is why this step exists.
 
    A hash that does NOT move is a result too, and on a lab-only pin it is the
    expected one: the block is assembled from the typed tool registry, which the
@@ -1289,6 +1334,41 @@ Platform ships a new digest → five steps on the agent side:
    21,420 characters. Say so in the PR body rather than leaving the step
    unmentioned: "the hash did not move, and here is why it should not have" is
    the difference between a checked step and a skipped one.
+
+   The lab-vocabulary assertion in that file is the one part to write
+   carefully, and v0.6.11 is the example. Its two hooks are `saturate_db_pool`
+   and `degrade_downstream`, and a filter on their word stems went red
+   immediately: `get_postgres_health`'s new description says "a saturated
+   connection pool", which is what an operator calls that fault. Assert the
+   HOOK NAMES. ADR 0012 withholds what caused the incident, not the English
+   for the state the reading exists to show, and a filter that forbids the
+   platform from naming a fault forbids the evidence with it.
+
+6. A pin that makes an EXISTING tool's output field REQUIRED breaks every
+   recording taken before it, permanently, and v0.6.11 is the first one to do
+   that (`get_postgres_health.slow_query_threshold_ms`). A recording is what
+   the platform said at its own pin; invariant 9 keeps every recording ever
+   made; `investigation._parse_output` validates every probe result against
+   today's model. So a recorded-mode run that probes that tool on an older
+   world escalates with "output parse failed" — a harness break wearing an
+   agent finding's clothes. Two things follow. Re-record the worlds before
+   reporting any recorded result from them (`make world-drift` says so itself),
+   and do not let the unit suite go quietly green over it: the waiver in
+   `tests/unit/test_recorded_client.py`
+   (`_FIELDS_A_LATER_PIN_MADE_REQUIRED`) admits that field by name, keeps
+   every other parse failure a failure, and is asserted to be non-empty so
+   deleting the debt means deleting the line.
+
+   `make world-drift` on all twelve committed recordings after this pin is
+   the cleanest possible reading of it: the eight whose premise a reset quiet
+   world satisfies each reported exactly 12 disagreements and every one of
+   them was one of the twelve new `get_postgres_health` fields as
+   `live_only_field` — nothing else in any world moved. The other four
+   (`jobs_not_progressing_dispatcher_stall`, `…_outbox_stall`,
+   `…_outbox_stall_deploy_noise`, `remediate_consumer_lag_success`) read
+   exit 7, "not compared", on an unmet precondition, which is the documented
+   case: a killed consumer builds no backlog and a paused relay holds no rows
+   unless something is arriving. Those need `make traffic`.
 
 ## Connection pool and run capacity ([ADR 0022](ADR/0022-connection-pool-sizing-and-the-run-concurrency-ceiling.md))
 

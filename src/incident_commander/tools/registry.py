@@ -178,12 +178,47 @@ class ListIncidentsOutput(BaseModel):
 
 
 class PostgresHealthOutput(BaseModel):
+    # v0.6.11 (plat #218, WO-R3-217) adds the twelve fields below. All of them
+    # are mirrored, in the snapshot's declaration order, because `extra="ignore"`
+    # drops an unmirrored field in silence (LESSONS 2026-09-08, cmd #206) —
+    # `tests/unit/test_registry_matches_snapshot.py` holds this schema to exact
+    # equality with the snapshot AND names any dropped field.
+    #
+    # `null` is unknown and `0` is a measurement, everywhere here. The two
+    # `*_unknown_reason` strings say which case a null is.
     model_config = ConfigDict(extra="ignore", frozen=True)
     ok: bool
     ping_latency_ms: float | None = None
     active_connections: int | None = None
     dialect: str
     error: str | None = None
+    # WHOSE POOL: the pool of the process that ANSWERED the call — the MCP
+    # service — and no other. The api service hosts the worker loops and has its
+    # own pool, so a pool exhausted there reads healthy here. ADR 0030 leaves
+    # that gap open deliberately; WO-R3-289 is the per-process gauge.
+    pool_size: int | None = None
+    # Includes the connection this very call holds, so an otherwise idle process
+    # reads 1, never 0. Only meaningful against `pool_size` + `pool_max_overflow`.
+    pool_checked_out: int | None = None
+    pool_overflow: int | None = None
+    pool_max_overflow: int | None = None
+    pool_wait_timeouts_1m: int | None = None
+    pool_stats_unknown_reason: str | None = None
+    # Read from the database server, so these cover every connection to it from
+    # every process — the pool fields' limit does not apply. The server's clock.
+    longest_active_query_ms: float | None = None
+    active_queries_over_slow_threshold: int | None = None
+    # Required (no default): the yardstick the count above is read against is
+    # never absent, and the platform offers no argument to change it.
+    slow_query_threshold_ms: float
+    # ALWAYS null in this release (O-28): there is no per-minute query history,
+    # and `query_stats_unknown_reason` says which of three cases applies.
+    # `longest_active_query_ms` + `active_queries_over_slow_threshold` are the
+    # live equivalents. Mirrored anyway — a field the agent may be shown must
+    # parse, and the day the platform can answer it, nothing here has to move.
+    p95_query_ms_1m: float | None = None
+    slow_query_count_1m: int | None = None
+    query_stats_unknown_reason: str | None = None
 
 
 class RedisHealthOutput(BaseModel):
@@ -230,6 +265,99 @@ class GetOutboxStatusOutput(BaseModel):
     relay_heartbeat_known: bool
     relay_heartbeat_unknown_reason: str | None = None
     relay_tick_interval_s: float
+
+
+# --- get_slo_status (read) -----------------------------------------------
+#
+# v0.6.11 (plat #218, WO-R3-217, platform ADR 0030). A READ tool under
+# `telemetry:read`, no arguments, surfacing the objective computation that had
+# exactly one caller before this — an admin REST route — so an alert saying an
+# objective was missed could be neither confirmed nor refuted from the tool
+# surface. No paging: every objective the platform declares comes back.
+#
+# Two readings that are easy to get backwards, both spelled out in the
+# platform's own descriptions: `total: 0` means nothing settled in the window,
+# which makes `current_success_rate: 1.0` and `healthy: true` an absence of
+# evidence rather than health; and `burn_rate: null` means the rate is
+# UNBOUNDED — above every threshold — not unknown.
+#
+# No class docstrings on these models: a docstring is the schema's
+# `description`, and this schema is a tool contract.
+
+
+class SloObjective(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    # Declaration order IS the snapshot's `required` order; the mirror test checks.
+    id: str
+    name: str
+    # The objective's own prose, not a field about this model. Shadows nothing:
+    # Pydantic treats it as an ordinary field.
+    description: str
+    target: float
+    window_hours: int
+    # Read this first: the denominator.
+    total: int
+    failed: int
+    current_success_rate: float
+    budget_remaining_pct: float
+    burn_rate: float | None = None
+    healthy: bool
+    fast_burn: bool
+
+
+class GetSloStatusOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    measured_at: datetime
+    objectives: list[SloObjective]
+    total: int
+    fast_burn_threshold: float
+
+
+# --- get_circuit_breakers (read) -----------------------------------------
+#
+# v0.6.11 (plat #218, WO-R3-217, platform ADR 0030). A READ tool under
+# `telemetry:read`, no arguments: whether the platform has stopped calling
+# something, which is the difference between "a downstream dependency is
+# failing" and "something inside this platform is wrong".
+#
+# Each breaker's state lives in Redis under `breaker:state:<name>` precisely so
+# a reader in ANOTHER process can see it — the registry is in-process and the
+# MCP server is its own process (platform ADR 0006), so the obvious
+# implementation reported every breaker closed. The timestamps are therefore on
+# the OWNING process's clock while `measured_at` is on the answering one's:
+# treat a second either way as skew.
+#
+# `reported_age_s` is not a heartbeat. A record is refreshed while calls flow,
+# so a large age on a closed breaker means nothing has called through it
+# lately. `unknown_reason` set with an empty `breakers` list is "could not
+# tell", which is not the same fact as "no breaker is open".
+
+
+class CircuitBreakerReading(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    # Declaration order IS the snapshot's `required` order; the mirror test checks.
+    name: str
+    # `closed` / `open` / `half_open`. A plain string on the platform side, so a
+    # Literal here would reject a state a later release adds.
+    state: str
+    failure_count: int
+    failure_threshold: int
+    recovery_timeout_s: float
+    last_state_change_at: datetime | None = None
+    seconds_since_state_change: float | None = None
+    last_failure_at: datetime | None = None
+    # A CLASS — `timeout`, `connection` or `other` — never the error text.
+    last_failure_reason_class: str | None = None
+    recorded_at: datetime
+    reported_age_s: float
+
+
+class GetCircuitBreakersOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    measured_at: datetime
+    breakers: list[CircuitBreakerReading]
+    total: int
+    unknown_reason: str | None = None
 
 
 # --- get_trace + search_traces ------------------------------------------
@@ -685,6 +813,8 @@ TOOL_REGISTRY: Final[dict[str, ToolSpec]] = {
     ),
     "get_incident": ToolSpec("get_incident", GetIncidentInput, GetIncidentOutput),
     "get_outbox_status": ToolSpec("get_outbox_status", _EmptyInput, GetOutboxStatusOutput),
+    "get_circuit_breakers": ToolSpec("get_circuit_breakers", _EmptyInput, GetCircuitBreakersOutput),
+    "get_slo_status": ToolSpec("get_slo_status", _EmptyInput, GetSloStatusOutput),
     "get_postgres_health": ToolSpec("get_postgres_health", _EmptyInput, PostgresHealthOutput),
     "get_redis_health": ToolSpec("get_redis_health", _EmptyInput, RedisHealthOutput),
     "get_trace": ToolSpec("get_trace", GetTraceInput, GetTraceOutput),

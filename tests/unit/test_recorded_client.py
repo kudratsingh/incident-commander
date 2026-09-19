@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Final, get_args, get_origin
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from evals import recorded_client, recorder
 from evals.fakes import CannedMCPClient
@@ -45,6 +45,19 @@ _RECORDED_AT: Final[datetime] = datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC)
 #: The moment it is replayed at — eleven days and a bit later, which is the
 #: point: a recording replayed the same afternoon hides every clock bug.
 _REPLAY_AT: Final[datetime] = datetime(2026, 9, 28, 9, 30, 0, tzinfo=UTC)
+
+#: Output fields a platform pin made REQUIRED after these recordings were taken, per
+#: tool. Only "missing" errors on these names are waived below. Append-only by
+#: construction: a recording is what the platform said at its own pin and invariant 9
+#: keeps every one ever made, so an earlier document is short of the field permanently
+#: and re-recording cannot change that. Each entry names the pin.
+#:
+#: * ``get_postgres_health.slow_query_threshold_ms`` — v0.6.11 (plat #218, WO-R3-217).
+#:   The yardstick for ``active_queries_over_slow_threshold``, declared with no default,
+#:   so required; absent from all twelve recordings this repo carries.
+_FIELDS_A_LATER_PIN_MADE_REQUIRED: Final[Mapping[str, frozenset[str]]] = {
+    "get_postgres_health": frozenset({"slow_query_threshold_ms"}),
+}
 
 
 # --------------------------------------------------------------------------
@@ -669,14 +682,59 @@ class TestTheCommittedRecordingsAllReplay:
             assert client.answered == len(world.calls), path.name
 
     def test_every_rebased_result_still_parses_as_the_tools_output(self) -> None:
-        """A re-base that produced an unparseable payload would escalate every run."""
+        """A re-base that produced an unparseable payload would escalate every run.
+
+        One parse failure is not the re-base's doing and re-recording cannot fix it: a
+        pin that makes a new output field REQUIRED leaves every earlier recording short
+        of it forever, and they all stay committed (invariant 9). v0.6.11 is the first
+        to do that, so ``_FIELDS_A_LATER_PIN_MADE_REQUIRED`` is waived by name and
+        every other parse failure stays a failure.
+        """
         for path in _committed():
             world = recorder.load_recording(path)
             client = RecordedMCPClient(world, replay_clock=_REPLAY_AT)
             for call in world.calls:
                 result = client.call_tool(call.tool, call.arguments)
                 model = TOOL_REGISTRY[call.tool].output_model
-                model.model_validate(_payload_of(result))
+                try:
+                    model.model_validate(_payload_of(result))
+                except ValidationError as err:
+                    waived = _FIELDS_A_LATER_PIN_MADE_REQUIRED.get(call.tool, frozenset())
+                    missing = {
+                        str(e["loc"][0])
+                        for e in err.errors()
+                        if e["type"] == "missing" and e["loc"]
+                    }
+                    assert missing and missing <= waived, (
+                        f"{path.name}: {call.tool} no longer parses, and not only "
+                        f"because a later pin made a field required: {err}"
+                    )
+
+    def test_the_waiver_is_real_and_is_the_recorded_mode_debt_it_looks_like(self) -> None:
+        """Anti-vacuity, and the finding the waiver must not bury.
+
+        The waiver does NOT make recorded mode work: ``investigation._parse_output``
+        validates every probe result, so a recorded-mode run probing
+        ``get_postgres_health`` on a pre-v0.6.11 world escalates with "output parse
+        failed" — a harness break, not an agent finding. Re-recording is the fix and is
+        a packet of its own. Both halves are asserted so neither rots: the waived field
+        is still required, and still absent from every recording here.
+        """
+        for tool, fields in _FIELDS_A_LATER_PIN_MADE_REQUIRED.items():
+            required = set(TOOL_REGISTRY[tool].output_model.model_json_schema()["required"])
+            assert fields <= required, f"{tool}: {fields - required} are not required any more"
+        affected = {
+            path.parent.name
+            for path in _committed()
+            for call in recorder.load_recording(path).calls
+            if call.tool in _FIELDS_A_LATER_PIN_MADE_REQUIRED
+            and not _FIELDS_A_LATER_PIN_MADE_REQUIRED[call.tool]
+            <= set(json.loads(call.result["content"][0]["text"]))
+        }
+        assert affected, (
+            "no committed recording is short of a waived field — the waiver is "
+            "dead and belongs deleted, not carried"
+        )
 
     def test_the_rebase_moved_something_somewhere(self) -> None:
         """Otherwise every assertion above would hold against a no-op re-base."""

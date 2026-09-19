@@ -36,6 +36,17 @@ CANNED_ONLY: Final = "canned-only"
 #: uptime — calling it post-fault would claim a mechanism that is not there.
 COLD_STACK: Final = "cold-stack"
 WARM_STACK: Final = "warm-stack"
+#: The fixture describes a fault NO LAB HOOK CAN PRODUCE (WO-R3-217, v0.6.11):
+#: `postgres_slow` is about queries running long, and nothing in the chaos surface
+#: makes a query slow — `saturate_db_pool` holds connections, which is the other
+#: fault. So the reading is the scenario's premise and the check probes a world
+#: that never had it. Its own word rather than POST_FAULT, for COLD_STACK's
+#: reason: POST_FAULT claims the scenario SEEDS the fault, and naming a hook that
+#: does not exist is how a ledger stops being readable. Not CANNED_ONLY either —
+#: that one means `use_live_mcp` is false, and this scenario's other reads do run
+#: live. Not work on the fixture; the work, if this scenario is ever to be run
+#: live, is a platform hook.
+NO_HOOK: Final = "no-hook"
 
 # Entries that are NOT fixture defects, each with the claim that makes it so.
 # Hand-recorded, not inferred: the obvious rule ("a scenario that seeds a fault gets
@@ -1125,6 +1136,29 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "climb and the check probes the world before the kill. Both elements share this "
         "row — the investigation probe and the post-restart verify",
     ),
+    # v0.6.11 (plat #218, WO-R3-217) gave `get_postgres_health` twelve fields, and
+    # `postgres_slow`'s fixture now writes all twelve — an absent pool counter parses
+    # as null, null means UNKNOWN, and a reading of unknowns with both
+    # `*_unknown_reason` strings null is a response the platform cannot produce.
+    # Ten of the twelve are exactly what a reset stack answers and need no entry;
+    # these two ARE the fault, and no hook can make them move.
+    ("postgres_slow", "get_postgres_health", "longest_active_query_ms", "value"): (
+        NO_HOOK,
+        "the fixture's world is a database serving slowly, so its longest "
+        "running query is 1.84s; the check probes a world where nothing is "
+        "running at all and pg_stat_activity answers null. Nothing in the lab "
+        "makes a query slow — `inject_latency` delays a consumer and "
+        "`saturate_db_pool` holds connections, which is the fault this one is "
+        "deliberately NOT about",
+    ),
+    ("postgres_slow", "get_postgres_health", "active_queries_over_slow_threshold", "value"): (
+        NO_HOOK,
+        "same reading, same absent hook: two queries past the platform's fixed "
+        "500ms threshold is the fault, and an idle world counts 0. The "
+        "threshold itself (`slow_query_threshold_ms`) matches live and is not "
+        "here, which is the pair worth reading together — the yardstick is the "
+        "platform's, only the count is the premise",
+    ),
 }
 
 
@@ -1286,6 +1320,17 @@ def dump_ledger(
                     "worker-dispatcher's lag is unmeasured for about the first minute "
                     "after boot, so a fresh platform answers null where the recording "
                     "says 0. Timing, not contract, and not fixable from either side"
+                ),
+                WARM_STACK: (
+                    "the mirror of cold-stack: the recording caught a freshly seeded "
+                    "world and the check ran against a volume that has been up long "
+                    "enough to have measured one. Timing, not contract"
+                ),
+                NO_HOOK: (
+                    "the fixture describes a fault no chaos hook can produce, so the "
+                    "canned value is the scenario's premise and the check probes a "
+                    "world that never had it. Not a defect; the fix, if that scenario "
+                    "is ever to run live, is a platform hook"
                 ),
             },
             "_counts": {

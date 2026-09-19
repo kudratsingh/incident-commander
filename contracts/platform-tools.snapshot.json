@@ -473,6 +473,95 @@
       "is_idempotent": false
     },
     {
+      "name": "degrade_downstream",
+      "description": "[chaos: single_service] Degrade the simulated third-party endpoints behind the `bulk-api-sync` circuit breaker for `ttl_seconds` (default 300, max 3600): `mode=fail` (default) makes every endpoint call return 503, `mode=slow` makes each one answer `delay_ms` late but succeed. Under `fail` the breaker opens once `failure_threshold` calls have failed, then admits one probe every `recovery_timeout_seconds`, fails it and re-opens — so a reader must poll across a recovery window rather than sample once, because either `open` or `half_open` is a correct reading. Also under `fail`, a job whose every endpoint call failed is itself failed, so the failure reaches the job surface: retries first, then the dead-letter queue. Under `slow` nothing fails and the breaker stays closed. Self-cleans when the flag expires, and the environment reset clears it; the breaker closes by itself on the first probe that succeeds afterwards. Only the `bulk_api_sync` job type is affected — other job types, the database and Redis are untouched.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "default": "fail",
+            "description": "`fail`: every endpoint call returns 503, which the breaker counts, so it opens. `slow`: every call answers `delay_ms` late and succeeds, so the breaker stays closed and only the job's duration moves.",
+            "enum": [
+              "fail",
+              "slow"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "delay_ms": {
+            "default": 2000,
+            "description": "Milliseconds each endpoint call takes under `mode=slow`; ignored under `fail`. Capped at 30000, below the job execution deadline, so a slow dependency does not read as a wedged worker.",
+            "maximum": 30000,
+            "minimum": 1,
+            "title": "Delay Ms",
+            "type": "integer"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "description": "How long the dependency stays degraded. Calls go back to normal on the first job after it expires — nothing has to be called. Default 5 minutes.",
+            "maximum": 3600,
+            "minimum": 1,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "title": "DegradeDownstreamInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "dependency": {
+            "title": "Dependency",
+            "type": "string"
+          },
+          "flag_key": {
+            "title": "Flag Key",
+            "type": "string"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "delay_ms": {
+            "title": "Delay Ms",
+            "type": "integer"
+          },
+          "ttl_seconds": {
+            "title": "Ttl Seconds",
+            "type": "integer"
+          },
+          "failure_threshold": {
+            "description": "Consecutive failures that open the breaker, read from the breaker itself: the first job syncing this many endpoints under `mode=fail` opens it.",
+            "title": "Failure Threshold",
+            "type": "integer"
+          },
+          "recovery_timeout_seconds": {
+            "description": "Seconds the breaker waits before admitting one probe. While the flag is set that probe fails and it re-opens, so a reader that samples once may catch either state.",
+            "title": "Recovery Timeout Seconds",
+            "type": "number"
+          },
+          "accepted": {
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dependency",
+          "flag_key",
+          "mode",
+          "delay_ms",
+          "ttl_seconds",
+          "failure_threshold",
+          "recovery_timeout_seconds",
+          "accepted"
+        ],
+        "title": "DegradeDownstreamOutput",
+        "type": "object"
+      },
+      "required_scope": "chaos:invoke",
+      "is_idempotent": false
+    },
+    {
       "name": "get_cache_key_info",
       "description": "Inspect one Redis cache key: existence, remaining TTL, value type, size, and whether the records it refers to still exist. Returns shape only — never the cached value, so tenant-scoped cache contents are not exposed.\nRestricted to the platform-owned cache namespaces ['cache:', 'jobs:cache:', 'kafka:consumer_lag:', 'read_model:'] — the same prefixes `invalidate_cache_key` may delete — so a suspect cache entry can be checked before remediation and confirmed gone after. Keys outside these namespaces are refused (`cache_key_forbidden`), as are tenant-scoped keys belonging to another tenant. Exact key only: this tool cannot enumerate keys, match patterns, or read arbitrary Redis state.\nTHE RECORD CHECK. Entries in these namespaces are copies of job records the database holds. `records_referenced` is how many job records this entry is meant to name — the items in its stored list, or the single job its key names. `records_found` is how many of those the database has right now, in your own tenant. Fewer found than referenced means this copy points at records the platform does not have; equal counts mean every reference resolves, which is not a claim that the copied fields are current. Both are null when the platform could not work out what records the entry refers to — null is not zero.\nFRESHNESS: live probe, measured at call time; the record check queries the database on every call.",
       "inputSchema": {
@@ -573,6 +662,168 @@
           "exists"
         ],
         "title": "GetCacheKeyInfoOutput",
+        "type": "object"
+      },
+      "required_scope": "telemetry:read",
+      "is_idempotent": false
+    },
+    {
+      "name": "get_circuit_breakers",
+      "description": "Read whether this platform has stopped calling any of its dependencies. A circuit breaker sits in front of each one: after enough consecutive failures it opens and refuses calls without attempting them, then after a wait lets one trial call through. This reading reports each breaker's state, how many consecutive failures are counted against it, when it last changed state and what kind of failure it last saw.\nWHAT IT DISCRIMINATES. An open breaker says the platform's calls to something outside it were failing. That is a different fault from slow queries or a saturated connection pool (`get_postgres_health`) and from work piling up inside the platform (`get_consumer_lag`, `get_outbox_status`), and it points outward rather than inward.\nFRESHNESS AND WHICH CLOCK. `measured_at` is the clock of the process that answered this call, and every age is that clock minus the timestamp beside it. The timestamps themselves are written by the process that owns the breaker, on its clock, so an age compares two clocks — treat a second either way as noise.\nNO PAGING, NOTHING CAPPED. It takes no arguments. There is no `limit`, no `offset` and no filter; every breaker with a record comes back, and `total` is a count of them rather than a page size.\nAN AGE HERE IS NOT A HEARTBEAT. A record is written whenever a breaker changes state, and refreshed while calls keep flowing through it. So a large `reported_age_s` on a `closed` breaker means nothing has called that dependency lately — it is not evidence that anything stopped, and not evidence that the owning process is alive.\nABSENT IS UNKNOWN, NOT CLOSED. A breaker with no record is not listed at all, and an empty listing with `unknown_reason` set means the platform could tell you nothing — neither of those is a breaker reporting itself closed. Read `unknown_reason` before concluding anything from an empty list.\nSCOPE. Breakers are platform-wide, shared by every tenant: this reading is not scoped to yours, and an open breaker affects everyone.\nWHAT THIS CANNOT SEE. It reports state, counts and times, and nothing else: no error text, no endpoint, no request that failed, and no history — each call is the state now, so it cannot show how long a breaker has been flapping.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "GetCircuitBreakersInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {
+          "CircuitBreakerReading": {
+            "properties": {
+              "name": {
+                "description": "Which dependency this breaker guards. A fixed platform name, the same across calls and restarts.",
+                "title": "Name",
+                "type": "string"
+              },
+              "state": {
+                "description": "`closed` (calls go through), `open` (calls are refused without being attempted) or `half_open` (one trial call is allowed through; every other caller is refused while it is in flight).",
+                "title": "State",
+                "type": "string"
+              },
+              "failure_count": {
+                "description": "Consecutive failures counted toward `failure_threshold`. Reset to 0 by any success. A 0 here is a measurement, not a missing value.",
+                "title": "Failure Count",
+                "type": "integer"
+              },
+              "failure_threshold": {
+                "description": "How many consecutive failures open this breaker. The yardstick `failure_count` is read against: 2 of 3 is a dependency in trouble, 2 of 20 is noise.",
+                "title": "Failure Threshold",
+                "type": "integer"
+              },
+              "recovery_timeout_s": {
+                "description": "How long an open breaker waits before letting one trial call through, in seconds.",
+                "title": "Recovery Timeout S",
+                "type": "number"
+              },
+              "last_state_change_at": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "When this breaker last changed state — ISO-8601, UTC, on the clock of the process that owns the breaker, not the one that answered this call. `null` when it has never changed state, which for a breaker that has always been closed is the healthy case.",
+                "title": "Last State Change At"
+              },
+              "seconds_since_state_change": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "How long ago `last_state_change_at` was, in seconds, against this reading's own clock. It compares two processes' clocks, so treat a second either way as noise. `null` exactly when `last_state_change_at` is null.",
+                "title": "Seconds Since State Change"
+              },
+              "last_failure_at": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "When a call through this breaker last failed, on the owning process's clock. `null` when none has failed since the platform started.",
+                "title": "Last Failure At"
+              },
+              "last_failure_reason_class": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "What kind of failure the last one was: `timeout` (the call ran out of time), `connection` (the far side could not be reached) or `other` — which does NOT distinguish an error the far side reported from a bug on this side, because the breaker cannot tell. Never the error text. `null` when nothing has failed.",
+                "title": "Last Failure Reason Class"
+              },
+              "recorded_at": {
+                "description": "When the owning process last wrote this record, on its own clock.",
+                "format": "date-time",
+                "title": "Recorded At",
+                "type": "string"
+              },
+              "reported_age_s": {
+                "description": "How long ago this record was written, in seconds. **This is not a heartbeat.** A record is written whenever the state changes and refreshed while calls keep flowing, so a large age on a closed breaker means no calls have gone through it lately — not that anything has stopped.",
+                "title": "Reported Age S",
+                "type": "number"
+              }
+            },
+            "required": [
+              "name",
+              "state",
+              "failure_count",
+              "failure_threshold",
+              "recovery_timeout_s",
+              "recorded_at",
+              "reported_age_s"
+            ],
+            "title": "CircuitBreakerReading",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "measured_at": {
+            "description": "When this reading was taken — ISO-8601, UTC, the clock of the process that answered the call. Every `*_age_s` and `seconds_since_*` value is this time minus the timestamp beside it.",
+            "format": "date-time",
+            "title": "Measured At",
+            "type": "string"
+          },
+          "breakers": {
+            "description": "Every breaker with a state record, in name order. Not a page: no cap, nothing truncated.",
+            "items": {
+              "$ref": "#/$defs/CircuitBreakerReading"
+            },
+            "title": "Breakers",
+            "type": "array"
+          },
+          "total": {
+            "description": "How many breakers are in `breakers`. Always equal to its length.",
+            "title": "Total",
+            "type": "integer"
+          },
+          "unknown_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why no breaker state is known, in plain words. When this is set, `breakers` is empty because the platform could not tell you anything — which is not the same as no breaker being open. `null` whenever at least one breaker reported.",
+            "title": "Unknown Reason"
+          }
+        },
+        "required": [
+          "measured_at",
+          "breakers",
+          "total"
+        ],
+        "title": "GetCircuitBreakersOutput",
         "type": "object"
       },
       "required_scope": "telemetry:read",
@@ -727,7 +978,7 @@
       "outputSchema": {
         "$defs": {
           "DagEdge": {
-            "description": "`from_id` depends on `to_id` — the parent has to finish before\nthe child can start. Direction matches the schema\n(`job_dependencies.child_job_id → parent_job_id`).",
+            "description": "`from_id` depends on `to_id` — the parent finishes before the child starts.",
             "properties": {
               "from_id": {
                 "title": "From Id",
@@ -1253,7 +1504,7 @@
     },
     {
       "name": "get_postgres_health",
-      "description": "Ping the primary database and read a small set of activity stats. Falls back cleanly on non-Postgres backends (SQLite in tests) — the `dialect` field tells the agent what it looked at.\nFRESHNESS: live probe, measured at call time.",
+      "description": "Ping the primary database and read how it is being used: connection activity, the connection pool this reading came from, and how long queries are taking right now. Never raises — an `ok=false` result *is* the interesting signal, and the `dialect` field says what was looked at (SQLite in dev and tests skips the Postgres-only readings).\nFRESHNESS AND WHICH CLOCK. Nothing here is cached. Every number is read at call time; `ping_latency_ms` is timed in the process that answered, and `longest_active_query_ms` is measured on the database server's clock, so the two are not comparable to the millisecond.\nNO PAGING, NOTHING CAPPED. This tool returns counts and timings, never rows. It takes no arguments, there is no `limit` and no `offset`, and nothing is truncated.\nWHOSE POOL. The `pool_*` fields describe the connection pool of the process that answered this call, and only that one. This platform runs the API, the worker and this read surface as separate processes, each with its own pool, so a pool exhausted in the API or the worker does not show up here. The query fields have no such limit: they are read from the database server, so they cover every connection to it.\nTELLING SLOW QUERIES FROM A FULL POOL. These are different faults with different fixes, and one reading separates them. Queries slow: `longest_active_query_ms` and `active_queries_over_slow_threshold` high, pool counters normal. Pool saturated: `pool_checked_out` at `pool_size` plus `pool_max_overflow` with `pool_wait_timeouts_1m` climbing, while queries themselves are not slow.\nUNKNOWN IS NULL, NEVER 0. A `null` count is missing information; a 0 is a measurement that found nothing. `pool_stats_unknown_reason` and `query_stats_unknown_reason` say which case a null is. Two fields, `p95_query_ms_1m` and `slow_query_count_1m`, are null in every response: the platform keeps no per-minute history of query timings, and says so rather than reporting a number it cannot stand behind.\nWHAT THIS CANNOT SEE. It reads one database's own views and one process's pool. It says nothing about replicas, nothing about which statements are slow (no query text is returned), and a healthy reading here does not mean callers are getting served — a pool full in another process looks perfectly healthy from this one.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {},
@@ -1306,11 +1557,160 @@
             ],
             "default": null,
             "title": "Error"
+          },
+          "pool_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How many connections the pool of the process that answered this call keeps open before it opens extras. `null` when that pool keeps no counters — see `pool_stats_unknown_reason`.",
+            "title": "Pool Size"
+          },
+          "pool_checked_out": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Connections in use right now, in the pool of the process that answered this call — **including the one this call is holding**, so on an otherwise idle process it reads 1 rather than 0. Read it against `pool_size` and `pool_max_overflow`: on its own a number here says nothing. `null` means unknown, never idle.",
+            "title": "Pool Checked Out"
+          },
+          "pool_overflow": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Connections currently open beyond `pool_size`, in the pool of the process that answered this call. 0 until the pool is full, then climbing to `pool_max_overflow`, at which point the next caller waits. `null` means unknown.",
+            "title": "Pool Overflow"
+          },
+          "pool_max_overflow": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How many connections beyond `pool_size` that pool may open. The ceiling `pool_overflow` is read against. `null` when the pool does not state one.",
+            "title": "Pool Max Overflow"
+          },
+          "pool_wait_timeouts_1m": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How many callers in the process that answered this call waited for a connection and gave up in the last 60 seconds. A 0 here is a real measurement — nothing waited — while `null` is unknown. Counted per process, so it says nothing about the API or worker processes.",
+            "title": "Pool Wait Timeouts 1M"
+          },
+          "pool_stats_unknown_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why every `pool_*` field above is null, in plain words. `null` exactly when they are populated.",
+            "title": "Pool Stats Unknown Reason"
+          },
+          "longest_active_query_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How long the longest query running right now has been running, in milliseconds, on the database server's clock. Covers every connection to this database from every process, not just this one, and excludes this reading's own query. `null` when nothing is running, or when the database keeps no such view — see `query_stats_unknown_reason`.",
+            "title": "Longest Active Query Ms"
+          },
+          "active_queries_over_slow_threshold": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How many queries running right now have been running longer than `slow_query_threshold_ms`. A live count across every connection to this database; 0 means nothing is currently slow, `null` means unknown.",
+            "title": "Active Queries Over Slow Threshold"
+          },
+          "slow_query_threshold_ms": {
+            "description": "The threshold the count above is measured against, in milliseconds. Fixed by the platform; there is no argument to change it.",
+            "title": "Slow Query Threshold Ms",
+            "type": "number"
+          },
+          "p95_query_ms_1m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Always `null` in this release: the platform cannot measure a query-latency percentile over the last minute, and `query_stats_unknown_reason` says why. Use `longest_active_query_ms` and `active_queries_over_slow_threshold` for query slowness instead.",
+            "title": "P95 Query Ms 1M"
+          },
+          "slow_query_count_1m": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Always `null` in this release, with `query_stats_unknown_reason` saying why — the platform keeps no per-minute query history. `active_queries_over_slow_threshold` is the live equivalent.",
+            "title": "Slow Query Count 1M"
+          },
+          "query_stats_unknown_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why the two per-minute query fields are null, in plain words: one of three fixed sentences saying which case it is. `null` only if they are ever populated.",
+            "title": "Query Stats Unknown Reason"
           }
         },
         "required": [
           "ok",
-          "dialect"
+          "dialect",
+          "slow_query_threshold_ms"
         ],
         "title": "PostgresHealthOutput",
         "type": "object"
@@ -1423,6 +1823,143 @@
           "ok"
         ],
         "title": "RedisHealthOutput",
+        "type": "object"
+      },
+      "required_scope": "telemetry:read",
+      "is_idempotent": false
+    },
+    {
+      "name": "get_slo_status",
+      "description": "Read how every service-level objective this platform declares is doing: how much settled work is in its window, how much of it failed, how much error budget is left and how fast that budget is being spent. This is the reading that confirms or refutes a claim that an objective is being missed.\nFRESHNESS AND WHICH CLOCK. Nothing is cached. Every objective is computed by query at call time over its own window, which ends at `measured_at` — the clock of the process that answered the call — and begins `window_hours` before it. A second call a few seconds later is genuine new evidence, though on a 24-hour window a few seconds move the numbers very little.\nNO PAGING, NOTHING CAPPED. It takes no arguments. There is no `limit`, no `offset` and no filter: every declared objective comes back every time, and `total` is the count of them rather than a page size.\nSCOPE. The counts cover the work your own tenant can see. The platform's own periodic check, the one that raises an alert, runs across every tenant — so a healthy reading here does not prove no alert was justified, and an unhealthy one is about your tenant specifically.\nREAD `total` FIRST, ALWAYS. With `total: 0` nothing settled in the window, so `budget_remaining_pct` is 100 and `healthy` is true because there is nothing that failed — not because anything is working. That is the reading a quiet platform gives and the one most easily misread: no traffic is an absence of evidence, not evidence of health.\nBREACH IS NOT THE SAME AS A PAGE. `healthy: false` means the window is below target. `fast_burn: true` means the budget is being spent at or above `fast_burn_threshold`, which is the rate at which this platform raises an alert. An objective can be missed for a window without burning fast, and can burn fast for minutes while the window still looks acceptable.\nWHAT THIS CANNOT SEE. It reports the objectives as declared and nothing else: no per-endpoint latency, no breakdown by job type, and no history — each call is one window ending now, so it cannot show when a burn started. Whether an alert exists is a separate reading.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "GetSloStatusInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {
+          "SloObjective": {
+            "properties": {
+              "id": {
+                "description": "Stable identifier for this objective. Fixed by the platform; the set of objectives does not change between calls.",
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "description": "What the objective is called, in plain words.",
+                "title": "Name",
+                "type": "string"
+              },
+              "description": {
+                "description": "What this objective measures and what it deliberately leaves out of the fraction.",
+                "title": "Description",
+                "type": "string"
+              },
+              "target": {
+                "description": "The share of work that must succeed, as a fraction in [0, 1] — 0.99 is 99%. The objective is missed below this, not at it.",
+                "title": "Target",
+                "type": "number"
+              },
+              "window_hours": {
+                "description": "How many hours back the counts below cover. Everything older than this is outside the measurement, however bad it was.",
+                "title": "Window Hours",
+                "type": "integer"
+              },
+              "total": {
+                "description": "How much settled work is in the window: the denominator. **0 means nothing settled in the window**, which makes every number beside it an absence of evidence rather than a healthy reading. Always read this first.",
+                "title": "Total",
+                "type": "integer"
+              },
+              "failed": {
+                "description": "How much of `total` counts as a failure for this objective: the numerator.",
+                "title": "Failed",
+                "type": "integer"
+              },
+              "current_success_rate": {
+                "description": "`1 - failed/total`, as a fraction in [0, 1]. 1.0 when `total` is 0, because there is nothing that failed — not because the platform is healthy.",
+                "title": "Current Success Rate",
+                "type": "number"
+              },
+              "budget_remaining_pct": {
+                "description": "How much of the error budget this window has left, as a percentage. 100 is untouched; 0 is exactly spent; negative means overspent, and it is clamped at -100 rather than reporting how far past it went.",
+                "title": "Budget Remaining Pct",
+                "type": "number"
+              },
+              "burn_rate": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "How many times faster than sustainable the budget is being spent. 1.0 spends the window's budget exactly over the window. `null` means the rate is unbounded — an objective that admits no failures had one — and is not unknown; it is above every threshold.",
+                "title": "Burn Rate"
+              },
+              "healthy": {
+                "description": "Whether `current_success_rate` is at or above `target` over this window. True with `total: 0`, for the reason that field gives.",
+                "title": "Healthy",
+                "type": "boolean"
+              },
+              "fast_burn": {
+                "description": "Whether `burn_rate` is at or above `fast_burn_threshold` — the rate at which this platform raises an alert rather than merely recording a miss.",
+                "title": "Fast Burn",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "description",
+              "target",
+              "window_hours",
+              "total",
+              "failed",
+              "current_success_rate",
+              "budget_remaining_pct",
+              "healthy",
+              "fast_burn"
+            ],
+            "title": "SloObjective",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "measured_at": {
+            "description": "When this reading was taken — ISO-8601, UTC, the clock of the process that answered the call. Each objective's window ends here and begins `window_hours` before it.",
+            "format": "date-time",
+            "title": "Measured At",
+            "type": "string"
+          },
+          "objectives": {
+            "description": "Every objective this platform declares, in the order it declares them. Not a page: there is no cap and nothing is omitted.",
+            "items": {
+              "$ref": "#/$defs/SloObjective"
+            },
+            "title": "Objectives",
+            "type": "array"
+          },
+          "total": {
+            "description": "How many objectives are in `objectives`. Equal to its length always — it is a count of what the platform declares, not of what was returned.",
+            "title": "Total",
+            "type": "integer"
+          },
+          "fast_burn_threshold": {
+            "description": "The burn rate at which this platform raises an alert. The yardstick every `burn_rate` above is read against.",
+            "title": "Fast Burn Threshold",
+            "type": "number"
+          }
+        },
+        "required": [
+          "measured_at",
+          "objectives",
+          "total",
+          "fast_burn_threshold"
+        ],
+        "title": "GetSloStatusOutput",
         "type": "object"
       },
       "required_scope": "telemetry:read",
@@ -3410,6 +3947,76 @@
       },
       "required_scope": "actions:execute",
       "is_idempotent": true
+    },
+    {
+      "name": "saturate_db_pool",
+      "description": "[chaos: shared_dependency] Hold `connections` connections checked out of the worker process's database pool for `ttl_seconds` (default 300, max 3600), so callers wait to ACQUIRE a connection while each query, once it has one, runs at its normal speed. Every connection is released when the flag expires, when the environment reset clears it, or when the worker restarts, so the fault is bounded with nothing to call. At least `min_free_connections` stay acquirable, so the background loops slow down rather than stop. A repeat call replaces the hold instead of adding a second one. This is the API and worker process's pool: the MCP server is a separate process with its own pool, so a pool reading taken there does not show this fault. Use `saturate_redis` for pressure on the cache instead — a different dependency.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "connections": {
+            "default": 10,
+            "description": "How many connections to hold checked out. Capped at 10, and clamped further at runtime so at least 4 stay acquirable however the pool is sized — the background loops have to keep running.",
+            "maximum": 10,
+            "minimum": 1,
+            "title": "Connections",
+            "type": "integer"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "description": "How long the hold lasts. Every connection is given back on the first pass after it expires — nothing has to be called. Default 5 minutes.",
+            "maximum": 3600,
+            "minimum": 1,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "title": "SaturateDbPoolInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "hold_key": {
+            "title": "Hold Key",
+            "type": "string"
+          },
+          "connections": {
+            "title": "Connections",
+            "type": "integer"
+          },
+          "ttl_seconds": {
+            "title": "Ttl Seconds",
+            "type": "integer"
+          },
+          "poll_interval_seconds": {
+            "description": "Seconds between the holder's passes. The hold starts, changes and ends on a pass, so a ttl_seconds smaller than this expires before any connection is taken.",
+            "title": "Poll Interval Seconds",
+            "type": "number"
+          },
+          "min_free_connections": {
+            "description": "Connections the runtime clamp always leaves acquirable, so a held pool slows the worker's loops rather than stopping them.",
+            "title": "Min Free Connections",
+            "type": "integer"
+          },
+          "accepted": {
+            "description": "True if the flag was set. This does not confirm the connections are held — that happens on the holder's next pass, at most poll_interval_seconds away.",
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "hold_key",
+          "connections",
+          "ttl_seconds",
+          "poll_interval_seconds",
+          "min_free_connections",
+          "accepted"
+        ],
+        "title": "SaturateDbPoolOutput",
+        "type": "object"
+      },
+      "required_scope": "chaos:invoke",
+      "is_idempotent": false
     },
     {
       "name": "saturate_redis",

@@ -420,6 +420,73 @@ class TestStrandedChainIsDeclarable:
         assert "stuck_chain_name_in_use" in _REFUSAL_MEANINGS
 
 
+class TestFamilyALabHooksAreDeclarable:
+    """v0.6.11's two lab hooks (platform ADR 0031), declarable without a scenario.
+
+    ``saturate_db_pool`` holds connections out of the WORKER process's pool and
+    ``degrade_downstream`` makes the simulated bulk-api-sync endpoints fail or
+    answer late. Family A's scenarios are WP-8.2's; this packet only re-pins,
+    and the closed set is derived from the snapshot at load time, so "a scenario
+    could declare it" is a property of THIS commit — the shape
+    ``TestPauseControlLoopIsDeclarable`` and ``TestPauseDagChaosIsDeclarable``
+    already use.
+
+    No scenario YAML is added.
+    """
+
+    def test_both_hooks_are_in_the_closed_set(self) -> None:
+        assert {"saturate_db_pool", "degrade_downstream"} <= chaos_tool_names()
+
+    def test_a_scenario_could_declare_each_with_no_arguments(self) -> None:
+        # Every input is optional on both hooks, so the minimal declaration is
+        # the empty one and no scenario has to name a number it does not care
+        # about.
+        for hook in ("saturate_db_pool", "degrade_downstream"):
+            assert not (chaos_tool_schemas()[hook].get("required") or []), hook
+            assert ChaosHook(name=hook, arguments=_minimal_arguments(hook)), hook
+
+    def test_the_hold_and_the_ttl_are_integer_typed_and_bounded(self) -> None:
+        schema = chaos_tool_schemas()["saturate_db_pool"]
+        for argument in ("connections", "ttl_seconds"):
+            resolved = resolve_schema_ref(schema["properties"][argument], schema)
+            assert "integer" in json_types_for(resolved), argument
+            with pytest.raises(ValidationError, match="compatible with the snapshot"):
+                ChaosHook(name="saturate_db_pool", arguments={argument: "lots"})
+
+    def test_the_degradation_mode_is_a_closed_set_of_two(self) -> None:
+        # `fail` opens the shipped `bulk-api-sync` breaker; `slow` leaves it
+        # closed and moves only the job's duration. A mode outside the pair
+        # would fail at live seeding time with a platform 400, after the run
+        # had started — which is what the closed-set check exists to stop.
+        schema = chaos_tool_schemas()["degrade_downstream"]
+        members = enum_values_for(resolve_schema_ref(schema["properties"]["mode"], schema))
+        assert members is not None
+        assert set(members) == {"fail", "slow"}
+        for mode in members:
+            assert ChaosHook(name="degrade_downstream", arguments={"mode": mode})
+        with pytest.raises(ValidationError, match="closed set"):
+            ChaosHook(name="degrade_downstream", arguments={"mode": "flaky"})
+
+    def test_both_hooks_are_marked_chaos_and_scoped_to_the_evaluator(self) -> None:
+        # Selected into the closed set by the structural `[chaos:` prefix, not
+        # by a hand-list — and the scope is what keeps the agent out.
+        entries = {t["name"]: t for t in json.loads(_SNAPSHOT_PATH.read_text())["tools"]}
+        for hook in ("saturate_db_pool", "degrade_downstream"):
+            assert entries[hook]["description"].startswith("[chaos: "), hook
+            assert entries[hook]["required_scope"] == "chaos:invoke", hook
+
+    def test_neither_hook_reaches_the_agents_typed_registry(self) -> None:
+        # ADR 0012: the lab's own names must not appear in the registry the
+        # planner picks from. The readings these hooks make observable —
+        # `get_postgres_health`'s pool fields and `get_circuit_breakers` — do.
+        from incident_commander.tools.registry import TOOL_REGISTRY
+
+        assert "saturate_db_pool" not in TOOL_REGISTRY
+        assert "degrade_downstream" not in TOOL_REGISTRY
+        assert "get_postgres_health" in TOOL_REGISTRY
+        assert "get_circuit_breakers" in TOOL_REGISTRY
+
+
 class TestSchemaRefResolution:
     """``$ref`` is followed exactly one hop, and only into local ``$defs``."""
 

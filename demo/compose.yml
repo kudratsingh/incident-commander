@@ -1,6 +1,6 @@
 # Live demo: full platform footprint sufficient for remediation eval.
 #
-# Pinned to the incident-platform v0.6.10 release by digest so the agent's
+# Pinned to the incident-platform v0.6.11 release by digest so the agent's
 # contract expectations don't shift under us. Every platform-code service
 # below uses the SAME pinned digest. Bump the digest whenever the platform
 # ships a new release and rerun `make eval-live` to catch drift.
@@ -132,7 +132,7 @@ services:
     # One-shot schema migration, mirroring the dev compose's migrate
     # service: with two app-code services (mcp + api) neither should
     # race `alembic upgrade head` at boot.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.10@sha256:5ff8da7917aa0c5d1eea948db6a68820beeef1029396f955a238d0895ab5d7fd
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.11@sha256:08522d48ef0787802c1fbde17ff4c02eb101cc640028a82ff14c0703bb846ae6
     platform: linux/amd64
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
@@ -144,7 +144,7 @@ services:
     restart: "no"
 
   platform:
-    # incident-platform v0.6.10 (INDEX digest published by the platform
+    # incident-platform v0.6.11 (INDEX digest published by the platform
     # release, confirmed with `docker buildx imagetools inspect` — the
     # top-level `Digest:`, not a per-platform child manifest).
     #
@@ -189,11 +189,58 @@ services:
     #     `stuck_chain_name_in_use` — the code the hook already raised for a
     #     drifted chain, so no new refusal and no new `BlastRadius` member.
     # Tool count with CHAOS_ENABLED=true: 32 → 33 (12 of them chaos).
+    #
+    # What v0.6.11 changed (plat #217 + #218, platform ADRs 0030 and 0031):
+    # TWO NEW AGENT-FACING READ TOOLS, TWO NEW LAB HOOKS, and twelve output
+    # fields on one existing read tool. No existing agent-facing tool moved
+    # name or tier, and nothing left the surface.
+    #   * `get_slo_status` — a read tool (`telemetry:read`, no arguments)
+    #     surfacing the objective computation that until now had exactly one
+    #     caller, an admin REST route: per objective the target, the window,
+    #     the settled total, the budget left, the burn rate and whether it is
+    #     fast-burning. An alert saying an objective is missed could be
+    #     neither confirmed nor refuted from the tool surface before this.
+    #     `total: 0` is named in the description as an absence of evidence,
+    #     not health, and an unbounded burn rate reads `null` — above every
+    #     threshold, not unknown.
+    #   * `get_circuit_breakers` — a read tool (`telemetry:read`, no
+    #     arguments) reporting per breaker its state (`closed` / `open` /
+    #     `half_open`), the consecutive failure count against its own
+    #     threshold, a wall-clock `last_state_change_at` and a failure reason
+    #     CLASS (`timeout` / `connection` / `other` — never the error text).
+    #     State lives in Redis under `breaker:state:<name>` (ADR 0030)
+    #     precisely so a reader in another process can see it: the registry
+    #     is in-process and the MCP server is a separate process (ADR 0006),
+    #     so a tool walking the registry reported every breaker closed.
+    #   * `get_postgres_health` — OUTPUT gains twelve fields and a rewritten
+    #     description. Five pool numbers (`pool_size`, `pool_checked_out`
+    #     including the call's own connection, `pool_overflow`,
+    #     `pool_max_overflow`, `pool_wait_timeouts_1m`) with
+    #     `pool_stats_unknown_reason` for why they are null; two live query
+    #     readings from `pg_stat_activity` (`longest_active_query_ms`,
+    #     `active_queries_over_slow_threshold`) with `slow_query_threshold_ms`
+    #     as their yardstick; and `p95_query_ms_1m` / `slow_query_count_1m`
+    #     ALWAYS null with `query_stats_unknown_reason` saying which of three
+    #     cases it is — `pg_stat_statements` is not installed here and could
+    #     not answer a one-minute percentile if it were (O-28, WO-R3-289).
+    #     THE POOL FIELDS DESCRIBE THE PROCESS THAT ANSWERED, and that is
+    #     this MCP service, not the api service the worker loops live in — so
+    #     a pool held in the worker reads perfectly healthy here. The
+    #     description says so in as many words; ADR 0030 leaves the gap open.
+    #   * `saturate_db_pool` and `degrade_downstream` — LAB hooks
+    #     (`chaos:invoke`, descriptions prefixed `[chaos: …]`), the 13th and
+    #     14th, never reachable by the agent's own token. The first holds
+    #     connections out of the WORKER process's pool (always leaving four
+    #     acquirable, so the loops slow rather than stop); the second makes
+    #     the simulated bulk-api-sync endpoints fail (opening the shipped
+    #     `bulk-api-sync` breaker at its threshold of three) or answer late.
+    # Tool count with CHAOS_ENABLED=true: 33 → 37 (14 of them chaos); the
+    # agent's read surface 14 → 16.
     # Do not switch to `:latest` — the whole point of pinning by digest is
     # that a platform-side prompt or schema change can't shift agent
     # behavior without an explicit bump here.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.10@sha256:5ff8da7917aa0c5d1eea948db6a68820beeef1029396f955a238d0895ab5d7fd
-    # v0.6.10 is an OCI index, but it still lists linux/amd64 ONLY (plus an
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.11@sha256:08522d48ef0787802c1fbde17ff4c02eb101cc640028a82ff14c0703bb846ae6
+    # v0.6.11 is an OCI index, but it still lists linux/amd64 ONLY (plus an
     # attestation manifest) — being an index is not the same as being
     # multi-arch, and this one is not. On Apple Silicon this runs under
     # Rosetta (slower cold start, correct output) — REQUIRED there; without
@@ -297,7 +344,7 @@ services:
     # Env copied deliberately from the dev compose's `app` service
     # (drift between services is platform bug #69's class); minio/jaeger
     # endpoints omitted with the services (see header note).
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.10@sha256:5ff8da7917aa0c5d1eea948db6a68820beeef1029396f955a238d0895ab5d7fd
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.11@sha256:08522d48ef0787802c1fbde17ff4c02eb101cc640028a82ff14c0703bb846ae6
     platform: linux/amd64
     ports:
       - "${DEMO_API_HOST_PORT:-8000}:8000"

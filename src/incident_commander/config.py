@@ -139,6 +139,28 @@ class Settings(BaseSettings):
     # ``ge=1``: a loop allowed none escalates having investigated nothing.
     max_iterations_override: int | None = Field(default=None, ge=1)
 
+    # --- The adaptive ladder's escalation thresholds (plan 02 § 15, WP-13.1) -----
+    # One override per threshold from plan 02 § 15's signal list, all UNSET here on purpose:
+    # each DEFAULT — and the benchmark split that default was set on — is declared once, in
+    # ``agent/strategies/policy.py``'s table, which refuses a default derived from the holdout
+    # (ADR 0061). A number here would be a second declaration with no split behind it, so
+    # ``None`` means "the declared default" and an operator's value is reported as having no
+    # split at all. Unread by every arm shipped today; ``adaptive`` (WP-13.2) is the reader.
+    #
+    # The 0.7 remediate bar is deliberately NOT in this block and gets no knob: it is a
+    # reported operating point re-examined per model in the phase-close protocol (plan
+    # 02 § 16), and a knob would move every arm's numbers at once from an environment.
+    uncertainty_top1_confidence_floor: float | None = Field(default=None, ge=0.0, le=1.0)
+    uncertainty_top1_top2_margin_floor: float | None = Field(default=None, ge=0.0, le=1.0)
+    uncertainty_selector_uncertainty_ceiling: float | None = Field(default=None, ge=0.0, le=1.0)
+    uncertainty_candidate_disagreement_ceiling: float | None = Field(default=None, ge=0.0, le=1.0)
+    uncertainty_confidence_floor_after_probes: float | None = Field(default=None, ge=0.0, le=1.0)
+    # The three that count rather than score. ``ge=1``: a count of zero fires on every step
+    # (the comparison is "at or above"), which is not a threshold but an always-escalate.
+    uncertainty_contradictory_evidence_count: int | None = Field(default=None, ge=1)
+    uncertainty_failed_attempt_count: int | None = Field(default=None, ge=1)
+    uncertainty_probe_count_before_confidence_check: int | None = Field(default=None, ge=1)
+
     # Required, no default (pinned for eval stability). min_length guards direct
     # construction, which env_ignore_empty cannot reach.
     judge_model: str = Field(min_length=1)

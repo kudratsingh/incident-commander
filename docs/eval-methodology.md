@@ -2077,6 +2077,54 @@ approve/refuse decision about a remediation plan is deterministic guard code, by
 invariant 4 forbids deriving a control from model output. Every calibration report says so, so a
 reader who finds no section for it can tell "not calibrated" from "not a judge".
 
+## Uncertainty thresholds and the split each default came from
+
+The adaptive ladder (plan 02 § 15) decides when a step is worth more inference from named
+thresholds, never from a number in the code. Each one is declared exactly once, in
+`src/incident_commander/agent/strategies/policy.py`, and a declaration carries three things
+besides the number: the signal it decides, the **benchmark split its default was set on**, and
+the source that set it. `agent/strategies/policy.py` refuses at construction any default whose
+split is `holdout`, so "never tuned against the holdout" (plan 03 § 4) is a property of the
+declaration rather than of anybody's memory — and `evals/export.py`'s refusal, the loader's
+split check and this table are then the three places that promise is kept.
+
+Every default today is `untuned`: a declared starting point with no sweep behind it. `untuned`
+is a real provenance value, not a missing one — it says "no run set this", which is a different
+claim from "a dev run set this". The sweep that moves any of them is WP-13.2's, and when it
+does, the row's split becomes the split of the run that set it.
+
+| threshold | env var | default | split | signal it decides |
+|---|---|---|---|---|
+| `top1_confidence_floor` | `UNCERTAINTY_TOP1_CONFIDENCE_FLOOR` | 0.75 | `untuned` | `top1_confidence_low` |
+| `top1_top2_margin_floor` | `UNCERTAINTY_TOP1_TOP2_MARGIN_FLOOR` | 0.15 | `untuned` | `top1_top2_margin_narrow` |
+| `selector_uncertainty_ceiling` | `UNCERTAINTY_SELECTOR_UNCERTAINTY_CEILING` | 0.4 | `untuned` | `selector_uncertainty_high` |
+| `candidate_disagreement_ceiling` | `UNCERTAINTY_CANDIDATE_DISAGREEMENT_CEILING` | 0.5 | `untuned` | `candidate_disagreement_high` |
+| `contradictory_evidence_count` | `UNCERTAINTY_CONTRADICTORY_EVIDENCE_COUNT` | 1.0 | `untuned` | `contradictory_evidence` |
+| `failed_attempt_count` | `UNCERTAINTY_FAILED_ATTEMPT_COUNT` | 1.0 | `untuned` | `remediation_attempt_failed` |
+| `probe_count_before_confidence_check` | `UNCERTAINTY_PROBE_COUNT_BEFORE_CONFIDENCE_CHECK` | 3.0 | `untuned` | `confidence_low_after_k_probes` |
+| `confidence_floor_after_probes` | `UNCERTAINTY_CONFIDENCE_FLOOR_AFTER_PROBES` | 0.85 | `untuned` | `confidence_low_after_k_probes` |
+
+A floor fires below itself, a ceiling above itself, and a count at itself. Three of the seven
+signals need something only an arm can measure — the selector's own `uncertainty` (ADR 0048)
+and the candidate set's disagreement and self-contradiction (ADR 0042) — and a signal with no
+measurement behind it is reported as UNMEASURED, never as not fired. The other four are read
+off the run: the two confidence readings, and `remediation_attempt_failed`, which counts the
+attempt records the remediation loop appends when an action ran and the incident stayed open
+(ADR 0056).
+
+**The 0.7 remediate bar is not in this table and has no environment variable.** It lives where
+it always has, in `agent/investigation.py`'s handoff gate, and plan 02 § 16 makes it a *reported*
+operating point: a number every report states, re-examined per model in the phase-close
+protocol, never tuned. Giving it a knob would let one environment move every arm's numbers at
+once, and a threshold here defaulting to 0.7 would read as the gate having moved into
+configuration — so no default equals it, and a test pins both facts.
+
+**What a report prints.** `policy.provenance_rows()` renders one row per threshold: the live
+value, the declared default, whether they are the same, the declared split, and the source.
+When an operator has overridden a threshold, the row's `live_value_split` is `None` rather than
+the declared split — nobody can say which split a value typed into an environment came from,
+and saying `untuned` would be a false claim about provenance rather than an absent one.
+
 ## What eval doesn't cover (yet)
 
 - **Adversarial robustness** — Phase 7. Injection payloads in log lines, DLQ bodies, trace metadata.

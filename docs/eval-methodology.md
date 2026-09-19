@@ -2364,6 +2364,13 @@ call proposed. One consequence of the declared thresholds is worth knowing when 
 cannot emit a remediation that bar would refuse. The bar is unchanged and still runs; it is simply no
 longer the thing that refuses.
 
+**Budget it for the climb, not for the average.** A climbing step bills up to three calls plus a
+walk where `baseline` bills one, so an adaptive sweep metered against the control group's token and
+dollar ceilings can exhaust mid-investigation and escalate — and the report would read that as the
+strategy failing rather than as the budget refusing to fund it. Set `TOKEN_BUDGET_MULTIPLIER` and
+`USD_BUDGET_MULTIPLIER` with the arm, as a best-of-N sweep does; tool calls are never multiplied,
+because probing the world is what the arms compete on (plan 02 § 8).
+
 **What the report says about it.** `make research-report` gains two sections:
 `adaptive_cost_frontier` — the accuracy/cost Pareto over arms on the same paired instances, with the
 dominated and non-dominated arms named and every regression printed rather than summarised away — and

@@ -140,6 +140,13 @@ costs on the record. The budget multipliers are untouched: tool calls are never 
   no longer the thing that refuses. A test pins both halves.
 * After a failed remediation, every later step climbs at least two rungs. That is a real cost, it is
   on the record rung by rung, and the deferred sweep is what prices it.
+* **A sweep of this arm has to seed the ledger for its worst case, not its typical one.** A climbing
+  step bills up to three calls plus a walk where `baseline` bills one, so an adaptive run metered
+  against the control group's token and dollar ceilings can exhaust mid-investigation and escalate —
+  and the report would read that as the *strategy* failing rather than as the budget refusing to fund
+  it (decision C4, the lesson best-of-N already cost). `TOKEN_BUDGET_MULTIPLIER` and
+  `USD_BUDGET_MULTIPLIER` are the instrument, applied once where `factory.start_run` seeds the
+  ledger; tool calls stay unmultiplied, because probing the world is what the arms compete on.
 * The `search` rung is measurable in recorded mode only, so the frontier's top rung is a
   recorded-world number. Canned and live rows show a three-rung ladder with a stop.
 * The aggregate research report gains two sections — the accuracy/cost frontier and the terminating

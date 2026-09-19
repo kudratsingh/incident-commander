@@ -3863,20 +3863,58 @@ class TestTheOneActionClaimIsStructuralNotGraded:
     """Why none of these scenarios asserts an exact CALL count.
 
     "Exactly one restart of exactly the alerted group" has two halves, and only the
-    resource half is graded: a run cannot make two Tier-1 calls, since PLANNING is
-    reachable only from INVESTIGATING and VERIFYING has no PLANNING successor
-    (ADR 0008). The count half would be the vacuous assertion this suite refuses
-    everywhere else, so the invariant is pinned where it lives — in the graph.
+    resource half is graded. Under ADR 0008 the count half followed from the graph: a run
+    could not make two Tier-1 calls at all. ADR 0056 replaced that with three structures
+    that these scenarios still lean on, and this class pins all three rather than the one
+    sentence that used to carry them: PLANNING is still reachable only from INVESTIGATING,
+    the second attempt is capped in config, and an identical (tool, wired arguments) repeat
+    is refused before execution. Between them, "a second call of this tool on this resource"
+    remains unreachable, which is what the resource assertion relies on. The count half
+    would still be the vacuous assertion this suite refuses everywhere else.
     """
 
-    def test_verifying_cannot_return_to_planning(self) -> None:
+    def test_verifying_retries_only_through_investigating(self) -> None:
         from incident_commander.agent.orchestrator import ALLOWED_TRANSITIONS
 
         assert IncidentState.PLANNING not in ALLOWED_TRANSITIONS[IncidentState.VERIFYING], (
-            "VERIFYING regained a PLANNING successor, so a run can now make a second "
-            "Tier-1 attempt. The scenarios in _EXACT_ACTION_SCENARIOS rely on that "
-            "being impossible instead of asserting a call count — give them one."
+            "VERIFYING regained a PLANNING successor, so a second Tier-1 attempt can now be "
+            "planned from the ledger that produced the first one's failure. ADR 0056's edge "
+            "goes to INVESTIGATING precisely so it cannot."
         )
+
+    def test_a_second_attempt_is_capped_and_configured(self) -> None:
+        # The cap that replaced the graph's "at most one": a number in Settings, so a
+        # scenario relying on a bounded attempt count can point at something.
+        from incident_commander.config import DEFAULT_MAX_REMEDIATION_ATTEMPTS, Settings
+
+        field = Settings.model_fields["max_remediation_attempts"]
+        assert field.default == DEFAULT_MAX_REMEDIATION_ATTEMPTS == 2, (
+            "MAX_REMEDIATION_ATTEMPTS moved. These scenarios assert WHICH resource was "
+            "acted on and not how many times, on the strength of a bounded, configured "
+            "attempt count — re-read ADR 0056 before raising it."
+        )
+
+    def test_an_identical_repeat_is_refused_before_execution(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # The other half: the bound on attempts would not protect the resource assertion
+        # if attempt two could be attempt one again.
+        from incident_commander.agent.remediation import RemediationPlan, _repeated_attempt
+
+        plan = RemediationPlan.model_validate(
+            {
+                "target_hypothesis": "consumer_saturation",
+                "action_tool": "restart_consumer_group",
+                "action_arguments": {"consumer_group": "worker-dispatcher"},
+                "verify_tool": "get_consumer_lag",
+                "verify_arguments": {"consumer_group": "worker-dispatcher"},
+                "verify_expectation": "lag drops",
+            }
+        )
+        run = _with_terminal(
+            run_state, IncidentState.PLANNING, (_restart(now, "worker-dispatcher"),)
+        )
+        assert _repeated_attempt(plan, run) is not None
 
     def test_planning_is_reachable_only_from_investigating(self) -> None:
         from incident_commander.agent.orchestrator import ALLOWED_TRANSITIONS
@@ -5321,18 +5359,18 @@ class TestRootCauseCoverageIsReported:
         assert "1 not graded" in capsys.readouterr().out
 
     def test_the_shipped_corpus_reports_partial_root_cause_coverage(self) -> None:
-        """Coverage is 40 of 49, and the report must say so rather than round it.
+        """Coverage is 44 of 53, and the report must say so rather than round it.
 
         It was 0 of 41 until WO-R3-261, and it did NOT move to 41: nine scenarios carry a
         recorded decision not to grade them on diagnosis, because none produces a
         diagnosis and a label there would fail the dimension for correct behaviour.
-        WO-R3-202 and WO-R3-214 each added four labelled worlds and no abstentions, so
-        numerator and denominator moved together and the nine stayed nine.
+        WO-R3-202, WO-R3-214 and WO-R3-226 each added four labelled worlds and no
+        abstentions, so numerator and denominator moved together and the nine stayed nine.
         """
         shipped = _shipped()
         graded = [s.name for s in shipped if s.root_cause_graded]
-        assert len(shipped) == 49, "the corpus size is read from the loader, never a literal"
-        assert len(graded) == 40, (
+        assert len(shipped) == 53, "the corpus size is read from the loader, never a literal"
+        assert len(graded) == 44, (
             f"{len(graded)} of {len(shipped)} scenarios declare a ground truth — update "
             "this test, ``tests/unit/test_ground_truth_corpus.py``'s record and the "
             "root-cause accuracy reported in the PR body together."

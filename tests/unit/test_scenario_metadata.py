@@ -163,7 +163,7 @@ class TestSplitsAreByTemplate:
         scenario that appears without anybody noticing is the thing this
         catches.
         """
-        assert len(CORPUS) == 49
+        assert len(CORPUS) == 53
 
 
 class TestClosedVocabularies:
@@ -395,6 +395,22 @@ class TestPromotionIsReconciled:
             "workflow_stuck",
             "same family, the level-0 control where the chain already ran",
         ),
+        # WO-R3-226 (WP-10.1). Two of the retry scenarios share one world — a stalled
+        # export pipeline whose lag sensor is frozen — and the substring rule has no
+        # needle for `pipeline_stalled`, so it answers `uncategorized`: the rule saying
+        # it cannot tell. The family is the SYMPTOM, and the symptom here is consumer
+        # lag; "retry" is a property of the agent's behaviour, not of the world, and a
+        # family per guard would group the corpus by our own code paths.
+        "retry_second_hypothesis_succeeds": (
+            "uncategorized",
+            "consumer_lag",
+            "the world is a lagging consumer; the retry is the agent's behaviour, not the family",
+        ),
+        "retry_cap_escalates": (
+            "uncategorized",
+            "consumer_lag",
+            "same world as its sibling, with the second attempt failing too",
+        ),
     }
 
     #: scenario -> (provisional difficulty, authoritative difficulty, why)
@@ -448,6 +464,20 @@ class TestPromotionIsReconciled:
             "single",
             "multi_hop",
             "dag state -> the root's own DLQ row -> replay -> verify on the chain",
+        ),
+        # WO-R3-226 (WP-10.1). Both are `ambiguous` and neither is visible from a name:
+        # the world offers two readings of one symptom (a frozen sensor and a saturated
+        # group), the first is defensible and wrong, and telling them apart takes acting
+        # on one and watching it fail.
+        "retry_second_hypothesis_succeeds": (
+            "single",
+            "ambiguous",
+            "two readings of one symptom; the first action is the discriminator",
+        ),
+        "retry_cap_escalates": (
+            "single",
+            "ambiguous",
+            "same two readings, and neither action clears the fault",
         ),
     }
 

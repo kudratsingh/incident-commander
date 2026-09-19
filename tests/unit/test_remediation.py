@@ -18,6 +18,11 @@ from pydantic import BaseModel
 
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
 from incident_commander.agent.investigation import HINT_ROUTED_TOOLS
+from incident_commander.agent.planner_context import (
+    ALREADY_ATTEMPTED_HEADING,
+    ATTEMPT_FAILED_MARKER,
+    format_planner_context,
+)
 from incident_commander.agent.remediation import (
     _PLAN_REFUSED_SUBJECT_TARGET_MARKER,
     _ROW_DISPOSITION,
@@ -27,6 +32,7 @@ from incident_commander.agent.remediation import (
     RemediationPlan,
     SubjectKind,
     _evidence_value_corpus,
+    _format_plan_context,
     _row_decisions_in_evidence,
     _row_source_for_subject,
     _subject_kind,
@@ -42,6 +48,7 @@ from incident_commander.agent.state import (
     IncidentState,
     RunState,
 )
+from incident_commander.config import DEFAULT_MAX_REMEDIATION_ATTEMPTS
 from incident_commander.llm.client import LLMError, LLMResult, LLMUsage
 from incident_commander.llm.fakes import CannedLLMClient, CannedUsage
 from incident_commander.tools.mcp_client import MCPError, ToolResult
@@ -563,12 +570,12 @@ class TestPlanRoundTrip:
             RemediationPlan.model_validate({**_plan_dict(), "extra_field": "boom"})
 
 
-class TestSingleAttemptInvariant:
-    """One Tier-1 attempt per incident (ADR 0008).
+class TestTheAttemptCap:
+    """``MAX_REMEDIATION_ATTEMPTS`` Tier-1 attempts per incident (ADR 0056).
 
-    PLANNING is reachable only from INVESTIGATING and VERIFYING has no PLANNING
-    successor, so the check in ``make_llm_plan`` is an INVARIANT GUARD rather than a soft
-    limit — it fires only if the graph is mutated or a RunState bypasses dispatch.
+    A real limit, not ADR 0008's unreachability assertion: VERIFYING may hand back to
+    INVESTIGATING, so PLANNING can be entered with an attempt already spent. VERIFYING
+    declines the edge at the cap, and this guard is the backstop on the same number.
     """
 
     def test_first_attempt_transitions_normally(self) -> None:
@@ -590,11 +597,65 @@ class TestSingleAttemptInvariant:
         result = transition(run, _now())
         assert result.state is IncidentState.REMEDIATING
 
-    def test_impossible_state_fires_invariant_guard(self) -> None:
-        # Construct the state directly, bypassing the dispatch that would never allow this.
-        # The LLM queue is empty: the guard must escalate before any planner tokens are spent.
+    def test_the_second_attempt_is_planned(self) -> None:
+        # The behaviour change ADR 0056 is: with one attempt spent and the cap at two,
+        # PLANNING plans again instead of escalating on an invariant.
+        llm = CannedLLMClient(
+            [
+                _plan_dict(
+                    action_arguments={"consumer_group": "analytics"},
+                    verify_arguments={"consumer_group": "analytics"},
+                )
+            ]
+        )
+        transition = make_llm_plan(llm, model=_MODEL)
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.CONSUMER_SATURATION,
+                    name="consumer_saturation",
+                    confidence=0.85,
+                    reasoning="r",
+                ),
+            ),
+            remediation_attempts=1,
+            alert={**_GROUP_ALERT, "consumer_group": "analytics"},
+        )
+        result = transition(run, _now())
+        assert result.state is IncidentState.REMEDIATING
+
+    def test_at_the_cap_the_guard_fires_and_names_the_cap(self) -> None:
+        # The LLM queue is empty: the guard must escalate before any planner tokens are
+        # spent, as it did under ADR 0008. Only the number and the message moved.
         llm = CannedLLMClient([])
         transition = make_llm_plan(llm, model=_MODEL)
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.CONSUMER_SATURATION,
+                    name="x",
+                    confidence=0.9,
+                    reasoning="r",
+                ),
+            ),
+            remediation_attempts=DEFAULT_MAX_REMEDIATION_ATTEMPTS,
+        )
+        result = transition(run, _now())
+        assert result.state is IncidentState.ESCALATED
+        assert any(
+            "remediation attempt cap reached (ADR 0056)" in e.result_summary
+            for e in result.evidence
+        )
+        assert llm.calls == []  # guard fires before spending planner tokens
+
+    def test_the_cap_is_the_configured_number(self) -> None:
+        # MAX_REMEDIATION_ATTEMPTS=1 restores ADR 0008's posture exactly, which is the
+        # claim .env.example makes — so the transition must read the argument, not a
+        # module constant (DIVERGENCE A6).
+        llm = CannedLLMClient([])
+        transition = make_llm_plan(llm, model=_MODEL, max_attempts=1)
         run = _run_state(
             state=IncidentState.PLANNING,
             hypotheses=(
@@ -609,8 +670,7 @@ class TestSingleAttemptInvariant:
         )
         result = transition(run, _now())
         assert result.state is IncidentState.ESCALATED
-        assert any("invariant violation (ADR 0008)" in e.result_summary for e in result.evidence)
-        assert llm.calls == []  # guard fires before spending planner tokens
+        assert any("max_attempts=1" in e.result_summary for e in result.evidence)
 
     def test_successful_remediation_increments_attempts(self) -> None:
         def handler(_n: str, args: Mapping[str, Any]) -> ToolResult:
@@ -641,6 +701,353 @@ class TestSingleAttemptInvariant:
         result = transition(run, _now())
         assert result.state is IncidentState.VERIFYING
         assert result.remediation_attempts == 1
+
+
+def _two_hypotheses() -> tuple[Hypothesis, ...]:
+    """A ranking with somewhere else to go: two names, both with a Tier-1 fix."""
+    return (
+        Hypothesis(
+            category=HypothesisCategory.CONSUMER_SATURATION,
+            name="consumer_saturation",
+            confidence=0.85,
+            reasoning="r",
+        ),
+        Hypothesis(
+            category=HypothesisCategory.STALE_CACHE,
+            name="stale_lag_sensor",
+            confidence=0.4,
+            reasoning="r",
+        ),
+    )
+
+
+def _one_hypothesis() -> tuple[Hypothesis, ...]:
+    """The ranking every pre-ADR-0056 scenario ends on: the attempted name, alone."""
+    return _two_hypotheses()[:1]
+
+
+def _attempt_marker(run: RunState) -> EvidenceEntry | None:
+    return next((e for e in run.evidence if e.tool_name == ATTEMPT_FAILED_MARKER), None)
+
+
+class TestTheRetryEdge:
+    """VERIFYING → INVESTIGATING, and the three deterministic reasons it is declined.
+
+    ADR 0056. Every decline that a pre-ADR-0056 run could reach leaves the escalation it
+    always had, which is why the 49 committed scenarios did not move.
+    """
+
+    _NOT_VERIFIED: Final[dict[str, Any]] = {
+        "verdict": "not_verified",
+        "reasoning": "lag still 50k after the restart",
+    }
+
+    def _verify(self, *, max_attempts: int = DEFAULT_MAX_REMEDIATION_ATTEMPTS) -> Any:
+        return make_llm_verify(
+            _lag_mcp(50_000),
+            CannedLLMClient([self._NOT_VERIFIED]),
+            model=_MODEL,
+            max_attempts=max_attempts,
+        )
+
+    def _run(self, *, hypotheses: tuple[Hypothesis, ...], attempts: int = 1) -> RunState:
+        return _run_state(
+            state=IncidentState.VERIFYING,
+            remediation_plan=_plan_dict(),
+            hypotheses=hypotheses,
+            remediation_attempts=attempts,
+            alert=_GROUP_ALERT,
+        )
+
+    def test_an_alternative_hypothesis_earns_a_reinvestigation(self) -> None:
+        result = self._verify()(self._run(hypotheses=_two_hypotheses()), _now())
+        assert result.state is IncidentState.INVESTIGATING
+        marker = _attempt_marker(result)
+        assert marker is not None
+        assert marker.arguments["verdict"] == "not_verified"
+        assert marker.arguments["action_tool"] == "restart_consumer_group"
+        assert marker.arguments["verify_tool"] == "get_consumer_lag"
+
+    def test_the_hypotheses_carry_over_and_the_spent_plan_does_not(self) -> None:
+        run = self._run(hypotheses=_two_hypotheses())
+        result = self._verify()(run, _now())
+        assert result.hypotheses == run.hypotheses
+        assert result.remediation_plan is None
+
+    def test_budgets_are_not_reset(self) -> None:
+        # The second attempt spends from the first's ledger: the only budget movement
+        # across the edge is what the verify probe and judge themselves charged.
+        run = self._run(hypotheses=_two_hypotheses())
+        result = self._verify()(run, _now())
+        assert result.budget.tool_calls_used == run.budget.tool_calls_used + 1
+        assert result.remediation_attempts == run.remediation_attempts
+
+    def test_no_alternative_escalates_exactly_as_adr_0008_did(self) -> None:
+        # The byte-identical path: no marker of its own, and the judge's verdict is the
+        # last entry, so the briefing reason is the one it always was.
+        run = self._run(hypotheses=_one_hypothesis())
+        result = self._verify()(run, _now())
+        assert result.state is IncidentState.ESCALATED
+        assert _attempt_marker(result) is None
+        assert result.evidence[-1].tool_name == "_verify_judge"
+
+    def test_the_cap_declines_the_edge_and_says_so(self) -> None:
+        run = self._run(hypotheses=_two_hypotheses(), attempts=2)
+        result = self._verify()(run, _now())
+        assert result.state is IncidentState.ESCALATED
+        reason = result.evidence[-1].result_summary
+        assert "no fix converged after 2 Tier-1 attempts" in reason
+        assert result.evidence[-1].arguments["attempted_tool"] == "restart_consumer_group"
+
+    def test_a_budget_that_cannot_fund_a_second_attempt_declines_the_edge(self) -> None:
+        run = self._run(hypotheses=_two_hypotheses())
+        spent = run.budget.model_copy(update={"tool_calls_used": run.budget.max_tool_calls - 2})
+        result = self._verify()(run.model_copy(update={"budget": spent}), _now())
+        assert result.state is IncidentState.ESCALATED
+        assert _attempt_marker(result) is None
+
+    def test_one_attempt_configured_declines_every_edge(self) -> None:
+        result = self._verify(max_attempts=1)(self._run(hypotheses=_two_hypotheses()), _now())
+        assert result.state is IncidentState.ESCALATED
+
+
+class TestAVerifiedStabilizerMayReinvestigate:
+    """ADR 0026 survives ADR 0056: a stabilizer never resolves, retry or no retry."""
+
+    _FENCE_PLAN: Final[dict[str, Any]] = {
+        "target_hypothesis": "poison",
+        "action_tool": "mark_dlq_permanent",
+        "action_arguments": {
+            "job_id": "eb798430-c3ad-5a44-b7d7-d15ab54d3f76",
+            "reason": "payload is missing a required field",
+        },
+        "verify_tool": "list_dlq_messages",
+        "verify_arguments": {"limit": 50},
+        "verify_expectation": "the row carries human_required and a non-null fenced_at",
+    }
+
+    def _mcp(self) -> _FakeMCP:
+        def handler(_n: str, _a: Mapping[str, Any]) -> ToolResult:
+            return ToolResult(
+                content=[
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {
+                                "total": 1,
+                                "items": [
+                                    {
+                                        "id": "eb798430-c3ad-5a44-b7d7-d15ab54d3f76",
+                                        "type": "bulk_api_sync",
+                                        "error_message": "SchemaValidationError: no keys",
+                                        "retry_count": 3,
+                                        "remediation_hint": "human_required",
+                                        "created_at": "2026-07-28T10:06:00Z",
+                                        "updated_at": "2026-07-28T10:06:00Z",
+                                        "dead_lettered_at": None,
+                                        "fenced_at": "2026-07-28T10:07:14Z",
+                                        "fenced_by": "agent",
+                                        "trace_id": None,
+                                        "triage": None,
+                                        "extra": None,
+                                    }
+                                ],
+                            }
+                        ),
+                    }
+                ]
+            )
+
+        return _FakeMCP(handler)
+
+    def _verify(self) -> Any:
+        return make_llm_verify(
+            self._mcp(),
+            CannedLLMClient([{"verdict": "verified", "reasoning": "the fence landed"}]),
+            model=_MODEL,
+        )
+
+    def _run(self, hypotheses: tuple[Hypothesis, ...]) -> RunState:
+        return _run_state(
+            state=IncidentState.VERIFYING,
+            remediation_plan=self._FENCE_PLAN,
+            hypotheses=hypotheses,
+            remediation_attempts=1,
+        )
+
+    def _poison(self) -> Hypothesis:
+        return Hypothesis(
+            category=HypothesisCategory.POISON_MESSAGE,
+            name="poison",
+            confidence=0.9,
+            reasoning="r",
+        )
+
+    def test_it_reinvestigates_carrying_adr_0026s_sentence(self) -> None:
+        result = self._verify()(self._run((self._poison(), *_two_hypotheses())), _now())
+        assert result.state is IncidentState.INVESTIGATING
+        marker = _attempt_marker(result)
+        assert marker is not None
+        assert marker.arguments["verdict"] == "verified_stabilizer"
+        # The ADR 0026 wording a human is owed follows the attempt onto the ledger, so
+        # reinvestigating cannot lose it.
+        assert "STABILIZED, NOT RESOLVED" in marker.result_summary
+
+    def test_with_nowhere_else_to_go_it_escalates_unchanged(self) -> None:
+        result = self._verify()(self._run((self._poison(),)), _now())
+        assert result.state is IncidentState.ESCALATED
+        assert "STABILIZED, NOT RESOLVED" in result.evidence[-1].result_summary
+        assert _attempt_marker(result) is None
+
+
+class TestTheIdenticalAttemptRefusal:
+    """A second attempt must be a different call, compared on the WIRED form (ADR 0056)."""
+
+    def _restart_evidence(self, group: str) -> tuple[EvidenceEntry, ...]:
+        # What ``make_remediate`` leaves on the ledger: the WIRED arguments it sent,
+        # idempotency key included.
+        return (
+            EvidenceEntry(
+                tool_name="restart_consumer_group",
+                arguments={
+                    "consumer_group": group,
+                    "idempotency_key": build_idempotency_key(
+                        "11111111-1111-1111-1111-111111111111",
+                        "restart_consumer_group",
+                        {"consumer_group": group},
+                    ),
+                },
+                result_summary=json.dumps({"consumer_group": group, "kill_key_cleared": True}),
+                timestamp=_now(),
+            ),
+        )
+
+    def _run(self, evidence: tuple[EvidenceEntry, ...]) -> RunState:
+        return _run_state(
+            state=IncidentState.PLANNING,
+            hypotheses=_two_hypotheses(),
+            evidence=evidence,
+            remediation_attempts=1,
+            alert=_GROUP_ALERT,
+        )
+
+    def test_the_same_call_again_is_refused_without_a_re_ask(self) -> None:
+        llm = CannedLLMClient([_plan_dict()])
+        result = make_llm_plan(llm, model=_MODEL)(
+            self._run(self._restart_evidence("worker-dispatcher")), _now()
+        )
+        assert result.state is IncidentState.ESCALATED
+        assert "identical second attempt refused (ADR 0056)" in result.evidence[-1].result_summary
+        # One planner call: a repeat is not a plan that a re-ask would improve.
+        assert len(llm.calls) == 1
+        # Nothing was executed, so nothing is recorded as attempted — SAFETY must not
+        # grade a write that never happened.
+        assert "attempted_tool" not in result.evidence[-1].arguments
+
+    def test_a_different_resource_is_a_different_attempt(self) -> None:
+        llm = CannedLLMClient([_plan_dict()])
+        result = make_llm_plan(llm, model=_MODEL)(
+            self._run(self._restart_evidence("analytics-consumer")), _now()
+        )
+        assert result.state is IncidentState.REMEDIATING
+
+    def test_an_omitted_optional_is_the_same_call_on_the_wire(self) -> None:
+        # ``pause_dag.ttl_seconds`` defaults to 600, so a plan that omits it and one that
+        # names 600 are one call once ``wire_arguments`` has filled it in. Comparing the
+        # plans as written would let this one through.
+        root = "5a8e6bc0-2f6a-5a4b-9a51-0d8f6a2c4b11"
+        executed = (
+            EvidenceEntry(
+                tool_name="pause_dag",
+                arguments={
+                    "root_job_id": root,
+                    "ttl_seconds": 600,
+                    "idempotency_key": "k" * 32,
+                },
+                result_summary=json.dumps({"root_job_id": root, "paused": True}),
+                timestamp=_now(),
+            ),
+        )
+        plan = _plan_dict(
+            target_hypothesis="consumer_saturation",
+            action_tool="pause_dag",
+            action_arguments={"root_job_id": root},
+            verify_tool="get_dag_state",
+            verify_arguments={"job_id": root},
+        )
+        result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(
+            _run_state(
+                state=IncidentState.PLANNING,
+                hypotheses=_two_hypotheses(),
+                evidence=executed,
+                remediation_attempts=1,
+                # The root has to be a value the platform produced, or the ADR 0030
+                # argument guard refuses the plan before this one is reached.
+                alert={
+                    "source": "platform.dag",
+                    "severity": "high",
+                    "fingerprint": "chain_root_stuck",
+                    "job_id": root,
+                },
+            ),
+            _now(),
+        )
+        assert result.state is IncidentState.ESCALATED
+        assert "identical second attempt refused (ADR 0056)" in result.evidence[-1].result_summary
+
+    def test_a_first_attempt_is_never_refused(self) -> None:
+        llm = CannedLLMClient([_plan_dict()])
+        result = make_llm_plan(llm, model=_MODEL)(
+            _run_state(
+                state=IncidentState.PLANNING,
+                hypotheses=_one_hypothesis(),
+                remediation_attempts=0,
+                alert=_GROUP_ALERT,
+            ),
+            _now(),
+        )
+        assert result.state is IncidentState.REMEDIATING
+
+
+class TestTheAlreadyAttemptedBlock:
+    """One renderer, two planner contexts, and the briefing (ADR 0056)."""
+
+    def _run_with_attempt(self) -> RunState:
+        verify = make_llm_verify(
+            _lag_mcp(50_000),
+            CannedLLMClient([{"verdict": "not_verified", "reasoning": "still 50k"}]),
+            model=_MODEL,
+        )
+        return verify(
+            _run_state(
+                state=IncidentState.VERIFYING,
+                remediation_plan=_plan_dict(),
+                hypotheses=_two_hypotheses(),
+                remediation_attempts=1,
+                alert=_GROUP_ALERT,
+            ),
+            _now(),
+        )
+
+    def test_the_remediation_planner_is_shown_it_once_and_whole(self) -> None:
+        run = self._run_with_attempt()
+        context = _format_plan_context(run, "stale_lag_sensor")
+        assert ALREADY_ATTEMPTED_HEADING in context
+        marker = _attempt_marker(run)
+        assert marker is not None
+        assert marker.result_summary in context
+        # Pulled OUT of the evidence dump, where the 200-character truncation would cut it.
+        assert f"[{ATTEMPT_FAILED_MARKER}]" not in context
+
+    def test_the_investigation_planner_is_shown_it_too(self) -> None:
+        context = format_planner_context(self._run_with_attempt())
+        assert ALREADY_ATTEMPTED_HEADING in context
+        assert f"[{ATTEMPT_FAILED_MARKER}]" not in context
+
+    def test_a_run_with_no_failed_attempt_renders_nothing(self) -> None:
+        run = _run_state(state=IncidentState.PLANNING, hypotheses=_one_hypothesis())
+        assert ALREADY_ATTEMPTED_HEADING not in _format_plan_context(run, "consumer_saturation")
+        assert ALREADY_ATTEMPTED_HEADING not in format_planner_context(run)
 
 
 class TestEvidenceSourcedArgs:

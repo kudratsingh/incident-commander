@@ -1061,18 +1061,18 @@ class TestTheGraderSideCanReadTheAnswerKey:
     def test_coverage_is_reportable_over_the_whole_corpus(self) -> None:
         corpus = load_scenarios(_SCENARIOS_DIR)
         graded = [s.name for s in corpus if s.root_cause_graded]
-        # 40 of 49: 32 of 41 since WO-R3-261, which wrote a decision for every
+        # 44 of 53: 32 of 41 since WO-R3-261, which wrote a decision for every
         # scenario from the world it manufactures, plus WO-R3-202's four
-        # `jobs_not_progressing` worlds and WO-R3-214's four `workflow_stuck`
-        # ones, every one of them labelled — ADR 0038 makes a label mandatory for
-        # a new scenario. The other nine are recorded abstentions rather than
+        # `jobs_not_progressing` worlds, WO-R3-214's four `workflow_stuck` ones and
+        # WO-R3-226's four retry ones, every one of them labelled — ADR 0038 makes
+        # a label mandatory for a new scenario. The other nine are recorded abstentions rather than
         # omissions — the tool-failure tests, the harness control and the noise
         # controls, none of which produces a diagnosis to grade. WHICH scenarios,
         # and why each one, is pinned by
         # ``tests/unit/test_ground_truth_corpus.py``; what this asserts is only
         # that the predicate the report is built from can still be computed over
         # the whole corpus and is no longer vacuous.
-        assert len(graded) == 40
+        assert len(graded) == 44
         assert len(corpus) >= 49
 
 

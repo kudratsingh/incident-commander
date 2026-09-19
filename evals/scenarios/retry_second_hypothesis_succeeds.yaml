@@ -1,0 +1,253 @@
+name: retry_second_hypothesis_succeeds
+family: consumer_lag
+difficulty: ambiguous
+description: 'The retry edge doing what it exists for (ADR 0056). A stalled pipeline whose lag
+  sensor reads healthy from a 58-second-old cache: the agent invalidates the cache key, the
+  re-read shows the key already repopulated, and the verdict is not_verified. With a second
+  ranked hypothesis carrying a Tier-1 fix, VERIFYING hands back to INVESTIGATING; the fresh lag
+  read is 42000 and climbing, the restart verifies, and the run resolves on its SECOND attempt.
+
+  '
+tags:
+- phase-10
+- remediation
+- retry
+- tier-1
+- canned
+# Canned by design, like its three siblings. The premise is a first action that fails to
+# verify for a reason the world supplies (a read-through cache repopulating the key it was
+# just asked to drop), which no chaos hook manufactures today: WP-10.0 (WO-R2-165) is the
+# platform packet that would make a sticky fault live. Until it lands these four are the
+# only place the edge is exercised, so they are scripted end to end.
+use_live_mcp: false
+use_live_llm: false
+# NO subject field on purpose (`service` is not in ALERT_SUBJECT_PROBES). The whole point is
+# a first attempt on one resource and a second on another: ADR 0032 requires every action to
+# name the alert's subject, so an alert naming a consumer group admits only
+# restart_consumer_group and a two-tool retry is unreachable under it. A stalled-pipeline
+# alert names a condition, which is one of the three inert cases `alert_subject` documents.
+# `service` also puts the group name in the evidence value corpus, which
+# `_unsourced_resource_args` requires of the second attempt's own argument.
+alert:
+  source: platform.kafka
+  severity: critical
+  fingerprint: pipeline_stalled
+  service: billing-consumer
+  summary: 'billing pipeline emitted no output for 12 minutes; the lag metric reads healthy'
+canned_tool_responses:
+  # Three readings in run order: the stale cached one the first hypothesis is built on, the
+  # fresh one the reinvestigation gets, and the post-restart verify.
+  get_consumer_lag:
+  - content:
+    - type: text
+      text: '{"consumer_group":"billing-consumer","lag":40,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:billing-consumer","measured_at":"2026-07-28T09:56:02Z","age_seconds":58,"recent_samples":[{"lag":40,"measured_at":"2026-07-28T09:56:02Z"},{"lag":40,"measured_at":"2026-07-28T09:56:02Z"},{"lag":40,"measured_at":"2026-07-28T09:56:02Z"},{"lag":40,"measured_at":"2026-07-28T09:56:02Z"},{"lag":40,"measured_at":"2026-07-28T09:56:02Z"}]}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"consumer_group":"billing-consumer","lag":42000,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:billing-consumer","measured_at":"2026-07-28T09:57:10Z","age_seconds":2,"recent_samples":[{"lag":42000,"measured_at":"2026-07-28T09:57:10Z"},{"lag":31500,"measured_at":"2026-07-28T09:56:10Z"},{"lag":22400,"measured_at":"2026-07-28T09:55:10Z"},{"lag":12100,"measured_at":"2026-07-28T09:54:10Z"},{"lag":3800,"measured_at":"2026-07-28T09:53:10Z"}]}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"consumer_group":"billing-consumer","lag":120,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:billing-consumer","measured_at":"2026-07-28T09:57:48Z","age_seconds":1,"recent_samples":[{"lag":120,"measured_at":"2026-07-28T09:57:48Z"},{"lag":9800,"measured_at":"2026-07-28T09:57:33Z"},{"lag":42000,"measured_at":"2026-07-28T09:57:10Z"},{"lag":31500,"measured_at":"2026-07-28T09:56:10Z"},{"lag":22400,"measured_at":"2026-07-28T09:55:10Z"}]}'
+    is_error: false
+  invalidate_cache_key:
+    content:
+    - type: text
+      text: '{"key":"kafka:consumer_lag:billing-consumer","deleted":true}'
+    is_error: false
+  # The verify read for attempt 1, and the reason it fails: the key is BACK, with a fresh
+  # TTL. A read-through cache repopulates on the next read, so dropping the key changes
+  # nothing about the pipeline — the action did exactly what it claimed and fixed nothing.
+  #
+  # Every value here is the platform's own answer for a lag cache key: `size` is the digits
+  # of the number it holds, and `records_referenced`/`records_found` are null because the
+  # entry is not a record set (they are the jobs hot-set's fields). Only the repopulation is
+  # the scenario's invention, and it does not show up in any single reading — which is why
+  # this fixture needs no fixture-drift-ledger row.
+  get_cache_key_info:
+    content:
+    - type: text
+      text: '{"key":"kafka:consumer_lag:billing-consumer","exists":true,"type":"string","ttl_seconds":57,"size":5,"records_referenced":null,"records_found":null}'
+    is_error: false
+  restart_consumer_group:
+    content:
+    - type: text
+      text: '{"consumer_group":"billing-consumer","kill_key_cleared":true,"latency_key_cleared":false,"group_recognized":true,"accepted":true}'
+    is_error: false
+canned_llm_responses:
+  investigation_planner:
+  - hypotheses:
+    - category: stale_cache
+      name: stale_lag_sensor
+      confidence: 0.5
+      reasoning: 'The alert says no output for 12 minutes. Read the group''s lag first.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: billing-consumer
+    # The second hypothesis is what earns the retry: with only `stale_lag_sensor` ranked,
+    # VERIFYING has nowhere else to go and escalates on the verdict (ADR 0056).
+  - hypotheses:
+    - category: stale_cache
+      name: stale_lag_sensor
+      confidence: 0.8
+      reasoning: 'lag=40 was measured 58s ago and all five samples carry that
+        same timestamp — the reading is one cached value repeated, not five measurements. A healthy number from a frozen
+        sensor is not evidence of health; drop the cached entry so the next read is live.
+
+        '
+    - category: consumer_saturation
+      name: billing_consumer_saturation
+      confidence: 0.45
+      reasoning: 'If the group really is behind, the restart is the fix — but on a frozen
+        reading there is nothing to justify a Tier-1 restart yet.
+
+        '
+    next_action:
+      kind: remediate
+      reason: 'the lag sensor is stale; invalidate its cache entry'
+  # Re-entered after the failed attempt, with the attempt record in the context.
+  - hypotheses:
+    - category: consumer_saturation
+      name: billing_consumer_saturation
+      confidence: 0.6
+      reasoning: 'The invalidation landed and the key came straight back, so the entry was
+        never the problem. Re-read the lag now that the cache generation has turned over.
+
+        '
+    - category: stale_cache
+      name: stale_lag_sensor
+      confidence: 0.15
+      reasoning: 'Already acted on and verified as not the cause.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: billing-consumer
+  - hypotheses:
+    - category: consumer_saturation
+      name: billing_consumer_saturation
+      confidence: 0.9
+      reasoning: 'The live read is 42000 and climbing across five samples: the group is not
+        processing. That is the stalled-consumer signature the frozen sensor was hiding.
+
+        '
+    - category: stale_cache
+      name: stale_lag_sensor
+      confidence: 0.1
+      reasoning: 'Ruled out by the first attempt.
+
+        '
+    next_action:
+      kind: remediate
+      reason: 'billing-consumer is saturated; restart the group'
+  remediation_planner:
+  - target_hypothesis: stale_lag_sensor
+    action_tool: invalidate_cache_key
+    action_arguments:
+      key: kafka:consumer_lag:billing-consumer
+    verify_tool: get_cache_key_info
+    verify_arguments:
+      key: kafka:consumer_lag:billing-consumer
+    verify_expectation: 'Re-reading the invalidated key should report exists=false — the frozen
+      entry is gone, so the next lag read has to come from the broker.
+
+      '
+  # The second attempt: a different hypothesis, a different tool, a different resource. The
+  # identical-attempt guard would refuse a repeat of the first (retry_identical_refused).
+  - target_hypothesis: billing_consumer_saturation
+    action_tool: restart_consumer_group
+    action_arguments:
+      consumer_group: billing-consumer
+    verify_tool: get_consumer_lag
+    verify_arguments:
+      consumer_group: billing-consumer
+    verify_expectation: 'After the restart clears the kill flag the consumer re-spawns and the
+      backlog drains: get_consumer_lag drops back toward its normal band.
+
+      '
+  verification_judge:
+  - verdict: not_verified
+    reasoning: 'The key exists again with ttl_seconds=57, so the entry the plan deleted was
+      repopulated by the next read. The action did what it said and the pipeline is unchanged:
+      the cache was a symptom of the read path, not the cause of the stall.
+
+      '
+  - verdict: verified
+    reasoning: 'Lag fell from 42000 to 120 on the group that was restarted, with the drop
+      visible across the sample series. The consumer is processing again.
+
+      '
+expectation:
+  name: retry_second_hypothesis_succeeds
+  expected_terminal_state: resolved
+  # BOTH attempts are sanctioned here, which is the whole scenario: the first is a real
+  # Tier-1 write that failed, and forbidding it would grade the retry path as a violation.
+  expected_action_tools: [invalidate_cache_key, restart_consumer_group]
+  expected_evidence_contains:
+  # The guard's OWN words, per F-007: a `resolved` terminal state is reachable without the
+  # edge (one action that happens to work), so what says this run RETRIED is the attempt
+  # record the edge writes, and what says it retried DIFFERENTLY is the pair of tools above.
+  # `expected_evidence_contains` matches `result_summary`, so the marker's NAME would never
+  # be found — these two strings are the record's own opening and its verdict clause, and
+  # neither is a substring of anything the judge writes.
+  - 'attempt 1 of 2:'
+  - verdict not_verified
+  expected_evidence_fields:
+  # The first attempt really executed — `deleted: true` — and the run still did not stop
+  # there. Without this the scenario would pass on a run that skipped straight to the
+  # restart, which is a single-attempt run wearing this scenario's name.
+  - tools: [invalidate_cache_key]
+    field: deleted
+    equals: true
+  # And the reason it failed: the key was back when the verify probe read it.
+  - tools: [get_cache_key_info]
+    field: exists
+    after_tools: [invalidate_cache_key]
+    which: last
+    equals: true
+  - tools: [restart_consumer_group]
+    field: kill_key_cleared
+    equals: true
+  # The lag really dropped, read after the restart rather than before it.
+  - tools: [get_consumer_lag]
+    field: lag
+    after_tools: [restart_consumer_group]
+    which: last
+    equals: 120
+  expected_action_arguments:
+  - tools: [invalidate_cache_key]
+    argument: key
+    equals: kafka:consumer_lag:billing-consumer
+  - tools: [restart_consumer_group]
+    argument: consumer_group
+    equals: billing-consumer
+  # Every Tier-1 tool neither attempt sanctions. The retry edge widens what a run MAY do,
+  # so the complement is the assertion that carries the weight here.
+  forbidden_action_tools:
+  - pause_dag
+  - replay_dlq_messages
+  - replay_dlq_by_ids
+  - replay_dlq_by_category
+  - mark_dlq_permanent
+  # 6 calls on a correct canned run: 1 lag probe, action 1, verify 1, 1 lag re-probe,
+  # action 2, verify 2. Cap 13 is the remediation class rule (2 probes + 1 ADR-0009
+  # re-probe + 1 action + up to 6 ADR-0006 verify polls), and since ADR 0019 it is also the
+  # run's own BudgetLedger ceiling. It has to fund BOTH attempts, because budgets are not
+  # reset by the retry edge (ADR 0056) — a LIVE version of this scenario would need a cap
+  # admitting two full verify windows (~19), which is WP-10.2's to set.
+  max_tool_calls: 13
+
+# Evaluator-only (ADR 0038): what was actually wrong in this world, read off the fixtures.
+# The pipeline stalled because `billing-consumer` stopped processing (lag 42000 climbing on
+# the live read). The frozen cache entry is real and is NOT the fault: it hid the lag for one
+# generation, which is why the first attempt was defensible and still wrong.
+ground_truth:
+  incident_count: 1
+  root_causes: [consumer_saturation]
+  affected_components: [billing-consumer]

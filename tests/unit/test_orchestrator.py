@@ -55,17 +55,50 @@ class TestAllowedTransitions:
                 f"{start.value} cannot reach any terminal state"
             )
 
-    def test_verifying_has_no_planning_successor(self) -> None:
-        # ADR 0008: single-attempt remediation. VERIFYING resolves,
-        # escalates, or fails — never re-plans. Practice 12: dead edges
-        # in ALLOWED_TRANSITIONS get deleted; the deleted edge becomes
-        # an explicit assertion so a future well-intentioned "let's
-        # retry" PR flags this test rather than silently restoring the
-        # loop.
+    def test_verifying_retries_through_investigating_and_never_through_planning(self) -> None:
+        # ADR 0056 replaced ADR 0008's single attempt with a capped retry, and kept the
+        # half of the pin that was the point: the retry edge goes to INVESTIGATING, so a
+        # second attempt is planned from evidence gathered AFTER the failure rather than
+        # from the ledger that produced it. A PR that adds PLANNING here flags this test.
         assert IncidentState.PLANNING not in ALLOWED_TRANSITIONS[IncidentState.VERIFYING]
         assert ALLOWED_TRANSITIONS[IncidentState.VERIFYING] == frozenset(
-            {IncidentState.RESOLVED, IncidentState.ESCALATED, IncidentState.FAILED}
+            {
+                IncidentState.INVESTIGATING,
+                IncidentState.RESOLVED,
+                IncidentState.ESCALATED,
+                IncidentState.FAILED,
+            }
         )
+
+    def test_planning_is_reachable_only_from_investigating(self) -> None:
+        # The property the retry edge had to preserve, asserted here as well as in
+        # test_grader.py: a second Tier-1 action is reachable only by re-entering the
+        # investigation loop, which is what makes it a different attempt.
+        sources = sorted(
+            state.value
+            for state, successors in ALLOWED_TRANSITIONS.items()
+            if IncidentState.PLANNING in successors
+        )
+        assert sources == [IncidentState.INVESTIGATING.value]
+
+    def test_the_only_cycle_runs_through_investigating(self) -> None:
+        # A cycle is now legal, so the graph tests above (reachability and
+        # terminal-reachability) are no longer trivially acyclic. This names the one
+        # cycle the design intends, so a second loop cannot appear unremarked.
+        on_a_cycle = sorted(
+            state.value
+            for state in IncidentState
+            if any(state in _reachable_from(s) for s in ALLOWED_TRANSITIONS[state])
+        )
+        assert on_a_cycle == sorted(
+            [
+                IncidentState.AWAITING_APPROVAL.value,
+                IncidentState.INVESTIGATING.value,
+                IncidentState.PLANNING.value,
+                IncidentState.REMEDIATING.value,
+                IncidentState.VERIFYING.value,
+            ]
+        ), "the retry edge is the one cycle; a second loop is a design change"
 
 
 class TestTransitionsRegistry:

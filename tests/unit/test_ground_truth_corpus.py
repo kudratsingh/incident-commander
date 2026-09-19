@@ -101,6 +101,17 @@ _DECIDED: Final[Mapping[str, tuple[Category, ...] | None]] = {
     # about the TIMELINE, graded on ATTRIBUTION, and not a second root cause.
     "temporal_ttl_recovers_before_action": (Category.STALE_CACHE,),
     "temporal_ttl_recovers_during_verify": (Category.STALE_CACHE,),
+    # WO-R3-221 (WP-8.5, ADR 0066). Family A: one page, four worlds, four labels, and
+    # every label read off the DEPENDENCY reading that separates its world rather than off
+    # the page the four share — which is the whole reason this family exists. All four
+    # already existed in the enum (WO-R3-188 wrote them for this plan section), so this is
+    # the first family to add none.
+    "api_latency_db_query": (Category.DB_QUERY_LATENCY,),
+    "api_latency_downstream": (Category.DOWNSTREAM_DEPENDENCY,),
+    "api_latency_redis": (Category.REDIS_SATURATION,),
+    # The level-0 control. `no_fault` is an ANSWER rather than a fault, and it is the one
+    # label in this family whose world is the seeded baseline with no hook at all.
+    "api_latency_healthy_control": (Category.NO_FAULT,),
     # WO-R3-229 (WP-11.2, ADR 0067). ONE label for a four-link cascade: the hook degrades
     # Redis and everything else in the world follows from it, so the absent lag reading,
     # the open admission throttle and the burning dispatch objective are consequences
@@ -208,14 +219,15 @@ class TestEveryScenarioCarriesADecision:
         """The number in the PR body, checked against the corpus that produced it."""
         corpus = _corpus()
         graded = [s for s in corpus if s.root_cause_graded]
-        assert (len(graded), len(corpus)) == (49, 58), (
+        assert (len(graded), len(corpus)) == (53, 62), (
             f"{len(graded)} of {len(corpus)} scenarios are root-cause graded; "
             "WO-R3-261 landed 32 of 41, WO-R3-202 took it to 36 of 45, WO-R3-214 "
             "to 40 of 49, WO-R3-226 to 44 of 53, WO-R3-228 to 46 of 55, WO-R3-236 to "
-            "48 of 57 and WO-R3-229 to 49 of 58 — every `jobs_not_progressing`, "
-            "`temporal_recovery`, `workflow_stuck`, retry, multi-fault and cascading "
-            "scenario carries a label, because ADR 0038 makes one mandatory for a new "
-            "scenario. Update this number and the run summary's coverage line together."
+            "48 of 57, WO-R3-229 to 49 of 58 and WO-R3-221 to 53 of 62 — every "
+            "`jobs_not_progressing`, `temporal_recovery`, `workflow_stuck`, "
+            "`api_latency`, retry, multi-fault and cascading scenario carries a label, "
+            "because ADR 0038 makes one mandatory for a new scenario. Update this "
+            "number and the run summary's coverage line together."
         )
 
 

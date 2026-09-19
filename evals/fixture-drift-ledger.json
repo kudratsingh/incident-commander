@@ -11,9 +11,9 @@
     "no-hook": "the fixture describes a fault no chaos hook can produce, so the canned value is the scenario's premise and the check probes a world that never had it. Not a defect; the fix, if that scenario is ever to run live, is a platform hook"
   },
   "_counts": {
-    "recorded": 147,
+    "recorded": 161,
     "fixture-defect": 0,
-    "explained": 147
+    "explained": 161
   },
   "known_drift": [
     {
@@ -71,6 +71,118 @@
       "kind": "value",
       "context": "canned-only",
       "why": "same scenario, same premise: the audit total counts events from that invented narrative"
+    },
+    {
+      "scenario": "api_latency_db_query",
+      "tool": "get_postgres_health",
+      "path": "active_queries_over_slow_threshold",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "the other half of the same pair and the load-bearing one: it is the platform's own count of queries past its own threshold, read from pg_stat_activity rather than sampled by us, and an un-faulted world counts 0. 1 or 2 depending which half of the offset the read caught, so the scenario grades `at_least: 1`"
+    },
+    {
+      "scenario": "api_latency_db_query",
+      "tool": "get_postgres_health",
+      "path": "longest_active_query_ms",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "`slow_db_queries(query_ms=2000)` holds two real reads of the jobs relation open at once, offset by half a chunk, so the server always has one past its 500ms threshold; the check probes the un-faulted world, where nothing is running and pg_stat_activity answers null. The canned 772.4 is one sample of a range six observations put at 772..1973ms, which is why the scenario grades it `at_least: 500.0` \u2014 the platform's threshold, the hook's own guarantee \u2014 and never the literal"
+    },
+    {
+      "scenario": "api_latency_db_query",
+      "tool": "get_slo_status",
+      "path": "objectives[].total[]",
+      "kind": "not_live_reachable",
+      "context": "traffic-stack",
+      "why": "the recording was taken under sustained `make traffic`, which this family's preconditions require (`total >= 1`, because `total: 0` is an absence of evidence rather than health); the drift walk probes a quiet stack, which answers 0"
+    },
+    {
+      "scenario": "api_latency_downstream",
+      "tool": "get_circuit_breakers",
+      "path": "breakers[].last_failure_reason_class[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the failure CLASS the breaker recorded \u2014 `other`, meaning neither a timeout nor a connection refusal, which is what a 503 is \u2014 where a dependency that has never failed reads null. This is the ONE world that earns the value, and the rebase proved it the hard way: the other three worlds' fixtures carried `other` too, because `breaker:state:<name>` lives outside `chaos:*` with a 24h TTL (platform ADR 0030) so `make eval-reset` never cleared this world's residue, and CI's freshly booted stack caught the four of them. The three were corrected to null; this one is the real reading and is ledgered"
+    },
+    {
+      "scenario": "api_latency_downstream",
+      "tool": "get_circuit_breakers",
+      "path": "breakers[].state[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "`degrade_downstream(mode=fail)` makes every endpoint behind the bulk-api-sync dependency answer 503 and the shipped breaker opens itself at its own threshold of three; the check probes a world where nothing has called that dependency, so the breaker reads `closed`. This is the world's central reading and the scenario grades it `not_equals: closed`, because `half_open` during a recovery probe is equally correct"
+    },
+    {
+      "scenario": "api_latency_downstream",
+      "tool": "get_slo_status",
+      "path": "objectives[].budget_remaining_pct[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the same hook fails the bulk_api_sync jobs themselves, so they retry and dead-letter and spend the job-completion-rate error budget; the fixture reads -100.0 (the floor, on a budget spent and then some) where a healthy world reads 100.0. The value is CLAMPED rather than continuous, which is why it can be canned at all while `total`, `failed`, `burn_rate` and `current_success_rate` are volatile"
+    },
+    {
+      "scenario": "api_latency_downstream",
+      "tool": "get_slo_status",
+      "path": "objectives[].burn_rate[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the same failures as a burn: 15.05 against the fixed 14.4 threshold where an un-faulted world reads 0.0. `fast_burn` is the boolean over it and is what the scenario actually grades"
+    },
+    {
+      "scenario": "api_latency_downstream",
+      "tool": "get_slo_status",
+      "path": "objectives[].current_success_rate[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the same failures as a ratio: 0.849 where an un-faulted world reads 1.0. The scenario grades neither this nor `burn_rate` below \u2014 they slide continuously while the window fills \u2014 but the fixture carries them because the reading does"
+    },
+    {
+      "scenario": "api_latency_downstream",
+      "tool": "get_slo_status",
+      "path": "objectives[].failed[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the count of jobs the degraded dependency failed \u2014 28 where an un-faulted world has 0. Unlike `total` beside it this IS produced by the hook, which is why it is post-fault and not traffic-stack"
+    },
+    {
+      "scenario": "api_latency_downstream",
+      "tool": "get_slo_status",
+      "path": "objectives[].fast_burn[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "same mechanism, and this is the platform's own verdict on it: 27 failed of 140 is a burn rate of 19.3 against the fixed 14.4 threshold, so the evaluator calls it fast-burning where a healthy world says false. The boolean is what the scenario grades; the rate behind it is volatile"
+    },
+    {
+      "scenario": "api_latency_downstream",
+      "tool": "get_slo_status",
+      "path": "objectives[].healthy[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the same reading's other boolean \u2014 an objective below its target is not healthy \u2014 false in the fault world and true in an idle one. Ledgered beside `fast_burn` rather than folded into it because they answer different questions (below target now, versus burning fast enough to page) and a world can be one without the other"
+    },
+    {
+      "scenario": "api_latency_downstream",
+      "tool": "get_slo_status",
+      "path": "objectives[].total[]",
+      "kind": "not_live_reachable",
+      "context": "traffic-stack",
+      "why": "same premise, same walk: 186 submitted jobs against a quiet stack's 0. Here the count also scopes the failure claims beside it \u2014 28 of 186 is a statement about these dispatches"
+    },
+    {
+      "scenario": "api_latency_healthy_control",
+      "tool": "get_slo_status",
+      "path": "objectives[].total[]",
+      "kind": "not_live_reachable",
+      "context": "traffic-stack",
+      "why": "same premise, and on the control it is load-bearing twice: without traffic the world's central claim (both budgets intact) would be asserted over no samples, which is INC-003's mistake in its strongest form"
+    },
+    {
+      "scenario": "api_latency_redis",
+      "tool": "get_slo_status",
+      "path": "objectives[].total[]",
+      "kind": "not_live_reachable",
+      "context": "traffic-stack",
+      "why": "same premise, same walk: 154 submitted jobs against a quiet stack's 0"
     },
     {
       "scenario": "cascading_redis_starves_backpressure",
@@ -398,7 +510,7 @@
       "path": "active_queries_over_slow_threshold",
       "kind": "value",
       "context": "no-hook",
-      "why": "same reading, same absent hook: two queries past the platform's fixed 500ms threshold is the fault, and an idle world counts 0. The threshold itself (`slow_query_threshold_ms`) matches live and is not here, which is the pair worth reading together \u2014 the yardstick is the platform's, only the count is the premise"
+      "why": "same reading, same unused hook: two queries past the platform's fixed 500ms threshold is the fault, and an idle world counts 0. The threshold itself (`slow_query_threshold_ms`) matches live and is not here, which is the pair worth reading together \u2014 the yardstick is the platform's, only the count is the premise"
     },
     {
       "scenario": "postgres_slow",
@@ -406,7 +518,7 @@
       "path": "longest_active_query_ms",
       "kind": "value",
       "context": "no-hook",
-      "why": "the fixture's world is a database serving slowly, so its longest running query is 1.84s; the check probes a world where nothing is running at all and pg_stat_activity answers null. Nothing in the lab makes a query slow \u2014 `inject_latency` delays a consumer and `saturate_db_pool` holds connections, which is the fault this one is deliberately NOT about"
+      "why": "the fixture's world is a database serving slowly, so its longest running query is 1.84s; the check probes a world where nothing is running at all and pg_stat_activity answers null. `inject_latency` delays a consumer and `saturate_db_pool` holds connections, which is the fault this one is deliberately NOT about; v0.6.12's `slow_db_queries` would produce it, and converting this scenario to seed it is a change of its own (WO-R3-221 declined to bundle it)"
     },
     {
       "scenario": "remediate_consumer_lag_success",

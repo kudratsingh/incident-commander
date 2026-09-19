@@ -136,20 +136,24 @@ class TestSplitsAreByTemplate:
         }
 
     def test_the_shipped_corpus_loads(self) -> None:
-        """58 scenarios, no straddle. The check is inert until it is not.
+        """62 scenarios, no straddle. The check is inert until it is not.
 
         41 until WO-R3-202's four, 45 until WO-R3-214's four, 49 until WO-R3-226's
-        four, 53 until WO-R3-228's two, 55 until WO-R3-236's two and 57 until
-        WO-R3-229's cascade. A pin, not a derivation.
+        four, 53 until WO-R3-228's two, 55 until WO-R3-236's two, 57 until
+        WO-R3-229's cascade and 58 until WO-R3-221's four. A pin, not a derivation.
         """
-        assert len(CORPUS) == 58
+        assert len(CORPUS) == 62
 
 
 class TestClosedVocabularies:
     def test_family_outside_the_enum_is_a_load_error(self, tmp_path: Path) -> None:
-        # Was `jobs_not_progressing`, then `workflow_stuck`; `api_latency` is the last of plan
-        # 01 § 7's future families.
-        _write(tmp_path, "solo", extra="family: api_latency\n")
+        # Was `jobs_not_progressing`, then `workflow_stuck`, then `api_latency` — each in
+        # turn the last of plan 01 § 7's future families, and each in turn built. With
+        # WO-R3-221 the enum is closed over every family plan 01 § 7 names, so the
+        # stand-in is a family this repo will never have rather than one it has not built
+        # yet. That is the stronger statement anyway: the check is about the enum being
+        # CLOSED, not about which packet is next.
+        _write(tmp_path, "solo", extra="family: kernel_panic\n")
         with pytest.raises(ScenarioLoadError, match="family"):
             load_scenarios(tmp_path)
 
@@ -184,18 +188,29 @@ class TestClosedVocabularies:
         """Plan 01 § 7's future families arrive with their own packets.
 
         An empty group reads as a measured zero. The rule (rewritten by WO-R3-214): a family
-        member lands with the scenarios that fill it, and `api_latency` is the last unbuilt one.
+        member lands with the scenarios that fill it.
+
+        **The list is now EMPTY, and that is the result rather than the check going
+        inert.** `api_latency` was the last unbuilt member and WO-R3-221 (WP-8.5) built it,
+        so every family plan 01 § 7 names is in the enum and carries scenarios. The
+        assertion stays because it is what a future packet trips: adding a member for a
+        family whose worlds are not in the same change puts a name back on this list.
         """
-        remaining_future_worlds = {"api_latency"}
+        remaining_future_worlds: set[str] = set()
         members = {member.value for member in ScenarioFamily}
         assert not remaining_future_worlds & members, (
             "a family member arrived without the scenarios that fill it. Add the member in the "
             "same change as its worlds, and take it off this list there."
         )
-        # And the rule's other half, at the two families that HAVE arrived: each
-        # is in the enum because something manufactures that world.
+        # And the rule's other half, at every family that HAS arrived: each is in the enum
+        # because something manufactures that world.
         populated = {s.family.value for s in CORPUS if s.family is not None}
-        for arrived in ("jobs_not_progressing", "workflow_stuck", "temporal_recovery"):
+        for arrived in (
+            "jobs_not_progressing",
+            "workflow_stuck",
+            "temporal_recovery",
+            "api_latency",
+        ):
             assert arrived in members and arrived in populated, (
                 f"{arrived} is a family this corpus built; it must be in the enum AND carry "
                 "scenarios, or one half of WO-R3-202's rule has come undone"
@@ -359,10 +374,49 @@ class TestPromotionIsReconciled:
             "temporal_recovery",
             "same family, the sibling world one TTL longer",
         ),
+        # WO-R3-221 (WP-8.5). Every one of the four is an exception, and the FOUR REASONS
+        # ARE THE FAMILY'S ARGUMENT: the rule reads a needle out of a name and each world's
+        # needle points at the DEPENDENCY it rules in, not at the symptom they share. So the
+        # rule splits one family across three groups and loses the control entirely — which
+        # is exactly the "two families where there is one" failure `ScenarioFamily`'s
+        # docstring exists to prevent, and the clearest demonstration in the corpus that a
+        # family is a property of the ALERT and not of the fault.
+        "api_latency_db_query": (
+            "postgres",
+            "api_latency",
+            "plan 01 section 7.3's Family A; the rule sees the database it rules IN and "
+            "the symptom the four worlds share is a latency page",
+        ),
+        "api_latency_redis": (
+            "cache_redis",
+            "api_latency",
+            "same family, and the rule sees the cache for the same reason — one world's "
+            "answer is not the group four worlds belong to",
+        ),
+        "api_latency_downstream": (
+            "uncategorized",
+            "api_latency",
+            "same family; there is no needle for a failing third-party dependency, which "
+            "is the rule reaching its limit rather than disagreeing",
+        ),
+        "api_latency_healthy_control": (
+            "uncategorized",
+            "api_latency",
+            "same family, and the world where nothing is wrong has nothing for a needle "
+            "to find — the level-0 control is invisible to a substring rule by definition",
+        ),
     }
 
     #: scenario -> (provisional difficulty, authoritative difficulty, why)
     DIFFICULTY_EXCEPTIONS = {
+        # WO-R3-221 (WP-8.5). Only the control moves; the three fault worlds are each one
+        # reading away from their answer, which is `single` and what the rule says.
+        "api_latency_healthy_control": (
+            "single",
+            "control",
+            "its own header: level-0 control, every dependency reading is at baseline and "
+            "the page is stale noise",
+        ),
         # The provisional rule keyed on the NAME, so it missed a control
         # that does not start with `noise_`.
         "no_fault_healthy_cache": (

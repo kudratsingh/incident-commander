@@ -39,7 +39,52 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
             "recent_samples.measured_at",
         }
     ),
+    # v0.6.11 (plat #218, WO-R3-217) added twelve output fields and v0.6.12's
+    # `slow_db_queries` is the first hook that moves two of them. Neither of those
+    # two joins this map, and WO-R3-221 (WP-8.5, ADR 0066) made that call
+    # deliberately after trying the other one, so the line is worth stating:
+    # **_VOLATILE is for a field no canned value can be right about in ANY world;
+    # a field a hook drives into a bounded range is LEDGERED post-fault instead.**
+    # `used_memory_bytes` above is the first kind — Redis allocates what it
+    # allocates and `saturate_redis` only adds to it. `longest_active_query_ms`
+    # is the second: the hook holds two `query_ms` reads offset by half a chunk,
+    # so a seeded world reads somewhere in 772..1973 ms (six observations) and a
+    # quiet one reads null. That is a range, not an arbitrary gauge, and the
+    # honest record of it is a ledger row saying which world each value belongs
+    # to. Declaring it volatile also had a cost that decided it: it made
+    # `postgres_slow`'s two ledger lines stale, and the only place that coverage
+    # could move to is a graded EVIDENCE claim on the fault's own values — which
+    # is a world-content claim on a scenario the read-only smoke pass runs
+    # UNSEEDED, i.e. the fifth instance of the class INC-003 is about and
+    # WO-R3-266 is filed to fix. It broke the committed re-grade of
+    # `0db6fe722f7c` immediately, which is that gap answering for itself.
     "get_postgres_health": frozenset({"ping_latency_ms", "active_connections"}),
+    # v0.6.11's breaker reading (plat #218, ADR 0030), first used by WO-R3-221.
+    # Two clocks and the two ages derived from them, plus `last_failure_at`, which
+    # is stamped by whichever call last failed. `seconds_since_state_change` and
+    # `reported_age_s` are both "how long ago you looked", so they cannot be
+    # canned at all. DELIBERATELY OUT: `state`, `failure_threshold` and
+    # `last_failure_reason_class` — `state` IS `api_latency_downstream`'s evidence,
+    # the threshold is configured, and the reason class is a closed three-member
+    # vocabulary rather than a reading. `failure_count` is IN, and it is the
+    # judgement call here: it climbs for as long as the dependency stays down
+    # (measured 3 -> 4 -> 5 -> 6 -> 9 across one fault), so no canned value can be
+    # right — but it is the other half of the open-breaker evidence, so
+    # `api_latency_downstream` grades it `at_least: 3`, the breaker's own
+    # threshold, which is the number that means "this opened because calls failed"
+    # rather than a sample of when you looked. Volatile as a value, load-bearing as
+    # a floor, exactly like `longest_active_query_ms` above.
+    "get_circuit_breakers": frozenset(
+        {
+            "measured_at",
+            "breakers.recorded_at",
+            "breakers.reported_age_s",
+            "breakers.last_state_change_at",
+            "breakers.seconds_since_state_change",
+            "breakers.last_failure_at",
+            "breakers.failure_count",
+        }
+    ),
     # Gauges of a running server that nothing seeds: memory is whatever Redis
     # allocated, and the keyspace counters are monotonic over its lifetime, so no
     # canned value can be right and type is the only honourable claim.
@@ -66,6 +111,22 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
     # and every objective's window ends at it. Nothing else here is exempt — the counts,
     # the rates and both flags ARE the reading a scenario grades, so a canned world's
     # numbers stay guarded and its disagreement with an un-faulted stack is ledgered.
+    #
+    # WO-R3-221 (WP-8.5) tried to widen this to `objectives.{total, failed,
+    # current_success_rate, burn_rate}` and **backed out**, because the two packets want
+    # opposite things from one per-tool map and the cascade's claim is the stronger one.
+    # For `cascading_redis_starves_backpressure` those four are AUTHORED premise — it is
+    # canned-only, so its numbers are the world — and four of its seven ledger rows are
+    # exactly them, which a volatility declaration would make stale and red the ratchet.
+    # For the `api_latency` family's four LIVE worlds the same four fields are a function
+    # of how long `make traffic` had been running (`total` read 143, 155, 174 and 221
+    # across recordings of worlds that differ in nothing else), so no canned value can be
+    # right and every one of them is ledgered post-fault instead.
+    #
+    # Both readings are correct about their own scenario and `_VOLATILE` is keyed by TOOL,
+    # so it cannot hold both. The same gap bit `get_outbox_status.unpublished_count` in
+    # the same packet, from the other side. Widening this map is not the fix; a per-
+    # scenario exemption would be, and until one exists the ledger carries the difference.
     "get_slo_status": frozenset({"measured_at"}),
     # v0.6.9 (plat #211, WO-R3-201), made from the four recordings under
     # `evals/recorded_worlds/jobs_not_progressing_*`. Two clocks (`measured_at`,

@@ -1,0 +1,36 @@
+{
+  "absent_reason": null,
+  "applies": false,
+  "ground_truth": {
+    "affected_components": [],
+    "causal_chain": [
+      "no fault is seeded; the world is the boot-seeded baseline",
+      "the paged job dispatch-latency objective is at 100% of budget over a real sample of dispatches",
+      "the database, Redis and the bulk-api-sync breaker all read their baseline values",
+      "the three active alerts the platform holds are unrelated incidents from the boot seed, not this page",
+      "the correct answer is that nothing is wrong and the page is stale"
+    ],
+    "incident_count": 0,
+    "root_causes": [
+      "no_fault"
+    ]
+  },
+  "provenance": {
+    "commander_head": "ceee91f",
+    "invocation_id": "e0ee51f1357c",
+    "platform_mcp_url": "http://localhost:8001/mcp",
+    "read_principal": "PLATFORM_SMOKE_TOKEN (read-scoped)",
+    "recorded_at": "2026-09-19T09:03:03.153566+00:00"
+  },
+  "recording": "api_latency_healthy_control.20260919T090303Z.e0ee51f1357c.json",
+  "scenario": "api_latency_healthy_control",
+  "schema_version": 1,
+  "why_this_file_is_separate": "ADR 0038: the wall around the answer key is structural. The replay client loads the recording through `recorder.load_recording`, which takes one path and has no way to reach this file; `RecordedWorld` forbids extra keys, so a ground truth cannot ride inside a recording either. Pinned by tests/unit/test_recorder.py.",
+  "world": {
+    "chaos_hooks": [],
+    "chaos_seeded": false,
+    "label": "the live platform as it stood, with NO fault seeded for `api_latency_healthy_control` \u2014 whatever the shared stack happened to hold. A ground truth written about the scenario's fault is not about this world (ADR 0040, INC-003).",
+    "live_mcp": true,
+    "settle_seconds": 0.0
+  }
+}

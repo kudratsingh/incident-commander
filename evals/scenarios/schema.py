@@ -678,10 +678,16 @@ class ScenarioFamily(StrEnum):
     closed enum rather than a free string, because a report grouped on typo-adjacent
     strings reports two families where there is one and a passing suite says nothing.
     The members are what the corpus honestly IS (promoted from WO-R3-179's provisional
-    substring rule). Deliberately absent: ``api_latency``, which no scenario manufactures
-    yet — a member lands in the same change as the scenarios that fill it, never before.
+    substring rule). ``api_latency`` was the one member this docstring named as
+    deliberately absent, on the rule that a member lands in the same change as the
+    scenarios that fill it; WO-R3-221 (WP-8.5, ADR 0066) is that change.
     """
 
+    # Plan 01 § 7.3's Family A, "the page says latency and the platform disagrees": one
+    # scenario-authored objective alert over four worlds, three of which hold a real
+    # fault the paged objective does not show (evals/scenarios/README-api-latency.md
+    # holds the matrix).
+    API_LATENCY = "api_latency"
     CACHE_REDIS = "cache_redis"
     CONSUMER_LAG = "consumer_lag"
     DEPLOY = "deploy"

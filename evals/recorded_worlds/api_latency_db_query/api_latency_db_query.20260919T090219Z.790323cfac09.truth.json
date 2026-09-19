@@ -1,0 +1,39 @@
+{
+  "absent_reason": null,
+  "applies": true,
+  "ground_truth": {
+    "affected_components": [
+      "postgres"
+    ],
+    "causal_chain": [
+      "two long-running reads of the jobs relation are held open in the worker process",
+      "the server reports one query past its 500 ms slow threshold at every sample",
+      "the connection pool is untouched, so callers wait on execution and not on acquisition",
+      "the platform's own job dispatch and completion objectives stay whole, so the paged breach is not confirmed"
+    ],
+    "incident_count": 1,
+    "root_causes": [
+      "db_query_latency"
+    ]
+  },
+  "provenance": {
+    "commander_head": "ceee91f",
+    "invocation_id": "790323cfac09",
+    "platform_mcp_url": "http://localhost:8001/mcp",
+    "read_principal": "PLATFORM_SMOKE_TOKEN (read-scoped)",
+    "recorded_at": "2026-09-19T09:02:19.979931+00:00"
+  },
+  "recording": "api_latency_db_query.20260919T090219Z.790323cfac09.json",
+  "scenario": "api_latency_db_query",
+  "schema_version": 1,
+  "why_this_file_is_separate": "ADR 0038: the wall around the answer key is structural. The replay client loads the recording through `recorder.load_recording`, which takes one path and has no way to reach this file; `RecordedWorld` forbids extra keys, so a ground truth cannot ride inside a recording either. Pinned by tests/unit/test_recorder.py.",
+  "world": {
+    "chaos_hooks": [
+      "slow_db_queries"
+    ],
+    "chaos_seeded": true,
+    "label": "the live platform with `api_latency_db_query`'s fault plan seeded (1 hook(s): `slow_db_queries`), settled 5.0s, read under the read-scoped principal",
+    "live_mcp": true,
+    "settle_seconds": 5.0
+  }
+}

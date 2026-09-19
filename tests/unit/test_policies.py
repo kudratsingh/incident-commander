@@ -16,7 +16,7 @@ import pytest
 from pydantic import BaseModel
 
 from evals.dossier import HINT_COHERENT_FAMILIES, error_families
-from evals.graders.deterministic import leaf_claims
+from evals.graders.deterministic import EvidenceFieldExpectation, leaf_claims
 from evals.runner import ScenarioResult, run_scenario
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
@@ -2818,4 +2818,356 @@ class TestTheDualFaultForbiddenSetsAreDerived:
             assert sanctioned <= routed, (
                 f"{name} sanctions {sorted(sanctioned - routed)}, which no cause in its "
                 "ground truth routes to — the steering and the grading disagree"
+            )
+
+
+class TestApiLatencyFamily:
+    """WP-8.5's acceptance, mechanised: one page, four worlds, and the page is wrong in all four.
+
+    Same contract as ``TestJobsNotProgressingFamily`` and ``TestWorkflowStuckFamily``,
+    and the same reason — plan 01 § 10 makes the evidence matrix the acceptance test for
+    a family and ``evals/scenarios/README-api-latency.md`` is where it is written, so the
+    half a passing suite can hold belongs here where prose cannot rot it.
+
+    What this family adds over the two before it, and why each check is here:
+
+    1. **Every pair is separated on a graded READING, and there are six pairs.** Every
+       world's terminal state, action count and forbidden set is identical, so ROOT_CAUSE
+       is the entire measurement and "distinguished on at least one agent-visible field"
+       is not a nicety — it is the only thing that makes four worlds four worlds. The
+       check is over pairs rather than over worlds for that reason.
+    2. **The page is refuted in EVERY world, including the one where something is
+       genuinely burning.** That is the family's subject (ADR 0066 § 1), and it is easy to
+       lose: a later editor who "fixed" the downstream world by pointing its page at the
+       objective that does breach would break the one-alert property and nothing else
+       would notice.
+    3. **The traffic premise is asserted, not documented** (ADR 0066 § 3). Every world
+       must precondition on ``objectives[].total at_least 1``, because ``total: 0`` is an
+       absence of evidence rather than health, and a control asserting an intact budget
+       over no samples is INC-003 in its strongest form.
+    4. **No world has a verify leg and no world sanctions an action**, which is the
+       structural consequence of four categories outside ``FIX_MAP``. Asserted so that
+       adding a fifth world with an action has to come back through here.
+    5. **Each world grades green end to end**, through the real runner and the real
+       grader.
+    """
+
+    FAMILY: Final[str] = "api_latency"
+
+    #: The alert field every world shares. Named rather than derived: the fingerprint is
+    #: what ``expect_briefing_contains`` asserts and what a reader greps for.
+    FINGERPRINT: Final[str] = "job_dispatch_latency_above_objective"
+    #: The objective the page names — the one ``get_slo_status`` refutes in every world.
+    PAGED_OBJECTIVE: Final[str] = "job_dispatch_latency"
+
+    @classmethod
+    def _members(cls) -> list[Scenario]:
+        members = [
+            s
+            for s in load_scenarios(_SCENARIO_DIR)
+            if s.family is not None and s.family.value == cls.FAMILY
+        ]
+        assert members, (
+            "the api_latency family has no scenarios — every check below is a sweep, and a "
+            "sweep over nothing passes"
+        )
+        return sorted(members, key=lambda s: s.name)
+
+    @staticmethod
+    def _truth(scenario: Scenario) -> tuple[str, ...]:
+        assert scenario.ground_truth is not None, f"{scenario.name} declares no ground truth"
+        return tuple(sorted(c.value for c in scenario.ground_truth.root_causes))
+
+    @staticmethod
+    def _plain(scenario: Scenario) -> list[EvidenceFieldExpectation]:
+        """The scenario's graded claims, with ``any_of`` groups excluded and asserted absent.
+
+        ``expected_evidence_fields`` is a union, and an ``any_of`` group is a different
+        shape with no ``field`` of its own. No world of this family declares one — there is
+        nothing to join, because none of them acts and so none has two equally-correct
+        verify shapes (INC-001's grammar exists for exactly that case). Asserting the
+        absence is what keeps every sweep below total: a group slipping in would be silently
+        skipped by a filter and the pair-separation check would compare fewer claims than
+        the scenario has.
+        """
+        claims = scenario.expectation.expected_evidence_fields
+        groups = [c for c in claims if not isinstance(c, EvidenceFieldExpectation)]
+        assert not groups, (
+            f"{scenario.name} declares an any_of group; no world of this family acts, so "
+            "there are no two equally-correct verify shapes to join"
+        )
+        return [c for c in claims if isinstance(c, EvidenceFieldExpectation)]
+
+    @staticmethod
+    def _claims(scenario: Scenario) -> set[tuple[str, ...]]:
+        """Each graded evidence claim as a comparable tuple, ``where`` included.
+
+        The ``where`` selector has to travel: three of this family's claims are on
+        ``objectives[].budget_remaining_pct`` and differ only in which objective they
+        select, so a comparison that dropped it would call two different claims the same
+        claim and report the pair as undistinguished.
+        """
+        out: set[tuple[str, ...]] = set()
+        for claim in TestApiLatencyFamily._plain(scenario):
+            where = (
+                (claim.where.field, str(claim.where.model_dump(exclude_none=True)))
+                if claim.where is not None
+                else ("", "")
+            )
+            out.add(
+                (
+                    ",".join(sorted(claim.tools)),
+                    claim.field,
+                    claim.rows,
+                    *where,
+                    str(
+                        claim.model_dump(
+                            include={"equals", "not_equals", "at_least", "at_most", "is_null"},
+                            exclude_none=True,
+                        )
+                    ),
+                )
+            )
+        return out
+
+    def test_the_family_has_the_four_worlds_that_ship(self) -> None:
+        """Membership, and four different answers across it.
+
+        The fifth world the plan asked for, ``db_pool``, is dropped with its reason in
+        ADR 0066 § 4: ``saturate_db_pool`` holds the WORKER process's pool and
+        ``get_postgres_health`` reports the ANSWERING process's, so the world reads as the
+        healthy control field for field and is distinguished from it on nothing. This
+        assertion is what makes that a decision rather than an omission — adding the world
+        means coming back through this list, and WO-R3-289 is what it waits on.
+        """
+        members = self._members()
+        assert [s.name for s in members] == [
+            "api_latency_db_query",
+            "api_latency_downstream",
+            "api_latency_healthy_control",
+            "api_latency_redis",
+        ]
+        assert {self._truth(s) for s in members} == {
+            ("db_query_latency",),
+            ("downstream_dependency",),
+            ("no_fault",),
+            ("redis_saturation",),
+        }
+
+    def test_the_alert_is_byte_identical_in_every_world(self) -> None:
+        """One page (ADR 0051 rule 1), compared as dictionaries rather than by eye.
+
+        Nothing in this family's alert varies — unlike Family B's deploy-noise variant,
+        there is no field a world may add — so the comparison is total.
+        """
+        alerts = [s.alert.model_dump() for s in self._members()]
+        first = alerts[0]
+        for scenario, alert in zip(self._members(), alerts, strict=True):
+            assert alert == first, (
+                f"{scenario.name}'s alert differs from the family's; one alert over four "
+                "worlds is what makes the diagnosis the measurement (ADR 0051 rule 1)"
+            )
+        assert first["fingerprint"] == self.FINGERPRINT
+        assert first["source"] == "monitoring.slo", (
+            "the page is scenario-authored and its source has to say so: the platform's "
+            "evaluator raises only on a >=14.4x burn of its own objectives and "
+            "job_dispatch_latency never burns here, so claiming platform.slo would be the "
+            "alert claiming what the platform does not know (ADR 0066 § 1)"
+        )
+
+    def test_the_alert_names_no_probeable_resource(self) -> None:
+        """The subject guard is inert BY DESIGN, and that is asserted rather than noticed.
+
+        A later editor adding a ``consumer_group`` or ``job_id`` to this page would give
+        cmd #177's machinery an opinion and make one probe mandatory in a family whose
+        whole point is that the agent chooses where to look. ADR 0066 § 2 rejected doing
+        that deliberately, so the absence is pinned.
+        """
+        for scenario in self._members():
+            assert alert_subject(scenario.alert.model_dump()) is None, (
+                f"{scenario.name}'s alert now names a probeable resource; this family's "
+                "page names an OBJECTIVE, which is the documented inert case (ADR 0066 § 2)"
+            )
+
+    def test_every_world_refutes_the_page_it_arrived_with(self) -> None:
+        """``get_slo_status`` says the paged objective is whole — in all four worlds.
+
+        Including ``downstream``, where a DIFFERENT objective is burning. That pairing is
+        the family's subject and the thing a later "fix" would quietly remove.
+        """
+        for scenario in self._members():
+            claims = [
+                c
+                for c in self._plain(scenario)
+                if "get_slo_status" in c.tools
+                and c.field == "objectives[].budget_remaining_pct"
+                and (
+                    (c.where is not None and c.where.equals == self.PAGED_OBJECTIVE)
+                    or (c.where is None and c.rows == "all")
+                )
+                and c.equals == 100.0
+            ]
+            assert claims, (
+                f"{scenario.name} does not grade the paged objective's budget as intact. "
+                "Every world of this family refutes its own page (ADR 0066 § 1); a world "
+                "that stopped doing so would need a different alert"
+            )
+
+    def test_every_world_asserts_the_traffic_premise_before_it_spends(self) -> None:
+        """``total at_least 1`` in the precondition AND in the graded claims.
+
+        ``get_slo_status`` computes over a rolling window of the jobs table and the
+        evaluator skips the seeded fixtures, so a quiet world answers ``total: 0`` — which
+        the tool's own description calls an absence of evidence, not health. Both halves
+        are checked: the precondition so a quiet run abandons before any model call, and
+        the claim so the graded statement is "there is evidence and it says the budget is
+        whole" (ADR 0066 § 3).
+        """
+        for scenario in self._members():
+            pre = [
+                field
+                for probe in scenario.expected_precondition
+                if probe.tool == "get_slo_status"
+                for field in probe.expect
+                if field.path == "objectives[].total" and field.at_least is not None
+            ]
+            assert pre, (
+                f"{scenario.name} does not precondition on get_slo_status.objectives[].total; "
+                "without it the world may be quiet and every budget claim vacuous"
+            )
+            graded = [
+                c
+                for c in self._plain(scenario)
+                if "get_slo_status" in c.tools
+                and c.field == "objectives[].total"
+                and c.at_least is not None
+            ]
+            assert graded, (
+                f"{scenario.name} does not GRADE get_slo_status.objectives[].total; the "
+                "precondition alone leaves the report saying nothing about whether the "
+                "intactness claim had evidence behind it"
+            )
+
+    def test_every_pair_of_worlds_is_separated_by_a_graded_reading(self) -> None:
+        """Six pairs, and each separated on a claim about a READING.
+
+        The plan's requirement, and in this family it is the whole design: every world
+        ends ``escalated`` with no action and the same forbidden set, so nothing but the
+        evidence tells them apart. A pair whose graded claim sets were equal would be one
+        world under two names — which is exactly the reading that made the fifth world
+        unbuildable (ADR 0066 § 4).
+        """
+        members = self._members()
+        claims = {s.name: self._claims(s) for s in members}
+        for i, left in enumerate(members):
+            for right in members[i + 1 :]:
+                only_left = claims[left.name] - claims[right.name]
+                only_right = claims[right.name] - claims[left.name]
+                assert only_left and only_right, (
+                    f"{left.name} and {right.name} are not separated in BOTH directions by a "
+                    f"graded claim (only-left {len(only_left)}, only-right {len(only_right)}). "
+                    "Every pair in this family must differ on an agent-visible field, and the "
+                    "asymmetric case is the dangerous one: a subset relation means one world's "
+                    "evidence is satisfied by the other's world"
+                )
+
+    def test_no_world_sanctions_an_action_and_all_seven_are_forbidden(self) -> None:
+        """Derived from the sanctioned action, never from the terminal state (ADR 0033).
+
+        All four categories are outside ``FIX_MAP``, so every correct action count is zero
+        and every forbidden set is all seven. The consequence is that this family measures
+        nothing on ACTION beyond a floor, which ADR 0066's consequences section states as
+        a limit — asserted here so a fifth world with an action has to say so.
+        """
+        for scenario in self._members():
+            assert scenario.expectation.expected_terminal_state.value == "escalated"
+            assert scenario.expectation.expected_action_tools == (), (
+                f"{scenario.name} sanctions an action; every category in this family is "
+                "outside FIX_MAP, so the correct count is zero (ADR 0033)"
+            )
+            forbidden = set(scenario.expectation.forbidden_action_tools)
+            assert forbidden == set(policies._TIER_1_TOOLS), (
+                f"{scenario.name} forbids {sorted(forbidden)}; "
+                "a zero correct-action count forbids all seven"
+            )
+
+    def test_the_control_grades_every_objective_and_not_merely_one(self) -> None:
+        """``rows: all`` on the control, and the reason it cannot be the default.
+
+        With the default any-row reading, "some objective has 100% of its budget" is true
+        in the DOWNSTREAM world too, where dispatch latency is whole and the completion
+        rate is gone. The control's claim is about the whole set, and ``rows: all`` is the
+        only way the grammar can say that.
+        """
+        control = next(
+            s
+            for s in self._members()
+            if s.difficulty is not None and s.difficulty.value == "control"
+        )
+        all_rows = {
+            c.field for c in self._plain(control) if "get_slo_status" in c.tools and c.rows == "all"
+        }
+        assert {
+            "objectives[].budget_remaining_pct",
+            "objectives[].failed",
+            "objectives[].fast_burn",
+        } <= all_rows, (
+            "the control must grade every objective, not any objective: an any-row claim "
+            "on budget_remaining_pct is satisfied by the downstream world"
+        )
+
+    def test_the_control_excludes_every_siblings_fault_before_it_spends(self) -> None:
+        """A control's precondition is the negation of its siblings' discriminators.
+
+        A leftover fault makes the control a fault world under the control's name, and
+        grading ``no_fault`` there is what ADR 0040 forbids and what INC-003 cost $2.15 to
+        learn. Each sibling is excluded in the sibling's OWN field.
+        """
+        control = next(
+            s
+            for s in self._members()
+            if s.difficulty is not None and s.difficulty.value == "control"
+        )
+        asserted = {
+            (probe.tool, field.path)
+            for probe in control.expected_precondition
+            for field in probe.expect
+        }
+        for tool, path in (
+            ("get_postgres_health", "longest_active_query_ms"),
+            ("get_redis_health", "used_memory_bytes"),
+            ("get_circuit_breakers", "breakers[].state"),
+        ):
+            assert (tool, path) in asserted, (
+                f"the control does not precondition on {tool}.{path}, so a leftover fault in "
+                "that sibling's own field would go unnoticed (ADR 0040, INC-003)"
+            )
+
+    def test_no_world_has_a_verify_leg_to_enumerate(self) -> None:
+        """Nothing is acted on, so ADR 0025 has no resource to demand a probe for.
+
+        Stated as an assertion because PROTOCOL step 4's second question ("what are ALL
+        the correct verify shapes?") has a real answer here — none — and "none" is only
+        trustworthy while no world acts.
+        """
+        for scenario in self._members():
+            assert scenario.expectation.expected_action_tools == ()
+            assert not [c for c in self._plain(scenario) if c.after_tools or c.before_tools], (
+                f"{scenario.name} orders a claim against an action boundary, but this family "
+                "takes no action — the boundary never occurs and the claim fails closed"
+            )
+
+    def test_the_family_grades_green_end_to_end(self) -> None:
+        """Each world through the real runner, transitions and grader.
+
+        The offline suite grades the canned planner scripts rather than the agent, which is
+        why this asserts only that each world is internally consistent — its fixtures, its
+        claims and its script agree. The agent's number on this family is the deferred
+        live acceptance.
+        """
+        for scenario in self._members():
+            report = run_scenario(scenario, _test_settings()).outcome.report
+            assert report.passed, (
+                f"{scenario.name} does not grade green offline: "
+                f"{[d.detail for d in report.dimensions if not d.passed]}"
             )

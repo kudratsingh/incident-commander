@@ -1,33 +1,19 @@
 """Canned fixtures vs the live platform.
 
-The sibling of ``test_contract_snapshot.py``, one level down. That test asks
-whether the tool *schemas* still match; this one asks whether the *values*
-the offline suite serves are values the platform can actually produce.
+``test_contract_snapshot.py`` asks whether the tool SCHEMAS still match; this asks
+whether the VALUES the offline suite serves are values the platform can produce.
+Nothing asked that before, which is why ``consumer_lag_high`` asserted ``lag: 1200``
+against a live ``0`` for months — the fixture stood in for queue traffic nobody had
+built, so the suite passed BECAUSE of the hole.
 
-Nothing asked that before, which is why ``consumer_lag_high`` asserted
-``lag: 1200`` against a live ``0`` for months — in a repo that also committed
-the trace proving it — and the suite stayed green throughout. The fixture was
-standing in for queue traffic nobody had built, so the suite passed *because
-of* the hole rather than despite it.
-
-Runs in CI in the ``contract`` job, which already boots the pinned platform
-by digest and seeds it (``SEED_EVAL_FIXTURES=true``), so this is one extra
-step against an existing stack rather than new infrastructure. Skipped
-cleanly without the live env, exactly like the contract diff, so
-``make test-integration`` in the ``test`` job stays offline.
-
-**Read-scoped by construction.** It runs under ``PLATFORM_SMOKE_TOKEN`` and
-deliberately does not fall back to ``PLATFORM_TOKEN``: a check that measures
-the world must not hold a principal that can change it. Tier-1 fixtures are
-additionally never probed — probing ``replay_dlq_by_category`` to see what it
-returns would replay the DLQ. The scope is the boundary; the filter is so a
-bug fails loudly instead of at the platform.
-
-That filter is asserted in ``tests/unit/test_fixture_probe_scope.py``, not
-here (WO-R2-122). It needs no platform, and the module-level skipif below
-meant the guard against probing a Tier-1 tool only ever ran in the
-environment where probing one would have done real damage. Everything left
-in this module genuinely needs the live stack.
+Runs in CI's ``contract`` job, which already boots the pinned platform and seeds it,
+and skips cleanly without the live env. READ-SCOPED by construction: under
+``PLATFORM_SMOKE_TOKEN`` with no fall back to ``PLATFORM_TOKEN``, because a check
+that measures the world must not hold a principal that can change it, and Tier-1
+fixtures are never probed at all. That filter is asserted in
+``tests/unit/test_fixture_probe_scope.py`` rather than here (WO-R2-122): the
+module-level skipif meant the guard against probing a Tier-1 tool only ever ran where
+probing one would have done real damage.
 """
 
 from __future__ import annotations
@@ -90,10 +76,9 @@ def test_no_fixture_drift_outside_the_ledger(probe) -> None:  # type: ignore[no-
 def test_ledger_holds_no_entry_that_is_already_fixed(probe) -> None:  # type: ignore[no-untyped-def]
     """The half that makes this a ratchet rather than an allowlist.
 
-    A recorded drift that no longer occurs means someone fixed a fixture, and
-    the line recording it has to leave in the same PR. Without this the file
-    would only ever grow, and a guard whose exception list grows is not a
-    guard.
+    A recorded drift that no longer occurs means someone fixed a fixture, and the line
+    recording it has to leave in the same PR — a guard whose exception list only grows is
+    not a guard.
     """
     _, stale = classify(probe.drifts, load_ledger(), stack_context=probe.stack_context)
     if stale:

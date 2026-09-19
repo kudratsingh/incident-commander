@@ -1,17 +1,13 @@
 """End-to-end crash-recovery test for the Phase 6 remediation loop.
 
-Simulates the failure mode CLAUDE.md invariant 6 requires the agent to
-handle: agent executes the Tier-1 action, writes a checkpoint, then
-crashes before advancing to VERIFYING. On restart the checkpoint is
-loaded and REMEDIATING re-fires. Under ADR 0008 the agent does NOT
-short-circuit here — it re-invokes with the SAME idempotency_key, and
-the platform's idempotency store (ADR 0010 on the platform side) is
-what makes the re-send safe. See
-``tests/integration/test_idempotency_contract.py`` for the live proof
-that the platform actually dedupes.
-
-Uses ``PostgresCheckpointer`` so the round-trip proves the schema
-handles v3 fields (``remediation_attempts``, ``remediation_plan``).
+The failure mode invariant 6 requires the agent to handle: execute the Tier-1 action,
+write a checkpoint, then crash before advancing to VERIFYING. On restart the
+checkpoint loads and REMEDIATING re-fires — and under ADR 0008 the agent does NOT
+short-circuit: it re-invokes with the SAME idempotency_key, and the platform's
+idempotency store is what makes the re-send safe
+(``tests/integration/test_idempotency_contract.py`` is the live proof). Uses
+``PostgresCheckpointer``, so the round trip also proves the schema handles the v3
+fields.
 """
 
 from __future__ import annotations
@@ -106,12 +102,10 @@ def _successful_action() -> ToolResult:
 class TestCrashRecoveryRoundTrip:
     """Full cycle: execute → checkpoint → crash → resume → re-send with same idem key.
 
-    Under ADR 0008 there is no client-side reconciliation branch. The
-    invariant is stronger, not weaker: on crash-resume the agent re-
-    invokes with a *deterministic* ``build_idempotency_key(incident,
-    tool, args)``, and the platform's idempotency store returns the
-    cached response. The agent doesn't need to know whether the first
-    invocation landed — the wire contract makes both cases equivalent.
+    Under ADR 0008 there is no client-side reconciliation branch, and the invariant is
+    stronger for it: on crash-resume the agent re-invokes with a DETERMINISTIC
+    ``build_idempotency_key(incident, tool, args)`` and the platform returns the cached
+    response, so the agent need not know whether the first invocation landed.
     """
 
     def test_resume_reissues_same_idempotency_key(self, clean_engine: Engine) -> None:
@@ -131,20 +125,17 @@ class TestCrashRecoveryRoundTrip:
         first_call_args = mcp.calls[0][1]
         first_idem_key = first_call_args["idempotency_key"]
 
-        # 2) Simulate the worst-case crash: the action landed on the
-        #    platform, but the post-transition checkpoint didn't. On
-        #    restart the state loaded from Postgres is still the
-        #    pre-execute snapshot.
+        # 2) Simulate the worst-case crash: the action landed on the platform but the
+        # #    post-transition checkpoint did not, so the state loaded from Postgres on
+        # #    restart is still the pre-execute snapshot.
         checkpointer.write(pre)
         resumed = checkpointer.load(pre.incident_id)
         assert resumed is not None
         assert resumed.state is IncidentState.REMEDIATING
 
-        # 3) Re-fire REMEDIATING. The agent invokes MCP AGAIN — no
-        #    client-side reconciliation short-circuit exists. The
-        #    critical assertion is that the second call carries the
-        #    SAME idempotency_key as the first, which is what makes
-        #    the platform's dedup safe.
+        # 3) Re-fire REMEDIATING. The agent invokes MCP AGAIN — no client-side
+        # #    reconciliation short-circuit exists — and the critical assertion is that the
+        # #    second call carries the SAME idempotency_key, which is what makes the dedup safe.
         after_recover = remediate(resumed, _now())
         assert after_recover.state is IncidentState.VERIFYING
         assert len(mcp.calls) == 2, (

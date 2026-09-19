@@ -1,13 +1,10 @@
 """Single-flight lease and crash-resume against real Postgres (ADR 0016).
 
-ADR 0002 promised "a single-flight lease per incident id ... guarantees one
-live run per incident" and named the integration test it wanted — "race two
-alerts for one incident" (line 52) — which was never written. This is it.
-
-`pg_try_advisory_lock` is session-scoped, so the whole point is that the lock
-lives on ONE pinned connection for the duration of the run; nothing but a real
-Postgres session can prove that, hence the testcontainers tier. Skips cleanly
-without a Docker daemon like every other test in this tree (see conftest).
+ADR 0002 promised "a single-flight lease per incident id" and named the integration
+test it wanted — "race two alerts for one incident" — which was never written. This
+is it. ``pg_try_advisory_lock`` is session-scoped, so the point is that the lock lives
+on ONE pinned connection for the run's duration, which nothing but a real Postgres
+session can prove.
 """
 
 from __future__ import annotations

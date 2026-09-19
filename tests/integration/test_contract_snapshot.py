@@ -1,21 +1,13 @@
 """Live contract diff.
 
-Runs ``tools/list`` against the platform reachable via ``PLATFORM_MCP_URL``,
-normalizes the response, and diffs against ``contracts/platform-tools.snapshot.json``.
-Skipped cleanly when the env isn't set. In CI the ``contract`` job in
-``.github/workflows/ci.yml`` boots ``demo/compose.yml`` at the pinned v0.6.3
-digest, mints a service-account token with ``scripts/bootstrap_agent_token.py``
-(``--postgres-container incident-commander-demo-postgres-1``), exports
-``PLATFORM_MCP_URL``/``PLATFORM_TOKEN``, and runs this test via
-``make test-contract`` on every pull request. Local dev runs it the same way
-via ``make test-contract`` after ``make demo`` and ``make bootstrap-token``.
+Runs ``tools/list`` against ``PLATFORM_MCP_URL``, normalizes the response and diffs
+it against ``contracts/platform-tools.snapshot.json``; skipped cleanly without the
+env. CI's ``contract`` job boots ``demo/compose.yml`` at the pinned digest, mints a
+token, and runs this on every pull request via ``make test-contract``.
 
-When this fails, the fix is one of:
-
-- The platform legitimately shipped a schema change → bump the digest in
-  ``demo/compose.yml`` and rerun ``make snapshot`` to bless the new contract.
-- The platform accidentally shipped a schema change → open a platform PR.
-- The agent's expectations are wrong → align the registry and rerun ``make eval-live``.
+When it fails the fix is one of three: the platform legitimately shipped a schema
+change (bump the digest and ``make snapshot``), it accidentally shipped one (open a
+platform PR), or the agent's expectations are wrong (align the registry).
 """
 
 from __future__ import annotations
@@ -58,9 +50,8 @@ def test_live_platform_matches_committed_snapshot() -> None:
     payload = r.json()
     assert "error" not in payload, f"tools/list failed: {payload.get('error')}"
     live_result = payload["result"]
-    # v0.4.8+ platform emits outputSchema on the wire (PR #88); we read every
-    # field off tools/list. Registry-side drift is caught by a separate unit
-    # test — see tests/unit/test_registry_matches_snapshot.py.
+    # v0.4.8+ emits outputSchema on the wire (PR #88) and every field is read off
+    # tools/list. Registry-side drift is caught by test_registry_matches_snapshot.py.
     live = normalize(live_result)
 
     committed = json.loads(_SNAPSHOT_PATH.read_text())

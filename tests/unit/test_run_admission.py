@@ -1,10 +1,7 @@
 """The concurrency ceiling's arithmetic and the semaphore that enforces it (ADR 0022).
 
-The ceiling is not a number somebody picked; it is a division. These tests pin
-the division, and — more importantly — pin the refusals, because the way this
-fix fails is not by computing a wrong ceiling but by an operator raising
-``AGENT_MAX_CONCURRENT_RUNS`` past what the pool can serve and reintroducing
-the deadlock with a config change.
+The refusals matter more than the division: the failure mode is an operator raising
+``AGENT_MAX_CONCURRENT_RUNS``.
 """
 
 from __future__ import annotations
@@ -49,10 +46,7 @@ class TestPoolDefaults:
     def test_every_admitted_run_can_hold_its_lease_and_still_write(self) -> None:
         """The property the whole ADR exists for, asserted as arithmetic.
 
-        Peak demand is every live run holding its lease AND writing a
-        checkpoint at the same instant. That must fit inside the pool with the
-        ingest reservation still intact, or a checkpoint write can block on a
-        connection only another lease holder could release.
+        Peak demand is every live run holding its lease AND writing at once, inside the pool.
         """
         settings = _settings()
         peak = settings.max_concurrent_runs * 2

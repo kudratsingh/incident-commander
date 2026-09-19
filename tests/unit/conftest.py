@@ -20,19 +20,8 @@ class OutboundSocketBlocked(RuntimeError):
 def no_outbound_sockets(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """No unit test may open a network connection. Enforced, not remembered.
 
-    ``TestOneMutatingScenarioPerInvocation.test_one_mutating_scenario_is_allowed``
-    ran ``main()`` under a real-looking live env without stubbing
-    ``make_client``, so it reached the write-scope principal guard and fired
-    a real MCP ``tools/call`` — a Tier-1-capable payload — at
-    ``http://real.host:8001/mcp`` from the local suite. The stub was one
-    ``monkeypatch.setattr`` away, which is exactly why per-test discipline is
-    the wrong control: the next test to forget it fails the same way, silently.
-
-    The attempt is RECORDED and failed at teardown rather than only raised.
-    Raising alone is not enough: the code paths that reach the network here
-    are safety guards that fail closed on any exception, so a refused
-    connection would be swallowed into a ``PrincipalGuardError`` and an exit
-    code the test already tolerates. A recorded violation cannot be caught.
+    One test fired a real MCP ``tools/call`` at ``http://real.host:8001/mcp``. The attempt is
+    RECORDED and failed at teardown, because the guards fail closed and would swallow it.
     """
     attempts: list[str] = []
 

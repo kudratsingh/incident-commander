@@ -1,22 +1,9 @@
 """The drift walk's Tier-1 filter, checked offline (WO-R2-122).
 
-This is the *filter* half of the fixture-drift probe's two safety guards. The
-other half is scope — the walk runs under the read-only
-``PLATFORM_SMOKE_TOKEN`` and never falls back to the write-scoped
-``PLATFORM_TOKEN`` — and that half can only be observed against a live stack,
-so it stays in ``tests/integration/test_canned_fixtures_match_live.py``.
-
-This half needs no platform at all: it reads the committed scenario corpus and
-asks whether the walk *would* probe a non-read tool. It lived in that
-integration module anyway, under a module-level ``skipif`` for the live
-environment, so the one guard that could have run in every CI run was the one
-that never ran in any of them — a safety check whose own execution depended on
-the thing it was protecting against.
-
-Probing a Tier-1 tool is not a failed assertion, it is a side effect: calling
-``replay_dlq_by_category`` to see what it returns replays the DLQ. So the
-check belongs where it fails *before* anyone reaches a platform, which is
-here, in the offline tier.
+The scope half — the walk runs under the read-only ``PLATFORM_SMOKE_TOKEN`` — needs a live
+stack and stays in ``tests/integration/``. This half reads the committed corpus and asks
+whether the walk WOULD probe a non-read tool. It used to sit behind a live-env ``skipif``,
+so the one guard that could run in every CI run never did. Probing Tier-1 is a side effect.
 """
 
 from __future__ import annotations

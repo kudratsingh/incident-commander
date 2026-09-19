@@ -146,11 +146,8 @@ class TestMakeInvestigate:
     ) -> None:
         """The whole point of escalating is telling a human why (WO-R2-119).
 
-        The marker was recorded under the *tool's* name, and the briefing
-        only reads a reason from an underscore-prefixed marker, so every
-        Phase-1 investigate escalation handed the on-call an empty reason —
-        and leaked the marker into the probe trail as a fake
-        ``get_consumer_lag`` result while it was there.
+        The marker was recorded under the *tool's* name, and the briefing reads a reason only
+        from an underscore-prefixed one.
         """
 
         def raise_error(_n: str, _a: Mapping[str, Any]) -> ToolResult:
@@ -172,10 +169,8 @@ class TestMakeInvestigate:
     ) -> None:
         """The happy path also ends ESCALATED, and must NOT gain a reason.
 
-        Its last evidence entry is a real ``get_consumer_lag`` result, so
-        widening the briefing's recognizer instead of renaming the marker
-        would put a JSON blob under a heading that says why the agent gave
-        up. It stays a probe: trail yes, reason no.
+        Widening the recognizer instead of renaming the marker would put a JSON blob under a
+        "why" heading.
         """
         transition = make_investigate(
             _FakeMCPClient(
@@ -276,13 +271,8 @@ class TestMakeInvestigate:
 class TestMalformedEnvelopeReachesTheEscalationRail:
     """The end-to-end claim behind the ``MCPError``-only contract.
 
-    Driven through a *real* ``MCPClient`` over a mock transport rather
-    than ``_FakeMCPClient``, because the bug under test lived in the
-    client's own validation step: a 200 with an unparseable result
-    envelope raised ``ValidationError``, which this transition does not
-    catch, so the run died FAILED with no briefing for the human who got
-    paged. What the rail owes them is an escalation carrying a reason and
-    a briefing that renders it.
+    Driven through a *real* ``MCPClient`` over a mock transport, because the bug lived in the
+    client's own validation: an unparseable envelope raised ``ValidationError``.
     """
 
     @staticmethod
@@ -316,16 +306,8 @@ class TestMalformedEnvelopeReachesTheEscalationRail:
     ) -> None:
         """The run ends at a human handoff, not at a crash.
 
-        Before the envelope validation moved inside the error wrapper this
-        never got here at all: ``ValidationError`` escaped the transition,
-        the runner classified it as a crash, and the incident finished
-        FAILED with no briefing rendered for anyone.
-
-        The reason survives the handoff too (WO-R2-119): the marker is
-        recorded under ``_ESCALATION_MARKER``, which is what
-        ``briefing._terminal_marker`` reads. It used to be recorded under
-        the tool's own name and the reason was dropped between the two, so
-        this path reached a human with a blank "why".
+        Before the validation moved inside the error wrapper, ``ValidationError`` escaped and the
+        incident finished FAILED. The reason survives too: the marker is ``_ESCALATION_MARKER``.
         """
         with self._client_returning({"content": "not-a-list"}) as client:
             transition = make_investigate(client)

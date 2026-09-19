@@ -38,9 +38,7 @@ class TestRenderBriefing:
         assert "group=billing-consumer" in briefing.alert_summary
 
     def test_alert_summary_prefers_consumer_group_spelling(self, run_state: RunState) -> None:
-        # B-10: the platform's tool arg (and every consumer_group-keyed
-        # scenario alert) spells it `consumer_group`; the summary read only
-        # the legacy `group`, so the group silently vanished from briefings.
+        # B-10: the platform spells it `consumer_group`; the summary read only `group`.
         run = run_state.model_copy(
             update={
                 "state": IncidentState.ESCALATED,
@@ -97,9 +95,7 @@ class TestRenderBriefing:
     def test_investigation_trail_excludes_every_underscore_pseudo_tool(
         self, run_state: RunState, now: datetime
     ) -> None:
-        # B-11: the filter is structural (startswith "_"), matching the
-        # grader — a hand-list drifted once the Phase-6 evidence writers
-        # landed and these five leaked into the trail as "probes".
+        # B-11: the filter is structural (startswith "_"), matching the grader.
         evidence = (
             _evidence(now, "_triage", "severity=high classified as investigating"),
             _evidence(now, "_planner_remediate", "planner chose remediation"),
@@ -118,11 +114,8 @@ class TestRenderBriefing:
     def test_the_trail_carries_each_probes_arguments(
         self, run_state: RunState, now: datetime
     ) -> None:
-        # INC-002: `list_dlq_messages` is the whole queue OR one slice under
-        # one name, so a result recorded without the arguments that scoped it
-        # cannot be read correctly by anyone downstream — and the trail is
-        # what both LLM readers of the briefing are given. The evidence ledger
-        # always had them; the briefing used to drop them on the floor.
+        # INC-002: `list_dlq_messages` is the whole queue OR one slice under one name, so a
+        # result recorded without its arguments cannot be read correctly downstream.
         evidence = (
             EvidenceEntry(
                 tool_name="list_dlq_messages",
@@ -159,9 +152,7 @@ class TestRenderBriefing:
         assert briefing.investigation_trail == ()
 
     def test_escalation_reason_reaches_the_human(self, run_state: RunState, now: datetime) -> None:
-        # R2-38: the underscore filter is right about the *trail* and wrong
-        # about the reason — it ate the one line telling the human why the
-        # agent gave up.
+        # R2-38: the filter is right about the trail, wrong about the reason.
         evidence = (
             _evidence(now, "get_consumer_lag", '{"group":"billing","lag":42}'),
             EvidenceEntry(
@@ -209,9 +200,7 @@ class TestRenderBriefing:
     def test_attempted_tier_1_action_reaches_the_human(
         self, run_state: RunState, now: datetime
     ) -> None:
-        # Safety: a human who is not told the action already fired may fire
-        # it again. The attempt lives only on the marker's arguments, because
-        # a refused call writes no evidence entry of its own.
+        # Safety: a human not told the action fired may fire it again.
         evidence = (
             EvidenceEntry(
                 tool_name="_remediation_escalate",

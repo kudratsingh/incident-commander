@@ -1,17 +1,9 @@
 """A written snapshot must never be reported as a crash (WO-R2-99).
 
-``snapshot_platform_tools.py`` writes the file and THEN prints where it
-went, via ``out_path.relative_to(_REPO_ROOT)``. ``relative_to`` raises
-``ValueError`` for any path that is not under the repo root — which
-includes both ``--out /tmp/x.json`` (an operator dumping a snapshot to
-compare two platform versions by hand) and a plain relative
-``--out out.json``, since the unresolved ``Path("out.json")`` is not
-under the absolute repo root either. The snapshot was already on disk by
-then, so the operator saw a traceback for a run that had succeeded and
-re-ran it against a live platform for no reason.
-
-Offline: ``fetch_tools`` is stubbed, so nothing here talks to a platform
-and nothing touches the committed snapshot.
+The script writes the file and THEN prints where it went via ``relative_to(_REPO_ROOT)``,
+which raises ``ValueError`` for any path outside the repo — including a plain relative
+``--out out.json``. The snapshot was already on disk, so the operator saw a traceback for
+a run that had succeeded.
 """
 
 from __future__ import annotations

@@ -115,9 +115,7 @@ class TestUnknownModel:
     def test_fallback_is_an_upper_bound_in_every_token_class(self) -> None:
         """The guarantee stated as a property, not as spot values.
 
-        The old form compared only ``rate_total``, so it held for any table —
-        including one whose priciest row by sum is cheaper than another row in
-        a single class. That is the shape that under-bills.
+        The old form compared only ``rate_total``, which held for any table.
         """
         fallback = pricing_for("claude-nonexistent")
         for name, row in MODEL_PRICING.items():
@@ -131,12 +129,8 @@ class TestUnknownModel:
     ) -> None:
         """The defect, pinned. A row cheaper in TOTAL but dearer in OUTPUT.
 
-        Selecting the single priciest row by the sum of its four rates picks
-        sonnet here — and sonnet's output rate is a third of this row's, so
-        every output token of an unpinned model billed at sonnet's rate is
-        metered below its real price. ADR 0015 says the meter may over-report
-        and never silently under-report; only a per-class maximum makes that
-        true by construction for any future table.
+        The priciest row by sum is sonnet, whose output rate is a third of this row's, so every
+        output token of an unpinned model would be metered below price (ADR 0015).
         """
         dear_output = ModelPricing(
             input_usd_per_mtok=Decimal("0.10"),

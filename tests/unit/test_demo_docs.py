@@ -1,24 +1,9 @@
 """Drift tripwires for the demo stack: pinning, named volumes, and the README.
 
-Three defects motivated this file (findings C-10, C-11, S-01), all of the same
-shape: the demo stack's *documented* and *declared* behavior drifted away from
-what `make demo-down` and `demo/compose.yml` actually do.
-
-* C-11 — both redpanda services floated on ``redpandadata/redpanda:latest``
-  while every platform service is digest-pinned, so broker and rpk client could
-  resolve different builds on different days.
-* S-01 — redpanda declared no volume. Its image declares
-  ``VOLUME /var/lib/redpanda/data``, so every ``docker compose down`` orphaned
-  an anonymous volume and took the Kafka event log and consumer-group offsets
-  with it — the same destructive-stop mechanism #84 fixed for postgres/redis.
-* C-10 — demo/README.md still told readers "Volumes are wiped on demo-down"
-  and inlined a platform digest that had gone stale two releases earlier. This
-  repo's established failure mode is a coding agent "fixing" code to match a
-  stale doc, which here means re-adding ``-v`` and destroying the audit log
-  that CLAUDE.md invariant 6 makes the ground truth for grading safety.
-
-The README rule is *single-source*: it must not inline a digest at all — the
-``image:`` lines in demo/compose.yml are the only copy that can be right.
+Three defects of one shape (C-10, C-11, S-01): both redpanda services floated on
+``:latest``; redpanda declared no volume, so every ``docker compose down`` orphaned the
+Kafka event log and offsets; and demo/README.md inlined a stale digest. The README rule
+is single-source: the ``image:`` lines are the only copy that can be right.
 """
 
 from __future__ import annotations
@@ -130,11 +115,8 @@ def test_every_repository_resolves_to_one_ref() -> None:
 def test_redpanda_data_lives_on_a_named_volume() -> None:
     """S-01: `make demo-down` must not delete the Kafka event log."""
     mounts = _service_mounts("redpanda")
-    # Parse the mount rather than string-matching its tail. Compose short
-    # syntax is source:target[:mode], so `endswith(":/var/lib/redpanda/data")`
-    # called a perfectly valid `demo_redpandadata:/var/lib/redpanda/data:rw`
-    # unnamed — failing with a message claiming the event log was about to be
-    # destroyed by a configuration that destroys nothing (WO-R2-102).
+    # Parse the mount rather than string-matching its tail: compose short syntax is
+    # source:target[:mode], so an endswith check called a valid named volume unnamed.
     named = [
         mount
         for mount in mounts

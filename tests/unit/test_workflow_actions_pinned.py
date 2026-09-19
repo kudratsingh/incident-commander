@@ -1,12 +1,8 @@
 """Regression: every GitHub Action must be pinned by full commit SHA (F2-14).
 
-Both workflows pinned upstream actions by mutable major-version tag
-(actions/checkout@v4, astral-sh/setup-uv@v3). A mutable tag can be retargeted
-by a compromised upstream to point at malicious code, poisoning every CI job
-that runs it — including the required checks branch protection trusts. These
-tests parse every workflow and require each ``uses:`` reference to name a
-full 40-hex-char commit SHA (the human-readable version stays in a trailing
-comment in the file), so a tag-pinned action cannot be reintroduced silently.
+A mutable major-version tag can be retargeted by a compromised upstream, poisoning every
+CI job — including the required checks branch protection trusts. Each ``uses:`` must name
+a 40-hex SHA.
 """
 
 from __future__ import annotations

@@ -1,23 +1,9 @@
 """The offline re-grade of a locked archive (WO-R3-265, INC-003).
 
-A paid archive is evidence and is never rewritten (CLAUDE.md invariant 9,
-ADR 0021), but a grading rule that was wrong when the archive was written
-leaves seven false reds sitting in it. `scripts/regrade_archive.py` is the
-answer to both facts at once: it reads the archive, re-grades every row from
-that run's own trajectories under TODAY's rules, and writes a NEW versioned
-report beside it. Nothing in the archive is touched, and the re-grade is a
-document about the archive rather than a replacement for it.
-
-What is asserted here:
-
-* the verdict actually moves where INC-003 says it should — a live row that
-  seeded no fault stops being graded on a canned-world label;
-* it is not a whitewash: a canned row's red is still red, and a row that
-  fails another dimension still fails;
-* the archive is byte-identical afterwards, checked by digest rather than by
-  reading the code and believing it;
-* the output is versioned through `evals/artifacts.py`, so a second re-grade
-  of the same archive cannot overwrite the first.
+A paid archive is never rewritten (invariant 9, ADR 0021), but a wrong grading rule leaves
+seven false reds in it. `scripts/regrade_archive.py` re-grades every row from that run's
+own trajectories under TODAY's rules into a NEW versioned report beside it: the verdict
+moves where INC-003 says, a canned red stays red, and the archive is byte-identical.
 """
 
 from __future__ import annotations
@@ -49,10 +35,7 @@ _SCENARIOS_DIR = Path(__file__).resolve().parents[2] / "evals" / "scenarios"
 _ARCHIVE_ID = "0123456789ab"
 _RAN_AT = datetime(2026, 9, 17, 13, 38, 24, tzinfo=UTC)
 
-#: The reading `postgres_slow`'s evidence expectations are written against.
-#: Values are the LIVE ones the read-only pass saw — a healthy database — so
-#: the row's evidence dimension passes and ROOT_CAUSE is the only thing the
-#: re-grade can move.
+#: Live values — a healthy database — so ROOT_CAUSE is the only thing that can move.
 _HEALTHY_POSTGRES = json.dumps(
     {
         "ok": True,
@@ -303,11 +286,8 @@ class TestTheReportIsVersionedEvidence:
 class TestTheCommittedReGradeOfThePaidArchive:
     """The real one: `0db6fe722f7c`, the $2.15 read-only pass, INC-003's subject.
 
-    The archive is committed and locked (cmd #262), and the re-grade of it is
-    committed beside it, so both halves of the claim are checkable here rather
-    than only in a PR body: the document regenerates byte for byte from the
-    archive, and its headline numbers are the ones the incident record and the
-    work order quote.
+    Both halves are checkable here: it regenerates byte for byte, and its numbers are the
+    ones the incident record quotes.
     """
 
     _PAID = "0db6fe722f7c"
@@ -325,9 +305,7 @@ class TestTheCommittedReGradeOfThePaidArchive:
     def test_the_committed_report_regenerates_byte_for_byte(self) -> None:
         """Anybody can re-derive it; nothing here was typed in.
 
-        The re-grade preserves the taxonomy wording it recorded for a world
-        that was not observable in that run. A later taxonomy change cannot
-        rewrite that evidence, and no exception is allowed in this comparison.
+        No exception is allowed in this comparison.
         """
         document = self._document()
         committed = self._committed(document).read_text()
@@ -379,9 +357,7 @@ class TestTheCommittedReGradeOfThePaidArchive:
     def test_nothing_but_root_cause_moved_on_any_row(self) -> None:
         """Why the re-grade is the runner's grade and not a second opinion.
 
-        If any other dimension moved, the re-grader would be scoring the run
-        differently from the runner that produced it, and the number it
-        reports would be about the re-grader.
+        If another dimension moved, the number would be about the re-grader.
         """
         document = self._document()
         moved = [

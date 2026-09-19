@@ -1,10 +1,7 @@
 """Tier-1 canned fixtures against the tools' output models — offline.
 
-The live drift check excludes every Tier-1 fixture by construction, because
-probing `pause_dag` to see what it returns would pause a DAG. That left the
-nine Tier-1 recordings checked by nothing: the one class of fixture that can
-invent a field and never be contradicted. The committed tool snapshot
-answers the half that needs no platform.
+The live drift check excludes every Tier-1 fixture, leaving the one class that can
+invent a field and never be contradicted.
 """
 
 from __future__ import annotations
@@ -41,17 +38,8 @@ class TestTheShippedTierOneFixtures:
         assert [d.describe() for d in defects] == []
 
     def test_there_are_tier_one_fixtures_to_check(self) -> None:
-        # Guards the check against passing because it looked at nothing —
-        # the failure mode of every filter-based guard.
-        #
-        # `pause_dag` was pinned here until wave-10 and no longer is: it was
-        # the remediation of remediate_runaway_saga_success, which now
-        # replays the stuck chain's dead-lettered root instead, because a
-        # pause only STABILIZES a chain (it halts promotion and self-expires)
-        # and never un-sticks one. No shipped scenario cans a pause_dag
-        # response any more, so pinning it here would pin a fixture nobody
-        # serves. The tool is still registered and still Tier-1; it is the
-        # scenario coverage that moved, and this list follows it.
+        # Guards the check against passing because it looked at nothing. `pause_dag` left at
+        # wave-10: no scenario cans a pause_dag response, so pinning it would pin nothing served.
         tools = {call.tool for call in _tier_one_calls()}
         assert {"replay_dlq_by_ids", "mark_dlq_permanent"} <= tools
 
@@ -107,19 +95,8 @@ class TestFabricatedTierOneFixtures:
         assert [(d.path, d.kind) for d in defects] == [("ttl_seconds", TYPE)]
 
     def test_a_nullable_field_accepts_null(self) -> None:
-        # `previous_hint` is `str | null`; a fixture recording the
-        # never-classified case is legal and must not be reported.
-        #
-        # That case stopped being hypothetical at the v0.6.2 re-pin:
-        # `create_bad_data_job(remediation_hint=unclassified)` writes a row
-        # with a null hint, so `dlq_human_required_escalates` now cans
-        # exactly this payload and `previous_hint: null` is what the
-        # platform actually answers there.
-        #
-        # `fenced_at` is present because v0.6.2 (plat #198) declares it
-        # REQUIRED on `MarkDlqPermanentOutput` — this test asserts that a
-        # legal nullable is not flagged, so it has to be legal in every
-        # other respect or it stops testing what it is named for.
+        # `previous_hint` is `str | null`, and since v0.6.2 `dlq_human_required_escalates` cans
+        # exactly the null case. `fenced_at` is present because v0.6.2 declares it REQUIRED.
         defects = check_call(
             _call(
                 "mark_dlq_permanent",
@@ -174,11 +151,8 @@ class TestFabricatedTierOneFixtures:
     def test_a_value_the_platform_cannot_produce_is_NOT_caught(self) -> None:
         """The named remaining hole, pinned so nobody assumes otherwise.
 
-        Both defects this check was built alongside were VALUES in correctly
-        shaped fields — a fabricated Redis namespace, and a flag
-        contradicting the field beside it. A JSON Schema of plain strings
-        and booleans cannot express either, and no offline check can. They
-        needed a person reading the platform's code.
+        Both defects this check was built alongside were VALUES in correctly shaped fields,
+        which no JSON Schema and no offline check can express.
         """
         defects = check_call(
             _call(

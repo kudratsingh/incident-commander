@@ -56,12 +56,8 @@ class TestAllowedTransitions:
             )
 
     def test_verifying_has_no_planning_successor(self) -> None:
-        # ADR 0008: single-attempt remediation. VERIFYING resolves,
-        # escalates, or fails — never re-plans. Practice 12: dead edges
-        # in ALLOWED_TRANSITIONS get deleted; the deleted edge becomes
-        # an explicit assertion so a future well-intentioned "let's
-        # retry" PR flags this test rather than silently restoring the
-        # loop.
+        # ADR 0008: single-attempt remediation. VERIFYING resolves, escalates or fails, never
+        # re-plans; the deleted edge is asserted so a retry PR flags it.
         assert IncidentState.PLANNING not in ALLOWED_TRANSITIONS[IncidentState.VERIFYING]
         assert ALLOWED_TRANSITIONS[IncidentState.VERIFYING] == frozenset(
             {IncidentState.RESOLVED, IncidentState.ESCALATED, IncidentState.FAILED}

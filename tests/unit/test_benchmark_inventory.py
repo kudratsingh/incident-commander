@@ -1,12 +1,7 @@
 """The committed inventory must change whenever its source metadata changes.
 
-Since WP-1.4 the family and difficulty columns read the scenario's own
-`family` / `difficulty` (``provisional: false``) and fall back to
-WO-R3-179's rule only where a scenario declares neither. Both halves are
-tested here: the rule still behaves as recorded, and a declared value
-overrides it and flips the flag. The corpus-level claim — that no shipped
-scenario is left on the fallback — lives in
-``tests/unit/test_scenario_metadata.py``.
+Since WP-1.4 the family and difficulty columns read the scenario's own values and fall
+back to WO-R3-179's rule only where it declares neither.
 """
 
 from __future__ import annotations
@@ -124,11 +119,8 @@ def test_provisional_family_precedence(
 def test_provisional_difficulty(tmp_path: Path, name: str, difficulty: str) -> None:
     """The fallback rule, in plan 03 § 3's vocabulary.
 
-    WO-R3-179 spelled these 0 and 1. They are the same two rungs under their
-    real names — which is why 35 of the 41 shipped scenarios promoted with no
-    change of meaning. `alert_storm` is one that did NOT: the rule guesses
-    `single` for it and the scenario declares `noisy`, which is the kind of
-    correction `provisional: false` exists to make visible.
+    WO-R3-179 spelled these 0 and 1, the same rungs under other names. `alert_storm` is one
+    the rule guesses wrong — `single` where the scenario declares `noisy`.
     """
     _write_scenario(tmp_path, name)
     assert generate_inventory(tmp_path)[0]["difficulty"] == {
@@ -197,12 +189,8 @@ def test_a_legacy_chaos_setup_is_a_one_hook_plan_in_the_manifest(tmp_path: Path)
 def test_a_two_hook_plan_is_counted_and_named_in_order(tmp_path: Path) -> None:
     """The under-report this column was migrated to close (WP-1.1 follow-up).
 
-    A plan-declaring scenario leaves `chaos_setup` None. Read directly, the
-    manifest described a two-fault world as seeding nothing at all — a whole
-    class of scenario dropping out of the benchmark's own description with
-    nothing failing (ADR 0037). Order is asserted, not just membership: a
-    cascade's second hook is only the fault it claims to be after the first
-    has landed, so a set would lose the part that makes the plan a plan.
+    A plan-declaring scenario leaves `chaos_setup` None, so read directly the manifest said a
+    two-fault world seeded nothing (ADR 0037). Order is asserted, not just membership.
     """
     path = _write_scenario(tmp_path, "cascade")
     path.write_text(

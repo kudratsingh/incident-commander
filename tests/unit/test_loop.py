@@ -224,10 +224,7 @@ class TestRunToCompletion:
             return later
 
         run = _with_alert(run_state, {"source": "billing", "severity": "info"})
-        # The clock jumps an hour, which the wall meter now sees as elapsed
-        # time against ``created_at``. Widen the wall cap so this test keeps
-        # exercising the triage transition's stamping rather than the budget
-        # escalation path.
+        # The clock jumps an hour, so widen the wall cap to keep exercising triage.
         run = run.model_copy(
             update={"budget": run.budget.model_copy(update={"max_wall_seconds": 7_200})}
         )
@@ -255,9 +252,7 @@ _PLAN: dict[str, object] = {
 def _exhausted(budget: BudgetLedger) -> BudgetLedger:
     """A ledger with no tool calls left — the resume-time normal case.
 
-    ADR 0015 anchors the wall meter on ``created_at``, so a run resumed
-    after a crash is frequently already exhausted before it dispatches
-    anything.
+    The wall meter is anchored on ``created_at`` (ADR 0015).
     """
     return budget.model_copy(update={"tool_calls_used": budget.max_tool_calls})
 
@@ -265,9 +260,7 @@ def _exhausted(budget: BudgetLedger) -> BudgetLedger:
 def _resumed_remediating(budget: BudgetLedger, now: datetime) -> RunState:
     """What ``load()`` hands the loop after a crash inside REMEDIATING.
 
-    The REMEDIATING checkpoint is written on *entry* to the state, before
-    the action tool is called and before any VERIFYING checkpoint — so
-    this state cannot tell us whether the Tier-1 action executed.
+    Written on *entry*, so it cannot say whether the action executed.
     """
     return RunState(
         incident_id=uuid4(),
@@ -283,10 +276,7 @@ def _resumed_remediating(budget: BudgetLedger, now: datetime) -> RunState:
 class TestBudgetExemptsResumedRemediating:
     """A crash-resumed REMEDIATING run must re-invoke before it escalates.
 
-    The re-invoke is safe because ``build_idempotency_key`` is deterministic
-    in (incident, tool, args) and the platform replays the cached response
-    instead of re-executing (ADR 0008; held to the wire by
-    tests/integration/test_idempotency_contract.py).
+    Safe because the idempotency key is deterministic: the platform replays (ADR 0008).
     """
 
     @staticmethod
@@ -334,11 +324,8 @@ class TestBudgetExemptsResumedRemediating:
     ) -> None:
         """RED at HEAD: the run escalates without ever re-invoking or verifying.
 
-        HEAD exempts only VERIFYING, so an exhausted ledger short-circuits
-        the resumed REMEDIATING run straight to ESCALATED — leaving a
-        Tier-1 action that may already have executed permanently
-        unverified, which is the exact case ADR 0006's exemption exists to
-        prevent.
+        HEAD exempts only VERIFYING, so an action that may already have executed is left
+        unverified.
         """
         calls: list[str] = []
         resumed = _resumed_remediating(budget, now)
@@ -355,9 +342,7 @@ class TestBudgetExemptsResumedRemediating:
     ) -> None:
         """The briefing must name the Tier-1 action that was re-invoked.
 
-        RED at HEAD: the short-circuit writes an ``_escalate`` marker, which
-        the trail filters out as bookkeeping, and the action never runs — so
-        the handoff to the human never mentions the attempt at all.
+        RED at HEAD: the short-circuit writes a marker the trail filters out.
         """
         calls: list[str] = []
         resumed = _resumed_remediating(budget, now)
@@ -372,11 +357,8 @@ class TestBudgetExemptsResumedRemediating:
     ) -> None:
         """The exemption is for RESUME only, not for REMEDIATING in general.
 
-        A run that reached REMEDIATING from PLANNING inside this process has
-        not dispatched anything yet, so an exhausted ledger must still stop
-        it *before* the Tier-1 call. Escalating pre-execution is the safe
-        direction; the resume case is the one where refusing loses
-        information.
+        A run that reached REMEDIATING inside this process has dispatched nothing, so escalating
+        pre-execution is the safe direction.
         """
         calls: list[str] = []
         fresh = RunState(
@@ -405,10 +387,8 @@ class TestBudgetExemptsResumedRemediating:
     ) -> None:
         """No stored plan means nothing was ever dispatched — nothing to re-invoke.
 
-        REMEDIATING is only reachable via PLANNING committing a plan, so a
-        checkpoint in REMEDIATING with ``remediation_plan is None`` is a
-        corrupt row rather than a crash-resume. Short-circuiting is correct
-        and the transition would escalate on the missing plan anyway.
+        REMEDIATING is only reachable through PLANNING committing a plan, so this is a corrupt
+        row, not a crash-resume.
         """
         calls: list[str] = []
         resumed = _resumed_remediating(budget, now).model_copy(update={"remediation_plan": None})

@@ -1,25 +1,9 @@
 """Reward v0 (WP-15.2, `evals/reward.py`) and the orderings it must not get wrong.
 
-A reward is the one artefact of this buildout that would be OPTIMISED against, so each
-test here is tied to a way that goes wrong:
-
-* **"Always escalate" must never beat a correct fix on a fixable fault.** F-011 is this
-  harness already rewarding the wrong thing: `saga_stuck` forbade all seven Tier-1 tools
-  because "escalate" was read as "touch nothing", so probe-the-chain / read-the-row / stop
-  scored five for five. Parameterised over the corpus, so a new fixable template is
-  covered without anybody remembering to add it.
-* **"Probe nothing, escalate" must be strictly dominated** by the same escalation with the
-  discriminating probes — on the scenarios where escalating is RIGHT most of all.
-* **Action, safety and budget come from the platform audit log** (invariant 6). A
-  trajectory that claims an action the log does not show scores as no action.
-* **A missing term is not a zero.** A scenario with no discriminating probes contributes
-  no process term and says so; scoring it zero would read as "probed nothing".
-* **No judge score enters the reward**, and the gate is in code rather than in a README.
-* **The reward is withheld rather than guessed** where nothing in the scenario can tell a
-  correct fix from a lazy escalation.
-
-Hermetic: hand-built audit windows and labels, plus the committed corpus read through
-`evals.scenarios.loader`. Nothing runs a scenario and nothing reaches a platform.
+A reward would be OPTIMISED against, so each test is tied to a way that goes wrong:
+"always escalate" must never beat a correct fix on a fixable fault (F-011 is this harness
+already rewarding that), "probe nothing" is strictly dominated, action/safety/budget come
+from the audit log (invariant 6), a missing term is not a zero, and no judge score enters.
 """
 
 from __future__ import annotations

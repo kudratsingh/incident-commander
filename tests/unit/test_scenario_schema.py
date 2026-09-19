@@ -603,6 +603,70 @@ class TestChaosHookArgumentClosure:
             )
 
 
+class TestV0612ChaosSurfaceReachesTheEvaluator:
+    """The v0.6.12 re-pin, stated as what a scenario may now declare.
+
+    The pin's whole delta is on the lab surface — one new hook and one hook's inputs
+    widened — so the only commander-side thing that can be wrong is the closure that
+    decides which hooks and which arguments a scenario may write. Before the re-pin both
+    assertions below fail against the committed snapshot, for the two different reasons
+    the closure has: an unknown NAME and an unknown ARGUMENT.
+    """
+
+    def test_slow_db_queries_is_a_declarable_hook(self) -> None:
+        assert "slow_db_queries" in chaos_tool_names()
+
+    def test_slow_db_queries_takes_every_argument_optional(self) -> None:
+        # Nothing is required, so the bare form is legal — and each of the three
+        # declared targets is, because `target` is a closed enum in the snapshot.
+        assert ChaosHook(name="slow_db_queries").arguments == {}
+        for target in ("job_reads", "audit_reads", "outbox_reads"):
+            hook = ChaosHook(
+                name="slow_db_queries",
+                arguments={"target": target, "query_ms": 2000, "ttl_seconds": 300},
+            )
+            assert hook.arguments["target"] == target
+
+    def test_a_target_outside_the_enum_is_still_refused(self) -> None:
+        with pytest.raises(ValidationError, match=r"not one of the snapshot's closed set"):
+            ChaosHook(name="slow_db_queries", arguments={"target": "user_reads"})
+
+    def test_kill_consumer_accepts_sticky(self) -> None:
+        hook = ChaosHook(
+            name="kill_consumer",
+            arguments={"consumer_group": "worker-dispatcher", "ttl_seconds": 300, "sticky": True},
+        )
+        assert hook.arguments["sticky"] is True
+
+    def test_sticky_is_a_boolean_and_an_integer_is_refused(self) -> None:
+        # The mirror of test_bool_is_not_accepted_for_an_integer_argument: the
+        # closure reads the snapshot's declared JSON type in both directions.
+        with pytest.raises(ValidationError, match="not compatible"):
+            ChaosHook(
+                name="kill_consumer",
+                arguments={"consumer_group": "worker-dispatcher", "sticky": 1},
+            )
+
+    def test_the_plain_kill_every_shipped_scenario_writes_is_unchanged(self) -> None:
+        # `sticky` defaults to false on the platform, so an existing scenario's
+        # wired arguments keep meaning what they meant (ADR 0043 keys a recorded
+        # world by those arguments).
+        assert (
+            chaos_argument_errors(
+                "kill_consumer", {"consumer_group": "worker-dispatcher", "ttl_seconds": 300}
+            )
+            == []
+        )
+
+    def test_the_declarable_lab_surface_is_fourteen_hooks(self) -> None:
+        # The snapshot carries FIFTEEN `[chaos: …]` tools at v0.6.12; `seed_dlq_messages`
+        # is excluded from the commander by construction (deferred, flag-off platform
+        # work), so what a scenario may declare is fourteen. Counting the snapshot here
+        # instead would make the exclusion invisible.
+        assert len(chaos_tool_names()) == 14
+        assert "seed_dlq_messages" not in chaos_tool_names()
+
+
 class TestChaosPlan:
     """WP-1.1: many hooks, in order, with their teardown and a settle wait.
 

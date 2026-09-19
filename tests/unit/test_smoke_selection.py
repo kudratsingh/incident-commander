@@ -1,39 +1,9 @@
-"""The smoke pass may not shrink without someone saying so (WO-R2-41/#151),
-now enforced structurally rather than by checking a hand list (WO-R2-123).
+"""The smoke pass may not shrink without someone saying so (WO-R2-41/#151), now enforced
+structurally rather than by a hand list (WO-R2-123).
 
-``make eval-smoke`` is the cheap read-only gate that runs before anything
-expensive. Which scenarios it covers used to be a comma-separated
-``SMOKE_ONLY`` pattern list in the ``Makefile``, with ``SMOKE_EXCLUDE``
-beside it for deliberate hold-backs. That list could lose coverage in two
-directions, both silent, and one already had:
-
-* **a renamed scenario** left its pattern behind matching nothing. The runner
-  refused only when *every* ``--only`` pattern came back empty, so one dead
-  pattern among nineteen live ones changed nothing visible — the run just
-  graded fewer scenarios and still printed green;
-* **a newly added read-only scenario** that nobody remembered to add simply
-  never ran. ``consumer_lag_null_unknown_state`` dropped out exactly this way.
-
-#151 made both cases *fail a test*. That is strictly weaker than what is here
-now, and the difference is the point of this rewrite: a test that compares a
-hand list against the tree still lets the hand list be wrong, catches it only
-on the next CI run, and must itself be kept in step with the list. The
-membership rule now lives on ``Scenario`` — ``in_smoke_pass``, derived from
-the runner's own two selection refusals minus an optional per-scenario
-``smoke_exclusion`` reason — and the runner applies it to a bare ``--smoke``.
-A rename carries the field with it. A new eligible scenario is in the pass the
-moment it lands. An exclusion cannot name a scenario that does not exist,
-because it *is* the scenario.
-
-So the two #151 cases are re-expressed here as what they always meant:
-:func:`test_a_renamed_scenario_stays_in_the_pass` and
-:func:`test_a_new_eligible_scenario_joins_the_pass_with_no_edit` build a
-scenario tree, mutate it the way the audit was worried about, and assert the
-derived selection still holds. Under the hand list both were red — the
-renamed scenario dropped out and the new one never joined. The runner-side
-half of #151 (a single dead ``--only`` pattern must still refuse the whole
-run) is unchanged and still pinned at the bottom, because ``SMOKE_ONLY``
-survives as the operator override and reaches the runner through ``--only``.
+``SMOKE_ONLY`` lost coverage two silent ways: a rename left a pattern matching nothing,
+and a new read-only scenario nobody added never ran. Membership now lives on ``Scenario``
+as ``in_smoke_pass``, so a rename carries it and a new scenario joins on landing.
 """
 
 from __future__ import annotations
@@ -75,10 +45,8 @@ def _derived(tree: Path) -> set[str]:
 def test_derivation_canary(scenarios: list[Scenario]) -> None:
     """Guard against a vacuous pass if the tree or the parse goes empty.
 
-    Every assertion below is a set comparison, and set comparisons against an
-    empty set pass loudly for the wrong reason. If the loader stops finding
-    scenarios, that must fail here as a broken guard rather than downstream as
-    a satisfied one.
+    Every assertion below is a set comparison, and an empty set passes for the wrong
+    reason.
     """
     assert len(scenarios) > 20, f"only {len(scenarios)} scenarios loaded from {_SCENARIOS_DIR}"
     assert len([s for s in scenarios if s.smoke_eligible]) > 10, "almost nothing is smoke-eligible"
@@ -91,10 +59,8 @@ def test_derivation_canary(scenarios: list[Scenario]) -> None:
 def test_a_renamed_scenario_stays_in_the_pass(tmp_path: Path) -> None:
     """#151 case 1. Under ``SMOKE_ONLY`` this was red.
 
-    Renaming ``redis_saturation`` left the pattern ``redis_saturation`` in the
-    Makefile matching nothing, so the scenario silently left the pass while
-    eighteen other live patterns kept the run green. The membership rule now
-    travels with the scenario, so the rename cannot separate them.
+    A rename left the pattern matching nothing while eighteen live ones kept the run green.
+    The rule now travels with the scenario.
     """
     tree = _tree_copy(tmp_path / "renamed")
     original = tree / "redis_saturation.yaml"
@@ -116,9 +82,7 @@ def test_a_renamed_scenario_stays_in_the_pass(tmp_path: Path) -> None:
 def test_a_new_eligible_scenario_joins_the_pass_with_no_edit(tmp_path: Path) -> None:
     """#151 case 2. Under ``SMOKE_ONLY`` this was red.
 
-    A read-only, chaos-free scenario nobody added to the list never ran, and
-    nothing said so — ``consumer_lag_null_unknown_state`` is the one that
-    actually happened. Landing the scenario is now the whole of the work.
+    ``consumer_lag_null_unknown_state`` is the one that actually happened.
     """
     tree = _tree_copy(tmp_path / "added")
     template = yaml.safe_load((tree / "redis_saturation.yaml").read_text(encoding="utf-8"))
@@ -138,12 +102,8 @@ def test_a_new_eligible_scenario_joins_the_pass_with_no_edit(tmp_path: Path) -> 
 def test_the_previously_dropped_scenario_is_in_the_pass(scenarios: list[Scenario]) -> None:
     """Named regression pin for the scenario the audit caught missing.
 
-    ``consumer_lag_null_unknown_state`` is the tripwire for reading a null lag
-    as healthy, and ``docs/eval-debt.md`` records a live observable for it that
-    only a live smoke run can produce. While it sat outside ``SMOKE_ONLY`` that
-    observable was never exercised by the documented protocol. The derivation
-    would now have to be broken for it to drop out, but this names it, so the
-    failure says what was lost rather than only that something was.
+    ``consumer_lag_null_unknown_state`` is the tripwire for reading a null lag as healthy,
+    and ``docs/eval-debt.md`` records a live observable only a smoke run produces.
     """
     by_name = {s.name: s for s in scenarios}
     scenario = by_name.get("consumer_lag_null_unknown_state")
@@ -161,13 +121,8 @@ def test_the_previously_dropped_scenario_is_in_the_pass(scenarios: list[Scenario
 def test_every_exclusion_is_eligible_and_gives_a_reason(scenarios: list[Scenario]) -> None:
     """A hold-back only means something for a scenario the stage could run.
 
-    ``dlq_human_required_escalates`` is the worked example of the other case:
-    it requires a ``mark_dlq_permanent`` fence, so it declares
-    ``expected_action_tools`` and the predicate excludes it for free — a
-    hand-written entry would imply a decision nobody still has to make. Note
-    the predicate keys on the ACTION, not on the terminal state: since
-    WO-R2-140 that scenario expects ``escalated`` (a fence is a stabilizer)
-    and is still a graded Tier-1 write the read-scoped token would 403.
+    ``dlq_human_required_escalates`` declares ``expected_action_tools``, so the predicate
+    excludes it for free — keyed on the ACTION, not on the terminal state (WO-R2-140).
     """
     for scenario in scenarios:
         if scenario.smoke_exclusion is None:
@@ -179,10 +134,7 @@ def test_every_exclusion_is_eligible_and_gives_a_reason(scenarios: list[Scenario
 def test_a_redundant_exclusion_is_refused_at_load(tmp_path: Path) -> None:
     """The former ``test_smoke_exclude_entries_are_real_and_still_needed``.
 
-    It was a test over a Makefile list; it is a model validator now, so the
-    redundant entry cannot reach a commit rather than being reported after it
-    does. A scenario that declares ``expected_action_tools`` is already
-    refused from a smoke selection by the predicate.
+    A model validator now, so a redundant entry cannot reach a commit.
     """
     tree = _tree_copy(tmp_path / "redundant")
     path = tree / "dlq_human_required_escalates.yaml"
@@ -210,9 +162,7 @@ def test_an_exclusion_without_a_real_reason_is_refused_at_load(tmp_path: Path) -
 def test_the_one_shipped_exclusion_is_the_one_we_expect(scenarios: list[Scenario]) -> None:
     """The tree ships exactly one hold-back, and it is the recorded one.
 
-    Not a style rule: every name here is a scenario the cheap gate is NOT
-    covering, so the set growing is a coverage decision that should show up in
-    a diff and be argued for, not arrive quietly.
+    The set growing is a coverage decision that should show up in a diff.
     """
     excluded = sorted(s.name for s in scenarios if s.smoke_exclusion is not None)
     assert excluded == ["dlq_backlog"], (
@@ -228,10 +178,7 @@ def test_the_one_shipped_exclusion_is_the_one_we_expect(scenarios: list[Scenario
 def test_the_makefile_ships_no_smoke_scenario_list() -> None:
     """The hand lists are gone, and a re-added one would silently win.
 
-    ``eval-smoke`` passes ``--only`` only when ``SMOKE_ONLY`` is set, so a
-    committed ``SMOKE_ONLY ?= ...`` default would override the derivation for
-    every run without changing a single scenario file — the old mechanism
-    back, and invisible from the tree.
+    A committed ``SMOKE_ONLY ?= ...`` default would override the derivation for every run.
     """
     text = _MAKEFILE.read_text(encoding="utf-8")
     committed = [
@@ -262,13 +209,8 @@ def test_runner_refuses_a_single_dead_only_pattern(
 ) -> None:
     """The runner-side half of #151, at the boundary that was actually broken.
 
-    Unchanged by WO-R2-123 and still required: ``SMOKE_ONLY`` remains the
-    operator override and arrives here as ``--only``, so a typo'd or stale
-    override must still refuse rather than run the remainder. The mix matters:
-    one live pattern and one dead one. That selection used to run happily — the
-    union was non-empty — which is exactly how a dead entry stayed invisible.
-    It must exit 2 and name the dead pattern, before any scenario runs and
-    before any spend.
+    ``SMOKE_ONLY`` remains the operator override and arrives as ``--only``, so one live and
+    one dead pattern must exit 2 naming the dead one, before any spend.
     """
     monkeypatch.setattr(
         "sys.argv",

@@ -123,9 +123,7 @@ class TestCall:
             )
 
     def test_schema_violation_wrapped_as_llm_error(self) -> None:
-        # ADR 0007: only the domain exception crosses the boundary. A
-        # schema-violating tool_use payload is a parse failure like any
-        # other, not a raw pydantic error for every caller to re-handle.
+        # ADR 0007: only the domain exception crosses the boundary.
         sdk = MagicMock()
         sdk.messages.create.return_value = _tool_use_message({"label": "ok"})
         with pytest.raises(LLMError, match="output failed schema validation for _SampleOutput"):
@@ -327,10 +325,8 @@ class TestTracer:
         assert record["duration_seconds"] >= 0
 
     def test_tracer_records_parse_failed_on_schema_violation(self) -> None:
-        # The call is already billed when the payload fails validation, so
-        # the trace must survive it (F-002). Before the LLMError wrap the
-        # raw ValidationError escaped `except LLMError` and the billed call
-        # left no trace record at all.
+        # The call is already billed when validation fails, so the trace must survive it
+        # (F-002).
         sdk = MagicMock()
         response = _tool_use_message({"label": "ok"})
         response.model_dump.return_value = {"content": [{"type": "tool_use"}]}
@@ -358,13 +354,8 @@ class TestTracer:
     def test_a_failed_call_is_traced_as_llm_error(self) -> None:
         """This assertion used to read `captured == []`, and that was the bug.
 
-        The test encoded the behaviour rather than the intent. `tracing.py`
-        has listed `llm_error` in its documented kind set since it was
-        written, and nothing ever emitted one — so a transport failure left
-        no record of a call the provider may well have billed. The repo has
-        already paid for this exact shape once: the `parse_failed` trace
-        exists because F-002 was "billed calls with no record", and the
-        transport path had the identical hole with a test holding it open.
+        `tracing.py` has listed `llm_error` since it was written and nothing emitted one, so a
+        transport failure left no record of a call the provider may have billed (F-002's shape).
         """
         sdk = MagicMock()
         sdk.messages.create.side_effect = anthropic.APIConnectionError(request=MagicMock())
@@ -392,17 +383,13 @@ class TestTracer:
 class TestUnexpectedApiErrorsAreWrapped:
     """Every anthropic error must leave this client as an LLMError.
 
-    The transitions catch LLMError and escalate with a reason. An SDK
-    exception that escapes uncaught is not absorbed anywhere — it takes out
-    an already-graded run at the briefing or judge step, and the run is
-    recorded as a crash rather than as the result it had already earned.
+    An uncaught SDK exception takes out an already-graded run at the briefing step,
+    recorded as a crash.
     """
 
     @staticmethod
     def _validation_error() -> anthropic.APIResponseValidationError:
-        # The live one: a 200 whose body the SDK cannot validate. It is
-        # neither APIConnectionError nor APIStatusError, so before the
-        # catch-all arm it escaped the retry block entirely.
+        # The live one: a 200 whose body the SDK cannot validate, so neither error class.
         return anthropic.APIResponseValidationError(
             response=httpx.Response(200, request=httpx.Request("POST", "http://x")),
             body=None,
@@ -454,10 +441,8 @@ class TestUnexpectedApiErrorsAreWrapped:
 class TestFailuresAreTraced:
     """A billed call that did not return must leave a record.
 
-    `llm_error` was in tracing.py's documented kind set from the start and
-    nothing ever wrote one. An exhausted 429 or a dropped connection left a
-    silent gap exactly where billed work had happened — the trace showed the
-    call before it and the call after it, and nothing in between.
+    `llm_error` was in tracing.py's kind set from the start and nothing wrote one, so an
+    exhausted 429 left a gap.
     """
 
     @staticmethod
@@ -552,12 +537,8 @@ class TestFailuresAreTraced:
 class TestBilledWorkLeavesTheClient:
     """Every non-happy path must hand the caller what it billed (ADR 0015).
 
-    The four token counters describe the attempt that returned. A logical
-    call can bill up to ``max_attempts`` times and can bill in full for a
-    response nobody could parse, and none of that used to reach the ledger:
-    ``BUDGET_MAX_USD`` and ``BUDGET_MAX_TOKENS`` were enforced against a
-    number with a hole in it, under-counting by up to 3x on the retry path.
-    The meter may over-report; it may never under-report.
+    A logical call can bill up to ``max_attempts`` times, and in full for an unparseable
+    response; none of that reached the ledger, under-counting by up to 3x on retries.
     """
 
     def _connection_error(self) -> anthropic.APIConnectionError:
@@ -659,10 +640,8 @@ class TestBilledWorkLeavesTheClient:
 class TestPreflightWrapsEverySdkError:
     """The point of preflight is one labeled line, never a traceback.
 
-    ``evals/runner.py`` catches ``LLMError`` and returns exit 3 with
-    "PREFLIGHT FAIL (LLM auth)". Any SDK error that escapes uncaught skips
-    that handler and crashes the runner with a stack trace — defeating the
-    one job the function exists to do.
+    ``evals/runner.py`` catches ``LLMError`` for exit 3; an SDK error that escapes skips
+    that handler.
     """
 
     def test_an_unexpected_api_error_becomes_an_llm_error(
@@ -693,24 +672,15 @@ class TestPreflightWrapsEverySdkError:
 class TestTheClientTimesItsOwnCalls:
     """WO-R3-260: ``LLMResult.elapsed_ms`` — the last plan-02 field left null.
 
-    ``StepRecord.llm_calls[].elapsed_ms`` sat at ``None`` on every run since
-    WP-2.1, with an honest comment saying nothing timed a call. Nothing did:
-    the only duration the client produced was a per-attempt
-    ``duration_seconds`` written into a trace file, which the offline suite
-    never writes and no record could read.
-
-    The measurement is of the LOGICAL call — every retried attempt and every
-    backoff sleep inside it — because that is the latency the loop waited out.
-    A per-attempt number would report a call that spent two 5xx retries and a
-    sleep as however long its last, successful leg took.
+    Nothing timed a call: the only duration was a per-attempt ``duration_seconds`` in a
+    trace file the offline suite never writes. The measurement is of the LOGICAL call —
+    every retry and backoff sleep — because that is the latency the loop waited out.
     """
 
     def _clock(self, *readings: float) -> Callable[[], float]:
         """A clock that returns each reading once, then holds the last.
 
-        Holding rather than raising: the number of ``self._clock()`` reads per
-        call is an implementation detail (the tracer takes its own), and a test
-        that pins it would fail on an unrelated change to tracing.
+        Holding rather than raising: the number of reads per call is an implementation detail.
         """
         ticks = list(readings)
 

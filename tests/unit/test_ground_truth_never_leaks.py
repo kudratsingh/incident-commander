@@ -1,52 +1,9 @@
 """The benchmark's trust boundary, asserted: hidden ground truth stays hidden.
 
-``Scenario.ground_truth`` and ``Scenario.discriminating_probes`` are the
-answer key — what was actually wrong, and which read tells this fault apart
-from the ones it resembles. An agent that can see either is not being
-measured on diagnosis, it is being measured on reading. Plan 00 § 3.1 calls
-this the trust boundary and the whole benchmark rests on it, so it is tested
-rather than asserted in prose.
-
-**The packet is this file, not the two fields.** Adding an optional field to
-a Pydantic model is nothing; keeping it out of the agent's context *forever*
-is the work. Two mechanisms do that, and the tests below are split along
-them:
-
-1. **Structural.** ``Scenario.agent_visible`` is an allow-list projection
-   onto ``AgentVisibleScenario``, which is ``extra="forbid"``. The runner
-   builds the agent's run from that object and nothing else. A field added
-   to ``Scenario`` tomorrow is invisible to the agent by construction —
-   there is no exclusion list to forget to update, which is the shape
-   ``docs/architecture-principles.md`` § 3 and LESSONS both record going
-   stale. ``Scenario.AGENT_VISIBLE_FIELDS`` / ``EVALUATOR_ONLY_FIELDS``
-   partition every field, checked at import.
-2. **Empirical.** For every scenario in the corpus, all four agent-visible
-   prompts are rendered twice — once as the scenario ships, once with a
-   maximal ground truth and a discriminating probe attached — and the two
-   renderings must be byte-identical.
-
-Byte-identity is the primary assertion rather than a substring hunt, and the
-reason matters: a substring test for root-cause labels is only as good as
-its ability to tell "the label leaked" from "the label was always there".
-``poison_message`` is a chaos tool name, ``replay_safe`` is a platform hint,
-and a scenario's alert legitimately carries words that also name categories.
-Identical output under an arbitrary ground truth says the ground truth
-changed nothing, whatever it said — which is the claim, and it cannot
-produce a false red. The substring assertions are kept beside it because
-they name the leaked thing when one does leak, and the per-label assertion
-is kept because it is the literal wording of the packet's acceptance test.
-
-The four prompts are the four places an LLM is shown something derived from
-a run (WP-1.3's findings row): ``investigation_planner``,
-``remediation_planner``, ``verification_judge``, ``briefing_writer``. The
-briefing *judge* is deliberately not here — it grades the briefing and lives
-on the evaluator's side of the boundary, where the ground truth is allowed.
-
-The system prompts themselves are not rendered per scenario and are not the
-leak surface: ``investigation_planner.md`` lists every ``HypothesisCategory``
-by design (``test_prompts_snapshot.py`` fails until a new category appears
-there), so it is the same text for all 41 scenarios and can carry no
-per-scenario information.
+``ground_truth`` and ``discriminating_probes`` are the answer key (plan 00 § 3.1). Two
+mechanisms keep them out: ``Scenario.agent_visible`` is an allow-list projection onto an
+``extra="forbid"`` model, so a new field is invisible by construction; and every
+agent-visible prompt renders identically with and without a maximal ground truth.
 """
 
 from __future__ import annotations
@@ -82,9 +39,7 @@ from incident_commander.agent.state import EvidenceEntry, IncidentState, RunStat
 
 _SCENARIOS_DIR: Final[Path] = Path(__file__).resolve().parents[2] / "evals" / "scenarios"
 
-# Fixed so two renderings of the same scenario differ only where the subject
-# under test makes them differ. A uuid4 incident id or a wall clock would put
-# noise in a comparison whose whole point is byte-identity.
+# Fixed, so two renderings differ only where the subject under test makes them differ.
 _AT: Final[datetime] = datetime(2026, 9, 15, 12, 0, 0, tzinfo=UTC)
 _INCIDENT_ID: Final[UUID] = UUID("00000000-0000-4000-8000-00000000d0d0")
 
@@ -125,10 +80,8 @@ _LEAK_KEYS: Final[tuple[str, ...]] = (
     "argument_pattern",
 )
 
-# Every category except NO_FAULT, which GroundTruth refuses to pair with a
-# fault (it is the answer "nothing is wrong"). Using all of them at once
-# makes the per-label assertion below cover the whole taxonomy in one pass,
-# including the WP-1.6 additions a future family will use.
+# Every category except NO_FAULT, which GroundTruth refuses to pair with a fault:
+# the per-label assertion covers the taxonomy in one pass.
 _ALL_FAULT_CATEGORIES: Final[tuple[HypothesisCategory, ...]] = tuple(
     category for category in HypothesisCategory if category is not HypothesisCategory.NO_FAULT
 )
@@ -153,11 +106,8 @@ _CORPUS_IDS: Final[list[str]] = [scenario.name for scenario in _CORPUS]
 def _run_state_for(scenario: Scenario) -> RunState:
     """A run built from the scenario's projection, carrying the world it serves.
 
-    The canned tool responses go onto the evidence ledger because that is
-    where they end up in a real offline run, and the evidence ledger is
-    rendered verbatim into three of the four prompts. Rendering the prompts
-    off an empty ledger would test much less: the canned world is the biggest
-    block of scenario-derived text the agent ever sees.
+    The canned tool responses go onto the evidence ledger, as in a real offline run, because
+    the ledger is rendered verbatim into three prompts.
     """
     visible = scenario.agent_visible()
     run = start_run(
@@ -202,11 +152,8 @@ def rendered_agent_contexts(scenario: Scenario) -> dict[str, str]:
     briefing = render_briefing(run)
     return {
         "investigation_planner": format_planner_context(run),
-        # The best-of-N arm's context is the same render with the evidence-id
-        # column on (WP-5.2, ADR 0043). Swept as its own entry rather than
-        # assumed to be covered by the line above: the flag adds text to every
-        # evidence line, and "the other rendering" is exactly where a leak
-        # would be missed.
+        # The best-of-N arm's context is the same render with the evidence-id column on
+        # (WP-5.2, ADR 0043): the flag adds text to every evidence line.
         "investigation_planner_best_of_n": format_planner_context(run, show_evidence_ids=True),
         "remediation_planner": _format_plan_context(run, _HYPOTHESIS.name),
         "verification_judge": format_verify_context(
@@ -219,10 +166,8 @@ def rendered_agent_contexts(scenario: Scenario) -> dict[str, str]:
 def assert_no_ground_truth_leak(scenario: Scenario) -> None:
     """Attaching an answer key to ``scenario`` must change nothing the agent sees.
 
-    Shared by the corpus sweep and by the red-before test that deliberately
-    breaks the projection, so the two cannot drift into checking different
-    things — the red-before proves *this* function fires, which is only worth
-    proving if it is the same function the corpus runs.
+    Shared by the corpus sweep and by the red-before, so the two cannot drift into
+    checking different things.
     """
     plain = rendered_agent_contexts(scenario)
     with_answer_key = rendered_agent_contexts(
@@ -266,12 +211,8 @@ def assert_no_ground_truth_leak(scenario: Scenario) -> None:
 def test_no_scenario_leaks_its_ground_truth_into_any_prompt(scenario: Scenario) -> None:
     """The corpus sweep. Parameterised, so a new scenario is covered on arrival.
 
-    This is the packet's acceptance test and it is deliberately indifferent
-    to whether the scenario ships a ground truth of its own: none of the 41
-    do yet (the fields land before the scenarios that use them), so the test
-    supplies one rather than passing vacuously on an absent field. A scenario
-    that later declares a real ground truth gets the same treatment — its own
-    plus the canary — and stays covered.
+    Deliberately indifferent to whether the scenario ships a ground truth: none do yet, so
+    the test supplies one rather than passing vacuously.
     """
     assert_no_ground_truth_leak(scenario)
 
@@ -289,9 +230,7 @@ class TestTheProjectionIsTheOnlyWayIn:
 
     def test_agent_visible_carries_only_allow_listed_fields(self) -> None:
         projected = set(AgentVisibleScenario.model_fields)
-        # ``max_tool_calls`` is lifted out of the graded expectation rather
-        # than copied from a Scenario field of that name, so it is expected
-        # here and nowhere in the partition.
+        # ``max_tool_calls`` is lifted out of the graded expectation, not a Scenario field.
         assert projected - {"max_tool_calls"} == Scenario.AGENT_VISIBLE_FIELDS, (
             f"AgentVisibleScenario projects {sorted(projected)} but "
             f"Scenario.AGENT_VISIBLE_FIELDS declares "
@@ -317,10 +256,8 @@ class TestTheProjectionIsTheOnlyWayIn:
     def test_a_field_on_neither_side_fails_at_import(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The import-time partition check, exercised.
 
-        ``_classify_every_scenario_field`` runs once when the module loads, so
-        the only way to see it fire is to take a field off both sides and call
-        it again. Without this, the guard is a line nobody has ever watched
-        work.
+        ``_classify_every_scenario_field`` runs at import, so seeing it fire means calling
+        it again.
         """
         from evals.scenarios.schema import _classify_every_scenario_field
 
@@ -341,13 +278,8 @@ class TestTheLeakCheckItselfFails:
     ) -> None:
         """Break the projection the way an exclusion-list design would break.
 
-        The realistic regression is not somebody adding ``ground_truth`` to
-        ``AgentVisibleScenario`` — that edit is visible in review. It is a
-        projection built by *dumping* the scenario and removing known-secret
-        keys, where the next field added is included by default. This
-        simulates exactly that: the evaluator's record rides into the alert
-        the agent is briefed with, and nothing about the leak test had to
-        know the field existed.
+        The realistic regression is a projection built by *dumping* the scenario and removing
+        known-secret keys, where the next field added is included by default.
         """
         honest = Scenario.agent_visible
 

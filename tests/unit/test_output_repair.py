@@ -1,21 +1,9 @@
 """One bounded repair, then escalate — and both calls billed (ADR 0035).
 
-``llm/structured.py`` removes the one output-shape defect we have actually
-seen. This is the backstop for the rest: a ``record_output`` payload the
-schema rejects buys exactly one re-ask carrying the validation error, and the
-second failure escalates with both errors, exactly as the first failure did
-before this change.
-
-The three claims worth holding onto, and each has a test below:
-
-* **Cap.** Two calls, never three, whatever the model does.
-* **Bill.** Both calls reach the ledger. A repair that only charged the run
-  when it worked would make the expensive path the cheap-looking one
-  (ADR 0015).
-* **Scope.** Only an OUTPUT failure is repairable. A transport failure —
-  429, dropped connection, exhausted retries — goes straight out, because
-  the client has already retried it and a "your JSON was malformed" turn is
-  not a useful thing to say to a rate limiter.
+A ``record_output`` payload the schema rejects buys exactly one re-ask carrying the
+validation error, and the second failure escalates with both. Three claims: two calls
+never three; both reach the ledger (a repair that charged only on success would make the
+expensive path look cheap); and only an OUTPUT failure is repairable, never a transport one.
 """
 
 from __future__ import annotations
@@ -57,9 +45,7 @@ _GOOD_STEP: dict[str, Any] = {
     "hypotheses": [{"category": "unknown", "name": "n", "confidence": 0.5, "reasoning": "r"}],
     "next_action": {"kind": "stop", "reason": "enough evidence"},
 }
-# The live shape, in miniature: the nested union arrives as a string that is
-# not decodable, so the decoder in llm/structured.py declines it and the
-# repair path is what has to save the run.
+# The live shape in miniature: the nested union arrives as an undecodable string.
 _BAD_STEP: dict[str, Any] = {
     "hypotheses": [{"category": "unknown", "name": "n", "confidence": 0.5, "reasoning": "r"}],
     "next_action": "remediate the replay_safe row",
@@ -121,10 +107,8 @@ def _briefing(run_state: RunState) -> EscalationBriefing:
 def _investigating(run_state: RunState, whole_queue_read: datetime | None = None) -> RunState:
     """An INVESTIGATING state on a subject-less alert.
 
-    ``whole_queue_read`` seeds the unfiltered ``list_dlq_messages`` reading
-    ADR 0041 requires before a dead-letter handoff. Only the one test driving
-    a POISON_MESSAGE `remediate` to PLANNING needs it; every other caller here
-    ends the run somewhere the guard never runs.
+    ``whole_queue_read`` seeds the unfiltered listing ADR 0041 requires before a
+    dead-letter handoff.
     """
     update: dict[str, Any] = {
         "state": IncidentState.INVESTIGATING,
@@ -465,13 +449,10 @@ class TestTheBriefingWriter:
 
 
 class TestTheVerificationJudge:
-    """WO-R2-174: the same wrapper, the same cap, on the judge that says "did it work?".
+    """WO-R2-174: the same wrapper and cap on the judge that says "did it work?".
 
-    The judge reads a probe and answers one question. A reply the schema
-    rejects answers nothing about the world — the envelope failed — and
-    before this the run escalated on it with a Tier-1 action already
-    executed, so a human read "verification incomplete" for a fix that had
-    landed.
+    A schema-rejected reply answers nothing, and the run used to escalate on it with a
+    Tier-1 action already executed.
     """
 
     def test_a_malformed_first_judgment_does_not_end_the_run(
@@ -574,11 +555,8 @@ class TestTheEvalBriefingJudge:
     ) -> None:
         """The column stays EMPTY and says why.
 
-        ``OutputRepairExhausted`` is an ``LLMError``, which is what
-        ``evals/runner.py`` catches to set ``judge_error`` and leave
-        ``judge_score`` ``None``. A default score would be an invented number
-        inside ``judge_mean_overall`` that no reader could tell from a real
-        one.
+        ``OutputRepairExhausted`` is an ``LLMError``, which the runner catches to leave
+        ``judge_score`` ``None``. A default would be invented.
         """
         llm = _ScriptedLLM([_BAD_SCORE, _BAD_SCORE])
         judge_score: JudgeScore | None = None
@@ -656,9 +634,7 @@ class TestTheFailureClass:
     ) -> None:
         """Two of the three prefixes contain both "LLM" and "invalid".
 
-        The transport heuristic below them matches on exactly those two
-        words, so without an earlier and more specific bucket a schema
-        rejection is filed as a network problem.
+        Without a more specific bucket a rejection is filed as network.
         """
         final = self._final(run_state, now, "planner LLM invalid: output failed schema validation")
         assert _classify_failure(self._failing_report(), final)[0] != "transport"
@@ -678,26 +654,18 @@ class TestTheLiveRunEndToEnd:
     ) -> None:
         """The decoder handles it, so the repair budget is never touched.
 
-        This is the difference between the two halves of ADR 0035: the shape
-        we have seen costs nothing extra, and the repair is there for the
-        shapes we have not.
+        ADR 0035's two halves: the seen shape costs nothing extra.
         """
         from tests.unit.test_structured_output import LIVE_RECORD_OUTPUT_INPUT
 
         llm = _ScriptedLLM([json.loads(json.dumps(LIVE_RECORD_OUTPUT_INPUT))])
         transition = make_llm_investigate(_NoMCP(), llm, model="m")
-        # The whole-queue reading that run had already taken (ADR 0041). It is
-        # not scaffolding for the guard: the payload's own text names the rows
-        # only an unfiltered listing shows ("an unclassified
-        # SchemaValidationError bulk_api_sync"), so a run state without it
-        # describes a trajectory `779b19a287a7` did not have. The claim under
-        # test is unchanged — one call, no repair, and the handoff lands.
+        # The whole-queue reading that run had already taken (ADR 0041): the payload's own text
+        # names rows only an unfiltered listing shows, so a state without it is a different run.
         result = transition(_investigating(run_state, whole_queue_read=now), now)
         assert len(llm.calls) == 1
         assert llm.repair_of == [None]
-        # `remediate` on a POISON_MESSAGE top hypothesis hands off to
-        # PLANNING; before this change the same payload escalated with
-        # "planner output invalid".
+        # `remediate` on a POISON_MESSAGE top hypothesis hands off to PLANNING.
         assert result.state is IncidentState.PLANNING
         markers = [e.result_summary for e in result.evidence]
         assert not any(m.startswith(INVESTIGATION_PLANNER_INVALID) for m in markers)

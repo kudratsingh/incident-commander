@@ -1,17 +1,8 @@
-"""Billed LLM work reaches the ledger on every path, happy or not — and is
-broken down by role, by step and by token class (WP-2.3).
+"""Billed LLM work reaches the ledger on every path, broken down by role, step and class.
 
-ADR 0015's rule is one-directional: the meter may over-report but never
-under-report, because ``BUDGET_MAX_USD`` is what bounds an unattended paid
-run. The first half of this file pins the two halves of that rule the client
-can express — the attempts that were billed and discarded, and the calls that
-were billed and then raised.
-
-The second half is the breakdown WP-2.3 adds on top, and its load-bearing
-property is that it *adds up*: a per-role split that does not reconcile with
-``BudgetLedger`` is worse than no split, because every cost column in every
-strategy comparison is computed from it and a dropped leg reports one arm as
-cheaper than it was.
+ADR 0015's rule is one-directional: the meter may over-report but never under-report,
+because ``BUDGET_MAX_USD`` bounds an unattended paid run. The breakdown must add up — a
+per-role split that does not reconcile with ``BudgetLedger`` reports one arm as cheap.
 """
 
 from __future__ import annotations
@@ -163,11 +154,8 @@ class _StepCountingClock:
 class _FailsThenSucceeds:
     """Bills, raises ``LLMOutputError``, then bills again and parses.
 
-    The ADR-0035 repair path as the accounting has to see it: two billed
-    calls for one logical planner step. ``CannedLLMClient`` cannot stand in —
-    it raises a bare ``ValidationError`` carrying no usage, so the leg that
-    was billed and thrown away would be free, which is the exact hole this
-    test exists to keep shut.
+    Two billed calls for one logical step; ``CannedLLMClient``'s bare
+    ``ValidationError`` carries no usage.
     """
 
     def __init__(self, output: dict[str, Any], *, failed_usage: LLMUsage, usage: LLMUsage) -> None:
@@ -413,10 +401,8 @@ class TestOneCallIsPricedAndTimed:
 class TestThePerRoleSumEqualsTheLedger:
     """The reconciliation, so the two can never disagree silently.
 
-    ADR 0015 holds an unattended run to ``BudgetLedger``. A per-role
-    breakdown that does not add up to it is worse than no breakdown: every
-    cost column in every strategy comparison is computed from the split, and
-    a split that quietly drops a leg reports one arm as cheaper than it was.
+    A per-role breakdown that does not add up to ``BudgetLedger`` reports one arm as
+    cheaper than it was.
     """
 
     def test_a_clean_run_reconciles(self, budget: BudgetLedger, now: datetime) -> None:
@@ -449,9 +435,7 @@ class TestThePerRoleSumEqualsTheLedger:
     def test_an_evaluator_side_role_is_reported_but_not_reconciled(self) -> None:
         """The briefing judge is the evaluator's spend, never the agent's.
 
-        It is billed, so it is recorded; it never touches ``BudgetLedger``,
-        so folding it into the reconciliation would make every run look
-        un-reconciled. The row says which side it is on.
+        Billed, so recorded; never in ``BudgetLedger``, so not reconciled.
         """
         accounting = RunAccounting()
         metered = accounting.meter(
@@ -495,9 +479,7 @@ class TestContextSizeIsMeasuredPerStep:
     ) -> None:
         """The fake client bills nothing, and 0 is the true number it charged.
 
-        Which is why the character measurement exists beside it (divergence
-        D1): the offline suite would otherwise have nothing to say about how
-        much context its planner saw.
+        Hence the character measurement beside it (divergence D1).
         """
         accounting = RunAccounting()
         _run_investigation(accounting, CannedLLMClient([_STOP_STEP]), budget, now)
@@ -508,11 +490,8 @@ class TestContextSizeIsMeasuredPerStep:
 class TestBaselineRecordsTheStrategyDimensionsAsZero:
     """Zero, never absent — the control group's row has to be comparable.
 
-    A best-of-N strategy's report will carry a selector-call count and a
-    branch count. If ``baseline`` omitted them, every comparison would have
-    to decide what a missing key means, and the cheapest wrong answer
-    ("treat it as zero") is indistinguishable from the right one until a
-    strategy that genuinely records nothing arrives.
+    If ``baseline`` omitted the selector-call and branch counts, every comparison would
+    have to decide what a missing key means.
     """
 
     def test_baseline_records_both_as_zero(self, budget: BudgetLedger, now: datetime) -> None:
@@ -582,12 +561,9 @@ def _accounted_scenario(name: str = "accounting_probe") -> Scenario:
 class TestTheRunReportCarriesTheAccounting:
     """Divergence D3, the half WP-0.3 left: a report with no cost in it.
 
-    WP-0.3 put the run's own ledger on the row, which answered "what did this
-    run spend in total?". It could not answer "on which role?", "over how many
-    planner steps?", or "how much context did each step carry?" — and those
-    are the columns the accuracy/cost frontier in Phases 6, 9, 12 and 13 is
-    drawn from. A number that is only in prose is not derivable from the
-    artifacts (divergence D4, the ledger that stopped).
+    WP-0.3 answered "what did this run spend in total?" and could not answer "on which
+    role?" or "over how many planner steps?" — the columns the accuracy/cost frontier is
+    drawn from.
     """
 
     def _outcome(self) -> ScenarioOutcome:
@@ -608,11 +584,8 @@ class TestTheRunReportCarriesTheAccounting:
     def test_the_agents_own_post_terminal_spend_is_charged(self) -> None:
         """WO-R3-260: the briefing writer is the agent's cost, so it is charged.
 
-        The flag separates whose money a call is, not when the call happened.
-        ``briefing_writer`` writes the handoff the agent gives a human, on the
-        agent's model, after the terminal state — metered, and never a gate,
-        because the loop that could be gated has already stopped. The only
-        ``False`` left belongs to the evaluator (see the judge below).
+        The flag separates whose money a call is, not when it happened: ``briefing_writer``
+        runs on the agent's model after the terminal state, metered, never a gate.
         """
         accounting = self._outcome().accounting
         assert accounting is not None
@@ -622,9 +595,7 @@ class TestTheRunReportCarriesTheAccounting:
     def test_only_the_evaluators_own_role_stays_out_of_the_ledger(self) -> None:
         """The judge grades the run; it is not part of it.
 
-        The same scenario with a briefing judge scripted. Two post-terminal
-        roles, one line between them, and the line is ownership: the writer is
-        the agent's, the judge is ours.
+        Two post-terminal roles, and the line between them is ownership.
         """
         scenario = _accounted_scenario()
         judged = scenario.model_copy(
@@ -656,18 +627,14 @@ class TestTheRunReportCarriesTheAccounting:
     def test_the_post_terminal_charge_does_not_reach_the_graded_run(self) -> None:
         """Metered, never gating — the runner's half of ADR 0015 § 4's amendment.
 
-        The briefing writer's charge lands on the ledger the row REPORTS, and
-        not on the ``RunState`` the grader reads. The BUDGET dimension grades
-        the agent's own run; a post-terminal charge deciding it would be a
-        ceiling applied to work the agent had already finished.
+        The charge lands on the ledger the row REPORTS, not on the ``RunState`` the grader
+        reads.
         """
         outcome = self._outcome()
         budget = next(d for d in outcome.report.dimensions if d.dimension.value == "budget")
         assert budget.passed
         assert outcome.provenance is not None
-        # The canned writer bills nothing, so the two numbers agree here. What
-        # is pinned is that the row's ledger is the one the briefing call was
-        # charged to and the tool-call meter is untouched by it.
+        # What is pinned is that the row's ledger is the one the call was charged to.
         assert outcome.provenance.budget.tool_calls_used == outcome.tool_calls_used == 1
         assert outcome.accounting is not None
         assert outcome.accounting.ledger_tokens_used == outcome.provenance.budget.tokens_used
@@ -719,9 +686,7 @@ class TestTheRunReportCarriesTheAccounting:
                 elapsed_ms=120,
             )
         )
-        # The checkpoint the run had written when it died — the ledger the
-        # record is reconciled against. 1000 input + 200 output on Sonnet is
-        # 1200 tokens of volume and $0.006.
+        # The checkpoint the run had written when it died: 1200 tokens and $0.006.
         checkpoint = _investigating(
             _ledger().model_copy(
                 update={"tokens_used": 1_200, "usd_used": Decimal("0.006"), "tool_calls_used": 3}
@@ -742,12 +707,8 @@ class TestTheRunReportCarriesTheAccounting:
     def test_a_crash_after_the_briefing_reconciles_against_the_charged_ledger(self) -> None:
         """WO-R3-260: the post-terminal charge is in no checkpoint.
 
-        A run that reached its terminal state, bought its briefing, and then
-        died in the grader has a charged split containing that call and a last
-        checkpoint written before it. Reconciling the two would print
-        ``COST UNRECONCILED`` over a run where nothing disagreed — so the
-        crash carries the ledger it charged, and the checkpoint is the
-        fallback for a crash that never got that far.
+        Reconciling a charged split against a checkpoint written before the briefing call
+        would print ``COST UNRECONCILED`` over a run where nothing disagreed.
         """
         accounting = RunAccounting()
         for role in ("investigation_planner", "briefing_writer"):

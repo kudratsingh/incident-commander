@@ -1,19 +1,9 @@
 """The aggregate research report groups, refuses, counts its pairs, and resolves.
 
-WO-R3-194's test requirement, one section per clause:
-
-* it groups by all seven keys of WP-2.5, on a fixture carrying more than one
-  value of each;
-* a two-model scope is REFUSED and both model ids are named (the red-before:
-  before ``assemble`` consulted ``regression.model_refusal`` it happily built
-  one leaderboard over two models, and the reader could not tell a behaviour
-  change from a model change);
-* every printed difference carries its paired-trial count, and a difference
-  computed from fewer pairs than plan 03 § 10's floor says so — proven both
-  ways, with a fixture above the floor and one below it;
-* the artifact resolves through ``artifacts.newest`` via a registered kind;
-* the committed document regenerates byte for byte from the committed
-  archives, the same check ``test_phase_close_report.py`` makes.
+WO-R3-194's clauses: grouping by all seven WP-2.5 keys; a two-model scope REFUSED with
+both ids named (the red-before — one leaderboard over two models); every difference
+carrying its paired-trial count and saying so below plan 03 § 10's floor; resolution
+through ``artifacts.newest``; and byte-for-byte regeneration of the committed document.
 """
 
 from __future__ import annotations
@@ -197,9 +187,7 @@ def test_a_row_missing_a_key_is_bucketed_as_unknown_not_dropped(tmp_path: Path) 
 def test_a_two_model_scope_is_refused_and_both_ids_are_named(tmp_path: Path) -> None:
     """Refused, not footnoted.
 
-    Red before ``assemble`` consulted the refusal: it took the first model id
-    it saw as the table's and wrote a leaderboard over both, so every delta in
-    it was a model change and a behaviour change added together.
+    Red before: it took the first model id it saw and wrote a leaderboard over both.
     """
     _archive(tmp_path, "cccccccccccc", (_outcome("lag_a", model="claude-sonnet-4-6"),))
     _archive(tmp_path, "dddddddddddd", (_outcome("lag_a", model="claude-haiku-4-5"),))
@@ -429,10 +417,7 @@ def test_the_report_states_what_it_cannot_say_yet() -> None:
 def test_the_root_cause_limit_counts_every_ungraded_row_and_says_which_reason() -> None:
     """The version before the Phase 2 archives said "NO ROOT-CAUSE NUMBER".
 
-    It now has one, over a small denominator, and the limit has to account for
-    the whole corpus rather than wave at it: graded plus the three reasons for
-    ungraded must add up to every row in scope, or a reader cannot tell a
-    missing label from a withdrawn verdict.
+    Graded plus the three ungraded reasons must add up to every row in scope.
     """
     document = json.loads(artifacts.newest("research_report").read_text())
     limit = next(entry for entry in document["limits"] if "ROOT-CAUSE NUMBER" in entry)
@@ -505,12 +490,8 @@ def test_scenario_level_regressions_exclude_the_filtered_runs() -> None:
 def test_a_partial_suite_is_excluded_from_the_diff_too() -> None:
     """The red-before, and it cost $2.15 to learn.
 
-    ``0db6fe722f7c`` is not filtered — ``make eval-smoke`` selects by token
-    scope, not by ``--only`` — so the filtered-run rule let it into the suite
-    diff, where comparing 27 unseeded live rows against a 41-row canned sweep
-    printed "7 regressions". Those seven were exactly the verdicts INC-003
-    withdrew. A partial suite is now excluded for the same reason a filtered
-    one is, and its absence is stated rather than silent.
+    ``0db6fe722f7c`` is not filtered, so the filtered-run rule let 27 unseeded live rows
+    into a diff against a 41-row canned sweep and printed "7 regressions" (INC-003).
     """
     section = json.loads(artifacts.newest("research_report").read_text())["sections"][
         "scenario_level_regressions"
@@ -529,10 +510,7 @@ def test_a_partial_suite_is_excluded_from_the_diff_too() -> None:
 def test_the_withdrawn_root_cause_verdicts_are_read_from_the_regrade_not_the_archive() -> None:
     """INC-003: the archive still carries seven grades the project withdrew.
 
-    Red before ``SUPERSEDED_ROOT_CAUSE`` existed: the table read the archive
-    and reported 46 of 53 graded rows correct, which is the withdrawn 11/18
-    folded into a larger number. The substitution happens on the way in, the
-    archive is never edited, and the re-grade's own verdicts are what appear.
+    Red before ``SUPERSEDED_ROOT_CAUSE``: the table read the archive and reported 46 of 53.
     """
     archive = "0db6fe722f7c"
     assert archive in research.SUPERSEDED_ROOT_CAUSE
@@ -610,21 +588,8 @@ def test_the_artifact_is_named_after_its_scope_not_after_the_clock() -> None:
     )
 
 
-#: Keys a later packet deliberately added to or changed in a leaderboard row,
-#: which is the only reason the committed JSON and today's render may differ.
-#:
-#: One entry so far. WP-6.3 gated ``judge_mean_overall`` on a calibration report
-#: (ADR 0052) and added three keys beside it, so the committed document — written
-#: before that rule existed — carries the bare mean where today's render carries a
-#: sentence saying it is withheld. The committed file is evidence of what was
-#: reported that day and is never rewritten (invariant 9), and the artifact's name
-#: identifies its SCOPE rather than its code, so a rule change cannot buy a new
-#: version without also changing the archives in scope.
-#:
-#: This list is the reviewable part. Adding to it is saying "a reporting rule
-#: changed deliberately, here is which field"; the assertions below still require
-#: that NOTHING ELSE moved, which is the direction that stays true (the lesson of
-#: cmd #284: pin the direction that survives a regeneration).
+#: Keys a later packet deliberately changed in a leaderboard row — the only reason the
+#: committed JSON and today's render may differ. One so far: WP-6.3's ADR 0052 gate.
 _DELIBERATE_ROW_CHANGES: Final[tuple[str, ...]] = (
     "judge_mean_overall",
     "judge",
@@ -636,10 +601,8 @@ _DELIBERATE_ROW_CHANGES: Final[tuple[str, ...]] = (
 def _without_the_deliberate_changes(payload: Any) -> Any:
     """The document with the enumerated keys dropped from every row that has them.
 
-    Identified by ``judge_mean_overall``, which only a leaderboard row carries and
-    which BOTH sides have — keying on one of the added fields would strip today's
-    row and leave the committed one intact, and the comparison would fail on the
-    asymmetry rather than on a real difference.
+    Identified by ``judge_mean_overall``, which both sides have: an added field would
+    strip one side only.
     """
     if isinstance(payload, dict):
         gated = "judge_mean_overall" in payload
@@ -656,13 +619,8 @@ def _without_the_deliberate_changes(payload: Any) -> Any:
 def test_the_committed_report_regenerates_byte_for_byte() -> None:
     """Every input is a locked archive, so the document is a function of the repo.
 
-    If this fails outside ``_DELIBERATE_ROW_CHANGES``, something the report READ
-    has changed — which for locked, append-only archives should be impossible, so
-    it is worth a look rather than a re-write.
-
-    The Markdown half is still compared byte for byte, with nothing excused: the
-    rendered table does not print the gated number, so a rule change that moved a
-    single character of the document a person reads would fail here.
+    A failure outside ``_DELIBERATE_ROW_CHANGES`` means something the report READ changed.
+    The Markdown half is compared byte for byte with nothing excused.
     """
     document = research.assemble(research.REPO_ROOT)
     committed = json.loads(artifacts.newest("research_report").read_text())
@@ -673,9 +631,7 @@ def test_the_committed_report_regenerates_byte_for_byte() -> None:
 def test_the_committed_report_predates_the_judge_gate() -> None:
     """The other half of the allowance above: it is used, and only for this.
 
-    The committed document carries a bare judge mean because it was written before
-    ADR 0052; today's render withholds it. Asserting both sides means the excuse
-    cannot quietly start covering a field that changed for some other reason.
+    Asserting both sides means the excuse cannot start covering another field.
     """
     committed = json.loads(artifacts.newest("research_report").read_text())
     rows = committed["sections"]["strategy_leaderboard"]["arms"]

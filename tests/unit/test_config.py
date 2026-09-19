@@ -19,18 +19,12 @@ from incident_commander.llm.pricing import MODEL_PRICING
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Every env var Settings can read, walked from the model itself. Env vars
-# outrank dotenv, so any of these leaking from the developer's shell would
-# silently override the file under test — which is why this is derived and
-# not typed out. The hand-kept version of this tuple had drifted from the
-# model it claimed to describe (WO-R2-87).
+# Every env var Settings can read, walked from the model itself: env vars outrank
+# dotenv, so a leak from the developer's shell would override the file under test.
 _ENV_VARS = settings_env_var_names()
 
-# The same surface, written down once, as a tripwire rather than as the
-# source: a new Settings field fails the assertion in TestEnvIsolation until
-# somebody adds it here, and adding it here is the prompt to ask whether the
-# new knob is also in .env.example and the operator docs. Nothing reads this
-# to build an isolation list — that is what the derived tuple above is for.
+# The same surface written down once, as a tripwire: a new Settings field fails
+# TestEnvIsolation until it is added here, which prompts the .env.example question.
 _DOCUMENTED_ENV_VARS = frozenset(
     {
         "ACTION_TOOL_TIMEOUT_SECONDS",
@@ -91,12 +85,8 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
 class TestEnvIsolation:
     """The isolation fixture must cover the settings surface, not a copy of it.
 
-    ``_ENV_VARS`` was a hand-kept list documented as "every env var Settings
-    can read", and it had drifted: the principal ids and the whole ADR-0022
-    pool group were missing, so a developer with any of them exported ran
-    these tests against their own environment while the file under test said
-    otherwise. Deriving the list removes the drift; these two tests are what
-    keep the derivation honest.
+    ``_ENV_VARS`` was hand-kept and had drifted — the principal ids and the ADR-0022 pool
+    group were missing, so an exported one ran the tests against a real environment.
     """
 
     def test_the_fixture_clears_every_variable_settings_reads(
@@ -115,10 +105,8 @@ class TestEnvIsolation:
         )
 
     def test_the_settings_env_surface_is_the_documented_one(self) -> None:
-        # The derived list is the thing the fixtures use; this is the tripwire
-        # that a NEW setting was noticed. Adding a field to Settings fails
-        # here until its variable is added below, which is the moment to ask
-        # whether it also needs a line in .env.example and the docs.
+        # The tripwire that a NEW setting was noticed: adding a field to Settings fails here
+        # until its variable is added below.
         assert set(settings_env_var_names()) == _DOCUMENTED_ENV_VARS
 
 
@@ -198,18 +186,14 @@ class TestSettings:
 
     @pytest.mark.parametrize("zero", [Decimal("0"), Decimal("0.00"), "0"])
     def test_zero_budget_usd_rejected(self, valid_kwargs: dict[str, Any], zero: Any) -> None:
-        # BUDGET_MAX_USD=0 was the one budget dimension that accepted zero,
-        # and is_exhausted compares with >=, so every run was born exhausted:
-        # it terminates on its first check having done nothing, and the
-        # result reads exactly like a budget policy working correctly.
+        # BUDGET_MAX_USD=0 was the one dimension that accepted zero, and is_exhausted
+        # compares with >=, so a run was born exhausted.
         valid_kwargs["budget_max_usd"] = zero
         with pytest.raises(ValidationError):
             _settings(**valid_kwargs)
 
     def test_a_sub_dollar_budget_is_still_allowed(self, valid_kwargs: dict[str, Any]) -> None:
-        # The bound is gt=0, not ge=1 like the integer dimensions: a cheap
-        # scenario capped at fifty cents is a legitimate operator choice, and
-        # unlike zero it is not exhausted before it starts.
+        # The bound is gt=0, not ge=1: fifty cents is a legitimate operator choice.
         valid_kwargs["budget_max_usd"] = Decimal("0.50")
         assert _settings(**valid_kwargs).budget_max_usd == Decimal("0.50")
 
@@ -229,18 +213,13 @@ class TestSettings:
         assert settings.agent_enabled is False
 
     def test_blank_judge_model_rejected(self, valid_kwargs: dict[str, Any]) -> None:
-        # C-09: judge_model="" used to be silently accepted and only failed
-        # as an API 400 at the first judge call mid-run. min_length=1 guards
-        # the direct-construction path that env_ignore_empty cannot reach.
+        # C-09: judge_model="" used to fail only as an API 400 mid-run; min_length=1 guards it.
         valid_kwargs["judge_model"] = ""
         with pytest.raises(ValidationError):
             _settings(**valid_kwargs)
 
     def test_unpriced_judge_model_refused_at_startup(self, valid_kwargs: dict[str, Any]) -> None:
-        # WO-R2-118: an id with no price row was accepted silently and only
-        # showed up as an over-billed run — pricing_for falls back to the
-        # per-class maximum of every registered row, so the meter reads high
-        # and nothing says why.
+        # WO-R2-118: an unpriced id billed at the per-class maximum with nothing to say why.
         valid_kwargs["judge_model"] = "claude-not-a-real-model"
         with pytest.raises(ValidationError) as err:
             _settings(**valid_kwargs)
@@ -283,20 +262,14 @@ class TestSettings:
 class TestModelRoles:
     """The two model roles (WP-0.3, plan 02 section 9).
 
-    A role is a pointer to a model id, and the point of recording it is that
-    a reported number can name the model that produced it. Which makes the
-    price guard load-bearing on BOTH new settings: ``--model-role benchmark``
-    resolves ``BENCHMARK_MODEL`` on the paid path, and an unpriced id
-    discovered there bills at the per-class ceiling with one log line — the
-    accounting hole ADR 0015 exists to close, rediscovered mid-run.
+    A role points at a model id, which makes the price guard load-bearing on both: an
+    unpriced ``BENCHMARK_MODEL`` bills at the per-class ceiling with one log line.
     """
 
     def test_unpriced_development_model_refused_at_startup(
         self, valid_kwargs: dict[str, Any]
     ) -> None:
-        # Red before the validator tuple was extended: with only AGENT_MODEL
-        # and JUDGE_MODEL in it, this constructed fine and the unpriced id
-        # was discovered by the meter instead (divergence D5).
+        # Red before the validator tuple was extended: the unpriced id reached the meter (D5).
         valid_kwargs["development_model"] = "not-a-priced-model"
         with pytest.raises(ValidationError) as err:
             _settings(**valid_kwargs)
@@ -376,9 +349,7 @@ class TestEnvExampleTemplate:
     live-only mitigation knobs (S-10)."""
 
     def test_env_example_with_secrets_filled_parses(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # The C-09 repro inverted into a regression test. Env vars outrank
-        # dotenv, so setenv stands in for "fill in the secrets"; everything
-        # else comes from the template verbatim.
+        # The C-09 repro inverted: setenv stands in for filling the secrets.
         for name, value in {
             "ANTHROPIC_API_KEY": "sk-ant-test",
             "JUDGE_MODEL": "claude-haiku-4-5",
@@ -398,9 +369,7 @@ class TestEnvExampleTemplate:
         assert settings.investigate_reprobe_attempts == 1
 
     def test_every_settings_field_documented_in_env_example(self) -> None:
-        # Every Settings field must at least appear in the template
-        # (commented-out counts) so the next live-only knob cannot be
-        # forgotten the way VERIFY_PROBE_ATTEMPTS was (S-10).
+        # Every Settings field must appear in the template, as VERIFY_PROBE_ATTEMPTS did not.
         text = (_REPO_ROOT / ".env.example").read_text(encoding="utf-8")
         for name in Settings.model_fields:
             assert name.upper() in text, f"{name.upper()} missing from .env.example"
@@ -424,14 +393,9 @@ class TestGetSettings:
 class TestTheChaosPrincipalIsSeparateAndRequiredAtUse:
     """`PLATFORM_CHAOS_TOKEN`: optional to load, mandatory at the point of use.
 
-    Platform v0.6.5 split one four-scope principal into two (owner decision
-    O-4). The agent's `PLATFORM_TOKEN` lost `chaos:invoke`, because the
-    platform withholds the `chaos.%` audit rows from principals that cannot
-    fire chaos and that filter is inert while one token holds every scope.
-    The evaluator's token is a second credential, and these pin the two
-    properties that make the split safe to depend on: an absent value never
-    blocks the offline world, and a seeding path never silently degrades to
-    the agent's token (the S-04 shape, one level up).
+    v0.6.5 split one four-scope principal into two (O-4), because the platform withholds
+    `chaos.%` audit rows from principals that cannot fire chaos. An absent value never
+    blocks the offline world, and a seeding path never degrades to the agent's token.
     """
 
     def test_it_is_optional_at_load(self, valid_kwargs: dict[str, Any]) -> None:
@@ -450,10 +414,7 @@ class TestTheChaosPrincipalIsSeparateAndRequiredAtUse:
     def test_unset_or_blank_refuses_rather_than_falling_back(
         self, valid_kwargs: dict[str, Any], unset: str | None
     ) -> None:
-        # Blank is UNSET, not "use the default", and the default it must not
-        # reach for is platform_token — which cannot seed anything since
-        # v0.6.5, so the fallback would surface as a scope refusal fired
-        # mid-run with the archive already open.
+        # Blank is UNSET: platform_token cannot seed anything since v0.6.5.
         overrides = {} if unset is None else {"platform_chaos_token": unset}
         settings = _settings(**valid_kwargs, **overrides)
         with pytest.raises(ChaosTokenNotConfigured) as exc:

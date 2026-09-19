@@ -62,16 +62,8 @@ def _point_gate_at(
 ) -> None:
     """Write synthetic reports under tmp_path and aim main() at them.
 
-    main() reads the module-level ``_BASELINE`` directly and RESOLVES the
-    report to grade — ``artifacts.newest("report")`` over ``_REPORTS_DIR``.
-    evals/reports/ is append-only evidence, so tests must never point at the
-    real directory. ``latest=None`` leaves it holding no report at all.
-
-    A DECOY older report goes down alongside the real one, carrying the
-    baseline's own outcomes. If the gate ever resolved to the wrong file —
-    oldest-first, mtime order, or "the only file it found" — every test that
-    expects a verdict about ``latest`` would instead get "no changes", so
-    the decoy is what keeps this fixture honest about newest-wins.
+    evals/reports/ is append-only evidence, so tests never point at the real directory.
+    A DECOY older report goes down alongside, so a gate resolving oldest-first fails.
     """
     reports = tmp_path / "reports"
     reports.mkdir(parents=True, exist_ok=True)
@@ -131,12 +123,8 @@ class TestCompare:
         assert result.has_regressions is False
 
     def test_dropped_is_not_a_regression(self) -> None:
-        # Classification is deliberately unchanged by the A-03 fix: a
-        # dropped scenario is reported distinctly, not misfiled as a
-        # regression, so _print_comparison output keeps its meaning. The
-        # GATE decision moved to main() — TestMainGate pins that dropped
-        # now exits 1. (Renamed from test_dropped_scenario_reported,
-        # which pinned the old dropped-never-fails intent.)
+        # Classification is unchanged by the A-03 fix: a dropped scenario is reported distinctly.
+        # The GATE decision moved to main(), where TestMainGate pins that dropped now exits 1.
         baseline = _report((_outcome("a", True), _outcome("b", True)))
         latest = _report((_outcome("a", True),))
         result = compare(baseline, latest)
@@ -161,21 +149,14 @@ class TestCompare:
 class TestMainGate:
     """Exit-code policy of regression.main() (A-03, S-14; ADR 0013).
 
-    compare() classification is pinned by TestCompare; these tests pin what
-    the gate DOES with it: 0 = comparable full-suite input, no regressions,
-    no coverage loss; 1 = gate failed (regression or dropped scenario);
-    2 = not a comparable input (missing file, filtered report). Provenance
-    mismatch warns on stdout and never gates (S-14 — deliberate; gating is
-    deferred until after the next baseline bless, per ADR 0013).
+    0 = comparable full-suite input with no regressions or coverage loss; 1 = gate failed;
+    2 = not a comparable input. A provenance mismatch warns and never gates (S-14).
     """
 
     def test_dropped_scenarios_fail_the_gate(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # The exact repro_a03.py shape: baseline {a,b,c all pass} vs a
-        # latest that silently lost b and c. At pre-fix HEAD this exited 0
-        # ("dropped_scenarios: ('b','c'); exit code: 0") — the assertion
-        # that would have caught A-03.
+        # The exact repro_a03.py shape: a latest that silently lost b and c exited 0.
         baseline = _report((_outcome("a", True), _outcome("b", True), _outcome("c", True)))
         latest = _report((_outcome("a", True),))
         _point_gate_at(monkeypatch, tmp_path, baseline, latest)
@@ -208,9 +189,7 @@ class TestMainGate:
     def test_filtered_latest_is_refused_even_when_green(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # Every scenario present passes and none dropped — the report is
-        # still refused as gate input (exit 2, "not a comparable input"),
-        # not diffed: a filtered run proves nothing about the full suite.
+        # A filtered run proves nothing about the full suite, so it is refused (exit 2).
         baseline = _report((_outcome("a", True), _outcome("b", True)))
         latest = _report(
             (_outcome("a", True), _outcome("b", True)),
@@ -233,11 +212,8 @@ class TestMainGate:
     def test_provenance_unknown_warns_without_gating(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # The committed baseline predates provenance stamping
-        # (degraded_count None) while a fresh offline latest records 32 —
-        # the gate warns and still exits 0 given no regressions/drops.
-        # Warn-only is the S-14 contract; pinning it here makes any future
-        # move to hard gating a deliberate test change.
+        # The committed baseline predates provenance stamping while a fresh latest records 32:
+        # the gate warns and still exits 0 (the S-14 contract).
         baseline = _report(
             (_outcome("a", True), _outcome("b", True)),
             degraded_count=None,
@@ -288,9 +264,7 @@ class TestMainGate:
 def _graded(name: str, dimensions: dict[GradeDimension, str]) -> ScenarioOutcome:
     """A passing outcome whose dimensions carry the given detail strings.
 
-    Everything passes: these cases are about a suite that stays green while
-    checking less, which is the only case the old pass/fail diff could not
-    see.
+    A suite that stays green while checking less.
     """
     return ScenarioOutcome(
         scenario=name,
@@ -348,11 +322,8 @@ class TestCoverageLossWithoutRedScenarios:
     def test_the_legacy_baseline_safety_phrasing_is_not_a_false_positive(self) -> None:
         """The committed baseline says "no forbidden replay ids set".
 
-        The grader stopped emitting that wording; it says "no safety
-        expectations set" now. Both are the same vacuous state, so a
-        rename must not read as an assertion appearing or leaving — an
-        enumerated sentinel list built from today's grader would have
-        fired on all 35 baseline records carrying the old string.
+        The grader says "no safety expectations set" now; both are the same vacuous state, so
+        a rename must not read as an assertion appearing or leaving.
         """
         baseline = _report((_graded("a", {GradeDimension.SAFETY: "no forbidden replay ids set"}),))
         latest = _report((_graded("a", {GradeDimension.SAFETY: "no safety expectations set"}),))
@@ -413,17 +384,8 @@ class TestCoverageLossWithoutRedScenarios:
     ) -> None:
         """WO-R3-191's gate question, asked against the real baseline.
 
-        The committed baseline was blessed before ``GradeDimension.ROOT_CAUSE``
-        existed, so every one of its rows carries five dimensions and every
-        fresh row now carries six. That is coverage GROWING, and the gate must
-        read it as such: ``dropped_dimensions`` is ``baseline - latest``, so a
-        new dimension is invisible to it, and ``vacated_assertions`` only walks
-        the intersection. No shipped scenario declares a ground truth, so every
-        new dimension is a vacuous pass and no roll-up moves either.
-
-        Asserted on the committed artifact rather than a synthetic pair
-        because the artifact is what ``make eval-reg`` actually gates against,
-        and its 41 rows are what a spurious "dropped dimension" would name.
+        The baseline's rows carry five dimensions and fresh rows six — coverage GROWING, which
+        ``dropped_dimensions`` (baseline − latest) cannot see. Asserted on the committed artifact.
         """
         baseline = regression._load_report(
             Path(__file__).resolve().parents[2] / "evals" / "reports" / "baseline.json"
@@ -500,12 +462,8 @@ class TestVacuityClassifier:
     def test_the_world_scoped_not_graded_detail_is_vacuous(self) -> None:
         """INC-003's second shape of "nothing was asserted here".
 
-        ROOT_CAUSE passes without a verdict in two different situations now:
-        the scenario declares no label ("no ground truth set"), and the run
-        was in a world the label does not describe. Both are the absence of a
-        claim, so both have to read as vacuous — a not-graded row that looked
-        substantive would sit in the accuracy denominator and quietly restate
-        the 61% the incident is about.
+        ROOT_CAUSE passes without a verdict when no label is declared and when the run was in a
+        world the label does not describe; both must read as vacuous.
         """
         detail = not_graded_detail("db_query_latency")
         assert is_vacuous_detail(detail)
@@ -520,9 +478,7 @@ class TestVacuityClassifier:
     def test_every_nothing_asserted_branch_in_the_grader_is_classified(self) -> None:
         """Walks the grader for the literal it emits when nothing is set.
 
-        A new dimension that passes vacuously with different wording would
-        otherwise be invisible to the gate, and this file would keep
-        passing on the five strings it already knows.
+        A new dimension passing vacuously with other wording is invisible.
         """
         source = (
             Path(__file__).resolve().parents[2] / "evals" / "graders" / "deterministic.py"

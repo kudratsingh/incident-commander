@@ -1,25 +1,9 @@
 """WP-5.3 — ``best_of_n_sampled``: N draws, one emitted step, N accruals.
 
-The order's acceptance list, one class each:
-
-* ``TestNIndependentCallsAllAccrue`` — N calls are made and **all N reach the
-  ledger**, asserted against the ledger so an under-accrual is a failure. The
-  hard half is the failure path: when draw k raises, the k−1 that returned are
-  charged too (ADR 0045), because the loop's own ``accrue_llm_error`` runs
-  against the state this strategy never got to return.
-* ``TestTheUnionDeduplicates`` — two samples that agree produce one candidate.
-* ``TestTheTemperatureIsApplied`` — asserted **on the client call**, not on a
-  setting, and the request body is checked for the field itself.
-* ``TestOtherRolesSendNoTemperature`` — the other half of that: adding the
-  parameter moved no other call's request bytes.
-* ``TestTheEmittedStepIsOneSamples`` — never a blend (ADR 0045).
-* ``TestTheArmIsConfigGated`` — it does not run in the development loop by
-  default: ``baseline`` is still the configured strategy and N is still 1.
-* ``TestTheCostMultiplierIsDeclared`` — the declaration reaches this arm's
-  ledger. Measuring it against the real token cost needs a run and is DEFERRED;
-  the tolerance is stated here so the deferred check has a bar to meet.
-* ``TestTheSamplingRejectionTripwire`` — no priced model rejects sampling, so
-  the day one is priced the suite says so instead of a paid sweep discovering it.
+One class per acceptance item: N calls all reach the ledger, including the k−1 that
+returned when draw k raises (ADR 0045); the union deduplicates; the temperature is
+asserted on the client call, and no other role's bytes moved; the emitted step is one
+sample's, never a blend; the arm is config-gated; no priced model rejects sampling.
 """
 
 from __future__ import annotations
@@ -287,9 +271,7 @@ class TestNIndependentCallsAllAccrue:
     ) -> None:
         """ADR 0045's failure path, through the real loop.
 
-        Four draws, the fourth raises. The loop catches it, charges
-        ``accrue_llm_error`` against the state it held BEFORE the call — so the
-        three that returned are only charged if the exception carried them.
+        The three draws that returned are charged only if the exception carried them.
         """
         llm = _RaisesOnCall(
             [_step()], fail_on=4, usage=CannedUsage(input_tokens=100, output_tokens=40)
@@ -316,14 +298,8 @@ class TestNIndependentCallsAllAccrue:
     ) -> None:
         """ADR 0035's re-ask is one more call, on this arm as on ``baseline``.
 
-        Three calls for two samples: draw 1's payload failed validation and was
-        re-asked once. The ledger moves by 2 x 140 rather than 3 x 140, and that
-        is correct rather than a gap: ``CannedLLMClient`` raises from
-        ``model_validate`` before it builds an ``LLMResult``, so the rejected leg
-        reports no usage at all — the same case ``MeteredLLMClient`` documents,
-        where charging a guess would be an over-report invented rather than
-        measured. A real client attaches the billed usage to the exception and
-        ``accrue_structured_call`` walks ``call.failures`` and charges it.
+        Three calls for two samples, and the ledger moves by 2 x 140: ``CannedLLMClient``
+        raises before it builds an ``LLMResult``, so the rejected leg reports no usage.
         """
         usage = CannedUsage(input_tokens=100, output_tokens=40)
         llm = CannedLLMClient([{"hypotheses": []}, _step(), _step()], usage=usage)
@@ -337,9 +313,7 @@ class TestNIndependentCallsAllAccrue:
     ) -> None:
         """A transport failure that reports no usage is charged nothing invented.
 
-        A transport ``LLMError`` rather than a ``ValueError``, deliberately: a
-        ``ValueError`` is *repairable* (ADR 0035), so it would buy a re-ask and
-        succeed rather than reach the loop. This is the unrepairable path.
+        A transport ``LLMError`` rather than a ``ValueError``, which would be repairable.
         """
         llm = _RaisesOnCall(
             [_step()],
@@ -426,9 +400,7 @@ class TestTheUnionDeduplicates:
     def test_branch_count_follows_the_union(self, run_state: RunState, now: datetime) -> None:
         """WP-2.3's ``branch_count`` is candidates beyond the emitted one.
 
-        Four draws that produced two distinct diagnoses branch once, not three
-        times — which is the honest reading and the reason the union is recorded
-        rather than the raw draws.
+        Four draws with two distinct diagnoses branch once, not three times.
         """
         accounting = RunAccounting()
         llm = CannedLLMClient(
@@ -683,10 +655,8 @@ class TestTheCostMultiplierIsDeclared:
     def test_an_unfunded_arm_is_not_silently_rescued(self, now: datetime) -> None:
         """Multiplier 1 is legal and is a budget experiment, not a strategy one.
 
-        Nothing here refuses it: the arm stamps ``n`` and the provenance record
-        carries the seeded ledger, so a BUDGET result can be read for what it is
-        (decision C4). The refusal would be the wrong guard — "does best-of-8
-        fit in baseline's budget" is a question worth being able to ask.
+        Nothing refuses it: the arm stamps ``n`` and the provenance carries the seeded ledger
+        (decision C4).
         """
         settings = _settings(inference_strategy="best_of_n_sampled", best_of_n=8)
         assert settings.seeded_max_tokens == settings.budget_max_tokens
@@ -699,9 +669,7 @@ class TestTheCostMultiplierIsDeclared:
     ) -> None:
         """The deferred check needs a number; this is where it comes from.
 
-        ``investigation_planner`` role tokens for this arm over the same
-        scenarios as a ``baseline`` run, compared against the declared
-        multiplier within ±20%.
+        Planner-role tokens against ``baseline``, within ±20%.
         """
         accounting = RunAccounting()
         usage = CannedUsage(input_tokens=100, output_tokens=40)
@@ -740,9 +708,7 @@ class TestTheSamplingRejectionTripwire:
     def test_it_is_a_tripwire_and_not_a_refusal(self) -> None:
         """Nothing blocks a model that is not on the list.
 
-        A wrong refusal stops a legitimate run; a wrong allow is a rejected
-        request the provider does not bill, which the client already turns into
-        one escalation.
+        A wrong refusal stops a real run; a wrong allow costs one escalation.
         """
         anthropic = _RecordingAnthropic(_step())
         client = LLMClient(api_key="k", client=anthropic)  # type: ignore[arg-type]

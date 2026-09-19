@@ -1,26 +1,9 @@
 """WP-5.2 — ``best_of_n_enumerated``: the arm, its schema, and what it records.
 
-The order's acceptance list, one class per item:
-
-* ``TestTheExactNSchema`` — N is honoured for N ∈ {1, 2, 4, 8}, a short set is
-  rejected rather than padded, and the bound is *advertised* as well as
-  enforced. The last half is the one that had no test: the expression WP-5.1
-  recommended emitted ``minLength``/``maxLength`` on an array, which a
-  JSON-Schema reader ignores, so the bound would have been enforced against a
-  model that was never told about it.
-* ``TestNIsOneReproducesBaseline`` — the same trajectory as ``baseline`` on the
-  same canned world. The cheapest proof the seam is honest.
-* ``TestTheWholeSetIsRecorded`` — N candidates in the ``StepRecord``, not just
-  the winner, and ``branch_count`` follows from it with no new accounting.
-* ``TestTheEmittedStepIsOrdinary`` — every downstream gate behaves the same,
-  exercised through the real loop rather than asserted about it.
-* ``TestDuplicatesAndRejections`` — a duplicate-heavy fake produces a non-zero
-  rate, by both definitions, and neither is presented as the other.
-* ``TestEvidenceIdsAreOnThePage`` — the citation rule is askable, and asking it
-  did not move ``baseline``'s bytes.
-* ``TestTheBudgetMultiplierReachesTheArm`` — the WP-2.4 multiplier seeds this
-  arm's ledger and the arm stamps the ratio, so a BUDGET result cannot be read
-  without it (decision C4).
+One class per acceptance item: N is honoured and the bound is advertised as
+``minItems``/``maxItems`` (the pair WP-5.1 recommended is ignored by a JSON-Schema
+reader); N=1 reproduces ``baseline``'s trajectory; the whole set is recorded with
+``branch_count`` following; and the WP-2.4 multiplier reaches this arm's ledger (C4).
 """
 
 from __future__ import annotations
@@ -67,9 +50,7 @@ _REPORTED_NS: Final[tuple[int, ...]] = (1, 2, 4, 8)
 
 
 # --------------------------------------------------------------------------
-# Fakes and payload builders. Local copies, for the reason
-# ``tests/unit/test_strategies.py`` keeps its own: this file must be able to
-# fail on its own.
+# Local fakes and payload builders.
 
 
 class _FakeMCPClient:
@@ -211,12 +192,8 @@ def _settings(**overrides: Any) -> Settings:
 def _trajectory(run: RunState) -> list[tuple[str, dict[str, Any]]]:
     """A run's evidence trail as (tool, arguments) — what it actually did.
 
-    The comparison ``TestNIsOneReproducesBaseline`` is built on. Deliberately
-    not the whole ``RunState``: ``Hypothesis.reasoning`` cannot match between
-    the two arms by construction (``DiagnosisCandidate`` has no ``reasoning``
-    field, ADR 0042), and ``incident_id`` and the timestamps differ per run. The
-    probes, their arguments and their order are the trajectory; the rest is
-    identity and prose.
+    Not the whole ``RunState``: ``Hypothesis.reasoning`` cannot match between the arms
+    (ADR 0042) and ids and timestamps differ per run.
     """
     return [(entry.tool_name, dict(entry.arguments)) for entry in run.evidence]
 
@@ -231,9 +208,7 @@ class TestTheExactNSchema:
     def test_the_schema_demands_exactly_n(self, n: int) -> None:
         schema = candidate_step_model(n).model_json_schema()["properties"]["candidates"]
         assert schema["type"] == "array"
-        # minItems/maxItems, NOT minLength/maxLength: the second pair means
-        # nothing for a JSON-Schema array, so a model reading the schema would
-        # never learn N. That is the half no exception reports.
+        # minItems/maxItems, NOT minLength/maxLength: the second pair means nothing here.
         assert (schema["minItems"], schema["maxItems"]) == (n, n)
         assert "minLength" not in schema and "maxLength" not in schema
 
@@ -253,9 +228,7 @@ class TestTheExactNSchema:
     def test_a_short_set_is_rejected_rather_than_padded(self) -> None:
         """The whole point of ``max_length == min_length``.
 
-        A padded set would make "the model produced N candidates" false in
-        exactly the runs where it matters, and every pass@k over it wrong by
-        construction.
+        A padded set makes every pass@k over it wrong.
         """
         model = candidate_step_model(4)
         with _grounded((_evidence(),)), pytest.raises(ValidationError) as caught:
@@ -327,9 +300,7 @@ class TestNIsOneReproducesBaseline:
     ) -> None:
         """Named rather than papered over (ADR 0043).
 
-        ``DiagnosisCandidate`` has no ``reasoning`` and ``Hypothesis`` requires
-        one, so this arm derives it from the citations. The PR reports it; this
-        test is what stops it from being discovered later as a surprise.
+        ``DiagnosisCandidate`` has no ``reasoning``, so this arm derives it from citations.
         """
         llm = CannedLLMClient([_stop_set([_candidate("c1")])])
         _, step, _ = _arm(n=1).plan_next_step(_investigating(run_state), now, _context(llm))
@@ -362,9 +333,7 @@ class TestTheEmittedStepIsOrdinary:
     ) -> None:
         """A top candidate outside ``FIX_MAP`` is stopped by the existing gate.
 
-        The order's findings list makes this explicit: it "gets StopAction from
-        the existing gate, which is correct and must not be special-cased inside
-        the strategy".
+        Not special-cased inside the strategy.
         """
         unmapped = {
             "candidates": [
@@ -385,9 +354,7 @@ class TestTheEmittedStepIsOrdinary:
     def test_the_top_candidate_by_confidence_is_the_one_emitted(
         self, run_state: RunState, now: datetime
     ) -> None:
-        # Stated out of order on purpose: the set is ranked at the schema
-        # boundary, so "the top candidate" does not depend on what the model
-        # happened to type first.
+        # Stated out of order: the set is ranked at the schema boundary.
         payload = _stop_set(
             [
                 _candidate("weak", name="weak", confidence=0.2),
@@ -529,9 +496,7 @@ class TestEvidenceIdsAreOnThePage:
     def test_the_id_column_is_the_only_difference(self, run_state: RunState) -> None:
         """Nothing else about the context moves with the flag.
 
-        The confound ADR 0043 accepts is exactly one ``evidence_id=<uuid> ``
-        prefix per evidence line. If the flag ever changed anything else, the
-        arm comparison would carry a difference nobody had bounded.
+        The confound ADR 0043 accepts is one ``evidence_id=<uuid> `` prefix per line.
         """
         entry = _evidence()
         state = _with_evidence(run_state, entry)

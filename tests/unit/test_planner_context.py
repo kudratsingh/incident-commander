@@ -45,6 +45,10 @@ _EXPECTED_READ_TOOLS: Final[frozenset[str]] = frozenset(
 
 #: sha256 of ``format_tool_block()``. Moved by the v0.6.11 re-pin (WO-R3-217): two read
 #: tools joined and get_postgres_health was re-described — 14 → 16, 21,420 → 28,323 chars.
+#: The v0.6.12 re-pin left it byte-identical at 28,323 characters, and that is the
+#: expected reading for a lab-only pin: its whole delta is one new chaos hook plus one
+#: chaos hook's widened schema, and the `[chaos:` filter keeps every hook out of the
+#: typed registry this block is assembled from. A hash that does not move is a result.
 _EXPECTED_TOOL_BLOCK_HASH: Final[str] = (
     "04a49645172ffae0ef2a00b073713e5e229c3bc86a08b8bed6a46dd5c1b801c8"
 )

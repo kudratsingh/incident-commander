@@ -2304,7 +2304,7 @@
     },
     {
       "name": "kill_consumer",
-      "description": "[chaos: single_consumer] Shut down one Kafka consumer group by setting a Redis flag the consumer's poll loop checks each iteration. The consumer exits cleanly; the worker's supervisor decides whether to restart. Effect lasts for `ttl_seconds` (default 300).",
+      "description": "[chaos: single_consumer] Shut down one Kafka consumer group by setting a Redis flag the consumer's poll loop checks each iteration. The consumer exits cleanly; the worker's supervisor decides whether to restart. Effect lasts for `ttl_seconds` (default 300).\nSTICKY: with `sticky: true` the group also stays down through a restart_consumer_group call. That action deletes the kill flag and truthfully reports having cleared it, and the supervisor finds the flag re-armed before it restarts anything — so the group is still down and a verify step has to read that off the group itself, not off the action's reply. This is how a first remediation attempt is made to genuinely fail.\nTHE WINDOW IS ABSOLUTE: it runs from this call on the platform's clock and `expires_at` names its end. Restarting the group any number of times does not extend it, and nothing re-arms the flag once it has passed. A second sticky call on the same group replaces the window instead of adding to it, and clearing both keys ends it early.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -2317,11 +2317,17 @@
           },
           "ttl_seconds": {
             "default": 300,
-            "description": "How long the kill flag stays active. After this the consumer's next restart succeeds. Default 5 minutes.",
+            "description": "How long the kill flag stays active. After this the consumer's next restart succeeds and a sticky kill stops re-arming. Default 5 minutes.",
             "maximum": 3600,
             "minimum": 1,
             "title": "Ttl Seconds",
             "type": "integer"
+          },
+          "sticky": {
+            "default": false,
+            "description": "Keep the group down THROUGH a restart_consumer_group call, for the remainder of `ttl_seconds`. Default false, which is the plain kill a single restart fixes.",
+            "title": "Sticky",
+            "type": "boolean"
           }
         },
         "required": [
@@ -2344,6 +2350,29 @@
             "title": "Ttl Seconds",
             "type": "integer"
           },
+          "sticky": {
+            "title": "Sticky",
+            "type": "boolean"
+          },
+          "sticky_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The second key a sticky kill wrote, or null for a plain kill. Null means nothing will re-arm the flag.",
+            "title": "Sticky Key"
+          },
+          "expires_at": {
+            "description": "When this kill ends — ISO-8601, UTC, the platform's clock, measured from this call. Absolute: restarts do not move it.",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
           "accepted": {
             "description": "True if the kill flag was set. This does not confirm the consumer actually stopped — that happens on its next poll iteration (typically within 500ms).",
             "title": "Accepted",
@@ -2354,6 +2383,8 @@
           "consumer_group",
           "kill_key",
           "ttl_seconds",
+          "sticky",
+          "expires_at",
           "accepted"
         ],
         "title": "KillConsumerOutput",
@@ -4279,6 +4310,109 @@
           "accepted"
         ],
         "title": "SeedDlqMessagesOutput",
+        "type": "object"
+      },
+      "required_scope": "chaos:invoke",
+      "is_idempotent": false
+    },
+    {
+      "name": "slow_db_queries",
+      "description": "[chaos: shared_dependency] Keep queries against one declared read path running long — `query_ms` each (default 2000, min 1100, max 10000), `concurrent_queries` at a time, for `ttl_seconds` (default 300, max 3600). The queries run in the API and worker process and are real reads of the relation `target` names, so the database server sees them: `get_postgres_health` reports them in `longest_active_query_ms` and `active_queries_over_slow_threshold`, which are read from the server and therefore the same answer whichever process asks. Its `pool_*` counters are NOT moved: this takes `concurrent_queries` connections out of the worker's pool and always leaves the free floor `saturate_db_pool` keeps, and a pool reading is per-process anyway. That contrast is the point — slow queries with a healthy pool, against `saturate_db_pool`'s full pool with normal queries. `p95_query_ms_1m` stays null: the platform keeps no per-minute query history and this does not give it one. What it does not do: the platform's own jobs still run at their normal speed, so job durations, consumer lag and the SLO readings are unaffected. Every query stops when the flag expires, when the environment reset clears it, or when the worker restarts; one already-running query finishes first, so up to `query_ms` outlives the flag. A repeat call replaces the fault instead of adding a second one.",
+      "inputSchema": {
+        "$defs": {
+          "SlowQueryTarget": {
+            "enum": [
+              "job_reads",
+              "audit_reads",
+              "outbox_reads"
+            ],
+            "title": "SlowQueryTarget",
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "$ref": "#/$defs/SlowQueryTarget",
+            "default": "job_reads",
+            "description": "Which read path runs slowly: `job_reads` (default), `audit_reads` or `outbox_reads`. Each names one relation, and the slow query really reads it, so it holds that relation's read lock while it runs. Anything else is refused."
+          },
+          "query_ms": {
+            "default": 2000,
+            "description": "How long each query takes, in milliseconds. The floor of 1100 is above twice the platform's 500 ms slow-query threshold on purpose: with 2 queries offset by half this, the longest one running is always past that threshold, so the reading never dips back to normal between queries. The ceiling of 10000 bounds how long one query can outlive the flag.",
+            "maximum": 10000,
+            "minimum": 1100,
+            "title": "Query Ms",
+            "type": "integer"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "description": "How long queries keep running slowly. They stop on the first pass after it expires — nothing has to be called. Default 5 minutes.",
+            "maximum": 3600,
+            "minimum": 1,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "title": "SlowQueryInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "flag_key": {
+            "title": "Flag Key",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "relation": {
+            "description": "The relation `target` names, which the slow query reads.",
+            "title": "Relation",
+            "type": "string"
+          },
+          "query_ms": {
+            "title": "Query Ms",
+            "type": "integer"
+          },
+          "ttl_seconds": {
+            "title": "Ttl Seconds",
+            "type": "integer"
+          },
+          "concurrent_queries": {
+            "description": "How many slow queries run at once, offset within `query_ms` so one is always past the slow threshold. Fixed, not a caller argument: it is also how many connections this takes out of the worker's pool, and the free floor is what caps it.",
+            "title": "Concurrent Queries",
+            "type": "integer"
+          },
+          "poll_interval_seconds": {
+            "description": "Seconds between the task's passes. The fault starts, changes and ends on a pass, so a ttl_seconds smaller than this expires before any query runs.",
+            "title": "Poll Interval Seconds",
+            "type": "number"
+          },
+          "slow_query_threshold_ms": {
+            "description": "The platform's own threshold, for comparison with `query_ms`: the reading that counts queries past it is what this fault moves.",
+            "title": "Slow Query Threshold Ms",
+            "type": "number"
+          },
+          "accepted": {
+            "description": "True if the flag was set. This does not confirm a query is running yet — that happens on the task's next pass, at most poll_interval_seconds away, plus the first query's own offset.",
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "flag_key",
+          "target",
+          "relation",
+          "query_ms",
+          "ttl_seconds",
+          "concurrent_queries",
+          "poll_interval_seconds",
+          "slow_query_threshold_ms",
+          "accepted"
+        ],
+        "title": "SlowQueryOutput",
         "type": "object"
       },
       "required_scope": "chaos:invoke",

@@ -1124,8 +1124,8 @@ For deeper introspection, the newest `evals/trajectories/<scenario>.<stamp>.<inv
 ## Contract-test target (constraint in force)
 
 **Run contract tests ONLY against the pinned demo stack.** The pin is
-v0.6.11 by index digest (`sha256:08522d48ef07…`) and the committed snapshot
-carries its **37** tools, blessed from that stack with the full 4-scope
+v0.6.12 by index digest (`sha256:56630360…`) and the committed snapshot
+carries its **38** tools, blessed from that stack with the full 4-scope
 service-account token. v0.6.9 moved the count by two at once —
 `get_outbox_status` (an agent-facing read tool) and `pause_control_loop` (a
 lab hook) — v0.6.10 moved it by one, `pause_dag_chaos`, a lab hook as well,
@@ -1148,7 +1148,23 @@ class docstring and a Pydantic docstring IS its schema description. A
 docs-only PR is a contract delta when it edits a model's docstring; read the
 mechanical diff, not the release notes.
 
-The rule outlives the v0.4.9 → v0.5.0 → v0.6.0 → … → v0.6.11 bumps that motivated it: platform
+v0.6.12 is the first pin since v0.6.10 that is **entirely lab-side**, and it
+is the cleanest example there has been of why the count is only half the
+check. It moves the count by one — `slow_db_queries`, a lab hook, 37 → 38,
+15 of them chaos — and the read surface not at all, so it stays at 16. The
+half the count cannot show is the other entry in the mechanical diff:
+`kill_consumer` gained one input (`sticky`), three outputs (`sticky`,
+`sticky_key`, `expires_at`), a rewritten description AND a changed
+description on an input it already had (`ttl_seconds`, which now mentions the
+re-arm). Four of those five are invisible to `tools/list`'s key set and
+visible only to an exact comparison, which is what the mechanical diff is
+for. And the behaviour change that matters is in a tool the diff does not
+mention at all: under a sticky kill, `restart_consumer_group` is unmodified,
+reports `kill_key_cleared: true` truthfully, and leaves the group down
+(platform ADR 0032). A caller that inferred recovery from that reply is now
+wrong, and no schema says so — read the group's own state.
+
+The rule outlives the v0.4.9 → v0.5.0 → v0.6.0 → … → v0.6.12 bumps that motivated it: platform
 master moves ahead of whatever tag is pinned, so a contract check against
 a master-built dev stack can fail **by design**. That is master drift, not
 drift in the pinned artifact, and it must never trigger a snapshot rebless
@@ -1308,6 +1324,26 @@ with v0.6.11, the first pin to make an existing tool's output field required):
    is why main is green. Same verdict as above — local-volume divergence,
    leave the ledger alone — and one more reason not to decide a bless from
    `make fixture-drift` alone.
+
+   v0.6.12 adds the fact that completes both notes, and it is the one to have
+   before deciding anything: **a stack's context is not a property of its
+   volume, it is a property of the last minute.** `evals/fixture_probe.py`
+   decides `warm` or `cold` from ONE reading — whether
+   `get_consumer_lag('worker-dispatcher')` answers `lag_known: true` with a
+   `measured_at` — and `make eval-reset` clears the lag samples
+   (`lag_samples_cleared`), so the same volume reads `cold` for the minute
+   after a reset and `warm` once the metrics loop has sampled again. On this
+   pin `make test-drift` was run twice, minutes apart, on one volume and one
+   snapshot, and failed differently each time: as `cold` it held the three
+   `jobs_not_progressing_*` `get_consumer_lag.lag` rows to the ratchet and
+   reported three stale entries; as `warm` it exempted those and held the one
+   `remediate_stale_cache_success` `get_cache_key_info.size` row instead. Both
+   readings are correct and neither is a reason to bless. The practical rule:
+   read WHICH context the failure printed before believing its stale list, and
+   if the list is entirely `cold-stack` or entirely `warm-stack` rows the
+   answer is "local volume", never "delete these lines". The tell that it is
+   something else is a non-empty `new` list — the one half of this check that
+   cannot be wrong about the ledger in the shrinking direction.
 5. Re-pin the planner's tool listing, which is the OTHER prompt the agent
    reads:
    ```bash
@@ -1333,7 +1369,12 @@ with v0.6.11, the first pin to make an existing tool's output field required):
    chaos tool and one chaos tool's schema widened — left it byte-identical at
    21,420 characters. Say so in the PR body rather than leaving the step
    unmentioned: "the hash did not move, and here is why it should not have" is
-   the difference between a checked step and a skipped one.
+   the difference between a checked step and a skipped one. v0.6.12 is the
+   second such reading and the stronger one, because it added a hook AND
+   widened an existing hook's schema and description: the block stayed
+   byte-identical at 28,323 characters, because the `[chaos:` filter keeps
+   every hook out of the typed registry the block is assembled from, whatever
+   happens to that hook's schema.
 
    The lab-vocabulary assertion in that file is the one part to write
    carefully, and v0.6.11 is the example. Its two hooks are `saturate_db_pool`
@@ -1369,6 +1410,40 @@ with v0.6.11, the first pin to make an existing tool's output field required):
    exit 7, "not compared", on an unmet precondition, which is the documented
    case: a killed consumer builds no backlog and a paused relay holds no rows
    unless something is arriving. Those need `make traffic`.
+
+7. A pin can change how an EXISTING action behaves without touching that
+   action's schema, and v0.6.12 is the first one to do it. `kill_consumer`
+   gained a `sticky` option; `restart_consumer_group` gained nothing at all and
+   is byte-identical in the snapshot. Under a sticky kill that action still
+   deletes the kill flag, still answers `kill_key_cleared: true` and
+   `accepted: true` — truthfully, that is what it did — and the group stays
+   down, because the kill-state read re-arms the flag with `PXAT` before the
+   supervisor restarts anything (platform ADR 0032). Nothing in the contract
+   diff points at it, and no test in this repo fails over it.
+
+   Two things follow for a re-pin. **The mechanical diff is a floor, not a
+   ceiling:** a batch whose stated point is a behaviour change in a tool it
+   does not touch has to be read out of the platform's release notes and ADRs,
+   and this is the step to do it in.
+
+   **And the corpus has to be re-read for claims on an action's REPLY rather
+   than on the acted resource.** v0.6.12 was checked for exactly that, and the
+   corpus has one: `remediate_consumer_lag_success` grades
+   `restart_consumer_group.kill_key_cleared equals true`, with a comment
+   explaining that no lag assertion belongs there because the cached metric
+   trails recovery by ~30 s. That claim is still TRUE of its own world, and it
+   is worth knowing precisely why: the scenario's `chaos_setup` calls
+   `kill_consumer` with `consumer_group` and `ttl_seconds` and no `sticky`, so
+   it gets the default non-sticky kill and a cleared flag really does mean a
+   restarted group. What changed is the KIND of guarantee behind it. Before
+   this pin "a cleared kill flag means the group comes back" was a property of
+   `restart_consumer_group`; after it, it is a property of that scenario's hook
+   arguments, and any scenario that ever passes `sticky: true` must grade
+   recovery on `get_consumer_lag` or on group membership instead. Leave the
+   claim alone and know which of the two it now rests on.
+   `remediate_verify_fails` is the scenario a sticky kill is FOR; flipping it
+   to live is its own decision with its own first-paid-run review and is
+   deliberately not part of a re-pin.
 
 ## Connection pool and run capacity ([ADR 0022](ADR/0022-connection-pool-sizing-and-the-run-concurrency-ceiling.md))
 

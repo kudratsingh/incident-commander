@@ -23,12 +23,38 @@ canned_tool_responses:
   # healthy path rather than omitting it. A fixture without the key never
   # offered the agent the field it is supposed to read when ok is false.
   # ping_latency_ms and active_connections are declared volatile for this
-  # tool, so the slow-and-saturated reading this scenario is about is checked
-  # for type only and stays exactly as recorded.
+  # tool, so the slow reading this scenario is about is checked for type only
+  # and stays exactly as recorded.
+  #
+  # Platform v0.6.11 (plat #218, WO-R3-217) gave this tool twelve more output
+  # fields, and every one of them is written out here. Not for completeness:
+  # they are all optional but one, so an absent field parses as `null`, and
+  # `null` on a pool counter means UNKNOWN — a reading of nulls with both
+  # `*_unknown_reason` strings also null is a response the platform cannot
+  # produce, and a world that contradicts itself is a fixture defect.
+  #
+  # The pool block is exactly what a healthy live stack answers (5/1/0/10/0),
+  # which is the point rather than a shortcut: this world is a database that is
+  # SERVING SLOWLY, so the reading has to say the pool is fine and the queries
+  # are not. That is the discrimination the twelve fields exist for, and it is
+  # what keeps `db_pool_saturation` off the answer key below. `pool_checked_out`
+  # is 1 because the call itself holds a connection; it counts the process that
+  # ANSWERED, which is the MCP service and not the one the 95 server-wide
+  # connections belong to.
+  #
+  # The two query readings are the fault, and they are the only values here a
+  # reset world cannot produce (it answers null and 0) — both are ledgered in
+  # `evals/fixture_drift_ledger.py` as canned-only, with the mechanism named.
+  # `slow_query_threshold_ms` is the platform's own fixed 500.0 and is the one
+  # new field with no default, so a fixture omitting it would not parse at all.
+  # `p95_query_ms_1m` and `slow_query_count_1m` are null in every release this
+  # pin can see, with the platform's own sentence saying why.
   get_postgres_health:
     content:
     - type: text
-      text: '{"ok":true,"ping_latency_ms":420.5,"active_connections":95,"dialect":"postgresql","error":null}'
+      text: '{"ok":true,"ping_latency_ms":420.5,"active_connections":95,"dialect":"postgresql","error":null,"pool_size":5,"pool_checked_out":1,"pool_overflow":0,"pool_max_overflow":10,"pool_wait_timeouts_1m":0,"pool_stats_unknown_reason":null,"longest_active_query_ms":1840.6,"active_queries_over_slow_threshold":2,"slow_query_threshold_ms":500.0,"p95_query_ms_1m":null,"slow_query_count_1m":null,"query_stats_unknown_reason":"the
+        PostgreSQL extension that records per-query timings is not installed on this
+        database, so no per-query timing history exists"}'
     is_error: false
 canned_llm_responses:
   investigation_planner:
@@ -39,19 +65,27 @@ canned_llm_responses:
   # exactly this world; the script predates them, and its own free-form name
   # ("db_saturation") already disagreed with the enum beside it.
   #
-  # Of the two DB labels this is the one the reading supports: the probe
-  # answers ok with a 420ms ping, which is "being served, slowly".
+  # Of the two DB labels this is the one the reading supports, and since the
+  # v0.6.11 pin the reading says so outright rather than by omission: two
+  # queries have been running longer than the platform's 500ms threshold and
+  # the longest is at 1.84s, while the pool the reading can see is almost idle
+  # (1 of 5 checked out, no overflow, no waiter gave up in the last minute).
+  # That is "being served, slowly".
+  #
   # db_pool_saturation means every connection in the pool is checked out, and
-  # 95 active connections arrive with no pool ceiling beside them \u2014 so the
-  # claim "approaching pool saturation" was not established by anything this
-  # probe returned. Both labels escalate, so nothing about the run's shape
-  # turns on the choice; what turns on it is whether the briefing sends the
-  # human to the queries or to the pool.
+  # nothing here shows that. The 95 active connections are SERVER-WIDE and the
+  # pool counters describe only the process that answered the call, so the two
+  # numbers cannot be compared \u2014 which is the same conclusion this script drew
+  # before the pool fields existed, reached now from what the reading says
+  # instead of from what it left out. Both labels escalate, so nothing about
+  # the run's shape turns on the choice; what turns on it is whether the
+  # briefing sends the human to the queries or to the pool.
   - hypotheses:
     - category: db_query_latency
       name: db_query_latency
       confidence: 0.55
-      reasoning: 'DB latency alert; probe postgres health for ping + connection stats.
+      reasoning: 'DB latency alert; probe postgres health for the ping, the connection
+        stats, the pool counters and how long queries are running.
 
         '
     next_action:
@@ -62,13 +96,13 @@ canned_llm_responses:
     - category: db_query_latency
       name: db_query_latency
       confidence: 0.8
-      reasoning: "Ping is 420ms against a sub-20ms baseline and the probe still answers ok \u2014 the database is serving, only slowly. 95 active connections is high, but the reading carries no pool ceiling to compare it against, so connection exhaustion is not something this probe establishes.\n"
+      reasoning: "Ping is 420ms against a sub-20ms baseline and the probe still answers ok \u2014 the database is serving, only slowly. Two queries have been running past the 500ms threshold and the longest is at 1.84s, which is where the latency is. The pool in the reading is nearly idle (1 of 5 checked out, 0 overflow, 0 waiters timed out in the last minute), so this is not connection exhaustion; the 95 active connections are server-wide and the pool counters cover only the process that answered, so those two numbers are not comparable.\n"
     next_action:
       kind: stop
       reason: DB degraded; escalate to human for scaling decision
   briefing_writer:
-  - findings: "Postgres ping latency is 420ms (usual baseline < 20ms) and the health probe still answers ok \u2014 the DB is degraded but still responsive. It reports 95 active connections; the reading carries no pool ceiling, so whether that is near the limit is not something this probe can say.\n"
-    recommendation: 'Check for long-running queries first, and confirm the 95 active connections against the pool ceiling before treating the pool as the constraint.
+  - findings: "Postgres ping latency is 420ms (usual baseline < 20ms) and the health probe still answers ok \u2014 the DB is degraded but still responsive. Two queries are currently running past the 500ms threshold, the longest at 1.84s. The connection pool the probe can see is nearly idle (1 of 5, no overflow, no checkout timeouts in the last minute), and the 95 active connections it reports are server-wide, so this reading cannot say whether any other process's pool is near its limit.\n"
+    recommendation: 'Start with the long-running queries \u2014 they are the measured latency. The pool is not the constraint in the process that answered; if the API or worker pools are suspected, they have to be read from those processes, because this probe cannot see them.
 
       '
   briefing_judge:
@@ -108,13 +142,16 @@ expectation:
 # Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off
 # the chaos hook and the canned fixtures above and never off the canned planner.
 # WO-R3-261.
-# `get_postgres_health` answers ok: true with ping_latency_ms 420.5 — the
-# database is answering, slowly, which is `db_query_latency`. The neighbouring
-# label `db_pool_saturation` is deliberately NOT used: it means every connection
-# in the pool is checked out, and the fixture reports 95 active connections with
-# no pool ceiling beside them, so saturation cannot be established from this
-# world. `transient_dependency` names an EXTERNAL dependency; this is the
-# platform's own database.
+# `get_postgres_health` answers ok: true with ping_latency_ms 420.5, two queries
+# past the 500ms threshold and the longest at 1.84s — the database is answering,
+# slowly, which is `db_query_latency`. The neighbouring label
+# `db_pool_saturation` is deliberately NOT used, and since the v0.6.11 pin the
+# world rules it out positively rather than leaving it unestablished: the pool in
+# the reading holds 1 of 5 with no overflow and no checkout timeout in the last
+# minute. The 95 active connections are server-wide and the pool counters belong
+# to the process that answered, so they are not two views of one number.
+# `transient_dependency` names an EXTERNAL dependency; this is the platform's own
+# database.
 ground_truth:
   incident_count: 1
   root_causes: [db_query_latency]

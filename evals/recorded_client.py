@@ -66,6 +66,22 @@ SHIFTED_CLOCK_FIELDS: Final[Mapping[str, frozenset[str]]] = {
             "relay_last_tick_at",
         }
     ),
+    # v0.6.11 (plat #218). `measured_at` is the answering process's clock; the
+    # three `breakers.*` stamps are the OWNING process's, and that split is the
+    # reason to shift them all by one offset rather than to re-derive them: the
+    # skew between two live processes is part of the world the recording caught,
+    # and a rigid shift keeps it.
+    "get_circuit_breakers": frozenset(
+        {
+            "measured_at",
+            "breakers.last_state_change_at",
+            "breakers.last_failure_at",
+            "breakers.recorded_at",
+        }
+    ),
+    # One clock only: an objective's window is `window_hours` back from the
+    # reading, so moving the reading moves the window with it.
+    "get_slo_status": frozenset({"measured_at"}),
     "search_traces": frozenset({"matches.created_at"}),
 }
 
@@ -92,6 +108,24 @@ HELD_DURATION_FIELDS: Final[Mapping[str, frozenset[str]]] = {
             "relay_tick_interval_s",
         }
     ),
+    # v0.6.11 (plat #218). `recovery_timeout_s` is configuration, like the outbox
+    # tick interval above; the two ages are relative to the reading and so are
+    # right unchanged. Held, not shifted — but the clocks they were computed from
+    # ARE shifted, so a replay's ages and its timestamps only agree to the
+    # whole-second rounding `replay_offset` applies (the known residual the
+    # comment above this table describes).
+    "get_circuit_breakers": frozenset(
+        {
+            "breakers.recovery_timeout_s",
+            "breakers.seconds_since_state_change",
+            "breakers.reported_age_s",
+        }
+    ),
+    # Not listed and deliberately so: `get_postgres_health`'s v0.6.11 durations
+    # are spelled `_ms` (`longest_active_query_ms`, `slow_query_threshold_ms`,
+    # `p95_query_ms_1m`), which the coverage walk does not read as durations and
+    # this table does not have to name — everything not in SHIFTED_CLOCK_FIELDS
+    # is already held byte-identical, which is what those readings want.
 }
 
 

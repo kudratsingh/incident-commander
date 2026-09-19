@@ -165,6 +165,7 @@ class Hypothesis(StructuredOutput):
 
 ReadToolName = Literal[
     "get_cache_key_info",
+    "get_circuit_breakers",
     "get_consumer_lag",
     "get_dag_state",
     "get_deploy_history",
@@ -172,6 +173,7 @@ ReadToolName = Literal[
     "get_outbox_status",
     "get_postgres_health",
     "get_redis_health",
+    "get_slo_status",
     "get_trace",
     "list_active_alerts",
     "list_audit_events",

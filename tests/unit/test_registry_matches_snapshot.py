@@ -100,6 +100,67 @@ class TestInputModelMatchesSnapshot:
         )
 
 
+class TestEverySnapshotOutputFieldLandsOnAModel:
+    """No field the platform sends is dropped on the floor (LESSONS 2026-09-08).
+
+    ``extra="ignore"`` is the right default — a field a later release adds must not
+    stop a response parsing mid-run — and its cost is that an undeclared field is
+    discarded with no error: a fence claim on v0.6.2 (cmd #206), all twelve of
+    ``get_postgres_health``'s new readings on v0.6.11. ``TestRegistryMatchesSnapshot``
+    fails on the same drift inside strict schema equality; this names the tool and the
+    missing fields, and covers NESTED objects too.
+    """
+
+    @staticmethod
+    def _local_objects(model: type[Any]) -> dict[str, set[str]]:
+        """Property names per object title in one output model's schema tree."""
+        schema = model.model_json_schema()
+        objects = {schema.get("title", ""): set(schema.get("properties", {}))}
+        for title, definition in (schema.get("$defs") or {}).items():
+            if "properties" in definition:
+                objects[title] = set(definition["properties"])
+        return objects
+
+    @pytest.mark.parametrize("tool_name", sorted(TOOL_REGISTRY.keys()))
+    def test_no_snapshot_output_field_is_silently_dropped(self, tool_name: str) -> None:
+        snapshot = _snapshot_output_schemas()[tool_name]
+        local = self._local_objects(TOOL_REGISTRY[tool_name].output_model)
+        remote = {snapshot.get("title", ""): set(snapshot.get("properties", {}))}
+        for title, definition in (snapshot.get("$defs") or {}).items():
+            if "properties" in definition:
+                remote[title] = set(definition["properties"])
+        for title, fields in remote.items():
+            assert title in local, (
+                f"{tool_name}: the snapshot describes an object {title!r} that "
+                "the local output model has no counterpart for — every nested "
+                "platform model needs a mirrored class, or its fields are "
+                'dropped by `extra="ignore"`.'
+            )
+            missing = fields - local[title]
+            assert not missing, (
+                f"{tool_name}: {sorted(missing)} are in the platform's "
+                f"outputSchema for {title!r} and not on the local model. Every "
+                'output model is `extra="ignore"`, so these arrive and are '
+                "thrown away — no error, no parse failure, and any claim or "
+                "hypothesis that needed them is unsatisfiable. Mirror them "
+                "(declaration order = the snapshot's `required` order)."
+            )
+
+    def test_the_configs_this_test_exists_for_are_what_they_claim(self) -> None:
+        # Anti-vacuity. If a model ever became `extra="forbid"` or
+        # `extra="allow"`, the paragraph above stops describing it: "forbid"
+        # fails loudly instead of silently (and breaks every response the day
+        # the platform adds a field), "allow" keeps the value under a name
+        # nothing reads. Either is a decision to take deliberately, not to
+        # discover here.
+        odd = {
+            name: spec.output_model.model_config.get("extra")
+            for name, spec in TOOL_REGISTRY.items()
+            if spec.output_model.model_config.get("extra") != "ignore"
+        }
+        assert not odd, f"output models not `extra=ignore`: {odd}"
+
+
 class TestSnapshotLoaderFailsHard:
     """C-13: a missing or unreadable snapshot must raise at import, not
     silently degrade to ``{}`` — the old fallback shipped '(no

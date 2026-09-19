@@ -38,6 +38,7 @@ class PolicyCoverageError(RuntimeError):
 _READ_TOOLS: Final[frozenset[str]] = frozenset(
     {
         "get_cache_key_info",
+        "get_circuit_breakers",
         "get_consumer_lag",
         "get_dag_state",
         "get_deploy_history",
@@ -45,6 +46,7 @@ _READ_TOOLS: Final[frozenset[str]] = frozenset(
         "get_outbox_status",
         "get_postgres_health",
         "get_redis_health",
+        "get_slo_status",
         "get_trace",
         "list_active_alerts",
         "list_audit_events",
@@ -236,6 +238,9 @@ def is_cached_read(tool_name: str) -> bool:
 RESOURCE_ARG_FIELDS: Final[dict[str, frozenset[str]]] = {
     # `key` NAMES a resource — same copy-don't-re-type rule as the write tool.
     "get_cache_key_info": frozenset({"key"}),
+    # No arguments — declared empty rather than omitted (ADR 0003), the same
+    # record `get_outbox_status` below is: the question was asked.
+    "get_circuit_breakers": frozenset(),
     "get_consumer_lag": frozenset({"consumer_group"}),
     "get_dag_state": frozenset({"job_id"}),
     "get_deploy_history": frozenset(),
@@ -245,6 +250,7 @@ RESOURCE_ARG_FIELDS: Final[dict[str, frozenset[str]]] = {
     "get_outbox_status": frozenset(),
     "get_postgres_health": frozenset(),
     "get_redis_health": frozenset(),
+    "get_slo_status": frozenset(),
     "get_trace": frozenset({"trace_id"}),
     "invalidate_cache_key": frozenset({"key"}),
     "list_active_alerts": frozenset(),

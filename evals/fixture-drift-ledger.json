@@ -6,12 +6,14 @@
     "post-fault": "the scenario seeds a fault and the check probes the un-faulted world; not a defect and must not be 'fixed'",
     "post-action": "the fixture element records the world after the agent's own remediation and the check probes the world before it; unfixable by construction and must not be 'fixed'",
     "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything",
-    "cold-stack": "the recording is of a warm stack and the check ran on a cold one: worker-dispatcher's lag is unmeasured for about the first minute after boot, so a fresh platform answers null where the recording says 0. Timing, not contract, and not fixable from either side"
+    "cold-stack": "the recording is of a warm stack and the check ran on a cold one: worker-dispatcher's lag is unmeasured for about the first minute after boot, so a fresh platform answers null where the recording says 0. Timing, not contract, and not fixable from either side",
+    "warm-stack": "the mirror of cold-stack: the recording caught a freshly seeded world and the check ran against a volume that has been up long enough to have measured one. Timing, not contract",
+    "no-hook": "the fixture describes a fault no chaos hook can produce, so the canned value is the scenario's premise and the check probes a world that never had it. Not a defect; the fix, if that scenario is ever to run live, is a platform hook"
   },
   "_counts": {
-    "recorded": 125,
+    "recorded": 127,
     "fixture-defect": 0,
-    "explained": 125
+    "explained": 127
   },
   "known_drift": [
     {
@@ -309,6 +311,22 @@
       "kind": "value",
       "context": "post-fault",
       "why": "same hook, same world, same reason \u2014 this scenario differs from its quiet sibling only in the alert it hands the agent"
+    },
+    {
+      "scenario": "postgres_slow",
+      "tool": "get_postgres_health",
+      "path": "active_queries_over_slow_threshold",
+      "kind": "value",
+      "context": "no-hook",
+      "why": "same reading, same absent hook: two queries past the platform's fixed 500ms threshold is the fault, and an idle world counts 0. The threshold itself (`slow_query_threshold_ms`) matches live and is not here, which is the pair worth reading together \u2014 the yardstick is the platform's, only the count is the premise"
+    },
+    {
+      "scenario": "postgres_slow",
+      "tool": "get_postgres_health",
+      "path": "longest_active_query_ms",
+      "kind": "value",
+      "context": "no-hook",
+      "why": "the fixture's world is a database serving slowly, so its longest running query is 1.84s; the check probes a world where nothing is running at all and pg_stat_activity answers null. Nothing in the lab makes a query slow \u2014 `inject_latency` delays a consumer and `saturate_db_pool` holds connections, which is the fault this one is deliberately NOT about"
     },
     {
       "scenario": "remediate_consumer_lag_success",

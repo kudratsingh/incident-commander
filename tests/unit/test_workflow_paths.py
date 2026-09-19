@@ -1,19 +1,9 @@
 """Regression: the eval gate's path filter must cover the real layout (A-08, S-16).
 
-evals.yml's pull_request path filter was written against CLAUDE.md's
-documented-but-never-shipped layout (src/agent/prompts/): it listed
-src/incident_commander/agent/** and tools/** but not
-src/incident_commander/llm/** — where all five prompts actually live — nor
-src/incident_commander/config.py (agent_model/judge_model pins), nor
-contracts/platform-tools.snapshot.json (planner-facing tool descriptions,
-loaded at import by the registry). Prompt, model-pin, and snapshot-rebless
-PRs therefore merged without ever triggering the eval regression gate.
-
-These tests parse the workflow and mechanically prove the filter covers the
-prompt loader's directory and the other planner-behavior surfaces, so the
-filter cannot silently drift from the layout again. Deriving the prompt list
-from the real prompts directory means a future prompt move breaks the test —
-which is the point.
+evals.yml's filter was written against a documented-but-never-shipped layout: it listed
+``agent/**`` and ``tools/**`` but not ``llm/**`` (where all five prompts live), nor
+``config.py`` (model pins), nor the contract snapshot — so prompt, model-pin and rebless
+PRs merged without triggering the gate. The prompt list is derived from the real directory.
 """
 
 from __future__ import annotations
@@ -34,19 +24,8 @@ _CI = _REPO / ".github" / "workflows" / "ci.yml"
 def _translate(pattern: str) -> str:
     """Compile one GitHub filter pattern to a regex, per GitHub's cheat sheet.
 
-    ``**`` matches any run of characters including ``/``; ``*`` matches any
-    run except ``/``; ``?`` and ``+`` are QUANTIFIERS on the preceding
-    element, not wildcards; ``[]`` is a character class. Everything else is
-    literal.
-
-    fnmatch is wrong here twice over — its ``*`` crosses ``/`` and its ``?``
-    is a single-character wildcard — so an fnmatch-based check would pass
-    vacuously. The previous hand-rolled version translated only ``*`` and
-    ``**`` and escaped the rest, which is a subtler version of the same
-    problem: ``!``, ``?``, ``+`` and ``[]`` became literal text, so a filter
-    that used any of them was silently misread. An exclusion in particular
-    failed open — ``_covered`` reported an EXCLUDED path as gated, which is
-    the exact direction that lets an ungated PR through.
+    ``**`` crosses ``/``, ``*`` does not, ``?`` and ``+`` are QUANTIFIERS, ``[]`` is a class.
+    The old version made ``!`` literal, so an exclusion failed OPEN.
     """
     out: list[str] = []
     i = 0
@@ -80,9 +59,7 @@ def _translate(pattern: str) -> str:
 def _github_match(pattern: str, path: str) -> bool:
     """True if a GitHub Actions path-filter pattern matches a repo-relative path.
 
-    Positive patterns only — a leading ``!`` is an exclusion and is the
-    caller's business, so passing one here is a bug rather than a
-    never-matching pattern that quietly reads as "not covered".
+    Positive patterns only: ``!`` is the caller's business.
     """
     assert not pattern.startswith("!"), (
         f"{pattern!r} is an exclusion; polarity belongs to _covered, not the matcher"
@@ -112,11 +89,7 @@ def _gate_paths() -> list[str]:
 def _covered(path: str, patterns: list[str] | None = None) -> bool:
     """Whether the eval gate fires for ``path``, honouring exclusions.
 
-    GitHub evaluates the filter list in order and the LAST match wins, so a
-    ``!`` exclusion removes a path a previous positive matched, and a later
-    positive can re-add it. Treating ``!`` as an ordinary literal — as this
-    file did — made an exclusion match nothing and left the earlier positive
-    standing, reporting an excluded path as gated.
+    GitHub evaluates in order and the LAST match wins, so a literal ``!`` failed open.
     """
     covered = False
     for pattern in patterns if patterns is not None else _gate_paths():
@@ -139,12 +112,8 @@ def test_matcher_mirrors_github_semantics() -> None:
 class TestTheMatcherUnderstandsTheWholeFilterSyntax:
     """The coverage tests are only as honest as the matcher (WO-R2-101).
 
-    ``_covered`` decides whether a behavior-changing file is gated by the
-    eval suite. It answered that question with a translation that knew two
-    of GitHub's six filter constructs and silently treated the other four as
-    literal text — so the moment anyone edited evals.yml to use them, the
-    coverage tests would keep reporting green while describing a filter that
-    does not exist. Exclusions are the dangerous direction: they fail OPEN.
+    ``_covered`` knew two of GitHub's six filter constructs and read the other four as
+    literal text. Exclusions are the dangerous direction: they fail OPEN.
     """
 
     def test_an_exclusion_removes_a_path_an_earlier_positive_matched(self) -> None:
@@ -212,12 +181,8 @@ def test_gate_covers_runner() -> None:
 class TestContractJobRetriesItsFlakySteps:
     """The contract job gates both platform checks, so its flakes lie.
 
-    It boots a stack and mints a token before running either the schema diff
-    or the fixture-drift check. Two of its steps failed for unrelated
-    environmental reasons on 2026-08-16 — a registry 502 pulling postgres,
-    and a 404 minting a service-account token that passed unchanged on
-    re-run — and both presented as a platform-contract failure. A gate that
-    cries wolf gets ignored exactly when it is right.
+    It boots a stack and mints a token first. A registry 502 and a 404 minting a token
+    (2026-08-16) both presented as a platform-contract failure.
     """
 
     @staticmethod
@@ -238,13 +203,8 @@ class TestContractJobRetriesItsFlakySteps:
     def _commands(name_fragment: str) -> str:
         """The step's run block with its comment lines stripped.
 
-        Every step in this job carries a long explanatory comment naming the
-        thing it does, so a bare substring search over the raw run block is
-        answered by the prose rather than by the shell. ``assert "pull" in
-        run`` was satisfied by "# Pull first, with retries" — delete the
-        actual ``docker compose pull`` and the test stayed green while its
-        message still claimed to be defending against a registry blip
-        reading as a boot failure (WO-R2-101).
+        Every step carries a long comment naming what it does, so ``assert "pull" in run`` was
+        satisfied by "# Pull first, with retries" (WO-R2-101).
         """
         run = TestContractJobRetriesItsFlakySteps._step(name_fragment)
         return "\n".join(line for line in run.splitlines() if not line.lstrip().startswith("#"))
@@ -272,16 +232,9 @@ class TestContractJobRetriesItsFlakySteps:
 class TestEveryJobIsBoundedAndLeastPrivileged:
     """Both workflows must cap their runtime and their token (WO-R2-101).
 
-    The `contract` job boots a five-service compose stack and waits on
-    healthchecks, a seeder and a REST app. Every one of those waits is a
-    place it can hang rather than fail, and with no `timeout-minutes` a hang
-    runs to GitHub's six-hour default — holding a concurrency slot for a
-    working day before anyone learns the contract diff never ran.
-
-    Neither workflow declared `permissions`, so every job received the
-    repository's default GITHUB_TOKEN scope. Nothing here writes to the
-    repo: they lint, test, and boot a stack against a PUBLIC ghcr.io
-    package (no registry secret, by design). Read is all any of it needs.
+    The `contract` job waits on healthchecks, a seeder and a REST app; with no
+    `timeout-minutes` a hang runs to GitHub's six-hour default, holding a concurrency slot.
+    Neither workflow declared `permissions`, and nothing here writes to the repo.
     """
 
     _WORKFLOWS = ("ci.yml", "evals.yml")

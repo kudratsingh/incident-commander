@@ -1,12 +1,7 @@
 """The traffic producer: the missing half of consumer lag.
 
-Lag is arrival minus service. `kill_consumer` supplies the service half —
-the consumer stops — but with nothing arriving the backlog stays at zero,
-`get_consumer_lag` keeps reading 0, and `remediate_consumer_lag_success`
-asserts a fault that cannot exist. The runbook has described "the standard
-1-job/2s loop" since 2026-08-04 as though it were runnable. It was not.
-
-Every test here is offline: httpx.MockTransport, no platform, no sleeping.
+Lag is arrival minus service. `kill_consumer` supplies the service half, but with nothing
+arriving the backlog stays at zero and the scenario asserts a fault that cannot exist.
 """
 
 from __future__ import annotations
@@ -200,13 +195,8 @@ class TestCli:
 class TestCountAlwaysTerminates:
     """``--count`` is a stop condition, so it has to count attempts (WO-R2-99).
 
-    ``Tally.submitted`` summed created + rate-limited + backpressured and
-    left ``errors`` out. Those three are the outcomes worth reporting, but
-    as a STOP condition the omission is fatal: a run pointed at a dead
-    platform, holding a stale token, or naming a job type the platform
-    rejects errors on every request, never advances ``submitted``, and
-    never terminates. The operator started it in a second terminal
-    mid-campaign and it sat there forever, silently, submitting nothing.
+    ``Tally.submitted`` summed created + rate-limited + backpressured and left ``errors`` out,
+    so a run pointed at a dead platform never advanced it and never terminated.
     """
 
     @staticmethod

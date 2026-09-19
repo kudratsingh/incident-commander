@@ -1,28 +1,9 @@
 """WP-6.1 — the ``candidate_selector``'s schema, its context and its call.
 
-The order's acceptance list, one class per item:
-
-* ``TestScoresResolveToTheSet`` — every scored id is a real candidate and every
-  real candidate is scored; the failure names the id. The red-before case.
-* ``TestASelectionIsStatedExactlyWhenThereIsOne`` — ``selected_candidate_id`` is
-  ``None`` iff the decision is not ``select``, in both directions, plus the
-  selected id resolving to the set.
-* ``TestTheScaleIsDeclared`` — ``uncertainty`` and every score in ``[0, 1]``.
-* ``TestNothingBoundIsARefusal`` — validation with no candidate set bound fails
-  closed, so forgetting ``selecting_among`` is loud on every path.
-* ``TestTheContextRendersArgumentsBeforeResults`` — INC-002's payload
-  specifically: ``remediation_hint='replay_safe'`` before ``'total': 0``, and an
-  unfiltered call distinguishable from a filtered one.
-* ``TestNoGroundTruthReachesTheSelector`` — parameterised over the corpus: no
-  ``ground_truth`` key and no root-cause label string in the rendered context,
-  asserted against ADR 0038's projection so a future evaluator-only field
-  cannot leak by omission.
-* ``TestTheCallSendsNoTemperature`` — decision O-24. The plan asks for
-  temperature 0; the newest model families reject the parameter, so the
-  assertion this repo can keep is that none is sent.
-* ``TestTheSelectorPointsAtOneCandidate`` — ``chosen_candidate_id``, the one
-  spelling of "the candidate this decision points at", including the
-  ``probe_more`` derivation that closes plan 02's own gap.
+One class per acceptance item: scores resolve to the set both ways (the red-before),
+``selected_candidate_id`` only on ``select``, the scale declared, nothing bound is a
+refusal, arguments rendered before results (INC-002), no ground truth reaching the
+selector (ADR 0038), no temperature sent (O-24), and one ``chosen_candidate_id``.
 """
 
 from __future__ import annotations
@@ -70,27 +51,13 @@ from incident_commander.llm.repair import OutputRepairExhausted
 _LEDGER_ID: Final[UUID] = UUID("11111111-1111-1111-1111-111111111111")
 _AT: Final[datetime] = datetime(2026, 7, 15, 20, 0, tzinfo=UTC)
 
-#: Every scenario the corpus root-cause-grades, which is the set that HAS an
-#: answer key to leak. Derived, so a scenario that declares one joins the sweep
-#: the moment its file lands.
+#: Every scenario the corpus root-cause-grades — the set that HAS a key to leak. Derived.
 _GRADED: Final[tuple[Scenario, ...]] = tuple(
     scenario for scenario in load_scenarios(SCENARIO_DIRECTORY) if scenario.root_cause_graded
 )
 
-#: The two labels the leak sweep below cannot look for by substring, and the
-#: reason is a property of the labels rather than a convenience.
-#:
-#: Both name the ABSENCE of a diagnosis — "I could not classify this" and
-#: "nothing is wrong" — so neither is an answer key in the sense ADR 0038 is
-#: about: an agent that read either learned nothing it could not have said
-#: itself. And both collide with ordinary agent-visible world text:
-#: ``consumer_lag_missing_group``'s alert names the consumer group
-#: ``unknown-consumer``, which is a fact about the world the agent is entitled
-#: to read, and a substring search cannot tell the two apart.
-#:
-#: Named as a constant and pinned by its own test, so widening this set is a
-#: deliberate edit a reviewer sees rather than a quiet narrowing of what the
-#: sweep checks.
+#: The two labels the leak sweep cannot look for by substring: both name the ABSENCE of a
+#: diagnosis, and both collide with agent-visible world text (``unknown-consumer``).
 _UNSEARCHABLE_LABELS: Final[frozenset[str]] = frozenset(
     {HypothesisCategory.UNKNOWN.value, HypothesisCategory.NO_FAULT.value}
 )
@@ -196,11 +163,7 @@ class TestScoresResolveToTheSet:
     def test_an_unknown_scored_id_is_refused_by_name(self) -> None:
         """The red-before case: this is what the schema exists to reject.
 
-        A ``scores`` key that names no candidate makes the whole mapping
-        unreadable — ``selected_candidate_id`` is looked up in the same id
-        space, and ``probe_more``'s probe comes from the highest-scored id — so
-        an id nobody can resolve is not a score, it is a corruption of the
-        ranking.
+        A ``scores`` key naming no candidate corrupts the ranking.
         """
         with pytest.raises(ValidationError) as caught:
             _validate(_payload(scores={"c1": 0.9, "c2": 0.2, "c9": 0.1}), _pair())
@@ -211,11 +174,7 @@ class TestScoresResolveToTheSet:
     def test_an_unscored_candidate_is_refused_by_name(self) -> None:
         """The strengthening, and it is the half that keeps the ranking total.
 
-        Plan 02 § 12 asks only that a scored id exist. A candidate with no
-        score is the mirror failure: the selector was shown it and said nothing
-        about it, which reads in the record as a candidate that scored zero and
-        is not one. It also leaves ``probe_more`` able to point at a candidate
-        the selector never ranked.
+        A candidate with no score reads as one that scored zero.
         """
         with pytest.raises(ValidationError) as caught:
             _validate(_payload(scores={"c1": 0.9}), _pair())
@@ -239,9 +198,7 @@ class TestASelectionIsStatedExactlyWhenThereIsOne:
     def test_a_non_select_decision_refuses_an_id(self, decision: str) -> None:
         """An id on a decision that does not act on it reads as a diagnosis.
 
-        A ``probe_more`` carrying ``selected_candidate_id`` looks, in a
-        trajectory and in a report, exactly like a run that committed to that
-        candidate and then did not act on it.
+        It reads as a run that committed and did not act.
         """
         with pytest.raises(ValidationError) as caught:
             _validate(_payload(decision=decision, selected="c1"), _pair())
@@ -283,10 +240,7 @@ class TestTheScaleIsDeclared:
 class TestNothingBoundIsARefusal:
     """Fail-closed, which is the only reason a context variable is tolerable.
 
-    ``candidates.grounded_in`` records the argument at length. The same holds
-    here one layer up: with nothing bound, a ``SelectionResult`` could name any
-    id at all, so the absence of a binding must be a loud failure rather than a
-    validator silently switched off.
+    With nothing bound a ``SelectionResult`` could name any id.
     """
 
     def test_validation_with_no_set_bound_refuses(self) -> None:
@@ -310,10 +264,7 @@ class TestNothingBoundIsARefusal:
     def test_an_empty_candidate_set_is_refused_before_any_call(self) -> None:
         """A generator that produced nothing is a generation failure.
 
-        Asked of ``select_candidate`` rather than of the schema, because the
-        schema would happily validate an empty ``scores`` against an empty set
-        — the failure is that there is nothing to select between, and it should
-        cost no call.
+        Asked of ``select_candidate``, not the schema: it should cost no call.
         """
         llm = CannedLLMClient([])
         with pytest.raises(ValueError, match="empty candidate set"):
@@ -327,10 +278,8 @@ class TestTheContextRendersArgumentsBeforeResults:
     def test_the_inc_002_payload_renders_its_filter_before_its_total(self) -> None:
         """``remediation_hint='replay_safe'`` before ``'total': 0``.
 
-        This is the exact reading order the briefing judge did not get. One
-        tool name serves the whole queue and one slice of it, so the filter is
-        what makes ``total 0`` mean "that slice is drained" rather than "the
-        queue is empty" — and reading it second is reading it too late.
+        The filter is what makes ``total 0`` mean "that slice is drained" rather than "the
+        queue is empty".
         """
         state = _state(
             _entry(
@@ -345,9 +294,7 @@ class TestTheContextRendersArgumentsBeforeResults:
     def test_an_unfiltered_read_is_distinguishable_from_a_filtered_one(self) -> None:
         """The absence of a filter is itself the fact, so it is rendered.
 
-        ``briefing._render_arguments`` keeps the ``None`` arguments for exactly
-        this reason. Two lines that differ only in a dropped key are two lines
-        a reader cannot tell apart.
+        A dropped key makes two lines look alike.
         """
         state = _state(
             _entry("list_dlq_messages", {"remediation_hint": None}, json.dumps({"total": 4})),
@@ -362,11 +309,7 @@ class TestTheContextRendersArgumentsBeforeResults:
     def test_the_trail_comes_from_the_shared_renderer(self) -> None:
         """Not a fourth renderer: the same function, byte for byte.
 
-        The order's finding is that the selector's context must be assembled
-        through ``briefing.render_trail``. Asserted by rendering the trail
-        directly and requiring the selector's context to contain every line, so
-        a future copy-paste of the rendering fails here rather than drifting
-        for a release.
+        The selector's context is assembled through ``briefing.render_trail``.
         """
         state = _state(
             _entry("get_consumer_lag", {"consumer_group": "billing"}, "lag 42"),
@@ -398,11 +341,8 @@ class TestTheContextRendersArgumentsBeforeResults:
 class TestNoGroundTruthReachesTheSelector:
     """ADR 0038's projection, asserted one layer further in, over the corpus.
 
-    The projection is an allow-list, so the interesting property is what it
-    does with a field nobody thought about: nothing. This sweep is written
-    against that projection rather than against a list of secret field names,
-    so a future evaluator-only field is covered on the day it lands — which is
-    the difference between this and an exclusion list that goes stale.
+    Written against the projection rather than a list of secret field names, so a future
+    evaluator-only field is covered on the day it lands.
     """
 
     @pytest.mark.parametrize("scenario", _GRADED, ids=lambda scenario: scenario.name)
@@ -417,10 +357,8 @@ class TestNoGroundTruthReachesTheSelector:
         )
         assert scenario.ground_truth is not None
         labels = {cause.value for cause in scenario.ground_truth.root_causes}
-        # A candidate's own category is legitimate agent-side vocabulary, so
-        # the fixture deliberately carries a label this scenario's ground truth
-        # does NOT: the claim is about the scenario's answer key reaching the
-        # page, not about the string existing anywhere in the world.
+        # A candidate's own category is legitimate agent vocabulary, so the fixture carries a
+        # label this scenario's ground truth does NOT.
         neutral = next(member for member in HypothesisCategory if member.value not in labels)
         rendered = format_selection_context(state, (_candidate("c1", category=neutral),))
         assert "ground_truth" not in rendered
@@ -437,10 +375,7 @@ class TestNoGroundTruthReachesTheSelector:
     def test_the_sweep_is_not_vacuous(self) -> None:
         """Anti-vacuity canary for a derived parameterisation.
 
-        Everything above parametrizes over ``_GRADED``. A corpus that loaded
-        empty, or a ``root_cause_graded`` that stopped being true of anything,
-        would collect zero cases and report green — the loudest possible way to
-        prove nothing.
+        A corpus that loaded empty would collect zero cases and report green.
         """
         assert len(_GRADED) >= 30, (
             f"only {len(_GRADED)} scenarios declare a ground truth; the sweep "
@@ -462,9 +397,7 @@ class TestNoGroundTruthReachesTheSelector:
     def test_the_skip_set_is_exactly_the_two_non_diagnoses(self) -> None:
         """Widening it must be a visible edit, not a passing test.
 
-        Every other label names a specific fault, so it IS an answer key and
-        the sweep looks for it. These two name the absence of one and collide
-        with ordinary world text — see the constant for the full argument.
+        Every other label names a specific fault, so it IS an answer key.
         """
         assert sorted(_UNSEARCHABLE_LABELS) == ["no_fault", "unknown"]
 
@@ -472,9 +405,6 @@ class TestNoGroundTruthReachesTheSelector:
         """The structural half: the function's arguments cannot carry a label.
 
         ``format_selection_context`` takes a ``RunState`` and a candidate set.
-        There is no parameter a ``Scenario``, a ``GroundTruth`` or a
-        ``DiscriminatingProbe`` could arrive through, which is what makes the
-        sweep above a check on the rendering rather than the only defence.
         """
         joined = " ".join(
             str(parameter.annotation)
@@ -486,10 +416,7 @@ class TestNoGroundTruthReachesTheSelector:
     def test_the_selector_is_its_own_accounting_role(self) -> None:
         """So the cost of selection is a number, not a share of the planner's.
 
-        WP-6.2 meters the selector client under this role and
-        ``StepAccounting.selector_calls`` counts the calls. A selector folded
-        into ``investigation_planner`` could not answer "what did selection
-        cost", which is the number the arm is compared on.
+        ``StepAccounting.selector_calls`` counts the calls (WP-6.2).
         """
         assert SELECTOR_ROLE == "candidate_selector"
         assert SELECTOR_ROLE != "investigation_planner"
@@ -499,11 +426,7 @@ class TestTheCallSendsNoTemperature:
     """Decision O-24, and the divergence from plan 04:161's "temperature 0".
 
     The newest model families reject ``temperature`` with a 400
-    (``llm/client.SAMPLING_REJECTED_MODELS``), so a selector that required
-    ``temperature=0`` would make the headline experiment un-runnable under a
-    newer pin for a reason that has nothing to do with selection. What the plan
-    wanted — a selector that does not wander — is bought by the fixed schema,
-    the closed decision set and the bounded id space instead.
+    (``llm/client.SAMPLING_REJECTED_MODELS``), so requiring it would break a newer pin.
     """
 
     def test_neither_leg_of_the_call_sends_a_temperature(self) -> None:
@@ -525,10 +448,7 @@ class TestTheCallSendsNoTemperature:
     def test_an_unresolvable_id_buys_one_repair_and_then_escalates(self) -> None:
         """ADR 0035 covers the selector because the validator raises inside the call.
 
-        That is the whole reason ``selecting_among`` wraps the call rather than
-        the parse afterwards. Two billed legs, then ``OutputRepairExhausted``,
-        which the caller charges and escalates on — not a crash outside the
-        repair loop.
+        Two billed legs, then ``OutputRepairExhausted``.
         """
         bad = _payload(scores={"c1": 0.9, "c2": 0.2, "ghost": 0.1})
         llm = CannedLLMClient([bad, bad])
@@ -548,11 +468,8 @@ class TestTheCallSendsNoTemperature:
 class TestTheSelectorPointsAtOneCandidate:
     """``chosen_candidate_id`` — one spelling of the rule WP-6.2 reads.
 
-    Plan 02 says both "``selected_candidate_id`` is None unless the decision is
-    ``select``" and "on ``probe_more`` the selected candidate's ``next_probe``
-    is emitted". Those cannot both be literally true, and the resolution is
-    here rather than in WP-6.2: ``select`` names a candidate, ``probe_more``
-    points at the highest-scored one, ``escalate`` points at nothing.
+    Plan 02's two rules cannot both be true; resolved here: ``select`` names a
+    candidate, ``probe_more`` the highest-scored, ``escalate`` nothing.
     """
 
     def test_select_points_at_the_candidate_it_named(self) -> None:
@@ -568,10 +485,7 @@ class TestTheSelectorPointsAtOneCandidate:
     def test_a_tie_on_probe_more_takes_the_first_stated(self) -> None:
         """Deterministic, and the order is the model's own.
 
-        ``scores`` arrives as a JSON object, so its iteration order is the
-        order the model wrote it in. A tie broken by anything else — a sort of
-        the ids, say — would make the emitted probe depend on how the ids
-        happen to be spelled.
+        ``scores`` arrives as a JSON object, so iteration order is the order the model wrote.
         """
         result = _validate(
             _payload(decision="probe_more", selected=None, scores={"c1": 0.5, "c2": 0.5}),

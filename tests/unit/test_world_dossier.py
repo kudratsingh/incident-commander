@@ -1,27 +1,9 @@
 """`make world-dossier` — the free, zero-LLM reading of a scenario's fault world.
 
-The run this file exists because of: `remediate_runaway_saga_success` run A,
-2026-09-07, archive `efdc3b2a9864`, ≈$0.15. The stuck chain's dead-lettered
-root was seeded ``remediation_hint: replay_safe`` and carried the error text
-``SchemaValidationError: payload missing required field 'user_id' …``. The
-agent read the row (which ADR 0027 requires), reasoned that a missing required
-field is a permanent data bug no replay can fix, and escalated naming the
-contradiction. Two readiness sweeps had passed on that scenario; both checked
-mechanics and neither read the fault's own fields.
-
-So the properties pinned here are the ones that make the tool worth running:
-
-* the probes are DERIVED from the guard maps, not listed — a hand-list rots
-  in the direction of reading less of the world than the reader believes;
-* the coherence lint is red on exactly that (hint, error) pair and green on a
-  transient one, so the finding it exists to make is the finding it makes;
-* the ONLY guard refuses before anything is seeded, in the shape `eval-live`
-  refuses;
-* the dossier write is create-only, like every other eval artifact
-  (invariant 9).
-
-Every test here is hermetic: a fake MCP client, ``tmp_path`` for writes, and
-the suite-wide outbound-socket block in ``conftest.py``.
+The run it exists because of: `remediate_runaway_saga_success`, archive `efdc3b2a9864` —
+a root seeded ``replay_safe`` over a permanent ``SchemaValidationError``, so the agent
+escalated on the contradiction. Pinned here: probes DERIVED from the guard maps, the
+coherence lint red on that pair, the ONLY guard refusing before seeding, create-only write.
 """
 
 from __future__ import annotations
@@ -46,19 +28,14 @@ from incident_commander.tools.registry import TOOL_REGISTRY
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _SCENARIOS_DIR: Final[Path] = _REPO_ROOT / "evals" / "scenarios"
 
-#: The chain root of `remediate_runaway_saga_success`, computed offline from a
-#: migration constant (see the scenario YAML's own comment) and therefore the
-#: same id on every stack.
+#: The chain root, computed offline from a migration constant: same on every stack.
 _SAGA_ROOT: Final[str] = "a2412a54-65f0-5258-95ab-5c168a15df64"
 
 
 class FakeClient:
     """Structural ``MCPClientProtocol`` fake keyed by tool name.
 
-    Deliberately not ``evals.fakes.CannedMCPClient``: that one is a queue per
-    tool, built for a trajectory that reads the same tool twice and expects
-    different answers. A dossier reads each derived probe once and wants to
-    assert on WHICH calls were made, so this records them.
+    Not ``CannedMCPClient`` (a queue per tool): a dossier asserts WHICH calls were made.
     """
 
     def __init__(self, payloads: Mapping[str, Any], errors: Sequence[str] = ()) -> None:
@@ -97,15 +74,8 @@ class TestProbeDerivation:
     ) -> None:
         """Alert subject → get_dag_state; source row and verify → the rest.
 
-        This is the derivation the rem-4 review needed and did not have. Each
-        of the three is a different map answering a different question, and
-        the union is "everything the agent is expected to read":
-
-        * ``ALERT_SUBJECT_PROBES`` — what is the alert about? (cmd #177)
-        * ``SOURCE_ROW_FOR_ACTION`` — is the thing we are about to change
-          safe to change? (ADR 0027)
-        * ``VERIFY_PROBE_FOR_ACTION`` — can we observe what we changed?
-          (ADR 0025)
+        Three maps answering three questions — ``ALERT_SUBJECT_PROBES`` (cmd #177),
+        ``SOURCE_ROW_FOR_ACTION`` (ADR 0027), ``VERIFY_PROBE_FOR_ACTION`` (ADR 0025).
         """
         probes, notes = dossier.derive_probes(scenarios["remediate_runaway_saga_success"])
         by_label = {probe.label: probe for probe in probes}
@@ -127,20 +97,10 @@ class TestProbeDerivation:
     def test_a_category_scenario_derives_the_listing_from_the_coverage_map(
         self, scenarios: dict[str, Scenario]
     ) -> None:
-        """ADR 0028's map is the fourth derivation, and on a category-replay
-        scenario it is the one that earns the probe.
+        """ADR 0028's map is the fourth derivation, and it earns the probe here.
 
-        `SOURCE_ROW_FOR_ACTION` is inert for `replay_dlq_by_category` — a
-        category names no row — so before this map existed the dossier's
-        reason for reading the DLQ on `dlq_replay_safe_success` came only
-        from the scenario's own evidence claim. That is a weaker footing
-        than it looks: a scenario that dropped the claim would have dropped
-        the probe with it, and the review would stop showing the rows the
-        agent is about to sweep.
-
-        The derived probe is UNFILTERED, which is the point of it — the
-        review compares the rows the category will take against the ones it
-        will leave, and a hint-filtered page shows only the first half.
+        `SOURCE_ROW_FOR_ACTION` is inert for `replay_dlq_by_category`, so the DLQ read used to
+        come only from the scenario's own evidence claim. The derived probe is UNFILTERED.
         """
         probes, notes = dossier.derive_probes(scenarios["dlq_replay_safe_success"])
         by_label = {probe.label: probe for probe in probes}
@@ -150,9 +110,7 @@ class TestProbeDerivation:
         assert "SOURCE_LISTING_FOR_ACTION[replay_dlq_by_category]" in origins
         assert "names a FILTER" in origins
 
-        # And the INERT note for the by-id map points at its sibling, so a
-        # reader does not take "no source row is required" for "nothing to
-        # check about what this replays".
+        # The INERT note points at its sibling: no source row is not nothing to check.
         inert = [n for n in notes if "INERT in SOURCE_ROW_FOR_ACTION" in n]
         assert inert, notes
         assert any("SOURCE_LISTING_FOR_ACTION" in n for n in inert)
@@ -169,13 +127,9 @@ class TestProbeDerivation:
         assert len(dag.origins) > 1
 
     def test_the_source_row_read_is_unfiltered(self, scenarios: dict[str, Scenario]) -> None:
-        """The precondition asks the platform for the `replay_safe` page; the
-        dossier asks for the whole listing.
+        """The precondition asks for the `replay_safe` page; the dossier reads the whole listing.
 
-        Both readings are in the document on purpose. The filtered one is the
-        scenario's premise; the UNFILTERED one is what the coherence lint
-        needs, because a contradiction on a row the filter excluded is still
-        a contradiction the agent will read.
+        The UNFILTERED one is what the coherence lint needs: an excluded row still contradicts.
         """
         probes, _ = dossier.derive_probes(scenarios["remediate_runaway_saga_success"])
         dlq = next(p for p in probes if p.tool == "list_dlq_messages")
@@ -210,11 +164,10 @@ class TestKindByFieldIsTotal:
     """A resource-naming argument with no kind produces a guessed probe."""
 
     def test_every_resource_arg_field_has_a_kind(self) -> None:
-        """``RESOURCE_ARG_FIELDS`` is the platform's list of arguments that
-        NAME something; ``_KIND_BY_FIELD`` says which ones name the same
-        something. A field missing here does not fail loudly — it silently
-        drops a probe (``_fill`` writes a note and moves on), so the whole
-        dossier reads less of the world with nothing to say it did."""
+        """``RESOURCE_ARG_FIELDS`` names arguments; ``_KIND_BY_FIELD`` says which name one thing.
+
+        A field missing here silently drops a probe.
+        """
         fields = {field for fields in RESOURCE_ARG_FIELDS.values() for field in fields}
         missing = sorted(fields - set(dossier._KIND_BY_FIELD))
         assert not missing, (
@@ -245,10 +198,10 @@ class TestCoherenceLint:
         assert "efdc3b2a9864" in findings[0].detail
 
     def test_replay_safe_on_a_timeout_is_clean(self) -> None:
-        """A transient error is what `replay_safe` means (platform enums.py:
-        "transient / poison — replay OK"). No finding, and silence here means
-        POSITIVELY coherent — an unclassifiable text produces a finding of
-        its own, so it cannot be mistaken for this."""
+        """A transient error is what `replay_safe` means (platform enums.py).
+
+        Silence means POSITIVELY coherent.
+        """
         assert (
             dossier.lint_dlq_row(
                 {
@@ -264,13 +217,8 @@ class TestCoherenceLint:
     def test_wait_and_replay_admits_a_transient_error(self) -> None:
         """The one cell added to the brief's table, and the reason.
 
-        `wait_and_replay` is the platform's "external dep down — retry later".
-        A connection refusal from an SMTP relay IS that, and two of the four
-        seeded rows carry exactly it. Reading transient errors as
-        `replay_safe`-only would put two false findings beside the one true
-        one on every run, and a lint the reader learns to skim is a lint that
-        has stopped working. The difference between the two hints on a
-        transient error is WHEN to replay, not WHETHER.
+        `wait_and_replay` is "external dep down — retry later", and an SMTP connection refusal
+        IS that; the two hints differ on WHEN to replay, not WHETHER.
         """
         assert (
             dossier.lint_dlq_row(
@@ -302,11 +250,10 @@ class TestCoherenceLint:
         assert [f.kind for f in findings] == ["INCOHERENT hint vs error"]
 
     def test_a_null_hint_contradicts_nothing_and_still_gets_read(self) -> None:
-        """ "Not categorised" is the platform's UNKNOWN. It cannot disagree
-        with an error text, so there is no incoherence finding — but a null
-        hint is worth the reader's attention on its own ("A null hint is
-        UNKNOWN, not replay-safe" — `list_dlq_messages`), and the row still
-        appears in §5.1's table."""
+        """ "Not categorised" is the platform's UNKNOWN, so it cannot disagree with a text.
+
+        No incoherence finding; the row still appears in §5.1.
+        """
         assert (
             dossier.lint_dlq_row(
                 {
@@ -355,15 +302,9 @@ class TestCoherenceLint:
 class TestTheSanctionedIncoherentFixture:
     """The lab's ONE deliberately mislabelled row reads as the premise, not red.
 
-    `dlq_mislabeled_replay_safe` (WO-R2-167) seeds a row whose hint says
-    `replay_safe` and whose error is a permanent CSV data fault. The lint is
-    right to see a contradiction — that IS the fixture — and the rem-4 sentence
-    it would otherwise print ("decide which one is wrong BEFORE spending") is
-    actively wrong advice on a row whose whole product is the contradiction.
-
-    What must NOT happen is the row going quiet: a dossier that showed it as
-    coherent would be the same species of untrue-but-green the file exists to
-    prevent. So the row keeps a finding and keeps its own verdict word.
+    `dlq_mislabeled_replay_safe` (WO-R2-167) seeds a `replay_safe` hint over a permanent
+    CSV fault. The lint is right to see a contradiction — that IS the fixture — but the
+    rem-4 advice is wrong here, so the row keeps a finding and its own verdict word.
     """
 
     _MISLABELLED = "be64a675-212b-5379-8349-816d17a8107a"
@@ -497,11 +438,7 @@ class TestSelectionGuard:
     ) -> None:
         """The runner backstop, in the shape `eval-live` has one.
 
-        The Makefile refuses at parse time, but ``python -m evals.dossier``
-        never comes through make — and this one SEEDS CHAOS, so the backstop
-        is not a nicety. ``Settings`` is poisoned to prove the refusal happens
-        first: no env is read, so a checkout with no `.env` still refuses for
-        the right reason.
+        ``python -m evals.dossier`` never comes through make and this one SEEDS CHAOS.
         """
 
         def _explode() -> None:
@@ -525,10 +462,7 @@ class TestSelectionGuard:
     def test_a_substring_refuses_and_says_what_it_meant(
         self, capsys: pytest.CaptureFixture[str], scenarios: dict[str, Scenario]
     ) -> None:
-        """Full names only, exactly as a live run selects — a substring
-        silently widens a selection, and `ONLY=dlq_backlog` taking
-        `remediate_dlq_backlog_success` with it is how a read-only stage
-        smuggled a mutating scenario past the ADR 0020 gate."""
+        """Full names only: a substring widened `ONLY=dlq_backlog` past the ADR 0020 gate."""
         selected, code = dossier._select(["runaway_saga"], list(scenarios.values()))
         assert selected is None
         assert code == dossier.EXIT_SELECTION
@@ -739,9 +673,7 @@ class TestReadingTheWorld:
         assert "INCOHERENT hint vs error" in document
         assert "Baseline re-audit: PASS" in document
         assert "$0.00" in document
-        # Whole payloads, not summaries: every field of every reading is in
-        # the document, because the field that mattered last time was one
-        # nobody would have chosen to summarise.
+        # Whole payloads: the field that mattered last time was not one to summarise.
         for reading in readings:
             assert reading.payload is not None
             assert json.dumps(reading.payload, indent=2) in document
@@ -775,16 +707,9 @@ class TestReadingTheWorld:
 class TestAPlanDeclaringScenarioIsSeededAndReportedInFull:
     """A two-hook `ChaosPlan` is read, fired and written down as a plan.
 
-    The follow-up to WP-1.1 (ADR 0037). A plan-declaring scenario leaves the
-    legacy `chaos_setup` field `None`, so this module reading that field
-    directly would have: seeded **nothing**, printed "declares no chaos_setup.
-    Nothing was seeded", and then linted an un-faulted world as though it were
-    the scenario's own. That is the failure this tool exists to prevent, in
-    the tool itself — a dossier that reads the wrong world reads it in full
-    and prints every field of it.
-
-    Nothing here touches a platform: `invoke` and `sleep` are injected fakes
-    and the reads go through `FakeClient`.
+    The follow-up to WP-1.1 (ADR 0037). A plan-declaring scenario leaves `chaos_setup`
+    `None`, so reading that field directly would have seeded nothing and then linted an
+    un-faulted world as the scenario's own. Nothing here touches a platform.
     """
 
     _PLAN: Final[ChaosPlan] = ChaosPlan(
@@ -870,9 +795,7 @@ class TestAPlanDeclaringScenarioIsSeededAndReportedInFull:
     ) -> None:
         """Respelling the fault as a plan changes what is SEEDED, not what is READ.
 
-        The probe derivation is the dossier's other half, and the claim under
-        test is that a plan-declaring scenario reaches it intact: same derived
-        calls, same readings, printed in full in the document.
+        Same derived calls, same readings, printed in full.
         """
         legacy = scenarios["remediate_runaway_saga_success"]
         planned = self._planned(legacy, self._PLAN)
@@ -996,11 +919,9 @@ class TestAPlanDeclaringScenarioIsSeededAndReportedInFull:
     def test_the_sanctioned_exemption_follows_the_hook_that_wrote_the_row(
         self, scenarios: dict[str, Scenario]
     ) -> None:
-        """§5.1's exemption must survive the migration, and only for real rows.
+        """§5.1's exemption survives the migration, and only for real rows.
 
-        Read off the hook's OWN reply, so a plan whose mislabelling hook is
-        second still exempts the row it created — and a plan that never
-        reached that hook exempts nothing.
+        Read off the hook's OWN reply.
         """
         plan = ChaosPlan(
             setup=(
@@ -1024,10 +945,7 @@ class TestAPlanDeclaringScenarioIsSeededAndReportedInFull:
 class TestBaselineMatchesTheRunbook:
     """One copy of the seeded baseline, pinned to the document that states it.
 
-    LESSONS 2026-09-07: "five places for the same truth means five stale
-    copies". The dossier re-audits the same numbers the runbook's pre-run
-    checklist tells a human to check, so the two must agree by test rather
-    than by discipline.
+    The dossier re-audits the runbook checklist's numbers, so they agree by test.
     """
 
     def test_the_numbers_agree(self) -> None:

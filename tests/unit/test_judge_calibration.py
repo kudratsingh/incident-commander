@@ -1,24 +1,9 @@
 """WP-6.3: the judge calibration harness, and the gate it opens.
 
-Five things are pinned here, and each of the first four has a red-before case:
-
-1. **The trap sets are the shapes plan 03 § 107 asks for, and each case's verdict
-   is asserted.** A trap whose right answer nobody stated is not ground truth.
-2. **The harness measures what it says it measures.** Agreement is scored on the
-   first ask; stability over N; a judge that cannot produce valid output is an
-   error, not a disagreement; and every question goes through the judge's real
-   prompt with no temperature (ADR 0048 / decision O-24).
-3. **The report is evidence.** Registered artifact kind, versioned, exclusive
-   create, resolvable through ``newest()``, one family per judge.
-4. **No judge number without a calibration report id** — the WP-6.3 acceptance,
-   both ways.
-5. **No bare "verifier"** on the judge-role surfaces (plan 02:25).
-
-WO-R2-174 is NOT re-proved here: the bounded output repair already covers both
-judges and ``tests/unit/test_output_repair.py`` holds its tests. What this file
-adds on that front is one test that the extraction of ``judge_verification`` did
-not lose the repair, because a refactor that silently dropped it would make every
-calibration a measurement of a judge that escalates on its own parse failure.
+Five things are pinned, the first four with a red-before: trap sets in plan 03 § 107's
+shapes with every verdict stated; agreement scored on the first ask and stability over N
+(no temperature — ADR 0048 / O-24); a registered, versioned, create-only report, one
+family per judge; no judge number without a report id; no bare "verifier" (plan 02:25).
 """
 
 from __future__ import annotations
@@ -141,9 +126,7 @@ class TestTheTrapSetsAreGroundTruth:
     def test_a_trap_set_covers_both_sides_of_its_approval_line(self, judge: str) -> None:
         """At least one case the judge should bless and one it should not.
 
-        A set that only holds failures is passed by a judge that refuses
-        everything, and a set that only holds clean cases is passed by one that
-        blesses everything. Either way the accuracy would be luck.
+        A one-sided set passes under a judge that refuses everything.
         """
         verdicts = [case.asserts for case in traps_for(judge)]
         assert any(is_approval(judge, verdict) for verdict in verdicts)
@@ -153,9 +136,7 @@ class TestTheTrapSetsAreGroundTruth:
     def test_no_case_names_hidden_lab_machinery(self, judge: str) -> None:
         """ADR 0012, applied to what a judge reads.
 
-        A trap is made of tool results and prose, which is what a judge really
-        sees. The word the injection machinery is called by appearing in one would
-        mean the calibration was asking the judge a question no run could produce.
+        The injection machinery's name in a trap would ask a question no run produces.
         """
         for case in traps_for(judge):
             assert "chaos" not in case.context().lower(), case.case_id
@@ -163,10 +144,8 @@ class TestTheTrapSetsAreGroundTruth:
     def test_the_trap_contexts_are_deterministic(self) -> None:
         """Two renders of one trap are the same bytes.
 
-        The scripted fake is keyed on the rendered context, so a case carrying a
-        freshly minted uuid or a wall-clock timestamp would make the script miss
-        and the whole harness untestable. Checked rather than assumed because the
-        models it is built from default ``evidence_id`` to ``uuid4()``.
+        The scripted fake is keyed on the rendered context, so a fresh uuid would make the
+        script miss.
         """
         for judge in CALIBRATED_ROLES:
             for case in traps_for(judge):
@@ -175,9 +154,7 @@ class TestTheTrapSetsAreGroundTruth:
     def test_the_selector_traps_cite_only_readings_in_their_own_trail(self) -> None:
         """ADR 0042's validator, exercised over the committed trap data.
 
-        Constructing a candidate that cites an id the trap's own ledger does not
-        hold raises. This asserts the property holds for the set as committed —
-        so the set cannot drift into asking the selector about evidence nobody has.
+        A candidate citing an id the trap's ledger lacks raises.
         """
         for case in traps_for(CANDIDATE_SELECTOR):
             subject = case.subject
@@ -232,9 +209,7 @@ class TestTheHarnessMeasuresWhatItSays:
     def test_a_wrong_approval_is_neither_a_false_approve_nor_a_false_reject(self) -> None:
         """The selector's own error: committed, and to the wrong candidate.
 
-        ``select:c1`` where ``select:c2`` was right is an approval that is wrong.
-        Folding it into either rate would hide the selector's most interesting
-        failure behind a number about a different one.
+        Folding it into either rate would hide it.
         """
         case = "cs-02-wrong-candidate-plausible-evidence"
         client = _agreeing(CANDIDATE_SELECTOR, wrong={case: f"{SELECT_PREFIX}c1"})
@@ -257,9 +232,7 @@ class TestTheHarnessMeasuresWhatItSays:
     def test_agreement_is_the_first_ask_not_a_vote(self) -> None:
         """A judge wrong first and right later has not agreed.
 
-        The opposite of the test above, and it is the direction that matters: if
-        agreement were a majority over the reps, a calibration would be measuring
-        a five-sample ensemble nothing in this system runs.
+        A majority over the reps would measure an ensemble nothing here runs.
         """
         case = "av-02-read-shows-no-movement"
         script = answers_for(ACTION_VERIFIER)
@@ -277,9 +250,7 @@ class TestTheHarnessMeasuresWhatItSays:
     def test_a_judge_that_cannot_answer_is_an_error_not_a_disagreement(self) -> None:
         """A malformed reply twice over is a harness event (ADR 0035).
 
-        Counted in neither the numerator nor the denominator of accuracy. A
-        calibration that scored it as a wrong verdict would be putting an envelope
-        failure into a measurement of judgement.
+        An envelope failure is not judgement.
         """
         case = "av-01-read-shows-recovery"
         script = answers_for(ACTION_VERIFIER)
@@ -303,9 +274,7 @@ class TestTheHarnessMeasuresWhatItSays:
     ) -> None:
         """Not a copy of the rubric, the rubric.
 
-        The whole leg is worthless if the harness asks a prompt the run does not
-        use — it would be calibrating a judge nobody calls, which is the INC-002
-        failure (one reading rule, two readers) one level up.
+        A harness asking a prompt the run does not use calibrates a judge nobody calls.
         """
         client = _agreeing(judge)
         calibrate(judge, client=client, model=_MODEL, now=_AT)
@@ -317,9 +286,7 @@ class TestTheHarnessMeasuresWhatItSays:
     def test_no_temperature_is_sent(self, judge: str) -> None:
         """ADR 0048 and owner decision O-24, asserted on the call.
 
-        ``llm/client.SAMPLING_REJECTED_MODELS`` is why: a calibration that pinned
-        temperature 0 would 400 on the first re-pin to a newer family, which is
-        exactly when a calibration is most needed. Stability is measured instead.
+        A pinned temperature 0 would 400 on the next re-pin.
         """
         client = _agreeing(judge)
         report = calibrate(judge, client=client, model=_MODEL, now=_AT)
@@ -399,11 +366,8 @@ class TestTheHarnessMeasuresWhatItSays:
 class TestTheRepairSurvivedTheExtraction:
     """WO-R2-174's repair, through the function WP-6.3 extracted.
 
-    Not a re-proof of ADR 0035 — ``tests/unit/test_output_repair.py`` owns that.
-    This is the refactor's own fence: ``judge_verification`` is now the one
-    spelling of the ``action_verifier``'s call, and a version of it that had lost
-    the wrapper would make every calibration a measurement of a judge that
-    escalates on its own parse failure, which is the thing the amendment fixed.
+    ``judge_verification`` is the one spelling of the ``action_verifier``'s call, and
+    losing the wrapper measures a judge that escalates on a parse failure.
     """
 
     _CASE: Final[str] = "av-01-read-shows-recovery"
@@ -455,10 +419,7 @@ class TestTheReportIsEvidence:
     def test_one_family_per_judge(self, tmp_path: Path) -> None:
         """Three judges must not share one resolution.
 
-        Plan 03 § 112's flat ``judge_calibration.<stamp>.<id>.json`` cannot do
-        this: a fixed stem has no room for the judge's name, so ``newest()`` would
-        return whichever judge was written last. The register is keyed by judge,
-        so the artifact has to be too.
+        A flat stem has no room for the judge's name, so ``newest()`` picks the last.
         """
         written = {}
         for judge in CALIBRATED_ROLES:
@@ -570,10 +531,7 @@ class TestTheTrackRecord:
     def test_a_canned_runs_scripted_verdict_is_never_scanned(self) -> None:
         """A fixture is not a judge.
 
-        Most archives carry a ``_verify_judge`` entry written by
-        ``CannedLLMClient`` from a scenario's script. Pairing those would measure
-        the fixtures. Proved by construction: every scanned row's archive has a
-        ``live_llm`` outcome for that scenario.
+        Most archives carry a scripted ``_verify_judge``; scanned rows have ``live_llm``.
         """
         for row in track_record.scan():
             report = json.loads(
@@ -667,10 +625,7 @@ class TestNoJudgeNumberWithoutACalibrationReport:
 class TestTheRoleWordIsAlwaysPrefixed:
     """Plan 02:25, scoped to the judge-role surfaces.
 
-    Three allowed shapes, and ``roles.py``'s module docstring argues for each:
-    prefixed with ``action_``; qualified by one of the three other things the word
-    correctly names in this repo; or in quotes, because a sentence about the word
-    is not a use of it.
+    Three shapes, argued in ``roles.py``: prefixed ``action_``, qualified, or quoted.
     """
 
     _SURFACES: Final[tuple[str, ...]] = (

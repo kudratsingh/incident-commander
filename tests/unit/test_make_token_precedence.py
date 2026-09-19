@@ -1,10 +1,7 @@
 """Regression: make variable precedence must never decide the principal.
 
-Run 001 stage 1 ran with write scope because `-include .env` (PR #62)
-overrode the PLATFORM_TOKEN that `eval-smoke` exported (PR #69), and make
-re-exported the FILE's value to the recipe. These tests pin both the
-mechanism (so nobody "fixes" .env inclusion into the token path again)
-and the structural remedy (the runner selects the principal from config).
+Run 001 stage 1 ran with write scope because `-include .env` overrode the exported
+PLATFORM_TOKEN.
 """
 
 from __future__ import annotations
@@ -23,12 +20,8 @@ from incident_commander.config import Settings
 
 _REPO = Path(__file__).resolve().parents[2]
 
-# The hermetic PATH handed to the make subprocess below, and — since
-# WO-R2-102 — the same one the skip guard searches. They disagreed: the
-# guard asked the AMBIENT PATH whether make existed while the child got
-# these three directories, so on any machine with make in /opt/homebrew/bin
-# or ~/.local/bin the guard passed and the subprocess then raised
-# FileNotFoundError. The test errored where it had promised to skip.
+# The hermetic PATH handed to the make subprocess, and — since WO-R2-102 — the one the
+# skip guard searches. They disagreed, so the guard passed and the subprocess raised.
 _SUBPROCESS_PATH: Final[str] = "/usr/bin:/bin:/usr/local/bin"
 
 
@@ -94,19 +87,14 @@ def test_empty_smoke_secret_is_unset_and_refuses_the_stage(
 ) -> None:
     """S-04: ``SecretStr("")`` is not a principal — it is a missing one.
 
-    ``if settings.platform_smoke_token is None`` passes for an empty secret,
-    so ``mcp_token`` became ``""`` and ``make_client``'s ``token or ...``
-    then selected the FULL write principal for every client in the stage,
-    the guard client included. The empty string must take the same exit as
-    an absent token, not the privileged default.
+    ``if ... is None`` passes for an empty secret, so ``make_client`` selected the FULL
+    write principal for every client in the stage.
     """
 
     def _boom(*_args: Any, **_kwargs: Any) -> Any:
         raise AssertionError("the smoke stage must not proceed on an empty token")
 
-    # Every collaborator past the token check is a tripwire: reaching any of
-    # them means the empty secret was accepted as a principal. preflight_auth
-    # in particular would otherwise be a real network call.
+    # Every collaborator past the token check is a tripwire; preflight_auth would be real.
     monkeypatch.setattr(runner_module, "run_all", _boom)
     monkeypatch.setattr(runner_module, "make_client", _boom)
     monkeypatch.setattr(runner_module, "preflight_auth", _boom)
@@ -123,18 +111,10 @@ def test_empty_smoke_secret_is_unset_and_refuses_the_stage(
 
 
 def test_only_guard_refuses_gate_and_bless_at_parse_time() -> None:
-    """A-03: `make eval-reg ONLY=x` / `make baseline ONLY=x` must refuse
-    BEFORE the `eval` prerequisite could write a filtered report that then
-    outranks the full-suite one as newest. That forces a parse-time conditional that swaps in a
-    prerequisite-free $(error) rule — a recipe-line check would fire only
-    after the filtered eval already ran (the study/runs.jsonl artifact-loss
-    pattern, dressed up as a fix).
+    """A-03: `ONLY=x` on `eval-reg` or `baseline` must refuse BEFORE the `eval` prerequisite
+        could write a filtered report that outranks the full-suite one.
 
-    Pinned on the Makefile TEXT so a red implementation can never launch an
-    eval run from inside pytest (ADR 0011 freeze). The manual freeze-safe
-    probe is `make -n <target> ONLY=x`: guard present → dies at parse time,
-    exit 2, no recipe output; guard absent → exit 0 (-n executes nothing
-    either way).
+    Pinned on the Makefile TEXT, so a red implementation cannot launch an eval run from pytest.
     """
     makefile = (_REPO / "Makefile").read_text()
     for target in ("eval-reg", "baseline"):

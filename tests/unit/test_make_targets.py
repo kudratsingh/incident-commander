@@ -1,29 +1,9 @@
 """The Makefile targets an operator types, exercised rather than read.
 
-Three defects, one file (WO-R2-89):
-
-* ``eval-reset``'s ``--purge-idempotency`` flag was gated with make's
-  ``$(if ...)``, which tests a value for non-emptiness rather than for truth.
-  ``PURGE_IDEMPOTENCY=0`` therefore DELETED the idempotency rows, on the one
-  flag in this repo whose whole purpose is to destroy data.
-* ``chaos-*`` and ``traffic`` never put PLATFORM_MCP_URL/PLATFORM_CHAOS_TOKEN/
-  PLATFORM_SMOKE_TOKEN into the child environment, so the seeding step the
-  live-eval runbook depends on aborted every time for anyone who kept their
-  credentials in ``.env`` — which is what the runbook tells them to do.
-* ``eval-smoke`` skipped the trace render when the run failed, which is the
-  exact bug that was fixed in ``eval-live`` and never carried across.
-
-These run the real Makefile, not a paraphrase of it. Two mechanisms:
-
-``make -n`` prints the commands a target would run without running them,
-which is enough for the flag gate — the flag either appears in the printed
-command line or it does not.
-
-For the recipes whose defect is about the *environment* (which ``-n`` cannot
-show) and about *ordering under failure*, the Makefile is copied into a tmp
-directory next to a fake ``.env`` and a fake ``uv`` on PATH that records what
-it was asked to run. Nothing real is invoked: no platform, no docker, no
-network, no tokens. The subject is still the shipped Makefile text.
+Three defects (WO-R2-89): ``--purge-idempotency`` was gated with make's ``$(if ...)``, so
+``PURGE_IDEMPOTENCY=0`` DELETED the rows; ``chaos-*`` and ``traffic`` never put the
+platform credentials into the child environment; ``eval-smoke`` skipped the trace render
+on failure. These run the real Makefile with ``make -n`` and a fake ``uv`` on PATH.
 """
 
 from __future__ import annotations
@@ -47,9 +27,7 @@ _WRITE_TOKEN: Final[str] = "sa_agent_actions_execute"
 _CHAOS_TOKEN: Final[str] = "sa_evaluator_chaos_invoke"
 _SMOKE_TOKEN: Final[str] = "sa_read_scoped_for_smoke"
 
-# A `uv` that runs nothing: it appends its arguments and the platform
-# variables it can see to a log, and reports whatever exit code the test
-# asked for on the eval runner line.
+# A `uv` that runs nothing: it logs its arguments and the platform variables it sees.
 _FAKE_UV = """#!/bin/sh
 {
   echo "ARGS: $@"
@@ -146,9 +124,7 @@ class TestPurgeIdempotencyGate:
         assert "--purge-idempotency" in _make_dry_run("eval-reset", "PURGE_IDEMPOTENCY=1")
 
     def test_the_gate_is_not_a_non_emptiness_test(self) -> None:
-        # The specific construct, named so it cannot come back by accident.
-        # Executable lines only: the Makefile quotes the forbidden pattern in
-        # a comment, on purpose, so the reason survives next to the fix.
+        # The specific construct, named so it cannot come back. Executable lines only.
         executable = "\n".join(
             line for line in _MAKEFILE.read_text().splitlines() if not line.strip().startswith("#")
         )
@@ -173,10 +149,8 @@ class TestPlatformCredentialsReachTheScripts:
         assert f"PLATFORM_CHAOS_TOKEN={_CHAOS_TOKEN}" in log
 
     def test_chaos_targets_never_see_the_agent_token(self, make_sandbox: Path) -> None:
-        # Since platform v0.6.5 the agent principal cannot fire a hook at all,
-        # so handing it over would only produce a -32002 whose cause reads like
-        # a broken stack. It is also the credential the agent under test holds,
-        # and a chaos recipe has no business with it.
+        # Since v0.6.5 the agent principal cannot fire a hook at all, and it is the credential
+        # the agent under test holds.
         _result, log = _run_in_sandbox(make_sandbox, "chaos-kill-consumer")
         assert _WRITE_TOKEN not in log
 
@@ -240,12 +214,8 @@ class TestSmokeRendersTracesWhenTheRunFails:
 class TestEvalResetClearsTheChaosTeardownLatch:
     """`make eval-reset` finishes the job it starts (ADR 0037, exit 10).
 
-    A teardown failure latches `evals/.chaos-teardown-block.json` and every
-    later `--live` run is refused with exit 10. Clearing it used to be a
-    second command an operator typed from memory, at the one moment they are
-    least likely to — mid-sequence, after something already went wrong. The
-    reset is what actually puts the world back, so the reset is what records
-    that it happened.
+    A teardown failure latches `evals/.chaos-teardown-block.json` and every later `--live`
+    run is refused. The reset puts the world back, so it records that.
     """
 
     def test_the_clear_runs_after_the_reset(self) -> None:

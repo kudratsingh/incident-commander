@@ -1,22 +1,9 @@
 """Regression tests for the live-eval hardening fixes.
 
-Covers four behavior changes:
-
-1. ``run_to_completion`` exempts VERIFYING from the budget short-circuit —
-   an executed Tier-1 action must always be verified, even over budget.
-2. ``make_llm_plan`` refuses to enter REMEDIATING without headroom for
-   the action + verify pair (>= 2 tool calls remaining).
-3. ``make_llm_verify`` can poll the verify probe: ``not_verified`` on an
-   eventually-consistent read retries after a delay instead of
-   escalating on the first instant read.
-4. That polling window re-checks the budget ledger between attempts
-   (B-12) — the first attempt is always allowed, every later one is
-   gated — and stamps each attempt with its own clock read when one is
-   wired in.
-
-Plus one calibration assertion that is not a behavior change: at the
-documented live knobs a CORRECT remediation run spends 10 tool calls, and
-every shipped remediation scenario's *grading* cap must admit that (A-02).
+Four behaviour changes: VERIFYING is exempt from the budget short-circuit; REMEDIATING
+is refused without headroom for the action+verify pair; the verify probe polls instead
+of escalating on the first read; and that window re-checks the ledger (B-12). Plus one
+calibration assertion: a correct remediation run spends 10 tool calls (A-02).
 """
 
 from __future__ import annotations
@@ -248,10 +235,7 @@ def _verify_window(run: RunState) -> list[EvidenceEntry]:
 class TestVerifyBudgetGate:
     """B-12: the polling window re-checks the ledger between attempts.
 
-    ADR 0006 exempts VERIFYING from the loop-level short-circuit and blesses
-    *one* extra probe over budget; without an in-loop gate a run entering
-    VERIFYING already exhausted could spend ``verify_probe_attempts`` (up to
-    10) probes plus as many judge calls past a hard limit.
+    ADR 0006 blesses ONE extra probe over budget; without a gate a run spends ten.
     """
 
     def test_entering_verifying_exhausted_allows_exactly_one_attempt(self) -> None:
@@ -400,15 +384,9 @@ _CALLS_BEFORE_VERIFYING = 2 + _LIVE_INVESTIGATE_REPROBE_ATTEMPTS + 1
 class TestLivePollingBudgetArithmetic:
     """A-02: verify polls and freshness re-probes are charged to the GRADED cap.
 
-    Every poll increments ``tool_calls_used`` (ADR 0006 accounting), as does
-    the ADR-0009 re-probe. At the documented live knobs a CORRECT remediation
-    run therefore spends ~10 tool calls — which the shipped remediation
-    scenario caps must admit. Eight of them sat at 8, so a correct run failed
-    the BUDGET dimension. This is the arithmetic assertion that would have
-    caught it. Since ADR 0019 the scenario cap is also the runtime
-    ``BudgetLedger`` ceiling, which raises the stakes: a cap that cannot
-    admit this profile no longer grades a correct run red, it cuts the verify
-    loop short and changes what the run does.
+    Every poll increments ``tool_calls_used`` (ADR 0006), as does the ADR-0009 re-probe, so
+    a correct remediation run spends ~10 calls. Eight scenarios sat at 8. Since ADR 0019
+    the cap is also the runtime ceiling, so too low cuts the verify loop short.
     """
 
     @staticmethod
@@ -430,10 +408,8 @@ class TestLivePollingBudgetArithmetic:
         )
         run = _run_state(
             IncidentState.VERIFYING,
-            # 25 here is the arithmetic's own headroom, not a scenario cap:
-            # this test measures how many calls a correct run SPENDS, which
-            # is the input to choosing a cap (ADR 0019), so it must not be
-            # bounded by one.
+            # 25 is the arithmetic's own headroom, not a scenario cap: this measures what a
+            # correct run SPENDS.
             _budget(max_tool_calls=25, used=_CALLS_BEFORE_VERIFYING),
             remediation_plan=_PLAN.model_dump(mode="json"),
         )
@@ -464,11 +440,8 @@ class TestLivePollingBudgetArithmetic:
 class TestVerifyJudgeSeesTheActionResult:
     """Some fixes report their effect rather than show it.
 
-    A delayed replay reports `scheduled` / `execute_at` in the ACTION
-    response, and the platform then holds the timer — so the DLQ cannot
-    shrink inside the ~100s verify window by design. The judge was shown
-    only the plan and the probe, told by its own prompt to err toward
-    `not_verified`, and a correct agent escalated instead of resolving.
+    A delayed replay reports `scheduled` / `execute_at`, so the DLQ cannot shrink inside
+    the verify window; the judge escalated a correct agent.
     """
 
     @staticmethod
@@ -516,9 +489,7 @@ class TestVerifyJudgeSeesTheActionResult:
     def test_the_transition_actually_passes_it_through(self) -> None:
         """The wiring, not just the formatter.
 
-        Testing `format_verify_context` alone would pass even if the call
-        site never looked the action result up — which is exactly the shape
-        of the original bug.
+        `format_verify_context` alone passes if nobody looks.
         """
         plan = self._plan()
         judge = CannedLLMClient([{"verdict": "verified", "reasoning": "scheduled"}])
@@ -548,9 +519,7 @@ class TestVerifyJudgeSeesTheActionResult:
 
     def test_the_latest_call_of_the_action_tool_wins(self) -> None:
         now = _clock()
-        # The remediation loop is single-attempt per incident, but the ledger
-        # can carry an earlier probe of the same tool name; the action that
-        # was just executed is the last one.
+        # The ledger can carry an earlier probe of the same tool name; the action is last.
         plan = self._plan()
         run = _run_state(
             IncidentState.VERIFYING,
@@ -582,10 +551,8 @@ class TestRefusedTier1AttemptsAreRecorded:
         return RemediationPlan(
             target_hypothesis="dlq_poison_message",
             action_tool="replay_dlq_by_ids",
-            # A well-formed id: the seeded human_required row. A malformed
-            # one is rejected by local argument validation BEFORE any call,
-            # which is the right behaviour and a different path — there is no
-            # attempt to record when nothing was attempted.
+            # A well-formed id: the seeded human_required row. A malformed one is rejected before
+            # any call.
             action_arguments={"job_ids": ["f030f975-974e-5ce3-aa6b-444136507d86"]},
             verify_tool="list_dlq_messages",
             verify_arguments={},

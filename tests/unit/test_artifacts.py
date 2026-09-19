@@ -1,20 +1,9 @@
 """The flat eval outputs are versioned, and nothing overwrites a prior file.
 
-CLAUDE.md invariant 9 shipped with a documented exception: four "refreshable
-pointers" — ``evals/briefings/<scenario>.json``,
-``evals/trajectories/<scenario>.json``, ``evals/reports/latest.json`` and
-``evals/reports/human/<scenario>.txt`` — that every run rewrote in place. The
-durable copy lived under ``evals/runs/<invocation_id>/``, so the exception
-looked cheap. It was not: an artifact that erases its own history cannot be
-evidence, and the pointer directories are exactly where an operator looks
-first (docs/runbook.md). The exception is withdrawn.
-
-This module pins the withdrawal the way
-``tests/unit/test_tracing.py::TestNoTruncationAcrossInvocations`` pins
-F-002's: by proving a *second* write leaves the *first* one readable.
-
-Everything here writes under ``tmp_path``. Nothing touches the real
-``evals/`` tree (ADR 0011 freeze; study/findings.md F-003).
+Invariant 9 shipped with a documented exception: four "refreshable pointers" every run
+rewrote in place, on the argument that ``evals/runs/<invocation_id>/`` held a durable
+copy. An artifact that erases its own history cannot be evidence, so the exception is
+withdrawn, and a second write must leave the first readable. Everything writes to ``tmp_path``.
 """
 
 from __future__ import annotations
@@ -94,9 +83,7 @@ class TestFlatOutputsAreVersioned:
         # Both readable — not just present.
         bodies = {json.loads((tmp_path / name).read_text())["incident_id"] for name in files}
         assert bodies == {"first", "second"}
-        # Newest wins. Within one clock second the two runs are separated by
-        # invocation_id (_INV1 < _INV2); across a second boundary the second
-        # run's stamp is larger. Both orderings put "second" last.
+        # Newest wins: within a second by invocation_id, across one by stamp.
         newest = artifacts.newest("trajectory", "consumer_lag_pass", directory=tmp_path)
         assert json.loads(newest.read_text())["incident_id"] == "second"
 
@@ -127,9 +114,7 @@ class TestFlatOutputsAreVersioned:
     def test_a_collision_raises_and_keeps_the_first_file(self, tmp_path: Path) -> None:
         """Exclusive-create is the load-bearing half — same as the archive writes.
 
-        Manufactured by replaying one run's exact identity: same scenario,
-        same stamp, same invocation_id. Nothing legitimate produces this, so
-        it must crash rather than quietly delete a prior run.
+        Nothing legitimate replays a run's identity.
         """
         write_trajectories([_trajectory("first", _INV1)], directory=tmp_path, timestamp=_T1)
 
@@ -216,9 +201,7 @@ class TestHumanReportsAreVersioned:
         self._trace(trace_dir / "redis_saturation.jsonl", "inv0000000001", "redis_saturation")
 
         assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir)]) == 0
-        # The second pass is INCREMENTAL and would skip an already-rendered
-        # attempt (WO-R3-257), so ask for the re-render explicitly — the rule
-        # under test here is that it lands beside the first, not over it.
+        # The second pass is INCREMENTAL (WO-R3-257), so ask for the re-render explicitly.
         assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir), "--force"]) == 0
 
         files = sorted(p.name for p in out_dir.rglob("*.txt"))
@@ -263,9 +246,7 @@ class TestNewestResolution:
     def test_orders_by_stamp_not_by_mtime(self, tmp_path: Path) -> None:
         """The older run is written to disk LAST. Filename ordering must win.
 
-        mtime is a property of the filesystem, not of the run: a restore, a
-        copy, or a ``touch`` re-orders it. A resolver a backup tool can
-        re-order is not a resolver.
+        A resolver a backup can re-order is not one.
         """
         newer = self._touch(tmp_path, "s.20260906T140000Z.bbbbbbbb0002.json", '{"n": 2}')
         older = self._touch(tmp_path, "s.20260906T101112Z.aaaaaaaa0001.json", '{"n": 1}')
@@ -328,10 +309,7 @@ class TestNewestResolution:
 class TestTheLayoutIsOneFamilyPerFolder:
     """WO-R3-257: where each family lives, and that reads still find the old place.
 
-    The owner asked for a reports folder a person can navigate. The layout
-    that answers it is data in ``KINDS``, so these tests read it the way
-    every caller does — by writing an artifact and asking where it went —
-    rather than restating a path list that could drift from the writers.
+    The layout is data in ``KINDS``, so these tests write an artifact and ask where it went.
     """
 
     _EXPECTED: Final[dict[str, tuple[str, ...]]] = {
@@ -346,24 +324,16 @@ class TestTheLayoutIsOneFamilyPerFolder:
         "regrade_report_md": ("evals", "reports", "regrades"),
         "human": ("evals", "reports", "human", "consumer_lag_pass"),
         "dossier": ("evals", "reports", "dossiers", "consumer_lag_pass"),
-        # WP-6.3. Per-JUDGE, not per-scenario: it rides the per-scenario
-        # mechanism because "one folder per subject" is the shape it needs, and
-        # the subject is a judge role name (`action_verifier`, …). The test's
-        # scenario stand-in below is what lands in that slot here.
+        # WP-6.3. Per-JUDGE, not per-scenario: it rides the per-scenario mechanism because
+        # the subject is a judge role name.
         "judge_calibration": ("evals", "reports", "judge-calibration", "consumer_lag_pass"),
         "trajectory": ("evals", "trajectories"),
         "briefing": ("evals", "briefings"),
-        # WP-3.1, and the one family deliberately OUTSIDE `evals/reports/`: a
-        # recording is an input a later run is executed against, not a document
-        # somebody reads. Its ground-truth sibling shares the folder on purpose
-        # (`tests/unit/test_recorder.py` owns why).
+        # WP-3.1, outside `evals/reports/`: a recording is an input, not a document.
         "recorded_world": ("evals", "recorded_worlds", "consumer_lag_pass"),
         "recorded_world_truth": ("evals", "recorded_worlds", "consumer_lag_pass"),
-        # WP-15.1, and outside `evals/reports/` for `recorded_world`'s reason: an
-        # export is data a later stage reads, not a document. Three families in one
-        # folder — the training data, the evaluator labels a training path must not
-        # load, and the manifest naming every template the data covers
-        # (`tests/unit/test_export.py` owns why, and that they stay disjoint).
+        # WP-15.1, outside `evals/reports/` for the same reason. Three families in one folder:
+        # the training data, the evaluator labels a training path must not load, and the manifest.
         "training_export": ("evals", "exports"),
         "training_export_labels": ("evals", "exports"),
         "training_export_manifest": ("evals", "exports"),
@@ -406,11 +376,8 @@ class TestTheLayoutIsOneFamilyPerFolder:
     def test_every_kind_still_finds_a_file_left_in_the_old_flat_place(self, tmp_path: Path) -> None:
         """The transition window: merged, not yet migrated, and nothing breaks.
 
-        Between this code landing and ``scripts/migrate_reports_layout.py``
-        running, every existing artifact is still in the flat container. A
-        resolver that only looked in the new sub-folder would report an empty
-        reports folder to the regression gate, to ``make baseline-report``
-        and to the trace formatter — over a directory holding a hundred runs.
+        Until ``scripts/migrate_reports_layout.py`` runs, every artifact is still flat; a
+        new-folder-only resolver would see an empty folder.
         """
         for kind, expected in self._EXPECTED.items():
             scenario = self._scenario_for(kind)
@@ -444,10 +411,7 @@ class TestTheLayoutIsOneFamilyPerFolder:
     def test_a_superseded_render_is_still_resolved(self, tmp_path: Path) -> None:
         """Moved aside for readability is not moved out of the record.
 
-        ``human/_superseded/<scenario>/`` holds earlier renders of runs that
-        have a newer one. They are evidence (invariant 9), so ``versions()``
-        returns them — and because they are by construction older than the
-        render that superseded them, one can never become ``newest()``.
+        ``human/_superseded/`` renders are evidence, so ``versions()`` returns them.
         """
         kept = artifacts.write_versioned(
             "human",
@@ -473,10 +437,7 @@ class TestTheLayoutIsOneFamilyPerFolder:
     def test_the_two_pinned_files_are_not_members_of_any_family(self, tmp_path: Path) -> None:
         """``baseline.json`` and ``latest.json`` stay at the top and stay themselves.
 
-        The gate reads ``baseline.json`` by a literal path (evals.yml's filter
-        names it too), so it must not acquire a folder. ``latest.json`` is
-        pre-versioning evidence and is the ``report`` family's oldest version
-        wherever it sits.
+        The gate reads ``baseline.json`` by a literal path: no folder.
         """
         (tmp_path / "baseline.json").write_text("{}")
         latest = tmp_path / "latest.json"

@@ -57,12 +57,8 @@ class TestJsonlTracer:
         assert target.parent.exists()
 
     def test_does_not_truncate_on_construction(self, tmp_path: Path) -> None:
-        # INVERTED 2026-08-07. This test previously asserted the file was
-        # cleared on construction "so re-runs don't accumulate stale
-        # lines" — the assertion was the bug, not the guard: it pinned
-        # behavior that deleted the previous attempt's records. Run 001's
-        # killed attempt was erased by its own re-run. Attempts are now
-        # separated by invocation_id, not by deletion.
+        # INVERTED 2026-08-07: this asserted the file was cleared on construction, which pinned
+        # behaviour that deleted the previous attempt's records. Attempts separate by invocation_id.
         target = tmp_path / "run.jsonl"
         target.write_text('{"kind": "prior_attempt"}\n')
         JsonlTracer(path=target)
@@ -113,10 +109,7 @@ class TestTracerFor:
 class TestNoTruncationAcrossInvocations:
     """Regression: the tracer must never delete a prior attempt's records.
 
-    Until 2026-08-07 ``JsonlTracer.__post_init__`` truncated the file "so
-    re-runs don't concatenate". Run 001's killed first attempt was erased
-    in full by its own re-run; the loss surfaced only as a ~1.9x gap
-    between trace-derived and billed cost (study/findings.md F-002).
+    Until 2026-08-07 ``__post_init__`` truncated the file (F-002).
     """
 
     def _records(self, path: Path) -> list[dict[str, object]]:
@@ -154,10 +147,7 @@ class TestNoTruncationAcrossInvocations:
 class TestRecordIdentity:
     """Every record is addressable, so one can name another (ADR 0035).
 
-    ``invocation_id`` groups an attempt; it cannot say *which* record inside
-    that attempt a repair re-ask is repairing. Two planner records with the
-    same invocation id and no per-record identity are two records a reader
-    has to pair by timestamp, which is a guess.
+    ``invocation_id`` groups an attempt but cannot say which record a re-ask repairs.
     """
 
     def test_every_record_gets_a_record_id(self, tmp_path: Path) -> None:
@@ -179,13 +169,8 @@ class TestRecordIdentity:
 
 
 # ---------------------------------------------------------------------------
-# WP-2.1 — StepRecords in the trace store.
-#
-# The records themselves are the previous packet's (``agent/strategies/
-# records.py``, WO-R3-180); what is tested here is the half that makes them
-# evidence: they reach the append-only trace store, one per planner step, on
-# the offline path as well as the live one — and they carry no hidden
-# chain-of-thought.
+# WP-2.1 — StepRecords reach the append-only store, one per planner step, offline
+# too, and carry no hidden chain-of-thought.
 
 
 def _test_settings(**overrides: Any) -> Settings:
@@ -207,9 +192,7 @@ def _test_settings(**overrides: Any) -> Settings:
 def _two_iteration_scenario() -> Scenario:
     """A canned scenario whose planner runs exactly twice: probe, then stop.
 
-    Two iterations rather than one on purpose — a per-step record that is
-    emitted once per *run* instead of once per *step* passes every one-step
-    test there is.
+    Once per run passes any one-step test.
     """
     return Scenario(
         name="step_record_two_iterations",
@@ -284,11 +267,8 @@ def _steps(path: Path) -> list[dict[str, Any]]:
 class TestStepRecordsReachTheTraceStore:
     """The offline landing place for per-step research data (divergence D1).
 
-    The tracer is opt-in and only the live Makefile targets export
-    ``EVAL_TRACE_DIR``, so before this packet a ``StepRecord`` was built on
-    every run and read on none. It is wired for canned runs too: what a canned
-    run *decided* is as real as what a live run decided, and it is the half of
-    every strategy comparison that costs nothing to produce.
+    Only the live targets export ``EVAL_TRACE_DIR``, so a ``StepRecord`` was built on
+    every run and read on none.
     """
 
     def _run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -308,9 +288,7 @@ class TestStepRecordsReachTheTraceStore:
     def test_the_baseline_candidate_set_holds_exactly_one_candidate(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # The control group's shape, asserted on a canned run: one call, one
-        # ranking, no alternatives generated. A best-of-N strategy is what
-        # makes this longer, and the difference is the measurement.
+        # The control group's shape on a canned run: one call, one ranking, no alternatives.
         steps = _steps(self._run(tmp_path, monkeypatch))
         assert [len(step["candidate_set"]) for step in steps] == [1, 1]
         assert {step["strategy"] for step in steps} == {"baseline"}
@@ -348,14 +326,8 @@ class TestStepRecordsReachTheTraceStore:
     ) -> None:
         """Anti-vacuity for ``planner_input_tokens`` and its offline twin.
 
-        The second step's context carries the first step's evidence entry, so
-        a number that really measures the context fed to the planner has to be
-        larger the second time. A hardcoded zero, a constant, or a value read
-        off the wrong object all fail here.
-
-        ``planner_input_tokens`` is the provider's own count and is honestly 0
-        offline — the canned client bills nothing — which is exactly why the
-        character measurement exists beside it.
+        The second step's context carries the first step's evidence, so a real measurement is
+        larger the second time. ``planner_input_tokens`` is honestly 0 offline.
         """
         first, second = _steps(self._run(tmp_path, monkeypatch))
 
@@ -383,9 +355,7 @@ class TestStepRecordsReachTheTraceStore:
     ) -> None:
         """Research data goes to the trace store, never to ``RunState``.
 
-        ``RunState`` is a frozen checkpoint (divergence C7): a candidate set
-        written into it would change the schema every future strategy touches,
-        and none of it is needed to resume a run.
+        ``RunState`` is a frozen checkpoint (divergence C7).
         """
         monkeypatch.setenv("EVAL_TRACE_DIR", str(tmp_path))
         scenario = _two_iteration_scenario()
@@ -402,9 +372,7 @@ class TestStepRecordsReachTheTraceStore:
     ) -> None:
         """Invariant 9 for the new kind (F-002 is what it is for).
 
-        The step records of a re-run land beneath the first attempt's, grouped
-        by ``invocation_id``. A tracer that truncated would make every
-        strategy comparison a comparison of whichever run went last.
+        A tracer that truncated would compare only the last run.
         """
         monkeypatch.setenv("EVAL_TRACE_DIR", str(tmp_path))
         scenario = _two_iteration_scenario()
@@ -422,22 +390,15 @@ class TestStepRecordsReachTheTraceStore:
 
 
 class TestNoChainOfThoughtIsStored:
-    """Plan 02 § 7: structured outputs and the short ``reasoning`` fields the
-    schema already asks for — nothing else.
+    """Plan 02 § 7: structured outputs and the short ``reasoning`` fields the schema asks
+    for — nothing else.
 
-    A hidden chain-of-thought in the trace store is not a neutral extra: it is
-    unreviewed model text stored under the evaluator's name, it is the field a
-    future reader would be tempted to feed back to a model, and it is the one
-    thing the plan names as out of bounds for this record. So the ban is
-    structural — a field whose name looks like one fails here — rather than a
-    sentence in a docstring.
+    A hidden chain-of-thought is unreviewed model text stored under the evaluator's name,
+    so the ban is structural.
     """
 
-    #: Names a hidden-reasoning field once the separators are stripped, so
-    #: ``chain_of_thought``, ``chainOfThought`` and ``chain-of-thought`` are
-    #: one entry. ``reasoning`` is deliberately NOT here: the hypothesis schema
-    #: has carried a short ``reasoning`` string since Phase 2 and plan 02 § 7
-    #: names it as permitted.
+    #: Names a hidden-reasoning field once separators are stripped, so the three spellings
+    #: are one entry. ``reasoning`` is NOT here: plan 02 § 7 permits it.
     _BANNED_SUBSTRINGS: Final[tuple[str, ...]] = (
         "chainofthought",
         "thinking",
@@ -518,9 +479,7 @@ class TestNoChainOfThoughtIsStored:
 
 class TestTheStepKindIsARealTraceKind:
     def test_step_is_written_through_the_enumeration(self) -> None:
-        # ``TraceKind`` membership is what makes the renderer's coverage test
-        # (tests/unit/test_format_traces.py::TestEveryKindRenders) fire for a
-        # new kind. A bare "step" string in the runner would bypass it.
+        # ``TraceKind`` membership is what makes the renderer's coverage test fire.
         assert TraceKind.STEP.value == "step"
 
     def test_the_tracer_stamps_a_step_record_like_any_other(self, tmp_path: Path) -> None:

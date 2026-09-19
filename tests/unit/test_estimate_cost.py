@@ -1,18 +1,9 @@
 """The trace cost estimator must survive real trace shapes (WO-C4-03, A-12).
 
-Two failure modes are pinned here:
-
-* ``usage.get("cache_read_input_tokens", 0)`` returns ``None`` — not the
-  default — when the key is present with a JSON null, which the Anthropic
-  SDK emits because the cache usage fields are ``Optional``. ``row[3] += None``
-  then aborts the whole audit on one record.
-* Mixed-vintage append-only files must partition by ``invocation_id`` using
-  exactly the same key as ``scripts/format_traces.py`` and
-  ``evals/runner.py::_archive_trace_slice`` — the three tools disagreeing
-  about what "no invocation id" means would silently split or merge attempts.
-
-All fixtures are synthetic JSONL under ``tmp_path``; nothing runs the eval
-harness and nothing is written under ``evals/`` (ADR 0011 freeze).
+Two failure modes: ``usage.get("cache_read_input_tokens", 0)`` returns ``None`` when the
+key is present with a JSON null (the SDK's fields are ``Optional``), so ``row[3] += None``
+aborted the audit; and mixed-vintage append-only files must partition by ``invocation_id``
+with the same key the other two tools use.
 """
 
 from __future__ import annotations
@@ -153,10 +144,7 @@ def test_partial_archive_trace_slice_is_priceable(
 def test_rates_agree_with_the_pinned_pricing_module() -> None:
     """Single source of truth: no silent drift from ``llm/pricing.py``.
 
-    The estimator keeps its own tier table because it prices HISTORICAL trace
-    records, including model ids the runtime meter no longer pins. Where the
-    two overlap they must agree to the cent, or a cost audit and the budget
-    meter would report different numbers for the same call.
+    The estimator keeps its own tier table for historical ids; overlaps agree to the cent.
     """
     for model, row in MODEL_PRICING.items():
         tier = next(name for name in RATES if name in model)
@@ -179,12 +167,8 @@ def test_docstring_describes_the_append_only_tracer() -> None:
 class TestSinceAcceptsWhatAnOperatorTypes:
     """``--since`` must survive a date-only value (WO-R2-99).
 
-    ``evals/tracing.py`` stamps every record with ``datetime.now(UTC)``, so
-    trace timestamps are always timezone-aware. ``--since 2026-08-01`` — the
-    most natural spelling of the flag, and the one the operator reaches for
-    mid-campaign — parses NAIVE, and the ``when < since`` comparison then
-    raised ``TypeError: can't compare offset-naive and offset-aware
-    datetimes``, aborting the whole cost audit.
+    Trace timestamps are always timezone-aware, so ``--since 2026-08-01`` parses NAIVE and
+    the ``when < since`` comparison raised ``TypeError``, aborting the whole audit.
     """
 
     @staticmethod
@@ -207,9 +191,7 @@ class TestSinceAcceptsWhatAnOperatorTypes:
     ) -> None:
         """Not just "does not crash": the cutoff has to actually apply.
 
-        Attaching UTC must not turn the filter into a no-op — the July
-        record is before the cutoff and the September one is after, so
-        exactly one of the two may be priced.
+        Exactly one of the two records may be priced.
         """
         _write_jsonl(tmp_path / "run.jsonl", self._two_dated_records())
         assert _run(monkeypatch, tmp_path, "--since", "2026-08-01") == 0

@@ -50,10 +50,7 @@ class TestVerify:
 class TestSignedMaterial:
     """The bytes the platform emitter MACs, transcribed independently.
 
-    Composed by hand rather than by calling the helper under test: if this
-    repo's idea of the material drifts from the emitter's, that is exactly
-    the failure the test exists to catch, and a self-referential assertion
-    would drift right along with it.
+    Composed by hand: a self-referential assertion would drift with the helper.
     """
 
     def test_matches_the_emitter_composition(self) -> None:

@@ -95,10 +95,7 @@ class TestHealth:
         assert response.json() == {"status": "ok", "details": {"datastore": "ok"}}
 
     def test_reports_degraded_when_the_datastore_is_down(self) -> None:
-        # The finding: /health returned ok unconditionally, so an agent that
-        # could not read or write a single run reported healthy to whatever
-        # watches it — and the lease/pool availability work would be graded
-        # against that answer.
+        # /health returned ok unconditionally, so an unusable agent reported healthy.
         app = create_app(
             settings=_test_settings(),
             checkpointer=_UnreachableStore(),
@@ -111,9 +108,7 @@ class TestHealth:
         assert "OperationalError" in body["details"]["datastore"]
 
     def test_reports_degraded_when_the_probe_does_not_answer_in_time(self) -> None:
-        # A store that hangs is the pool-exhaustion shape, and it is the one a
-        # health check must not inherit: waiting for it makes the endpoint as
-        # unavailable as the thing it is reporting on.
+        # A hanging store is pool exhaustion: waiting makes the endpoint unavailable too.
         app = create_app(
             settings=_test_settings(health_probe_timeout_seconds=0.05),
             checkpointer=_SlowStore(),
@@ -235,9 +230,7 @@ class TestIngestAlert:
     def test_platform_emitter_shaped_request_accepted(
         self, client: TestClient, spawned_runs: list[RunState]
     ) -> None:
-        # The platform has always sent X-Alert-Signature (+ X-Alert-Timestamp,
-        # epoch ms), never X-Signature-256. This assertion would have caught
-        # the header mismatch that 401'd every real delivery.
+        # The platform sends X-Alert-Signature (+ X-Alert-Timestamp), never X-Signature-256.
         response = self._platform_post(
             client,
             {"source": "billing", "severity": "high", "group": "billing-consumer"},
@@ -253,9 +246,7 @@ class TestIngestAlert:
         timestamp = str(int(time.time() * 1000))
         first = self._platform_post(client, alert, timestamp=timestamp)
         second = self._platform_post(client, alert, timestamp=timestamp)
-        # Replay suppressed but still 202: the platform emitter treats any
-        # >=400 as delivery failure, and redelivery is legitimate
-        # at-least-once behavior, not an error.
+        # Replay suppressed but still 202: the emitter treats >=400 as delivery failure.
         assert first.status_code == 202
         assert second.status_code == 202
         UUID(second.json()["incident_id"])
@@ -300,12 +291,8 @@ class TestIngestAlert:
     def test_absurdly_large_timestamp_is_refused_not_crashed(
         self, client: TestClient, spawned_runs: list[RunState]
     ) -> None:
-        # `int` is unbounded, so 10**400 parses fine and then overflowed the
-        # float conversion in the skew comparison — an OverflowError outside
-        # the `except ValueError`, i.e. an unauthenticated caller getting a
-        # 500 out of the ingress. It is a client error like every other
-        # unusable timestamp, and 401 is the code the two neighbouring
-        # rejections (non-numeric, out-of-window) already use.
+        # `int` is unbounded, so 10**400 parses and then overflowed the float conversion — an
+        # OverflowError outside the `except ValueError`, i.e. a 500 to an unauthenticated caller.
         response = self._platform_post(client, {"source": "billing"}, timestamp=str(10**400))
         assert 400 <= response.status_code < 500, "an unusable header must not be a server error"
         assert response.status_code == 401
@@ -324,12 +311,7 @@ class TestIngestAlert:
         assert len(spawned_runs) == 1
 
     # ---- The nonce-bound scheme the platform emits (plat #183 / WO-R2-70) ----
-    #
-    # These sign the wire bytes by hand rather than through the commander's own
-    # helper on purpose: the contract is the platform's, and a test that reuses
-    # our composition would still pass if both ends drifted together. The bytes
-    # below are transcribed from platform `alerts.signed_material` and
-    # docs/ARCHITECTURE.md.
+    # Signed by hand: reusing our own composition would pass if both ends drifted.
 
     def _nonce_post(
         self,
@@ -359,9 +341,7 @@ class TestIngestAlert:
     def test_nonce_scheme_delivery_accepted(
         self, client: TestClient, spawned_runs: list[RunState]
     ) -> None:
-        # Red before WO-R2-126: the verifier MAC'd the body alone, so every
-        # delivery from the re-pinned platform 401'd and the live alert path
-        # was dead.
+        # Red before WO-R2-126: the verifier MAC'd the body alone.
         response = self._nonce_post(
             client,
             {"source": "billing", "severity": "high", "group": "billing-consumer"},
@@ -371,9 +351,7 @@ class TestIngestAlert:
         assert spawned_runs[0].alert["group"] == "billing-consumer"
 
     def test_nonce_reuse_is_refused(self, client: TestClient, spawned_runs: list[RunState]) -> None:
-        # The emitter mints a fresh nonce per delivery — a retry is a new
-        # delivery — so a repeated nonce is unambiguously a replay rather than
-        # legitimate at-least-once redelivery, and is refused outright.
+        # A fresh nonce per delivery, so a repeated nonce is a replay, not redelivery.
         alert = {"source": "billing", "severity": "high", "group": "billing-consumer"}
         timestamp = str(int(time.time() * 1000))
         first = self._nonce_post(client, alert, timestamp=timestamp, nonce="aaaa1111")
@@ -465,12 +443,8 @@ class TestIngestAlert:
 class TestIngressBodyCap:
     """An unauthenticated caller must not be able to make this process buffer.
 
-    ``/alerts`` reads the whole body before the HMAC check can reject anyone —
-    it has to, because the signature covers the body — so the only place a cap
-    can protect the process is ahead of the route. Both shapes are covered:
-    a declared Content-Length over the cap (refused without reading a byte)
-    and an undeclared/chunked body (refused the moment the running total
-    passes the cap, so lying about the length buys nothing).
+    ``/alerts`` reads the whole body before the HMAC check can reject anyone, so the cap sits
+    ahead of the route — for a declared Content-Length and for a chunked body alike.
     """
 
     _CAP = 1024
@@ -495,9 +469,7 @@ class TestIngressBodyCap:
             content=b"x" * (self._CAP * 4),
             headers={"Content-Type": "application/json"},
         )
-        # 413 and not 401 is the whole assertion: 401 would mean the body was
-        # buffered and handed to the signature check, which is the memory the
-        # cap exists to refuse to spend on an unauthenticated caller.
+        # 413 and not 401: a 401 would mean the body was buffered and signature-checked.
         assert response.status_code == 413
         assert spawned_runs == []
 
@@ -520,9 +492,7 @@ class TestIngressBodyCap:
             for _ in range(8):
                 yield b"x" * self._CAP
 
-        # A generator body makes httpx use chunked transfer-encoding, so there
-        # is no Content-Length to check and the running count is the only
-        # thing standing between the caller and the buffer.
+        # A generator body is chunked, so there is no Content-Length and the count is all.
         response = capped_client.post(
             "/alerts", content=chunks(), headers={"Content-Type": "application/json"}
         )
@@ -553,16 +523,11 @@ class TestIngressBodyCap:
 
 
 class TestDurableIncidentIdentity:
-    """ADR 0016: the incident id is derived from the triage dedup key, so an
-    at-least-once redelivery lands on the SAME incident — durably, unlike the
-    process-local replay cache (ADR 0014) that only suppresses byte-identical
-    redeliveries within the skew window.
+    """ADR 0016: the incident id is derived from the triage dedup key, so a redelivery lands
+    on the SAME incident, unlike the process-local replay cache (ADR 0014).
 
-    Every test here defeats that cache deliberately (a cleared cache or a body
-    that differs outside the identity pair), so a green result can only come
-    from derivation. ``len(spawned_runs) == 2`` is the proof: the replay branch
-    returns before spawning, so two spawns mean both deliveries ran the full
-    ingress path.
+    Every test defeats that cache, so a green can only come from derivation; two spawns
+    prove both ran the full ingress path.
     """
 
     def _post(self, client: TestClient, alert: dict[str, Any]) -> Any:
@@ -627,10 +592,7 @@ class TestDurableIncidentIdentity:
     ) -> None:
         """The corruption case the conditional ingress write exists for.
 
-        ``run_snapshots`` is append-only and ``load`` returns the highest
-        version, so an unconditional TRIAGE append on top of an in-flight
-        INVESTIGATING run would hand the resume path an evidence-stripped
-        state.
+        An unconditional TRIAGE append would strip an in-flight run's evidence.
         """
         alert = {"source": "billing", "severity": "high", "fingerprint": "kafka-lag-spike"}
         incident_id = UUID(self._post(client, alert).json()["incident_id"])
@@ -682,9 +644,7 @@ class TestDurableIncidentIdentity:
         assert second != first
         assert checkpointer.load(second) is not None
 
-        # The recurrence is a deterministic generation, not a fresh uuid4:
-        # its own redeliveries must keep landing on it, or dedupe would be
-        # lost exactly for the alerts most likely to be retried.
+        # The recurrence is a deterministic generation, not a fresh uuid4, or dedupe is lost.
         app_module._replay_cache.clear()
         third = UUID(self._post(client, alert).json()["incident_id"])
         assert third == second
@@ -773,11 +733,8 @@ def _boom(*_args: Any, **_kwargs: Any) -> RunState:
 class TestFailureRail:
     """B-04: a crashing background run must still leave a terminal record.
 
-    ``test_api.py`` injects ``run_task=capture`` everywhere else, so the real
-    ``_run_investigation`` body was never exercised — which is exactly why the
-    missing failure rail survived. Monkeypatching ``run_to_completion`` is the
-    honest seam: the Phase-0 transitions wired by ``create_app`` always
-    terminate at ESCALATED, so no realistic flow reaches a raising transition.
+    ``test_api.py`` injects ``run_task=capture`` everywhere else, so ``_run_investigation``
+    was never exercised. ``run_to_completion`` is the seam.
     """
 
     def _run(self) -> RunState:
@@ -844,14 +801,10 @@ class TestFailureRail:
     def test_crash_after_terminal_state_appends_nothing(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A crash after the outcome was decided must not overwrite it with
-        FAILED — the terminal record already tells the true story.
+        """A crash after the outcome was decided must not overwrite it with FAILED.
 
-        Two layers hold this now. ADR 0016's resume gate refuses to re-run a
-        terminal incident at all, so the crashing body is never reached; and
-        ``_record_run_failure``'s own terminal check, exercised directly below,
-        still guards a crash that happens after the loop wrote a terminal
-        snapshot internally.
+        ADR 0016's resume gate refuses to re-run a terminal incident, and
+        ``_record_run_failure``'s own terminal check guards an internal crash.
         """
         ckpt = InMemoryCheckpointer()
         run = self._run()
@@ -911,10 +864,7 @@ class TestFailureRail:
     ) -> None:
         """R2-38: the service path is where a real on-call reads the handoff.
 
-        The reason lived only on an underscore-prefixed marker that the
-        briefing filtered out, so this log line used to describe an
-        escalation without saying why — or that a Tier-1 action had already
-        fired, which is the half an on-call can act on destructively.
+        The reason lived on a filtered-out marker, so the line never said why.
         """
         from incident_commander.agent.briefing import EscalationBriefing
 
@@ -1038,10 +988,7 @@ class TestResumeGate:
     def test_awaiting_approval_is_not_resumed(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Tier-2 resume is scoped out (ADR 0016): AWAITING_APPROVAL's
-        transition is still a stub, so resuming into it would raise
-        NotImplementedError and the failure rail would turn a merely-waiting
-        incident into a FAILED one."""
+        """Tier-2 resume is scoped out (ADR 0016): resuming a stub would FAIL a waiting incident."""
         ckpt = InMemoryCheckpointer()
         run = self._run()
         ckpt.write(run.with_state(IncidentState.AWAITING_APPROVAL, datetime.now(UTC)))
@@ -1059,10 +1006,7 @@ class TestResumeGate:
 def _pool_exhausted(_engine: object, _incident_id: UUID) -> Iterator[bool]:
     """A lease attempt that dies before it can answer — the realistic loser.
 
-    ``incident_lease`` checks a connection out of the pool and runs
-    ``pg_try_advisory_lock`` on it. Under the ADR 0022 bound, a pool with no
-    free connection (or a Postgres blip) raises here, and the process learns
-    nothing about who owns the incident — least of all that it does.
+    Under the ADR 0022 bound an exhausted pool raises here and the process learns nothing.
     """
     raise OSError("connection pool exhausted")
 
@@ -1083,13 +1027,8 @@ def _escalates(state: RunState, **kwargs: Any) -> RunState:
 class TestCrashRailIsLeaseAware:
     """R2-40: only the lease HOLDER may write the terminal FAILED record.
 
-    The rail wraps admission as well as the run, so any exception on the way
-    to the lease — pool exhaustion above all — lands in the same ``except``.
-    Without a holder check it stamps FAILED on an incident this process never
-    owned, and per ADR 0016 that record is non-resumable: the worker that does
-    hold the lease has its run killed off from the outside, and because a
-    closed generation-0 makes ``derive_incident_id`` walk on, the next
-    redelivery forks a second investigation of one fault.
+    The rail wraps admission too, so pool exhaustion lands in the same ``except``: a FAILED
+    stamped by a non-holder is non-resumable (ADR 0016) and forks the next redelivery.
     """
 
     def _alert(self) -> dict[str, Any]:
@@ -1138,9 +1077,7 @@ class TestCrashRailIsLeaseAware:
                 run, _test_settings(), ckpt, engine=cast("Engine", object())
             )
 
-        # Generation 0 is still open, so the next redelivery of this alert
-        # joins the live run instead of forking a second investigation of one
-        # fault. A spurious FAILED closes it and this returns a new uuid.
+        # Generation 0 is open, so a redelivery joins the live run; a spurious FAILED forks.
         assert derive_incident_id(self._alert(), ckpt) == run.incident_id
 
         # And the holder, resuming under its own lease, still completes.

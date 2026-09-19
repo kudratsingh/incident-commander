@@ -1,15 +1,8 @@
 """The reports-layout migration moves evidence and never loses any (WO-R3-257).
 
-``scripts/migrate_reports_layout.py`` is the only thing in this repo that
-moves an eval artifact, so it is the one place where invariant 9 depends on a
-script getting it right rather than on a write refusing to overwrite. These
-tests are the proof: a manifest before anything happens, a count and a
-sha256 for every file either side of the move, a second run that does
-nothing, a refusal rather than an overwrite, and locks that come back exactly
-as they were found.
-
-Everything runs against a synthetic tree under ``tmp_path``. Nothing here
-reads or writes the real ``evals/`` tree.
+The only thing here that moves an eval artifact, so invariant 9 depends on a script
+rather than on a write refusing to overwrite. A manifest first, sha256 either side, an
+idempotent second run, a refusal rather than an overwrite, locks restored.
 """
 
 from __future__ import annotations
@@ -38,10 +31,8 @@ _RENDER = (
     "##########\nINCIDENT TRAJECTORY: {scenario}\n##########\n\nInvocation:    {inv} (1 of 1)\n"
 )
 
-# File flags are macOS/BSD only and typeshed says so, so the uchg assertions
-# reach them through one guarded name — the same shape as the script under
-# test, and as tests/unit/test_runner.py's archive-lock tests. CI is Linux:
-# this is None there, the uchg test skips, and the chmod assertions still run.
+# File flags are macOS/BSD only, so the uchg assertions reach them through one guarded
+# name. CI is Linux: this is None there and the uchg test skips.
 _CHFLAGS: Final[Callable[[Path, int], None] | None] = getattr(os, "chflags", None)
 
 
@@ -150,9 +141,7 @@ class TestThePlan:
     def test_the_newest_render_of_each_run_is_the_one_that_stays(self, tmp_path: Path) -> None:
         """ "The same run" is read from the report's headers, not from its name.
 
-        The id in a report's filename names the RENDER session. Two renders of
-        one run carry two different ids and identical ``Invocation:`` headers,
-        which is the only thing that can tell them apart.
+        Two renders carry two ids and one ``Invocation:`` header.
         """
         root = _tree(tmp_path)
         by_reason = {
@@ -295,9 +284,7 @@ class TestTheRails:
     def test_it_refuses_a_folder_that_is_not_named_reports(self, tmp_path: Path) -> None:
         """Pointed at ``evals/runs/`` — or a home directory — it does nothing.
 
-        Archives under ``evals/runs/`` are explicitly outside this work order
-        and are locked by ADR 0021. The rail is cheap and the failure it
-        prevents is not recoverable.
+        Archives are locked by ADR 0021.
         """
         runs = tmp_path / "runs"
         (runs / "deadbeefcafe").mkdir(parents=True)
@@ -339,9 +326,7 @@ class TestLocks:
     def test_a_uchg_file_is_unlocked_moved_and_re_flagged(self, tmp_path: Path) -> None:
         """macOS ``uchg`` refuses a rename outright, so it must come off and go back.
 
-        Skipped where there are no file flags. The mode half of the lock is
-        covered by the test above, which runs everywhere — that is the half CI
-        exercises, and it is the one that has to hold on Linux.
+        Skipped without file flags; the mode half runs everywhere.
         """
         assert _CHFLAGS is not None  # guarded by the skipif above
         root = _tree(tmp_path)
@@ -363,9 +348,7 @@ class TestGitTrackedFilesMoveWithGitMv:
     """History follows a tracked file, instead of reading as a delete plus an add."""
 
     def test_a_tracked_file_moves_through_git(self, tmp_path: Path) -> None:
-        # The work tree is the parent, exactly as `evals/reports` sits inside
-        # the commander: `.git` must not be under the folder being migrated,
-        # or the index would count as evidence that changed.
+        # ``.git`` must not be under the folder being migrated, or the index counts as evidence.
         root = tmp_path / "reports"
         root.mkdir()
         _report(root, "20260907T062014Z", "aaaaaaaa0001")

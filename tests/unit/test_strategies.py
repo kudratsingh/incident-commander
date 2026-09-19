@@ -1,18 +1,9 @@
 """WP-0.2 — the ``baseline`` strategy seam (plan 02 § 4, ADR 0036).
 
-Acceptance is falsifiable in one line: delete the strategy indirection and the
-canned report is unchanged; change the strategy and it is not. These tests are
-the unit half of that claim (``make eval-reg`` is the other half):
-
-* ``TestBaselineIsTheExistingCall`` — ``baseline`` returns exactly what the
-  planner call returned before the seam existed, ledger included.
-* ``TestStrategiesHoldNoExecutionPolicy`` — the seam replaces one call and
-  carries none of the policy around it, enforced by an import-and-reference
-  scan rather than by review.
-* ``TestTheRegistryRefusesWhatItDoesNotKnow`` / ``TestTheDefaultIsBaseline`` —
-  a config typo cannot silently change the control group.
-* ``TestBaselineEmitsOneCandidatePerStep`` — one ``StepRecord`` per planner
-  iteration, one candidate in it.
+Acceptance in one line: delete the indirection and the canned report is unchanged. The
+unit half (``make eval-reg`` is the other): ``baseline`` returns the old call's result,
+ledger included; the seam holds no execution policy (an import scan); the registry
+refuses what it does not know; one ``StepRecord`` per iteration, one candidate in it.
 """
 
 from __future__ import annotations
@@ -56,9 +47,7 @@ _POLICIES: Final[Path] = _REPO_ROOT / "src" / "incident_commander" / "tools" / "
 
 
 # --------------------------------------------------------------------------
-# Fakes. Deliberately local copies of the two the investigation suite uses:
-# this file must be able to fail on its own, and a shared helper edited for
-# another test's needs is how a guard quietly stops guarding.
+# Local fakes, so this file can fail on its own.
 
 
 class _FakeMCPClient:
@@ -170,10 +159,7 @@ def _settings(**overrides: Any) -> Settings:
 class TestBaselineIsTheExistingCall:
     """``baseline`` is the control group: the same call, the same result.
 
-    Not "equivalent behaviour" — the same values. If these diverge, every
-    number the live campaign produced stops describing the loop that is
-    running, and `make eval-reg`'s byte-identity is the only thing that would
-    have caught it, one CI stage later.
+    Not "equivalent behaviour" — the same values, or the numbers stop describing.
     """
 
     def test_it_returns_what_plan_next_step_returns(
@@ -192,9 +178,7 @@ class TestBaselineIsTheExistingCall:
 
         assert seam_step == direct_step
         assert seam_state == direct_state
-        # The ledger is part of "the same result": a strategy that skipped
-        # ``accrue_structured_call`` would make every budget number in every
-        # report a lower bound (ADR 0015), and the run would still look fine.
+        # Skipping ``accrue_structured_call`` makes every budget number a lower bound.
         assert seam_state.budget.tokens_used == direct_state.budget.tokens_used == 21
         assert seam_state.hypotheses == direct_state.hypotheses
         assert record.llm_calls[0].tokens_used == 21
@@ -206,9 +190,7 @@ class TestBaselineIsTheExistingCall:
         assert record.planner_input_tokens == direct_call.context_tokens == 14
 
     def test_the_planner_prompt_is_the_same_one(self, run_state: RunState, now: datetime) -> None:
-        # The canned suite keys its planner responses by prompt name, so a
-        # strategy that rendered its own system prompt would not merely change
-        # behaviour — it would change which canned queue answers the call.
+        # Canned responses are keyed by prompt name, so an own prompt changes the queue.
         direct_llm = CannedLLMClient([_stop_payload()])
         _plan_next_step(_investigating(run_state), now, direct_llm, "m")
         seam_llm = CannedLLMClient([_stop_payload()])
@@ -219,9 +201,7 @@ class TestBaselineIsTheExistingCall:
     def test_the_output_repair_wrapper_still_fires(
         self, run_state: RunState, now: datetime
     ) -> None:
-        # ADR 0035: a payload the schema rejects is re-asked once, and both
-        # calls are billed. The repair lives inside ``_plan_next_step``, so a
-        # strategy that reimplemented the call would silently drop it.
+        # ADR 0035: the repair lives inside ``_plan_next_step``, and both calls are billed.
         broken = {**_stop_payload(), "next_action": {"kind": "stop"}}  # no reason
         llm = CannedLLMClient([broken, _stop_payload()], usage=CannedUsage(output_tokens=5))
         state, step, record = BaselineStrategy().plan_next_step(
@@ -230,19 +210,14 @@ class TestBaselineIsTheExistingCall:
 
         assert len(llm.calls) == 2, "the repair re-ask did not happen"
         assert step.next_action.kind == "stop"
-        # What the step billed is what the record reports — one number, read
-        # off the ledger, so the two cannot disagree. (The canned client's
-        # rejected payload carries no usage to charge, which is why this is 5
-        # and not 10; a real client's failure does, and both are accrued.)
+        # Read off the ledger, so the two cannot disagree (the canned rejection carries no usage).
         assert state.budget.tokens_used == 5
         assert record.llm_calls[0].tokens_used == state.budget.tokens_used
 
     def test_a_planner_failure_propagates_untouched(
         self, run_state: RunState, now: datetime
     ) -> None:
-        # The loop's own except arm charges the failed call and escalates. A
-        # strategy that swallowed the exception would move that accounting
-        # behind the seam, where every future strategy has to repeat it.
+        # The loop's own except arm charges the failed call and escalates.
         llm = CannedLLMClient([])
         with pytest.raises(Exception, match="no more canned responses"):
             BaselineStrategy().plan_next_step(_investigating(run_state), now, _context(llm))
@@ -320,9 +295,7 @@ class TestBaselineEmitsOneCandidatePerStep:
     def test_a_record_is_produced_even_when_nobody_is_recording(
         self, run_state: RunState, now: datetime
     ) -> None:
-        # The tracer is opt-in (``EVAL_TRACE_DIR``) and the offline suite does
-        # not set it. Research data that only exists when someone is watching
-        # is data nobody can compare across runs.
+        # The tracer is opt-in (``EVAL_TRACE_DIR``) and the offline suite does not set it.
         _state, _step, record = BaselineStrategy().plan_next_step(
             _investigating(run_state), now, _context(CannedLLMClient([_stop_payload()]))
         )
@@ -345,9 +318,7 @@ class TestBaselineEmitsOneCandidatePerStep:
         assert "kind" not in written
 
     def test_the_record_never_reaches_run_state(self, run_state: RunState, now: datetime) -> None:
-        # Divergence C7: RunState is a frozen schema_version=3 checkpoint
-        # holding the latest ranking and nothing else. extra="forbid" would
-        # refuse a candidate set, and nothing here tries to add one.
+        # Divergence C7: RunState is a frozen schema_version=3 checkpoint, extra="forbid".
         state, _step, _record = BaselineStrategy().plan_next_step(
             _investigating(run_state), now, _context(CannedLLMClient([_stop_payload()]))
         )
@@ -358,21 +329,14 @@ class TestBaselineEmitsOneCandidatePerStep:
 class TestTheStepRecordCarriesTheCallsOwnDuration:
     """WO-R3-260: ``StepRecord.llm_calls[].elapsed_ms``, which was always null.
 
-    WP-2.1 filled every other field on the record from the planner call's own
-    report and left this one at ``None``, because nothing in ``llm/client.py``
-    timed a call. The client times its logical calls now, so the strategy's
-    job is to carry the number through — and nothing more. A stopwatch around
-    ``plan_next_step`` would also time the accrual and the ``model_copy``
-    beside it, and report them as time the model spent.
+    The client times its logical calls now, so the strategy carries the number through and
+    nothing more: a stopwatch around ``plan_next_step`` would also time the accrual.
     """
 
     def _live_shaped_client(self, payload: dict[str, Any], *, took_seconds: float) -> LLMClient:
         """A real ``LLMClient`` over a stubbed SDK — the live path, offline.
 
-        Deliberately not a ``CannedLLMClient``: this measurement only exists
-        on the client that makes real calls, so a fake that reported one would
-        prove the record's plumbing against a number the live path never
-        produces.
+        Not a ``CannedLLMClient``: the measurement exists only on the real client.
         """
         block = MagicMock()
         block.type = "tool_use"
@@ -444,9 +408,7 @@ class TestTheRegistryRefusesWhatItDoesNotKnow:
         assert STRATEGIES.create(StrategyName.BASELINE).name == "baseline"
 
     def test_the_registry_and_the_configurable_names_are_the_same_set(self) -> None:
-        # Architecture principle 2. A member with no entry passes configuration
-        # and fails at run time; an entry with no member is a strategy nothing
-        # can select.
+        # Architecture principle 2: a member with no entry fails at run time.
         assert set(STRATEGIES.names) == {member.value for member in StrategyName}
 
     def test_a_factory_under_the_wrong_key_is_refused(self) -> None:
@@ -472,10 +434,8 @@ class TestTheDefaultIsBaseline:
         assert default_strategy().name == _settings().inference_strategy.value == "baseline"
 
     def test_an_unknown_configured_strategy_is_refused_at_construction(self) -> None:
-        # The placeholder used to be "best_of_n_sampled" and then "reflection", each made
-        # a real member by its packet (WP-5.3, WP-9.1). A name from plan 02 § 4 that has
-        # no implementation yet is the right stand-in: it is what an operator reading the
-        # plan would actually mistype, and it stays unknown until its packet lands.
+        # A name from plan 02 § 4 with no implementation yet is the right stand-in — the
+        # placeholder was ``best_of_n_sampled``, then ``reflection`` (WP-5.3, WP-9.1).
         with pytest.raises(ValidationError) as caught:
             _settings(inference_strategy="search")
         message = str(caught.value)
@@ -524,9 +484,7 @@ class TestTheProtocolIsSatisfied:
         assert strategy.name == "baseline"
 
     def test_the_config_block_cannot_be_written_through(self) -> None:
-        # ``config`` is stamped into provenance. A mutable empty mapping would
-        # let a caller fill it in and have the record report knobs the run
-        # never had.
+        # ``config`` is stamped into provenance, so the default is immutable.
         strategy = BaselineStrategy()
         with pytest.raises(TypeError):
             strategy.config["n"] = 8  # type: ignore[index]
@@ -559,9 +517,7 @@ def _imported_modules(tree: ast.AST) -> dict[str, tuple[str, ...]]:
 def _referenced_names(tree: ast.AST) -> set[str]:
     """Every identifier the module's *code* uses.
 
-    AST nodes, not text: the modules here explain in prose which policy stays
-    in ``investigation.py``, and naming a thing in a docstring is the opposite
-    of depending on it.
+    AST nodes, not text: prose is not a dependency.
     """
     names: set[str] = set()
     for node in ast.walk(tree):
@@ -574,9 +530,7 @@ def _referenced_names(tree: ast.AST) -> set[str]:
     return names
 
 
-#: Modules a strategy may not import. Tool policy, the registry, the wire
-#: serializer and the MCP client are the four ways a proposal could turn into
-#: an action; ``evals`` is the harness that grades it.
+#: Modules a strategy may not import: the four ways a proposal could become an action.
 _FORBIDDEN_MODULES: Final[frozenset[str]] = frozenset(
     {
         "incident_commander.tools.policies",
@@ -586,10 +540,8 @@ _FORBIDDEN_MODULES: Final[frozenset[str]] = frozenset(
     }
 )
 
-#: Every piece of execution policy and gate logic that stays shared, by name.
-#: Each is asserted to exist in ``investigation.py`` or ``tools/policies.py``
-#: below, so a rename cannot turn this list into a set of strings that match
-#: nothing and a scan that proves nothing.
+#: Shared execution policy and gate logic, by name. Each is asserted to exist below, so
+#: a rename cannot make this match nothing.
 _FORBIDDEN_NAMES: Final[frozenset[str]] = frozenset(
     {
         "FIX_MAP",
@@ -617,10 +569,7 @@ _FORBIDDEN_NAMES: Final[frozenset[str]] = frozenset(
 class TestStrategiesHoldNoExecutionPolicy:
     """The seam replaces one call. It does not carry the policy around it.
 
-    Plan 02 § 2: new strategies propose more candidates internally, and **the
-    same execution policy gates every real action**. That is a property of the
-    import graph, not of anyone's intentions — which is why it is scanned here,
-    in the spirit of the platform's import-linter contracts.
+    Plan 02 § 2: the same execution policy gates every action — an import-graph property.
     """
 
     @pytest.mark.parametrize("module", _strategy_modules(), ids=lambda path: path.name)
@@ -682,16 +631,8 @@ class TestStrategiesHoldNoExecutionPolicy:
         assert "below threshold" in result.evidence[-1].result_summary
 
     def test_a_strategy_cannot_reach_a_tool_through_its_context(self) -> None:
-        # The context is the whole of a strategy's reach: models, its own
-        # settings, a sink. No MCP client, no registry, no run.
-        #
-        # ``selector_llm_client`` (WP-6.2) and ``critic_llm_client`` (WP-9.1) are FURTHER
-        # LLM clients and not a widening of that reach: each is the same kind of thing as
-        # ``llm_client`` — something that answers a structured prompt — and each exists
-        # because the accounting splits on ROLE, so the selector's and the critic's tokens
-        # have to be metered apart from the planner's. What this test is for is the other
-        # kind of addition: an MCP client, a tool registry, a tier map or the run itself,
-        # any of which would let a strategy act rather than propose.
+        # The whole of a strategy's reach: models, its own settings, a sink. The selector and critic
+        # clients are further LLM clients, not a widening; an MCP client or the run itself would be.
         fields = set(StrategyContext.__dataclass_fields__)
         assert fields == {
             "llm_client",

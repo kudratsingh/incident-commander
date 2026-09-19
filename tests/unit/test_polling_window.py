@@ -1,21 +1,9 @@
 """The polling window: one arithmetic, and the docs held to it (WO-R2-88).
 
-Two loops in this repo poll a live platform for a state change: ADR 0006's
-verify window (``agent/remediation.py::make_llm_verify``) and the eval
-precondition probe (``evals/runner.py::_assert_preconditions``). Both sleep
-BETWEEN attempts, so N attempts span ``(N - 1) * delay`` — and both this
-ADR's stated bound and the precondition guard used to say ``N * delay``,
-overstating every window by one whole delay.
-
-That overstatement is not a rounding error. A polling window is sized to
-outlast a staleness (here the platform's 60s metrics interval); a guard that
-overstates it green-lights a window that cannot see the change it is waiting
-for, and reports the pass as coverage. The guard passed a 5-attempt, 14.9s
-probe — 74.5s claimed, 59.6s real.
-
-So the arithmetic lives in ``config.polling_window_seconds`` and this module
-holds three things to it: the formula, the two loops that must really sleep
-that long, and ADR 0006's own numbers.
+Two loops poll a live platform — ADR 0006's verify window and the eval precondition probe
+— and both sleep BETWEEN attempts, so N attempts span ``(N - 1) * delay``. Both used to
+say ``N * delay``, overstating every window by one delay: the guard passed a 5-attempt,
+14.9s probe as 74.5s when it really waits 59.6s, short of the 60s metrics interval.
 """
 
 from __future__ import annotations
@@ -78,9 +66,7 @@ class TestTheFormula:
     def test_a_window_the_old_arithmetic_green_lit_is_now_short(self) -> None:
         """The regression case, stated as the two numbers side by side.
 
-        ``attempts * delay`` says 74.5s and clears the 60s metrics interval.
-        The real wait is 59.6s and does not: every probe in this window can
-        read the pre-change value and the run aborts as "never manufactured".
+        ``attempts * delay`` says 74.5s and clears 60s; the real wait is 59.6s.
         """
         attempts, delay = 5, 14.9
         assert attempts * delay >= PLATFORM_METRICS_INTERVAL_SECONDS
@@ -121,9 +107,7 @@ class TestBothLoopsSleepExactlyThatLong:
     ) -> None:
         """The shipped lag precondition, driven against a world that stays 0.
 
-        Every attempt reads a live-shaped payload that does not satisfy the
-        expectation, so the loop runs to exhaustion — the longest wait the
-        probe can impose, which is the one the guard is sizing.
+        The loop runs to exhaustion: the longest wait it can impose.
         """
         scenario = next(
             s
@@ -148,10 +132,7 @@ class TestBothLoopsSleepExactlyThatLong:
 class TestAdr0006StatesTheOperativeNumbers:
     """Doc-drift tripwire, same shape as ``test_docs_env_vars`` (B-03).
 
-    ADR 0006 said the window was "default 3 attempts × 15s = 45s" while no
-    configuration used 3 and the arithmetic counted a delay that is never
-    slept. A number in an ADR that no test reads is a number that drifts, so
-    the amendment's figures are built here from the constants themselves.
+    ADR 0006 said "3 attempts × 15s = 45s" while no configuration used 3.
     """
 
     @staticmethod

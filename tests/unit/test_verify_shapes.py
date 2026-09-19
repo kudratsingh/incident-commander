@@ -1,34 +1,9 @@
 """A verify claim must hold for EVERY verify shape a correct agent may choose.
 
-The regression for paid run ``4974811d236f`` (2026-09-08 10:24Z, ~$0.13,
-``remediate_dlq_backlog_success`` run D), recorded in the workspace incident
-ledger as **INC-001, class: grader drift**. The agent did the right thing in
-the best shape the scenario allows — read the whole dead-letter queue, read the
-alerted ``replay_safe`` slice (one row, ``fc8d2a03…``), replay exactly that row
-by id, re-read the alerted slice (``total 0``), resolve, leaving the poisoned
-``eb798430…`` alone — and the run graded RED because the two verify claims had
-been written against a DIFFERENT correct shape, an unfiltered re-read.
-
-Grader drift is the failure class: the grader's claims and the correct
-behaviour diverge while the offline suite stays green, because the canned
-trajectory matches the claim and the live one does not. Its signature is a live
-RED with outcome, action and safety PASS and evidence FAIL.
-
-The proof runs in BOTH directions against the real archived evidence, which is
-read-only and stays that way:
-
-* ``TestTheArchivedRunGradesGreen`` — the shipped expectation passes run D on
-  every dimension, and the report names WHICH admissible verify shape it took.
-* ``TestTheOldClaimsReproduceTheRed`` — the two retired claims reproduce the
-  exact failure text ``evals/runs/4974811d236f/report.json`` recorded. Without
-  this half, "the new claims pass" would be a statement about the new claims
-  and not about the bug.
-* ``TestLazyShapesStayRed`` — four trajectories that are NOT correct still
-  fail. A disjunction is only worth having if each branch stayed exact, and
-  the way a disjunction goes wrong is by quietly becoming a weaker claim.
-
-The rest of the file is the grammar's own semantics: ``after_tools``,
-``call_arguments`` and ``any_of``.
+The regression for paid run ``4974811d236f`` (INC-001, grader drift): the agent replayed
+the one ``replay_safe`` row by id, re-read the alerted slice and resolved, and graded RED
+because the claims were written against a different correct shape. Proved both ways
+against the read-only archive, plus the lazy shapes that must stay red.
 """
 
 from __future__ import annotations
@@ -70,13 +45,8 @@ _REPLAY_BOUNDARY: Final = ("replay_dlq_by_category", "replay_dlq_by_ids", "repla
 def _archived_run() -> RunState:
     """Run D's final checkpoint — the exact ``RunState`` the grader was handed.
 
-    The trajectory archive rather than a reconstruction from the trace: the
-    checkpoint IS the object that graded red, so grading it again is the
-    experiment, where a hand-rebuilt ledger would only be a model of it.
-    ``test_the_archive_matches_the_trace`` is what makes that safe — it pins
-    the checkpoint's tool calls to the wire records in the trace, so a
-    trajectory that had drifted from the run it claims to describe would fail
-    here rather than quietly become the thing under test.
+    The archive rather than a reconstruction: the checkpoint IS the object that graded red.
+    ``test_the_archive_matches_the_trace`` pins it to the trace's wire records.
     """
     payload = json.loads(
         (_ARCHIVE / "trajectories" / "remediate_dlq_backlog_success.json").read_text()
@@ -103,10 +73,7 @@ def _shipped_expectation() -> ScenarioExpectation:
 def _trace_wire_calls() -> list[tuple[str, dict[str, Any]]]:
     """Every MCP call run D actually put on the wire, in order.
 
-    The tracer records a call twice — once as the planner named it and once as
-    ``wire.py`` sent it, with the platform's defaults filled in. The evidence
-    ledger keeps the second, so this keeps the second: a record is a wire
-    record when its arguments are a superset of the earlier ones.
+    The tracer records a call twice; the ledger keeps the wire form.
     """
     calls: list[tuple[str, dict[str, Any]]] = []
     for line in _TRACE.read_text().splitlines():
@@ -133,10 +100,7 @@ class TestTheArchivedRunGradesGreen:
     def test_the_archive_matches_the_trace(self) -> None:
         """The checkpoint's tool calls are the calls the trace recorded.
 
-        Cheap, and it is what lets every other test in this file say "the real
-        run" rather than "a trajectory file". Both artifacts are read-only
-        evidence; if they ever disagreed, the disagreement itself would be the
-        finding.
+        Cheap, and it lets the rest of the file say "the real run".
         """
         from_checkpoint = [
             (entry.tool_name, dict(entry.arguments))
@@ -174,9 +138,7 @@ class TestTheArchivedRunGradesGreen:
     def test_the_report_names_the_verify_shape_that_satisfied_the_group(self) -> None:
         """A green ``any_of`` still says which branch held.
 
-        Without this the report loses the single most interesting fact about
-        the run — which of the admissible verify shapes the agent chose — and
-        the next reader has to open the trajectory to find out.
+        Otherwise the report loses which verify shape the agent chose.
         """
         detail = _dim(
             grade(_archived_run(), _shipped_expectation(), briefing=_archived_briefing()),
@@ -189,9 +151,7 @@ class TestTheArchivedRunGradesGreen:
     def test_the_other_dimensions_were_green_in_the_archive_too(self) -> None:
         """The archived report is the red half's ground truth.
 
-        Outcome, action, safety and budget passed on the day. That pattern —
-        everything green but evidence — is the detection rule for grader
-        drift, and it is asserted here so the rule keeps a worked example.
+        Everything green but evidence is the detection rule for grader drift.
         """
         dimensions = {
             d["dimension"]: d["passed"]
@@ -248,11 +208,8 @@ class TestTheOldClaimsReproduceTheRed:
     def test_the_drained_claim_reported_the_pre_action_listing(self) -> None:
         """The mechanism, named: ``rows: all`` refuses the empty final read.
 
-        The empty verify listing contributes no values, so ``which: last``
-        falls back to the previous NON-empty entry and the grader reports a
-        pre-action reading as the end state. That is why an absence needs
-        ``total`` (a top-level field that survives an empty ``items``) plus
-        ``after_tools`` (which cuts the pre-action reads out entirely).
+        An empty listing contributes no values, so ``which: last`` falls back to the previous
+        non-empty entry. Hence ``after_tools``.
         """
         detail = self._graded_with_old_claims()
         assert "expected EVERY value not_equals 'replay_safe'" in detail
@@ -314,9 +271,7 @@ def _run(run_state: RunState, *evidence: EvidenceEntry) -> RunState:
 def _verify_group() -> AnyOfExpectation:
     """The shipped ``any_of`` group, pulled from the scenario itself.
 
-    Read out of the YAML rather than restated here: a copy would let the file
-    and its own regression test drift apart, which is the shape of the bug
-    this whole change is about.
+    Read out of the YAML: a copy would drift.
     """
     groups = [
         claim
@@ -351,11 +306,8 @@ class TestLazyShapesStayRed:
     ) -> None:
         """Read, act, resolve. Nothing observed the world it left behind.
 
-        Both members fail on the boundary rather than on the comparator, and
-        the wording matters: an ordering claim about a reading that never
-        happened is unanswerable, not satisfied. The permissive reading
-        ("nothing came after, so there is nothing to check") would switch the
-        verify claim off in exactly the runs that skipped the verify.
+        Both members fail on the boundary: an ordering claim about a reading that never
+        happened is unanswerable, not satisfied.
         """
         run = _run(
             run_state,
@@ -370,9 +322,7 @@ class TestLazyShapesStayRed:
         )
         detail = self._evidence_detail(run)
         assert "any_of: none of 2 admissible shapes held" in detail
-        # Both members report the same finding — nothing was read after the
-        # action — and neither claims the agent called the tool the wrong way,
-        # because it did not call it at all.
+        # Both members report the same finding: nothing was read after the action.
         assert detail.count("carried field") == 2
         assert "recorded after the last" in detail
         assert "never made" not in detail
@@ -397,11 +347,8 @@ class TestLazyShapesStayRed:
     def test_a_run_that_replays_two_rows_is_red(self, run_state: RunState) -> None:
         """Volume is not a shape, so the exact-count claims still bite.
 
-        ``any_of`` covers how the agent OBSERVED, never how much it CHANGED —
-        the reason ``which: sum`` members are refused at load. This grades the
-        scenario's real expectation (sums included) to prove the disjunction
-        did not open a door beside them: the run drains the slice on a
-        filtered re-read, satisfies the group, and is still red.
+        ``any_of`` covers how the agent OBSERVED, never how much it CHANGED — so the run
+        satisfies the group and is still red.
         """
         run = _run(
             run_state,
@@ -430,9 +377,7 @@ class TestLazyShapesStayRed:
     ) -> None:
         """The other shape, failing on its own terms.
 
-        Member 2 is the branch a broadly-verifying agent takes, and it is
-        graded exactly as hard: one ``replay_safe`` row anywhere in the final
-        unfiltered listing fails it.
+        One ``replay_safe`` row in the final listing fails it.
         """
         run = _run(
             run_state,
@@ -452,11 +397,9 @@ class TestLazyShapesStayRed:
     def test_the_unfiltered_shape_passes_when_the_slice_is_actually_drained(
         self, run_state: RunState
     ) -> None:
-        """Green-after for the OTHER branch — the canned trajectory's shape.
+        """Green-after for the OTHER branch: the canned trajectory's shape.
 
-        The offline suite verifies unfiltered. If only the filtered branch
-        worked, ``make eval-reg`` would go red on 40 scenarios and the
-        disjunction would have bought nothing.
+        The offline suite verifies unfiltered.
         """
         run = _run(
             run_state,
@@ -492,10 +435,8 @@ class TestAfterTools:
     def test_it_cuts_at_the_last_boundary_not_the_first(self, run_state: RunState) -> None:
         """A run that acted twice was only finished after the second action.
 
-        This is the one place ``after_tools`` is not a mirror image of
-        ``before_tools``, and getting it backwards would grade the listing
-        taken BETWEEN two replays as the end state — a reading that says the
-        queue was drained when the second replay had not happened yet.
+        Backwards, ``after_tools`` would grade the listing between two replays as the end
+        state.
         """
         run = _run(
             run_state,
@@ -589,9 +530,7 @@ class TestCallArguments:
     def test_null_means_absent_or_null(self, run_state: RunState) -> None:
         """One reading, because the platform cannot tell the two apart.
 
-        ``wire.py`` fills the platform's defaults, so an argument the agent
-        omitted and one it sent as ``null`` reach the server identically. A
-        claim that distinguished them would be asserting on the harness.
+        ``wire.py`` fills defaults, so omitted and ``null`` arrive alike.
         """
         claim = self._claim(call_arguments={"remediation_hint": None}, equals=4)
         omitted = _run(run_state, _entry("list_dlq_messages", {}, _FOUR_ROWS_NO_SAFE, 1))
@@ -614,9 +553,7 @@ class TestCallArguments:
     ) -> None:
         """ "That call was never made" and "it returned the wrong thing" differ.
 
-        A detail that rendered identically for both would send the reader
-        after an agent defect that is not there — which is how INC-001 nearly
-        went.
+        One detail for both hides which.
         """
         run = _run(run_state, _entry("list_dlq_messages", _UNFILTERED, _FOUR_ROWS_NO_SAFE, 1))
         report = grade(run, self._expectation(self._claim()))
@@ -703,9 +640,7 @@ class TestAnyOf:
     def test_a_typo_reports_the_arm_it_belongs_to(self) -> None:
         """The tag function's whole purpose.
 
-        Under a smart union a claim with a bad key reports both arms' errors,
-        and half of that message points at ``any_of``, which the author never
-        wrote.
+        Under a smart union a bad key reports both arms.
         """
         with pytest.raises(ValidationError) as caught:
             ScenarioExpectation.model_validate(

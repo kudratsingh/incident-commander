@@ -74,10 +74,10 @@ class TestValueDrift:
         assert _kinds(drifts) == {"type"}
 
     def test_null_against_a_number_is_a_value_disagreement_not_a_type_one(self) -> None:
-        """`null` is a legal value here, and treating it as a type made the
-        ledger flake: a freshly booted platform reports `lag: null` for
-        worker-dispatcher until the 60s metrics loop first runs, then `0`.
-        Same fixture defect, two ledger keys, depending on timing."""
+        """`null` is a legal value here; treating it as a type made the ledger flake.
+
+        A fresh platform reports `lag: null` then `0`.
+        """
         as_null = compare(_call("get_consumer_lag", {"lag": 15000}), {"lag": None})
         as_zero = compare(_call("get_consumer_lag", {"lag": 15000}), {"lag": 0})
         assert _kinds(as_null) == {"value"}
@@ -173,9 +173,7 @@ class TestValueDomain:
         assert compare(_call("list_dlq_messages", canned), live) == []
 
     def test_an_empty_live_list_is_one_finding(self) -> None:
-        # `trace_investigation` pins a trace id the platform returns nothing
-        # for. That is one fact — the rows do not exist — and reporting it
-        # once beats reporting it per field the fixture happened to write.
+        # `trace_investigation` pins a trace id the platform has no rows for: one fact.
         drifts = compare(
             _call("get_trace", {"jobs": [{"status": "failed"}]}),
             {"jobs": []},
@@ -191,11 +189,8 @@ class TestValueDomain:
 class TestDomainMembershipIsTypeAware:
     """`in` uses `==`, and in Python `True == 1`. That is a contract change.
 
-    The grader's `FieldComparator.satisfied_by` refuses to let bool-vs-number
-    pass — it compares `is` the moment either side is a bool — so a fixture
-    the drift guard calls reachable can still fail the grader on the exact
-    same value. Membership here mirrors that rule: JSON type first, value
-    second.
+    `FieldComparator.satisfied_by` compares `is` when either side is a bool, so this
+    mirrors it.
     """
 
     def test_canned_true_against_a_live_one_is_type_drift(self) -> None:
@@ -233,10 +228,7 @@ class TestCannedCallDerivation:
     """Arguments come from the scenario's own canned planner, not a hand table."""
 
     def test_every_shipped_canned_tool_has_derivable_arguments(self) -> None:
-        # `canned_tool_responses` is keyed by tool name only, so the fixture
-        # does not record the call it answers. If a scenario's canned planner
-        # stops naming a tool the fixture covers, the drift check would probe
-        # it with `{}` and quietly compare against the wrong world.
+        # Keyed by tool name only, so a dropped tool would be probed with `{}`.
         scenarios = load_scenarios(_SCENARIOS_DIR)
         calls = canned_calls(scenarios)
         by_scenario = {s.name: s for s in scenarios}
@@ -278,11 +270,8 @@ class TestCannedCallDerivation:
     def test_chaos_seeded_reads_the_plan_not_the_legacy_field(self, spelling: str) -> None:
         """Both spellings of one fault mark the call chaos-seeded.
 
-        `chaos_seeded` decides whether "that entity does not exist" is an
-        observation or a probe error (`evals/fixture_probe.py`). Read off
-        `chaos_setup`, a plan-declaring scenario answers False — so the
-        un-faulted world's "not found" would be reported as a broken probe
-        for exactly the scenarios whose fault is most elaborate (ADR 0037).
+        `chaos_seeded` decides whether "does not exist" is an observation or an error;
+        off `chaos_setup` a plan answers False (ADR 0037).
         """
         from evals.graders.deterministic import ScenarioExpectation
         from evals.scenarios.schema import ChaosHook, ChaosPlan, Scenario
@@ -360,9 +349,7 @@ class TestLedgerRatchet:
     def test_key_ignores_the_observed_values(self) -> None:
         """A wobbling gauge must not force a re-bless.
 
-        If the key carried the values, every drift on a moving number would
-        read as new drift, the ledger would be re-blessed constantly, and a
-        genuinely new fixture defect would ride in on one of those blesses.
+        A key carrying the values would make every moving number read as new drift.
         """
         a = Drift(scenario="s", tool="t", path="p", kind="value", canned=1, live=2)
         b = Drift(scenario="s", tool="t", path="p", kind="value", canned=1, live=9)
@@ -413,10 +400,8 @@ class TestCommittedLedger:
 class TestEmptyLiveList:
     """One finding, not one per field.
 
-    The first CI run of this check hit an unseeded platform and turned a
-    single fact — "the platform has no rows here" — into 64 per-field
-    findings, which made the result depend on how wide each fixture happened
-    to be rather than on what was wrong.
+    The first CI run hit an unseeded platform and turned one fact into 64 per-field
+    findings.
     """
 
     def test_empty_live_list_reports_one_drift(self) -> None:
@@ -445,13 +430,9 @@ class TestEmptyLiveList:
 class TestVolatileListEmptinessSaysNothing:
     """A volatile list reports the same drift whether live is empty or not.
 
-    `get_consumer_lag.recent_samples` is the window the platform's metrics
-    loop rolls: it is `[]` for the first minute of a stack's life and
-    populated after it. Without the exemption the drift KIND depended on when
-    the check ran — `no_live_rows` inside that minute, nothing outside it —
-    and the ledger's stale check reddens on whichever key it did not see.
-    This is the `_differs_in_type` lesson (null-vs-zero landing under two
-    keys by timing) applied to list emptiness.
+    `get_consumer_lag.recent_samples` is `[]` for a stack's first minute, so without the
+    exemption the drift KIND depended on when the check ran — the `_differs_in_type`
+    lesson, for list emptiness.
     """
 
     def test_an_empty_live_window_is_not_reported(self) -> None:
@@ -474,9 +455,7 @@ class TestVolatileListEmptinessSaysNothing:
         assert compare(_call("get_consumer_lag", canned), live) == []
 
     def test_a_missing_window_is_still_shape_drift(self) -> None:
-        # The exemption is about VALUES, never about presence: a fixture that
-        # was not re-recorded for v0.6.7 must still be reported, which is how
-        # the fourteen canned lag responses were found.
+        # The exemption is about VALUES, never presence: an un-re-recorded fixture still reports.
         drifts = compare(
             _call("get_consumer_lag", {"consumer_group": "worker-dispatcher"}),
             {"consumer_group": "worker-dispatcher", "recent_samples": []},
@@ -542,12 +521,8 @@ class _Response:
 class TestSequencedFixturesProbePerElement:
     """Each element of a sequenced fixture is answered by its own live read.
 
-    A sequenced fixture records a SEQUENCE of observations — the offline run
-    serves element 0 to the investigation probe and element 1 to the verify
-    probe that follows the agent's action. Comparing both against one cached
-    snapshot makes any element that deliberately records post-action state
-    drift by construction, and `Drift` carried no index, so the report could
-    not say which element it meant.
+    Element 0 serves the investigation probe and element 1 the verify probe, so comparing
+    both against one snapshot makes post-action state drift by construction.
     """
 
     class _Stub:
@@ -639,12 +614,8 @@ class TestSequencedFixturesProbePerElement:
 class TestProbeErrorChannels:
     """A call that could not be made is RECORDED, never fatal.
 
-    ``ProbeError`` exists to say "this fixture went unchecked", but only an
-    MCP-level JSON-RPC error could ever reach it: an HTTP status, a body
-    that is not JSON, and a connection that never opened all escaped
-    ``_call_tool`` uncaught and took the whole 95-fixture drift check with
-    them. One bad gateway on one tool is not a reason to learn nothing
-    about the other ninety-four.
+    Only an MCP-level JSON-RPC error reached ``ProbeError``: an HTTP status, a non-JSON
+    body and a refused connection escaped ``_call_tool`` and took the check.
     """
 
     _REQUEST = httpx.Request("POST", "http://x/mcp")
@@ -763,11 +734,8 @@ class TestProbeErrorChannels:
 class TestBlessOnlyDropsWhatTheRunDisproved:
     """The ledger is the burn-down list, so a bless may not shrink it by accident.
 
-    ``dump_ledger`` wrote the whole file from the drift observed in one run.
-    Any entry whose fixture that run did not reach — a 502, a scenario that
-    errored, anything the probe never compared — simply vanished, which is a
-    silent deletion of work nobody disproved. A ratchet that can also be
-    turned by a flake is not a ratchet.
+    ``dump_ledger`` wrote the whole file from one run, so an unreached entry vanished.
+    A ratchet a flake can turn is not one.
     """
 
     def _drift(self, scenario: str, tool: str, path: str = "lag") -> Drift:
@@ -830,10 +798,7 @@ class TestBlessOnlyDropsWhatTheRunDisproved:
         assert [(r["context"], "kill_consumer" in r["why"]) for r in rows] == [(POST_FAULT, True)]
 
     def test_a_round_trip_preserves_keys_this_module_does_not_own(self, tmp_path: Path) -> None:
-        # `_blessed_against` records WHICH platform state the file was
-        # blessed against — the one thing that says whether a local
-        # disagreement is about the fixtures or about your postgres volume.
-        # Every bless silently dropped it.
+        # `_blessed_against` records which platform state the file was blessed against.
         path = tmp_path / "ledger.json"
         self._prior(
             path,
@@ -867,11 +832,8 @@ class TestLedgerContext:
     def test_the_stale_cache_memory_fixture_is_still_a_defect(self) -> None:
         """The case that rules out inferring context from the scenario.
 
-        `remediate_stale_cache_success` seeds a fault, so a blanket "fault
-        scenarios get a pass on value drift" rule would absolve this. But
-        `create_stale_cache` writes ONE Redis key; it cannot explain a
-        fixture claiming 1.00G of memory in use against a live 1.60M. A rule
-        would have deleted this from the work list. It stays work.
+        `create_stale_cache` writes ONE Redis key; it cannot explain a fixture claiming 1.00G
+        of memory against a live 1.60M. Still work.
         """
         context, _ = context_of(
             ("remediate_stale_cache_success", "get_redis_health", "used_memory_human", "value")
@@ -907,11 +869,8 @@ class TestLedgerContext:
     def test_the_committed_contexts_agree_with_the_code(self) -> None:
         """The file is a projection of `_JUSTIFIED`, and has to stay one.
 
-        `_JUSTIFIED` is where a human records the mechanism that makes a
-        disagreement not-work; the ledger's per-row `context` is that
-        decision written down for whoever opens the file. Nothing asserted
-        the two still said the same thing, so a re-classification in code
-        could sit next to a file that contradicted it indefinitely.
+        Nothing asserted the two still agreed, so a re-classification in code could sit next
+        to a file contradicting it.
         """
         from evals.fixture_drift_ledger import LEDGER_PATH
 
@@ -933,19 +892,8 @@ class TestLedgerContext:
     ) -> None:
         """Absolving an entry in code must remove it from the work list.
 
-        `load_entries` read a dict row's context from the FILE while reading
-        an array row's from `_JUSTIFIED`, so deciding in code that an entry
-        was post-fault changed nothing the burn-down number could see. The
-        code is the authority on classification; the file records it.
-
-        Written against a ledger this test builds rather than the committed
-        one. It used to reclassify whichever shipped entry happened to be a
-        defect, which stopped working at wave-10 for the best possible
-        reason: the burn-down list reached zero, so `next()` had nothing to
-        pick and the test raised StopIteration. A guard that only runs while
-        the work list is non-empty is a guard that switches itself off on
-        success — the mechanism it protects (code outranks file) is exactly
-        as load-bearing at zero defects as at thirteen.
+        `load_entries` read a dict row's context from the FILE and an array row's from
+        `_JUSTIFIED`. Built here rather than taken from the committed ledger, which is empty.
         """
         key = ("some_scenario", "some_tool", "some.path", "value")
         path = tmp_path / "ledger.json"
@@ -971,13 +919,8 @@ class TestLedgerContext:
     def test_the_committed_burn_down_list_is_empty(self) -> None:
         """The ratchet's terminal state, pinned so a regrowth is visible.
 
-        Wave-10 took the last thirteen defects off the list: six saga_stuck
-        `get_dag_state` entries became post-fault when the scenario was
-        rebuilt on the create_stuck_dag chaos hook, and seven alert_storm
-        entries became canned-only when the platform proved unable to burst
-        alerts. A new defect is not forbidden — fixtures drift and that is
-        what the ledger is for — but it should have to be added
-        deliberately, with this line updated in the same change.
+        Wave-10 took the last thirteen off: six saga_stuck `get_dag_state` entries became
+        post-fault and seven alert_storm entries became canned-only.
         """
         defects = [entry.key for entry in load_entries() if entry.is_defect]
         assert defects == [], (
@@ -987,9 +930,7 @@ class TestLedgerContext:
         )
 
     def test_the_original_array_format_still_parses(self, tmp_path: Path) -> None:
-        # The committed ledger predates the annotated format; a checkout
-        # mid-migration must not read as an empty ledger, which is the
-        # strictest possible reading and would fail every run.
+        # The committed ledger predates the annotated format; mid-migration is not empty.
         path = tmp_path / "old.json"
         path.write_text(
             json.dumps({"known_drift": [["consumer_lag_high", "get_consumer_lag", "lag", "value"]]})

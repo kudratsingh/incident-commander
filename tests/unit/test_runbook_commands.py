@@ -1,32 +1,9 @@
 """The operator docs must describe commands that exist (WO-R2-90).
 
-``docs/runbook.md`` and ``.env.example`` are what an operator reads immediately
-before a live run, and they had drifted away from the ``Makefile`` and from the
-runner's actual refusals in six places at once — three of them commands that
-cannot succeed as written, one of them a default that sends the reader at the
-wrong stack:
-
-* ``make eval-reset``'s documented defaults were the sibling platform checkout
-  and its ``app`` container. The Makefile defaults to this repo's demo stack and
-  the ``api`` service. Following the doc resets a different Postgres and a
-  different Redis, and reports success — the eval then runs against state
-  nobody prepared.
-* the image-bump procedure told the reader to run an unscoped
-  ``docker compose up -d --wait``, which this repo has already established
-  always fails when the one-shot services are recreated, which is exactly what
-  a digest bump does. ``make demo`` exists precisely to scope that wait.
-* the step-2 live command was a bare ``make eval-live``. An unfiltered live
-  selection is refused by the runner before any spend — twice over, in fact.
-* the DLQ seeding note named ``replay_dlq_messages`` as "the fix". That tool was
-  demoted to legacy by the v0.4.0 categorization tools and is no longer what any
-  scenario expects.
-* the cost/scope line described a 33-scenario suite.
-
-The generalisable half is that each of these is checkable against something in
-the repo that cannot itself go stale — the Makefile's own rules and ``?=``
-defaults, the scenario tree, the runner's refusals — which is what this file
-does, following the pattern ``tests/unit/test_demo_docs.py`` already uses for
-the demo docs. Nothing here hand-lists a forbidden string.
+``docs/runbook.md`` and ``.env.example`` had drifted from the ``Makefile`` and the runner's
+refusals in six places: ``eval-reset`` defaults naming the sibling checkout, an unscoped
+``compose up --wait``, a bare ``make eval-live`` (refused), ``replay_dlq_messages`` named
+as the fix, and a 33-scenario cost line. Each is checkable against the repo itself.
 """
 
 from __future__ import annotations
@@ -52,10 +29,8 @@ _OPERATOR_DOCS: Final[tuple[Path, ...]] = (_RUNBOOK, _ENV_EXAMPLE)
 _RULE: Final[re.Pattern[str]] = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*)\s*:(?!=)", re.MULTILINE)
 # `NAME ?= value` — the overridable defaults an operator can be told about.
 _DEFAULT: Final[re.Pattern[str]] = re.compile(r"^([A-Z][A-Z0-9_]*)\s*\?=\s*(.*)$", re.MULTILINE)
-# A fenced block plus its info string, so shell blocks can be told from yaml.
-# Leading whitespace is allowed and matters: the image-bump procedure — the
-# one carrying the unscoped compose wait — is a numbered list whose fences are
-# indented under it, and an anchored `^```` skips exactly those blocks.
+# A fenced block plus its info string, so shell blocks differ from yaml. Leading
+# whitespace matters: the image-bump fences are indented under a list.
 _FENCE: Final[re.Pattern[str]] = re.compile(
     r"^[ \t]*```([a-z]*)\n(.*?)^[ \t]*```", re.DOTALL | re.MULTILINE
 )
@@ -97,11 +72,8 @@ def _uncommented(block: str) -> list[str]:
 def _claim_units(doc: Path) -> list[str]:
     """``doc`` as blank-line-separated paragraphs, one claim per unit.
 
-    A paragraph rather than a line, because a claim is not reliably confined
-    to one: ``.env.example`` states ``PLATFORM_COMPOSE``'s default across two
-    wrapped comment lines, and a line-wise scan reads the variable name and
-    the word "defaults" as unrelated. Leading ``#`` is stripped so the same
-    unit shape covers the markdown docs and the env template.
+    A paragraph, not a line: ``.env.example`` states ``PLATFORM_COMPOSE``'s default across
+    two wrapped comment lines. Leading ``#`` is stripped.
     """
     units: list[str] = []
     current: list[str] = []
@@ -144,9 +116,7 @@ def test_parser_canary() -> None:
 def test_every_documented_make_target_exists() -> None:
     """A documented target that is not a rule is a command that cannot run.
 
-    ``eval-live-remediation`` was deleted for being unsafe; a doc that still
-    named it would send an operator at a target make answers with "No rule to
-    make target", which reads as a broken checkout rather than a stale doc.
+    ``eval-live-remediation`` was deleted; a doc naming it reads as broken.
     """
     targets = _make_targets()
     missing = sorted(
@@ -168,13 +138,8 @@ def test_every_documented_make_target_exists() -> None:
 def test_documented_defaults_match_the_makefile() -> None:
     """A stated default must be the real one.
 
-    Scoped to sentences that name the variable *and* claim a default, because
-    that is the claim being checked — prose that merely mentions
-    ``PLATFORM_COMPOSE`` while telling you to override it is not asserting
-    anything about its value. This is what caught ``PLATFORM_COMPOSE``:
-    both docs described the sibling platform checkout long after the Makefile
-    moved to ``demo/compose.yml``, and following that resets a stack nobody is
-    testing while reporting success.
+    Scoped to sentences that name the variable *and* claim a default. This caught
+    ``PLATFORM_COMPOSE``, which named the sibling checkout after the move to ``demo/``.
     """
     wrong: list[str] = []
     for name, default in _make_defaults().items():
@@ -193,10 +158,7 @@ def test_documented_defaults_match_the_makefile() -> None:
 def test_eval_reset_names_the_service_the_makefile_shells_into() -> None:
     """The container name is half the reset target, and it drifted with the file.
 
-    ``PLATFORM_COMPOSE`` and ``PLATFORM_SERVICE`` moved together and the docs
-    followed neither, describing a ``docker compose exec`` into the platform
-    dev stack's ``app``. The service name is not a default anyone states as a
-    default, so the check is keyed on the sentence that describes the reset.
+    ``PLATFORM_SERVICE`` is not stated as a default, so the check reads the sentence.
     """
     service = _make_defaults()["PLATFORM_SERVICE"]
     wrong = [
@@ -217,19 +179,8 @@ def test_eval_reset_names_the_service_the_makefile_shells_into() -> None:
 def test_an_unfiltered_live_run_really_is_refused(scenarios: list[Scenario]) -> None:
     """The premise of the rule below — now asserted structurally, not derived.
 
-    This test used to establish the premise from the tree: the whole suite
-    contains canned-only scenarios (exit 8) and more than one mutating scenario
-    (exit 7), so an unfiltered ``--live`` could not get through. Both are still
-    true, and both are still worth knowing — but neither is the reason any
-    more, and relying on them was the defect. Give every scenario a live leg
-    and exit 8 stops firing; the missing filter is refused on its own terms
-    now, by ``make eval-live``'s ``ifndef ONLY`` guard and by the runner's own
-    exit-2 backstop, both pinned in ``test_pre_spend_guards.py`` and
-    ``TestLiveRequiresAnExplicitSelection``.
-
-    Kept as a tripwire on the two incidental refusals, which still cover the
-    cases a filter cannot: a NAMED canned-only scenario, and a named pair that
-    both mutate.
+    The missing filter is refused on its own terms by ``make eval-live``'s ``ifndef ONLY``
+    guard and the runner's exit-2 backstop. Kept as a tripwire on exits 8 and 7.
     """
     assert [s for s in scenarios if s.canned_only], "no canned-only scenario — exit 8 unreachable"
     mutating = [s for s in scenarios if s.expectation.expected_action_tools or s.chaos_setup]
@@ -239,11 +190,8 @@ def test_an_unfiltered_live_run_really_is_refused(scenarios: list[Scenario]) -> 
 def test_documented_eval_live_invocations_are_filtered() -> None:
     """So the documented way to run a live eval must not be the refused one.
 
-    ``make eval-live`` unfiltered was the runbook's step 2 for the entire life
-    of the refusals above: the documented happy path always failed. Every
-    invocation has to carry ``ONLY=``, which is also the one-fault-one-scenario
-    protocol the rest of the runbook insists on — and, since the ``ifndef
-    ONLY`` guard, the only form make will even expand.
+    ``make eval-live`` unfiltered was the runbook's step 2 for the whole life of the
+    refusals above. Every invocation carries ``ONLY=``.
     """
     unfiltered = [
         line.strip()
@@ -262,11 +210,8 @@ def test_documented_eval_live_invocations_are_filtered() -> None:
 def test_documented_compose_waits_are_scoped_to_services() -> None:
     """`docker compose up --wait` unscoped fails whenever a one-shot re-runs.
 
-    The Makefile's own ``demo`` target carries the finding and the fix: compose
-    fails the wait when a one-shot (migrate, redpanda-init) exits during the
-    watch window, so the wait is scoped to the five long-running services. The
-    image-bump procedure told the reader to run the unscoped form — during a
-    digest bump, which recreates every one-shot there is.
+    The Makefile's ``demo`` target scopes the wait to the five long-running services; the
+    image-bump procedure used the unscoped form.
     """
     offenders = [
         line.strip()
@@ -292,9 +237,7 @@ def test_documented_compose_waits_are_scoped_to_services() -> None:
 def test_documented_suite_size_matches_the_scenario_tree(scenarios: list[Scenario]) -> None:
     """A cost estimate is only useful if its scenario count is the real one.
 
-    The runbook advertised a 33-scenario suite and "~29 live" while the tree
-    had grown past both, which understates what a live campaign costs and what
-    it covers.
+    It advertised 33 long after the tree grew.
     """
     total, live = len(scenarios), len([s for s in scenarios if not s.canned_only])
     claims = [
@@ -326,11 +269,8 @@ def test_documented_suite_size_matches_the_scenario_tree(scenarios: list[Scenari
 def test_tools_named_as_the_fix_are_ones_a_scenario_expects(scenarios: list[Scenario]) -> None:
     """ "X is the fix" must name a tool the agent is actually graded on using.
 
-    ``replay_dlq_messages`` survived in the seeding instructions long after the
-    v0.4.0 categorization tools replaced it. It is still in the registry, so an
-    "is it a known tool" check would have passed it — the honest question is
-    whether any scenario expects it, and none does. Seeding chaos and then
-    watching for the wrong tool is a run misread as a failure.
+    ``replay_dlq_messages`` is still in the registry, so "is it known" would pass it;
+    no scenario expects it.
     """
     routed = {tool for s in scenarios for tool in s.expectation.expected_action_tools}
     assert routed, "no scenario expects any action tool — the derivation is broken"
@@ -363,10 +303,7 @@ def _env_example_names() -> frozenset[str]:
 def test_env_example_documents_every_settings_field() -> None:
     """The file an operator copies must offer every knob the agent reads.
 
-    ``Settings`` has ``extra="ignore"``, so an undocumented field is not a
-    crash — it is a default nobody knew they could change, discovered during
-    an incident if at all. #166 added nine fields at once; this is what keeps
-    the next batch from landing unmentioned.
+    ``Settings`` has ``extra="ignore"``, so an undocumented field is a silent default.
     """
     from incident_commander.config import Settings
 
@@ -381,11 +318,8 @@ def test_env_example_documents_every_settings_field() -> None:
 def test_env_example_documents_every_overridable_make_default() -> None:
     """`VAR ?= x` in the Makefile is an operator knob, and `.env` is where it goes.
 
-    ``-include .env`` at the top of the Makefile means every one of these can be
-    set once in ``.env`` instead of remembered on each invocation, which the
-    runbook tells the reader to do. ``PLATFORM_SERVICE`` was such a knob and
-    appeared in no operator-facing file at all, so the half of ``eval-reset``
-    that names the container was untunable-by-documentation and silently wrong.
+    ``-include .env`` means each can be set once instead of remembered per invocation.
+    ``PLATFORM_SERVICE`` appeared in no operator-facing file.
     """
     missing = sorted(set(_make_defaults()) - _env_example_names())
     assert missing == [], (
@@ -398,10 +332,7 @@ def test_env_example_documents_every_overridable_make_default() -> None:
 def test_env_example_assigns_nothing_the_repo_does_not_read() -> None:
     """The mirror: a variable in the template that nothing consumes is a lie.
 
-    This is the ``AGENT_ENABLED``-that-no-code-read defect
-    (``tests/unit/test_docs_env_vars.py``) aimed at the file operators
-    actually copy. A name here is either a ``Settings`` field or a make
-    variable with a rule behind it; there is no third kind.
+    A name here is a ``Settings`` field or a make variable with a rule behind it.
     """
     from incident_commander.config import Settings
 
@@ -420,9 +351,7 @@ def test_env_example_assigns_nothing_the_repo_does_not_read() -> None:
     )
 
 
-# The ADR that restated the exit contract whole, in the pattern ADR 0018 set:
-# a code is defined in exactly one place and every other document agrees with
-# it or is wrong.
+# ADR 0018's pattern: a code is defined in one place and every document agrees.
 _EXIT_ADR: Final[Path] = (
     _REPO_ROOT / "docs" / "ADR" / "0037-a-scenarios-fault-is-a-plan-and-the-plan-is-put-back.md"
 )
@@ -447,13 +376,8 @@ def _runbook_exit_section() -> str:
 def test_the_runbook_exit_table_carries_every_code_the_adr_defines() -> None:
     """The operator's table and the contract's table are the same table.
 
-    The exit codes are the refusals an operator meets mid-sequence, and the
-    runbook is what they read at that moment. ADR 0037 restated the contract
-    whole as 0–10 while the runbook's table still stopped at 8 — so exits 9
-    and 10 were real, reachable, pre-spend refusals that the operational
-    record did not mention. Pinned against the ADR rather than a hand-typed
-    list here, because a code 11 must fail this test until both documents
-    have it.
+    ADR 0037 restated the contract whole as 0–10 while the runbook's table stopped at 8,
+    so exits 9 and 10 were reachable and unmentioned. Pinned against the ADR.
     """
     documented = _exit_codes(_runbook_exit_section())
     contracted = _exit_codes(_EXIT_ADR.read_text(encoding="utf-8"))

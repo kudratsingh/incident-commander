@@ -187,13 +187,8 @@ class TestRetries:
 class TestRetryAfterCeiling:
     """A server-supplied ``Retry-After`` is a hint, not an instruction.
 
-    ``LLMClient`` caps it at 60s (``llm/client.py``'s
-    ``_MAX_RETRY_AFTER_SECONDS``, applied at :218) precisely so one
-    hostile-or-buggy header cannot park a run for a day. This client
-    honoured the value unbounded, so a ``Retry-After: 86400`` on a single
-    429 outlasted every wall-clock budget the incident had (invariant 7:
-    budgets are hard limits, and a sleep the budget cannot see is not
-    bounded by it).
+    ``LLMClient`` caps it at 60s; this client honoured it unbounded, so a
+    ``Retry-After: 86400`` on one 429 outlasted every wall-clock budget (invariant 7).
     """
 
     @staticmethod
@@ -244,14 +239,9 @@ class TestRetryAfterCeiling:
 class TestMalformedResultEnvelope:
     """Every failure path raises ``MCPError`` — including envelope validation.
 
-    ``ToolResult.model_validate`` used to sit *outside* ``call_tool``'s
-    error-wrapping path, so a 200 carrying a result the envelope cannot
-    parse raised a raw ``ValidationError`` out of the module. Every
-    transition catches ``MCPError`` and nothing else
-    (``investigation.py`` :89 and :334, ``remediation.py`` :532 and :688),
-    so that one exception walked straight past the escalate-with-reason
-    rail and terminated the incident FAILED with no briefing — the
-    fail-open promise (invariant 5) inverted by a typo on the server.
+    ``ToolResult.model_validate`` used to sit *outside* the error wrapping, so an unparseable
+    result raised a raw ``ValidationError``; every transition catches ``MCPError`` only, so
+    the incident ended FAILED (invariant 5).
     """
 
     def test_non_list_content_raises_mcp_error(self) -> None:
@@ -294,11 +284,8 @@ class TestMalformedResultEnvelope:
 class TestNonConformantErrorMember:
     """``payload["error"]`` is server-controlled and need not be a mapping.
 
-    The branch called ``.get`` on it and ``int()`` on whatever came back,
-    so a bare-string error member raised ``AttributeError`` and a
-    non-numeric code raised ``ValueError`` — both escaping the module's
-    documented ``MCPError``-only contract in exactly the way the malformed
-    envelope did.
+    The branch called ``.get`` on it, so a bare-string error escaped the
+    ``MCPError``-only contract.
     """
 
     @staticmethod
@@ -364,9 +351,7 @@ class TestToolResultWireShape:
         assert ToolResult().is_error is False
 
     def test_model_dump_still_emits_snake_case_field_name(self) -> None:
-        # Trajectories, tracer JSONL, and canned fixtures all spell the
-        # field ``is_error`` — dumps must keep that spelling and must not
-        # leak a stray ``isError`` extra alongside it.
+        # Trajectories and fixtures spell it ``is_error``; no stray ``isError`` extra.
         dumped = ToolResult.model_validate({"content": [], "isError": True}).model_dump(mode="json")
         assert dumped["is_error"] is True
         assert "isError" not in dumped
@@ -459,10 +444,7 @@ def _bearer(client: MCPClient) -> str:
 class TestMakeClientPrincipalSelection:
     """S-04: an explicit empty token is a config error, not a request for root.
 
-    ``token or settings.platform_token`` conflated "no token given" with
-    "an empty token was given" and answered both with the FULL write-scoped
-    principal. "Not provided" is a documented default; "provided as empty"
-    is a broken config, and a broken config must not resolve upward.
+    ``token or settings.platform_token`` answered an empty token with the FULL principal.
     """
 
     def test_explicit_empty_token_raises(self) -> None:
@@ -470,9 +452,7 @@ class TestMakeClientPrincipalSelection:
             make_client(_settings(), token="")
 
     def test_explicit_empty_token_does_not_build_a_privileged_client(self) -> None:
-        # The assertion that catches fallback-to-privileged: at HEAD this
-        # returned a client whose Authorization header carried the full
-        # platform token.
+        # At HEAD this returned a client carrying the full platform token.
         try:
             client = make_client(_settings(), token="")
         except ValueError:

@@ -1,26 +1,9 @@
 """The planner's page, pinned — the half of the prompt nobody authored.
 
-``tests/unit/test_prompts_snapshot.py`` pins every file under
-``llm/prompts/``, so an edit to an authored prompt shows up as a hash change
-in the PR diff. The tool listing the planner is shown is not in any of those
-files: ``planner_context.format_tool_block`` assembles it from
-``TOOL_REGISTRY``, the tier map, and the platform-authored descriptions in
-``contracts/platform-tools.snapshot.json``. It therefore moves when the
-PINNED PLATFORM IMAGE moves, which no prompt hash could see.
-
-That was the gap this module closes. Platform v0.6.9 added one read tool
-(``get_outbox_status``) and the block grew by about 4,700 characters — a
-28 percent larger tool section on every planner call, with the whole unit
-suite green, because nothing pinned it. v0.6.7 and v0.6.8 each rewrote an
-existing tool's description with the same silence.
-
-``planner_context``'s own module docstring has promised this file since
-WP-5.2; it did not exist. Both halves of that promise are here: the block is
-read-tier only, and it is pinned by hash.
-
-Updating the hash is a normal part of a platform re-pin, and it is meant to
-be a deliberate line in the diff: say in the PR what moved and why, the same
-way ``_EXPECTED_HASHES`` entries are explained.
+``format_tool_block`` assembles the tool listing from ``TOOL_REGISTRY``, the tier map and
+the platform-authored descriptions in the snapshot, so it moves when the PINNED PLATFORM
+IMAGE moves, which no prompt hash could see: v0.6.9 grew it ~4,700 characters with the
+suite green. Both halves are here — the block is read-tier only, and it is pinned by hash.
 """
 
 from __future__ import annotations
@@ -33,11 +16,8 @@ from incident_commander.agent.planner_context import format_tool_block
 from incident_commander.tools.policies import Tier, tools_at_or_below
 from incident_commander.tools.registry import TOOL_REGISTRY, description_of
 
-#: The read surface the agent is shown, spelled out. Hand-listed on purpose:
-#: this is the one place a reviewer can read "what the agent can see" off the
-#: page, and a tool joining or leaving it is the change most worth putting in
-#: front of someone. Held to equality with the tier map below, so it cannot
-#: drift into a stale second copy.
+#: The read surface the agent is shown, spelled out. Hand-listed on purpose: a tool
+#: joining or leaving it is worth a reviewer's eye. Held equal to the tier map.
 _EXPECTED_READ_TOOLS: Final[frozenset[str]] = frozenset(
     {
         "get_cache_key_info",
@@ -59,9 +39,7 @@ _EXPECTED_READ_TOOLS: Final[frozenset[str]] = frozenset(
     }
 )
 
-#: sha256 of ``format_tool_block()``. Moved by the platform v0.6.9 re-pin:
-#: ``get_outbox_status`` and its description joined the listing, 13 read
-#: tools → 14, 16,689 characters → 21,420.
+#: sha256 of ``format_tool_block()``. Moved by the v0.6.9 re-pin: 13 read tools → 14.
 _EXPECTED_TOOL_BLOCK_HASH: Final[str] = (
     "3132f829b129ad0d07fea7e4bcb406cfaa10f17b3c3bf56f08f4d56c9227b0c2"
 )
@@ -107,9 +85,7 @@ class TestTheBlockIsPinned:
         )
 
     def test_every_listed_tool_carries_its_platform_description(self) -> None:
-        # The descriptions are the interface (incident-platform/CLAUDE.md):
-        # an empty one means the snapshot is stale or the loader path broke,
-        # and the planner would be choosing probes blind.
+        # The descriptions are the interface: an empty one means a stale snapshot.
         block = format_tool_block()
         for name in tools_at_or_below(Tier.READ):
             description = description_of(name)
@@ -136,10 +112,7 @@ class TestTheOutboxReadingIsOnThePage:
         assert schema["additionalProperties"] is False
 
     def test_the_description_says_which_clock_and_that_nothing_is_capped(self) -> None:
-        # The four normative description rules (incident-platform/CLAUDE.md
-        # :172-179) are the platform's to keep; this asserts the sentences
-        # that carry them actually reached what the agent reads, because a
-        # truncated or stale snapshot would drop them silently.
+        # The platform's four normative description rules reached what the agent reads.
         description = description_of("get_outbox_status")
         for phrase in (
             "FRESHNESS AND WHICH CLOCK",
@@ -153,16 +126,12 @@ class TestTheOutboxReadingIsOnThePage:
         assert description.replace("\n", "\n    ") in format_tool_block()
 
     def test_it_says_the_outbox_queue_is_not_consumer_lag(self) -> None:
-        # The discriminating fact the family exists for: without it an outbox
-        # stall and a consumer stall look the same from anything the agent
-        # can see.
+        # Without it an outbox stall and a consumer stall look the same.
         description = description_of("get_outbox_status")
         assert "not the same queue as consumer lag" in description
 
     def test_no_lab_vocabulary_reaches_the_page(self) -> None:
-        # ADR 0012: the agent must not be able to read what caused its own
-        # incident. `pause_control_loop` is the hook that stalls the relay and
-        # it must leave no trace in the read tool's prose.
+        # ADR 0012: `pause_control_loop` must leave no trace in the read tool's prose.
         block = format_tool_block().lower()
         for term in ("chaos", "pause_control_loop", "inject", "seeded"):
             assert term not in block, term

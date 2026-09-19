@@ -1,25 +1,9 @@
 """Can this suite fail a broken agent?
 
-Nothing has ever shown that it can. Every green run to date proves the
-harness *ran*; none of them proves it would have gone red had the agent
-misbehaved. Phase 1's exit criterion asks for exactly this and it was never
-built, so "26/26 passed" has always been weaker evidence than it reads as.
-
-The offline gate cannot supply it by accident, either. ``CannedLLMClient``
-plays back a fixed sequence and never reads the prompt, so you cannot break
-the agent by breaking its instructions — a sabotaged prompt produces an
-identical run. What you *can* do is change the decisions, which is what the
-canned responses are: offline, they ARE the agent's behaviour.
-
-So each case below takes a scenario that passes, makes the agent do one
-specific wrong thing, and asserts the run goes red **on the dimension that
-is supposed to notice**. Wrong-reason reds are worth as little as
-wrong-reason greens, so every case pins the dimension rather than just
-``passed is False``.
-
-The whole assembled chain runs — real runner, real transitions, real grader.
-A test that graded a synthetic ``RunState`` would prove the grader works and
-say nothing about whether the runner would ever hand it that state.
+Every green run proves the harness *ran*, not that it would have gone red. Offline the
+canned responses ARE the agent's behaviour (``CannedLLMClient`` never reads the prompt),
+so each case makes the agent do one wrong thing and pins the dimension that must notice.
+The whole assembled chain runs: real runner, real transitions, real grader.
 """
 
 from __future__ import annotations
@@ -47,30 +31,15 @@ _SCENARIOS_DIR = Path(__file__).resolve().parents[2] / "evals" / "scenarios"
 # A remediation scenario that passes offline and exercises the full loop:
 # investigate -> plan -> remediate -> verify -> resolved.
 _SUBJECT = "remediate_dlq_backlog_success"
-# The subject-less counterpart, for the one case that needs an unsafe action to
-# actually reach the platform. `dlq_mixed_partial`'s alert names no category on
-# purpose (ADR 0031), so ADR 0032's subject-target guard is inert on it and a
-# sabotaged plan executes — which is what leaves SAFETY something to grade.
+# The subject-less counterpart: `dlq_mixed_partial`'s alert names no category (ADR 0031),
+# so ADR 0032's guard is inert and a sabotaged plan executes.
 _SUBJECTLESS = "dlq_mixed_partial"
 
-# BUDGET is exempt, and is exempt *by name*: since ADR 0019 the cap is the
-# runtime ceiling the loop enforces as it goes, so an offline agent cannot
-# exceed it — the loop stops it before the grader is ever handed an
-# over-budget run. There is no canned sequence that reds BUDGET here, and
-# its failure mode is exercised directly against the grader in
-# test_grader.py instead.
-#
-# Stating the exemption rather than encoding it by omission is the point of
-# WO-R2-79. The coverage floor below used to parametrize over a hand-copied
-# list of four members, which reads as "these four are watched" but means
-# "everything else is unwatched, silently" — a sixth dimension would have
-# joined the grader with no case and no failure, the exact hole the floor
-# exists to close.
+# BUDGET is exempt BY NAME: since ADR 0019 the cap is the runtime ceiling the loop enforces,
+# so an offline agent cannot exceed it; its red lives in test_grader.py (WO-R2-79).
 _EXEMPT_DIMENSIONS: Final[frozenset[GradeDimension]] = frozenset({GradeDimension.BUDGET})
 
-# Derived, never hand-maintained: every dimension the grader scores, minus
-# the recorded exemptions. Adding a member to GradeDimension adds a required
-# case here on the next collection.
+# Derived, never hand-maintained: every dimension the grader scores, minus exemptions.
 _WATCHED_DIMENSIONS: Final[tuple[GradeDimension, ...]] = tuple(
     sorted(set(GradeDimension) - _EXEMPT_DIMENSIONS, key=lambda dimension: dimension.name)
 )
@@ -94,18 +63,8 @@ def _with_llm(scenario: Scenario, mutate: Any) -> Scenario:
 def _with_ground_truth(scenario: Scenario, *causes: HypothesisCategory) -> Scenario:
     """A copy of the scenario carrying the answer key, stated at the call site.
 
-    Since WO-R3-261 the subject's YAML declares the same label this is called
-    with, so the copy is now a restatement rather than a back-fill — and it is
-    kept, because the point of a negative control is that the thing being
-    graded is visible in the test rather than resolved from a file. It attaches
-    the cause the scenario's world actually manufactures; the sabotage below is
-    still done to the AGENT, not to the answer key, which is what keeps this
-    file's discipline intact: every case here makes the agent do one specific
-    wrong thing.
-
-    Evaluator-only, so attaching it cannot reach the agent: the runner builds
-    the run from ``agent_visible()``, an allow-list this field is not on
-    (ADR 0038, ``tests/unit/test_ground_truth_never_leaks.py``).
+    Kept visible in the test rather than resolved from a file; the sabotage is done to the
+    AGENT, not the key. Evaluator-only, so it cannot reach the agent (ADR 0038).
     """
     return scenario.model_copy(
         update={"ground_truth": GroundTruth(incident_count=1, root_causes=causes)}
@@ -133,9 +92,7 @@ class TestTheControlItself:
 
 class TestABrokenAgentIsCaught:
     def test_an_agent_that_never_acts_fails_on_ACTION(self) -> None:
-        # The planner stops instead of handing off to remediation. The run
-        # ends ESCALATED having done nothing, which is exactly the shape of
-        # a regression that quietly disables remediation.
+        # The planner stops instead of handing off: the run ends ESCALATED having done nothing.
         def _stop_instead(responses: dict[str, list[dict[str, Any]]]) -> None:
             for step in responses["investigation_planner"]:
                 if (step.get("next_action") or {}).get("kind") == "remediate":
@@ -160,35 +117,8 @@ class TestABrokenAgentIsCaught:
         )
 
     def test_an_agent_that_replays_a_forbidden_category_fails_on_SAFETY(self) -> None:
-        # The one that matters most: an unsafe action the platform would
-        # refuse. SAFETY must red the ATTEMPT, per docs/eval-methodology.md.
-        #
-        # Run on the SUBJECT-LESS scenario, and the move is ADR 0032's doing.
-        # On `_SUBJECT` this sabotage no longer reaches the platform at all —
-        # its alert names the `replay_safe` slice, so the subject-target guard
-        # refuses a `human_required` sweep before execution and the run ends
-        # ESCALATED, red on OUTCOME/ACTION/EVIDENCE and green on SAFETY,
-        # because nothing unsafe happened. That is the harness working, and it
-        # would have quietly deleted this case's witness: SAFETY would have had
-        # no sabotage left that it alone reds.
-        #
-        # `dlq_mixed_partial` is where the witness lives now. Its alert names
-        # no subject — deliberately, so the mixed-queue rule stays measurable
-        # (ADR 0031) — so the guard is inert, the unsafe sweep executes, and
-        # SAFETY reds on its own. The pairing is the honest one: where a plan
-        # guard can stop an unsafe action it does, and where no guard can, the
-        # grader still catches it.
-        #
-        # WO-R2-164 moved that scenario's terminal state to `escalated` and the
-        # case got STRONGER rather than needing a move again. The sabotage
-        # sweeps `human_required`, which addresses one of four rows, so the
-        # alerted-condition check escalates the run — and the scenario now
-        # EXPECTS `escalated`, so OUTCOME stays green and this remains the
-        # clean single-dimension red the matrix below claims it is. Every other
-        # dimension is green for its own reason: the canned replay reply
-        # reports `replayed: 1` whatever category it was handed, the tool is in
-        # `expected_action_tools`, and the briefing claims are satisfied by the
-        # escalation reason and the investigation trail.
+        # An unsafe action the platform would refuse: SAFETY must red the ATTEMPT. Run on the
+        # SUBJECT-LESS `dlq_mixed_partial`, because ADR 0032's guard would refuse it elsewhere.
         def _unsafe(responses: dict[str, list[dict[str, Any]]]) -> None:
             for step in responses["remediation_planner"]:
                 step["action_tool"] = "replay_dlq_by_category"
@@ -207,14 +137,8 @@ class TestABrokenAgentIsCaught:
     ) -> None:
         """The stronger claim, and the reason the case above had to move.
 
-        Grading an unsafe action after the fact is the weaker guarantee. On a
-        scenario whose alert names its subject, the identical sabotage is
-        refused at PLANNING and the tool is never called — so there is nothing
-        for SAFETY to grade, and OUTCOME reds instead because the run escalates
-        having done nothing.
-
-        Asserted on the tools actually called rather than on the dimensions, so
-        this says "it did not happen" rather than "it was noticed".
+        On a scenario whose alert names its subject the identical sabotage is refused at PLANNING
+        and the tool is never called. Asserted on the tools called, not on the dimensions.
         """
 
         def _unsafe(responses: dict[str, list[dict[str, Any]]]) -> None:
@@ -246,18 +170,8 @@ class TestABrokenAgentIsCaught:
     def test_an_agent_that_names_the_wrong_cause_fails_on_ROOT_CAUSE(self) -> None:
         """WP-2.2's headline case, through the whole chain rather than the grader alone.
 
-        The agent takes every correct step — the two listings, the replay of
-        the alerted slice, the verify — and reaches RESOLVED, while calling
-        the fault a stale cache. Before ROOT_CAUSE existed, that run and a
-        correctly-reasoned one were the same green row: a right answer for
-        the wrong reason is luck, and the suite could not say so.
-
-        ``stale_cache`` is the sabotage rather than an escalate-only category
-        on purpose. It is in ``FIX_MAP``, so the remediate gate still hands
-        off to PLANNING and the run still resolves — which is what leaves
-        OUTCOME green and makes this a clean single-dimension red. A category
-        outside the map would escalate the run and red four dimensions at
-        once, proving something weaker.
+        Every step is correct and the run RESOLVES while calling the fault a stale cache.
+        ``stale_cache`` is in ``FIX_MAP``, so OUTCOME stays green and the red is single.
         """
 
         def _misdiagnose(responses: dict[str, list[dict[str, Any]]]) -> None:
@@ -266,9 +180,7 @@ class TestABrokenAgentIsCaught:
                     hypothesis["category"] = HypothesisCategory.STALE_CACHE.value
 
         truthful = _with_ground_truth(_subject(), HypothesisCategory.POISON_MESSAGE)
-        # The control's control: with the answer key attached and nothing
-        # sabotaged, the scenario still passes — so the red below is the
-        # misdiagnosis and not the ground truth being wrong about the world.
+        # The control's control: key attached, nothing sabotaged, still passes.
         assert _grade(truthful).passed, "the attached ground truth does not match the scenario"
 
         report = _grade(_with_llm(truthful, _misdiagnose))
@@ -280,13 +192,8 @@ class TestABrokenAgentIsCaught:
         assert report.dimensions[0].passed, "OUTCOME must stay green — the incident was fixed"
 
     def test_an_agent_that_skips_investigation_fails_on_EVIDENCE(self) -> None:
-        # Straight to remediation with no probe, so nothing is cited.
-        #
-        # Honest about what this shows: EVIDENCE fires, but so do OUTCOME and
-        # ACTION, because skipping investigation also means the confidence
-        # handoff is refused and no action runs. It is a cascade, not an
-        # isolated EVIDENCE probe — see the matrix below for which cases are
-        # clean single-dimension reds and which are not.
+        # Straight to remediation with no probe. EVIDENCE fires, but so do OUTCOME and ACTION:
+        # it is a cascade, not an isolated probe — see the matrix below.
         def _no_probe(responses: dict[str, list[dict[str, Any]]]) -> None:
             first = responses["investigation_planner"][0]
             first["next_action"] = {"kind": "remediate", "reason": "sabotage: no evidence"}
@@ -297,9 +204,8 @@ class TestABrokenAgentIsCaught:
         )
 
 
-# What each sabotage actually produces, measured rather than assumed. Two of
-# the four are clean single-dimension reds, which is the stronger result: the
-# suite pinpoints the specific misbehaviour rather than merely going red.
+# What each sabotage produces, measured rather than assumed — two of the four are clean
+# single-dimension reds:
 #
 #   sabotage              red dimensions
 #   ------------------    -----------------------------
@@ -310,24 +216,14 @@ class TestABrokenAgentIsCaught:
 #   names the wrong cause ROOT_CAUSE only    (ground truth attached)
 #   skips investigation   outcome, evidence, action
 #
-# The unsafe-replay row carries its scenario because it is the one case whose
-# subject moved. On a scenario whose alert names a slice, ADR 0032 refuses that
-# sabotage at PLANNING and it reds outcome/evidence/action instead — a stronger
-# result and a different claim, asserted separately on tools-called rather than
-# on dimensions.
-#
-# The cascading pairs are indistinguishable from each other by dimension
-# alone. That is a real limit on how precisely a red run can be attributed,
-# and it is what BUILD_PLAN 3.3's escalation taxonomy would address.
+# The cascading pairs are indistinguishable by dimension alone.
 
 
 class TestTheControlWouldNoticeItsOwnDecay:
     def test_each_case_changes_something(self) -> None:
         """A mutation that no longer mutates is a test that passes for free.
 
-        If the subject's canned shape moves — a renamed key, a restructured
-        next_action — a mutator can silently become a no-op and its case
-        would then be asserting against an unmodified run.
+        If the canned shape moves, a mutator becomes a no-op.
         """
         subject = _subject()
 
@@ -353,21 +249,8 @@ class TestTheControlWouldNoticeItsOwnDecay:
 def test_the_watched_set_is_derived_from_the_enum() -> None:
     """The floor must keep walking the enum, not a copy of it.
 
-    Two ways the coverage floor below can quietly stop being a floor, and
-    this is the test that refuses both:
-
-    * the parametrize argument is turned back into a hand-written list of
-      members. Then it enumerates itself again and a new dimension joins the
-      grader unwatched — the WO-R2-79 failure, and the state this file was
-      in until now;
-    * ``_EXEMPT_DIMENSIONS`` grows an entry that is not a real member (a bare
-      string, a member that has since been renamed away), which would exempt
-      nothing while reading as though it exempted something.
-
-    The partition is the invariant: watched and exempt must together be
-    exactly ``GradeDimension``, with nothing in both and nothing in neither.
-    Note the honest limit — deleting ``BUDGET`` outright fails at import,
-    not here, because the exemption names the member directly.
+    Two ways it stops being a floor: the parametrize argument becomes a hand-written list
+    (WO-R2-79), or ``_EXEMPT_DIMENSIONS`` names something that is not a real member.
     """
     watched = set(_WATCHED_DIMENSIONS)
     unknown = _EXEMPT_DIMENSIONS - set(GradeDimension)
@@ -386,9 +269,7 @@ def test_the_watched_set_is_derived_from_the_enum() -> None:
         f"list is how a dimension joins the grader with no negative control."
     )
     assert not watched & _EXEMPT_DIMENSIONS, "a dimension is both watched and exempt"
-    # Anti-vacuity canary: every assertion above is satisfied by an empty
-    # watched set, and an empty parametrize list collects zero cases and
-    # reports green. The grader scores six dimensions and exempts one.
+    # Anti-vacuity canary: every assertion above is satisfied by an empty watched set.
     assert len(watched) >= 5, (
         f"only {len(watched)} dimension(s) are watched, so the coverage floor "
         f"below collects almost nothing. Either GradeDimension shrank or the "
@@ -401,9 +282,7 @@ def test_the_watched_set_is_derived_from_the_enum() -> None:
 def test_every_gradeable_dimension_has_a_case(dimension: GradeDimension) -> None:
     """Coverage floor, so a dimension cannot join the grader unwatched.
 
-    Parametrized over the enum minus ``_EXEMPT_DIMENSIONS`` (see the reason
-    recorded there for BUDGET), so adding a dimension to the grader adds a
-    failing case here until someone writes the sabotage that reds it.
+    Parametrized over the enum minus ``_EXEMPT_DIMENSIONS``.
     """
     source = Path(__file__).read_text()
     assert f"fails_on_{dimension.name}" in source, (

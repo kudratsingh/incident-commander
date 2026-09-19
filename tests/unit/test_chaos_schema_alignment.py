@@ -1,27 +1,9 @@
 """Chaos-tool invocations must match the snapshot's chaos inputSchemas (S-18).
 
-Chaos tools are deliberately excluded from ``TOOL_REGISTRY`` (the
-``[chaos:`` description-prefix filter — see ``test_registry.py``): the
-agent never calls them, so they have no local Pydantic models. But two
-commander-side surfaces DO invoke them blind, over raw JSON-RPC:
-
-- scenario YAML ``chaos_setup`` blocks (fired by the runner before a
-  live run), and
-- ``scripts/chaos_setup.py``'s CLI subcommands (the flag-less
-  ``make chaos-*`` targets).
-
-Until this walk, neither was validated against anything — a platform-side
-chaos-schema change surfaced only as a live ``ChaosInvocationError``
-during seeding, after run startup cost was already spent. Every chaos
-invocation this repo can produce is checked here against the committed
-snapshot's inputSchema for the named tool: argument names, required
-fields, and primitive argument types (a name+required-only check would
-not catch S-18's own probe, a ``ttl_seconds`` integer→string flip).
-
-The snapshot is read-only here as everywhere: when this test fails, the
-fix lands in the scenario YAML / the CLI table (commander drifted) or in
-a platform-pin bump + ``make snapshot`` (platform drifted) — never in a
-hand edit of the snapshot.
+Chaos tools are excluded from ``TOOL_REGISTRY`` (the ``[chaos:`` filter), so they have no
+local models — yet scenario ``chaos_setup`` blocks and ``scripts/chaos_setup.py`` invoke
+them blind. Each invocation is checked against the snapshot: names, required fields and
+primitive types. The snapshot is read-only; the fix is the YAML, the CLI table or a pin.
 """
 
 from __future__ import annotations
@@ -70,18 +52,8 @@ class _ChaosCase:
 def _cli_call_sites() -> dict[str, tuple[int, ...]]:
     """Every ``client.call("<tool>", ...)`` in ``scripts/chaos_setup.py``, by tool.
 
-    Walks the script's AST rather than trusting the table below it. The
-    anti-vacuity check used to assert a hardcoded length against the
-    hardcoded tuple in this same file, which could only fail if someone
-    edited that tuple — it said nothing whatever about the script it
-    claimed to mirror, so a new or deleted chaos call site changed nothing
-    and no test went red.
-
-    The tool name is the first positional argument at every call site and
-    is a string literal at all of them, which is what makes the walk
-    possible; a call site that computed its tool name would show up here
-    as absent and fail the set comparison, which is the right direction to
-    fail in.
+    Walks the script's AST rather than trusting the table below it; the old check compared a
+    literal against a tuple in this same file. A computed tool name shows up as absent.
     """
     tree = ast.parse(_CHAOS_SCRIPT.read_text(encoding="utf-8"))
     sites: dict[str, list[int]] = {}
@@ -100,13 +72,8 @@ def _cli_call_sites() -> dict[str, tuple[int, ...]]:
 def _cli_chaos_tools() -> set[str]:
     """The chaos half of those call sites, split from the registry half structurally.
 
-    ``restart_consumer_group`` is a real registry tool the restore path
-    calls, already covered by the registry and snapshot contract tests.
-    Rather than naming it as an exception, it is excluded by the same
-    property this whole module is organised around: chaos tools are the
-    ones deliberately kept OUT of ``TOOL_REGISTRY`` by the ``[chaos:``
-    description filter. A newly added registry call site is excluded for
-    free; a newly added chaos call site is not.
+    ``restart_consumer_group`` is excluded by the property this module is organised around —
+    chaos tools are the ones kept OUT of ``TOOL_REGISTRY`` — not by name.
     """
     return set(_cli_call_sites()) - set(TOOL_REGISTRY)
 
@@ -114,11 +81,8 @@ def _cli_chaos_tools() -> set[str]:
 def _scenario_files_declaring_chaos() -> tuple[str, ...]:
     """Scenario files whose YAML carries a ``chaos_setup`` key, read raw.
 
-    Deliberately independent of ``load_scenarios``: this is the reference
-    the loader is checked against, so it must not share the loader's
-    failure modes. The floor it replaces was ``>= 1`` against four real
-    scenarios, so three could silently drop out of the walk — including
-    via exactly the loader change the comment said it was watching for.
+    Deliberately independent of ``load_scenarios``: this is the reference the loader is
+    checked against, so it shares no failure modes.
     """
     names: list[str] = []
     for path in sorted(_SCENARIOS_DIR.rglob("*.yaml")):
@@ -147,14 +111,8 @@ def _scenario_cases() -> list[_ChaosCase]:
     return cases
 
 
-# Hand-maintained mirror of scripts/chaos_setup.py's six chaos call sites,
-# invoked with their argparse defaults — exactly what the flag-less
-# `make chaos-*` targets send. The duplication is deliberate: when a
-# chaos_setup.py call site changes, this table is the one-line fix that
-# keeps the tripwire honest (each entry cites its source lines).
-# `restore-consumer` (scripts/chaos_setup.py:241-245) is excluded on
-# purpose: it calls `restart_consumer_group`, a registry tool already
-# covered by the registry/snapshot contract tests, not a chaos hook.
+# Hand-maintained mirror of scripts/chaos_setup.py's six chaos call sites, invoked with
+# their argparse defaults. `restore-consumer` is excluded: it calls a registry tool.
 _CLI_CASES: Final[tuple[_ChaosCase, ...]] = (
     # scripts/chaos_setup.py:161-164 (kill-consumer; defaults at :83-84)
     _ChaosCase(
@@ -162,9 +120,7 @@ _CLI_CASES: Final[tuple[_ChaosCase, ...]] = (
         tool="kill_consumer",
         arguments={"consumer_group": "worker-dispatcher", "ttl_seconds": 300},
     ),
-    # scripts/chaos_setup.py:174-181 (poison-message; defaults at :90-96).
-    # payload defaults to json.loads("{}") == {}; the call site always
-    # sends partition_key, None by default.
+    # scripts/chaos_setup.py:174-181; payload defaults to {} and partition_key is sent.
     _ChaosCase(
         source="cli:poison-message",
         tool="poison_message",
@@ -182,14 +138,8 @@ _CLI_CASES: Final[tuple[_ChaosCase, ...]] = (
         tool="inject_latency",
         arguments={"consumer_group": "worker-dispatcher", "latency_ms": 2000, "ttl_seconds": 300},
     ),
-    # scripts/chaos_setup.py:219-225 (bad-deploy; defaults at :118-120).
-    # Two cases because this is the one call site that shapes its argument
-    # dict conditionally: `if args.note:` (a truthiness test, so both the
-    # None default and an explicit `--note ""` omit the key entirely).
-    # This entry used to send `note: None` "to record the argparse
-    # default", which mirrored an invocation the CLI cannot produce — the
-    # tripwire was validating a payload no code path emits, which is the
-    # one thing a mirror must never do.
+    # scripts/chaos_setup.py:219-225. The one call site that shapes its dict conditionally:
+    # `if args.note:` omits the key for both None and `--note ""`.
     _ChaosCase(
         source="cli:bad-deploy",
         tool="bad_deploy",
@@ -217,10 +167,8 @@ _CLI_CASES: Final[tuple[_ChaosCase, ...]] = (
 _ALL_CASES: Final[tuple[_ChaosCase, ...]] = tuple(_scenario_cases()) + _CLI_CASES
 
 
-# The type walk itself now lives in ``evals/scenarios/schema.py``, because
-# ``ChaosHook`` enforces the same rules at scenario-load time (G1-07). This
-# file keeps the CLI half of the corpus and the mutated-snapshot probes; the
-# comparison logic is imported so the two cannot drift apart.
+# The type walk lives in ``evals/scenarios/schema.py``: ``ChaosHook`` enforces the
+# same rules at load time (G1-07).
 def _json_types_for(prop: dict[str, Any]) -> set[str]:
     return set(json_types_for(prop))
 
@@ -271,13 +219,8 @@ class TestChaosInvocationsMatchSnapshot:
     def test_cli_table_covers_every_chaos_call_site_in_the_script(self) -> None:
         """The hand-maintained mirror must equal the set the script produces.
 
-        The arguments still have to be written out by hand — they are
-        argparse defaults resolved at runtime, not statically readable —
-        but *which tools get invoked* is now derived. Adding a chaos call
-        site to ``scripts/chaos_setup.py`` without adding its case here
-        fails, which is what the old ``== 6`` was meant to do and could
-        not: it compared a literal against the tuple sitting six lines
-        above it in this same file.
+        The arguments are argparse defaults and stay hand-written; WHICH tools get invoked is
+        derived, which the old ``== 6`` could not do.
         """
         derived = _cli_chaos_tools()
         mirrored = {c.tool for c in _CLI_CASES}
@@ -294,12 +237,8 @@ class TestChaosInvocationsMatchSnapshot:
     def test_every_scenario_declaring_chaos_reaches_the_walk(self) -> None:
         """The loader must not quietly drop a ``chaos_setup`` block.
 
-        Replaces a ``>= 1`` floor that four real scenarios cleared, so
-        three of them could have vanished from the corpus without a red
-        test — and the mechanism the comment feared (a loader change that
-        drops the field) is precisely the one a floor of one cannot see.
-        The reference side reads the YAML directly, so it shares no code
-        with the loader it is checking.
+        Replaces a ``>= 1`` floor that four scenarios cleared, so three could have vanished.
+        The reference side reads the YAML directly.
         """
         declared = set(_scenario_files_declaring_chaos())
         walked = {
@@ -324,12 +263,8 @@ class TestChaosInvocationsMatchSnapshot:
 class TestBadDeployNoteShape:
     """``note`` is optional and nullable, and no invocation asserts that now.
 
-    The CLI table used to carry ``note: None`` on the flag-less case,
-    which pinned the platform property as present-and-nullable as a side
-    effect of mirroring an invocation that does not exist. Removing the
-    fiction removes the pin, so the pin is stated directly instead — a
-    property that becomes required, or loses its null branch, still fails
-    here rather than at live seeding time.
+    The CLI table used to carry ``note: None``, pinning the property as a side effect of
+    mirroring an invocation that does not exist. Stated directly instead.
     """
 
     def test_note_is_optional_on_the_platform_side(self) -> None:
@@ -380,12 +315,8 @@ class TestS18Probe:
             _validate_case(case, schemas)
 
     def test_unknown_tool_points_at_the_pin_bump_flow(self) -> None:
-        # The sentinel is a name that cannot ever be blessed, not a real tool
-        # awaiting a pin bump. This probe used seed_dlq_messages until the
-        # v0.5.0 rebless made it the 27th snapshot tool — at which point the
-        # case stopped exercising the unknown-tool branch and started failing
-        # on a missing required argument instead. A synthetic name keeps the
-        # branch pinned across every future rebless.
+        # The sentinel is a name that can never be blessed: this probe used seed_dlq_messages
+        # until the v0.5.0 rebless made it a snapshot tool and the branch stopped being tested.
         case = _ChaosCase(
             source="probe:unknown-tool", tool="chaos_tool_that_does_not_exist", arguments={}
         )

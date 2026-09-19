@@ -1,15 +1,8 @@
 """WP-5.2's reporting half: pass@k, appeared-at-any-step, and two duplicate rates.
 
-The two properties that are decisions rather than arithmetic:
-
-* pass@k is scored at the **deciding** step and "appeared at any step" is a
-  different number — ``TestTheTwoQuestionsDiffer`` builds the fixture the order
-  asks for, where the correct candidate appears early and is dropped, and shows
-  the two disagreeing on it.
-* "duplicate rate" is two numbers and neither is the other — a set that repeats
-  itself never reaches a record (the schema refuses it), so the within-step rate
-  is computed from billed refusals while the cross-step rate is computed from
-  what was accepted.
+Two decisions rather than arithmetic: pass@k is scored at the DECIDING step and "appeared
+at any step" is a different number; and the within-step duplicate rate comes from billed
+refusals while the cross-step one comes from what was accepted.
 """
 
 from __future__ import annotations

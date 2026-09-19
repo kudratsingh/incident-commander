@@ -1,21 +1,9 @@
 """The cross-satisfiability audit, and the CI guard it powers.
 
-``failed_traces_scan`` passed the trusted 26/26 live run without ever
-calling ``search_traces``: the agent probed ``list_dlq_messages`` and
-``get_deploy_history``, escalated, and the scenario's one evidence assert
-— the substring ``trace`` — was satisfied because DLQ rows carry a
-``trace_id`` field. The scenario exists to prove the agent scans failed
-traces, and it proved nothing (context/INDEX.md, 2026-08-16 dress
-rehearsal). The existing hygiene rule ("assert a field name, never a
-value") permits the whole class, because field names recur across tools.
-
-``evals/evidence_audit.py`` closes the class mechanically: a token in
-``expected_evidence_contains`` that could appear in the recorded output
-of two or more tools cannot prove which tool ran, and must instead be a
-tool-scoped ``expected_evidence_fields`` assert. The suite-wide test at
-the bottom is the lasting guard — the next scenario written with a
-cross-satisfiable token fails here, in CI, instead of going green for
-the wrong reason in a paid live run.
+``failed_traces_scan`` passed the trusted 26/26 live run without calling
+``search_traces``: its one assert, the substring ``trace``, was satisfied because DLQ rows
+carry a ``trace_id`` field. So a token that could appear in two tools' output cannot prove
+which ran, and must be a tool-scoped ``expected_evidence_fields`` assert.
 """
 
 from __future__ import annotations
@@ -102,9 +90,7 @@ class TestReachableFieldNames:
 
 class TestRenderedCannedEvidence:
     def test_fixture_is_rendered_the_way_the_runtime_records_it(self) -> None:
-        # extra fields are dropped by the output model (extra="ignore"), so a
-        # raw-fixture substring match would over-approximate what evidence
-        # can contain; the rendered corpus must not.
+        # extra fields are dropped by the output model, so the rendered corpus is the reference.
         raw = (
             '{"consumer_group":"g","lag":5,"lag_known":true,"source":"static","cache_key":"kafka:consumer_lag:g",'
             '"internal_debug_note":"never-recorded"}'
@@ -145,11 +131,8 @@ class TestRenderedCannedEvidence:
 
 class TestAuditFlagsTheDefectClass:
     def test_the_original_token_never_reaches_the_audit_now(self) -> None:
-        # The original defect, reconstructed. `trace` is a substring of the
-        # `trace_id` FIELD NAME, and since WO-R2-34 the schema refuses key
-        # text outright — one layer earlier than this audit. The two layers
-        # divide cleanly: the schema refuses tokens matched by a key, the
-        # audit refuses VALUES that two or more tools could produce.
+        # The original defect, reconstructed. Since WO-R2-34 the schema refuses key text one
+        # layer earlier; the audit refuses VALUES two or more tools could produce.
         with pytest.raises(ValidationError, match="key text, not value text"):
             _scenario(
                 "failed_traces_scan_shape",
@@ -158,9 +141,7 @@ class TestAuditFlagsTheDefectClass:
             )
 
     def test_a_value_two_tools_could_produce_is_flagged(self) -> None:
-        # The half the schema cannot see: `trace-1a2b` is a value, not key
-        # text, and it appears in BOTH search_traces and list_dlq_messages
-        # renderings — so it still cannot prove which tool ran.
+        # The half the schema cannot see: `trace-1a2b` is a value in both renderings.
         scenarios = [
             _scenario(
                 "failed_traces_scan_shape",
@@ -184,9 +165,7 @@ class TestAuditFlagsTheDefectClass:
         assert audit_evidence_scoping(scenarios) == []
 
     def test_tokens_unique_to_one_tool_stay_legal(self) -> None:
-        # A single-satisfier VALUE still proves which tool ran, so the audit
-        # leaves it alone. (Single-satisfier field NAMES no longer reach here
-        # — the schema refuses them as key text.)
+        # A single-satisfier VALUE still proves which tool ran, so the audit leaves it.
         scenarios = [
             _scenario(
                 "dlq_shape",
@@ -237,10 +216,7 @@ class TestFailedTracesScanRegression:
             ),
         )
         run = self._run(run_state, evidence)
-        # The pre-sweep expectation — `expected_evidence_contains: [trace]` —
-        # graded this run green: the wrong-reason pass the 2026-08-16 dress
-        # rehearsal caught. It is unbuildable now (key text), so the defect is
-        # pinned on the corpus it exploited rather than through the schema.
+        # The pre-sweep expectation graded this run green — the 2026-08-16 wrong-reason pass.
         corpus = " ".join(e.result_summary for e in run.evidence)
         assert "trace" in corpus
         with pytest.raises(ValidationError, match="key text, not value text"):

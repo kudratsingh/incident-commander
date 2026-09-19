@@ -1,10 +1,7 @@
 """``scripts/fixture_drift.py``'s two decisions: when to wait, and when to bless.
 
-Both are exercised with ``probe_live`` replaced, because both are about what
-the script does with a result rather than about how the result was obtained
-— that half lives in ``test_fixture_drift.py``. Nothing here touches the
-network and nothing writes under ``evals/`` (ADR 0011 freeze): the bless
-tests assert the committed ledger is byte-identical afterwards.
+Both are exercised with ``probe_live`` replaced — how the result was obtained lives
+in ``test_fixture_drift.py``.
 """
 
 from __future__ import annotations
@@ -61,10 +58,7 @@ def _scripted(monkeypatch: pytest.MonkeyPatch, outcomes: list[Any]) -> list[Any]
 class TestReadinessGate:
     """``--await-fixtures`` exists to survive a platform that is still booting.
 
-    It only ever caught ``UnseededPlatformError`` — the "up but empty" case —
-    so the connection errors a platform produces while it is *not yet up*
-    killed the poll loop on attempt one, which is precisely the window the
-    gate was added for.
+    It only caught ``UnseededPlatformError``, so a not-yet-up platform killed it.
     """
 
     def test_survives_a_platform_that_has_not_opened_its_port(
@@ -97,11 +91,8 @@ class TestReadinessGate:
 class TestBlessRefusesOnAnUnprobedFixture:
     """The ledger may only shrink on evidence, and an error is not evidence.
 
-    ``--bless`` rewrote the whole ledger from the drift observed in one run,
-    including runs where ``result.errors`` said some fixtures were never
-    reached. Every ledger entry for an unreached fixture then vanished — a
-    silent deletion of work nobody had disproved, in the file that IS the
-    burn-down list.
+    ``--bless`` rewrote the whole ledger from one run, so every entry for a fixture that
+    run never reached vanished.
     """
 
     def test_bless_refuses_and_leaves_the_ledger_untouched(
@@ -153,19 +144,9 @@ class TestBlessRefusesOnAnUnprobedFixture:
 class TestNotFreshHoldsNoOpinion:
     """``--not-fresh`` is the stale-volume twin of the probe-error refusal.
 
-    The refusal above covers a fixture the run could not read. This covers
-    one it read against a world that is not a fresh seed, where the reading
-    is a true statement about the developer's volume and a false one about
-    the fixture — the case the ledger's own ``_blessed_against`` note
-    describes and nothing enforced.
-
-    The concrete instance: `failed_traces_scan` probes
-    ``search_traces(status="failed", since_hours=1)``. A stack up for more
-    than an hour returns nothing; CI's freshly seeded contract job returns
-    the seeded rows. Blessing that reading writes an entry CI never
-    observes, and the ratchet fails on entries no longer observed — so a
-    naive bless from a stale volume turns CI red in the *opposite*
-    direction, which is the failure mode this flag exists to prevent.
+    A fixture read against a world that is not a fresh seed gives a reading true about the
+    developer's volume and false about the fixture: `failed_traces_scan` probes
+    ``since_hours=1``, so a naive bless writes an entry CI never observes.
     """
 
     @staticmethod
@@ -199,10 +180,7 @@ class TestNotFreshHoldsNoOpinion:
         ((drifts, kwargs),) = written
         # Its drift is not written...
         assert drifts == (keep,)
-        # ...and its coverage is withdrawn, so `split_for_bless` carries any
-        # existing entry for it rather than deleting one this run cannot
-        # speak to. Withdrawing only the drift would have been worse than
-        # doing nothing: the entry would be silently disproved.
+        # Coverage withdrawn, so `split_for_bless` carries any existing entry rather than deleting.
         assert kwargs["checked"] == (("keep", "list_dlq_messages"),)
 
     def test_naming_a_fixture_the_run_never_compared_is_refused(

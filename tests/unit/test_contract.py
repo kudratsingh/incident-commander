@@ -64,9 +64,7 @@ class TestNormalize:
             ]
         }
         result = normalize(raw)
-        # `annotations` is dropped; the six snapshotted fields are kept.
-        # required_scope/is_idempotent joined this set at wave-10
-        # (WO-R2-130) — see TestScopeAndIdempotencyAreVisibleToTheDiff.
+        # `annotations` is dropped; required_scope/is_idempotent joined at wave-10 (WO-R2-130).
         assert set(result["tools"][0].keys()) == {
             "name",
             "description",
@@ -140,9 +138,7 @@ class TestCompare:
         assert diff.changed == ("get_consumer_lag",)
 
     def test_output_schema_change_flagged(self) -> None:
-        # v0.4.4's real drift was outputs — this is the assertion that would
-        # have caught it. Same platform tool description + inputSchema, but a
-        # response field changed → surfaces as a `changed` delta.
+        # v0.4.4's real drift was outputs: same description and inputSchema, changed response.
         committed = normalize(
             {
                 "tools": [
@@ -201,10 +197,7 @@ class TestCompare:
     def test_mutation_of_committed_snapshot_detected(self) -> None:
         """The exit criterion: a mutated schema fails the check.
 
-        We load the shipped snapshot, mutate a field, and confirm ``compare``
-        flags it as changed. Wired against the real committed file so this
-        breaks if the snapshot moves and its schema stops looking the way we
-        expect.
+        Wired against the real committed file, so it breaks if the snapshot's shape moves.
         """
         import json
         from pathlib import Path
@@ -226,24 +219,9 @@ class TestCompare:
 class TestScopeAndIdempotencyAreVisibleToTheDiff:
     """`required_scope` and `is_idempotent` are snapshotted (WO-R2-130).
 
-    Both are platform extensions (plat #168 / WO-R2-32) advertised on every
-    `tools/list` entry, and both were invisible to this module until
-    wave-10: `_tool_view` kept only name/description/inputSchema/
-    outputSchema, so re-scoping a tool or dropping its idempotency changed
-    nothing the contract diff could see. The platform added them *for* this
-    diff — its own `ToolInfo` docstring says they "mirror `ToolDefinition`'s
-    attribute names, which is what the commander's `_tool_view` reads on
-    the other side" — so a snapshot that dropped them made the contract
-    test unable to catch the drift it exists to catch.
-
-    `is_idempotent` is the one that bites. It is what makes a Tier-1
-    recovery re-invoke return the cached response verbatim; if it is
-    silently dropped the retry actually re-runs, returns a different
-    payload, and verification reads that as a spurious escalation — a
-    failure that surfaces far from its cause.
-
-    Both are snake_case on the wire, unlike inputSchema/outputSchema: the
-    camelCase convention belongs to the MCP spec's own fields.
+    Both are platform extensions on every `tools/list` entry, and `_tool_view` kept only the
+    four MCP fields, so re-scoping a tool changed nothing the diff could see. `is_idempotent`
+    bites hardest: dropped, a recovery re-invoke re-runs and verification reads a spurious red.
     """
 
     @staticmethod
@@ -286,9 +264,7 @@ class TestScopeAndIdempotencyAreVisibleToTheDiff:
     def test_defaults_match_the_platforms_own(self) -> None:
         """A tool that advertises neither reads as unscoped, non-idempotent.
 
-        The platform defaults `required_scope` to None (the few tools that
-        need no scope) and `is_idempotent` to False, so the snapshot has to
-        agree or every such entry would diff on the first rebless.
+        The platform defaults them to None and False.
         """
         raw = {"tools": [{"name": "a", "description": "d", "inputSchema": {}}]}
         result = normalize(raw)

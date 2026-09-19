@@ -1,35 +1,9 @@
 """The candidate schema: grounded, deduplicated, ranked, repairable (WP-5.1).
 
-Four claims, one class each, and the negative half of every one of them is in
-the same file:
-
-* **Grounding is structural.** A candidate citing an ``evidence_id`` that names
-  no ledger entry fails validation and the message names the id. With no ledger
-  bound, validation refuses — including for a set that cites nothing, which is
-  the only case ``EvidenceRef``'s own validator cannot see.
-* **A set has no duplicates.** Same ``(category, name)`` rejected; same
-  ``candidate_id`` rejected; and the deliberate non-normalisations (a name
-  differing only in case, the same name under another category) are pinned as
-  *accepted*, so the comparison cannot be quietly widened later.
-* **Ranking is normalised at the schema boundary.** Index 0 is the top
-  candidate for any input order, ties keep the model's stated order.
-* **A parse failure is a harness event (ADR 0035).** A candidate set that
-  arrived as a JSON string decodes, and an ungrounded one buys exactly one
-  re-ask before ``OutputRepairExhausted`` — asserted on the repair's own
-  marker and on the guard's own message, not on the fact that something raised
-  (F-007).
-
-**The stringified payload is not hand-written.** There is no live candidate-set
-payload yet — the strategy that would emit one is WP-5.2 — so the malformation
-is taken from the payload we *have* observed: run ``779b19a287a7``'s
-``next_action``, imported from ``test_structured_output`` so it stays byte-
-identical to the evidence, with its stray closer read off the string rather
-than retyped. The candidate content is the live run's own two diagnoses, read
-out of the same payload. That is as close to "pinned with the observed payload,
-byte for byte" as a shape nothing has emitted yet can be, and the alternative —
-inventing a malformation — is the thing LESSONS 2026-09-08 is about: a
-``json.loads`` coercion that read as solved for six weeks because nothing had
-ever fed it a real malformed reply.
+Four claims with their negative halves: grounding is structural (an unknown
+``evidence_id`` fails, and no ledger bound refuses); no duplicates, with the deliberate
+non-normalisations pinned as accepted; ranking normalised at the schema boundary; a parse
+failure is a harness event (ADR 0035). The payload is run ``779b19a287a7``'s, imported.
 """
 
 from __future__ import annotations
@@ -109,9 +83,7 @@ def _candidate(
 def _observed_stray_closer() -> str:
     """What run ``779b19a287a7`` left after the JSON value in its string field.
 
-    Derived from the imported evidence rather than retyped: if the archived
-    payload ever changes, every test built on this changes with it instead of
-    silently pinning a paraphrase.
+    Derived from the imported evidence, not retyped.
     """
     text = str(LIVE_RECORD_OUTPUT_INPUT["next_action"])
     _, end = json.JSONDecoder().raw_decode(text)
@@ -124,11 +96,8 @@ _LIVE_TOP: Final[dict[str, Any]] = dict(LIVE_RECORD_OUTPUT_INPUT["hypotheses"][0
 def _live_candidates(ledger: tuple[EvidenceEntry, ...]) -> list[dict[str, Any]]:
     """The two diagnoses run ``779b19a287a7``'s payload actually contains.
 
-    The first is its ranked hypothesis verbatim. The second is the alternative
-    its own ``next_action`` reason states — the unclassified row carrying a
-    permanent schema error, which is a ``persistent_data_bug`` and not the
-    replay-safe row it acted on. Both are the run's content, not invented
-    furniture.
+    Its ranked hypothesis verbatim, plus the alternative its own ``next_action`` reason
+    states, not invented.
     """
     return [
         _candidate(
@@ -286,9 +255,7 @@ class TestGroundingIsStructural:
     def test_with_no_ledger_bound_an_uncited_set_is_refused_too(self) -> None:
         """The hole a permissive default would have left.
 
-        ``EvidenceRef``'s validator never runs on a set that cites nothing, so
-        without the set-level check a forgotten ``grounded_in`` would switch
-        grounding off silently for exactly the payloads that cite nothing.
+        ``EvidenceRef``'s validator never runs on a set that cites nothing.
         """
         with pytest.raises(ValidationError) as excinfo:
             CandidateSet.model_validate({"candidates": [_candidate()]})
@@ -368,10 +335,7 @@ class TestDuplicatesAreRejected:
     def test_names_differing_only_in_case_are_not_folded_together(self) -> None:
         """A deliberate non-normalisation, pinned so it cannot drift.
 
-        ``name`` is operator-facing free text. Case-folding it would make two
-        labels a reader can tell apart collide, and the duplicate *rate* WP-5.2
-        reports is a measurement of what the model produced rather than of what
-        a normaliser could hide.
+        ``name`` is operator-facing free text, and the rate measures what the model produced.
         """
         payload = [_candidate("c1", name="Stale cache"), _candidate("c2", name="stale cache")]
         with grounded_in(_ledger()):
@@ -419,16 +383,9 @@ class TestRankingIsNormalisedAtTheSchemaBoundary:
 class _ScriptedLLM:
     """Plays a fixed script of payloads-or-exceptions, one per ``call``.
 
-    ``model_validate`` runs *inside* ``call``, which is the whole point: that
-    is where ``LLMClient._parse`` validates, so a grounding failure raised by a
-    validator lands where ``call_with_output_repair`` can see it.
-
-    A rejection is wrapped as ``LLMOutputError`` carrying this call's
-    ``record_id``, because that is what ``_parse`` does with a
-    ``ValidationError`` — and it is the field the re-ask reads to correlate
-    itself to the call it repairs. A fake that let the bare ``ValidationError``
-    out would still exercise the repair, but the correlation it asserts would
-    be fiction.
+    ``model_validate`` runs *inside* ``call``, where ``LLMClient._parse`` validates, so a
+    grounding failure lands where ``call_with_output_repair`` can see it. A rejection is
+    wrapped as ``LLMOutputError`` carrying the ``record_id`` the re-ask correlates on.
     """
 
     def __init__(self, script: list[Any]) -> None:
@@ -499,11 +456,8 @@ class TestTheRepairPathAppliesToACandidateSet:
     def test_a_second_ungrounded_set_exhausts_the_repair_and_names_the_cause(self) -> None:
         """F-007: the assertion is the guard's own marker, not just "it raised".
 
-        ``OutputRepairExhausted`` is an ``LLMError``, which is what the
-        investigation loop's existing ``except`` arm turns into an escalation
-        with the reason in the evidence trail — pinned where that call site
-        exists (``tests/unit/test_output_repair.py``). WP-5.1 has no call site
-        yet, so the claim proven here ends at the exception the loop reads.
+        ``OutputRepairExhausted`` is an ``LLMError``, which the loop's existing ``except`` arm
+        turns into an escalation.
         """
         ledger = _ledger()
         unknown = uuid4()
@@ -574,9 +528,7 @@ class TestTheSchemaShownToTheModel:
     def test_no_model_carries_a_class_docstring(self, model: type[StructuredOutput]) -> None:
         """A class docstring becomes the schema's ``description`` and reaches the model.
 
-        These three schemas are shown to the model through ``record_output``,
-        so their prose lives in the module docstring instead. This is the test
-        that keeps it there.
+        The prose lives in the module docstring.
         """
         assert model.__doc__ is None
         assert "description" not in model.model_json_schema()

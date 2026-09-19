@@ -1,21 +1,9 @@
 """A Makefile recipe that runs a script importing ``evals`` must set PYTHONPATH.
 
-``python scripts/x.py`` puts ``scripts/`` on ``sys.path[0]``, not the repo root,
-so ``import evals`` raises ``ModuleNotFoundError`` before the script's first
-line runs. Every ``make chaos-*`` target was broken this way — all seven, since
-whenever ``chaos_setup.py`` grew its ``evals.chaos_hooks`` import — and the
-failure is total and immediate:
-
-    $ make chaos-help
-    ModuleNotFoundError: No module named 'evals'
-
-pytest does not have the problem (``pyproject.toml`` sets ``pythonpath``), which
-is why every test of that script passes while the target a human types does not.
-That gap is the reason this is a lint over the Makefile rather than a test of
-the script.
-
-Static on purpose: no subprocess, no ``uv run``, no platform. It reads the two
-files and compares them.
+``python scripts/x.py`` puts ``scripts/`` on ``sys.path[0]``, not the repo root, so
+``import evals`` raises ``ModuleNotFoundError`` before the first line runs — all seven
+``make chaos-*`` targets. pytest sets ``pythonpath``, so every test of the script
+passes while the target a human types does not; hence a lint over the Makefile.
 """
 
 from __future__ import annotations
@@ -86,9 +74,7 @@ class TestMakeRecipesCanImportEvals:
         assert all("PYTHONPATH" in prefix for _, prefix in chaos_lines)
 
     def test_recipes_for_scripts_that_do_not_import_evals_are_left_alone(self) -> None:
-        # The rule is targeted, not blanket: a script with no evals import does
-        # not need the repo root on its path, and requiring it everywhere would
-        # make the lint noise rather than signal.
+        # The rule is targeted: a script with no evals import needs no repo root.
         needs_path = _scripts_importing_evals()
         others = {script for _, script, _ in _recipe_invocations()} - needs_path
         assert others, "every invoked script imports evals — the exclusion is untested"

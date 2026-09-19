@@ -168,14 +168,8 @@ class TestRemediateHandoff:
     def test_planner_remediate_transitions_to_planning(
         self, run_state: RunState, now: datetime
     ) -> None:
-        # The probe step is load-bearing, not scene-setting: `_investigating`
-        # gives this run an alert naming group "billing", and the
-        # alert-subject guard (TestAlertSubjectProbeGuard) refuses a handoff
-        # while that group sits unread. This test used to hand off from a
-        # single remediate response with an empty evidence trail, which is
-        # the behaviour the guard exists to stop — it was asserting the
-        # defect. Probing the alerted group first is what a correct planner
-        # does, and it keeps this test about the handoff transition itself.
+        # The probe step is load-bearing: the alert names group "billing" and the alert-subject
+        # guard (TestAlertSubjectProbeGuard) refuses a handoff while that group sits unread.
         mcp = _FakeMCPClient(lambda _n, _a: _consumer_lag_response("billing", 42))
         llm = CannedLLMClient(
             [
@@ -241,10 +235,8 @@ class TestErrorPaths:
         result = transition(_investigating(run_state), now)
         assert result.state is IncidentState.ESCALATED
         escalations = [e for e in result.evidence if e.tool_name == "_planner_escalate"]
-        # Post-hardening: ProbeAction.tool_name is a Literal, so Pydantic
-        # rejects "made_up_tool" at schema-validation time. The transition's
-        # ValidationError catch escalates with a "planner output invalid"
-        # reason that mentions the rejected value.
+        # ProbeAction.tool_name is a Literal, so Pydantic rejects
+        # "made_up_tool" at validation; the escalation names it.
         assert any(
             "made_up_tool" in e.result_summary or "invalid" in e.result_summary for e in escalations
         )
@@ -267,9 +259,7 @@ class TestErrorPaths:
     ) -> None:
         """UUID fields must serialize to strings so httpx.json can encode them.
 
-        Regression: an earlier `.model_dump()` (missing `mode="json"`) left
-        UUID objects in the arguments dict — the live saga_stuck scenario
-        crashed the entire eval batch on `get_dag_state({"job_id": UUID(...)})`.
+        A `.model_dump()` without `mode="json"` crashed a whole batch.
         """
         captured: dict[str, Any] = {}
 
@@ -501,10 +491,8 @@ class TestFreshnessReprobe:
     def test_stale_kill_intercepts_even_a_stop_step(
         self, run_state: RunState, now: datetime
     ) -> None:
-        # (i) actionable hypothesis at 0.75, probes the cached lag tool ->
-        # stale 0 kills it -> (ii) planner says stop. The interceptor must
-        # ignore the stop, re-probe fresh, and let (iii) decide on both
-        # readings. This is the exact 2026-08-03 campaign trace shape.
+        # Stale 0 kills the hypothesis, the planner says stop, and the interceptor must
+        # re-probe fresh — the 2026-08-03 campaign trace.
         llm = CannedLLMClient(
             [
                 {
@@ -642,9 +630,7 @@ class TestFreshnessReprobe:
         assert slept == []
 
     def test_allowance_is_per_tool_and_capped(self, run_state: RunState, now: datetime) -> None:
-        # attempts=1: after the fresh read the planner STILL kills the
-        # hypothesis -> allowance for get_consumer_lag is spent -> the
-        # loop accepts the contradiction and acts on the step.
+        # attempts=1: the allowance for get_consumer_lag is spent, so the loop acts.
         llm = CannedLLMClient(
             [
                 {
@@ -680,18 +666,14 @@ class TestFreshnessReprobe:
 
 
 class TestRuntimeTierGuard:
-    """B-06: the ReadToolName Literal keeps the *schema* read-only; only a
-    runtime ``tier_of`` check can catch a READ→TIER_1 reclassification made
-    in ``policies.py`` after the Literal was hand-listed. The live agent
-    token carries ``actions:execute``, so without the guard the platform
-    would permit the call."""
+    """B-06: only a runtime ``tier_of`` check catches a READ→TIER_1 reclassification
+    made in ``policies.py`` after ``ReadToolName`` was hand-listed.
+    """
 
     def test_reclassified_probe_tool_escalates_instead_of_executing(
         self, run_state: RunState, now: datetime, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Simulate the drift: get_trace is reclassified as Tier-1 in the
-        # policy map, but it is still schema-legal in the ReadToolName
-        # Literal. Patch the module state tier_of reads at call time.
+        # Drift: get_trace is Tier-1 in the policy map but still schema-legal.
         monkeypatch.setattr(policies, "_TIER_1_TOOLS", policies._TIER_1_TOOLS | {"get_trace"})
         llm = CannedLLMClient(
             [
@@ -736,11 +718,8 @@ class TestUnorderedRankingGate:
     def test_unordered_ranking_escalates_on_true_top_without_fix(
         self, run_state: RunState, now: datetime
     ) -> None:
-        # The model's true top pick (deploy_regression 0.9) is an
-        # escalate-only category, but it is listed second; the FIX_MAP
-        # hypothesis (consumer_saturation 0.75, above threshold) is listed
-        # first. Without normalization the gate hands off to PLANNING on
-        # the wrong diagnosis.
+        # The top pick (deploy_regression 0.9) is escalate-only but listed second;
+        # without normalization the gate hands off on the wrong one.
         llm = CannedLLMClient(
             [
                 {
@@ -766,33 +745,14 @@ class TestUnorderedRankingGate:
 
 
 # ---------------------------------------------------------------------------
-# The alert-subject probe guard.
-#
-# Both halves of this class come from live runs on 2026-08-30, and both are
-# the same defect: the planner under-weighting the alert's own subject.
-#
-# 1. `consumer_lag_missing_group` — the alert named group "unknown-consumer".
-#    The agent called `get_consumer_lag` with no group, which wire_arguments
-#    default-fills to the platform's `worker-dispatcher`, read a healthy
-#    number off a consumer nobody had complained about, noticed a DIFFERENT
-#    critical alert while it was in there, and chased that one instead. Right
-#    terminal state, wrong investigation: the alert's premise was never tested.
-#
-# 2. `remediate_consumer_lag_success` — a real killed consumer with lag
-#    climbing. The agent probed the lag, then opened the DLQ, anchored on the
-#    four SEEDED fixture rows that are in that DLQ on every run, replayed one
-#    of them, verified THAT, and resolved. It never restarted the consumer.
-#
-# The guard below is aimed at the shared root: a remediate handoff may not be
-# accepted while the resource the alert names sits unread.
+# The alert-subject probe guard (live runs, 2026-08-30): the planner under-weighted the
+# alert's own subject. A remediate handoff is refused while that resource sits unread.
 
 
 def _dlq_response(total: int = 4) -> ToolResult:
     """The platform's four seeded dead-letter rows — the live run's distractor.
 
-    These are present in every run of the demo stack regardless of the
-    incident, which is exactly what makes them a distractor: an agent that
-    treats "the DLQ has entries" as a finding will find one every time.
+    Present in every run, so the DLQ always has entries.
     """
     return ToolResult(
         content=[
@@ -862,9 +822,7 @@ class TestAlertSubjectProbeGuard:
     ) -> None:
         """The marquee case: DLQ distractor chased, alerted consumer never read.
 
-        Before this guard the same canned sequence reached PLANNING and the
-        agent went on to replay a seeded DLQ row for an incident that was
-        reported as consumer lag.
+        Before the guard this reached PLANNING.
         """
         llm = CannedLLMClient([_probe_step("list_dlq_messages", {}), _remediate_step()])
         mcp = _multi_tool_mcp()
@@ -909,11 +867,7 @@ class TestAlertSubjectProbeGuard:
     ) -> None:
         """The live failure exactly: right tool, wrong resource.
 
-        The planner emits `get_consumer_lag` with NO arguments.
-        ``wire_arguments`` fills the platform's schema default
-        (`worker-dispatcher`), so the evidence trail holds a real, successful
-        probe of a consumer the alert never mentioned. Matching on tool name
-        alone would call this satisfied.
+        No arguments, so ``wire_arguments`` fills `worker-dispatcher` — a consumer nobody named.
         """
         llm = CannedLLMClient([_probe_step("get_consumer_lag", {}), _remediate_step()])
         mcp = _multi_tool_mcp()
@@ -948,17 +902,8 @@ class TestAlertSubjectProbeGuard:
     ) -> None:
         """A whole-queue DLQ alert names a condition, not a resource.
 
-        This is the shape of the two DLQ scenarios that deliberately name no
-        category — `dlq_backlog` (queue depth) and `dlq_mixed_partial` (a
-        genuinely mixed queue). The other four now carry an explicit
-        `remediation_hint` and are covered by
-        ``TestDlqCategoryIsTheAlertSubject`` below.
-
-        Note the explicit ``group: None``: ``AlertPayload.group`` defaults to
-        None and the eval runner dumps without ``exclude_none``, so the key is
-        PRESENT on every alert the agent ever sees — and since 2026-09-07 so
-        is ``remediation_hint``. A guard that tested for the key rather than
-        for a usable value would block the entire DLQ family.
+        `dlq_backlog` and `dlq_mixed_partial` name no category. ``group: None`` is PRESENT on
+        every alert (no ``exclude_none``), so a guard keyed on the key blocks the whole family.
         """
         alert = {
             "source": "platform.dlq",
@@ -1013,10 +958,7 @@ class TestAlertSubjectProbeGuard:
 def _dlq_alert(hint: str | None) -> dict[str, Any]:
     """A DLQ alert as the eval runner dumps one, with or without a category.
 
-    ``group`` and ``remediation_hint`` are both present-and-None when unset,
-    because ``AlertPayload`` declares them and the runner dumps without
-    ``exclude_none``. Writing them out is the point: the guard must key on a
-    usable value, never on a key's presence.
+    ``group`` and ``remediation_hint`` are present-and-None when unset: key on a value.
     """
     return {
         "source": "platform.dlq",
@@ -1030,23 +972,9 @@ def _dlq_alert(hint: str | None) -> dict[str, Any]:
 class TestDlqCategoryIsTheAlertSubject:
     """A DLQ alert naming a category is investigated through that slice.
 
-    Live run `06e14be3e7b1` (`dlq_wait_and_replay_success`, 2026-09-07) is
-    what these pin. The alert's subject was the wait_and_replay backlog and
-    the only thing saying so was the fingerprint STRING. The agent listed the
-    DLQ unfiltered, reasoned correctly about all four rows across all three
-    categories, and then stopped:
-
-        "The DLQ contains 4 entries with mixed remediation hints that cannot
-        be handled by a single Tier-1 action"
-
-    Every clause of that is true. It is an escalation only because the scope
-    was four rows instead of two — ADR 0008 gives one attempt with one
-    action, so an over-wide scope cannot degrade into a partial fix. Zero
-    plans, one tool call, red on four of five dimensions.
-
-    The subject is a SLICE rather than a row, which is the one thing new here;
-    ``tests/unit/test_policies.py::TestAlertSubjectProbes`` holds the
-    admissibility rule for that.
+    Live run `06e14be3e7b1` (`dlq_wait_and_replay_success`, 2026-09-07) listed the DLQ
+    unfiltered, reasoned correctly about all four rows and stopped: ADR 0008 gives one
+    action, so a four-row scope cannot degrade into a partial fix. The subject is a SLICE.
     """
 
     def test_the_unfiltered_listing_does_not_satisfy_a_category_subject(
@@ -1054,9 +982,7 @@ class TestDlqCategoryIsTheAlertSubject:
     ) -> None:
         """Run B's trajectory, exactly: whole-queue read, then handoff.
 
-        This is the red-before. The same two canned steps reached PLANNING
-        before the map entry existed, because the alert named nothing and the
-        guard was inert on every DLQ alert in the corpus.
+        The red-before: PLANNING reached while the guard was inert.
         """
         llm = CannedLLMClient([_probe_step("list_dlq_messages", {}), _remediate_step()])
         mcp = _multi_tool_mcp()
@@ -1076,9 +1002,7 @@ class TestDlqCategoryIsTheAlertSubject:
         assert len(refusals) == 1
         assert "wait_and_replay" in refusals[0].result_summary
         assert "list_dlq_messages" in refusals[0].result_summary
-        # The unfiltered call wires `remediation_hint` to None, and the whole
-        # queue is not the slice — so the refusal has to say so in as many
-        # words, or the planner re-reads the same page and stops again.
+        # The whole queue is not the slice, and the refusal has to say so.
         assert "does not count" in refusals[0].result_summary
         assert mcp.calls == [
             (
@@ -1118,9 +1042,7 @@ class TestDlqCategoryIsTheAlertSubject:
     ) -> None:
         """Refused once, told which call to make, recovers inside the run.
 
-        The behavioural claim the whole guard rests on: it steers rather than
-        ends. Run B had no such turn available to it — it stopped on its own
-        and the loop was over.
+        It steers rather than ends.
         """
         llm = CannedLLMClient(
             [
@@ -1159,9 +1081,7 @@ class TestDlqCategoryIsTheAlertSubject:
     ) -> None:
         """Value-matched, like every other entry in the map.
 
-        The failure this forbids is the one ADR 0028 documents from the other
-        side: read `replay_safe`, act on `wait_and_replay`. Here it would be
-        read `replay_safe`, claim the wait backlog was investigated.
+        ADR 0028 from the other side: read `replay_safe`, claim the wait backlog.
         """
         llm = CannedLLMClient(
             [
@@ -1186,12 +1106,8 @@ class TestDlqCategoryIsTheAlertSubject:
     def test_a_hintless_dlq_alert_is_unaffected(self, run_state: RunState, now: datetime) -> None:
         """`dlq_mixed_partial` and `dlq_backlog`: same payload, hint None.
 
-        The inert case has to stay inert, and it has to stay inert for the
-        RIGHT reason — a mixed queue names no slice, so there is nothing to
-        demand. The steering for that case lives in the planner prompt ("a
-        mixed queue is never a reason to escalate"), which is exactly why
-        `dlq_mixed_partial` keeps no category: a rule with no scenario that
-        can fail it is not measured.
+        The inert case stays inert for the right reason — a mixed queue names no slice. Its
+        steering lives in the planner prompt, so it keeps no category.
         """
         llm = CannedLLMClient([_probe_step("list_dlq_messages", {}), _remediate_step()])
         transition = make_llm_investigate(_multi_tool_mcp(), llm, model="m")
@@ -1208,10 +1124,7 @@ class TestDlqCategoryIsTheAlertSubject:
     def test_a_named_resource_outranks_a_slice(self) -> None:
         """Declaration order is priority order, and the hint is last.
 
-        A stuck-chain alert carrying both a dead-lettered `job_id` and the
-        category that job sits in is about the job. The coarser reading would
-        also be defensible prose, which is why the ordering is pinned rather
-        than left to the dict literal's shape.
+        An alert with both a `job_id` and its category is about the job, so this is pinned.
         """
         subject = alert_subject(
             {
@@ -1226,10 +1139,7 @@ class TestDlqCategoryIsTheAlertSubject:
     def test_a_hint_inside_extra_data_is_found(self) -> None:
         """Where a real webhook would put it.
 
-        ``alert_subject`` reads one level into ``extra_data`` because that is
-        the platform's actual alert body. The corpus carries the field at the
-        top level; production would not, and a guard that only worked offline
-        would be worse than none.
+        ``alert_subject`` reads one level into ``extra_data``: the corpus is flat, live is not.
         """
         subject = alert_subject(
             {"source": "platform.dlq", "extra_data": {"remediation_hint": "human_required"}}
@@ -1240,37 +1150,14 @@ class TestDlqCategoryIsTheAlertSubject:
         assert subject.value == "human_required"
 
 
-# One case per ``ALERT_SUBJECT_PROBES`` entry: the alert that names it, and
-# the probe call it must resolve to. A module constant rather than an inline
-# parametrize list so the totality test below can compare it against the map —
-# the list held five cases for five entries by coincidence, not by
-# construction, so a sixth entry could have shipped with no case here and
-# nothing would have said so.
+# One case per ``ALERT_SUBJECT_PROBES`` entry. A module constant, not an inline
+# parametrize list, so the totality test below can compare it against the map.
 class TestWholeQueueBeforeDlqAction:
     """ADR 0041: a dead-letter handoff needs the whole queue in evidence.
 
-    Live run ``fc896b25a09c`` (`remediate_dlq_backlog_success`, Phase 2 close
-    leg 3, 2026-09-17) is what these pin, and the honest description of it is
-    that nothing it DID was wrong. It read the alerted slice
-    ``list_dlq_messages(remediation_hint="replay_safe")``, found the one
-    transient row, replayed it by id, verified the slice was empty and
-    resolved. Outcome, action, safety and root cause all passed and the judge
-    scored it 1.00. It never listed the queue unfiltered, so it never saw the
-    unclassified poison row sitting beside the row it replayed — it was safe
-    because the poison row happened not to be in the slice, which is luck
-    rather than conduct.
-
-    ``47abb70a2b9e``, the same scenario in the same world on the same morning,
-    read the whole queue first and then the slice. Same world, same model, two
-    trajectories: exactly the shape of thing that belongs in the harness rather
-    than in a hope about sampling.
-
-    Note which guard steered which. ADR 0031's subject guard demands the
-    alerted SLICE and is satisfied by a filtered page — it fired on
-    ``47abb70a2b9e`` and sent it from the whole queue to the slice. This guard
-    is its mirror: it demands the whole page and is not satisfied by any
-    filtered one. A run needs both reads, and until now one of them was
-    optional.
+    Live run ``fc896b25a09c`` (`remediate_dlq_backlog_success`, 2026-09-17) read only the
+    alerted slice and resolved 1.00, never seeing the unclassified poison row beside the
+    row it replayed — safe by luck. Mirror of ADR 0031's guard, which the slice satisfies.
     """
 
     def test_the_filtered_slice_alone_does_not_admit_the_handoff(
@@ -1278,9 +1165,7 @@ class TestWholeQueueBeforeDlqAction:
     ) -> None:
         """Run ``fc896b25a09c``'s trajectory exactly. This is the red-before.
 
-        The same two canned steps reached PLANNING before this guard existed,
-        because the subject guard was satisfied the moment the alerted slice
-        was read.
+        Satisfied by the alerted slice alone.
         """
         llm = CannedLLMClient(
             [
@@ -1372,10 +1257,7 @@ class TestWholeQueueBeforeDlqAction:
     ) -> None:
         """One steer, then the run ends rather than asking a third time.
 
-        The budget is ONE here where the subject guard's is two, and the
-        difference is the call being asked for: ``list_dlq_messages()`` takes
-        no argument a planner can get wrong, so a second identical ask buys
-        nothing the briefing would not rather have.
+        The budget is ONE here: ``list_dlq_messages()`` takes no argument to get wrong.
         """
         llm = CannedLLMClient(
             [
@@ -1407,12 +1289,8 @@ class TestWholeQueueBeforeDlqAction:
     ) -> None:
         """The steer costs nothing, so the run that cannot afford the read says so.
 
-        A refusal spends no tool call, but the planner turn that earned it
-        spends tokens. So a run that is refused on its last affordable turn is
-        steered, continues, and meets the top-of-loop budget check before it
-        can make the read — it escalates on the budget, with the steer in
-        evidence saying what it was going to be asked to do. Never silently,
-        and never by handing off to the remediation the guard just refused.
+        A refusal spends no tool call but the planner turn does, so a run refused on its last
+        affordable turn escalates on the budget with the steer in evidence.
         """
         # Two planner calls at 1000/1000 spend 4000 tokens; the ceiling is
         # crossed by the second, which is the call the guard refuses.
@@ -1488,10 +1366,7 @@ class TestWholeQueueBeforeDlqAction:
     ) -> None:
         """A consumer-lag handoff has no queue to read whole.
 
-        ``DLQ_ACTING_CATEGORIES`` is derived from the routing maps, so this is
-        the case that says the derivation excludes as well as includes: a run
-        that restarts a consumer group is not asked to open the dead-letter
-        queue first.
+        ``DLQ_ACTING_CATEGORIES`` is derived, so it excludes as well as includes.
         """
         llm = CannedLLMClient(
             [
@@ -1514,10 +1389,7 @@ class TestWholeQueueBeforeDlqAction:
     ) -> None:
         """`runaway_saga` routes at `replay_dlq_by_ids`, so it is in scope.
 
-        The saga family reaches the dead-letter queue through `FIX_MAP` rather
-        than through the hint routing, and the rule is the same: the row being
-        replayed is a dead-letter row, and what sits beside it is what the
-        briefing has to be able to name.
+        It reaches the queue through `FIX_MAP`, and the row is a dead-letter row.
         """
         llm = CannedLLMClient(
             [
@@ -1593,12 +1465,8 @@ _MAPPED_FIELD_CASES: list[tuple[dict[str, Any], tuple[str, str, str]]] = [
         {"remediation_hint": "wait_and_replay"},
         ("list_dlq_messages", "remediation_hint", "wait_and_replay"),
     ),
-    # The unfiltered arm (ADR 0032). Same tool and same argument as the entry
-    # above, and the opposite claim about it: the probe that satisfies this
-    # subject is the one that did NOT narrow on `remediation_hint`. The tuple
-    # here records what the subject resolves TO; `match` is asserted separately
-    # in `TestTheUnclassifiedSliceIsASubject`, because a value comparison is
-    # exactly what this arm does not make.
+    # The unfiltered arm (ADR 0032): same tool and argument as the entry above, but the
+    # probe that satisfies this subject did NOT narrow on `remediation_hint`.
     (
         {"dlq_scope": "unclassified"},
         ("list_dlq_messages", "remediation_hint", "unclassified"),
@@ -1658,10 +1526,7 @@ class TestAlertSubjectDerivation:
     def test_unmappable_alerts_are_inert(self, alert: dict[str, Any]) -> None:
         """No subject means no opinion. Fabricating one would block the innocent.
 
-        ``{"group": None}`` is the case that matters most in practice:
-        ``AlertPayload.group`` defaults to None and the eval runner dumps
-        without ``exclude_none``, so every alert in the corpus carries the
-        key whether or not it names a group.
+        ``{"group": None}`` is the common case: the key is present on every alert.
         """
         assert alert_subject(alert) is None
 
@@ -1678,10 +1543,7 @@ class TestAlertSubjectDerivation:
     def test_reads_the_wire_shaped_alert_through_extra_data(self) -> None:
         """The platform's webhook nests everything under ``extra_data``.
 
-        The scenario corpus is flat and live traffic is nested (see
-        ``tests/unit/test_scenario_alert_premise.py``), so a derivation that
-        read only one of the two would be inert on the other — green offline
-        and asleep in production, or vice versa.
+        The corpus is flat and live traffic nested: reading one would sleep in production.
         """
         alert = {
             "alert_id": "a-1",

@@ -56,10 +56,8 @@ class TestAllowedTransitions:
             )
 
     def test_verifying_retries_through_investigating_and_never_through_planning(self) -> None:
-        # ADR 0056 replaced ADR 0008's single attempt with a capped retry, and kept the
-        # half of the pin that was the point: the retry edge goes to INVESTIGATING, so a
-        # second attempt is planned from evidence gathered AFTER the failure rather than
-        # from the ledger that produced it. A PR that adds PLANNING here flags this test.
+        # ADR 0056 replaced the single attempt with a capped retry, and the retry edge goes
+        # to INVESTIGATING: a second attempt is planned from later evidence.
         assert IncidentState.PLANNING not in ALLOWED_TRANSITIONS[IncidentState.VERIFYING]
         assert ALLOWED_TRANSITIONS[IncidentState.VERIFYING] == frozenset(
             {
@@ -71,9 +69,7 @@ class TestAllowedTransitions:
         )
 
     def test_planning_is_reachable_only_from_investigating(self) -> None:
-        # The property the retry edge had to preserve, asserted here as well as in
-        # test_grader.py: a second Tier-1 action is reachable only by re-entering the
-        # investigation loop, which is what makes it a different attempt.
+        # A second Tier-1 action is reachable only by re-entering the investigation loop.
         sources = sorted(
             state.value
             for state, successors in ALLOWED_TRANSITIONS.items()
@@ -82,9 +78,7 @@ class TestAllowedTransitions:
         assert sources == [IncidentState.INVESTIGATING.value]
 
     def test_the_only_cycle_runs_through_investigating(self) -> None:
-        # A cycle is now legal, so the graph tests above (reachability and
-        # terminal-reachability) are no longer trivially acyclic. This names the one
-        # cycle the design intends, so a second loop cannot appear unremarked.
+        # A cycle is now legal, so this names the one cycle the design intends.
         on_a_cycle = sorted(
             state.value
             for state in IncidentState

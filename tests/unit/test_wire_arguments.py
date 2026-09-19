@@ -1,25 +1,9 @@
 """Golden snapshots for ``wire_arguments`` — the exact bytes the agent sends.
 
-The platform hashes the JSON body of ``tools/call`` for idempotency. A
-serialization tweak (``exclude_none``, ``by_alias``, aliasing, default
-handling) that goes unnoticed here would silently break retry dedup:
-same key + drifted bytes = 409 on a legitimate crash-recovery re-send.
-
-These tests pin the exact wire format. When one fails, that's the
-signal to stop, look at the platform's arguments-hash spec
-(ADR 0010 on the platform side), and confirm the change is intentional
-before reblessing the snapshot.
-
-Focus on the two easily-drifting cases:
-
-- **defaulted field**: Pydantic fills it; is it in the wire output?
-- **nullable field**: user omits it; does it wire as ``null`` or is it
-  absent?
-
-``replay_dlq_by_ids`` is the canonical fixture because ``delay_seconds``
-is both defaulted (``None``) and typed as ``int | None`` — exactly the
-combination that surfaces ``exclude_none`` / ``exclude_defaults``
-regressions.
+The platform hashes the JSON body of ``tools/call``, so a serialization tweak breaks retry
+dedup: same key, drifted bytes, 409 on a legitimate re-send. ``replay_dlq_by_ids`` is the
+canonical fixture because ``delay_seconds`` is both defaulted and ``int | None``. A failure
+means reading the platform's arguments-hash spec before reblessing.
 """
 
 from __future__ import annotations
@@ -47,10 +31,7 @@ class TestReplayDlqByIds:
     _JOB_ID = UUID("11111111-1111-1111-1111-000000000001")
 
     def test_delay_seconds_defaults_to_null_in_wire(self) -> None:
-        # Omit delay_seconds. Pydantic fills default=None. Wire MUST include
-        # it as null — the platform's arguments hash covers the raw wire
-        # bytes with Pydantic-filled defaults, so dropping the field would
-        # produce a different hash than the platform expects.
+        # Omit delay_seconds: the wire MUST include it as null (the hash covers defaults).
         out = wire_arguments(
             self._SPEC,
             {
@@ -76,9 +57,7 @@ class TestReplayDlqByIds:
         assert out["delay_seconds"] == 300
 
     def test_uuid_serializes_to_string_in_wire(self) -> None:
-        # mode="json" is what makes UUIDs strings. If someone drops mode
-        # (or switches to python mode), the wire body carries UUID objects
-        # → different bytes → hash mismatch.
+        # mode="json" is what makes UUIDs strings; python mode changes the bytes.
         out = wire_arguments(
             self._SPEC,
             {
@@ -143,26 +122,15 @@ class _RecordingMCP:
 class TestEveryCallPathRoutesThroughWireArguments:
     """One serialization, asserted at each call site (WO-R2-15 finding 3).
 
-    This module's docstring calls ``wire_arguments`` the canonical
-    producer of the bytes the platform hashes, and ``wire.py``'s own
-    docstring forbids re-implementing it. The investigation legs used to
-    do exactly that — ``spec.input_model.model_validate(...).model_dump()``
-    inline, and the opening probe's copy omitted ``mode="json"`` — so the
-    rule was stated in two places and enforced in neither.
-
-    These tests compare what the MCP client actually received against
-    ``wire_arguments`` output for the same inputs. A future inline
-    re-implementation that drifts (drops a default, skips ``mode="json"``,
-    adds ``exclude_none``) fails here rather than at a 409 on a
-    crash-recovery re-send.
+    The investigation legs used to inline ``model_validate(...).model_dump()``, and the
+    opening probe's copy omitted ``mode="json"`` — so the rule was stated in two places and
+    enforced in neither. These compare what the MCP client received against ``wire_arguments``.
     """
 
     def test_opening_probe_matches_wire_arguments_when_alert_names_no_group(
         self, run_state: RunState, now: datetime
     ) -> None:
-        # This leg default-fills: a read-only probe with no group named is
-        # allowed to fall back to the registry default (unlike the
-        # remediation legs — ADR 0024). The bytes must still be canonical.
+        # This leg default-fills: a read-only probe with no group named may fall back (ADR 0024).
         mcp = _RecordingMCP(
             {
                 "consumer_group": "worker-dispatcher",
@@ -215,9 +183,7 @@ class TestEveryCallPathRoutesThroughWireArguments:
     def test_planner_probe_matches_wire_arguments_including_uuid_coercion(
         self, run_state: RunState, now: datetime
     ) -> None:
-        # get_dag_state.job_id is a UUID field, and mode="json" is what
-        # turns it into the string httpx can encode. An inline
-        # `.model_dump()` without a mode would reintroduce that bug here.
+        # get_dag_state.job_id is a UUID, and mode="json" is what httpx can encode.
         job_id = "33333333-3333-3333-3333-333333333333"
         mcp = _RecordingMCP({"seed_id": job_id, "nodes": [], "edges": [], "paused": True})
         action = ProbeAction(tool_name="get_dag_state", arguments={"job_id": job_id})

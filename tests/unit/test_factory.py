@@ -83,12 +83,8 @@ class TestStartRun:
 class TestStartRunStaysNonDeterministic:
     """Regression guard for the eval runner's per-scenario isolation.
 
-    ``evals/runner.py`` calls ``start_run(scenario.alert.model_dump(), ...)``
-    with no ``incident_id`` and depends on a fresh ``uuid4`` per scenario. If
-    derivation were ever moved into ``start_run`` (ADR 0016 forbids it), every
-    canned scenario sharing a ``(source, fingerprint)`` pair would collapse
-    onto one incident id, merging their checkpointer histories and corrupting
-    trajectories and graders.
+    ``start_run`` is called with no ``incident_id`` and depends on a fresh ``uuid4``:
+    derivation inside it (ADR 0016 forbids it) would collapse scenarios onto one id.
     """
 
     def test_repeated_identical_alerts_get_fresh_ids(self, now: datetime) -> None:
@@ -98,9 +94,7 @@ class TestStartRunStaysNonDeterministic:
         assert first.incident_id != second.incident_id
 
     def test_derivation_is_not_reachable_without_a_checkpointer(self, now: datetime) -> None:
-        # ``derive_incident_id`` needs a checkpointer to walk the recurrence
-        # chain, so it cannot be wired into ``start_run``'s default without
-        # changing that signature — this pins the shape, not just the values.
+        # ``derive_incident_id`` needs a checkpointer, so it cannot be wired into the default.
         alert = {"source": "billing", "fingerprint": "kafka-lag-spike"}
         run = start_run(alert, _test_settings(), now)
         assert run.incident_id != uuid5(_INCIDENT_NAMESPACE, dedup_key(alert))
@@ -155,9 +149,7 @@ class TestDeriveIncidentId:
         assert derive_incident_id(payload, ckpt) != derive_incident_id(payload, ckpt)
 
     def test_fallback_keys_on_the_raw_field_not_the_hash(self) -> None:
-        # ``dedup_key`` happily hashes "billing|" into a stable value; returning
-        # it would collapse every fingerprint-less alert from one source into a
-        # single immortal incident. The check must be on the raw field.
+        # ``dedup_key`` hashes "billing|" into a stable value: the check is on the raw field.
         payload: dict[str, object] = {"source": "billing", "fingerprint": ""}
         derived = derive_incident_id(payload, InMemoryCheckpointer())
         assert derived != uuid5(_INCIDENT_NAMESPACE, dedup_key(payload))
@@ -217,11 +209,8 @@ class TestDeriveIncidentId:
 class TestStartRunToolCallOverride:
     """ADR 0019: the caller may bound one run below the fleet default.
 
-    Before this, every eval scenario ran on ``settings.budget_max_tool_calls``
-    regardless of the cap it declared, so the runtime ceiling and the graded
-    cap were different numbers — and the investigation planner was told the
-    default of 25 in every scenario, including the ones whose entire subject
-    is behaviour under a tight budget.
+    Before this, every scenario ran on the fleet default whatever cap it declared, so the
+    runtime ceiling and the graded cap differed.
     """
 
     def test_override_seeds_the_ledger(self, now: datetime) -> None:
@@ -243,10 +232,7 @@ class TestStartRunToolCallOverride:
     def test_zero_override_is_ignored(self, now: datetime) -> None:
         """A zero ledger is born exhausted, so it cannot be a runtime ceiling.
 
-        ``is_exhausted`` is ``used >= max``; at max 0 the loop escalates
-        before TRIAGE ever classifies the alert, ending the run before it
-        does the thing a cap-0 scenario exists to observe. The claim "a
-        correct run makes no tool call" is graded post-hoc instead.
+        ``is_exhausted`` is ``used >= max``, so at 0 the loop escalates before TRIAGE runs.
         """
         settings = _test_settings(budget_max_tool_calls=25)
         run = start_run({"source": "s"}, settings, now, max_tool_calls=0)

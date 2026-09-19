@@ -229,14 +229,9 @@ class TestJudgeBriefing:
 class TestJudgeSeesTheDeterministicFields:
     """The judge must see what the writer saw (WO-R2-34, after #152).
 
-    ``escalation_reason`` and ``attempted_action`` are deterministic fields
-    the briefing writer is given (``briefing_enrichment._format_context``).
-    The judge grades ``groundedness`` — does every claim derive from the
-    context — against a rendering that omitted both, so a recommendation
-    correctly built on them read as invented, and a recommendation that
-    told the human to re-run an already-attempted Tier-1 action could not
-    be marked down for it. Grading a briefing on less than it was written
-    from is the same vacuous-assertion shape this order is closing.
+    ``escalation_reason`` and ``attempted_action`` are deterministic fields the writer is
+    given, and the judge graded ``groundedness`` against a rendering that omitted both —
+    so a recommendation correctly built on them read as invented.
     """
 
     @staticmethod
@@ -278,11 +273,8 @@ class TestJudgeSeesTheDeterministicFields:
     def test_the_judge_is_shown_what_the_writer_was_shown(
         self, run_state: RunState, now: datetime
     ) -> None:
-        # The anti-drift pin. Two renderings exist on purpose (the writer
-        # also gets the budget, the judge also gets findings/recommendation),
-        # but the halves they share must stay word-for-word identical — a
-        # judge grading groundedness against different phrasing than the
-        # writer received is grading a different briefing.
+        # The anti-drift pin: two renderings exist on purpose, but the halves they share must
+        # stay word-for-word identical.
         from incident_commander.agent.briefing_enrichment import _format_context
 
         briefing = _sample_briefing(run_state, now).model_copy(
@@ -328,23 +320,9 @@ class TestUnusedProbeSummary:
 class TestTheJudgeReadsEachProbesArguments:
     """INC-002: a probe result rendered without its arguments has no scope.
 
-    Paid run ``54ab08425f82`` (``remediate_dlq_backlog_success`` run E,
-    2026-09-08 11:13Z, GREEN on all five deterministic dimensions) is the
-    reference case. The agent read the whole dead-letter queue, read the
-    alerted ``remediation_hint='replay_safe'`` slice, replayed its single row
-    by id, re-read the SAME filtered slice to verify (``total 0``), and wrote
-    an honest briefing: one row replayed, four rows remaining, each with what
-    it still needs. The judge was shown that final probe as
-    ``list_dlq_messages: {"total":0,"items":[]}`` — the filter that scoped it
-    stripped away — concluded "all 5 messages are gone", and scored
-    groundedness 0.0 / overall 0.38 / "0/1 useful" on a briefing that was
-    right. It made the exact overclaim cmd #218 had just forbidden the writer.
-
-    Two halves, and both are needed. The rubric half (a filtered read proves
-    its slice and nothing outside it) lives in
-    ``test_prompts_snapshot.py::TestBriefingJudgeInvariants``; a rule the
-    judge cannot apply because the fact is missing from its context is not a
-    rule. This file is the context half.
+    Paid run ``54ab08425f82`` replayed the one alerted row and re-read the same filtered
+    slice; the judge saw that probe as ``{"total":0,"items":[]}`` with the filter stripped,
+    concluded "all 5 messages are gone", and scored groundedness 0.0 on a correct briefing.
     """
 
     @staticmethod
@@ -372,18 +350,13 @@ class TestTheJudgeReadsEachProbesArguments:
         line = _trail_line(self._judged(briefing), "list_dlq_messages")
         assert "remediation_hint='replay_safe'" in line
         assert '{"total":0,"items":[]}' in line
-        # Arguments BEFORE the result: the rubric tells the judge to read the
-        # scope first, and a context that renders it afterwards asks the judge
-        # to have already interpreted the number by the time it learns what
-        # was counted.
+        # Arguments BEFORE the result: the rubric tells the judge to read the scope first.
         assert line.index("remediation_hint='replay_safe'") < line.index('"total":0')
 
     def test_an_unfiltered_read_says_so_rather_than_saying_nothing(
         self, run_state: RunState, now: datetime
     ) -> None:
-        # The absence of a filter is itself the distinguishing fact. Rendering
-        # nothing for it would make the whole-queue read and the slice read
-        # indistinguishable again, which is the bug.
+        # The absence of a filter is itself the distinguishing fact.
         evidence = (
             EvidenceEntry(
                 tool_name="list_dlq_messages",
@@ -408,12 +381,8 @@ class TestTheJudgeReadsEachProbesArguments:
 class TestTheArchivedJudgeContextCarriesTheFilter:
     """Run E's own trail, rebuilt from the archive. Read-only, and no live judge.
 
-    The archived trajectory's final checkpoint IS the ``RunState`` the
-    briefing was rendered from, so rendering it again is the experiment; a
-    hand-written trail would only be a model of it, and a model is what the
-    fix must not be graded against. Nothing here calls a model: the context
-    string is built and inspected, which is the whole of what INC-002 was
-    about.
+    The archived final checkpoint IS the ``RunState`` the briefing was rendered from, so
+    rendering it again is the experiment, not a model of it.
     """
 
     def test_the_archive_is_present(self) -> None:
@@ -426,9 +395,7 @@ class TestTheArchivedJudgeContextCarriesTheFilter:
         )
 
     def test_the_final_verify_is_the_filtered_read_that_returned_zero(self) -> None:
-        # Pins the premise the rest of the class rests on, so a trajectory
-        # that had drifted from the run it claims to describe fails here
-        # rather than quietly becoming the thing under test.
+        # Pins the premise, so a drifted trajectory fails here rather than becoming the test.
         probe = _run_e_final_probe()
         assert probe.tool == "list_dlq_messages"
         assert probe.arguments["remediation_hint"] == "replay_safe"
@@ -442,18 +409,14 @@ class TestTheArchivedJudgeContextCarriesTheFilter:
         assert line.index("remediation_hint='replay_safe'") < line.index('"total":0')
 
     def test_the_earlier_unfiltered_read_stays_distinguishable(self) -> None:
-        # Run E read the queue twice under one tool name. If both lines
-        # rendered identically apart from their results, the judge would still
-        # have to guess which read the `total 0` belonged to.
+        # Run E read the queue twice under one tool name, so the lines must differ.
         lines = _trail_lines(format_briefing_context(_run_e_briefing()), "list_dlq_messages")
         assert len(lines) == 3
         assert "remediation_hint=None" in lines[0]
         assert all("remediation_hint='replay_safe'" in line for line in lines[1:])
 
     def test_the_untouched_rows_the_briefing_named_are_in_the_context(self) -> None:
-        # The judge called the briefing ungrounded for naming four remaining
-        # rows. Three of them are visible in the trail's first, unfiltered
-        # read; the briefing was reporting the context, not inventing.
+        # Three of the four remaining rows are visible in the trail's unfiltered read.
         context = format_briefing_context(_run_e_briefing())
         for row in (_POISON_ROW, _HUMAN_ROW, _RATE_LIMIT_ROW):
             assert row in context

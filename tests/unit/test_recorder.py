@@ -1,40 +1,9 @@
 """`make world-record` — the recorded-world recorder (WP-3.1, WO-R3-196).
 
-A recording exists so that every paired comparison in Phases 5, 6, 9, 12 and 13
-runs against ONE world instead of one world per run. That makes the properties
-pinned here load-bearing in a way a document's are not: a recording is not read
-by a person who would notice something odd, it is REPLAYED to measured runs for
-weeks.
-
-So, the five things this file exists to prove, each tied to the thing that goes
-wrong without it:
-
-* **Keys are the WIRED arguments** (divergence F2). Every call the agent makes
-  goes through ``tools/wire.py::wire_arguments``, which default-fills every
-  optional field. A recording keyed on ``list_dlq_messages({})`` cannot answer
-  the agent's ``list_dlq_messages({"job_type": null, "remediation_hint": null,
-  "limit": 50, "offset": 0})``, and the failure mode is not an error — it is a
-  ``not_recorded`` miss on every read, i.e. a benchmark that measures nothing.
-  ``TestKeysAreTheWiredArguments`` is the red-before test: against raw sorted
-  arguments it fails on the defaults.
-* **The whole ``ToolResult`` survives** (divergence F3). ``Reading`` keeps the
-  first JSON object and the joined text; a replay client has to answer with
-  content blocks and ``is_error``.
-* **Determinism.** Two recordings of one canned world are the same recording
-  apart from their timestamps, or "the world did not move" cannot be said.
-* **The answer key is out of reach.** The ground truth is a sibling file, the
-  loader has no parameter that could reach it, and ``RecordedWorld`` forbids
-  extra keys so it cannot ride inside a recording either (ADR 0038's wall,
-  applied to a recording; ADR 0040 for which world the key is about).
-* **Evidence, not a cache.** Exclusive-create: a second recording of the same
-  scenario raises rather than replacing the first (invariant 9). And the
-  coherence lints run, because "a recorded world that contradicts itself is a
-  fixture defect, not a benchmark" (plan 02 §187, the rem-4 run).
-
-Every test is hermetic: a fake MCP client, ``tmp_path`` for writes, and the
-suite-wide outbound-socket block in ``conftest.py``. Nothing here starts a
-platform and nothing here constructs an LLM client — the module under test does
-not import one.
+A recording is REPLAYED to measured runs for weeks. Five things are proved here: keys are
+the WIRED arguments (divergence F2 — a raw-argument key misses every read), the whole
+``ToolResult`` survives (F3), a recording is deterministic bar timestamps, the answer key
+is out of reach (ADR 0038/0040), and the write is exclusive-create (invariant 9).
 """
 
 from __future__ import annotations
@@ -65,9 +34,7 @@ _T2: Final[datetime] = datetime(2026, 9, 17, 13, 30, 0, tzinfo=UTC)
 _INV1: Final[str] = "aaaabbbbcccc"
 _INV2: Final[str] = "ddddeeeeffff"
 
-#: A DLQ row whose hint sanctions a transient error and whose text is a
-#: permanent data bug — the rem-4 contradiction, the pair the coherence lint
-#: exists to report (archive ``efdc3b2a9864``, 2026-09-07).
+#: The rem-4 contradiction: a `replay_safe` hint over a permanent data bug.
 _INCOHERENT_ROW: Final[dict[str, Any]] = {
     "id": "11111111-1111-5111-8111-111111111111",
     "type": "csv_upload",
@@ -81,13 +48,8 @@ _INCOHERENT_ROW: Final[dict[str, Any]] = {
 class FakeClient:
     """Structural ``MCPClientProtocol`` fake, keyed by tool name.
 
-    Records the arguments it was called with, which is the only way to assert
-    that the WIRED form is what went over the wire rather than only what was
-    written into the document. Same shape as
-    ``tests/unit/test_world_dossier.py``'s and deliberately not
-    ``evals.fakes.CannedMCPClient``: that one is a per-tool queue, and the
-    argument-awareness a recording exists for is exactly what a queue cannot
-    express.
+    Records the arguments it was called with, the only way to assert the WIRED form went
+    over the wire. Not ``CannedMCPClient``: a per-tool queue cannot express that.
     """
 
     def __init__(
@@ -147,10 +109,7 @@ def _record(
 ) -> recorder.RecordedWorld:
     """The recorder's own pipeline, minus the seeding and the reset.
 
-    Deliberately assembled from the module's public functions rather than by
-    calling ``main`` with a patched world: what is under test is the pipeline
-    the CLI runs, and a test that drove ``main`` would need a fake ``make
-    eval-reset`` to reach it.
+    Assembled from public functions: driving ``main`` would need a fake ``eval-reset``.
     """
     derived, notes = recorder.recording_probes(scenario)
     probes, wire_notes = recorder.wire_probes(derived)
@@ -175,10 +134,7 @@ def _record(
 class TestKeysAreTheWiredArguments:
     """Divergence F2, the one that decides whether a recording works at all.
 
-    RED BEFORE: with ``wire_probes`` re-keying on ``probe.args`` (the raw
-    sorted tuple) instead of ``wire_arguments``' output, both tests below fail —
-    the key carries ``{}`` where the agent sends four fields, and the
-    hash-derived key does not match what the agent's own call hashes to.
+    RED BEFORE: keying on the raw ``probe.args`` carries ``{}`` where the agent sends four.
     """
 
     def test_an_omitted_optional_is_in_the_key_with_the_default_the_platform_fills(
@@ -198,9 +154,7 @@ class TestKeysAreTheWiredArguments:
     def test_the_call_made_is_the_wired_call_not_the_raw_one(self) -> None:
         """The wire is what matters: a recording of a call nobody makes is empty.
 
-        ``read`` sends ``probe.args``, so wiring has to happen BEFORE the call
-        or the recording would hold the platform's answer to a different
-        request than the one it is keyed by.
+        Wiring happens BEFORE the call.
         """
         client = FakeClient({"list_dlq_messages": {"total": 0, "items": []}})
         probes, _notes = recorder.wire_probes([dossier._probe("list_dlq_messages", {}, "test")])
@@ -215,10 +169,7 @@ class TestKeysAreTheWiredArguments:
     def test_the_key_is_what_the_agents_own_call_hashes_to(self) -> None:
         """One key function, computed from the wire form, used by both sides.
 
-        The agent's client wires ``{"remediation_hint": "replay_safe"}`` into
-        four fields. ``answer`` wires whatever it is handed, so a replay lookup
-        with the agent's raw arguments finds the recording made from the
-        derivation's arguments — which is the whole point of F2's fix.
+        ``answer`` wires whatever it is handed, so a raw-argument lookup finds it (F2).
         """
         client = FakeClient({"list_dlq_messages": {"total": 1, "items": [_INCOHERENT_ROW]}})
         probes, _notes = recorder.wire_probes(
@@ -241,9 +192,7 @@ class TestKeysAreTheWiredArguments:
     def test_two_probes_that_wire_to_one_call_are_recorded_once(self) -> None:
         """``{}`` and ``{"limit": 50}`` are the same request after wiring.
 
-        The merge has to run again on the WIRED form, or the recorder makes the
-        same request twice and stores two entries under one key — which a
-        replay lookup would silently resolve to whichever came first.
+        The merge runs again on the WIRED form, or two entries collide.
         """
         probes, _notes = recorder.wire_probes(
             [
@@ -320,9 +269,7 @@ class TestDeterminism:
     ) -> None:
         """Byte-identical apart from timestamps, stated as a diff over the JSON.
 
-        Checked as well as the fingerprint because the fingerprint is code that
-        could be wrong in the same direction as the recorder: this compares the
-        documents themselves and names every key that moved.
+        Checked as well as the fingerprint, which could be wrong too.
         """
         scenario = scenarios["remediate_dlq_backlog_success"]
         first = json.loads(
@@ -356,16 +303,8 @@ class TestTheAnswerKeyIsOutOfReach:
     ) -> None:
         """Checked on the SHAPE, not by grepping for a label.
 
-        A substring search is the wrong instrument here and finding out why is
-        worth the line: ``remediate_dlq_backlog_success`` seeds a chaos hook
-        called ``poison_message`` and its ground-truth label is also
-        ``poison_message``, so a grep over the document is red for a document
-        that leaks nothing. The recording names the HOOKS because ADR 0040
-        requires it to say which world it is; the two strings coinciding is a
-        coincidence of vocabulary, not a leak.
-
-        What must be true is structural and is what this asserts: the document
-        has no field in which an answer key could sit.
+        A grep is wrong here: ``remediate_dlq_backlog_success`` seeds ``poison_message`` and so
+        is its label. What must hold is structural: no field an answer key could sit in.
         """
         scenario = scenarios["remediate_dlq_backlog_success"]
         assert scenario.ground_truth is not None, "this test needs a labelled scenario"
@@ -379,9 +318,7 @@ class TestTheAnswerKeyIsOutOfReach:
     ) -> None:
         """The agent's whole view of a recording is ``calls[].result`` (via ``answer``).
 
-        So that is where the leak test belongs, and there the substring check is
-        exactly right: a platform response carrying a root-cause label would be
-        the ADR 0012 failure one layer down.
+        There a substring check is right (ADR 0012).
         """
         scenario = scenarios["remediate_dlq_backlog_success"]
         assert scenario.ground_truth is not None
@@ -406,10 +343,7 @@ class TestTheAnswerKeyIsOutOfReach:
     ) -> None:
         """The property, checked by watching every file the loader touches.
 
-        ``load_recording`` takes one path and has no parameter that could reach
-        the sibling; this proves it by recording every ``Path.read_text`` and
-        ``Path.open`` the call makes. A future loader that "helpfully" picked up
-        the answer key beside the recording fails here.
+        ``load_recording`` takes one path and has no parameter that could reach the sibling.
         """
         recording = artifacts.write_versioned(
             "recorded_world",
@@ -605,9 +539,7 @@ class TestThePremiseIsEstablishedBeforeAnythingIsRecorded:
     ) -> None:
         """The consumer-lag case: ``lag >= 20`` behind a 60-second gauge cadence.
 
-        Single-shot — the dossier's behaviour, correct for a dossier — would
-        refuse every consumer-lag scenario in the corpus and report it as "the
-        fault was never manufactured".
+        Single-shot would refuse every lag scenario.
         """
         scenario = scenarios["remediate_consumer_lag_success"]
         probe = scenario.expected_precondition[0]
@@ -702,9 +634,7 @@ class TestTheCallSet:
     ) -> None:
         """The scenario's own declared argument values — the filtered forms (04:110).
 
-        The derivation reads the DLQ listing UNFILTERED on purpose; the
-        precondition reads the alerted slice. A replayed agent may take either
-        route, so both are in the recording.
+        The derivation reads UNFILTERED.
         """
         scenario = scenarios["remediate_dlq_backlog_success"]
         assert scenario.expected_precondition, "this test needs a scenario with preconditions"
@@ -767,11 +697,8 @@ class TestTheDossierPathIsUnchanged:
     ) -> None:
         """The rendered document, pinned against its own re-render.
 
-        ``render`` is pure over its inputs, so two renders of one reading are
-        the same bytes; what this catches is a recorder change that reached
-        ``derive_probes``, ``read`` or a lint and moved the dossier's content.
-        The stable half of the document is everything below the header, which
-        carries the invocation id and the clock.
+        ``render`` is pure over its inputs, so this catches a recorder change that reached
+        ``derive_probes``, ``read`` or a lint.
         """
         scenario = scenarios["remediate_dlq_backlog_success"]
         client = _dlq_client()
@@ -810,10 +737,7 @@ class TestTheDossierPathIsUnchanged:
 def _paths_read_while_loading(path: Path) -> set[str]:
     """Every file ``load_recording`` touches, watched from outside it.
 
-    A free function rather than a closure in the loop that calls it: a nested
-    spy would capture the loop's own accumulator, which is the bug ruff's B023
-    exists to catch and exactly the sort of thing that makes a leak test pass
-    for the wrong reason.
+    A free function, not a closure: a nested spy would capture the loop's accumulator (B023).
     """
     touched: set[str] = set()
     real_read_text = Path.read_text
@@ -831,13 +755,9 @@ def _paths_read_while_loading(path: Path) -> set[str]:
 class TestNothingAgentVisibleNamesTheLab:
     """The hazard the recorder introduces, and nothing else in the repo has.
 
-    A live run's agent holds `PLATFORM_TOKEN`, which deliberately lacks
-    `chaos:invoke` so it cannot read the `chaos.` audit stream and learn which
-    hook caused its own incident (ADR 0012, the three-token split). The recorder
-    reads under `PLATFORM_SMOKE_TOKEN`. Anything that principal can see and the
-    agent's cannot would be handed to a replayed agent as tool output — and it
-    would be in a committed fixture replayed to every run built on it, not in
-    one trajectory somebody reads once.
+    A live agent's `PLATFORM_TOKEN` lacks `chaos:invoke` so it cannot read the `chaos.`
+    audit stream (ADR 0012); the recorder reads under `PLATFORM_SMOKE_TOKEN`, and what
+    it sees reaches a replayed agent.
     """
 
     def test_the_term_set_is_derived_from_the_contract_not_typed(self) -> None:
@@ -877,9 +797,7 @@ class TestNothingAgentVisibleNamesTheLab:
     ) -> None:
         """ADR 0040 needs the label to say which hooks built the world.
 
-        It is evaluator-side and unreachable through `answer()`, so naming them
-        there is required rather than a leak — and the lint must not confuse the
-        two, or a scenario could never declare its own fault plan.
+        It is evaluator-side and unreachable through `answer()`.
         """
         label = recorder.world_label(scenarios["remediate_consumer_lag_success"], chaos_seeded=True)
         assert "kill_consumer" in label.label
@@ -891,12 +809,8 @@ class TestNothingAgentVisibleNamesTheLab:
 class TestTheCommittedRecordings:
     """Every recording this repo carries, checked as the fixture it now is.
 
-    They are committed rather than gitignored because WP-3.2's replay client and
-    WP-3.3's `--mode recorded` cannot run in a fresh clone without them, and a
-    benchmark whose world exists only on the machine that recorded it is not a
-    benchmark anyone can reproduce. That makes them code's responsibility: a
-    recording that has stopped loading, or that has started carrying its own
-    answer key, is a defect in the repo and not in somebody's scratch directory.
+    Committed, not gitignored: WP-3.2's replay client and ``--mode recorded`` cannot run
+    in a fresh clone without them, so one that stops loading is a defect in the repo.
     """
 
     @staticmethod
@@ -916,9 +830,7 @@ class TestTheCommittedRecordings:
             assert world.schema_version == recorder.SCHEMA_VERSION, path.name
             assert world.calls, path.name
             assert world.scenario == path.parent.name, path.name
-            # The key stored is the key `answer` will compute. A hand-edited
-            # recording whose key stopped matching its own arguments would
-            # answer nothing and look fine.
+            # A hand-edited key that stopped matching its arguments answers nothing.
             for call in world.calls:
                 assert call.key == recorder.call_key(call.tool, call.arguments), path.name
 
@@ -970,9 +882,7 @@ class TestTheCommittedRecordings:
     def test_no_committed_recording_holds_a_credential(self) -> None:
         """A recording is read from a live platform, so this is not hypothetical.
 
-        Identifier-shaped values (the principal UUIDs the audit log returns) are
-        NOT credentials and are expected — a token is. The patterns are the
-        credential shapes this project actually uses.
+        Principal UUIDs are NOT credentials.
         """
         secrets = re.compile(r"sk-ant-|sa_[A-Za-z0-9_]{10,}|Bearer\s+\S|ANTHROPIC_API_KEY")
         folder = _REPO_ROOT / "evals" / "recorded_worlds"

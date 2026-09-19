@@ -43,13 +43,8 @@ def snapshot() -> dict[str, Any]:
 
 class TestCoverage:
     def test_registry_covers_every_snapshot_tool(self, snapshot: dict[str, Any]) -> None:
-        # Chaos/seed tools live on the platform but the agent never invokes
-        # them via the typed registry — they're operator/eval concerns
-        # wrapped by scripts/chaos_setup.py and the runner's chaos hooks
-        # (raw httpx, outside the agent trust boundary). Since v0.4.9 the
-        # platform marks them with a "[chaos: ...]" description prefix, so
-        # the filter is structural instead of a hand-list that drifted on
-        # every new hook (seed_dlq_messages was the third time).
+        # Chaos/seed tools live on the platform but the agent never invokes them through the typed
+        # registry. Since v0.4.9 a "[chaos: ...]" description prefix makes the filter structural.
         expected = {
             t["name"]
             for t in snapshot["tools"]
@@ -125,9 +120,7 @@ class TestGetConsumerLagOutput:
         model = GetConsumerLagOutput(
             consumer_group="worker-dispatcher",
             lag=None,
-            # v0.6.0: a null lag from the LIVE group. `source` says where the
-            # number would come from, so it stays "live"; `lag_known` is what
-            # reports that there is no number.
+            # v0.6.0: a null lag from the LIVE group, so `source` stays "live".
             lag_known=False,
             source="live",
             cache_key="kafka:consumer_lag:worker-dispatcher",

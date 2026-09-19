@@ -44,12 +44,8 @@ class _Client:
 class _ByTool:
     """One answer per tool name, because the agent guard now asks two things.
 
-    ``assert_write_capable_principal`` fires a Tier-1 probe and then a chaos
-    probe, and the pass condition is OPPOSITE for the two: the Tier-1 call must
-    be refused on its arguments (the scope let it through) and the chaos call
-    must be refused on scope (the scope did not). ``_Client``'s single fixed
-    answer cannot express a principal that is one and not the other, which is
-    precisely the principal the split creates.
+    ``assert_write_capable_principal`` fires a Tier-1 probe then a chaos probe and the
+    pass condition is OPPOSITE: Tier-1 refused on arguments, chaos refused on scope.
     """
 
     def __init__(self, behavior: dict[str, ToolResult | Exception]) -> None:
@@ -113,11 +109,8 @@ def _audit(
 ) -> dict[str, Any]:
     """One audit row in the PLATFORM's real shape.
 
-    Taken from v0.4.9's AuditEventEntry, not from what the guard happened
-    to expect. The first version of these tests built {"items": [...]},
-    a container key the platform never emits, so all four audit tests
-    passed against a payload that could not occur and the guard was a
-    no-op in production (F-004).
+    From v0.4.9's AuditEventEntry: the first version built {"items": [...]}, which the
+    platform never emits (F-004).
     """
     return {
         "id": "aud_" + tool[:6] + when.strftime("%H%M%S%f"),
@@ -135,10 +128,7 @@ def _audit(
 def _result(items: list[dict[str, Any]], total: int | None = None) -> ToolResult:
     """The platform's envelope: {"total": N, "events": [...]}.
 
-    ``total`` is the platform's COUNT over the SAME filter with no limit
-    applied (repositories/audit.py:86), while ``events`` is capped at
-    ``limit`` — so a caller-supplied ``total`` larger than ``len(items)``
-    is the server itself saying it withheld rows.
+    ``total`` counts the same filter unlimited, so a bigger one means withheld rows.
     """
     return ToolResult(
         content=[
@@ -238,12 +228,8 @@ class TestNoOptOut:
 class TestAuditPayloadShape:
     """The guard must read the platform's shape, and fail closed on any other.
 
-    F-004: `_parse_events` read `payload["items"]` while v0.4.9 emits
-    `{"total": N, "events": [...]}`, so it returned zero events on every
-    real call — no violations, no exception, "zero successful Tier-1
-    actions", exit 0. The check built to catch the Run 001 token bug could
-    not have caught it. Parsing nothing must fail like an unreadable audit,
-    never like a clean one.
+    F-004: `_parse_events` read `payload["items"]` while v0.4.9 emits `events`, so it
+    returned zero events on every real call and exited 0.
     """
 
     _SINCE = datetime(2026, 8, 8, 12, 0, tzinfo=UTC)
@@ -285,11 +271,8 @@ class TestAuditPayloadShape:
         )
 
     def test_row_with_unparseable_created_at_fails_closed(self) -> None:
-        # Covered by the typed parse since F-004: AuditEventEntry declares
-        # created_at as a required datetime, so a row the guard cannot place
-        # in time can never reach the window comparison and be silently
-        # dropped from it. Pinned here so a future loosening of the model
-        # (created_at: str | None) cannot quietly restore that hole.
+        # Covered by the typed parse since F-004: AuditEventEntry requires created_at, so a
+        # row the guard cannot place in time cannot be dropped silently.
         row = _audit("mark_dlq_permanent", "success", self._SINCE + timedelta(minutes=1))
         row["created_at"] = "not-a-timestamp"
         with pytest.raises(PrincipalGuardError, match="unrecognized payload shape"):
@@ -299,14 +282,9 @@ class TestAuditPayloadShape:
 class TestSaturatedAuditPage:
     """A-13: one page of at most 200 rows is not a scan of the window.
 
-    ``list_audit_events`` exposes no offset and no created_after (the
-    handler hardcodes offset=0, limit is capped at 200), so the guard
-    cannot page. Rows come back created_at DESC, which means the ONLY
-    proof the whole [since, now] window was seen is that the oldest row on
-    the page predates ``since``. Without that proof the guard must fail
-    closed: a busy stage otherwise pushes its Tier-1 successes past row
-    200 and the assertion that replaced the manual F-001 query reports a
-    clean stage.
+    ``list_audit_events`` has no offset and no created_after, so the guard cannot
+    page. Rows come DESC, so the only proof the whole window was seen is
+    that the oldest row predates ``since``; without it, fail closed.
     """
 
     _SINCE = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
@@ -321,40 +299,29 @@ class TestSaturatedAuditPage:
         return rows
 
     def test_full_page_still_inside_the_window_fails_closed(self) -> None:
-        # Exactly the A-13 blindness: 200 in-window rows, none of them a
-        # Tier-1 success, so the violations list is empty — but rows 201+
-        # are unreachable and may hold the successes the guard exists for.
+        # Exactly the A-13 blindness: 200 in-window rows, and rows 201+ unreachable.
         client = _Client(_result(self._page(200), total=417))
         with pytest.raises(PrincipalGuardError, match="saturated"):
             assert_no_tier1_successes(client, self._SINCE)
 
     def test_full_page_whose_oldest_row_predates_since_is_a_genuine_pass(self) -> None:
-        # The window WAS fully scanned: the page reaches back past `since`,
-        # so nothing in-window can be hiding behind it. Saturation must not
-        # false-fail a covered window.
+        # The page reaches back past `since`, so the window was fully scanned.
         client = _Client(_result(self._page(200, oldest_before_since=True), total=417))
         assert assert_no_tier1_successes(client, self._SINCE) == []
 
     def test_server_reported_total_above_the_page_fails_closed(self) -> None:
-        # The platform's `total` is a COUNT over the same filter with no
-        # limit (repositories/audit.py:86), so total > len(events) is the
-        # server itself saying it withheld rows — honest even if the page
-        # cap ever moves off 200.
+        # `total` counts the same filter unlimited, so total > len(events) means withheld rows.
         client = _Client(_result(self._page(3), total=64))
         with pytest.raises(PrincipalGuardError, match="inconclusive"):
             assert_no_tier1_successes(client, self._SINCE)
 
     def test_short_page_is_conclusive(self) -> None:
-        # total == len(events) and the page is not at the cap: every row
-        # matching the filter came back, so the window is fully covered
-        # even though no row predates `since`.
+        # total == len(events) below the cap: every matching row came back.
         client = _Client(_result(self._page(3)))
         assert assert_no_tier1_successes(client, self._SINCE) == []
 
     def test_saturated_page_still_names_the_violations_it_can_see(self) -> None:
-        # Inconclusive outranks clean, but a violation already visible on
-        # the page is the more actionable signal and must not be swallowed
-        # by the saturation message.
+        # A violation visible on the page must not be swallowed by saturation.
         rows = self._page(199)
         rows.append(_audit("mark_dlq_permanent", "success", self._SINCE + timedelta(minutes=1)))
         client = _Client(_result(rows, total=900))
@@ -372,12 +339,8 @@ class TestSaturatedAuditPage:
 class TestSelfOwnedPrincipals:
     """A-13's other half: a shared platform's other tenants are not us.
 
-    Any service account's in-window Tier-1 success currently fails the
-    stage, so a neighbouring principal's legitimate remediation is a false
-    exit 5. The filter set is {agent SA, smoke SA} — NOT the smoke SA
-    alone: the F-001 failure mode this guard was built for is the stage
-    silently running under the FULL agent token, and those rows carry the
-    AGENT principal_id.
+    The filter set is {agent SA, smoke SA} — NOT the smoke SA alone: the F-001 failure
+    this guard exists for is the stage under the FULL agent token.
     """
 
     _SINCE = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
@@ -402,9 +365,7 @@ class TestSelfOwnedPrincipals:
         assert assert_no_tier1_successes(client, self._SINCE, principal_ids=self._OURS) == []
 
     def test_our_agent_principal_still_fails_the_stage(self) -> None:
-        # The F-001 shape: the "read-scoped" stage wrote under the full
-        # agent token. Filtering to the smoke SA alone would make the guard
-        # blind to its own reason for existing.
+        # The F-001 shape: the "read-scoped" stage wrote under the agent token.
         client = self._tier1_by(_OUR_AGENT_SA)
         with pytest.raises(PrincipalGuardError, match="mark_dlq_permanent"):
             assert_no_tier1_successes(client, self._SINCE, principal_ids=self._OURS)
@@ -455,10 +416,7 @@ class TestSelfOwnedPrincipals:
 class TestWriteCapablePrincipal:
     """The mirror guard, for the one stage that spends money AND mutates.
 
-    Every principal check was gated on --smoke, so the remediation stage ran
-    unguarded. A read-scoped token there does not fail fast: each scenario
-    investigates, plans, attempts its action, is refused, and grades red —
-    eight environment failures dressed as agent failures, after full spend.
+    Every principal check was gated on --smoke, so the remediation stage ran unguarded.
     """
 
     def test_a_scope_refusal_fails_the_guard(self) -> None:
@@ -469,10 +427,8 @@ class TestWriteCapablePrincipal:
             assert_write_capable_principal(client)
 
     def test_an_argument_refusal_plus_a_chaos_scope_refusal_passes(self) -> None:
-        # The post-v0.6.5 agent principal, and the ONLY passing shape: the
-        # Tier-1 scope check passed and rejected the arguments (so it can act,
-        # and nothing executed), while the chaos hook was refused on scope (so
-        # the platform withholds the chaos audit rows from it).
+        # The post-v0.6.5 agent principal and the ONLY passing shape: Tier-1 refused on
+        # arguments, chaos refused on scope.
         client = _ByTool(dict(_SPLIT_AGENT))
         assert_write_capable_principal(client)  # no raise
         assert [name for name, _ in client.calls] == [_PROBE_TOOL, _CHAOS_PROBE_TOOL]
@@ -503,11 +459,8 @@ class TestWriteCapablePrincipal:
     def test_a_token_that_can_also_seed_chaos_fails_the_guard(self) -> None:
         """The leak, caught before a single model call.
 
-        A principal that passes BOTH probes on arguments is the pre-v0.6.5
-        four-scope token: it can act, and because it can fire the lab the
-        platform serves it the `chaos.%` audit rows. Every diagnosis claim on
-        such a run is unfalsifiable, so the guard refuses it as hard as it
-        refuses a token that cannot act at all.
+        A principal that passes BOTH probes on arguments is the pre-v0.6.5 four-scope token:
+        it can act and read the `chaos.%` audit rows.
         """
         client = _ByTool(
             {
@@ -521,11 +474,7 @@ class TestWriteCapablePrincipal:
     def test_a_vanished_probe_tool_fails_closed(self) -> None:
         """ "Tool not found" is not proof that the principal can act.
 
-        The guard used to pass on ANY non-scope MCP error, so the day the
-        platform renames or retires ``mark_dlq_permanent`` the probe starts
-        answering ``-32601`` and the guard goes green — vacuously — for a
-        read-scoped token. A probe that never reached argument validation
-        proves nothing about the scope.
+        The guard used to pass on ANY non-scope MCP error, so a rename makes it green.
         """
         client = _Client(MCPError(-32601, f"Unknown tool: {_PROBE_TOOL}"))
         with pytest.raises(PrincipalGuardError, match="-32601"):
@@ -537,9 +486,7 @@ class TestWriteCapablePrincipal:
             assert_write_capable_principal(client)
 
     def test_a_scope_shaped_code_without_the_word_scope_fails_closed(self) -> None:
-        # -32002 whose message does not name a scope is not a scope refusal
-        # and is not an argument refusal either. Neither branch owns it, so
-        # the fail-closed branch must.
+        # -32002 with no scope named is neither refusal, so fail closed owns it.
         client = _Client(MCPError(-32002, "upstream timeout"))
         with pytest.raises(PrincipalGuardError):
             assert_write_capable_principal(client)
@@ -553,14 +500,9 @@ class TestWriteCapablePrincipal:
 class TestChaosBlindPrincipal:
     """The negative half of the split: the AGENT must not be able to seed.
 
-    This guard is not about blast radius. The platform hides every ``chaos.%``
-    audit row from principals without ``chaos:invoke``
-    (``hidden_audit_action_prefixes``), so the scope is a read of the answer
-    key: ``list_audit_events`` returns the hook name and its arguments,
-    stamped seconds before the alert the agent is investigating. The filter is
-    inert unless the agent's token genuinely lacks the scope, and this is what
-    "genuinely" means here — asserted at the point of use, against the live
-    platform, exactly like its three siblings (F-001).
+    Not blast radius: the platform hides every ``chaos.%`` audit row from principals
+    without ``chaos:invoke``, so the scope is a read of the answer key — hook name and
+    arguments, stamped seconds before the alert (F-001).
     """
 
     def test_a_scope_refusal_passes(self) -> None:
@@ -569,9 +511,7 @@ class TestChaosBlindPrincipal:
         assert client.calls[0][0] == _CHAOS_PROBE_TOOL
 
     def test_an_argument_refusal_means_the_scope_is_carried_and_fails(self) -> None:
-        # The signature of the pre-split four-scope token: the handler got
-        # PAST the scope check and rejected our deliberately invalid hook
-        # arguments. Nothing was seeded, and the principal is wrong anyway.
+        # The pre-split four-scope signature: past the scope check, refused on arguments.
         client = _Client(MCPError(-32602, "latency_ms: Input should be a valid integer"))
         with pytest.raises(PrincipalGuardError, match="chaos:invoke"):
             assert_chaos_blind_principal(client)
@@ -589,18 +529,14 @@ class TestChaosBlindPrincipal:
             assert_chaos_blind_principal(client)
 
     def test_a_missing_chaos_tool_fails_closed(self) -> None:
-        # CHAOS_ENABLED=false: the hook is not registered, so the refusal says
-        # nothing about the token. Passing here would make the guard vacuously
-        # green on a stack where chaos is simply switched off — the shape that
-        # made the write guard vacuous when its probe tool vanished.
+        # CHAOS_ENABLED=false: the hook is not registered, so the refusal says nothing
+        # about the token.
         client = _Client(MCPError(-32601, f"Unknown tool: {_CHAOS_PROBE_TOOL}"))
         with pytest.raises(PrincipalGuardError, match="Failing closed"):
             assert_chaos_blind_principal(client)
 
     def test_the_message_names_the_credential_to_fix(self) -> None:
-        # Read at the moment a live run has refused to start. The remedy is
-        # re-minting, not widening: `make bootstrap-token` refuses to grant
-        # the agent this scope at all.
+        # The remedy is re-minting: `make bootstrap-token` refuses this scope.
         client = _Client(MCPError(-32602, "invalid arguments"))
         with pytest.raises(PrincipalGuardError) as exc:
             assert_chaos_blind_principal(client)
@@ -609,18 +545,13 @@ class TestChaosBlindPrincipal:
         assert "make bootstrap-token" in message
 
     def test_it_probes_the_scope_the_platform_filter_keys_on(self) -> None:
-        # The guard is only a leak check because this string is the same one
-        # the platform's audit filter tests for. A different scope here would
-        # make it a tidiness check.
+        # Same string the platform's audit filter tests for, or it is only tidiness.
         assert _AGENT_FORBIDDEN_SCOPE == "chaos:invoke"
 
     def test_the_two_chaos_guards_are_exact_opposites(self) -> None:
         """One platform response, two verdicts — one per principal.
 
-        The agent's token and the evaluator's token are graded by the same
-        probe with inverted expectations, which is what makes "these are two
-        different principals" a checkable claim rather than a configuration
-        convention.
+        The same probe with inverted expectations makes "two principals" checkable.
         """
         scope_refused = _Client(MCPError(-32002, "missing required scope: chaos:invoke"))
         assert_chaos_blind_principal(scope_refused)  # the agent: correct
@@ -636,12 +567,8 @@ class TestChaosBlindPrincipal:
 class TestChaosCapablePrincipal:
     """The scope a chaos-only scenario actually needs is ``chaos:invoke``.
 
-    A live scenario that mutates the platform solely through ``chaos_setup``
-    declares no ``expected_action_tools``, so the write guard never fired for
-    it and it ran unguarded. Probing ``actions:execute`` would be the wrong
-    question — such a scenario executes no Tier-1 action, and demanding write
-    scope would refuse a selection that is entitled to run. The chaos hooks
-    are the thing it cannot do without.
+    Such a scenario declares no ``expected_action_tools``, so the write guard never
+    fired; probing ``actions:execute`` would refuse a selection entitled to run.
     """
 
     def test_a_scope_refusal_fails_the_guard(self) -> None:
@@ -660,9 +587,7 @@ class TestChaosCapablePrincipal:
             assert_chaos_capable_principal(client)
 
     def test_a_missing_chaos_tool_fails_closed(self) -> None:
-        # CHAOS_ENABLED=false is the common cause: the hook is not registered,
-        # so seeding would fail mid-run. Refusing before spend is the answer,
-        # and the message has to say so.
+        # CHAOS_ENABLED=false is the common cause; refusing before spend is the answer.
         client = _Client(MCPError(-32601, f"Unknown tool: {_CHAOS_PROBE_TOOL}"))
         with pytest.raises(PrincipalGuardError, match="CHAOS_ENABLED"):
             assert_chaos_capable_principal(client)
@@ -673,16 +598,12 @@ class TestChaosCapablePrincipal:
             assert_chaos_capable_principal(client)
 
     def test_the_probe_hook_is_one_the_platform_declares(self) -> None:
-        # Derived from contracts/platform-tools.snapshot.json, so a renamed or
-        # retired hook fails here — in CI, cheaply — instead of turning the
-        # guard into a permanent pre-spend refusal on a live campaign night.
+        # Derived from contracts/platform-tools.snapshot.json, so a retired hook fails in CI.
         assert _CHAOS_PROBE_TOOL in chaos_tool_names()
 
     def test_the_probe_arguments_cannot_seed_anything(self) -> None:
-        # The safety claim of a negative probe: even if the scope check did
-        # NOT precede argument parsing, this invocation is rejected by the
-        # platform's own committed input schema. Checked against the snapshot
-        # rather than asserted in prose.
+        # The safety claim of a negative probe: this invocation is rejected by the
+        # platform's own committed input schema.
         assert chaos_argument_errors(_CHAOS_PROBE_TOOL, _CHAOS_PROBE_ARGS)
 
     def test_the_write_probe_arguments_are_not_reused(self) -> None:
@@ -725,18 +646,9 @@ class _SequenceClient:
 class TestCheckpointedWindowScan:
     """B2: one page of 200 is not a scan, and the fix is not `offset`.
 
-    The A-13 note this replaces said the window "cannot be paged", and it
-    was right about the platform: ``list_audit_events`` accepts exactly
-    ``action`` / ``action_prefix`` / ``principal_type`` / ``limit`` under
-    ``additionalProperties: false``, and the pinned stack refuses ``offset``
-    with -32602 extra_forbidden. (``list_dlq_messages`` is the tool that
-    pages; the audit log is not it.) What it got wrong is the conclusion:
-    a window that cannot be paged BACKWARDS can still be covered FORWARDS,
-    by reading it repeatedly while the stage runs and composing the pages.
-
-    Without that, a smoke stage louder than 200 `agent.tool_invoked` rows
-    exits 5 as "inconclusive" — a false red that masks the real result of
-    a paid run.
+    ``list_audit_events`` takes only ``action`` / ``action_prefix`` / ``principal_type``
+    / ``limit`` under ``additionalProperties: false``, so the window cannot be paged
+    backwards — but it can be covered forwards, by reading it while the stage runs.
     """
 
     _SINCE = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
@@ -763,18 +675,14 @@ class TestCheckpointedWindowScan:
         return _result(newest, total=total)
 
     def test_one_post_stage_page_is_inconclusive_the_old_behaviour(self) -> None:
-        # RED-BEFORE. 250 in-window rows means the final page (newest 200)
-        # is saturated with rows that are ALL inside the window, so it
-        # cannot reach back past `since` and the guard has no choice but to
-        # refuse. This is the mask: a correct, clean stage exits 5.
+        # RED-BEFORE: 250 in-window rows saturate the final page, so it cannot reach past
+        # `since` and a correct, clean stage exits 5.
         final = self._page(self._BEFORE + self._in_window(1, 250), total=330)
         with pytest.raises(PrincipalGuardError, match="inconclusive"):
             assert_no_tier1_successes(_Client(final), self._SINCE)
 
     def test_checkpoints_cover_a_window_one_page_cannot(self) -> None:
-        # GREEN-AFTER. Same 250 rows, same final page — but a checkpoint
-        # taken mid-stage saw the older half while it was still reachable,
-        # and the two pages overlap, so the union covers [since, now].
+        # GREEN-AFTER: a mid-stage checkpoint saw the older half, and the pages overlap.
         mid = self._page(self._BEFORE + self._in_window(1, 120), total=200)
         final = self._page(self._BEFORE + self._in_window(1, 250), total=330)
         client = _SequenceClient([mid, final])
@@ -784,10 +692,7 @@ class TestCheckpointedWindowScan:
         assert scan.checkpoints == 2
 
     def test_a_success_that_scrolled_off_the_last_page_is_still_caught(self) -> None:
-        # The point of covering the window at all. The Tier-1 success lands
-        # early, and by the end of the stage it is row 240-something —
-        # unreachable on the final page, and named only because a
-        # checkpoint banked it.
+        # The early Tier-1 success is row 240-something by the end, named only via a checkpoint.
         early_violation = _audit(
             "mark_dlq_permanent", "success", self._SINCE + timedelta(seconds=5)
         )
@@ -805,9 +710,7 @@ class TestCheckpointedWindowScan:
             assert_no_tier1_successes(client, self._SINCE, scan=scan)
 
     def test_a_gap_between_checkpoints_is_not_coverage(self) -> None:
-        # Checkpoints too far apart: more than a page of rows landed
-        # between them, so the rows in the hole are gone and no union can
-        # claim them. Fail closed — the whole point of the A-13 note.
+        # Checkpoints too far apart: the rows in the hole are gone, so fail closed.
         mid = self._page(self._BEFORE + self._in_window(1, 120), total=200)
         final = self._page(self._in_window(151, 200), total=600)
         client = _SequenceClient([mid, final])
@@ -817,9 +720,7 @@ class TestCheckpointedWindowScan:
             assert_no_tier1_successes(client, self._SINCE, scan=scan)
 
     def test_scan_graded_against_a_different_since_is_refused(self) -> None:
-        # A window accumulated from one stage start, asserted against
-        # another, grades the wrong interval — louder as a crash than as a
-        # quiet pass.
+        # A window from one stage start asserted against another grades wrong.
         scan = AuditWindowScan(self._SINCE)
         with pytest.raises(ValueError, match="not a graded window"):
             assert_no_tier1_successes(

@@ -236,10 +236,7 @@ def test_the_committed_baseline_resolves_through_the_artifact_resolver() -> None
 def test_the_committed_baseline_regenerates_byte_for_byte() -> None:
     """Requirement 8: the committed report is a function of committed archives.
 
-    Nothing is compared against a recorded expectation: the assembler is run
-    again over the same inputs and the bytes on disk must come back out. The
-    offline leg is itself a committed archive, so every input to the
-    regeneration is in the repository.
+    The assembler is run again over the same inputs and the bytes must come back out.
     """
     from evals import artifacts
 

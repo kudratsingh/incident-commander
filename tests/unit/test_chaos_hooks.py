@@ -1,10 +1,7 @@
 """Chaos seeding failures must arrive as ChaosInvocationError, named.
 
-``evals/runner.py`` wraps the seeding call in ``except ChaosInvocationError``
-and re-raises with the scenario and hook name attached. Anything the client
-lets through unwrapped skips that handler entirely and lands in
-``_crashed_result`` as a bare "transport" crash — which sends the reader to
-the network when the truth is that one specific fault could not be seeded.
+Anything the client lets through unwrapped lands in ``_crashed_result`` as a bare
+"transport" crash, sending the reader to the network.
 """
 
 from __future__ import annotations
@@ -69,9 +66,7 @@ class TestEveryFailureNamesTheHook:
     def test_a_non_object_error_member_is_wrapped(self) -> None:
         """A JSON-RPC ``error`` that is not an object must not raise AttributeError.
 
-        ``.get`` on a string is an AttributeError, which sails straight past
-        the runner's ``except ChaosInvocationError`` — the bare untyped crash
-        this module's own header says it eliminated.
+        ``.get`` on a string sails past the ``except`` arm.
         """
         payload = {"error": "missing required scope"}
         client = self._client(lambda _r: httpx.Response(200, json=payload))
@@ -92,11 +87,8 @@ class TestEveryFailureNamesTheHook:
 class TestToolLevelFailureIsAFailedSeed:
     """A hook that fails at the tool level did not seed the fault.
 
-    JSON-RPC success carries MCP tool failures in ``result.isError``, not in
-    the JSON-RPC ``error`` member. Reading only the latter reports a failed
-    hook to the runner as a successful seed — so the run grades the agent on
-    a fault that was never manufactured. The agent's own ``MCPClient`` was
-    hardened for exactly this in C-02; this brings the chaos client to parity.
+    JSON-RPC success carries MCP tool failures in ``result.isError``, not the ``error``
+    member, so reading only the latter calls a failed hook seeded.
     """
 
     @staticmethod
@@ -141,15 +133,9 @@ class TestToolLevelFailureIsAFailedSeed:
 class TestARefusalIsNamedNotBucketedAsFlakiness:
     """A chaos refusal carries the platform's own code, not just ``-32011``.
 
-    WO-R2-16's second half, and the reason plat #199 flagged it at the release:
-    every tool-level refusal the platform raises arrives as JSON-RPC ``-32011``
-    with the name in ``data.error_code``, so on the code alone a fixture-name
-    collision and a Kafka outage read identically. The runner buckets a failed
-    seed as ``shared-env`` and a human reads the message — and a message that
-    looks like transport flakiness gets re-run, which is exactly wrong for
-    ``*_fixture_name_in_use``: the previous run's row is still there, so the
-    retry seeds the same refusal again. The fix is a reset, and the message now
-    says so.
+    Every tool-level refusal arrives as ``-32011`` with the name in ``data.error_code``, so on
+    the code alone a fixture-name collision and a Kafka outage read identically — and a
+    re-run is exactly wrong for ``*_fixture_name_in_use``.
     """
 
     @staticmethod

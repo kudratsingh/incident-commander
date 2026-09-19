@@ -1,11 +1,7 @@
 """Regression: dependency pinning must actually exist (C-03, ADR 0012).
 
-CLAUDE.md promises "uv-managed, pinned dependencies", but nothing enforced
-the mechanism: uv.lock was gitignored and untracked, pyproject.toml carries
-only >= floors, and every CI job installed with an unfrozen `uv sync` — so
-each fresh clone or CI run resolved the newest allowed versions. These
-tests pin the mechanism itself: the lockfile is tracked (not gitignored)
-and every CI install refuses to run from anything but the committed lock.
+uv.lock was gitignored and untracked and every CI job installed with an unfrozen
+`uv sync`. These pin the mechanism: the lockfile is tracked, the installs are frozen.
 """
 
 from __future__ import annotations

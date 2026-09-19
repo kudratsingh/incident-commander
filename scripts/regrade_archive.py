@@ -179,11 +179,43 @@ def _coverage(dimensions: Sequence[dict[str, Any]], total: int) -> dict[str, Any
     }
 
 
+def _frozen_regrade(root: Path, archive_id: str, generated_at: datetime) -> dict[str, Any] | None:
+    """The original report for this archive, when one is already committed."""
+    path = artifacts.version_path(
+        "regrade_report", timestamp=generated_at, invocation_id=archive_id, root=root
+    )
+    return json.loads(path.read_text()) if path.is_file() else None
+
+
+def _frozen_not_graded_details(document: dict[str, Any] | None) -> dict[str, str]:
+    """The taxonomy wording the original report recorded for unobservable worlds."""
+    if document is None:
+        return {}
+    details: dict[str, str] = {}
+    for row in document["scenarios"]:
+        root_cause = row["dimensions"].get(GradeDimension.ROOT_CAUSE.value, {})
+        regraded = root_cause.get("regraded")
+        if regraded is not None and is_not_graded_detail(regraded["detail"]):
+            details[row["scenario"]] = regraded["detail"]
+    return details
+
+
+def _taxonomy_snapshot(corpus: dict[str, Scenario]) -> dict[str, Any]:
+    """The labels a new re-grade used, recorded so later regeneration can read them back."""
+    labels = {
+        name: [] if scenario.ground_truth is None else list(scenario.ground_truth.root_causes)
+        for name, scenario in sorted(corpus.items())
+    }
+    encoded = json.dumps(labels, sort_keys=True, separators=(",", ":")).encode()
+    return {"labels": labels, "sha256": hashlib.sha256(encoded).hexdigest()}
+
+
 def regrade(
     archive_id: str,
     *,
     runs_dir: Path = RUNS_DIR,
     scenarios_dir: Path = SCENARIOS_DIR,
+    root: Path = REPO_ROOT,
 ) -> dict[str, Any]:
     """Re-grade one archive and return the document. Writes nothing."""
     archive = runs_dir / archive_id
@@ -192,6 +224,8 @@ def regrade(
     before = digest_tree(archive)
     report = read_report(archive)
     corpus = {scenario.name: scenario for scenario in load_scenarios(scenarios_dir)}
+    frozen = _frozen_regrade(root, archive_id, report.generated_at)
+    frozen_not_graded = _frozen_not_graded_details(frozen)
 
     rows: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
@@ -211,6 +245,21 @@ def regrade(
             )
             continue
         regraded = regrade_outcome(outcome, scenario, run, _briefing(archive, outcome.scenario))
+        dimensions = _dimension_rows(outcome.report, regraded)
+        root_cause = dimensions.get(GradeDimension.ROOT_CAUSE.value)
+        frozen_detail = frozen_not_graded.get(outcome.scenario)
+        if (
+            root_cause is not None
+            and frozen_detail is not None
+            and root_cause["regraded"] is not None
+            and is_not_graded_detail(root_cause["regraded"]["detail"])
+        ):
+            root_cause["regraded"]["detail"] = frozen_detail
+            archived = root_cause["archived"]
+            root_cause["changed"] = archived is None or (
+                archived["passed"],
+                archived["detail"],
+            ) != (root_cause["regraded"]["passed"], frozen_detail)
         rows.append(
             {
                 "scenario": outcome.scenario,
@@ -218,7 +267,7 @@ def regrade(
                 "archived": {"passed": outcome.report.passed},
                 "regraded": {"passed": regraded.passed},
                 "changed": outcome.report.passed != regraded.passed,
-                "dimensions": _dimension_rows(outcome.report, regraded),
+                "dimensions": dimensions,
             }
         )
 
@@ -276,6 +325,8 @@ def regrade(
         "not_regraded": skipped,
         "archive_digest": before,
     }
+    if frozen is None:
+        document["taxonomy_at_regrade"] = _taxonomy_snapshot(corpus)
     verify_unchanged(archive, before)
     return document
 

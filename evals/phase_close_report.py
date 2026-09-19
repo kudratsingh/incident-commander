@@ -24,7 +24,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from evals import artifacts, regression
 from evals.runner import RunReport, root_cause_coverage
@@ -594,7 +594,7 @@ def _frozen_section(root: Path, scope: PhaseScope, name: str) -> dict[str, Any] 
         path, _ = committed(scope.phase, root=root)
     except ValueError:
         return None
-    return json.loads(path.read_text())["sections"][name]
+    return cast(dict[str, Any], json.loads(path.read_text())["sections"][name])
 
 
 def leak_hunt(root: Path, scope: PhaseScope) -> dict[str, Any]:
@@ -603,7 +603,7 @@ def leak_hunt(root: Path, scope: PhaseScope) -> dict[str, Any]:
     swept, _, _ = _read_report(archive_dir(root, scope.canned_sweep) / "report.json")
     frozen = _frozen_section(root, scope, "leak_hunt")
     groups = (
-        frozen.get("terms")
+        cast(dict[str, tuple[str, ...]], frozen["terms"])
         if frozen is not None
         else leak_terms(root, {outcome.scenario for outcome in swept.outcomes})
     )
@@ -1871,6 +1871,21 @@ _PHASE2_FOLLOW_UPS: Final[tuple[dict[str, str], ...]] = (
         "id": "O-8",
         "what": "`bad_deploy`'s alert source vs the reset predicate — untouched by this close.",
         "status": "open",
+    },
+)
+
+
+#: Dated after the close, because the committed reports are append-only evidence.
+#: This does not alter their still-honest O-19 line.
+FOLLOW_UP_ADDENDA: Final[tuple[dict[str, str], ...]] = (
+    {
+        "id": "O-19",
+        "date": "2026-09-17",
+        "status": "closed by WO-R3-263 / ADR 0054",
+        "detail": (
+            "Resource exhaustion is now a taxonomy member, and the conditional "
+            "stuck-chain routing rule is rendered identically to every reader."
+        ),
     },
 )
 

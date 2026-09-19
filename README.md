@@ -121,7 +121,7 @@ demo/               compose file pinning the platform by digest, and how to driv
 
 - [`CLAUDE.md`](CLAUDE.md) — the project constitution: invariants, architecture, phase plan, conventions. Start here if you are going to change something.
 - [`docs/README.md`](docs/README.md) — one line per document.
-- [`docs/ADR/README.md`](docs/ADR/README.md) — all 39 decision records with their statuses.
+- [`docs/ADR/README.md`](docs/ADR/README.md) — all 54 decision records with their statuses.
 - [`docs/safety-model.md`](docs/safety-model.md) — the enforceable safety contract.
 - [`docs/eval-methodology.md`](docs/eval-methodology.md) — how the harness measures, and why those measures.
 - [`docs/runbook.md`](docs/runbook.md) — operating the agent: live runs, re-pins, rollbacks, the kill switch.

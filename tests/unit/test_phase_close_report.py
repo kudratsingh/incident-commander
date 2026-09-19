@@ -53,7 +53,6 @@ from evals import artifacts
 from evals import phase_close_report as close
 from evals.graders.deterministic import GradeReport
 from evals.runner import ExecutionMode, RunProvenance, RunReport, ScenarioOutcome
-from incident_commander.agent.hypothesis import HypothesisCategory
 from incident_commander.agent.state import BudgetLedger, IncidentState
 from incident_commander.config import ModelRole
 
@@ -82,55 +81,9 @@ def _case_ids() -> list[str]:
     return [json_path.stem for _, json_path, _ in _document_cases()]
 
 
-#: The values a committed close report states about the REPO AS OF ASSEMBLY
-#: TIME rather than about the archives it closes, with the reason each one is
-#: allowed to move after the document is committed (WO-R3-263).
-#:
-#: This is not a loosening of "every committed document regenerates byte for
-#: byte" — it is that claim, made about the half of the document that can
-#: actually hold still. Two values in a close report are derived from today's
-#: source tree by design and the document says so in its own prose:
-#:
-#: * the leak-hunt vocabulary — "all derived rather than typed: `chaos`; every
-#:   `HypothesisCategory` value; every scenario name and every chaos hook name
-#:   in the corpus". Adding a category widens the search, which is the whole
-#:   point of deriving it; the report's FINDINGS (hits, adjudications, verdict)
-#:   are about the archives and are not in this list.
-#: * the judge-prompt digests, printed under the heading "Judge prompt digests
-#:   at assembly time". A judge prompt edited after a close moves them, and the
-#:   claim the section makes — no judge re-run was required inside the phase —
-#:   is untouched by that.
-#:
-#: Everything else must still match to the byte, and an unexplained line is
-#: reported with the line in it. The same class as the corpus-size gate cmd
-#: #284 hit (LESSONS 2026-09-17): a frozen artifact regenerated from a living
-#: repo can only be pinned on what the repo is not allowed to move.
-_ASSEMBLY_TIME_FACTS: Final[tuple[tuple[str, str], ...]] = (
-    (
-        r'^\s*"term_count": \d+,?$',
-        "the leak vocabulary's size, derived from the enum and the corpus",
-    ),
-    (
-        r'^\s*"(?:' + "|".join(c.value for c in HypothesisCategory) + r')",?$',
-        "one derived leak term: a HypothesisCategory value",
-    ),
-    (
-        r"^\d+ terms in three families",
-        "the same size, in the markdown's own sentence",
-    ),
-    (
-        r"Per-run counts for all \d+ terms",
-        "and again where the markdown points at the JSON companion",
-    ),
-    (
-        r'^\s*"(?:briefing|verification)_judge\.md": "[0-9a-f]{64}",?$',
-        "a judge prompt digest, recorded at assembly time",
-    ),
-    (
-        r"^- `(?:briefing|verification)_judge\.md` — `sha256:[0-9a-f]{64}`$",
-        "the same digest, rendered",
-    ),
-)
+#: Committed reports record their own leak vocabulary and judge digests, so a
+#: regeneration must be byte-identical with no assembly-time exceptions.
+_ASSEMBLY_TIME_FACTS: Final[tuple[tuple[str, str], ...]] = ()
 
 
 def _unexplained_drift(committed: str, regenerated: str) -> list[str]:
@@ -783,6 +736,21 @@ def test_the_report_states_its_reduction_and_its_open_follow_ups(phase: int) -> 
     )
     assert document["incidents_row_reason"].strip()
     assert document["claims"]["does_claim"] and document["claims"]["does_not_claim"]
+
+
+def test_o19_has_a_dated_addendum_without_rewriting_the_close() -> None:
+    assert close.FOLLOW_UP_ADDENDA == (
+        {
+            "id": "O-19",
+            "date": "2026-09-17",
+            "status": "closed by WO-R3-263 / ADR 0054",
+            "detail": (
+                "Resource exhaustion is now a taxonomy member, and the conditional "
+                "stuck-chain routing rule is rendered identically to every reader."
+            ),
+        },
+    )
+    assert _committed(2)["follow_ups"] != list(close.FOLLOW_UP_ADDENDA)
 
 
 def test_each_phase_names_its_own_scope_decision_and_incident_answer() -> None:

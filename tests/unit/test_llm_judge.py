@@ -13,11 +13,16 @@ from evals.graders.llm_judge import (
     judge_briefing,
 )
 from incident_commander.agent.briefing import (
+    INCIDENTS_HEADING,
+    REMAINDER_HEADING,
     AttemptedAction,
     EscalationBriefing,
     ProbeSummary,
     render_briefing,
+    render_incidents,
 )
+from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
+from incident_commander.agent.planner_context import PLAN_MARKER
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 from incident_commander.llm.fakes import CannedLLMClient
 
@@ -75,6 +80,44 @@ def _evidence(now: datetime, tool: str, summary: str) -> EvidenceEntry:
         arguments={},
         result_summary=summary,
         timestamp=now,
+    )
+
+
+def _dual_fault_briefing(run_state: RunState, now: datetime) -> EscalationBriefing:
+    """A run that fixed one of the two causes it named — WP-11.3's subject."""
+    run = run_state.model_copy(
+        update={
+            "state": IncidentState.ESCALATED,
+            "hypotheses": (
+                Hypothesis(
+                    category=HypothesisCategory.CONSUMER_SATURATION,
+                    name="dispatcher_saturation",
+                    confidence=0.85,
+                    reasoning="fixture",
+                ),
+                Hypothesis(
+                    category=HypothesisCategory.DEPLOY_REGRESSION,
+                    name="billing_release_regression",
+                    confidence=0.75,
+                    reasoning="fixture",
+                ),
+            ),
+            "evidence": (
+                EvidenceEntry(
+                    tool_name=PLAN_MARKER,
+                    arguments={"target_hypothesis": "dispatcher_saturation"},
+                    result_summary="plan targeting dispatcher_saturation",
+                    timestamp=now,
+                ),
+                _evidence(now, "get_consumer_lag", '{"lag":120}'),
+            ),
+        }
+    )
+    return render_briefing(run).model_copy(
+        update={
+            "findings": "the dispatcher was restarted; the billing release is still out there",
+            "recommendation": "roll billing-api back to the previous prod release",
+        }
     )
 
 
@@ -294,14 +337,38 @@ class TestJudgeSeesTheDeterministicFields:
                 (
                     "Why the run ended:",
                     "Tier-1 action ALREADY ATTEMPTED",
+                    INCIDENTS_HEADING,
+                    REMAINDER_HEADING,
                     "Investigation trail:",
                     "  - ",
                 )
             )
         }
-        # Two deterministic fields, the trail heading, and one probe line.
+        # Two deterministic fields, the trail heading, and one probe line. The sample briefing
+        # carries no ranking, so WP-11.3's slot block renders nothing here — which is the other
+        # half of the pin: a context that predates the slots is byte-identical to what it was.
         assert len(shared) == 4
         assert shared <= judge_lines
+
+    def test_the_judge_and_the_writer_see_the_same_remainder(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """WP-11.3: the slot block is one rendering, shown to both readers (INC-002).
+
+        The judge scoring a briefing without the block would mark down the writer for naming a
+        cause "no probe mentions" — the same overclaim in its own voice that INC-002 recorded.
+        """
+        from incident_commander.agent.briefing_enrichment import _format_context
+
+        briefing = _dual_fault_briefing(run_state, now)
+        block = render_incidents(briefing.incidents)
+        assert REMAINDER_HEADING in block
+        writer = _format_context(briefing)
+        judge = self._judged(briefing)
+        for line in block:
+            assert line in writer, line
+            assert line in judge, line
+        assert "billing_release_regression" in judge
 
     def test_absent_fields_add_no_lines(self, run_state: RunState, now: datetime) -> None:
         # The default briefing carries neither; the rendering must not grow

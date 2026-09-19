@@ -20,6 +20,7 @@ from typing import Final
 
 import pytest
 
+from incident_commander.agent.briefing import REMAINDER_HEADING
 from incident_commander.agent.hypothesis import HypothesisCategory
 from incident_commander.agent.investigation import FIX_MAP
 from incident_commander.agent.remediation import RemediationPlan
@@ -32,6 +33,7 @@ from incident_commander.llm.prompts.loader import (
 from incident_commander.llm.prompts.shared_rules import (
     SHARED_RULES,
     STUCK_CHAIN_ROOT_RULE,
+    UNRESOLVED_REMAINDER_RULE,
     UnknownSharedRuleError,
     render,
 )
@@ -47,6 +49,14 @@ _STUCK_CHAIN_RULE_READERS: Final[tuple[str, ...]] = (
     "remediation_planner",
 )
 
+# WP-11.3's readers of the structured remainder: the writer that must name every cause the
+# block lists, and the judge that must score naming them as grounded rather than as
+# speculation. Written down and compared against the directory in both directions, as above.
+_REMAINDER_RULE_READERS: Final[tuple[str, ...]] = (
+    "briefing_judge",
+    "briefing_writer",
+)
+
 # Every category the planner may emit, in a stable order, built from the enum so a
 # new ``HypothesisCategory`` value adds a case on the next collection.
 _CATEGORIES: Final[tuple[HypothesisCategory, ...]] = tuple(
@@ -54,7 +64,12 @@ _CATEGORIES: Final[tuple[HypothesisCategory, ...]] = tuple(
 )
 
 _EXPECTED_HASHES: Final[dict[str, str]] = {
-    "briefing_writer": ("118e7739f4261a4b49ac8fda63b149e058621a6ba81f04108c3e64a214ff16af"),
+    # Moved by WO-R3-230 / WP-11.3 / ADR 0065, together with `briefing_judge` below and for
+    # the same reason as the three ADR 0054 hashes: ONE sentence in
+    # `llm/prompts/shared_rules.py` tells the writer that produces the briefing and the judge
+    # that grades it how to read the structured remainder. A rule given to one of them is half
+    # a rule (INC-002), so the two hashes move together or the change is wrong.
+    "briefing_writer": ("3f745f8c9e3cf704c1532841655a1bd5950686fff60439abb0fcc70da659437b"),
     # Moved by WP-1.6 (nine category rows and the healthy-world rule) and again by
     # WO-R3-263 / O-19 / ADR 0054, whose three moved hashes are named in that PR's
     # body. Note what those three have in common: ONE sentence held in
@@ -79,7 +94,8 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     "investigation_planner_revision": (
         "005dea4d2724b11d99734a5d4ebf1ce809358a53f6ad3f80bae7f65e4d1b2c98"
     ),
-    "briefing_judge": ("479334d1a4a79ff9db84a5f5aa697d8d048196b0f966145ac776a9179c82e689"),
+    # Moved by WO-R3-230 / WP-11.3 / ADR 0065 — the remainder rule's other reader.
+    "briefing_judge": ("81654a1bf1faacd78964a235a39dd1d0f012885aa57f7838fc11dc078dbb32fa"),
     # Moved by WO-R3-226 / ADR 0056: two sentences cited ADR 0008 for "you get one Tier-1
     # call", which is now true of a PLAN and not of a run. The rules themselves are
     # unchanged — a plan still proposes exactly one action.
@@ -921,6 +937,70 @@ class TestSharedRulesReachEveryReader:
         """Anti-vacuity canary for every parametrized case above."""
         assert SHARED_RULES
         assert "stuck_chain_root" in SHARED_RULES
+
+
+class TestTheUnresolvedRemainderRuleReachesBothReaders:
+    """WP-11.3 (ADR 0065): the briefing's structured remainder, read the same way twice.
+
+    The writer must name every cause the block lists and the judge must score naming them as
+    grounded. Those are two halves of one rule, and INC-002 is what half of it cost: the same
+    mechanism as the stuck-chain rule above, with the same two failure modes checked.
+    """
+
+    _KEY: Final = "unresolved_remainder"
+    _PLACEHOLDER: Final = "{{rule:unresolved_remainder}}"
+
+    def test_the_rule_is_one_sentence(self) -> None:
+        rule = UNRESOLVED_REMAINDER_RULE.strip()
+        assert rule.endswith("."), rule
+        assert ". " not in rule, (
+            f"the remainder rule has more than one sentence:\n{rule}\nOne sentence, for the "
+            f"reason O-19 gives: a second is where a paraphrase starts, and a paraphrase in "
+            f"one of two renderings is invisible in a diff."
+        )
+
+    @pytest.mark.parametrize("name", _REMAINDER_RULE_READERS)
+    def test_every_reader_is_served_the_identical_rule(self, name: str) -> None:
+        assert UNRESOLVED_REMAINDER_RULE in load_prompt(name), (
+            f"{name} does not carry the remainder rule as served. It must write "
+            f"`{self._PLACEHOLDER}` where the rule belongs; `load_prompt` expands it."
+        )
+
+    @pytest.mark.parametrize("name", _REMAINDER_RULE_READERS)
+    def test_every_reader_delegates_the_rule_rather_than_copying_it(self, name: str) -> None:
+        raw = raw_prompt(name)
+        assert self._PLACEHOLDER in raw, (
+            f"{name}.md does not delegate the shared rule. Replace the copied sentence "
+            f"with `{self._PLACEHOLDER}`."
+        )
+        assert UNRESOLVED_REMAINDER_RULE not in raw, (
+            f"{name}.md spells the remainder rule out as well as delegating it."
+        )
+
+    def test_the_readers_are_exactly_the_writer_and_its_judge(self) -> None:
+        """Both directions. The briefing writer produces the block's content and the briefing
+        judge grades it; a third reader would be a decision about which roles this binds."""
+        carrying = tuple(
+            sorted(name for name in available_prompts() if self._PLACEHOLDER in raw_prompt(name))
+        )
+        assert carrying == _REMAINDER_RULE_READERS, (
+            f"prompts carrying the remainder rule are {list(carrying)}; WP-11.3 names "
+            f"{list(_REMAINDER_RULE_READERS)}."
+        )
+
+    def test_the_rule_quotes_the_heading_the_code_actually_renders(self) -> None:
+        """The pin that makes the rule about a real block rather than a remembered one.
+
+        ``agent/briefing.py::render_incidents`` writes ``REMAINDER_HEADING``; both prompts tell
+        a model to read the block under it. If the heading is reworded and the rule is not, the
+        readers are looking for a block that no longer exists — and nothing else would fail.
+        """
+        assert REMAINDER_HEADING in UNRESOLVED_REMAINDER_RULE
+        for name in _REMAINDER_RULE_READERS:
+            assert REMAINDER_HEADING in load_prompt(name), name
+
+    def test_the_rule_is_in_the_table(self) -> None:
+        assert self._KEY in SHARED_RULES
 
 
 class TestLoader:

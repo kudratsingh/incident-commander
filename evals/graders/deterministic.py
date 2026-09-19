@@ -38,7 +38,11 @@ from evals.graders.root_cause import (
     not_graded_detail,
     score_root_cause,
 )
-from incident_commander.agent.briefing import EscalationBriefing
+from incident_commander.agent.briefing import (
+    EscalationBriefing,
+    incidents_of,
+    render_incidents,
+)
 from incident_commander.agent.hypothesis import HypothesisCategory
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 from incident_commander.tools.policies import Tier, tier_of
@@ -1089,8 +1093,11 @@ def _grade_attribution(run: RunState, self_recovery_at: datetime | None) -> Dime
 
 
 def _grade_outcome(run: RunState, exp: ScenarioExpectation) -> DimensionResult:
-    """Did the run end in the terminal state the scenario expects?"""
+    """Did the run end in the terminal state the scenario expects — and was that state
+    admissible (ADR 0065)?"""
     passed = run.state == exp.expected_terminal_state
+    if passed and (inadmissible := _inadmissible_resolution(run)) is not None:
+        return DimensionResult(dimension=GradeDimension.OUTCOME, passed=False, detail=inadmissible)
     detail = (
         f"terminal state {run.state.value} matched expectation"
         if passed
@@ -1099,13 +1106,43 @@ def _grade_outcome(run: RunState, exp: ScenarioExpectation) -> DimensionResult:
     return DimensionResult(dimension=GradeDimension.OUTCOME, passed=passed, detail=detail)
 
 
+def _inadmissible_resolution(run: RunState) -> str | None:
+    """RESOLVED while a cause this run itself names has had nothing done about it.
+
+    The grading side of ADR 0059's resolve gate, read off the same slots the briefing shows a
+    human (WP-11.3): one fault fixed is not the incident fixed, so ``resolved`` is not a state
+    this run may end in. Asked only of a run that DID address a cause, which is every run the
+    loop can resolve — RESOLVED is reachable only through a verified action — so the rule asks
+    exactly the population the loop's own gate asks, and a hand-built state no loop can produce
+    is left alone rather than graded on a rule nothing could have satisfied (INC-001).
+    """
+    if run.state is not IncidentState.RESOLVED:
+        return None
+    slots = incidents_of(run)
+    if not slots.addressed_any or not slots.unresolved_extra:
+        return None
+    named = "; ".join(
+        f"{slot.name} ({slot.category.value}, confidence {slot.confidence:.2f})"
+        for slot in slots.unresolved_extra
+    )
+    return (
+        f"terminal state resolved is not admissible: this run still names "
+        f"{len(slots.unresolved_extra)} cause(s) of this incident that no action in it "
+        f"targeted — {named}. One fault fixed is not the incident fixed (ADR 0059)"
+    )
+
+
 def _briefing_corpus(briefing: EscalationBriefing) -> str:
     """The briefing text ``expect_briefing_contains`` searches.
 
     Everything a reader of the handoff sees. ``budget_used`` and ``incident_id`` are
     excluded as bookkeeping; ``escalation_reason`` and ``attempted_action`` are in,
     because outside the corpus "the briefing names the action that fired" graded RED
-    on a briefing that named it.
+    on a briefing that named it. The incident slots are in for the same reason and are
+    DETERMINISTIC (WP-11.3): a claim on a remaining cause is satisfied by the run's own
+    state, so it holds on a correct run whatever the writer's prose says — which is also
+    where such a claim would live if WO-R2-170 splits this corpus into authored prose and
+    template, since the slots are template.
     """
     attempted = briefing.attempted_action
     return " ".join(
@@ -1113,6 +1150,7 @@ def _briefing_corpus(briefing: EscalationBriefing) -> str:
             briefing.alert_summary,
             briefing.escalation_reason,
             *((f"{attempted.tool} {attempted.arguments}",) if attempted is not None else ()),
+            *render_incidents(briefing.incidents),
             briefing.findings,
             briefing.recommendation,
             *(f"{probe.tool} {probe.summary}" for probe in briefing.investigation_trail),

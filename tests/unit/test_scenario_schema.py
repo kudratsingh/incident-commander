@@ -48,15 +48,8 @@ _SAMPLE_BY_JSON_TYPE: dict[str, Any] = {
 def _minimal_arguments(hook: str) -> dict[str, Any]:
     """The smallest argument set the snapshot accepts for ``hook``.
 
-    Derived from the snapshot's ``required`` list and each property's declared
-    JSON type, never hand-listed: a hook that gains a required argument on a
-    future platform pin keeps working here, and one whose argument type flips
-    fails in ``test_chaos_schema_alignment.py`` where that is the subject.
-
-    Each property is resolved through ``resolve_schema_ref`` first, and a
-    closed set is sampled from its own members rather than from the type
-    table — ``pause_control_loop.loop_name`` (v0.6.9) is a ``$ref``'d enum,
-    so ``"x"`` is the right JSON type and still not a legal value.
+    Derived from the snapshot's ``required`` list and each property's declared JSON type,
+    never hand-listed; a ``$ref``'d enum is sampled from its own members.
     """
     schema = chaos_tool_schemas()[hook]
     properties = schema.get("properties") or {}
@@ -158,10 +151,8 @@ class TestScenarioExpectation:
     def test_singular_expected_action_tool_is_rejected(self) -> None:
         """A-16: the stale documented name is not an alias — it fails the load.
 
-        ``ScenarioExpectation`` is ``extra="forbid"``, so a scenario author who
-        copies the singular ``expected_action_tool`` out of a doc gets a load
-        failure rather than a silently ungraded ACTION dimension. The correct
-        field is ``expected_action_tools``, a list of equivalent Tier-1 tools.
+        ``extra="forbid"``, so the singular spelling is a load failure rather than a
+        silently ungraded ACTION dimension.
         """
         with pytest.raises(ValidationError, match="expected_action_tool"):
             ScenarioExpectation.model_validate(
@@ -205,10 +196,8 @@ def _snapshot_payload(*tools: tuple[str, str]) -> dict[str, Any]:
 class TestChaosHookClosedSet:
     """S-03: a chaos hook name is a closed set, not an arbitrary string.
 
-    ``chaos_setup`` is fired by the runner under ``settings.platform_token``
-    — the FULL write+chaos principal — and ``ChaosClient.call`` forwards the
-    name verbatim as a ``tools/call``. An unconstrained ``str`` therefore
-    lets any scenario YAML execute any platform tool under that principal.
+    The name is forwarded verbatim under the full write+chaos principal, so a plain
+    ``str`` lets any YAML call any tool.
     """
 
     def test_tier1_write_tool_name_rejected(self) -> None:
@@ -230,9 +219,7 @@ class TestChaosHookClosedSet:
         assert ChaosHook(name=name, arguments=_minimal_arguments(name)).name == name
 
     def test_allowed_set_is_the_snapshots_chaos_tools(self) -> None:
-        # The seven the pinned v0.4.9 platform registers. Pinned as a subset,
-        # not an equality, so a later pin bump that adds a chaos tool widens
-        # the set without a test edit — the exclusions below are the closure.
+        # The seven the pinned v0.4.9 platform registers, as a subset so a pin bump can widen it.
         assert {
             "bad_deploy",
             "create_bad_data_job",
@@ -248,11 +235,8 @@ class TestChaosHookClosedSet:
             assert name not in chaos_tool_names()
 
     def test_seed_dlq_messages_excluded_even_when_the_snapshot_carries_it(self) -> None:
-        # Cross-repo rule: seed_dlq_messages stays out of the commander —
-        # not in TOOL_REGISTRY, not in ChaosHook usage, not in scenarios. It
-        # is deferred, flag-off platform work, and the post-campaign rebless
-        # will put it INTO the snapshot. The exclusion is by construction so
-        # that rebless cannot silently widen this closed set.
+        # Cross-repo rule: seed_dlq_messages stays out of the commander — deferred, flag-off
+        # platform work, excluded by construction so the rebless cannot widen it.
         allowed = _chaos_names_from_snapshot(
             _snapshot_payload(
                 ("kill_consumer", "[chaos: single_consumer] shut one down"),
@@ -281,9 +265,7 @@ class TestChaosHookClosedSet:
         assert "make snapshot" in message
 
     def test_shipped_scenario_chaos_names_are_all_members(self) -> None:
-        # Regression against the audit's hand-list, which omitted
-        # create_stale_cache and misspelled create_bad_data_job: adopting it
-        # would have broken a shipped scenario at load time.
+        # Regression against the audit's hand-list: it omitted create_stale_cache.
         for name in ("inject_latency", "create_stale_cache", "create_bad_data_job"):
             assert ChaosHook(name=name, arguments=_minimal_arguments(name)).name == name
 
@@ -291,16 +273,9 @@ class TestChaosHookClosedSet:
 class TestPauseControlLoopIsDeclarable:
     """v0.6.9's 11th chaos hook, proven declarable without shipping a scenario.
 
-    WP-4.3 is what adds the outbox family; this packet only re-pins. But the
-    closed set is derived from the snapshot at load time, so "a scenario
-    could declare it" is a property of THIS commit and testable here — and
-    the interesting half is the argument, not the name: ``loop_name`` is the
-    first chaos argument the platform expresses as a ``$ref`` into
-    ``$defs``, and before ``resolve_schema_ref`` the checker read a property
-    that declared nothing and so admitted everything.
-
-    No scenario YAML is added. ``test_shipped_scenario_chaos_names_are_all_members``
-    above is the other direction and stays as it is.
+    The closed set is derived from the snapshot at load time, so "a scenario could declare
+    it" is a property of THIS commit. ``loop_name`` is the first chaos argument the platform
+    expresses as a ``$ref``, which before ``resolve_schema_ref`` declared nothing.
     """
 
     def test_the_hook_is_in_the_closed_set(self) -> None:
@@ -334,19 +309,14 @@ class TestPauseControlLoopIsDeclarable:
         properties = schema["properties"]
         members = enum_values_for(resolve_schema_ref(properties["loop_name"], schema))
         assert members is not None
-        # The platform ships eleven background loops (plat #210). Asserted as
-        # a count plus two anchors rather than a copied list: the list belongs
-        # to the snapshot, and a twelfth loop is a platform release, not a
-        # test edit.
+        # Eleven background loops (plat #210), as a count plus two anchors, not a copied list.
         assert len(members) == 11
         assert {"outbox_relay", "slo_evaluation"} <= set(members)
         for loop in members:
             assert ChaosHook(name="pause_control_loop", arguments={"loop_name": loop})
 
     def test_the_hook_never_reaches_the_agents_typed_registry(self) -> None:
-        # A chaos tool is seeded by the evaluator under `chaos:invoke`; the
-        # agent's own principal cannot call it and its name must not appear
-        # in the registry the planner picks from (ADR 0012).
+        # Seeded under `chaos:invoke`, so it must not be in the planner's registry (ADR 0012).
         from incident_commander.tools.registry import TOOL_REGISTRY
 
         assert "pause_control_loop" not in TOOL_REGISTRY
@@ -355,18 +325,9 @@ class TestPauseControlLoopIsDeclarable:
 class TestPauseDagChaosIsDeclarable:
     """v0.6.10's 12th chaos hook, proven declarable without shipping a scenario.
 
-    WP-7.2 is what adds the `workflow_stuck` family; this packet only
-    re-pins. But the closed set is derived from the snapshot at load time, so
-    "a scenario could declare it" is a property of THIS commit and testable
-    here — the same shape as ``TestPauseControlLoopIsDeclarable`` above.
-
-    The hook writes the same ``dag:paused:<root>`` flag the Tier-1 action
-    ``pause_dag`` writes, so ``get_dag_state`` reads ``paused: true`` exactly
-    as after an operator pause (platform ADR 0029). Nothing here is
-    agent-facing: the pause the agent can see is indistinguishable from an
-    operator's, and the hook that set it is not in the agent's registry.
-
-    No scenario YAML is added.
+    Same shape as ``TestPauseControlLoopIsDeclarable`` above. The hook writes the same
+    ``dag:paused:<root>`` flag the Tier-1 ``pause_dag`` writes (platform ADR 0029), so the
+    pause the agent can see is indistinguishable from an operator's. No scenario YAML.
     """
 
     def test_the_hook_is_in_the_closed_set(self) -> None:
@@ -402,18 +363,9 @@ class TestPauseDagChaosIsDeclarable:
 class TestStrandedChainIsDeclarable:
     """v0.6.10's ``create_stuck_dag`` gains three optional inputs (plat #214).
 
-    ``root_status: completed`` + ``child_age_seconds`` + ``failed_step`` are
-    what make the `workflow_stuck` family's three-way contrast manufacturable
-    (WO-R3-274): a chain whose root COMPLETED and whose descendants are still
-    `waiting`, backdated, with no dead-letter row at all. Proven declarable
-    here; the family itself is WP-7.2's.
-
-    The other half of the proof is that the defaults did not move. ADR 0043
-    keys a recorded world by the wired arguments of the hooks that made it, so
-    a new optional argument that changed a default — or that a scenario had to
-    start passing — would move every committed recording's key. The two
-    shipped `create_stuck_dag` scenarios pass three arguments each, and they
-    still validate byte-identically.
+    ``root_status: completed`` + ``child_age_seconds`` + ``failed_step`` make the
+    `workflow_stuck` family's three-way contrast manufacturable (WO-R3-274), and the defaults
+    did not move — ADR 0043 keys a recorded world by the wired arguments of its hooks.
     """
 
     def test_the_three_new_arguments_are_declarable_together(self) -> None:
@@ -452,9 +404,7 @@ class TestStrandedChainIsDeclarable:
     def test_all_three_are_optional_so_no_wired_argument_has_to_move(self) -> None:
         required = chaos_tool_schemas()["create_stuck_dag"].get("required") or []
         assert not ({"root_status", "child_age_seconds", "failed_step"} & set(required))
-        # The two shipped scenarios' wired arguments, verbatim from their YAML.
-        # If a new input were required, these would stop validating and every
-        # recording keyed on them (ADR 0043) would need a new key.
+        # Verbatim from the YAML: a new required input would move every ADR 0043 key.
         for chain in ("runaway-saga-eval", "saga-stuck-eval"):
             assert ChaosHook(
                 name="create_stuck_dag",
@@ -466,9 +416,7 @@ class TestStrandedChainIsDeclarable:
             )
 
     def test_the_stranded_chains_refusal_is_already_ledgered(self) -> None:
-        # A repeat call with a different shape under the same chain_name is
-        # refused `stuck_chain_name_in_use` — the code the hook already
-        # raised for a drifted chain, so no new refusal joins the ledger.
+        # A repeat call with a different shape is refused `stuck_chain_name_in_use`.
         from evals.chaos_hooks import _REFUSAL_MEANINGS
 
         assert "stuck_chain_name_in_use" in _REFUSAL_MEANINGS
@@ -509,9 +457,7 @@ class TestSchemaRefResolution:
         assert enum_values_for(resolved) == ("a", None)
 
     def test_an_unclosed_branch_makes_the_whole_property_unclosed(self) -> None:
-        # The union of the enum branches would be a NARROWER claim than the
-        # schema makes, and a check that rejects a legal value is the worse
-        # failure — so nothing is asserted at all.
+        # Asserting the union of the enum branches would be narrower than the schema.
         assert enum_values_for({"anyOf": [{"enum": ["a"]}, {"type": "string"}]}) is None
 
     def test_a_property_with_no_enum_is_unclosed(self) -> None:
@@ -522,14 +468,9 @@ class TestSchemaRefResolution:
 class TestChaosHookArgumentClosure:
     """G1-07: the arguments are a closed set too, against the same snapshot entry.
 
-    The name closure (#116) left half of every chaos invocation unchecked.
-    ``ChaosClient.call`` forwards ``arguments`` verbatim to ``tools/call``
-    under the full write+chaos principal, and every chaos ``inputSchema``
-    declares ``additionalProperties: false`` — so a typo'd argument name, a
-    missing required one, or a flipped value type is a guaranteed live
-    ``ChaosInvocationError``. Before this closure all three validated happily
-    at load time and surfaced only during seeding: mid-campaign, after the
-    platform had been touched and after run startup was already paid for.
+    The name closure (#116) left half of every invocation unchecked. ``arguments`` go
+    verbatim to ``tools/call`` and every chaos ``inputSchema`` is ``additionalProperties:
+    false``, so a typo'd name or flipped type is a guaranteed live ``ChaosInvocationError``.
     """
 
     def test_missing_required_argument_rejected(self) -> None:
@@ -549,9 +490,7 @@ class TestChaosHookArgumentClosure:
             )
 
     def test_flipped_argument_type_rejected(self) -> None:
-        # The S-18 shape: ttl_seconds integer→string. Caught at load, not at
-        # seeding — tests/unit/test_chaos_schema_alignment.py pins the same
-        # flip for the shipped invocations.
+        # The S-18 shape: ttl_seconds integer→string, caught at load not at seeding.
         with pytest.raises(ValidationError, match="not compatible"):
             ChaosHook(
                 name="kill_consumer",
@@ -590,9 +529,7 @@ class TestChaosHookArgumentClosure:
         assert "Never hand-edit" in message
 
     def test_every_shipped_scenario_chaos_block_is_well_formed(self) -> None:
-        # The shipped four load through the real loader elsewhere; this is the
-        # direct statement that the new closure admits every one of them, so a
-        # future author reading this file sees the closure is not vacuous.
+        # The direct statement that the new closure admits all four shipped, so it is not vacuous.
         for scenario in _shipped_scenarios_with_chaos():
             assert scenario.chaos_setup is not None
             assert (
@@ -604,11 +541,8 @@ class TestChaosHookArgumentClosure:
 class TestChaosPlan:
     """WP-1.1: many hooks, in order, with their teardown and a settle wait.
 
-    The one-hook world is what all 40 shipped scenarios describe. These
-    assert the composable form validates the same way — same closed name
-    set, same snapshot argument check, on BOTH halves of the plan — because
-    a teardown validated more loosely than a setup is a second, weaker door
-    into the same write+chaos principal.
+    Both halves of the plan validate alike: a teardown checked more loosely would be a
+    second door into the same write+chaos principal.
     """
 
     def test_one_hook_plan_validates(self) -> None:
@@ -730,9 +664,7 @@ class TestScenarioChaosNormalization:
             self._scenario(chaos_plan=ChaosPlan(teardown=(ChaosHook(name="saturate_redis"),)))
 
     def test_a_multi_hook_plan_is_never_smoke_eligible(self) -> None:
-        # The predicate reads seeds_chaos, not chaos_setup — the legacy field
-        # is None here, and a smoke pass admitting this would seed two faults
-        # under the principal the stage exists to prove cannot write.
+        # The predicate reads seeds_chaos, not chaos_setup: the legacy field is None here.
         scenario = self._scenario(
             chaos_plan=ChaosPlan(
                 setup=(ChaosHook(name="saturate_redis"), ChaosHook(name="bad_deploy"))
@@ -767,15 +699,9 @@ class TestScenarioChaosNormalization:
 class TestShippedScenariosRoundTripToPlans:
     """Every shipped YAML normalizes to the plan the runner will execute.
 
-    The migration claim, stated over the whole corpus rather than over a
-    sample. It was written when every scenario spelled its one fault with the
-    legacy ``chaos_setup`` field, and WO-R3-214 (WP-7.2) is the packet that
-    ended that: the `workflow_stuck` family's worlds need up to three ordered
-    hooks and a settle wait, so they declare ``chaos_plan``. The claim being
-    checked did not change — one spelling per scenario, and whichever one it
-    uses is what the runner fires — so the two tests whose PREMISE was "nobody
-    uses the new form yet" are rewritten to assert the rule instead of the
-    premise.
+    WO-R3-214 (WP-7.2) ended the one-spelling era: the `workflow_stuck` worlds need up to
+    three ordered hooks, so they declare ``chaos_plan``. The claim is unchanged — one
+    spelling per scenario, and whichever it uses is what the runner fires.
     """
 
     def test_every_scenario_normalizes_without_loss(self) -> None:
@@ -784,9 +710,7 @@ class TestShippedScenariosRoundTripToPlans:
         for scenario in scenarios:
             plan = scenario.chaos
             if scenario.chaos_plan is not None:
-                # The composable form is authoritative for itself: `chaos`
-                # returns it unchanged, and the legacy field is absent (the
-                # model validator refuses both).
+                # `chaos` returns the composable form unchanged; the legacy field is None.
                 assert plan == scenario.chaos_plan, scenario.name
                 assert scenario.chaos_setup is None, scenario.name
                 assert scenario.seeds_chaos is bool(plan.setup), scenario.name
@@ -803,24 +727,8 @@ class TestShippedScenariosRoundTripToPlans:
     def test_no_shipped_scenario_declares_a_plan_yet(self) -> None:
         """REWRITTEN by WO-R3-214: the corpus now uses both spellings.
 
-        The premise ("nothing declares a ``chaos_plan``") was true for the
-        packet that added the field and is false by design now — the
-        `workflow_stuck` family is the first world set that needs more than one
-        ordered hook. What the test was FOR survives: the round-trip above must
-        cover the whole corpus rather than the legacy half of a half-migrated
-        one, and no scenario may spell its fault twice.
-
-        So it asserts three things it could not assert before:
-
-        * every scenario declares AT MOST one of the two forms — the model
-          validator refuses both, and this is the corpus-wide statement of it,
-          because two spellings would compose into a third world nobody wrote;
-        * the composable form is in use, and by whom. Named rather than
-          counted, so the day a fifth scenario adopts it somebody reads this
-          test and decides whether the legacy field should be retired;
-        * every hook in every declared plan validates against the snapshot,
-          which is what stops a plan-only scenario from skipping the closed-set
-          check the legacy field used to be the only carrier of.
+        What the test was FOR survives: at most one form per scenario, named users of the
+        composable one, and every hook in every plan validated against the snapshot.
         """
         scenarios = load_scenarios(_SCENARIOS_DIR)
         both = [s.name for s in scenarios if s.chaos_plan is not None and s.chaos_setup is not None]
@@ -843,9 +751,7 @@ class TestShippedScenariosRoundTripToPlans:
                 continue
             for hook in scenario.chaos_plan.setup + scenario.chaos_plan.teardown:
                 # Re-validating through `ChaosHook` is the closed-name and
-                # snapshot-argument check; a plan that reached here having
-                # skipped it would be a scenario YAML able to call any tool the
-                # chaos principal can reach (S-03).
+                # snapshot-argument check (S-03).
                 assert ChaosHook(name=hook.name, arguments=dict(hook.arguments)) == hook, (
                     f"{scenario.name}: plan hook {hook.name!r} does not re-validate against "
                     "contracts/platform-tools.snapshot.json"
@@ -854,12 +760,8 @@ class TestShippedScenariosRoundTripToPlans:
     def test_seeds_chaos_agrees_with_the_legacy_field_everywhere(self) -> None:
         """REWRITTEN by WO-R3-214, same reason and same rule.
 
-        The gates moved from ``chaos_setup is not None`` to ``seeds_chaos``, and
-        while every scenario used the legacy field the two were the same
-        predicate. They are not any more: four scenarios seed chaos through a
-        plan. What has to hold — or the smoke derivation and the ADR 0020
-        selection changed silently — is that ``seeds_chaos`` is true of exactly
-        the scenarios that fire a hook, whichever spelling they use.
+        The gates moved from ``chaos_setup is not None`` to ``seeds_chaos``, and four scenarios
+        now seed through a plan: ``seeds_chaos`` must be true of exactly the hook-firing ones.
         """
         for scenario in load_scenarios(_SCENARIOS_DIR):
             fires_a_hook = bool(scenario.chaos.setup)
@@ -868,10 +770,7 @@ class TestShippedScenariosRoundTripToPlans:
                 scenario.chaos_setup is not None
                 or (scenario.chaos_plan is not None and bool(scenario.chaos_plan.setup))
             ), scenario.name
-            # And the derived gates agree with it, which is the thing the
-            # predicate is actually for: a scenario that seeds chaos is not
-            # eligible for the read-only smoke pass, because seeding fires under
-            # the write+chaos principal.
+            # A scenario that seeds chaos is not eligible for the read-only smoke pass.
             if fires_a_hook:
                 assert scenario.smoke_eligible is False, scenario.name
 
@@ -924,9 +823,7 @@ class TestGroundTruth:
     def test_an_unknown_root_cause_label_is_rejected(self) -> None:
         """The label is the enum the agent classifies into, or it is nothing.
 
-        A free-string root cause could never be compared with a
-        ``Hypothesis.category``, so the root-cause grader would be matching
-        prose. ``StrEnum`` makes the typo a load error instead.
+        A free string could never be compared with a ``Hypothesis.category``.
         """
         with pytest.raises(ValidationError, match="root_causes"):
             GroundTruth.model_validate({"incident_count": 1, "root_causes": ["outbox_stalled"]})
@@ -979,11 +876,8 @@ class TestGroundTruth:
     def test_no_action_fields_exist_on_it(self) -> None:
         """Divergence C5 / plan 01 § 5, pinned rather than remembered.
 
-        ``expected_action_tools`` and ``forbidden_action_tools`` live on
-        ``ScenarioExpectation`` and are cross-checked against ``FIX_MAP`` by
-        ``test_policies.py``. A second copy here is how ``FIX_MAP`` drifted
-        for weeks; this test is what stops the next author adding one for
-        convenience.
+        The action fields live on ``ScenarioExpectation``; a second copy here is how
+        ``FIX_MAP`` drifted for weeks.
         """
         action_shaped = sorted(field for field in GroundTruth.model_fields if "action" in field)
         assert action_shaped == [], (
@@ -1008,9 +902,7 @@ class TestDiscriminatingProbe:
             DiscriminatingProbe(tool="replay_dlq_by_ids")
 
     def test_an_unregistered_tool_is_rejected(self) -> None:
-        # Was `get_outbox_status`, written when it was the outbox family's
-        # planned-but-absent read tool. Platform v0.6.9 shipped it, so the
-        # case needed a name no release can take from it.
+        # Renamed off `get_outbox_status`: platform v0.6.9 shipped it.
         with pytest.raises(ValidationError, match="not a registered tool"):
             DiscriminatingProbe(tool="not_a_platform_tool")
 
@@ -1035,14 +927,9 @@ class TestDiscriminatingProbe:
 class TestTheGraderSideCanReadTheAnswerKey:
     """WP-2.2's reader, proven reachable from where the grader is called.
 
-    ``grade()`` takes only ``RunState`` and ``ScenarioExpectation`` today, so
-    the root-cause dimension cannot be a field on the expectation without
-    duplicating it (divergence C4 — WP-2.2 decides whether that is a new
-    signature or a second grader). What this packet owes that decision is a
-    record the evaluator can reach from the ``Scenario`` the runner already
-    holds, and a coverage predicate to report against. Both are asserted
-    here against the real corpus so "the grader can read it" is a fact rather
-    than an intention.
+    ``grade()`` takes only ``RunState`` and ``ScenarioExpectation``, so the root-cause
+    dimension cannot be a field on the expectation without duplicating it (divergence C4).
+    Asserted against the real corpus rather than intended.
     """
 
     def test_the_answer_key_is_reachable_from_a_loaded_scenario(self) -> None:
@@ -1061,17 +948,8 @@ class TestTheGraderSideCanReadTheAnswerKey:
     def test_coverage_is_reportable_over_the_whole_corpus(self) -> None:
         corpus = load_scenarios(_SCENARIOS_DIR)
         graded = [s.name for s in corpus if s.root_cause_graded]
-        # 40 of 49: 32 of 41 since WO-R3-261, which wrote a decision for every
-        # scenario from the world it manufactures, plus WO-R3-202's four
-        # `jobs_not_progressing` worlds and WO-R3-214's four `workflow_stuck`
-        # ones, every one of them labelled — ADR 0038 makes a label mandatory for
-        # a new scenario. The other nine are recorded abstentions rather than
-        # omissions — the tool-failure tests, the harness control and the noise
-        # controls, none of which produces a diagnosis to grade. WHICH scenarios,
-        # and why each one, is pinned by
-        # ``tests/unit/test_ground_truth_corpus.py``; what this asserts is only
-        # that the predicate the report is built from can still be computed over
-        # the whole corpus and is no longer vacuous.
+        # 40 of 49 carry a ground-truth label (ADR 0038 makes one mandatory); the other
+        # nine are recorded abstentions, pinned by test_ground_truth_corpus.py.
         assert len(graded) == 40
         assert len(corpus) >= 49
 

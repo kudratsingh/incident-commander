@@ -148,6 +148,7 @@ incident-commander/
 │   ├── inventory.py                # counts and classifies the corpus (make inventory)
 │   ├── candidate_metrics.py        # pass@k, appeared-at-any-step, duplicate rate (WP-5.2)
 │   ├── export.py                   # trajectory export for training — refs, not output; refuses holdout
+│   ├── reward.py                    # reward v0 — deterministic, audit-log grounded, withheld when unearnable
 │   ├── judge_calibration/          # trap sets + the calibration harness per judge (WP-6.3)
 │   ├── fixture_drift.py            # canned fixture VALUES vs live, against a blessed ledger
 │   ├── world_drift.py              # a RECORDED world vs live, reusing that walk (make world-drift)
@@ -209,7 +210,7 @@ docs/
 ├── ADR/                        # numbered decision records, never edited after acceptance
 │   ├── README.md               # the index: all of them, with status and what amended what
 │   ├── 0000-template.md
-│   └── 0001-…0057-….md         # 0001 external client architecture … 0057 the training export
+│   └── 0001-…0058-….md         # 0001 external client architecture … 0058 reward v0
 ├── lessons/                    # case studies of things that went wrong, or almost did
 │   ├── phase-6-hardening.md          # free-form Hypothesis.name → schema tightening
 │   ├── live-eval-noise-sources.md    # the five buckets a weird live failure falls into
@@ -218,6 +219,7 @@ docs/
 │   └── parallel-agent-campaigns.md   # what breaks when several agents share one checkout
 ├── architecture-principles.md  # rules for future PRs: structural > prose, single source of truth
 ├── eval-methodology.md         # scenario taxonomy, grader design, metric definitions, judge pinning
+├── reward-spec.md              # reward v0: components, ordering proofs, what it refuses to score
 ├── eval-debt.md                # append-only ledger of the campaign freeze, and its closing walk
 ├── safety-model.md             # tiers, approval flow, budgets, fail-open behavior
 ├── runbook.md                  # operating the agent itself: deploys, rollbacks, kill switch
@@ -226,7 +228,7 @@ docs/
 └── interview-map.md            # (planned — Phase 8) component → JD skill → talking points
 ```
 
-ADR process: any decision that constrains future work gets an ADR before or with the implementing PR. Status flow is proposed, accepted, superseded. An accepted ADR is never rewritten — a later ADR amends or supersedes it and both stay on the shelf. The set runs 0001 through 0057; [`docs/ADR/README.md`](docs/ADR/README.md) lists every one with its status and records which later ADR moved which.
+ADR process: any decision that constrains future work gets an ADR before or with the implementing PR. Status flow is proposed, accepted, superseded. An accepted ADR is never rewritten — a later ADR amends or supersedes it and both stay on the shelf. The set runs 0001 through 0058, with 0056 assigned to work still in review; [`docs/ADR/README.md`](docs/ADR/README.md) lists every one with its status and records which later ADR moved which.
 
 Before opening a PR touching schemas, prompts, or the state machine, read [`docs/architecture-principles.md`](docs/architecture-principles.md). It codifies the rules that came out of past PRs — most importantly "default to the structural fix, not the band-aid." When you hit a symptom that a prompt tweak would patch, the first design conversation is whether the schema should reject the class of bug instead. See [`docs/lessons/phase-6-hardening.md`](docs/lessons/phase-6-hardening.md) for the case study that produced this rule.
 

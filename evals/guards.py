@@ -13,7 +13,7 @@ it reads the answer key out of ``list_audit_events`` (owner decision O-4).
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from datetime import datetime
 from typing import Any, Final
 
@@ -375,8 +375,8 @@ class AuditWindowScan:
             (
                 e
                 for e in self._rows.values()
-                if _tool_of(e) in _TIER_1_TOOLS
-                and _outcome_of(e) == "success"
+                if tool_of(e) in _TIER_1_TOOLS
+                and outcome_of(e) == "success"
                 and e.created_at >= self.since
                 and (owned is None or str(e.principal_id) in owned)
             ),
@@ -461,7 +461,7 @@ def assert_no_tier1_successes(
 
 def _summarize(violations: list[AuditEventEntry]) -> str:
     return ", ".join(
-        f"{_tool_of(e)}@{e.created_at.isoformat()} by {e.principal_id}" for e in violations[:5]
+        f"{tool_of(e)}@{e.created_at.isoformat()} by {e.principal_id}" for e in violations[:5]
     )
 
 
@@ -505,11 +505,20 @@ def _parse_events(result: Any) -> tuple[int, list[AuditEventEntry]]:
     )
 
 
-def _tool_of(event: AuditEventEntry) -> str:
+def tool_of(event: AuditEventEntry) -> str:
+    """The tool one audit row names. Public: `evals/reward.py` reads rows too."""
     extra = event.extra_data or {}
     return str(extra.get("tool_name", ""))
 
 
-def _outcome_of(event: AuditEventEntry) -> str:
+def outcome_of(event: AuditEventEntry) -> str:
+    """Whether the platform served that invocation. `success` or anything else."""
     extra = event.extra_data or {}
     return str(extra.get("outcome", ""))
+
+
+def arguments_of(event: AuditEventEntry) -> Mapping[str, Any]:
+    """The arguments the platform recorded. Untrusted content, read structurally."""
+    extra = event.extra_data or {}
+    arguments = extra.get("arguments")
+    return arguments if isinstance(arguments, Mapping) else {}

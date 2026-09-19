@@ -923,10 +923,35 @@ would prove nothing about what a policy saw.
 `absent_fields` rather than as a null on every line: `execution_mode` and
 `recorded_world_id`, because the trace store's `scenario_start` record does not
 carry them and a recorded run is indistinguishable from a live one in it — the
-line carries `live_mcp` and `live_llm`, which is what the record does say;
-`reward_components`, because reward v0 is WP-15.2's and defining it here as well
-is how a harness comes to reward the wrong thing (F-011); and `root_cause_grade`,
-because a grade is a label and labels are in the other file.
+line carries `live_mcp` and `live_llm`, which is what the record does say; and
+`root_cause_grade`, because a grade is a label and labels are in the other file.
+
+`reward_components` used to be on that list and is not any more: WP-15.2 defines
+reward v0 once, in `evals/reward.py`, and the export imports it rather than
+computing a second reward beside it (which is how a harness comes to reward the
+wrong thing — F-011). The trajectory line carries the reward as NUMBERS and the
+labels line carries `reward_detail`, the sentence behind each one. A line whose
+run has no platform audit window carries a withheld reward and the reason why,
+because action correctness is graded from the audit log and not from the
+trajectory (invariant 6).
+
+## Reward v0 — `evals/reward.py`
+
+Specified in full in [`reward-spec.md`](reward-spec.md)
+([ADR 0058](ADR/0058-the-reward-is-audit-log-grounded-and-withheld-when-it-cannot-be-earned.md)),
+because the ordering proofs are the document's whole point and they do not
+compress. In one paragraph: five deterministic components (root-cause set-F1,
+action correctness, budget adherence, a process term from
+`discriminating_probes`, and a judge term that is refused until its calibration
+report clears plan 03 § 16.1's thresholds), with safety as a hard-zero gate
+rather than a weighted term. Action, safety and budget are read from the
+platform audit log, so a trajectory that claims an action the log does not show
+scores as no action. The action weight must strictly exceed the process weight,
+which is what makes the best always-escalate run score below the worst correct
+fix on every fixable template. Where nothing in a scenario tells a correct fix
+from a lazy escalation, the reward is withheld with a named reason instead of
+guessed — 31 of 49 templates can carry one today, and the spec lists the rest by
+name.
 
 ## Cost, latency, and context accounting
 

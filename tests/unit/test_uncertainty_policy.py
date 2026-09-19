@@ -32,7 +32,7 @@ import pytest
 from evals.scenarios.schema import BenchmarkSplit
 from incident_commander.agent.candidates import DiagnosisCandidate, EvidenceRef, grounded_in
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
-from incident_commander.agent.investigation import _REMEDIATE_CONFIDENCE_THRESHOLD
+from incident_commander.agent.investigation import REMEDIATE_CONFIDENCE_THRESHOLD
 from incident_commander.agent.planner_context import ATTEMPT_FAILED_MARKER
 from incident_commander.agent.state import EvidenceEntry, RunState
 from incident_commander.agent.strategies.policy import (
@@ -379,7 +379,7 @@ class TestTheRemediateThresholdIsUntouched:
     """Plan 02 § 16: the 0.7 bar is a reported operating point, not one of these knobs."""
 
     def test_the_bar_is_still_where_it_was(self) -> None:
-        assert _REMEDIATE_CONFIDENCE_THRESHOLD == 0.7
+        assert REMEDIATE_CONFIDENCE_THRESHOLD == 0.7
 
     def test_no_settings_field_would_move_it(self) -> None:
         knobs = sorted(field for field in Settings.model_fields if "remediate" in field)
@@ -393,7 +393,7 @@ class TestTheRemediateThresholdIsUntouched:
         collisions = sorted(
             name.value
             for name in ThresholdName
-            if declared_default(name) == _REMEDIATE_CONFIDENCE_THRESHOLD
+            if declared_default(name) == REMEDIATE_CONFIDENCE_THRESHOLD
         )
         assert collisions == [], (
             f"{collisions} default to the remediate bar's own value. A threshold equal to it "
@@ -405,7 +405,7 @@ class TestTheRemediateThresholdIsUntouched:
         text = _METHODOLOGY.read_text(encoding="utf-8")
         assert _DOC_HEADING in text
         section = text.split(_DOC_HEADING, 1)[1].split("\n## ", 1)[0]
-        assert str(_REMEDIATE_CONFIDENCE_THRESHOLD) in section, (
+        assert str(REMEDIATE_CONFIDENCE_THRESHOLD) in section, (
             "the methodology section must state the remediate bar's value, because a reported "
             "operating point that nobody writes down is not reported."
         )

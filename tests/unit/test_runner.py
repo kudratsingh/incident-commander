@@ -79,10 +79,8 @@ def _is_write_locked(path: Path) -> bool:
 def _unlock_tree(root: Path) -> None:
     """Deliberately unlock an archive tree so pytest can clean tmp_path.
 
-    Mirrors the operator unlock in docs/runbook.md (``chflags -R nouchg``
-    then ``chmod -R u+w``): flags must clear before modes, because chmod
-    on a ``uchg`` path is itself EPERM. Tolerant of paths the lock never
-    reached — the lock-failure test leaves nothing locked at all.
+    Mirrors the operator unlock in docs/runbook.md: flags clear before modes,
+    because chmod on a ``uchg`` path is itself EPERM.
     """
     if not root.exists():
         return
@@ -102,9 +100,9 @@ def _unlock_tree(root: Path) -> None:
 
 @pytest.fixture(autouse=True)
 def _tmp_archives_unlocked_for_cleanup(tmp_path: Path) -> Iterator[None]:
-    """Any test that finalizes an archive under tmp_path leaves immutable
-    files behind; without this, pytest's own retention sweep of old tmp
-    directories is what trips over them."""
+    """Any test that finalizes an archive under tmp_path leaves immutable files behind,
+    and pytest's own retention sweep is what trips over them.
+    """
     yield
     _unlock_tree(tmp_path)
 
@@ -116,10 +114,9 @@ def _test_settings(**overrides: Any) -> Settings:
         "platform_mcp_url": "https://eval.local",
         "platform_rest_url": "https://eval.local",
         "platform_token": SecretStr("eval"),
-        # The evaluator's principal. Present by default because seeding a
-        # scenario's chaos plan now refuses without it (platform v0.6.5), and
-        # a fixture that omitted it would make every plan test fail on the
-        # credential rather than on the thing it is about.
+        # The evaluator's principal, present by default because seeding a chaos plan
+        # refuses without it (platform v0.6.5) — otherwise every plan test would fail on
+        # the credential rather than on its subject.
         "platform_chaos_token": SecretStr("eval-chaos"),
         "platform_webhook_secret": SecretStr("eval"),
         "database_url": "postgresql://eval:eval@localhost:5432/eval",
@@ -135,9 +132,8 @@ def _passing_scenario() -> Scenario:
         expectation=ScenarioExpectation(
             name="consumer_lag_pass",
             expected_terminal_state=IncidentState.ESCALATED,
-            # Value text, not key text: `lag` would name the field that
-            # get_consumer_lag serializes whatever the reading is, and the
-            # schema refuses that shape. The group name is an observation.
+            # Value text, not key text: `lag` would name the field get_consumer_lag serializes
+            # whatever the reading is, and the schema refuses that shape.
             expected_evidence_contains=("billing",),
             max_tool_calls=5,
         ),
@@ -295,9 +291,8 @@ class TestRunScenario:
 class TestPostGradeDecorationsAreContained:
     """The briefing writer and the judge run AFTER grade(); neither may void the run.
 
-    ADR 0007: a crashed scenario is an eval-infrastructure bug by definition,
-    so a soft-quality decoration failing on an already-graded run must be
-    recorded as a missing column, not a transport crash.
+    ADR 0007: a soft-quality decoration failing on an already-graded run is a missing
+    column, not a transport crash.
     """
 
     def _with_llm_queue(self, role: str, queue: list[dict[str, Any]]) -> Scenario:
@@ -357,9 +352,8 @@ class TestRunAll:
         assert len(trajectories) == 2
 
     def test_one_crashing_scenario_does_not_abort_batch(self, monkeypatch: Any) -> None:
-        """Regression: earlier `run_all` propagated the first scenario's exception,
-        wiping every scenario that hadn't run yet. Live-eval batches now survive
-        a per-scenario crash by capturing it as a failed outcome and continuing.
+        """Regression: `run_all` used to propagate the first scenario's exception, wiping
+        every scenario that had not run yet.
         """
         from evals import runner as runner_module
 
@@ -401,11 +395,9 @@ class TestRunAll:
         from evals.scenarios.loader import load_scenarios
 
         scenarios = load_scenarios(Path(__file__).resolve().parents[2] / "evals" / "scenarios")
-        # Every shipped scenario has canned fallback data, so all of them
-        # run — and pass — in offline mode. Since WO-R3-261 that includes the
-        # ROOT_CAUSE dimension on the 32 scenarios that declare a ground
-        # truth, so this is now also the statement that no canned planner
-        # misdiagnoses the world its own fixtures serve.
+        # Every shipped scenario has canned fallback data, so all of them run and pass
+        # offline — including ROOT_CAUSE on the 32 that declare a ground truth, so this also
+        # says no canned planner misdiagnoses the world its own fixtures serve.
         report, _, _ = run_all(scenarios, _test_settings())
         failed = sorted(o.scenario for o in report.outcomes if not o.report.passed)
         assert report.failed == 0, f"scenarios red in the offline suite: {failed}"
@@ -483,10 +475,8 @@ class TestChaosSetupHook:
             calls.append((name, arguments))
             return {"seeded": True}
 
-        # We can't actually reach a live platform here, so we also monkeypatch
-        # the MCP client factory to return a fake with a no-op close() (the
-        # runner treats live_mcp_client as an MCPClient and calls .close() in
-        # its finally block).
+        # No live platform is reachable here, so the MCP client factory is patched to return
+        # a fake with a no-op close() — the runner calls .close() in its finally block.
         class _ClosableCannedMCP(CannedMCPClient):
             def close(self) -> None:  # pragma: no cover - no-op
                 return None
@@ -516,9 +506,8 @@ class TestChaosSetupHook:
 class TestWriteReport:
     """Filenames are versioned; every read goes through ``artifacts.newest``.
 
-    These used to assert the fixed name ``latest.json``. They now assert the
-    resolver returns what was just written — the same guarantee, expressed
-    the way every production reader expresses it.
+    These used to assert the fixed name ``latest.json``, and now assert the resolver
+    returns what was just written — the same guarantee, in production's spelling.
     """
 
     def test_round_trip_json(self, tmp_path: Path) -> None:
@@ -551,9 +540,8 @@ class TestWriteReport:
     def test_a_run_with_no_identity_cannot_name_its_report(self, tmp_path: Path) -> None:
         """An unidentified run is refused, not filed under a blank id.
 
-        A report named without an ``invocation_id`` cannot be joined back to
-        the run that paid for it, and two such runs would collide within the
-        same second — silently, if the write were not exclusive-create.
+        A report with no ``invocation_id`` cannot be joined back to the run that paid for
+        it, and two such runs would collide within the same second.
         """
         report, _, _ = run_all([_passing_scenario()], _test_settings())
         assert report.invocation_id == ""
@@ -688,10 +676,8 @@ class TestFailureClassification:
     def test_the_grader_drift_bucket_carries_its_diagnosis(self) -> None:
         """The bucket names the suspect; the detail says where to look.
 
-        `grader-brittleness` was already the right label on live run
-        4974811d236f (INC-001) and it still cost a full trace read to learn
-        WHICH claim and WHICH call shape disagreed. Both facts are in the
-        graded artifacts, so the detail carries them into `report.json`.
+        `grader-brittleness` was already right on live run 4974811d236f (INC-001) and
+        still cost a full trace read to learn WHICH claim and call shape disagreed.
         """
         report = GradeReport(
             scenario="s",
@@ -752,9 +738,8 @@ class TestFailureClassification:
         assert got == ("shared-env", "")
 
     def test_real_mcp_transport_summary_is_transport(self) -> None:
-        # Summary built exactly as investigation.py's tool-error escalation
-        # builds it — from str() of a real MCPError, which renders
-        # "MCP error <code>: <message>" and never the class name (A-07).
+        # Summary built as investigation.py's tool-error escalation builds it — from str()
+        # of a real MCPError, which never renders the class name (A-07).
         err = MCPError(-32000, "connection reset by peer")
         final = self._final(("get_consumer_lag", f"tool error (get_consumer_lag): {err}"))
         got = _classify_failure(self._report({GradeDimension.OUTCOME}), final)
@@ -819,11 +804,9 @@ class TestCannedSequencing:
 class TestRunArchiveIsAppendOnly:
     """CLAUDE.md invariant 9 for the runner's own artifacts.
 
-    ``write_trajectories`` keyed files on scenario name alone and used
-    ``write_text``, so any later run — including a free offline
-    ``make eval`` — overwrote the previous one. Run 001's paid live
-    trajectories were destroyed exactly this way while the trace-truncation
-    fix was being developed (study/findings.md F-003).
+    ``write_trajectories`` keyed on scenario name and used ``write_text``, so any
+    later run overwrote the previous one — which is how Run 001's paid live
+    trajectories were destroyed (F-003).
     """
 
     def _report(self, scenario: str) -> RunReport:
@@ -872,12 +855,9 @@ class TestRunArchiveIsAppendOnly:
     def test_a_later_top_level_write_destroys_nothing(self, tmp_path: Path) -> None:
         """The exact Run 001 loss (F-003), now impossible in BOTH places.
 
-        This test used to assert the loss: it wrote two runs to the flat
-        ``trajectories/s.json`` and checked only that the *archive* still
-        held the first one, because the flat file was a pointer and losing
-        it was by design. The pointer exception is withdrawn — the second
-        run must leave the first run's top-level copy readable too, and the
-        archive must still not follow either of them.
+        This test used to ASSERT the loss, checking only that the archive still held the
+        first run, because the flat file was a pointer by design. That exception is
+        withdrawn: the second run must leave the first's top-level copy readable too.
         """
         runs, flat = tmp_path / "runs", tmp_path / "trajectories"
         first_traj = Trajectory(
@@ -928,21 +908,18 @@ def _stub_report(scenario: str) -> RunReport:
 class TestIncrementalArchive:
     """The archive is written per scenario, and report.json marks completion.
 
-    Until 2026-08-09 every artifact except the JSONL traces lived only in
-    memory until the whole suite finished: a Ctrl-C at scenario 30 of 37 threw
-    away 30 scenarios of paid live evidence, because the single bulk
-    ``archive_run`` call came after the loop (S-05/A-14). The archive also
-    omitted the invocation's traces (S-07) and wrote report.json FIRST, so a
-    half-written archive was indistinguishable from a complete one (S-08).
+    Until 2026-08-09 every artifact but the traces lived in memory until the suite
+    finished, so a Ctrl-C at scenario 30 of 37 threw away 30 scenarios of paid
+    evidence (S-05/A-14); the archive also omitted traces (S-07) and wrote
+    report.json FIRST, so a half-written archive looked complete (S-08).
     """
 
     def test_killed_suite_keeps_completed_scenarios(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        # The assertion that would have caught S-05/A-14: scenario 1 finishes,
-        # scenario 2 takes a Ctrl-C. run_all catches Exception only, so the
-        # KeyboardInterrupt escapes the suite by design — and scenario 1's
-        # evidence must already be on disk when it does.
+        # The assertion that would have caught S-05/A-14: run_all catches Exception only, so
+        # a KeyboardInterrupt escapes by design — and scenario 1's evidence must already be
+        # on disk when it does.
         target = tmp_path / "runs" / "inv"
         (target / "trajectories").mkdir(parents=True)
         (target / "briefings").mkdir(parents=True)
@@ -994,9 +971,8 @@ class TestIncrementalArchive:
         assert "simulated platform outage" in archived["alert_summary"]
 
     def test_trace_slice_contains_only_this_invocation(self, tmp_path: Path) -> None:
-        # Catches S-07: the archive omitted traces entirely, so the join from
-        # an archived run to its prompts/responses ran through the flat
-        # (gitignored, multi-vintage) trace file and did not survive it.
+        # Catches S-07: the archive omitted traces, so the join from an archived run to its
+        # prompts ran through the flat multi-vintage trace file and did not survive it.
         trace_dir = tmp_path / "traces"
         trace_dir.mkdir()
         flat = trace_dir / "consumer_lag_pass.jsonl"
@@ -1058,9 +1034,8 @@ class TestIncrementalArchive:
             runner_module.archive_scenario(target, result, invocation_id="inv", trace_dir=None)
 
     def test_report_json_is_written_last_and_marks_completion(self, tmp_path: Path) -> None:
-        # Catches S-08: report.json used to be the FIRST archive write, so a
-        # crash mid-archive left a directory that looked complete. It is now
-        # the last, and its absence is the "this run was killed" signal.
+        # Catches S-08: report.json used to be the FIRST archive write, so a crash
+        # mid-archive left a directory that looked complete.
         target = tmp_path / "runs" / "inv"
         (target / "trajectories").mkdir(parents=True)
         (target / "briefings").mkdir(parents=True)
@@ -1079,10 +1054,8 @@ class TestIncrementalArchive:
     def test_main_streams_each_scenario_then_writes_the_marker(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        # End-to-end wiring, in process: main() must create the run directory
-        # BEFORE run_all and hand it a streaming callback, so evidence lands
-        # while the suite is still running. run_all and the flat-pointer
-        # writers are stubbed — nothing touches the real evals/ tree.
+        # End-to-end wiring, in process: main() must create the run directory BEFORE run_all
+        # and hand it a streaming callback. run_all and the flat writers are stubbed.
         _isolate_settings_env(monkeypatch, tmp_path)
         runs = tmp_path / "runs"
         monkeypatch.setattr(runner_module, "_RUNS_DIR", runs)
@@ -1114,15 +1087,11 @@ class TestIncrementalArchive:
 class TestCompletedArchiveIsLocked:
     """CLAUDE.md invariant 9, enforced by the filesystem (ADR 0021).
 
-    Exclusive-create protects the archive from the runner itself; nothing
-    protected it from everything else. Under ``evals/runs/`` 0 of 371
-    files carried any on-disk protection, and a routine cleanup of a
-    retired checkout came within one command of destroying 195 run files
-    that existed nowhere else. Session archives already solved this
-    (``context/README.md``: read-only + ``uchg``, unlock is a deliberate
-    documented act); these tests pin the same convention for run
-    archives. Write-bit assertions run everywhere including Linux CI;
-    the ``uchg`` layer is asserted only where the platform has it.
+    Exclusive-create protects the archive from the runner; nothing protected it from
+    anything else, and 0 of 371 files under ``evals/runs/`` carried on-disk
+    protection when a routine cleanup came within one command of destroying 195 run
+    files. Write-bit assertions run everywhere; the ``uchg`` layer only where the
+    platform has it.
     """
 
     def _streamed_archive(self, tmp_path: Path) -> Path:
@@ -1159,13 +1128,9 @@ class TestCompletedArchiveIsLocked:
     def test_scenario_files_lock_as_they_land_but_the_run_stays_appendable(
         self, tmp_path: Path
     ) -> None:
-        # The killed-run half of the design: each scenario's evidence is
-        # protected the moment it is durable (a partial archive's rows are
-        # still evidence — ADR 0017), while the DIRECTORIES stay writable
-        # so scenario N+1 and the completion marker can still land. No
-        # future invocation ever writes into an existing run dir (fresh
-        # invocation_id per run), so the unlocked-directory window belongs
-        # to this run alone.
+        # The killed-run half: each scenario's evidence is protected the moment it is
+        # durable (ADR 0017) while the DIRECTORIES stay writable so N+1 and the marker can
+        # land. A fresh invocation_id per run means the unlocked window is this run's alone.
         target = self._streamed_archive(tmp_path)
 
         first = target / "trajectories" / "consumer_lag_pass.json"
@@ -1182,12 +1147,9 @@ class TestCompletedArchiveIsLocked:
 
     @pytest.mark.skipif(not hasattr(os, "chflags"), reason="no file flags on this platform")
     def test_uchg_backs_the_lock_where_the_platform_has_it(self, tmp_path: Path) -> None:
-        # On macOS the lock must survive what chmod alone cannot: unlink
-        # goes by the PARENT directory's write bit, so before finalize a
-        # read-only file in a writable directory would still delete. uchg
-        # is the layer that refuses that — the context/README.md table's
-        # "rm -f: refused" — and it is exactly what a killed run's rows
-        # rely on until a human decides their fate.
+        # On macOS the lock must survive what chmod alone cannot: unlink goes by the PARENT
+        # directory's write bit, so before finalize a read-only file in a writable directory
+        # would still delete. ``uchg`` is the layer that refuses that.
         target = self._streamed_archive(tmp_path)
         first = target / "trajectories" / "consumer_lag_pass.json"
         assert getattr(first.stat(), "st_flags", 0) & stat.UF_IMMUTABLE
@@ -1201,10 +1163,8 @@ class TestCompletedArchiveIsLocked:
     def test_lock_failure_is_logged_and_never_fatal(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # A filesystem that refuses chmod (network mounts, exotic CI) must
-        # not turn a finished run into a crashed one — by lock time the
-        # evidence bytes are already durable, and the lock is best-effort
-        # on top of them.
+        # A filesystem that refuses chmod must not turn a finished run into a crashed one:
+        # by lock time the evidence bytes are durable and the lock is best-effort on top.
         def _refuse(*_args: Any, **_kwargs: Any) -> None:
             raise OSError("Operation not permitted: filesystem refuses chmod")
 
@@ -1217,13 +1177,9 @@ class TestCompletedArchiveIsLocked:
         assert "archive lock skipped" in capsys.readouterr().out
 
     def test_writing_into_a_finalized_archive_fails_loudly(self, tmp_path: Path) -> None:
-        # The re-run story, at the file layer. Reaching a finalized
-        # directory at all requires colliding with its invocation id,
-        # which already fails at mkdir/exclusive-create before any spend
-        # (test_reusing_an_invocation_id_fails_loudly). If a future
-        # refactor ever loses that guard, the lock is the second wall:
-        # a NEW scenario cannot land in a sealed archive, and the sealed
-        # marker cannot be rewritten.
+        # The re-run story at the file layer. Reaching a finalized directory requires
+        # colliding with its invocation id, which already fails before any spend; the lock
+        # is the second wall — a NEW scenario cannot land in a sealed archive.
         target = self._streamed_archive(tmp_path)
         runner_module.finalize_archive(target, _stub_report("consumer_lag_pass"))
 
@@ -1238,49 +1194,30 @@ class TestCompletedArchiveIsLocked:
 class TestRunsDirIsTracked:
     """CLAUDE.md invariant 9: evals/runs/ must be commit-able (S-06).
 
-    The append-only archive is the durable record, yet .gitignore carried an
-    ``evals/runs/*`` entry, so no archive was ever tracked and routine git
-    hygiene (a clean or a fresh clone) erased every one. This is the assertion
-    that would have caught it.
+    .gitignore carried an ``evals/runs/*`` entry, so no archive was ever tracked and
+    routine git hygiene erased every one.
 
-    It asks **git**, and does not pattern-match the file. The original form
-    scanned .gitignore for a line starting with the literal ``evals/runs``,
-    which is not the question: the ordinary anchored spelling ``/evals/runs/``
-    walks straight past it, and so do ``runs/``, ``**/runs/``, ``evals/*``, a
-    pattern in any parent or nested .gitignore, and anything in
-    ``.git/info/exclude`` or the user's global excludes file — every one of
-    which re-ignores the archive with the assertion still green. It failed in
-    the other direction too, reporting a violation for a *comment* line
-    beginning ``evals/runs``; the real file dodges that only because its
-    comment happens to start ``# ``. ``git check-ignore`` resolves the same
-    precedence git itself will apply when the archive is committed or cleaned,
-    and that resolver is the thing that erased the archives.
+    It asks GIT, and does not pattern-match the file. Scanning .gitignore for a line
+    starting ``evals/runs`` is not the question: the anchored spelling, ``runs/``,
+    ``**/runs/``, a pattern in any parent file, ``.git/info/exclude`` and the global
+    excludes all re-ignore the archive with the assertion green, and it reported a
+    violation for a COMMENT line too. ``git check-ignore`` resolves the precedence git
+    itself will apply — the resolver that erased the archives.
 
-    The per-run output ignores (trajectories, briefings, latest.json,
-    reports/human) stay ignored, versioned filenames included — those files
-    are reproducible per-run output, not the durable record. ``evals/traces``
-    is deliberately NOT among them, despite sitting next to them in the same
-    .gitignore stanza: it is the append-only cross-invocation trace log, no
-    ``evals/traces/*`` pattern exists, and it is tracked on purpose — for a
-    scenario killed before its per-scenario archive slice is written it is the
-    only record that the work happened and was billed (see the comment at
-    .gitignore lines 44-51, and saga_stuck on 2026-08-11).
+    The per-run output ignores stay ignored, versioned filenames included.
+    ``evals/traces`` is deliberately NOT among them: for a scenario killed before its
+    archive slice is written it is the only record that the work was billed.
     """
 
-    # A path only a real archive contains: the per-invocation report a live
-    # campaign is required to commit. Asking about the bare directory would
-    # under-test, because ``evals/runs/*`` ignores the CONTENTS while leaving
-    # ``evals/runs`` itself unignored. The path need not exist — check-ignore
-    # answers from the patterns, which is what lets this run on a clean tree.
+    # A path only a real archive contains. Asking about the bare directory would
+    # under-test, because ``evals/runs/*`` ignores the CONTENTS. The path need not exist
+    # — check-ignore answers from the patterns, which is what lets this run on a clean tree.
     _DURABLE_RECORD: Final[str] = "evals/runs/inv-20260101-000000/report.json"
 
-    # A trajectory that must stay ignored, used to prove the probe below can
-    # still return "yes" (.gitignore `evals/trajectories/*`). Spelled in the
-    # VERSIONED form the runner writes now: versioned files under an ignored
-    # directory must stay ignored, so an ignore rule written as
-    # `evals/trajectories/*.json` — which still covers the legacy flat name —
-    # would keep this green while every per-run file it is meant to cover
-    # started showing up untracked.
+    # A trajectory that must stay ignored, proving the probe below can still answer
+    # "yes". Spelled in the VERSIONED form the runner writes now: an ignore rule written
+    # as `evals/trajectories/*.json` would keep this green while every per-run file it
+    # covers started showing up untracked.
     _IGNORED_TRAJECTORY: Final[str] = (
         "evals/trajectories/consumer_lag_pass.20260101T000000Z.abc123abc123.json"
     )
@@ -1292,15 +1229,9 @@ class TestRunsDirIsTracked:
     def _git_ignores(path: str) -> bool:
         """Would git skip ``path``? Exit 0 = ignored, 1 = not, anything else = broken.
 
-        128 is git refusing to answer (not a work tree, unreadable ignore
-        file, bad invocation). That must fail loudly rather than be folded
-        into either answer: read as "not ignored" it is a guard that passes
-        because it broke, and read as "ignored" it is a confusing red about
-        the wrong thing.
-
-        No network is involved — this is a local subprocess against the
-        working tree — so it is unaffected by the autouse socket block in
-        tests/unit/conftest.py.
+        128 is git refusing to answer, which must fail loudly: read as "not ignored" it is
+        a guard that passes because it broke. No network — a local subprocess against the
+        working tree.
         """
         repo_root = Path(__file__).resolve().parents[2]
         try:
@@ -1343,11 +1274,9 @@ class TestRunsDirIsTracked:
     def test_the_probe_can_still_say_yes(self) -> None:
         """Canary: prove the check above is capable of failing.
 
-        ``_git_ignores`` returning False is only evidence if it can return
-        True. A wrong cwd, a mangled argument list or a git that quietly
-        stopped resolving patterns would answer "not ignored" for everything,
-        and the guard above would pass forever while the archive was being
-        deleted. So ask about a path that must be ignored.
+        ``_git_ignores`` returning False is only evidence if it can return True — a wrong
+        cwd or a git that stopped resolving patterns would answer "not ignored" for
+        everything while the archive was being deleted.
         """
         for path in (self._IGNORED_TRAJECTORY, self._IGNORED_LEGACY_TRAJECTORY):
             assert self._git_ignores(path), (
@@ -1362,19 +1291,14 @@ class TestRunsDirIsTracked:
 
 # --- Run provenance + exit-code contract (ADR 0013; findings A-01/S-09/A-04/A-15) ---
 
-# Every env var Settings can read, walked from the model (config.py).
-# Exit-code tests must clear ALL of them and chdir away from any real .env, or a
-# developer's environment leaks into the test — the exact A-04 mechanism. This
-# was a hand-kept tuple until WO-R2-87, and it had drifted from the model it
-# claimed to mirror; tests/unit/test_config.py holds the written-down copy that
-# a new setting has to be added to.
+# Every env var Settings can read, walked from the model. Exit-code tests must clear
+# ALL of them and chdir away from any real .env, or a developer's environment leaks
+# in — the A-04 mechanism. Hand-kept until WO-R2-87, when it had already drifted.
 _SETTINGS_ENV_VARS = settings_env_var_names()
 
-# A present-but-offline env for a --live run: every field set and parseable,
-# ANTHROPIC_API_KEY an offline placeholder, platform URL the offline
-# placeholder. (A verbatim `.env.example` copy no longer parses this way:
-# env_ignore_empty treats its blank required entries as unset, so that copy
-# now dies as 'Field required' at construction — the broken-env exit-3 path.)
+# A present-but-offline env for a --live run: every field set and parseable, with
+# placeholder key and URL. A verbatim `.env.example` copy no longer parses this way —
+# env_ignore_empty treats its blank required entries as unset.
 _PLACEHOLDER_LIVE_ENV = {
     "ANTHROPIC_API_KEY": "eval",
     "JUDGE_MODEL": "claude-haiku-4-5",
@@ -1400,14 +1324,10 @@ _REAL_LOOKING_LIVE_ENV = {
 }
 
 
-# A smoke pass selects chaos-free scenarios, exactly as `make eval-smoke`
-# does (`--only "$(SMOKE_ONLY)"` — see the SMOKE_ONLY block in the Makefile;
-# the remediate_* scenarios are deliberately absent from that list). An
-# unfiltered `--live --smoke` selects the whole suite and is refused with
-# exit 6: it would seed chaos under the full write+chaos principal during
-# the read-only stage (S-03). One representative pattern stands in for the
-# full SMOKE_ONLY list; that the list itself covers every eligible scenario
-# is what tests/unit/test_smoke_only_coverage.py checks.
+# A smoke pass selects chaos-free scenarios, as `make eval-smoke` does. An
+# unfiltered `--live --smoke` selects the whole suite and is refused with exit 6: it
+# would seed chaos under the full principal during the read-only stage (S-03). One
+# representative pattern stands in for the full SMOKE_ONLY list.
 _SMOKE_ONLY_ARGS = ["--only", "consumer_lag_healthy,tool_"]
 
 
@@ -1429,13 +1349,10 @@ def test_isolate_settings_env_clears_every_variable_settings_reads(
 ) -> None:
     """The exit-code tests below are only meaningful if this holds.
 
-    ``_SETTINGS_ENV_VARS`` used to be typed out by hand under the claim that
-    it was "every env var Settings can read (config.py)", and it was not:
-    AGENT_ENABLED, WEBHOOK_MAX_SKEW_SECONDS and the whole ADR-0022 pool group
-    were missing, so a developer with any of those exported ran the exit-code
-    contract against their own shell — the A-04 mechanism these tests exist to
-    prevent, reintroduced inside the guard against it. The list is derived
-    from the model now; this is the check that the derivation covers it.
+    ``_SETTINGS_ENV_VARS`` was typed by hand under the claim that it was every var
+    Settings reads, and it was not — so a developer with AGENT_ENABLED exported ran
+    the exit-code contract against their own shell, the A-04 mechanism reintroduced
+    inside the guard against it. Derived from the model now.
     """
     for name in settings_env_var_names():
         monkeypatch.setenv(name, "9999")
@@ -1475,10 +1392,9 @@ def _green_stub_report() -> RunReport:
 
 
 def _stub_run_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[dict[str, Any]]:
-    """Stub run_all and the flat writers so main() can cross the run boundary
-    without touching evals/{reports,trajectories,briefings}, and redirect the
-    run archive at tmp_path — main() now creates runs/<invocation_id>/ itself
-    and writes its completion marker there."""
+    """Stub run_all and the flat writers so main() can cross the run boundary without
+    touching evals/, and redirect the run archive at tmp_path.
+    """
     run_all_calls: list[dict[str, Any]] = []
 
     def _stub_run_all(*args: Any, **kwargs: Any) -> Any:
@@ -1501,9 +1417,8 @@ class _StubGuardClient:
 def _split_agent_probe(monkeypatch: pytest.MonkeyPatch) -> Any:
     """One client that answers as the post-v0.6.5 AGENT principal.
 
-    Used where a test patches ``make_client`` itself rather than going through
-    ``_stub_principal_probe``: the Tier-1 probe is refused on its arguments
-    (the token can act) and the chaos probe on scope (it cannot seed).
+    For tests that patch ``make_client`` directly: the Tier-1 probe is refused on its
+    arguments (the token can act) and the chaos probe on scope (it cannot seed).
     """
     probe = _ClosableCanned({})
 
@@ -1524,27 +1439,16 @@ def _stub_principal_probe(
 ) -> list[str]:
     """Give main()'s principal guards a local probe client.
 
-    Without this, any test that reaches a guard under a real-looking live env
-    builds a real ``MCPClient`` and fires a real ``tools/call`` at
-    PLATFORM_MCP_URL — which is what ``test_one_mutating_scenario_is_allowed``
-    did until the ``no_outbound_sockets`` fixture caught it. The guards fail
-    closed on the resulting error, so the network trip was invisible in the
-    exit code; the fixture reports it regardless.
+    Without it, any test reaching a guard under a live-looking env builds a real
+    ``MCPClient`` and fires a real ``tools/call`` at PLATFORM_MCP_URL — invisible in
+    the exit code, because the guards fail closed on the resulting error.
 
-    The default behaviour is an argument refusal: the scope check passed and
-    the deliberately invalid probe arguments were rejected, which is what both
-    the write and the chaos guard require to let a run proceed.
-
-    One exception, and it is the token split (platform v0.6.5): the client
-    built for the AGENT answers the CHAOS probe with a scope refusal, because
-    the agent principal must not be able to seed — a token that can fire the
-    lab is served the lab's audit rows. Which client is which is read off the
-    token ``make_client`` was handed, exactly as the runner distinguishes
-    them. ``agent_chaos_behavior`` overrides that half for the tests that are
-    about it.
-
-    Returns the list of probe tool names as they are called, so a test can
-    assert WHICH scope was probed and not merely that something was.
+    The default is an argument refusal, which is what both the write and the chaos
+    guard require to let a run proceed. One exception, the token split: the client
+    built for the AGENT answers the CHAOS probe with a SCOPE refusal, because a token
+    that can fire the lab is served the lab's audit rows. Which client is which is
+    read off the token, as the runner does. Returns the probe tool names called, so a
+    test can assert WHICH scope was probed.
     """
     probed: list[str] = []
     error = behavior if behavior is not None else MCPError(-32602, "invalid tool arguments")
@@ -1561,9 +1465,8 @@ def _stub_principal_probe(
 
         def _call_tool(name: str, _arguments: Any, **_k: Any) -> Any:
             probed.append(name)
-            # The agent's client answers the chaos probe with a SCOPE refusal
-            # by default — the post-v0.6.5 principal, and the only shape that
-            # passes assert_chaos_blind_principal.
+            # The agent's client answers the chaos probe with a SCOPE refusal by default — the
+            # post-v0.6.5 principal, and the only shape that passes the blindness guard.
             if not is_chaos_client and name == guards_module._CHAOS_PROBE_TOOL:
                 raise blind
             raise error
@@ -1651,13 +1554,9 @@ class TestEvalDefaultsPinned:
 class TestBaselineBackwardCompat:
     """The committed baseline must parse, and must not claim what it does not know.
 
-    Until WO-R3-249 this pinned the *pre-schema* baseline, whose every
-    provenance field was absent and whose compatibility was therefore carried
-    by defaults. That bless replaced it with a stamped 41-scenario report, so
-    the same invariant now asserts the other side of the same rule: a field
-    this run DOES know is answered, not left at the pre-schema default. The
-    invariant is unchanged; only which half of it the committed artifact
-    exercises has flipped.
+    Until WO-R3-249 this pinned the PRE-SCHEMA baseline, whose provenance was carried
+    by defaults; that bless replaced it with a stamped 41-scenario report, so the same
+    invariant now asserts the other side — a field this run DOES know is answered.
     """
 
     def test_committed_baseline_parses_and_states_what_it_knows(self) -> None:
@@ -1666,9 +1565,8 @@ class TestBaselineBackwardCompat:
         # The corpus the gate compares against, read off the artifact rather
         # than hand-written twice.
         assert report.total == len(report.outcomes) == 41
-        # A NUMBER, not None: the blessed run knows how many scenarios fell
-        # back to canned, so it says so. None is the pre-schema "unknown", and
-        # asserting it here would now be the falsehood this test guards.
+        # A NUMBER, not None: the blessed run knows how many scenarios fell back to canned.
+        # None is the pre-schema "unknown", and asserting it here would be a falsehood.
         assert report.degraded_count == 34
         assert report.only_patterns == ()
         # The roll-up agrees with the rows it is a roll-up of — the shape a
@@ -1682,17 +1580,14 @@ class TestMainExitCodes:
     def test_live_with_placeholder_env_refuses_exit_3(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        # The executed S-09 repro: present-but-placeholder values under
-        # --live. At HEAD this ran the whole suite canned and returned 0.
-        # (The verbatim-.env.example-copy variant of the repro now exits 3
-        # even earlier — 'Field required' at construction, same path as
-        # test_live_with_broken_env_exits_3_not_traceback.)
+        # The executed S-09 repro: present-but-placeholder values under --live, which at
+        # HEAD ran the whole suite canned and returned 0. The verbatim-.env.example variant
+        # now exits 3 even earlier, at construction.
         _isolate_settings_env(monkeypatch, tmp_path, _PLACEHOLDER_LIVE_ENV)
         _forbid_run_all(monkeypatch)
-        # --only is load-bearing since ADR 0020: a full-suite --live selection is
-        # refused (exit 7) before the environment is examined, because a wrong
-        # SELECTION is knowable without touching the env. Narrow to one read-only
-        # scenario so this test still reaches the env path it is about.
+        # --only is load-bearing since ADR 0020: a full-suite --live selection is refused
+        # before the environment is examined, because a wrong SELECTION is knowable without
+        # touching the env. Narrowed here so the test still reaches the env path.
         monkeypatch.setattr(
             sys, "argv", ["evals.runner", "--live", "--only", "consumer_lag_healthy_zero"]
         )
@@ -1720,18 +1615,17 @@ class TestMainExitCodes:
         # interpreter exits 1 — the code reserved for "scenario failed".
         _isolate_settings_env(monkeypatch, tmp_path)
         _forbid_run_all(monkeypatch)
-        # --only is mandatory under --live since the missing-filter backstop,
-        # and that refusal (exit 2) runs BEFORE the settings load — so the
-        # broken-env claim needs a selection to reach the code it is about.
+        # --only is mandatory under --live since the missing-filter backstop, and that
+        # refusal runs BEFORE the settings load — so the broken-env claim needs a selection.
         monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--only", "consumer_lag_pass"])
         assert runner_module.main() == 3
 
     def test_live_smoke_placeholder_platform_with_canned_only_selection_exits_3(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        # A-04 defense-in-depth: the selection contains no use_live scenario
-        # (so the degraded fail-fast is silent), the smoke token is present,
-        # but the platform is a placeholder — there is no principal to guard.
+        # A-04 defence in depth: the selection contains no use_live scenario (so the
+        # degraded fail-fast is silent), the smoke token is present, and the platform is a
+        # placeholder — there is no principal to guard.
         env = dict(_PLACEHOLDER_LIVE_ENV)
         env["PLATFORM_SMOKE_TOKEN"] = "sa_smoke_read_only"
         _isolate_settings_env(monkeypatch, tmp_path, env)
@@ -1753,10 +1647,9 @@ class TestMainExitCodes:
     def test_live_smoke_with_real_env_passes_preflight(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        # The `make eval-smoke` shape (--live --smoke, nothing offline) must
-        # NOT trip the degraded fail-fast: degraded_to_canned == 0. Unit-level
-        # replacement for observing make eval-smoke under the eval freeze
-        # (ADR 0011). Every live collaborator is stubbed — no network.
+        # The `make eval-smoke` shape must NOT trip the degraded fail-fast:
+        # degraded_to_canned == 0. A unit-level replacement for observing it under the eval
+        # freeze (ADR 0011), with every live collaborator stubbed.
         _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
         run_all_calls = _stub_run_pipeline(monkeypatch, tmp_path)
         preflight_calls: list[str] = []
@@ -1784,20 +1677,17 @@ class TestMainExitCodes:
         assert len(run_all_calls) == 1
         # The read-scoped smoke token — not the write token — reached run_all.
         assert run_all_calls[0]["kwargs"]["mcp_token"] == "sa_smoke_read_only"
-        # Neither principal id is configured in this env: the post-stage
-        # audit stays deliberately over-broad (any service account's
-        # in-window Tier-1 success fails the stage).
+        # Neither principal id is configured here, so the post-stage audit stays
+        # deliberately over-broad: any service account's in-window Tier-1 success fails.
         assert _principal_ids(audit_kwargs) == [None]
 
     def test_configured_principal_ids_reach_the_post_stage_audit(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        # A-13: on a shared platform the guard must attribute violations to
-        # the principals this stage owns. BOTH ids are required — the F-001
-        # failure mode (the stage silently holding the full token) writes
-        # under the AGENT principal, not the smoke one — so filtering to the
-        # smoke id alone would blind the guard to its own reason for
-        # existing. The ids come from Settings, printed by bootstrap-token.
+        # A-13: on a shared platform the guard must attribute violations to the principals
+        # this stage owns, and BOTH ids are required — the F-001 failure mode writes under
+        # the AGENT principal, so filtering to the smoke id would blind the guard to its own
+        # reason for existing.
         env = dict(_REAL_LOOKING_LIVE_ENV)
         env["PLATFORM_AGENT_PRINCIPAL_ID"] = "agent-sa-uuid"
         env["PLATFORM_SMOKE_PRINCIPAL_ID"] = "smoke-sa-uuid"
@@ -1819,10 +1709,8 @@ class TestMainExitCodes:
     def test_half_configured_principal_ids_fall_back_to_unfiltered(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # Naming ONLY the smoke principal would filter out the agent rows
-        # the F-001 failure mode writes — the guard would stop catching the
-        # thing it was built for. A half-configured env therefore falls back
-        # to the over-broad default (safe side) and says so.
+        # Naming ONLY the smoke principal would filter out the agent rows F-001 writes, so a
+        # half-configured env falls back to the over-broad default and says so.
         env = dict(_REAL_LOOKING_LIVE_ENV)
         env["PLATFORM_SMOKE_PRINCIPAL_ID"] = "smoke-sa-uuid"
         _isolate_settings_env(monkeypatch, tmp_path, env)
@@ -1845,11 +1733,9 @@ class TestMainExitCodes:
 def _principal_ids(audit_kwargs: list[dict[str, Any]]) -> list[Any]:
     """The `principal_ids` each post-stage audit call was given.
 
-    The call also carries `scan=` — the AuditWindowScan the runner has been
-    checkpointing since the stage started — so these assertions read the one
-    kwarg they are about instead of pinning the whole signature. `scan` gets
-    its own assertion in `TestPostStageAuditIsCheckpointed`, where it is the
-    subject rather than incidental.
+    The call also carries `scan=`, so these read the one kwarg they are about rather
+    than pinning the whole signature; `scan` is the subject of
+    `TestPostStageAuditIsCheckpointed`.
     """
     return [kwargs["principal_ids"] for kwargs in audit_kwargs]
 
@@ -1857,11 +1743,9 @@ def _principal_ids(audit_kwargs: list[dict[str, Any]]) -> list[Any]:
 class TestSmokeRefusesChaosSeeding:
     """S-03: a read-only stage does not seed chaos.
 
-    ``run_scenario`` fires ``chaos_setup`` under ``settings.platform_token``
-    — the full write+chaos principal — regardless of ``--smoke``. The #80
-    principal guard only asserts the AGENT client's token, and the exit-5
-    post-stage audit sees the write after it lands. The only prevention is
-    refusing the run before anything is spent.
+    ``run_scenario`` fires ``chaos_setup`` under the full principal regardless of
+    ``--smoke``, the #80 guard only asserts the agent client's token, and the exit-5
+    audit sees the write after it lands — so the only prevention is refusing the run.
     """
 
     def _chaos_scenario(self) -> Scenario:
@@ -1879,15 +1763,11 @@ class TestSmokeRefusesChaosSeeding:
     def test_smoke_with_a_chaos_scenario_exits_6_and_fires_no_hook(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # At HEAD this run proceeds: the hook fires inside run_scenario under
-        # the FULL principal during the stage whose purpose is proving the
-        # smoke token is read-only.
-        #
-        # Driven through --only since WO-R2-123, and that IS the case worth
-        # pinning: a bare --smoke now derives its selection from
-        # Scenario.in_smoke_pass, which excludes a chaos-declaring scenario
-        # by construction, so the only way one can still reach the stage is
-        # the operator override — the reachable channel ADR 0018 names.
+        # At HEAD this run proceeds: the hook fires inside run_scenario under the FULL
+        # principal during the stage whose purpose is proving the smoke token is read-only.
+        # Driven through --only since WO-R2-123, which IS the case worth pinning — a bare
+        # --smoke derives from ``in_smoke_pass``, so the operator override is the only way
+        # one can still reach the stage (the reachable channel ADR 0018 names).
         _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
         _forbid_run_all(monkeypatch)
         hook_calls: list[str] = []
@@ -1967,11 +1847,9 @@ class TestSmokeRefusesChaosSeeding:
     def test_a_bare_smoke_run_derives_past_the_chaos_scenarios(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # WO-R2-123: the default path no longer needs the exit-6 refusal to
-        # keep chaos out, because a chaos-declaring scenario is not in the
-        # derived selection to begin with. The refusal above stays for the
-        # override channel; this pins that the two do not fight — a mixed
-        # tree runs the read-only half rather than refusing the whole pass.
+        # WO-R2-123: the default path no longer needs the exit-6 refusal, because a
+        # chaos-declaring scenario is not in the derived selection. The refusal stays for the
+        # override channel, and this pins that the two do not fight.
         _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
         run_all_calls = _stub_run_pipeline(monkeypatch, tmp_path)
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
@@ -2019,22 +1897,13 @@ class TestSmokeRefusesChaosSeeding:
 class TestSmokeRefusesAnythingOutsideTheDerivedSet:
     """The other half of the door above: ``--only`` could re-admit a WRITE.
 
-    The derived smoke set is ``in_smoke_pass`` — no ``chaos_setup``, no
-    ``expected_action_tools``, no ``smoke_exclusion``. But ``--only`` bypasses
-    the derivation entirely (``if smoke and not only_patterns``), and the gate
-    it then ran into checked ``chaos_setup`` alone. So a scenario declaring
-    ``expected_action_tools`` and no chaos passed every guard: a graded Tier-1
-    write inside the stage whose whole purpose is proving the smoke token
-    cannot write. Five shipped scenarios are in exactly that shape, all of
-    them live-capable and all of them reachable by ``SMOKE_ONLY=dlq_``.
-
-    ``Scenario.smoke_eligible``'s docstring already asserted this refusal
-    existed ("guaranteed red here and belongs to the remediation stage"), so
-    the derivation and the gate disagreed about what the stage admits — and
-    the gate is the one that runs.
-
-    The override may still NARROW the derived set: that is what SMOKE_ONLY is
-    for, and ``test_a_narrowing_override_still_runs`` pins it.
+    ``--only`` bypasses the derivation entirely and the gate it ran into checked
+    ``chaos_setup`` alone — so a scenario declaring ``expected_action_tools`` and no
+    chaos passed every guard: a graded Tier-1 write inside the stage whose purpose is
+    proving the smoke token cannot write. Five shipped scenarios are that shape, all
+    reachable by ``SMOKE_ONLY=dlq_``. ``Scenario.smoke_eligible``'s docstring already
+    asserted the refusal existed, so the derivation and the gate disagreed about what
+    the stage admits — and the gate is the one that runs. The override may still NARROW.
     """
 
     def _smoke_env(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -2046,11 +1915,9 @@ class TestSmokeRefusesAnythingOutsideTheDerivedSet:
     def test_a_write_scenario_cannot_be_smuggled_in_by_only(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # RED BEFORE: exit 0 — dlq_replay_safe_success declares
-        # expected_action_tools and no chaos_setup, so the chaos-only gate
-        # waved it through and the stage graded a Tier-1 write under the
-        # read-scoped token. Real shipped scenario, real tree: the door is
-        # reachable as `make eval-smoke SMOKE_ONLY=dlq_replay_safe_success`.
+        # RED BEFORE: exit 0 — dlq_replay_safe_success declares expected_action_tools and no
+        # chaos_setup, so the chaos-only gate waved it through and the stage graded a Tier-1
+        # write under the read-scoped token.
         self._smoke_env(monkeypatch, tmp_path)
         monkeypatch.setattr(
             sys,
@@ -2066,20 +1933,11 @@ class TestSmokeRefusesAnythingOutsideTheDerivedSet:
     def test_the_refusal_names_every_offender_and_its_reason(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # `SMOKE_ONLY=dlq_` is the realistic operator form, and it happens to
-        # cover both surviving reasons at once: four write scenarios plus
-        # dlq_backlog, which is held back by a hand-written smoke_exclusion
-        # (it COULD pass under the smoke token — the hold-back is a judgement,
-        # and its recorded reason is what says when it can be lifted).
-        # Three causes, three different repairs, so the reason is per scenario.
-        #
-        # Since the v0.6.2 re-pin `dlq_human_required_escalates` seeds its own
-        # unclassified row, so it is the corpus's first scenario held back for
-        # TWO causes at once, and it is asserted as two: `_smoke_holdback_reason`
-        # joins them with "; " and the point of naming causes per scenario is
-        # that a reader gets all of them, not the first one. Asserting only the
-        # write half would have passed just as well before the chaos hook
-        # existed and so would not have noticed it appearing.
+        # `SMOKE_ONLY=dlq_` is the realistic operator form and covers both surviving reasons
+        # at once: four write scenarios plus dlq_backlog, held back by a hand-written
+        # smoke_exclusion. Three causes, three repairs, so the reason is per scenario — and
+        # since the v0.6.2 re-pin `dlq_human_required_escalates` is held back for TWO at
+        # once, asserted as two, because a reader needs all of them and not the first.
         self._smoke_env(monkeypatch, tmp_path)
         monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke", "--only", "dlq_"])
         assert runner_module.main() == 6
@@ -2092,9 +1950,8 @@ class TestSmokeRefusesAnythingOutsideTheDerivedSet:
     def test_a_narrowing_override_still_runs(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # SMOKE_ONLY keeps substring semantics for scenarios that ARE in the
-        # derived set. Narrowing is the whole point of the override; only
-        # widening is refused. All five noise_* scenarios are in_smoke_pass.
+        # SMOKE_ONLY keeps substring semantics for scenarios that ARE in the derived set:
+        # narrowing is the point of the override, and only widening is refused.
         _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
         monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
@@ -2112,10 +1969,8 @@ class TestSmokeRefusesAnythingOutsideTheDerivedSet:
     def test_a_bare_smoke_run_is_unaffected(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        # The derivation and the gate now agree by construction: everything
-        # the derivation admits is in_smoke_pass, so the gate can never fire
-        # on a bare --smoke. If it ever does, the two have drifted apart and
-        # that is the bug this class exists to prevent.
+        # The derivation and the gate now agree by construction, so the gate can never fire
+        # on a bare --smoke. If it ever does, the two have drifted apart.
         _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
         monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
@@ -2137,13 +1992,9 @@ class TestSmokeRefusesAnythingOutsideTheDerivedSet:
             "no scenario is held out of the smoke pass — this gate has no subject"
         )
         for scenario in scenarios:
-            # `seeds_chaos`, not `chaos_setup`: a scenario spelling its world
-            # with the composable `chaos_plan` leaves the legacy field None
-            # while still firing hooks, and this copy of the predicate said
-            # "eligible" for the first four of those the moment they landed
-            # (WO-R3-214's `workflow_stuck` family). Which is the drift this
-            # test exists to catch, caught here rather than by a smoke pass
-            # seeding three faults into the world it exists to prove clean.
+            # `seeds_chaos`, not `chaos_setup`: a scenario spelling its world with the composable
+            # `chaos_plan` leaves the legacy field None while still firing hooks, and this copy
+            # of the predicate said "eligible" for WO-R3-214's four the moment they landed.
             expected = (
                 not scenario.seeds_chaos
                 and not scenario.expectation.expected_action_tools
@@ -2153,18 +2004,15 @@ class TestSmokeRefusesAnythingOutsideTheDerivedSet:
 
 
 class TestCannedEquivalentKnobWarning:
-    """S-10: a --live run whose probe knobs sit at the canned-equivalent
-    defaults reproduces both documented live failure modes (ADR 0006 verify
-    polling, ADR 0009 freshness re-probe). The runner warns — never exits —
-    because through Settings an explicit VERIFY_PROBE_ATTEMPTS=1 is
-    indistinguishable from unset, and a hard fail would ban deliberate
-    single-probe live experiments with no escape hatch."""
+    """S-10: a --live run whose probe knobs sit at the canned-equivalent defaults
+    reproduces both documented live failure modes (ADR 0006, ADR 0009). It warns and
+    never exits, because an explicit ``VERIFY_PROBE_ATTEMPTS=1`` is indistinguishable
+    from unset and a hard fail would ban single-probe live experiments.
+    """
 
     def test_warns_on_default_settings(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # No knob overrides: the config.py defaults are deliberately
-        # canned-equivalent (ADR 0006/0009 chose canned-default-off), so
-        # default-constructed settings must warn. delenv guards against a
-        # developer shell exporting the knobs into unset fields.
+        # No knob overrides: the config defaults are deliberately canned-equivalent, so
+        # default-constructed settings must warn. delenv guards against a developer shell.
         monkeypatch.delenv("VERIFY_PROBE_ATTEMPTS", raising=False)
         monkeypatch.delenv("INVESTIGATE_REPROBE_ATTEMPTS", raising=False)
         msg = _canned_equivalent_knob_warning(_test_settings())
@@ -2189,15 +2037,12 @@ class TestCannedEquivalentKnobWarning:
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        # Wiring: the warning fires immediately after the settings load —
-        # before the degraded fail-fast — so even a refused --live run
-        # surfaces it. Pre-spend: run_all stays forbidden.
+        # Wiring: the warning fires immediately after the settings load, before the degraded
+        # fail-fast, so even a refused --live run surfaces it. Pre-spend.
         _isolate_settings_env(monkeypatch, tmp_path, _PLACEHOLDER_LIVE_ENV)
         _forbid_run_all(monkeypatch)
-        # --only is load-bearing since ADR 0020: a full-suite --live selection is
-        # refused (exit 7) before the environment is examined, because a wrong
-        # SELECTION is knowable without touching the env. Narrow to one read-only
-        # scenario so this test still reaches the env path it is about.
+        # --only is load-bearing since ADR 0020: a full-suite --live selection is refused
+        # before the environment is examined. Narrowed so the test reaches the env path.
         monkeypatch.setattr(
             sys, "argv", ["evals.runner", "--live", "--only", "consumer_lag_healthy_zero"]
         )
@@ -2223,13 +2068,10 @@ class TestCannedEquivalentKnobWarning:
 class TestScenarioBudgetReachesTheRun:
     """ADR 0019: the declared cap is the run's ceiling, and the agent is told it.
 
-    Two separate defects, one wire. The runtime ceiling was
-    ``settings.budget_max_tool_calls`` for every scenario regardless of what
-    the scenario declared, so a cap of 5 and a ceiling of 25 disagreed by
-    20 calls. And ``_format_planner_context`` renders "Budget remaining:
-    tool_calls=..." from that same ledger, so the investigation planner was
-    told 25 in every scenario — including the ones whose entire subject is
-    what the agent does when the budget is tight.
+    Two defects, one wire. The runtime ceiling was ``settings.budget_max_tool_calls``
+    whatever the scenario declared, and ``_format_planner_context`` renders "Budget
+    remaining" from that same ledger — so the planner was told 25 in every scenario,
+    including the ones whose whole subject is a tight budget.
     """
 
     def test_ledger_is_seeded_from_the_scenario_cap(self) -> None:
@@ -2250,9 +2092,8 @@ class TestScenarioBudgetReachesTheRun:
         assert captured[0].budget.max_tool_calls == 5
 
     def test_planner_is_told_the_scenario_budget_not_the_fleet_default(self) -> None:
-        # The defect this closes is visible only in the prompt text: the
-        # planner reads "Budget remaining: tool_calls=N" and decides how many
-        # probes it can afford from it.
+        # The defect this closes is visible only in the prompt text: the planner reads
+        # "Budget remaining: tool_calls=N" and decides how many probes it can afford.
         built: list[CannedLLMClient] = []
 
         class _Recording(CannedLLMClient):
@@ -2287,9 +2128,8 @@ class TestScenarioBudgetReachesTheRun:
         assert captured[0].budget.max_tool_calls == 17
 
     def test_every_shipped_scenario_still_grades_green_under_its_own_ceiling(self) -> None:
-        # The suite-wide statement of the change: nine scenarios declare a cap
-        # of 0, which start_run ignores (a zero ledger is born exhausted), and
-        # the rest now run under the number they are graded against.
+        # The suite-wide statement: nine scenarios declare a cap of 0, which start_run
+        # ignores, and the rest now run under the number they are graded against.
         from evals.scenarios.loader import load_scenarios
 
         scenarios = load_scenarios(Path(__file__).resolve().parents[2] / "evals" / "scenarios")
@@ -2298,9 +2138,8 @@ class TestScenarioBudgetReachesTheRun:
         assert failed == [], f"scenarios red under their own ceiling: {failed}"
         # Anti-vacuity: a sweep over an empty report is green and says nothing.
         assert len(report.outcomes) >= 41
-        # The BUDGET dimension is the one a ceiling can move, and it is the
-        # claim this test is actually about — asserted directly so a future
-        # red somewhere else cannot be mistaken for a budget failure.
+        # BUDGET is the dimension a ceiling can move, asserted directly so a future red
+        # elsewhere cannot be mistaken for a budget failure.
         over_budget = [
             outcome.scenario
             for outcome in report.outcomes
@@ -2320,9 +2159,8 @@ class _ClosableCanned(CannedMCPClient):
 class _ScriptedCanned(_ClosableCanned):
     """A canned client that stops answering on chosen (1-based) attempts.
 
-    CannedMCPClient scripts changing *answers*; it cannot script a platform
-    that stops answering mid-window, which is the sequence the
-    Not-Met/Unverifiable split actually turns on.
+    CannedMCPClient scripts changing ANSWERS; it cannot script a platform that stops
+    answering mid-window, which is what the Not-Met/Unverifiable split turns on.
     """
 
     def __init__(self, responses: Any, *, dead_on: set[int]) -> None:
@@ -2347,9 +2185,8 @@ class _ScriptedCanned(_ClosableCanned):
 class TestPreconditions:
     """An unmet premise abandons the run instead of grading the agent on it.
 
-    The distinction this draws is the one `bb1fa70abb4c` could not: a run
-    that never happened says nothing about the agent, and must not be
-    recorded as though it did.
+    The distinction `bb1fa70abb4c` could not draw: a run that never happened says
+    nothing about the agent.
     """
 
     @staticmethod
@@ -2459,9 +2296,8 @@ class TestPreconditions:
             self._run_live(monkeypatch, scenario, client)
 
     def test_canned_runs_ignore_preconditions_entirely(self) -> None:
-        # Offline the broken state is served by construction, so there is
-        # nothing to establish — and an offline suite must never need a
-        # platform to run.
+        # Offline the broken state is served by construction, so there is nothing to
+        # establish — and an offline suite must never need a platform to run.
         scenario = _passing_scenario().model_copy(
             update={
                 "expected_precondition": (
@@ -2479,10 +2315,8 @@ class TestPreconditions:
     ) -> None:
         """UNKNOWN is not FALSE, and the report must not conflate them.
 
-        "The fault was never manufactured" is a claim about the world; making
-        it requires the world to have answered. A refused scope or a dead
-        platform says nothing about the fault, and reporting one as the other
-        sends the reader to seeding when the platform is the problem.
+        "The fault was never manufactured" is a claim about the world and needs the world
+        to have answered; reporting a dead platform as one sends the reader to seeding.
         """
         client = _ClosableCanned({})  # no canned response => MCPError
         with pytest.raises(runner_module.PreconditionUnverifiable, match="UNKNOWN"):
@@ -2499,9 +2333,8 @@ class TestPreconditions:
     ) -> None:
         """A bare json.loads here escaped the polling loop entirely.
 
-        One malformed text block ended the run as an uncaught crash bucketed
-        "transport", losing both the probe that failed and the fact that it
-        was a precondition at all.
+        One malformed text block ended the run as a crash bucketed "transport", losing
+        both the failing probe and the fact that it was a precondition.
         """
         garbage = ToolResult(content=[{"type": "text", "text": "<html>502 Bad Gateway</html>"}])
         client = _ClosableCanned({"get_consumer_lag": garbage})
@@ -2513,12 +2346,10 @@ class TestPreconditions:
     ) -> None:
         """A platform that dies mid-polling is UNKNOWN, not FALSE.
 
-        `answered` latched True on the first readable payload and was never
-        reset, while `failures` was overwritten by each attempt — so
-        [readable-but-unmet, dead platform] reported the transport error
-        under "the fault was never manufactured", pointing the operator at
-        seeding while the platform was the thing that was down, inside a
-        committed append-only artifact and at the cost of a paid re-run.
+        `answered` latched True on the first readable payload while `failures` was
+        overwritten each attempt, so [readable-but-unmet, dead platform] reported the
+        transport error under "the fault was never manufactured" — inside a committed
+        append-only artifact, at the cost of a paid re-run.
         """
         monkeypatch.setattr(time, "sleep", lambda _s: None)
         client = _ScriptedCanned({"get_consumer_lag": self._lag_result(0)}, dead_on={2})
@@ -2533,9 +2364,8 @@ class TestPreconditions:
     def test_the_last_reading_still_decides_when_the_window_merely_expires(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # The other half of "the decisive attempt decides": every attempt was
-        # readable, so this IS a claim about the world, and it quotes the LAST
-        # reading rather than the first.
+        # The other half of "the decisive attempt decides": every attempt was readable, so
+        # this IS a claim about the world, and it quotes the LAST reading.
         monkeypatch.setattr(time, "sleep", lambda _s: None)
         client = _ClosableCanned({"get_consumer_lag": [self._lag_result(0), self._lag_result(-1)]})
         scenario = self._live_scenario_with_precondition(attempts=2, delay_seconds=1.0)
@@ -2549,9 +2379,8 @@ class TestPreconditions:
     def test_a_platform_that_comes_back_before_the_window_closes_is_unmet(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Symmetry check: transport failure FIRST, readable-but-unmet LAST.
-        # The decisive attempt answered, so the premise really is false and
-        # the transport blip must not promote it to Unverifiable.
+        # Symmetry check: transport failure FIRST, readable-but-unmet LAST. The decisive
+        # attempt answered, so the premise really is false.
         monkeypatch.setattr(time, "sleep", lambda _s: None)
         client = _ScriptedCanned({"get_consumer_lag": self._lag_result(0)}, dead_on={1})
         scenario = self._live_scenario_with_precondition(attempts=2, delay_seconds=1.0)
@@ -2568,11 +2397,9 @@ class TestPreconditions:
             self._run_live(monkeypatch, self._live_scenario_with_precondition(), client)
 
 
-# The two independent faults the WP-1.2 fixture below manufactures: a dead
-# consumer (lag climbs) and a poisoned cache key (size is the chaos write's
-# own number, not the seeded fixture's 120 — see docs/eval-methodology.md
-# "A precondition that the fixture pack alone can satisfy is not a
-# precondition").
+# The two independent faults the WP-1.2 fixture manufactures: a dead consumer (lag
+# climbs) and a poisoned cache key (size is the chaos write's own number, not the
+# seeded fixture's 120 — docs/eval-methodology.md).
 _TWO_FAULT_GROUP: Final = "billing"
 _TWO_FAULT_KEY: Final = "cache:jobs:worker-dispatcher:hot_set"
 _TWO_FAULT_CHAOS_SIZE: Final = 90
@@ -2582,11 +2409,9 @@ _TWO_FAULT_SEEDED_SIZE: Final = 120
 class _OrderedCanned(_ClosableCanned):
     """A live-path client that appends every call to a shared ordering list.
 
-    The ordering list is the only way to state WP-1.2's acceptance as one
-    assertion: the probes and the first model call are made by different
-    objects, so "both faults proven before the first model call" is a claim
-    about the sequence the two of them share, not about either one's own
-    call count.
+    The only way to state WP-1.2's acceptance as one assertion: the probes and the
+    first model call are made by different objects, so "both faults proven before the
+    first model call" is a claim about the sequence they share.
     """
 
     def __init__(self, responses: Any, order: list[str]) -> None:
@@ -2607,22 +2432,12 @@ class _OrderedCanned(_ClosableCanned):
 class TestTwoFaultPreconditions:
     """WP-1.2: a two-fault scenario proves BOTH faults before the first model call.
 
-    Nothing here is new machinery, and that is the point of the packet.
-    ``expected_precondition`` has always been a tuple, and
-    ``_assert_preconditions`` has always looped it, polled each probe on its
-    own ``attempts``/``delay_seconds``, and named the failing probe's tool.
-    What did not exist was the proof for a world with more than one fault in
-    it — every precondition test above drives a single probe, and the
-    multi-probe scenarios in the shipped suite only run live, where nothing
-    offline can assert on them.
-
-    So this is the acceptance test from plan 04 § WP-1.2 written against a
-    synthetic two-fault scenario: a two-hook ``ChaosPlan`` (dead consumer +
-    poisoned cache key), one read-only probe per fault, driven through the
-    live-MCP path with a fake platform. It is a fixture rather than a new
-    canned scenario YAML for a reason the suite already pins: a canned run
-    ignores preconditions entirely (``test_canned_runs_ignore_preconditions_
-    entirely``), so a canned scenario cannot prove anything about them.
+    Nothing here is new machinery, which is the point of the packet: what did not
+    exist was the PROOF for a world with more than one fault, since every precondition
+    test above drives a single probe and the shipped multi-probe scenarios only run
+    live. So: a synthetic two-fault scenario, one read-only probe per fault, driven
+    through the live-MCP path with a fake platform. A fixture rather than a canned
+    YAML because a canned run ignores preconditions entirely.
     """
 
     @staticmethod
@@ -2734,9 +2549,8 @@ class TestTwoFaultPreconditions:
     ) -> tuple[list[str], list[CannedLLMClient], ScenarioResult | None]:
         """Seed, probe and run against a fake platform; return the ordering.
 
-        Returns ``None`` for the result when the premise was false — the
-        caller is inside ``pytest.raises`` there and wants the ordering, not
-        a grade that by construction does not exist.
+        ``None`` for the result when the premise was false — the caller is inside
+        ``pytest.raises`` and wants the ordering, not a grade that does not exist.
         """
         order: list[str] = []
         built = self._record_llm(monkeypatch, order)
@@ -2811,9 +2625,9 @@ class TestTwoFaultPreconditions:
     ) -> None:
         """The cache key is there but carries the seeded size, not the chaos write.
 
-        The half a single-probe suite cannot see: the first premise holds,
-        so reaching this failure at all requires the loop to keep going, and
-        reporting it requires the message to name the SECOND probe.
+        The half a single-probe suite cannot see: the first premise holds, so reaching
+        this failure requires the loop to keep going and the message to name the SECOND
+        probe.
         """
         with pytest.raises(runner_module.PreconditionNotMet) as caught:
             self._run(
@@ -2834,9 +2648,8 @@ class TestTwoFaultPreconditions:
     ) -> None:
         """The cost argument, for a multi-fault world: still zero either way.
 
-        Asserted on the LLM fakes' own call counts rather than on the
-        exception text, because the text is what a message change may edit
-        and the call count is what money is billed against.
+        Asserted on the LLM fakes' own call counts rather than the exception text, because
+        the text is what a message change may edit.
         """
         worlds = (
             {
@@ -2878,10 +2691,9 @@ class TestTwoFaultPreconditions:
     ) -> None:
         """Attempt/delay semantics are per probe, and unchanged by there being two.
 
-        The two faults land on different clocks — a killed consumer's lag
-        trails the platform's metrics interval, a cache write is visible at
-        once — so a shared polling budget would be wrong for one of them by
-        construction.
+        The two faults land on different clocks — a killed consumer's lag trails the
+        metrics interval, a cache write is visible at once — so a shared polling budget
+        would be wrong for one of them by construction.
         """
         slept: list[float] = []
         monkeypatch.setattr(time, "sleep", slept.append)
@@ -2918,11 +2730,9 @@ class TestTwoFaultPreconditions:
     ) -> None:
         """The not-met / unverifiable split is per probe, not per scenario.
 
-        A met first premise must not latch "the world answered" for the
-        second: the whole point of the pair is that a claim about the world
-        requires THAT probe's deciding attempt to have answered. Getting
-        this wrong is what once let a dead platform report as "the fault was
-        never manufactured" (runner.py, ``_assert_preconditions``).
+        A met first premise must not latch "the world answered" for the second; getting
+        this wrong is what once let a dead platform report as "the fault was never
+        manufactured".
         """
         with pytest.raises(runner_module.PreconditionUnverifiable) as caught:
             self._run(
@@ -2940,23 +2750,18 @@ class TestTwoFaultPreconditions:
 class TestLiveRequiresAnExplicitSelection:
     """A bare ``--live`` is the whole suite, and must be refused as such.
 
-    It always looked refused: the exit-8 canned-only gate catches it because
-    some scenarios in the tree declare no live leg. But that is a property of
-    ``evals/scenarios/``, not of the invocation — give every one of them a live
-    leg and the identical command starts spending with nothing here changed —
-    and the message it refuses with names the wrong problem. The Makefile's
-    `ifndef ONLY` guard says the same thing one layer out; this is the backstop,
-    since
-    `python -m evals.runner --live` never comes through make.
+    It always LOOKED refused, by the exit-8 canned-only gate — but that is a property
+    of ``evals/scenarios/`` rather than of the invocation, and the message names the
+    wrong problem. The Makefile's `ifndef ONLY` says the same thing one layer out;
+    this is the backstop, since `python -m evals.runner --live` never comes through make.
     """
 
     def test_live_without_only_is_refused_before_the_scenario_tree_is_read(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # Both stubs explode. Passing this proves the refusal is structural:
-        # it precedes the settings load AND the scenario load, so it cannot be
-        # contingent on an .env or on what is in the scenario directory — the
-        # two things the old incidental refusal depended on.
+        # Both stubs explode, so passing proves the refusal is structural: it precedes the
+        # settings load AND the scenario load, the two things the old incidental refusal
+        # depended on.
         def _boom(*_a: Any, **_k: Any) -> Any:
             raise AssertionError("the missing-filter refusal must precede this")
 
@@ -2974,10 +2779,8 @@ class TestLiveRequiresAnExplicitSelection:
     def test_smoke_is_exempt(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # `--live --smoke` derives its own selection (WO-R2-123), so a bare one
-        # is not an unfiltered run — it is the read-only pass under the
-        # read-scoped token. It must fail on its own terms (exit 3, no smoke
-        # token in an isolated env), not be refused for a missing --only.
+        # `--live --smoke` derives its own selection (WO-R2-123), so a bare one is not an
+        # unfiltered run — it must fail on its own terms rather than for a missing --only.
         _isolate_settings_env(monkeypatch, tmp_path, _PLACEHOLDER_LIVE_ENV)
         _forbid_run_all(monkeypatch)
         monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
@@ -2987,9 +2790,8 @@ class TestLiveRequiresAnExplicitSelection:
     def test_an_offline_run_still_needs_no_only(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        # The guard is about spend, and an offline run has none. Refusing here
-        # would take out `make eval-reg` and `make baseline`, which forbid ONLY
-        # precisely so that they gate on the full suite.
+        # The guard is about spend, and an offline run has none. Refusing here would take out
+        # `make eval-reg` and `make baseline`, which forbid ONLY so they gate on the suite.
         _isolate_settings_env(monkeypatch, tmp_path)
         seen: list[Path] = []
 
@@ -3007,16 +2809,10 @@ class TestLiveRequiresAnExplicitSelection:
 class TestLiveOnlyMatchesByFullScenarioName:
     """``--only`` was an unanchored substring, and silently widened selections.
 
-    ``ONLY=dlq_backlog`` took ``dlq_backlog`` AND
-    ``remediate_dlq_backlog_success``. The read-only one runs first and drains
-    the seeded replay_safe pool the remediation is graded on, so a correct
-    agent reds. ADR 0020 cannot catch it — only one of the two mutates, so
-    ``len(mutating) > 1`` is False (2026-08-30).
-
-    Scoped to the spend path. ``--smoke`` keeps substring matching: it runs
-    read-scoped, refuses chaos seeding on its own (exit 6), and SMOKE_ONLY is
-    a documented substring override. Offline keeps it for the same reason the
-    guard above does not fire there — no spend, no shared platform.
+    ``ONLY=dlq_backlog`` took ``remediate_dlq_backlog_success`` too; the read-only one
+    runs first and drains the seeded replay_safe pool the remediation is graded on, so
+    a correct agent reds. ADR 0020 cannot catch it — only one of the two mutates.
+    Scoped to the spend path: ``--smoke`` and offline keep substring matching.
     """
 
     def _select(
@@ -3024,8 +2820,8 @@ class TestLiveOnlyMatchesByFullScenarioName:
     ) -> tuple[int, list[str]]:
         """Run main() over the REAL scenario tree and report what it selected.
 
-        The real tree is the subject: the widening is a property of the actual
-        names, so a synthetic pair would only test the matcher against itself.
+        The real tree is the subject: the widening is a property of the actual names, so a
+        synthetic pair would test the matcher against itself.
         """
         _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
@@ -3039,10 +2835,9 @@ class TestLiveOnlyMatchesByFullScenarioName:
     def test_a_name_that_is_a_prefix_of_another_selects_only_itself(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        # RED BEFORE: this selected both dlq_backlog and
-        # remediate_dlq_backlog_success. Exact match comes FIRST for exactly
-        # this case — refusing `dlq_backlog` as ambiguous because a longer name
-        # contains it would make that scenario unrunnable live forever.
+        # RED BEFORE: this selected both dlq_backlog and remediate_dlq_backlog_success.
+        # Exact match comes FIRST for this case — refusing `dlq_backlog` as ambiguous would
+        # make that scenario unrunnable live forever.
         code, selected = self._select(monkeypatch, tmp_path, "--live", "--only", "dlq_backlog")
         assert code == 0
         assert selected == ["dlq_backlog"]
@@ -3050,9 +2845,8 @@ class TestLiveOnlyMatchesByFullScenarioName:
     def test_a_substring_pattern_is_refused_and_names_what_it_would_have_taken(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # `dlq_` is not a scenario, so there is no exact match to prefer and no
-        # honest narrowing to guess at. Never silently widen — and never merely
-        # refuse either: name the candidates, or the operator retries blind.
+        # `dlq_` is not a scenario, so there is no exact match to prefer. Never silently
+        # widen — and never merely refuse: name the candidates, or the operator retries blind.
         code, selected = self._select(monkeypatch, tmp_path, "--live", "--only", "dlq_")
         assert code == 2
         assert selected == [], "refusal must precede the run boundary"
@@ -3076,9 +2870,8 @@ class TestLiveOnlyMatchesByFullScenarioName:
     def test_a_comma_list_of_exact_names_still_selects_all_of_them(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        # Exact-match is per pattern, not a one-scenario cap: ADR 0020 is what
-        # limits a live selection to one MUTATING scenario, and it has to stay
-        # the thing that says so. Both of these are read-only and live-capable.
+        # Exact-match is per pattern, not a one-scenario cap: ADR 0020 is what limits a live
+        # selection to one MUTATING scenario, and it has to stay the thing that says so.
         code, selected = self._select(
             monkeypatch, tmp_path, "--live", "--only", "dlq_backlog,noise_info_orders"
         )
@@ -3088,11 +2881,9 @@ class TestLiveOnlyMatchesByFullScenarioName:
     def test_a_dead_pattern_keeps_its_own_refusal(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # #151's message must survive. A pattern matching nothing at all is a
-        # renamed or deleted scenario, which is a different repair from a
-        # pattern that matches too much — so it must not be swallowed by the
-        # new "not a scenario name" message, even though both exit 2 and a
-        # dead pattern is trivially also not a scenario name.
+        # #151's message must survive: a pattern matching nothing is a renamed or deleted
+        # scenario, which is a different repair from one that matches too much, so it must
+        # not be swallowed by the new message even though both exit 2.
         code, _ = self._select(
             monkeypatch, tmp_path, "--live", "--only", "dlq_backlog,scenario_renamed_away"
         )
@@ -3106,10 +2897,9 @@ class TestLiveOnlyMatchesByFullScenarioName:
     def test_smoke_keeps_substring_matching(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # SMOKE_ONLY is a documented substring override (`SMOKE_ONLY=noise_`)
-        # and reaches the runner as --only. Applying the exact-name rule here
-        # would break an operator control for no gain: the read-only stage
-        # neither spends on Tier-1 actions nor shares mutable state.
+        # SMOKE_ONLY is a documented substring override and reaches the runner as --only.
+        # Applying the exact-name rule would break an operator control for no gain: the
+        # read-only stage neither spends on Tier-1 actions nor shares mutable state.
         _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
         monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
@@ -3142,12 +2932,10 @@ class TestLiveOnlyMatchesByFullScenarioName:
 class TestLiveRefusesABatchOfMutatingScenarios:
     """ADR 0020: one state-mutating scenario per live invocation, enforced.
 
-    Nine remediation scenarios share ONE platform and the runner has no reset
-    between them — the reset lives outside it. The seeded pool carries exactly
-    one replay_safe row that two scenarios both consume, so in a single
-    invocation a CORRECT agent greens one and reds the other, and the report
-    blames the agent. Refusing the selection is the only place that can be
-    stopped before spend.
+    Nine remediation scenarios share ONE platform with no reset between them, and the
+    seeded pool carries one replay_safe row two of them both consume — so in a single
+    invocation a CORRECT agent greens one and reds the other, and the report blames
+    the agent.
     """
 
     @staticmethod
@@ -3190,15 +2978,13 @@ class TestLiveRefusesABatchOfMutatingScenarios:
             # Refusal must happen BEFORE the run boundary — that is the claim.
             _forbid_run_all(monkeypatch)
         else:
-            # An allowed selection runs on PAST the ADR 0020 gate and into the
-            # principal guards, which build a client from PLATFORM_MCP_URL. Stub
-            # it: unstubbed, this test fired a real Tier-1-capable tools/call at
-            # http://real.host:8001/mcp from the unit suite (WO-R2-35).
+            # An allowed selection runs past the ADR 0020 gate into the principal guards, which
+            # build a client from PLATFORM_MCP_URL. Unstubbed, this fired a real Tier-1-capable
+            # tools/call from the unit suite (WO-R2-35).
             _stub_principal_probe(monkeypatch)
             _stub_run_pipeline(monkeypatch, tmp_path)
-        # Every scenario named exactly: --live selects by full name now, and a
-        # comma list of exact names is how a multi-scenario selection is even
-        # expressible — which is what the ADR 0020 gate below is graded on.
+        # Every scenario named exactly: --live selects by full name, and a comma list of
+        # exact names is how a multi-scenario selection is even expressible.
         monkeypatch.setattr(
             sys,
             "argv",
@@ -3279,9 +3065,8 @@ class TestLiveRefusesABatchOfMutatingScenarios:
     ) -> None:
         """ADR 0020 is UNCHANGED by ChaosPlan: two hooks, still one scenario.
 
-        The whole point of plan 01 section 4's closing line. If the gate
-        counted hooks rather than scenarios, every multi-fault world would be
-        unrunnable the day it landed.
+        Plan 01 § 4's closing line. A gate counting hooks rather than scenarios would make
+        every multi-fault world unrunnable the day it landed.
         """
         code = self._run_main(
             monkeypatch,
@@ -3296,10 +3081,9 @@ class TestLiveRefusesABatchOfMutatingScenarios:
     ) -> None:
         """The regression this gate would have taken silently.
 
-        ``chaos_setup`` is None on a plan-declaring scenario, so a gate
-        reading the legacy field counts a two-fault seeding scenario as
-        read-only and lets it be selected beside a remediation scenario —
-        exactly the isolation defect exit 7 exists to make impossible.
+        ``chaos_setup`` is None on a plan-declaring scenario, so a gate reading the legacy
+        field counts a two-fault seeding scenario as read-only and lets it be selected
+        beside a remediation scenario.
         """
         code = self._run_main(
             monkeypatch,
@@ -3331,15 +3115,11 @@ class TestLiveRefusesABatchOfMutatingScenarios:
 class TestLiveRefusesCannedOnlySelection:
     """A canned-only scenario in a --live selection is refused: exit 8.
 
-    ``use_live_mcp``/``use_live_llm`` false is a statement about the WORLD,
-    not the env: the platform cannot manufacture (or expose) the fault —
-    alert_storm needs many alerts inside a short window and the platform's
-    three alert producers each emit at most one; remediate_verify_fails
-    needs a consumer group that stays dead. Without this gate ``run_scenario``
-    silently serves the canned fixtures and the row lands in the live
-    report's pass count as if the world had been graded. Refusal is the
-    honest bucket: explicit, pre-spend, never a silent pass and never a
-    misattributed red.
+    The flags being false is a statement about the WORLD, not the env — the platform
+    cannot manufacture the fault (alert_storm needs many alerts in a short window and
+    the three producers each emit one; remediate_verify_fails needs a consumer group
+    that stays dead). Without the gate ``run_scenario`` serves the canned fixtures and
+    the row lands in the live report's pass count as if the world had been graded.
     """
 
     _CANNED_ONLY_SHIPPED = (
@@ -3366,10 +3146,9 @@ class TestLiveRefusesCannedOnlySelection:
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        # Real shipped corpus, real-looking env: this pins BOTH halves —
-        # the YAML marker (flags false) and the runner gate that honors it.
-        # At HEAD (gate absent) the runaway_saga/stale_cache selections ran
-        # canned to exit 0 inside a "live" invocation.
+        # Real shipped corpus, real-looking env: this pins BOTH halves, the YAML marker and
+        # the runner gate that honors it. At HEAD those selections ran canned to exit 0
+        # inside a "live" invocation.
         _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
         _forbid_run_all(monkeypatch)
         self._forbid_clients_and_hooks(monkeypatch)
@@ -3384,11 +3163,9 @@ class TestLiveRefusesCannedOnlySelection:
     def test_the_refusal_is_knowable_without_touching_the_env(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        # Placeholder env: a wrong SELECTION outranks a wrong env (the ADR
-        # 0020 precedent). Without the gate this exact invocation sails past
-        # the degraded fail-fast — canned-only scenarios are not "degraded",
-        # canned is their intended mode — and runs canned to exit 0: the
-        # silent pass this class exists to forbid.
+        # Placeholder env: a wrong SELECTION outranks a wrong env (the ADR 0020 precedent).
+        # Without the gate this invocation sails past the degraded fail-fast — canned is a
+        # canned-only scenario's intended mode — and runs canned to exit 0.
         _isolate_settings_env(monkeypatch, tmp_path, _PLACEHOLDER_LIVE_ENV)
         _forbid_run_all(monkeypatch)
         self._forbid_clients_and_hooks(monkeypatch)
@@ -3399,9 +3176,8 @@ class TestLiveRefusesCannedOnlySelection:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         # The exemption, pinned: SMOKE_ONLY deliberately includes canned-only
-        # harness-sanity scenarios (noise_*, tool_*), and the smoke report
-        # mixes canned and live rows by design (docs/eval-methodology.md,
-        # "The read-only smoke pass"). Gating smoke would gut that stage.
+        # harness-sanity scenarios and the smoke report mixes canned and live rows by
+        # design. Gating smoke would gut that stage.
         _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
         _stub_run_pipeline(monkeypatch, tmp_path)
         monkeypatch.setattr(runner_module, "load_scenarios", lambda _d: [_passing_scenario()])
@@ -3438,10 +3214,9 @@ class TestLiveRefusesCannedOnlySelection:
 class TestCrashedRowsKeepTheirProvenance:
     """A crashed row must not claim it ran canned.
 
-    live_mcp/live_llm defaulted to False on the synthesized outcome, so every
-    crashed row in a live report described itself as an offline run — and
-    `degraded` False alongside said that was intended. A reader counting live
-    coverage counted wrong, and the report is the artifact.
+    live_mcp/live_llm defaulted to False on the synthesized outcome, so every crashed
+    row in a live report described itself as offline — and `degraded` False alongside
+    said that was intended.
     """
 
     def test_a_live_scenario_that_crashes_is_recorded_as_live(self) -> None:
@@ -3461,9 +3236,9 @@ class TestCrashedRowsKeepTheirProvenance:
 class TestLiveRemediationGuardsTheWriteScope:
     """The stage that spends money AND mutates was the one running unguarded.
 
-    Every principal check was gated on `smoke`. A remediation stage under a
-    read-scoped token does not fail fast — each scenario investigates, plans,
-    attempts its action, is refused, and grades red after full spend.
+    Every principal check was gated on `smoke`, and a remediation stage under a
+    read-scoped token does not fail fast: each scenario attempts its action, is
+    refused, and grades red after full spend.
     """
 
     @staticmethod
@@ -3504,9 +3279,9 @@ class TestLiveRemediationGuardsTheWriteScope:
     def test_a_write_capable_token_that_cannot_seed_proceeds(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        # The post-v0.6.5 agent principal: the Tier-1 probe is refused on its
-        # arguments (it can act) and the chaos probe is refused on scope (it
-        # cannot seed, so the platform withholds the chaos audit rows).
+        # The post-v0.6.5 agent principal: the Tier-1 probe is refused on its arguments (it
+        # can act) and the chaos probe on scope (it cannot seed, so the platform withholds
+        # the chaos audit rows).
         assert self._main(monkeypatch, tmp_path, _split_agent_probe(monkeypatch)) != 4
 
     def test_a_token_that_can_also_seed_chaos_is_refused_before_any_spend(
@@ -3514,12 +3289,10 @@ class TestLiveRemediationGuardsTheWriteScope:
     ) -> None:
         """The leak this whole packet closes, caught at the guard.
 
-        A principal refused on ARGUMENTS by both probes is the pre-split
-        four-scope token: it can act, and because it can fire the lab the
-        platform serves it `list_audit_events` rows naming the hook and its
-        arguments seconds before the alert. Every diagnosis claim on such a
-        run is unfalsifiable, so it is refused as hard as a token that cannot
-        act at all — before the archive exists and before a model call.
+        A principal refused on ARGUMENTS by both probes is the pre-split four-scope token:
+        it can act, and because it can fire the lab the platform serves it audit rows
+        naming the hook seconds before the alert. Every diagnosis claim on such a run is
+        unfalsifiable, so it is refused as hard as a token that cannot act at all.
         """
         probe = _ClosableCanned({})
         monkeypatch.setattr(
@@ -3535,9 +3308,8 @@ class TestLiveRemediationGuardsTheWriteScope:
     def test_a_read_only_live_selection_is_not_guarded(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        # No expected_action_tools means nothing will be executed, so there
-        # is no write scope to require — and demanding one would break the
-        # read-only live stage.
+        # No expected_action_tools means nothing will be executed, so there is no write
+        # scope to require — and demanding one would break the read-only live stage.
         _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
         base = _passing_scenario()
         read_only = base.model_copy(update={"name": "read_only", "use_live_mcp": True})
@@ -3555,17 +3327,12 @@ class TestLiveRemediationGuardsTheWriteScope:
 class TestLiveChaosSeedingGuardsTheChaosScope:
     """A scenario that mutates only through ``chaos_setup`` ran unguarded.
 
-    The write guard is keyed on ``expected_action_tools``, and a chaos-only
-    scenario declares none — it seeds a fault and then grades the agent on
-    what it does about it, executing no Tier-1 action itself. So the one
-    principal check that could have caught a wrong token skipped it, and the
-    run reached ``run_scenario``, which fires the hook under
-    ``settings.platform_token``. Without ``chaos:invoke`` that seeding raises
-    mid-run, after the archive is open and the first scenario is under way.
-
-    The scope it needs is ``chaos:invoke``, not ``actions:execute``. Probing
-    for write scope here would be the wrong question twice over: it would
-    pass a token that cannot seed, and refuse a token that can.
+    The write guard is keyed on ``expected_action_tools`` and a chaos-only scenario
+    declares none, so the one check that could have caught a wrong token skipped it
+    and the run reached ``run_scenario``, which fires the hook under
+    ``settings.platform_token`` — raising mid-run, after the archive is open. The scope
+    it needs is ``chaos:invoke``: probing for write scope would pass a token that
+    cannot seed and refuse one that can.
     """
 
     @staticmethod
@@ -3630,12 +3397,10 @@ class TestLiveChaosSeedingGuardsTheChaosScope:
 
         monkeypatch.setattr(runner_module, "assert_write_capable_principal", _never)
         _, probed = self._main(monkeypatch, tmp_path, [self._chaos_only()])
-        # The SAME hook, fired twice at two principals with opposite
-        # expectations: the agent's token must be refused on scope, the
-        # evaluator's must get past it. A chaos-only scenario has an agent in
-        # it too, and the audit leak does not care that nothing was remediated
-        # — so the blindness probe is not skipped just because the write guard
-        # is.
+        # The SAME hook fired twice at two principals with opposite expectations: the
+        # agent's token must be refused on scope, the evaluator's must get past it. A
+        # chaos-only scenario has an agent in it too, and the audit leak does not care that
+        # nothing was remediated.
         assert probed == [guards_module._CHAOS_PROBE_TOOL, guards_module._CHAOS_PROBE_TOOL]
 
     def test_a_scenario_that_both_seeds_and_acts_is_probed_for_both(
@@ -3691,10 +3456,9 @@ class TestLiveChaosSeedingGuardsTheChaosScope:
 class TestVerificationJudgeIsPinned:
     """The verdict that decides RESOLVED must not ride the unpinned model.
 
-    JUDGE_MODEL exists to be pinned separately from AGENT_MODEL so eval
-    results stay comparable across a model-pin change. The briefing judge
-    already used it; the verification judge — the one whose verdict decides
-    whether an incident is RESOLVED — did not.
+    JUDGE_MODEL is pinned separately from AGENT_MODEL so results stay comparable
+    across a model-pin change. The briefing judge used it; the verification judge —
+    whose verdict decides RESOLVED — did not.
     """
 
     def test_the_verify_transition_gets_the_judge_model(
@@ -3733,11 +3497,9 @@ class TestVerificationJudgeIsPinned:
 class TestACrashedRowReportsWhatItSpent:
     """A crash after N tool calls must report N, not zero.
 
-    ``_crashed_result`` hardcoded ``tool_calls_used=0`` and an empty
-    trajectory because the exception was all ``run_all``'s handler could
-    reach. Every crashed row in a live report therefore claimed the
-    scenario spent nothing — and the report is the artifact those cost and
-    budget columns are read from (invariant 9, ADR 0015).
+    ``_crashed_result`` hardcoded ``tool_calls_used=0`` because the exception was all
+    ``run_all``'s handler could reach, so every crashed row claimed the scenario spent
+    nothing — and the report is the artifact the cost columns are read from.
     """
 
     def test_a_crash_after_tool_calls_reports_them(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3800,11 +3562,9 @@ class _StubAuditClient:
 class TestPostStageAuditIsCheckpointed:
     """B2: the post-stage audit reads the window while the stage runs.
 
-    ``list_audit_events`` has no offset and no created_after, so once the
-    stage ends the newest 200 rows are all there will ever be. A smoke
-    stage that emits more than that used to exit 5 "inconclusive" — a
-    false red on a paid run. The runner now banks a page after every
-    scenario and hands the accumulated scan to the assertion.
+    ``list_audit_events`` has no offset and no created_after, so once the stage ends
+    the newest 200 rows are all there will ever be — and a louder smoke stage used to
+    exit 5 "inconclusive", a false red on a paid run.
     """
 
     def test_a_checkpoint_is_taken_after_every_scenario(
@@ -3843,11 +3603,9 @@ class TestPostStageAuditIsCheckpointed:
     def test_a_failing_checkpoint_does_not_abort_the_stage(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # A checkpoint is best-effort: losing one only narrows coverage,
-        # which fails closed on its own at the assertion. Aborting a paid
-        # stage over a transient audit read would be the worse trade — but
-        # it must be said out loud, or a systematically broken checkpoint
-        # silently degrades the guard back to a single page.
+        # A checkpoint is best-effort: losing one only narrows coverage, which fails closed
+        # at the assertion, and aborting a paid stage over a transient read would be worse.
+        # But it must be said out loud, or a broken checkpoint silently degrades the guard.
         _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
         _stub_run_pipeline(monkeypatch, tmp_path)
 
@@ -3875,11 +3633,9 @@ class TestPostStageAuditIsCheckpointed:
 class TestChaosPlanRunnerSemantics:
     """WP-1.1: setup in order, settle, preconditions, run, teardown in finally.
 
-    Nine steps in plan 01 section 4, and the two failure semantics that make
-    them worth the machinery: a failed SETUP means the benchmark world is
-    invalid, so the agent is not graded at all; a failed TEARDOWN leaves a
-    valid grade beside a contaminated environment, so it is reported
-    separately and blocks the next live run.
+    Plan 01 § 4's nine steps, and the two failure semantics that make them worth the
+    machinery: a failed SETUP means the world is invalid, so the agent is not graded;
+    a failed TEARDOWN leaves a valid grade beside a contaminated environment.
     """
 
     @staticmethod
@@ -3933,10 +3689,8 @@ class TestChaosPlanRunnerSemantics:
 
     @pytest.fixture(autouse=True)
     def _isolated_block(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        # The teardown latch is a real file at a module constant. Without
-        # redirecting it, one failing-teardown test would block live runs in
-        # the developer's own checkout — the unit suite writing operational
-        # state into the repo it is testing.
+        # The teardown latch is a real file at a module constant: without redirecting it,
+        # one failing-teardown test would block live runs in the developer's own checkout.
         monkeypatch.setattr(runner_module, "_CHAOS_BLOCK_PATH", tmp_path / "block.json")
 
     # --- setup ---------------------------------------------------------
@@ -4051,9 +3805,8 @@ class TestChaosPlanRunnerSemantics:
     ) -> None:
         """The packet's sharpest requirement: not "it failed", but "no grade".
 
-        A crash row would carry a GradeReport saying the scenario failed, and
-        every rate derived from the report would then describe the agent
-        using an event that happened before it started.
+        A crash row would carry a GradeReport saying the scenario failed, and every rate
+        derived from the report would describe the agent using a pre-run event.
         """
         scenario = self._plan_scenario(ChaosPlan(setup=(ChaosHook(name="saturate_redis"),)))
         self._record_hooks(monkeypatch, failures={"saturate_redis": "platform said no"})
@@ -4212,10 +3965,9 @@ class TestChaosTeardownBlocksFurtherLiveRuns:
         # around — the ADR 0020 lesson, applied to this gate.
         assert "make eval-reset PURGE_IDEMPOTENCY=1" in out
         assert "--clear-chaos-block" in out
-        # Since cmd #233 the reset's last recipe line clears the latch itself,
-        # so the advice must not read as two steps the operator owes: a second
-        # command that is already run for you is one that gets run out of
-        # order, or run alone on a world nobody restored.
+        # Since cmd #233 the reset's last recipe line clears the latch itself, so the advice
+        # must not read as two steps the operator owes: a second command that is already run
+        # for you is one that gets run out of order.
         assert "clears the block on success" in out
         assert "no stack left to reset" in out
         assert "nothing was spent" in out
@@ -4257,12 +4009,10 @@ class TestChaosTeardownBlocksFurtherLiveRuns:
 def _never_stopping_scenario(name: str = "iteration_override_probe") -> Scenario:
     """A canned scenario whose planner probes forever and never stops.
 
-    The loop's own iteration bound is the only thing that ends it, so the
-    number of probes it got through IS the bound it ran under — which is the
-    observable ``MAX_ITERATIONS_OVERRIDE`` has to move. Six planner responses
-    (one more than the default bound of 5) and a tool-call ceiling of nine, so
-    neither the canned queue nor the budget can end the run first and stand in
-    for the bound.
+    The loop's own iteration bound is the only thing that ends it, so the number of
+    probes it got through IS the bound — which is the observable
+    ``MAX_ITERATIONS_OVERRIDE`` has to move. Six planner responses and a ceiling of
+    nine, so neither the queue nor the budget can end the run first.
     """
     probe = {
         "hypotheses": [
@@ -4308,12 +4058,10 @@ def _never_stopping_scenario(name: str = "iteration_override_probe") -> Scenario
 class TestMaxIterationsOverrideReachesTheLoop:
     """WO-R3-256: WP-2.4's third knob had no consumer.
 
-    ``MAX_ITERATIONS_OVERRIDE`` landed on ``Settings`` with cmd #251 and the
-    one call site that could honor it — ``make_llm_investigate`` here — was
-    owned by another packet that wave, so the setting configured nothing. It
-    is harmless while ``baseline`` is the only strategy (its override is
-    unset) and wrong the moment a strategy that needs more or fewer planner
-    steps than five is run: the run would be measured under the fleet default
+    ``MAX_ITERATIONS_OVERRIDE`` landed on ``Settings`` with cmd #251 while its one
+    call site was owned by another packet, so the setting configured nothing —
+    harmless while ``baseline`` is the only strategy, and wrong the moment a strategy
+    needing another bound runs: the run would be measured under the fleet default
     while its provenance named a strategy that asked for something else.
     """
 
@@ -4341,13 +4089,9 @@ class TestMaxIterationsOverrideReachesTheLoop:
 class TestCrashPathLedgerIsSeededFromTheScaledCeilings:
     """WO-R3-256: a crash row must not report the UNSCALED ceilings.
 
-    ``_crashed_result`` rebuilds the ledger a run "would have been seeded
-    with" when the crash carried no partial one. It read
-    ``budget_max_tokens`` / ``budget_max_usd`` directly, which are the
-    configured ceilings BEFORE WP-2.4's per-strategy multipliers — so under a
-    non-1.0 multiplier the row named budgets no run would ever have had, and
-    a cost table built from crashed rows would compare a scaled run against
-    unscaled ceilings.
+    ``_crashed_result`` rebuilds the ledger a run "would have been seeded with" and
+    read the configured ceilings, which are BEFORE WP-2.4's per-strategy multipliers —
+    so under a non-1.0 multiplier the row named budgets no run would ever have had.
     """
 
     def _crash_budget(self, **overrides: Any) -> BudgetLedger:

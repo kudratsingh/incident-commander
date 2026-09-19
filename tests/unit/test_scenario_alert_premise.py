@@ -1,26 +1,9 @@
 """The alert that starts a scenario must be one the platform could have sent.
 
-Everything else in the suite is checked against the platform somewhere: tool
-schemas by the contract diff, canned response values by the drift check, chaos
-arguments at scenario load. The alert — the thing that *starts* every run — was
-checked against nothing at all, and it is the most wrong part of the fixture
-corpus:
-
-* 3 of 38 scenarios declare a severity the platform's alert service rejects
-  outright, so the alert could not be created, let alone delivered. It was 32
-  until WO-R2-45; see ``_SEVERITY_IS_THE_PREMISE`` for what the other 29 were
-  and why these three did not move with them.
-* Every scenario carries top-level fields the alert webhook does not send.
-
-The second one is not a scenario defect. The scenarios are faithful to
-``AlertPayload``, the commander's own ingress model; it is ``AlertPayload``
-that is unfaithful to the platform. That distinction is the point of this
-file, and it is why the fix for each half lands in a different place.
-
-Cross-repo contract mirrored here, not imported: CLAUDE.md invariant 1 forbids
-importing platform code. Citations are exact so the mirror can be re-checked
-by hand, and a platform change to the severity set would also surface as live
-drift in ``list_active_alerts``'s observed value domain.
+Everything else is checked against the platform somewhere; the alert was not. Two
+defects: 3 of 38 scenarios declare a severity the platform rejects (WO-R2-45), and
+every scenario carries top-level fields the webhook does not send — the second is
+``AlertPayload``'s fault, not the corpus's. Contract mirrored, not imported (invariant 1).
 """
 
 from __future__ import annotations
@@ -39,10 +22,7 @@ from incident_commander.api.schemas import AlertPayload
 
 _SCENARIOS_DIR = Path(__file__).resolve().parents[2] / "evals" / "scenarios"
 
-# incident-platform backend/app/models/alert.py:
-#   SEVERITY_INFO/WARNING/CRITICAL, ALLOWED_SEVERITIES
-# Enforced in backend/app/services/alerts.py: a create with anything else
-# raises AlertValidationError before the row exists.
+# ALLOWED_SEVERITIES (platform app/models/alert.py); anything else is rejected.
 _PLATFORM_SEVERITIES: Final[frozenset[str]] = frozenset({"info", "warning", "critical"})
 
 # The exact body of the alert webhook, incident-platform
@@ -69,52 +49,16 @@ def _alert_of(scenario: Scenario) -> dict[str, object]:
     return scenario.alert.model_dump()
 
 
-# Scenarios that still declare a severity the platform cannot emit, and the
-# value each uses — kept illegal ON PURPOSE.
-#
-# This list held 32 entries until WO-R2-45, which split it by intent (user
-# decision, 2026-08-30). For 29 of them the severity was incidental: it only
-# had to be actionable enough to clear the TRIAGE noise filter so the scenario
-# could get on with testing probe selection, DLQ categorization, remediation,
-# or tool-error handling. Those were rewritten onto the platform's own bands
-# — `high` -> `critical` (the corpus calls `high` "paging severity", and
-# `critical` is the platform's paging band), `medium` -> `warning` (the one
-# scenario that is explicitly "not paging-grade but still actionable"). The
-# rewrite moved no scenario across the noise boundary, which is what
-# ``TestTheSplitPreservedEveryTriageOutcome`` below pins.
-#
-# The three left here are the ones where the severity IS the premise rather
-# than the setup. Each declares `max_tool_calls: 0` and asserts only that
-# TRIAGE escalated: the severity value is the entire input, so rewriting it to
-# `info` would not adapt the scenario, it would delete it and leave a
-# near-duplicate of `noise_info_severity`. `_NOISE_SEVERITIES` in
-# agent/triage.py has three members; `info` is already witnessed by
-# `noise_info_severity` and `noise_info_orders`, and these three are the only
-# witnesses `low` and `unknown` have.
-#
-# Resolving them is a platform-side question and is deliberately NOT decided
-# here: docs/wave4-specs/R2-45-platform-widening.md states the widening and
-# the counter-option (narrow `_NOISE_SEVERITIES` instead, since `low` and
-# `unknown` are unreachable on a live alert either way) for the coordinator's
-# ADR. Note `noise_missing_severity` is not a widening candidate at all — its
-# premise is the field's ABSENCE, and the webhook always sends `severity` from
-# a non-nullable column, so no accepted value can express it.
-#
-# This list may only SHRINK. An entry whose scenario now uses a legal severity
-# fails below, so a fix forces its line out in the same change.
+# Severities the platform cannot emit, kept illegal ON PURPOSE: the only
+# witnesses `low` and `unknown` have; WO-R2-45 rewrote the other 29 (R2-45 spec).
 _SEVERITY_IS_THE_PREMISE: Final[dict[str, str]] = {
     "noise_low_analytics": "low",
     "noise_low_severity": "low",
     "noise_missing_severity": "unknown",
 }
 
-# The other side of the WO-R2-45 split: name -> (value before, value now).
-# Held as data so the classification table in the PR body is checkable against
-# the YAML instead of being prose someone has to re-derive, and so the
-# triage-preservation property below names the exact scenarios it covers.
-# `high` -> `critical` because the corpus calls `high` "paging severity" and
-# `critical` is the platform's paging band; `medium` -> `warning` for the one
-# scenario documented as "not paging-grade but still actionable".
+# The other side of the WO-R2-45 split: name -> (value before, value now),
+# held as data so the classification is checkable against the YAML.
 _REWRITTEN: Final[dict[str, tuple[str, str]]] = {
     "consumer_lag_healthy_zero": ("high", "critical"),
     "consumer_lag_high": ("high", "critical"),
@@ -147,22 +91,8 @@ _REWRITTEN: Final[dict[str, tuple[str, str]]] = {
     "trace_investigation": ("high", "critical"),
 }
 
-# Top-level alert keys the scenarios use that the webhook does not send. A
-# real alert carries these — where it carries them at all — inside
-# `extra_data`. Recorded at the vocabulary level rather than per scenario
-# because the divergence is uniform and structural: it is one disagreement
-# between the commander's ingress model and the platform's emitter, not 38
-# separate scenario mistakes.
-#
-# `remediation_hint` is the newest entry and the one with a platform-side
-# note attached: the commander now READS it (a category-scoped DLQ alert is
-# investigated through the hint-filtered listing —
-# `investigation.ALERT_SUBJECT_PROBES`), and the platform's DLQ-depth alert
-# producer does not yet EMIT it. Until it does, the field is a top-level
-# scenario convention like the ten above it. When the platform starts
-# emitting the category inside `extra_data`, nothing here changes —
-# `alert_subject` already looks one level into `extra_data` — and this entry
-# stays, because the corpus keeps carrying it at the top level.
+# Top-level alert keys the scenarios use that the webhook does not send — a real
+# alert carries them inside `extra_data`. `remediation_hint` is not emitted yet.
 _NON_WEBHOOK_ALERT_FIELDS: Final[frozenset[str]] = frozenset(
     {
         "fingerprint",
@@ -176,20 +106,10 @@ _NON_WEBHOOK_ALERT_FIELDS: Final[frozenset[str]] = frozenset(
         "cache_key",
         "trace_id",
         "remediation_hint",
-        # ADR 0032: the positive statement `remediation_hint: null` cannot
-        # make, in its own field. Non-webhook for the same reason its sibling
-        # is — the platform's DLQ alert producer does not send it yet.
+        # ADR 0032: the positive statement `remediation_hint: null` cannot make.
         "dlq_scope",
-        # WO-R3-202 / ADR 0051. The `jobs_not_progressing` family's noise
-        # variant carries the running release, which is how a production alert
-        # really arrives enriched — and it is the distractor the family needed
-        # after `bad_deploy` was ruled out for leaking `chaos:bad_deploy` and
-        # "Simulated bad deploy" through `list_active_alerts` (plan divergence
-        # G5). A top-level scenario convention like the twelve above it: a real
-        # alert would carry it inside `extra_data`, which `alert_subject`
-        # already reads one level into. Deliberately NOT in
-        # `ALERT_SUBJECT_PROBES` — no probe is required by naming a release,
-        # and the family's subject stays the consumer group.
+        # WO-R3-202 / ADR 0051: the `jobs_not_progressing` noise variant carries the
+        # running release. NOT in `ALERT_SUBJECT_PROBES` — a release needs no probe.
         "deploy_version",
     }
 )
@@ -211,9 +131,7 @@ class TestSeverityIsOneThePlatformCanEmit:
         )
 
     def test_recorded_values_still_match(self) -> None:
-        # Keeps the record honest: if a scenario's severity changed to a
-        # different illegal value, the entry is stale in a way that would
-        # otherwise go unnoticed.
+        # Keeps the record honest: a severity changed to a different illegal value.
         by_name = {s.name: s.alert.severity for s in _shipped()}
         wrong = {
             name: (recorded, by_name.get(name))
@@ -246,13 +164,9 @@ class TestSeverityIsOneThePlatformCanEmit:
 class TestTheSplitPreservedEveryTriageOutcome:
     """WO-R2-45's safety property, pinned rather than asserted in a PR body.
 
-    TRIAGE is the one place severity is load-bearing for control flow: a noise
-    severity escalates without spending a single tool call, anything else goes
-    to INVESTIGATING. So a severity rewrite is only "incidental" if it left the
-    scenario on the same side of that boundary — otherwise it silently deleted
-    the scenario's reason to exist. This drives the real classifier rather than
-    re-stating its constant, so a change to `_NOISE_SEVERITIES` that would
-    re-classify a scenario fails here instead of in a live run.
+    TRIAGE is where severity drives control flow: a noise severity escalates without
+    spending a tool call, anything else goes to INVESTIGATING. A `_NOISE_SEVERITIES`
+    change fails here rather than in a live run.
     """
 
     @staticmethod
@@ -283,9 +197,7 @@ class TestTheSplitPreservedEveryTriageOutcome:
     ) -> None:
         """The 29 incidental rewrites must still reach INVESTIGATING.
 
-        Had one landed on `info`, it would escalate at TRIAGE with its budget
-        unspent and never run the probe it exists to test — the scenario would
-        still pass, while testing nothing it was written to test.
+        On `info` one would escalate at TRIAGE with its budget unspent, still passing.
         """
         by_name = {s.name: s for s in _shipped()}
         escalated = sorted(
@@ -305,9 +217,7 @@ class TestTheSplitPreservedEveryTriageOutcome:
     ) -> None:
         """The other direction: the deferred three must still be noise.
 
-        This is what makes them load-bearing. Each one's whole assertion is
-        that TRIAGE escalated on the severity alone; if one stopped doing that,
-        the entry is no longer describing a premise worth widening for.
+        Each one's whole assertion is that TRIAGE escalated on the severity alone.
         """
         not_noise = sorted(
             name
@@ -321,17 +231,9 @@ class TestTheSplitPreservedEveryTriageOutcome:
 class TestIngressModelMatchesTheEmitter:
     """The sharp one: `AlertPayload` declares fields the webhook never sends.
 
-    The scenarios are faithful to `AlertPayload`; `AlertPayload` is not
-    faithful to the platform. Both halves of that sentence matter, because
-    they send the fix to different places.
-
-    `fingerprint` is the load-bearing case and it has a production symptom.
-    `derive_incident_id` (ADR 0016) keys deduplication on it, and
-    `AlertPayload` types it `str | None`. The webhook body has no such field,
-    so a real alert arrives with `fingerprint=None`, the derivation declines
-    to dedupe and returns a fresh `uuid4`, and every redelivery of the same
-    alert opens a NEW incident. That is platform issue #141 — "alert dedupe
-    inert in production" — and this is its mechanism.
+    `fingerprint` is the load-bearing case: `derive_incident_id` (ADR 0016) keys dedupe
+    on it, the webhook body has no such field, so a real alert arrives with None, the
+    derivation returns a fresh `uuid4` and every redelivery opens a NEW incident (plat #141).
     """
 
     def test_alert_payload_declares_fields_the_webhook_does_not_send(self) -> None:
@@ -347,24 +249,8 @@ class TestIngressModelMatchesTheEmitter:
     def test_the_dlq_category_field_is_one_of_them_and_is_a_filed_platform_gap(self) -> None:
         """`remediation_hint` joined the list on 2026-09-07, deliberately.
 
-        Unlike `fingerprint`, this one was added to `AlertPayload` by the
-        commander in full knowledge that the platform does not send it, so it
-        is worth being explicit that the gap is intentional and outstanding
-        rather than an oversight this test caught.
-
-        The commander now READS it: `investigation.ALERT_SUBJECT_PROBES` maps
-        it to `list_dlq_messages(remediation_hint=…)`, which is the probe a
-        category-scoped DLQ incident must be investigated through (live run
-        `06e14be3e7b1`). Offline the eval corpus supplies it. In production the
-        field arrives from nowhere, so the guard is inert on real DLQ alerts
-        until the platform's DLQ-depth alert producer emits the category —
-        filed as the platform-side note on this change.
-
-        Inert is the correct failure mode and that is why this ships ahead of
-        the platform: `alert_subject` returns None on an alert with no hint, so
-        a production DLQ alert investigates exactly as it does today. When the
-        platform starts emitting the category inside `extra_data`, nothing here
-        changes — `alert_subject` already reads one level in.
+        Added to `AlertPayload` knowing the platform does not send it: the commander READS it
+        (`ALERT_SUBJECT_PROBES` → `list_dlq_messages`) and the guard is inert in production.
         """
         assert "remediation_hint" not in _WEBHOOK_FIELDS
         assert "remediation_hint" in AlertPayload.model_fields
@@ -373,20 +259,8 @@ class TestIngressModelMatchesTheEmitter:
     def test_the_unclassified_scope_field_is_one_of_them_and_the_same_filed_gap(self) -> None:
         """`dlq_scope` joined the list on 2026-09-08, with the same posture.
 
-        Same shape as `remediation_hint` above and the same outstanding
-        platform-side ask: the commander reads a field the platform's DLQ
-        alert producer does not send yet, and until it does, a production
-        unclassified-row alert investigates exactly as it does today because
-        `alert_subject` returns None without it.
-
-        It is a SEPARATE field rather than a reading of `remediation_hint:
-        null`, and this is the test that records why: `model_dump()`
-        materialises every declared field, so an omitted `remediation_hint`
-        and an explicit null are the same object by the time the state machine
-        sees them. A guard keyed on key-presence would be inert offline for
-        the scenarios that omit the key and non-inert for every production
-        alert of any kind — the fail-open/fail-closed asymmetry
-        `alert_subject`'s docstring names as the worst shape of guard.
+        A SEPARATE field, not a reading of `remediation_hint: null`: `model_dump()` materialises
+        every declared field, so an omitted key and an explicit null are the same object.
         """
         assert "dlq_scope" not in _WEBHOOK_FIELDS
         assert "dlq_scope" in AlertPayload.model_fields
@@ -435,18 +309,10 @@ class TestScenarioAlertVocabulary:
     def test_not_one_scenario_alert_is_wire_shaped(self) -> None:
         """The measurement, pinned as a fact rather than left in a report.
 
-        Zero of 38. Every scenario alert carries at least one field the
-        platform's webhook does not send, so no scenario in the suite is
-        triggered by a payload the platform could deliver. If this ever
-        becomes non-zero, someone fixed something and this test should be
-        rewritten to say how many.
+        Zero of 38: every scenario alert carries at least one field the webhook does not send.
         """
-        # `exclude_none=True` so this asks about the scenario's YAML rather
-        # than about AlertPayload's field list. Plain model_dump() always
-        # emits the declared `fingerprint` and `group` keys — neither of
-        # which is in _WEBHOOK_FIELDS — so the subset test was False for
-        # every scenario by construction, and the count it reports was
-        # structurally zero regardless of what the scenarios said (WO-R2-102).
+        # `exclude_none=True` asks about the scenario's YAML, not AlertPayload's field list: plain
+        # model_dump() always emits `fingerprint` and `group`, so the test was vacuous (WO-R2-102).
         wire_shaped = [
             s.name
             for s in _shipped()
@@ -458,17 +324,11 @@ class TestScenarioAlertVocabulary:
         )
 
 
-# The seeded human_required DLQ row: uuid5 of the platform seeder's namespace
-# over "dlq-job-csv-parse" (incident-platform/scripts/seed_eval_fixtures.py).
-# Computed, not copied — the seeder derives every fixture id this way.
+# The seeded human_required DLQ row, computed as seed_eval_fixtures.py derives fixture ids.
 _LIVE_HUMAN_REQUIRED: Final[str] = "f030f975-974e-5ce3-aa6b-444136507d86"
 
-# Tools a scenario may name as its intended replay. `replay_dlq_messages` is
-# absent on purpose: per the platform's own docstring it takes only job_type
-# and "omit to include every dead-lettered job in the tenant", so it sweeps up
-# human_required rows — and it carries no job_ids argument, which means
-# forbidden_replay_job_ids cannot inspect it. A scenario that accepts it has
-# no mechanism at all against an indiscriminate replay.
+# Tools a scenario may name as its intended replay. `replay_dlq_messages` is absent: it
+# sweeps the whole tenant and has no job_ids argument for forbidden_replay_job_ids to see.
 _FILTERED_REPLAY_TOOLS: Final[frozenset[str]] = frozenset(
     {"replay_dlq_by_ids", "replay_dlq_by_category"}
 )
@@ -518,35 +378,11 @@ class TestReplayScenariosGuardTheSeededForbiddenRow:
 
 
 class TestTheUnclassifiedDlqAlertNamesTheScopeNotACategory:
-    """`dlq_human_required_escalates` carries NO `remediation_hint`, on purpose,
-    and since 2026-09-08 it DOES carry `dlq_scope: unclassified` (ADR 0032).
+    """`dlq_human_required_escalates` carries no `remediation_hint` but does carry `dlq_scope`.
 
-    Both halves are the premise and they pull in opposite directions, which is
-    why they are pinned together.
-
-    The scenario's incident is a row the platform's triage has NOT classified
-    (`create_bad_data_job(remediation_hint=unclassified)` writes
-    `remediation_hint = NULL`). An alert is produced by the platform, so it
-    cannot name a category the platform has not assigned; and there is no
-    listing that selects unclassified rows, because
-    `ListDlqMessagesInput.remediation_hint = null` means "no filter" — the
-    platform's own words, "Omit for all categories (including uncategorized)".
-    So the category field stays null, permanently, and the two tests below
-    about what a category-scoped listing would contain are unchanged.
-
-    What DID change is the conclusion drawn from that. This class used to
-    assert `alert_subject` returns None here and called an inert guard "the
-    correct reading of a real fault". Live run `a0aa257bf865` cost that
-    reading: with no subject, nothing required the agent's ACTION to be about
-    the unclassified row, and the agent — having read the right page and named
-    the right row in its own rationale — replayed a different slice and
-    resolved. "Nobody has classified this row" is a positive statement about
-    the world, and the alert now makes it in a field that can carry it.
-
-    The inert case itself is untouched and still supported: `alert_subject`
-    returns None for an alert naming neither, the handoff guard is applied as
-    `if subject is not None and not _alert_subject_probed(...)`, and
-    `dlq_backlog` and `dlq_mixed_partial` remain the corpus's witnesses for it.
+    The incident is a row the platform's triage has not classified, and no listing selects
+    unclassified rows, so the category stays null (ADR 0032). Live run `a0aa257bf865` cost the
+    old inert reading: with no subject, nothing required the ACTION to be about that row.
     """
 
     _SCENARIO: Final[str] = "dlq_human_required_escalates"
@@ -574,12 +410,8 @@ class TestTheUnclassifiedDlqAlertNamesTheScopeNotACategory:
     def test_the_subject_is_the_unfiltered_listing_not_a_filtered_one(self) -> None:
         """The derived subject, and the shape of the probe it demands.
 
-        Point 3 of the scenario's own note — the unfiltered page is the only
-        read that shows this row — is what this asserts as a property of the
-        guard rather than as prose: the subject resolves to
-        `list_dlq_messages` on the `remediation_hint` argument under
-        `SubjectMatch.UNFILTERED`, so a page narrowed to any category does NOT
-        satisfy it and the whole-queue page does.
+        The unfiltered page is the only read that shows this row, so the subject resolves to
+        `list_dlq_messages` on `remediation_hint` under `SubjectMatch.UNFILTERED`.
         """
         subject = alert_subject(_alert_of(self._scenario()))
         assert subject is not None
@@ -593,13 +425,8 @@ class TestTheUnclassifiedDlqAlertNamesTheScopeNotACategory:
     def test_a_category_scoped_listing_would_not_contain_this_incident(self) -> None:
         """The reason the field cannot simply be added back.
 
-        Read off the scenario's own canned pre-fence listing, so this fails
-        if the fixture is ever re-recorded with a classified chaos row. A
-        `human_required` alert would make
-        `list_dlq_messages(remediation_hint=human_required)` the required
-        first probe — and that listing holds exactly the seeded furniture
-        row, not the incident. The one read the guard made mandatory would be
-        the one read that hides the fault.
+        Read off the scenario's own canned pre-fence listing. A `human_required` alert would
+        make the required first probe the one listing that hides the fault.
         """
         scenario = self._scenario()
         canned = scenario.canned_tool_responses["list_dlq_messages"]
@@ -624,11 +451,8 @@ class TestTheUnclassifiedDlqAlertNamesTheScopeNotACategory:
     def test_the_fence_is_observable_across_the_two_recordings(self) -> None:
         """The re-seed's whole point, asserted on the fixture itself.
 
-        Through v0.6.1 a fence on this scenario's row changed nothing that
-        any read could see, so "fence, then escalate" was gradeable only on
-        the tool's own reply. The pre/post pair is what makes it observable
-        on the ROW, and if a future edit collapsed the sequence back to one
-        response this test says which property was lost.
+        Through v0.6.1 a fence on this row changed nothing any read could see; the pre/post
+        pair is what makes it observable on the ROW.
         """
         scenario = self._scenario()
         canned = scenario.canned_tool_responses["list_dlq_messages"]

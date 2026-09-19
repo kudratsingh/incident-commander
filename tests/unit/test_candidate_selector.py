@@ -1,30 +1,9 @@
 """WP-6.2 — the ``candidate_selector`` arm and the oracle gap.
 
-The order's acceptance list, one class per item:
-
-* ``TestTheGeneratorSeam`` — the arm composes over either best-of-N generator per
-  config, refuses ``baseline``, and stamps all three parts of the arm identity.
-* ``TestSelectEmitsTheSelectedCandidate`` — and emits *only* it, which is the
-  decision: ``InvestigationStep`` re-sorts by confidence, so a set emitted here
-  could gate the run on a candidate the selector rejected.
-* ``TestProbeMoreEmitsTheSelectedCandidatesProbe`` — through the real loop, so
-  ``_execute_probe``'s tier re-check runs on it; a non-read probe is refused at
-  the generator's own schema boundary (red-before).
-* ``TestEscalateReachesStopThroughTheExistingPath`` — no new terminal path.
-* ``TestSelectionIsNotAuthorization`` — the ``FIX_MAP`` gate and the 0.7
-  threshold still decide, whatever the selector chose.
-* ``TestTheSelectorBlockIsOnEveryStep`` — and is ``None`` for ``baseline`` and
-  for both generator-only arms.
-* ``TestTheSelectorIsItsOwnMeteredRole`` — its own client, its own role, charged
-  to the ledger; and a selector failure carries the generation's bill (ADR 0045's
-  trap one layer up).
-* ``TestSelectedAtKAndTheOracleGap`` — ``oracle_gap@k = pass@k − selected@k``
-  exactly, on a hand-built fixture where the correct candidate is present and not
-  selected.
-* ``TestAGapIsPairedWithinOneWorld`` — the world key per execution mode, and the
-  refusal across two worlds.
-* ``TestNoSelectorNumberWithoutACalibrationReport`` — the report withholds, both
-  ways.
+One class per acceptance item: the generator seam (either best-of-N generator, ``baseline``
+refused, all three parts of the arm identity stamped), select emits ONLY the selected
+candidate, probe_more runs through the real loop, selection is not authorization, the
+selector is its own metered role, and ``oracle_gap@k = pass@k − selected@k`` per world.
 """
 
 from __future__ import annotations
@@ -211,23 +190,8 @@ def _context(
 def _settings(**overrides: Any) -> Settings:
     """``Settings`` built from explicit placeholders, isolated from the machine.
 
-    Every required field is supplied here and ``_env_file=None`` turns dotenv off,
-    so this constructor reads nothing from the developer's environment. The
-    shorter version — four fields and no ``_env_file`` — passed on a machine whose
-    worktree has a ``.env`` and failed in CI with three `Field required` errors,
-    which is exactly the shape WO-R3-247 closed for ``test_provenance.py``
-    (cmd #235): a test that borrows the ambient environment is a test whose result
-    depends on who ran it. Same pattern as ``tests/unit/test_config.py`` and
-    ``tests/unit/test_provenance.py``.
-
-    Init keyword arguments outrank environment variables in pydantic-settings, so
-    the values below also win over anything a shell happens to export — the other
-    half of the isolation, and the reason an exported ``BEST_OF_N`` cannot move a
-    number asserted here.
-
-    None of these is a credential. They are the shapes the validators accept and
-    nothing more; a real key in a test file would be a secret committed to a
-    public repo.
+    Every required field is supplied and ``_env_file=None`` turns dotenv off, so this reads
+    nothing from the developer's environment (WO-R3-247). None of these is a credential.
     """
     base: dict[str, Any] = {
         "anthropic_api_key": "sk-ant-test",
@@ -245,9 +209,7 @@ def _settings(**overrides: Any) -> Settings:
 
 
 # --------------------------------------------------------------------------
-# A hand-built step record, for the arithmetic tests. Not a run: the numbers
-# below are about what a record SAYS, and building one directly is the only way
-# to state "the correct candidate was present and not selected" exactly.
+# A hand-built step record, not a run: what a record SAYS.
 
 
 def _record_with(
@@ -283,9 +245,7 @@ def _record_with(
 def _outcome(*, mode: ExecutionMode, replay: dict[str, Any] | None = None) -> ScenarioOutcome:
     """A minimal ``ScenarioOutcome`` for the world-key tests.
 
-    Built rather than fixtured because only three fields are read: the execution
-    mode off the provenance, and the ``replay`` row the runner writes on a
-    recorded run. Everything else is a required field of the model.
+    Only three fields are read: the execution mode and the ``replay`` row.
     """
     return ScenarioOutcome(
         scenario="s",
@@ -338,9 +298,7 @@ class TestTheGeneratorSeam:
     def test_baseline_is_refused_as_a_generator(self) -> None:
         """A selector over a one-candidate set is a billed call with one answer.
 
-        ``baseline`` is a real registry name, so the refusal cannot come from the
-        registry — it has to come from the arm, and it does: ``baseline`` has no
-        ``generate``, so it is not a ``CandidateGenerator``.
+        ``baseline`` has no ``generate``, so the arm refuses it, not the registry.
         """
         with pytest.raises(ValueError, match="cannot supply a candidate set"):
             _arm(generator=StrategyName.BASELINE.value)
@@ -348,9 +306,7 @@ class TestTheGeneratorSeam:
     def test_the_config_stamps_all_three_parts_of_the_arm(self) -> None:
         """Plan 02 § 12: the arm is (generator, N, selector).
 
-        Two different generators under one selector are two arms. A report keyed
-        on the strategy name alone would average two oracle gaps that answer
-        different questions.
+        A report keyed on the strategy name alone would average two gaps.
         """
         config = _arm(n=4, generator=StrategyName.BEST_OF_N_SAMPLED.value).config
         assert config["generator"] == "best_of_n_sampled"
@@ -396,11 +352,8 @@ class TestSelectEmitsTheSelectedCandidate:
     def test_a_more_confident_unselected_candidate_cannot_reach_index_zero(self) -> None:
         """The reason the step carries one hypothesis and not the set.
 
-        ``InvestigationStep._rank_by_confidence`` re-sorts at the schema boundary
-        and three gates read index 0 as the top pick. Emitting the set with the
-        selection first would let the 0.95 candidate sort into index 0 and gate
-        the run on a diagnosis the selector rejected — the one failure this arm
-        cannot have. Asserted on the emitted step rather than on the intent.
+        ``InvestigationStep._rank_by_confidence`` re-sorts at the schema boundary and three
+        gates read index 0, so emitting the set would gate the run on a rejected diagnosis.
         """
         planner = CannedLLMClient(
             [
@@ -475,9 +428,7 @@ class TestProbeMoreEmitsTheSelectedCandidatesProbe:
     def test_the_probe_goes_through_the_loops_tier_re_check(self) -> None:
         """Exercised through the real loop, not asserted about.
 
-        The emitted probe reaches ``_execute_probe``, which re-checks the tier at
-        run time (B-06) before calling anything. A selector cannot widen what may
-        be probed, because it never touches that path.
+        ``_execute_probe`` re-checks the tier at run time (B-06).
         """
         planner = CannedLLMClient(
             [
@@ -508,11 +459,8 @@ class TestProbeMoreEmitsTheSelectedCandidatesProbe:
     def test_a_non_read_next_probe_is_refused_at_the_schema(self) -> None:
         """Red-before, and the refusal is structural rather than a check.
 
-        ``ProbeAction.tool_name`` is a ``ReadToolName`` literal, so a candidate
-        proposing a Tier-1 tool as its next probe fails validation at the
-        generator's own schema boundary — the selector can never be handed one to
-        emit. ``_execute_probe``'s ``tier_of`` re-check is the second layer, for a
-        tool reclassified in ``policies.py`` after the literal was written.
+        ``ProbeAction.tool_name`` is a ``ReadToolName`` literal, so a Tier-1 next probe fails
+        at the generator's schema; ``_execute_probe``'s ``tier_of`` is the second layer.
         """
         with pytest.raises(ValidationError), grounded_in(()):
             DiagnosisCandidate.model_validate(
@@ -522,11 +470,8 @@ class TestProbeMoreEmitsTheSelectedCandidatesProbe:
     def test_probe_more_on_a_candidate_with_no_probe_stops_instead(self) -> None:
         """Fail-safe: nothing fabricated, nothing overruled, no crash.
 
-        The selector asked for evidence and the candidate it points at names no
-        way to get it. That is not silently replaced by the generator's own step
-        (which would overrule a decision the model made) and it does not raise (a
-        harness crash for a model's incoherence) — it stops, naming the reason,
-        through the loop's existing terminal path.
+        The candidate names no way to get the evidence, so the loop stops through its existing
+        terminal path rather than substituting the generator's own step.
         """
         planner = CannedLLMClient([_generator_payload(_candidate_payload("c1", probe=None))])
         selector = CannedLLMClient(
@@ -568,10 +513,8 @@ class TestSelectionIsNotAuthorization:
     def test_a_selected_candidate_below_the_threshold_still_escalates(self) -> None:
         """Plan 02 § 18, through the real loop.
 
-        The generator emits ``remediate`` and the selector picks a fixable
-        category — and the 0.7 threshold refuses it anyway, because the selected
-        candidate's confidence is 0.5. The gate is in the loop, shared, and this
-        arm does not special-case it.
+        The selector picks a fixable category and the 0.7 threshold refuses it anyway: the
+        gate is in the loop.
         """
         planner = CannedLLMClient(
             [
@@ -614,12 +557,8 @@ class TestSelectionIsNotAuthorization:
     def test_the_strategy_holds_no_execution_policy(self) -> None:
         """The same claim ``test_strategies.py`` makes about the seam, on this file.
 
-        Scanned through the AST rather than over the text, because the module
-        docstring NAMES the gates it must not hold — "the FIX_MAP gate and the 0.7
-        threshold still decide" is the property, and a substring scan would read
-        the sentence as the violation it forbids. What the AST sees is what the
-        module can reach: its imports, the names it binds and the attributes it
-        reads.
+        Scanned through the AST rather than the text, because the module docstring NAMES the
+        gates it must not hold and a substring scan would read that as the violation.
         """
         source = (
             Path(__file__).resolve().parents[2]
@@ -713,9 +652,7 @@ class TestTheSelectorBlockIsOnEveryStep:
     def test_the_whole_record_is_the_generators_with_the_selector_added(self) -> None:
         """One record per step, and the generator's own measurements survive.
 
-        ``planner_context_chars`` is the number an arm comparison is read off, so
-        the record is REBUILT from the generator's rather than assembled a second
-        time — two assemblies are two definitions of that number.
+        Rebuilt from the generator's record: two assemblies are two definitions.
         """
         sink: list[StepRecord] = []
         planner = CannedLLMClient([_generator_payload(_candidate_payload("c1"))])
@@ -803,10 +740,8 @@ class TestTheSelectorIsItsOwnMeteredRole:
     def test_a_selector_failure_carries_the_generations_bill(self) -> None:
         """ADR 0045's trap, one layer up.
 
-        The generation is paid for BEFORE the selector is asked, and the loop's
-        ``except`` arm charges against the state it held before the step. A
-        selector that let its exception through would charge the generation to
-        nobody.
+        The generation is paid for BEFORE the selector is asked, so a selector exception
+        would charge it to nobody.
         """
         planner = CannedLLMClient(
             [_generator_payload(_candidate_payload("c1"))],
@@ -820,13 +755,8 @@ class TestTheSelectorIsItsOwnMeteredRole:
             _arm(n=1).plan_next_step(_state(), _AT, _context(planner, selector))
         usage = caught.value.usage
         assert usage is not None
-        # 120 — the generation, in full. The two rejected selector legs bill
-        # NOTHING here and that is correct rather than a gap: a ``CannedLLMClient``
-        # validates the payload itself and raises a bare ``ValidationError`` with
-        # no usage on it, so there is nothing measured to charge and charging a
-        # guess would be an over-report invented rather than measured (the same
-        # note WP-5.3 recorded for a repaired sample). What this test is for is the
-        # 120: without ``billed_usage`` the generation would be charged to nobody.
+        # 120 — the generation in full. The rejected selector legs bill NOTHING (a bare
+        # ``ValidationError`` carries no usage); without ``billed_usage`` nobody is charged.
         assert usage.input_tokens + usage.output_tokens == 120
 
     def test_a_selector_failure_escalates_the_run_with_the_bill_charged(self) -> None:
@@ -855,10 +785,7 @@ class TestSelectedAtKAndTheOracleGap:
     ) -> None:
         """The order's fixture, exactly: present and not selected.
 
-        ``c1`` is the correct cause and the selector committed to ``c2``. pass@2
-        hits (a correct candidate was available), selected@2 misses (it was not
-        taken), so the gap is 1 — a finding about SELECTION, which is the whole
-        point of the metric.
+        ``c1`` is correct and the selector took ``c2``: pass@2 hits, selected@2 misses.
         """
         steps = steps_of(
             [_record_with(categories=("consumer_saturation", "stale_cache"), selected="c2")]
@@ -953,10 +880,7 @@ class TestAGapIsPairedWithinOneWorld:
     def test_two_live_runs_of_one_scenario_are_two_worlds(self) -> None:
         """A live world is only ever itself (INC-003).
 
-        Nothing guarantees two live runs of one scenario met the same database,
-        the same queue depth or the same seeded fault. Keying on the archive
-        refuses a comparison that might be sound rather than reporting one that
-        might not be.
+        Nothing guarantees two live runs met the same world, so the archive is the key.
         """
         left = world_key(scenario="s", execution_mode="live", archive="aaa")
         right = world_key(scenario="s", execution_mode="live", archive="bbb")
@@ -965,12 +889,8 @@ class TestAGapIsPairedWithinOneWorld:
     def test_a_recorded_world_pairs_by_the_recordings_own_fingerprint(self) -> None:
         """ADR 0043: a recording IS a world, so two arms over one recording pair.
 
-        Keyed on ``recorder.world_fingerprint`` — the repo's existing answer to
-        "are these two recordings of the same world" — and not on the file path or
-        the archive: a path is a name, an archive is a run, and two archives that
-        replayed one recording are exactly the paired comparison plan 03 § 5 puts
-        strategy comparisons in. Two different recordings never pair, whatever
-        they are called.
+        Keyed on ``recorder.world_fingerprint``, not the path or the archive: a path is a
+        name, an archive is a run, and two archives replaying one recording are the pair.
         """
         left = world_key(
             scenario="s", execution_mode="recorded", archive="aaa", world_fingerprint="w1"
@@ -992,11 +912,8 @@ class TestAGapIsPairedWithinOneWorld:
     ) -> None:
         """The rule is reachable now that recorded mode exists (cmd #277, #279).
 
-        ``runner._replay_record`` puts ``world_fingerprint`` on every recorded
-        outcome, from ``recorder.world_fingerprint``, and the report reads it
-        through one function. Asserted against the runner's own key name rather
-        than against a literal, so a rename on either side fails here instead of
-        silently pairing every recorded run under ``None``.
+        ``runner._replay_record`` puts ``world_fingerprint`` on every recorded outcome;
+        asserted against the runner's own key name, not a literal.
         """
         recorded = _outcome(mode=ExecutionMode.RECORDED, replay={"world_fingerprint": "abc123"})
         assert research_report.recorded_fingerprint(recorded) == "abc123"
@@ -1039,10 +956,7 @@ class TestAGapIsPairedWithinOneWorld:
     def test_both_terms_come_off_one_runs_own_steps(self) -> None:
         """Paired by construction, which is the structural half of the rule.
 
-        ``measure_selection`` computes pass@k and selected@k from the SAME
-        ``steps`` sequence and stamps the one world it was given on every gap, so
-        there is no code path on which the two terms could come from different
-        runs.
+        ``measure_selection`` computes both terms from the SAME ``steps`` sequence.
         """
         metrics = measure_selection(
             [_record_with(categories=("consumer_saturation", "stale_cache"), selected="c2")],

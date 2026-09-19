@@ -49,7 +49,7 @@ canned_tool_responses:
   get_cache_key_info:
     content:
     - type: text
-      text: '{"key":"kafka:consumer_lag:billing-consumer","exists":true,"type":"string","ttl_seconds":57,"size":48,"records_referenced":0,"records_found":0}'
+      text: '{"key":"kafka:consumer_lag:billing-consumer","exists":true,"type":"string","ttl_seconds":57,"size":5,"records_referenced":null,"records_found":null}'
     is_error: false
   restart_consumer_group:
     content:

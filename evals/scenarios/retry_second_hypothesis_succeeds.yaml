@@ -58,10 +58,16 @@ canned_tool_responses:
   # The verify read for attempt 1, and the reason it fails: the key is BACK, with a fresh
   # TTL. A read-through cache repopulates on the next read, so dropping the key changes
   # nothing about the pipeline — the action did exactly what it claimed and fixed nothing.
+  #
+  # Every value here is the platform's own answer for a lag cache key: `size` is the digits
+  # of the number it holds, and `records_referenced`/`records_found` are null because the
+  # entry is not a record set (they are the jobs hot-set's fields). Only the repopulation is
+  # the scenario's invention, and it does not show up in any single reading — which is why
+  # this fixture needs no fixture-drift-ledger row.
   get_cache_key_info:
     content:
     - type: text
-      text: '{"key":"kafka:consumer_lag:billing-consumer","exists":true,"type":"string","ttl_seconds":57,"size":48,"records_referenced":0,"records_found":0}'
+      text: '{"key":"kafka:consumer_lag:billing-consumer","exists":true,"type":"string","ttl_seconds":57,"size":5,"records_referenced":null,"records_found":null}'
     is_error: false
   restart_consumer_group:
     content:

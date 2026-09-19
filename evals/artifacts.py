@@ -143,6 +143,20 @@ KINDS: Final[dict[str, ArtifactKind]] = {
     "recorded_world_truth": ArtifactKind(
         ("evals", "recorded_worlds"), ".truth.json", grouping="scenario"
     ),
+    # `make training-export WRITE=1` (evals/export.py, WP-15.1) — the JSONL a later
+    # training stage reads, plus the evaluator labels it must not, plus the manifest
+    # naming every `template_id` the data covers. Three stems in one folder, disjoint by
+    # suffix on `recorded_world_truth`'s precedent: `newest("training_export")` must
+    # never resolve to the labels beside it, and a re-export is a new version, never a
+    # replacement (invariant 9 — an export whose provenance can be rewritten cannot
+    # support a claim about what a policy was trained on).
+    "training_export": ArtifactKind(("evals", "exports"), ".jsonl", fixed_stem="training_export"),
+    "training_export_labels": ArtifactKind(
+        ("evals", "exports"), ".labels.jsonl", fixed_stem="training_export"
+    ),
+    "training_export_manifest": ArtifactKind(
+        ("evals", "exports"), ".manifest.json", fixed_stem="training_export"
+    ),
 }
 
 

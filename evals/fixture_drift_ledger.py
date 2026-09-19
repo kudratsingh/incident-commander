@@ -1,24 +1,12 @@
 """The known-drift ledger: a ratchet, not an allowlist.
 
-Every canned fixture in this repo predates the check that compares it to the
-platform, and most of them disagree with it. A guard that went red on all of
-that on day one would have been turned off on day one, so the drift that
-exists at introduction is recorded here and the check fails only on drift
-that is NOT recorded. That much is an ordinary allowlist.
-
-What makes it a ratchet is the second rule: an entry that is no longer
-observed also fails, with an instruction to delete it. So the ledger can
-only shrink. Fixing a fixture forces a line out of this file in the same PR,
-and nothing can quietly regrow.
-
-Entries are keyed by ``(scenario, tool, path, kind)`` and deliberately carry
-no observed values. A gauge that wobbles between runs is the same unfixed
-drift, and re-blessing the file on every wobble would turn it into a rubber
-stamp — which is how this class of guard usually dies.
-
-Regenerate with ``make fixture-drift-bless`` (never by hand): it needs a
-live platform, and hand-editing would let an entry in that no live run ever
-justified.
+Every canned fixture predates the check that compares it to the platform, so the
+drift that existed at introduction is recorded here and only UNRECORDED drift
+fails. The ratchet is the second rule: an entry that is no longer observed fails
+too, with an instruction to delete it, so the ledger can only shrink. Keyed by
+``(scenario, tool, path, kind)`` with no observed values — re-blessing on every
+gauge wobble is how this class of guard dies. Regenerate with
+``make fixture-drift-bless``, never by hand: it needs a live platform.
 """
 
 from __future__ import annotations
@@ -40,37 +28,20 @@ FIXTURE_DEFECT: Final = "fixture-defect"
 POST_FAULT: Final = "post-fault"
 POST_ACTION: Final = "post-action"
 CANNED_ONLY: Final = "canned-only"
-#: The recording is of a WARM stack and the check ran on a cold one. Added by
-#: WO-R3-202, which shipped the first canned `get_consumer_lag` response that
-#: pins a MEASURED zero on `worker-dispatcher`. That group is the one the metrics
-#: loop refreshes continuously, and for roughly the first minute of a freshly
-#: booted platform it has no measurement at all: the honest reading is
-#: `lag: null, lag_known: false`, which flips to `0, true` once the loop emits.
-#: `fixture_drift._VOLATILE` already forgives the `lag_known` half and
-#: deliberately does NOT forgive `lag` — that value is what every lag scenario
-#: rests on — so the value half lands here.
-#:
-#: Distinct from POST_FAULT, and the distinction is the reason this word exists
-#: rather than a fifth reuse of that one: post-fault drift is the chaos hook's
-#: doing and would vanish if the walk ran after seeding. This is neither the
-#: hook's nor the agent's doing — it is the platform's uptime, and no seeding or
-#: reset changes it. Calling it post-fault would claim a mechanism that is not
-#: there, which the note above `_JUSTIFIED` is explicitly about.
+#: The recording is of a WARM stack and the check ran on a cold one (WO-R3-202):
+#: `worker-dispatcher` has no measurement for about a minute after boot, so a fresh
+#: platform answers `lag: null, lag_known: false` where the recording says `0, true`.
+#: `_VOLATILE` forgives the `lag_known` half and deliberately not `lag`. Its own word
+#: rather than POST_FAULT because no hook, agent, seeding or reset changes platform
+#: uptime — calling it post-fault would claim a mechanism that is not there.
 COLD_STACK: Final = "cold-stack"
 WARM_STACK: Final = "warm-stack"
 
 # Entries that are NOT fixture defects, each with the claim that makes it so.
-#
-# Deliberately hand-recorded rather than inferred. The obvious rule — "a
-# scenario that seeds a fault gets a pass on value drift" — is wrong in a way
-# that hides real defects: `create_stale_cache` writes ONE Redis key, so it
-# cannot explain a fixture claiming 1.00G of memory in use against a live
-# 1.60M. That entry stays a defect. A rule would have absolved it; a person
-# has to look.
-#
-# The cost of being wrong here is asymmetric. Wrongly calling something a
-# defect wastes an investigation; wrongly absolving one deletes it from the
-# work list forever. So the bar is a specific mechanism, named.
+# Hand-recorded, not inferred: the obvious rule ("a scenario that seeds a fault gets
+# a pass") would have absolved a fixture claiming 1.00G of Redis memory against a
+# live 1.60M, which `create_stale_cache`'s one key cannot explain. Wrongly absolving
+# deletes work forever, so the bar is a specific mechanism, named.
 _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
     ("consumer_lag_high", "get_consumer_lag", "lag", "value"): (
         POST_FAULT,
@@ -86,16 +57,10 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "poison_message adds a dead-letter row, so the canned total counts a "
         "row the un-faulted world has not produced yet",
     ),
-    # The `jobs_not_progressing` family (WO-R3-202, WP-4.3). Four rows, and each
-    # one is a named mechanism rather than "the scenario seeds a fault".
-    #
-    # What is NOT here is the point: every other field of `get_outbox_status` is
-    # either declared volatile in `fixture_drift._VOLATILE` (the clocks and the
-    # ages) or matches live with no entry at all
-    # (`unpublished_past_attempt_limit`, `relay_heartbeat_known`,
-    # `relay_tick_interval_s`). `unpublished_count` is the one field the outbox
-    # scenarios actually grade, so it stays guarded and its disagreement is
-    # written down here.
+    # The `jobs_not_progressing` family (WO-R3-202, WP-4.3), four named mechanisms.
+    # What is NOT here is the point: every other `get_outbox_status` field is either
+    # volatile or matches live with no entry. `unpublished_count` is the one the
+    # outbox scenarios grade, so it stays guarded and its disagreement is written down.
     ("jobs_not_progressing_dispatcher_stall", "get_consumer_lag", "lag", "value"): (
         POST_FAULT,
         "kill_consumer makes worker-dispatcher's lag climb; the check probes "
@@ -129,31 +94,13 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "same hook, same world, same reason — this scenario differs from its "
         "quiet sibling only in the alert it hands the agent",
     ),
-    # The `workflow_stuck` family (WO-R3-214, WP-7.2, ADR 0053). All four worlds
-    # are ONE chain — `create_stuck_dag(chain_name="workflow-stuck-eval")` — and
-    # the hook derives every row id from that name, so in the un-faulted world
-    # this walk probes, the job the alert names DOES NOT EXIST. `get_dag_state`
-    # answers "job not found" and carries no field at all, which is why all six
-    # of its fields are recorded per world rather than only the ones the
-    # scenarios grade: the key-set diff runs before any value comparison, so an
-    # absent document is six `canned_only_field` rows and not one.
-    #
-    # Same mechanism as `saga_stuck` and `remediate_runaway_saga_success` above,
-    # and deliberately the same wording, with this family's chain name and each
-    # world's own shape — a reader comparing the three should see one mechanism
-    # rather than three paraphrases of it.
-    #
-    # Sequenced fixtures get ONE line here, per the runbook: the ledger key
-    # carries no element index, so where two elements disagree for two reasons
-    # both halves go in the `why` and the row is filed under the one a reader
-    # would come looking for. `workflow_stuck_dead_lettered_root:get_dag_state`
-    # is the only such fixture in this family.
-    #
-    # What is NOT here is the point. No world records a field its chain does not
-    # carry, the three worlds that dead-letter nothing have no
-    # `list_dlq_messages` entry at all (their canned `total` is 4 and matches
-    # live), and the control has no `search_traces` entry (its world has drained,
-    # so it declares no such fixture).
+    # The `workflow_stuck` family (WO-R3-214, WP-7.2, ADR 0053). All four worlds are
+    # ONE chain — `create_stuck_dag(chain_name="workflow-stuck-eval")` — whose ids are
+    # derived from that name, so in the un-faulted world the job the alert names DOES
+    # NOT EXIST: `get_dag_state` answers "job not found" and the key-set diff turns an
+    # absent document into six `canned_only_field` rows, not one. Same mechanism and
+    # deliberately the same wording as the saga blocks below. A sequenced fixture gets
+    # ONE line (the key carries no index), with both halves in its `why`.
     ("workflow_stuck_dead_lettered_root", "get_dag_state", "edges", "canned_only_field"): (
         POST_FAULT,
         "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the "
@@ -364,10 +311,9 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "carries no seed_id at all — the root job id the chain is named for. This world is "
         "the same chain drained to completed",
     ),
-    # The dead-lettered world is the only one of the four whose chain puts a row
-    # in the queue, so it is the only one with `list_dlq_messages` entries — which
-    # is platform ADR 0029 section 1's behaviour change with teeth, and this
-    # family's discriminator stated as a ledger asymmetry.
+    # The dead-lettered world is the only one of the four that puts a row in the queue,
+    # so the only one with `list_dlq_messages` entries — this family's discriminator
+    # stated as a ledger asymmetry (platform ADR 0029 § 1).
     (
         "workflow_stuck_dead_lettered_root",
         "list_dlq_messages",
@@ -397,13 +343,10 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "four boot-seeded ones. The three sibling worlds seed root_status=completed and "
         "dead-letter nothing, so their canned 4 matches live and needs no entry",
     ),
-    # `search_traces(status="waiting")` in the three worlds that hold the chain
-    # stranded. This absence is the one worth reading twice, because it is
-    # environment-wide rather than scoped to the chain: platform ADR 0029
-    # measured it while building these hooks — with both stalls armed there was
-    # no waiting row ANYWHERE on a warm stack to borrow, which is why the chain
-    # has to be manufactured at all. So in the un-faulted world this walk probes,
-    # the reading is not "different rows", it is "no waiting row exists".
+    # `search_traces(status="waiting")` in the three stranded worlds. This absence is
+    # environment-wide, not scoped to the chain: platform ADR 0029 measured that a warm
+    # stack has no waiting row ANYWHERE to borrow, which is why the chain is
+    # manufactured at all. The un-faulted reading is not "different rows" but "none".
     (
         "workflow_stuck_dead_lettered_root",
         "search_traces",
@@ -507,19 +450,12 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "create_stuck_dag stamps each descendant's trace_id from the same namespace and "
         "chain_name, so the two trace ids appear and disappear with the rows themselves",
     ),
-    # The three cold-stack rows, and they are the only entries in this file that
-    # a warm developer stack cannot observe. `_blessed_against` above is what
-    # settles which side is authoritative: this file is blessed against CI's
-    # freshly seeded stack, so on a developer volume whose metrics loop has been
-    # running for minutes these three read as "already fixed". They are not —
-    # deleting them reds CI's contract job, which is where the cold reading is.
-    #
-    # Each scenario's world is the WARM one: its precondition asserts
-    # `lag_known equals true` beside `lag at_most 5`, so a cold stack fails the
-    # premise BEFORE any model call and reports that the world was never
-    # manufactured, rather than grading the agent against a missing reading.
-    # `make world-audit` (PROTOCOL step 3) checks `lag_known` too, so the paid
-    # path cannot reach a cold stack either.
+    # The three cold-stack rows: the only entries a warm developer stack cannot
+    # observe. `_blessed_against` settles which side is authoritative — this file is
+    # blessed against CI's freshly seeded stack, so locally they read as "already
+    # fixed" and deleting them reds CI's contract job. Each scenario's own premise is
+    # the WARM reading (`lag_known equals true`), asserted before any model call, and
+    # `make world-audit` checks it too, so the paid path cannot reach a cold stack.
     ("jobs_not_progressing_healthy_backlog_spike", "get_consumer_lag", "lag", "value"): (
         COLD_STACK,
         "the recording pins worker-dispatcher's MEASURED zero; a freshly seeded "
@@ -538,29 +474,13 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         COLD_STACK,
         "same hook, same world, same reason as its quiet sibling",
     ),
-    # The first POST_ACTION rows. The constant has existed since the ledger
-    # did, describing exactly this and matching nothing — because until ADR 0025
-    # no fixture recorded the world after the agent's own remediation.
-    #
-    # `remediate_stale_cache_success` now verifies by re-reading the key it
-    # invalidated (ADR 0025), so its `get_cache_key_info` fixture is a
-    # sequence: element 0 is the key present, element 1 is the key gone.
-    # Element 1 is what every verify poll reads, and the drift walk probes
-    # the world BEFORE the agent acts, where the key is still there. The
-    # disagreement is the recording being correct about a later moment than
-    # the one the walk can observe.
-    #
-    # Distinct from POST_FAULT above, and the distinction is worth keeping:
-    # post-fault drift is the CHAOS HOOK's doing and would vanish if the
-    # walk ran after seeding; post-action drift is the AGENT's doing and
-    # would not — no probe of any un-remediated world can ever match it.
-    # Neither is work; they are unreachable for different reasons.
-    #
-    # All three shape fields move together because the platform returns
-    # them as a set: `GetCacheKeyInfoOutput` documents "All three are null
-    # when the key does not exist". `ttl_seconds` is absent from this list
-    # only because it is already declared volatile in fixture_drift.py, so
-    # its value is never compared in the first place.
+    # The first POST_ACTION rows. `remediate_stale_cache_success` verifies by re-reading
+    # the key it invalidated (ADR 0025), so its fixture is a sequence: element 0 the key
+    # present, element 1 the key gone. The walk probes the world BEFORE the agent acts,
+    # so the recording is correct about a later moment than the walk can observe —
+    # post-FAULT drift would vanish if the walk ran after seeding, post-ACTION never
+    # can. All three shape fields move together (`GetCacheKeyInfoOutput`: all null when
+    # the key is absent); `ttl_seconds` is missing only because it is already volatile.
     ("remediate_stale_cache_success", "get_cache_key_info", "exists", "value"): (
         POST_ACTION,
         "the verify leg re-reads the invalidated key and the fixture records "
@@ -581,25 +501,12 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         POST_ACTION,
         "same recording, same reason: an absent key reports type=null",
     ),
-    # The two v0.6.8 record-check fields (plat #209, WO-R3-267). They are the
-    # first rows on this fixture where BOTH elements disagree with the walk,
-    # for two different reasons, and the key cannot carry two contexts — so
-    # each `why` names both halves and the context is the one a reader would
-    # come here to find.
-    #
-    # `records_found` is filed post-fault because that is the half that is
-    # about the scenario's premise: element 0 records the SEEDED world, where
-    # the entry names three job records and the database holds none of them
-    # (0), while the walk probes the un-faulted world and gets 3 — the same
-    # mechanism as kill_consumer's lag at the top of this file. Element 1
-    # disagrees as well, and that half is post-action (an absent key reports
-    # null).
-    #
-    # `records_referenced` is filed post-action because only element 1
-    # disagrees: element 0 says 3 and the live un-faulted read says 3, so the
-    # entry names the same three records either way — what the fault changes
-    # is whether they are still there, which is the whole point of the field
-    # pair and the reason this scenario stopped being a coin flip.
+    # The two v0.6.8 record-check fields (plat #209, WO-R3-267): the first rows where
+    # BOTH elements disagree for two different reasons, and one key cannot carry two
+    # contexts, so each `why` names both halves. `records_found` is filed post-fault
+    # because element 0's seeded 0 against a live 3 is the scenario's premise;
+    # `records_referenced` post-action because only element 1 disagrees (both worlds
+    # name the same three records — the fault changes whether they are still there).
     ("remediate_stale_cache_success", "get_cache_key_info", "records_found", "value"): (
         POST_FAULT,
         "create_stale_cache replaces the hot-set entry with one naming three "
@@ -616,36 +523,14 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "which element 0 records verbatim, so only the post-action element "
         "disagrees",
     ),
-    # The `get_dag_state` recordings for the two saga scenarios are one
-    # mechanism. Both scenarios now seed their own chain with the
-    # `create_stuck_dag` chaos hook (wave-10, on the v0.6.0 pin), and the
-    # chain's ids are uuid5-derived from the chain_name, so they exist ONLY
-    # after that hook has fired. The drift check probes a world in which no
-    # chaos has been seeded, where those ids do not resolve at all — the
-    # platform answers `job not found` — so the whole response is absent and
-    # each of the fixture's six top-level keys reads as `canned_only_field`.
-    # That is the same post-fault shape already recorded for kill_consumer's
-    # lag and poison_message's DLQ total: the scenario seeds a fault, the
-    # check probes the un-faulted world.
-    #
-    # These twelve replace twelve older keys (the `not_live_reachable` rows
-    # under `nodes[].*` / `edges[].*`), which were six `canned-only`
-    # (runaway_saga, whose flags were false) and six `fixture-defect`
-    # (saga_stuck, counted as work). Neither reading survives the rebuild:
-    # the scenarios DO run live now, so "its premise rather than a
-    # recording" is no longer true, and the recordings are verbatim from the
-    # seeded world, so they are not defects either. The block that said "if
-    # a chaos hook that seeds a genuinely stuck DAG ever lands and the
-    # scenario's flags flip back, these become real work again and this
-    # block is what has to be removed first" is what this replaces — the
-    # hook landed.
-    #
-    # The key SHAPE changed because the probe changed with it: a fixture
-    # whose entity does not exist yet used to be dropped from the walk as an
-    # unreachable probe error, which left its entries permanently stale and
-    # permanently undeletable (see evals/fixture_probe.py). It is now
-    # compared against an empty live response instead, which is what keeps
-    # these recorded, classified, and discharge-able.
+    # The `get_dag_state` recordings for the two saga scenarios are one mechanism: both
+    # seed their own chain with `create_stuck_dag`, whose ids are uuid5-derived from the
+    # chain_name, so the un-faulted world answers `job not found` and all six top-level
+    # keys read as `canned_only_field`. These twelve replaced twelve older
+    # `not_live_reachable` rows once the hook landed and the scenarios began running
+    # live. A fixture whose entity does not exist is now compared against an empty live
+    # response rather than dropped as a probe error (see evals/fixture_probe.py), which
+    # is what keeps these recorded, classified and discharge-able.
     ("remediate_runaway_saga_success", "get_dag_state", "seed_id", "canned_only_field"): (
         POST_FAULT,
         "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from "
@@ -725,32 +610,13 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "the chain_name, so the un-faulted world the check probes answers "
         "'job not found' and carries no paused_expires_in_seconds at all — the pause's countdown",
     ),
-    # The `list_dlq_messages` recordings for the same two saga scenarios, and
-    # the same mechanism one tool over. ADR 0027 made the agent read the
-    # chain root's DEAD-LETTER ROW before replaying it — `get_dag_state`
-    # carries no `remediation_hint`, so the listing is the only place that
-    # answer exists — which means both scenarios now record a listing, and
-    # both listings contain a row that `create_stuck_dag` creates.
-    #
-    # The chain root IS a dead-letter row: the hook inserts it with
-    # `status=dead_letter`, `retry_count=3` and the hint its argument names.
-    # So the faulted world holds five rows (the four boot-seeded ones plus
-    # the root) and the un-faulted world the check probes holds four. Every
-    # entry below is that one fact seen through a different field:
-    #
-    #   * `total` — five against a live four;
-    #   * `items[].id[]` — the root's uuid5-derived id is in no un-faulted
-    #     reading, exactly as its `get_dag_state.seed_id` is not;
-    #   * `items[].trace_id[]` — the hook derives the trace id from the same
-    #     namespace and chain_name, so it appears and disappears with the row.
-    #
-    # POST_FAULT, not a defect, and specifically NOT to be "fixed" by
-    # trimming the fixtures back to four rows: the root row is the evidence
-    # the replay-safety claim is made of, and a four-row recording would
-    # describe a world in which the scenario's own premise is false. Same
-    # reading as `remediate_dlq_backlog_success`'s `total` above, which is
-    # the poison row counted but not named; here the row can be named,
-    # because the hook derives its id deterministically.
+    # The same mechanism one tool over. ADR 0027 made the agent read the chain root's
+    # DEAD-LETTER ROW before replaying it (only the listing carries
+    # `remediation_hint`), and `create_stuck_dag` inserts that root as a dead-letter
+    # row — so the faulted world holds five rows against the un-faulted four, seen
+    # through `total`, `items[].id[]` and `items[].trace_id[]`. POST_FAULT, and NOT to
+    # be "fixed" by trimming the fixtures to four rows: the root row is the evidence
+    # the replay-safety claim is made of.
     ("remediate_runaway_saga_success", "list_dlq_messages", "total", "value"): (
         POST_FAULT,
         "create_stuck_dag dead-letters the runaway-saga-eval chain root, so the "
@@ -790,39 +656,14 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "create_stuck_dag stamps the root's trace_id from the same namespace and "
         "chain_name, so it appears and disappears with the row itself",
     ),
-    # `dlq_human_required_escalates` joined the seeds-its-own-fault family at
-    # the v0.6.2 re-pin, and its two entries are the same mechanism as the two
-    # saga blocks above seen through a third hook.
-    #
-    # It declared no `chaos_setup` until now: it ran against the four
-    # boot-seeded rows and fenced the seeded `human_required` one. That row
-    # already carried the value the fence would set, and through v0.6.1 the
-    # platform's mark on such a row wrote nothing at all — so the drill could
-    # not tell an agent that fenced from one that skipped the step (LESSONS
-    # 2026-09-08). Platform v0.6.2 (plat #198) added
-    # `create_bad_data_job(remediation_hint=unclassified)`, which writes a
-    # dead-letter row with `remediation_hint = NULL` and a bad-data error text,
-    # so the scenario now manufactures its own subject and the fence is a real
-    # write with a real audit row.
-    #
-    # The faulted world therefore holds five rows where the un-faulted world
-    # the check probes holds four, and both entries below are that one fact
-    # seen through a different field. Both sequence elements of the listing
-    # fixture (pre-fence and post-fence) report them; `Drift.key` does not
-    # include the index, so two keys cover four observations.
-    #
-    # POST_FAULT, not a defect, and specifically NOT to be "fixed" by trimming
-    # the recording back to four rows: the chaos row IS the incident, and a
-    # four-row recording would describe a world in which the scenario's own
-    # premise is false. Same reading as the saga roots above.
-    #
-    # Note what is NOT here, because it is the part that took work: the
-    # `fenced_at` / `fenced_by` that plat #198 added to every `DlqEntry`
-    # produce no drift at all. On the four seeded rows they are null on both
-    # sides, and on the post-fence recording they are exempted as leaf values
-    # by `fixture_drift._VOLATILE` (a clock, and a per-boot principal id).
-    # Their PRESENCE is still compared — which is how this re-pin found the 30
-    # canned rows that had to be re-recorded.
+    # `dlq_human_required_escalates` joined the seeds-its-own-fault family at the v0.6.2
+    # re-pin: it used to fence a boot-seeded row that already carried the value the
+    # fence would set, so the drill could not tell an agent that fenced from one that
+    # skipped it (LESSONS 2026-09-08). Plat #198's
+    # `create_bad_data_job(remediation_hint=unclassified)` lets it manufacture its own
+    # subject, so the faulted world holds five rows against four. POST_FAULT, and NOT to
+    # be trimmed back: the chaos row IS the incident. The `fenced_at`/`fenced_by` those
+    # rows gained produce no drift — null on both sides, or leaf-exempt in `_VOLATILE`.
     ("dlq_human_required_escalates", "list_dlq_messages", "total", "value"): (
         POST_FAULT,
         "create_bad_data_job injects the unclassified bad-data row this scenario "
@@ -841,39 +682,13 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "create_bad_data_job has fired, so no un-faulted reading of the DLQ "
         "contains it — the same absence already recorded for the two chain roots",
     ),
-    # `poison_message` joins the family at the v0.6.3 re-pin, through TWO
-    # scenarios, and the pair is worth reading together because the same row
-    # produces the entries for opposite reasons.
-    #
-    # The mechanism is the one the two saga blocks and the bad-data block above
-    # already record: a scenario seeds a fault, the drift walk probes the
-    # un-faulted world, and the row the fault creates is in one and not the
-    # other. What is new is that the row can now be NAMED. Through v0.6.2
-    # `poison_message` minted a random id per call, so an `items[].id[]` entry
-    # was impossible and the recordings could not include the row at all —
-    # `remediate_dlq_backlog_success` counted a fifth row in `total` and listed
-    # four, and its comment said so. v0.6.3 derives the id
-    # (`uuid5(eeeeeeee-dead-4000-8000-000000000000, "{tenant_id}:poison-message")`),
-    # so both fixtures now record the row itself and both report its absence
-    # from the un-faulted queue.
-    #
-    # POST_FAULT, not a defect, and specifically NOT to be "fixed" by trimming
-    # the recordings back to four rows: the poisoned row IS the incident in one
-    # scenario and the row the other one must not touch, and a four-row
-    # recording would describe a world in which neither premise is true.
-    #
-    # `Drift.key` carries no sequence index, so one key covers every element of
-    # a sequenced fixture — three elements in `remediate_dlq_backlog_success`,
-    # two in `dlq_poison_unclassified`.
-    #
-    # What is NOT here: `remediate_dlq_backlog_success`'s `total`, which is
-    # already recorded above and stayed recorded through the re-derivation (the
-    # faulted queue still holds five rows where the un-faulted world holds
-    # four); and any entry for the poisoned row's `remediation_hint`, because
-    # `walk_leaves` strips `None` from both sides before comparing — a canned
-    # null against a live domain that never contains the row reports nothing.
-    # Whether the hint LANDED null is a scenario claim (the precondition), not
-    # a ratchet claim.
+    # `poison_message` joins the family at the v0.6.3 re-pin, through TWO scenarios. The
+    # mechanism is the blocks above; what is new is that the row can be NAMED — through
+    # v0.6.2 the hook minted a random id per call, so the recordings could not include
+    # the row at all. POST_FAULT, and NOT to be trimmed to four rows: the poisoned row IS
+    # the incident in one scenario and the row the other must not touch. No entry for its
+    # `remediation_hint`: `walk_leaves` strips `None` from both sides, and whether the
+    # hint LANDED null is a scenario claim.
     (
         "remediate_dlq_backlog_success",
         "list_dlq_messages",
@@ -904,25 +719,12 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "fired — the same absence already recorded for the two chain roots and the "
         "bad-data row",
     ),
-    # `create_mislabeled_dlq_job` is the fifth hook in this family (WO-R2-167),
-    # and its two entries are the same mechanism as the four blocks above: the
-    # scenario seeds a row, the drift walk probes the un-faulted world, and the
-    # row is in one and not the other.
-    #
-    # What is worth writing down is what is NOT here. The post-fence element
-    # records this row as `human_required`, and that produces no value drift on
-    # `items[].remediation_hint[]` at all — `human_required` is in the live
-    # domain because the seeded furniture row `f030f975` carries it. So a
-    # recording that moved this row into a category NOTHING in the un-faulted
-    # world holds would have shown up as drift, which is the check working: the
-    # walk compares against the live DOMAIN of a field, not against a row.
-    # `fenced_at` / `fenced_by` are leaf-exempt (`_VOLATILE`), so the fence
-    # itself is silent here and is a scenario claim instead.
-    #
-    # POST_FAULT, not a defect, and specifically NOT to be "fixed" by trimming
-    # the recordings to four rows: the mislabelled row IS the incident, and a
-    # four-row recording would describe a world where this scenario's premise —
-    # a contradiction sitting in the alerted slice — is false.
+    # `create_mislabeled_dlq_job` is the fifth hook in this family (WO-R2-167), same
+    # mechanism. What is NOT here matters: the post-fence element records this row as
+    # `human_required` and produces no drift on `items[].remediation_hint[]`, because
+    # the walk compares against the live DOMAIN of a field and a seeded furniture row
+    # carries that value. POST_FAULT, and NOT to be trimmed to four rows: the
+    # mislabelled row IS the incident.
     ("dlq_mislabeled_replay_safe", "list_dlq_messages", "total", "value"): (
         POST_FAULT,
         "create_mislabeled_dlq_job injects the deliberately mislabelled row this "
@@ -941,14 +743,10 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "create_mislabeled_dlq_job has fired — the same absence already recorded for "
         "the two chain roots, the bad-data row and the poisoned row",
     ),
-    # alert_storm went the other way at wave-10: it is `use_live_mcp: false`
-    # now, because the pinned platform cannot burst alerts. Alerts have three
-    # producers (the bad_deploy chaos hook, the SLO fast-burn loop, the boot
-    # seed) and none of them emits more than one at a time, so a storm is
-    # unmanufacturable and the scenario's five-alert recording is its premise
-    # rather than a recording of anything. These seven were counted as work
-    # for the whole campaign and could never have come off the list: there is
-    # no live reading for a canned-only scenario to be corrected towards.
+    # alert_storm went the other way at wave-10: `use_live_mcp: false`, because none of
+    # the three alert producers emits more than one at a time, so a storm is
+    # unmanufacturable and its five-alert recording is its premise. These seven were
+    # counted as work for a whole campaign and could never have come off the list.
     ("alert_storm", "list_active_alerts", "alerts[].description", "live_only_field"): (
         CANNED_ONLY,
         "use_live_mcp is false — the platform cannot burst alerts, so the "
@@ -995,12 +793,9 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         CANNED_ONLY,
         "same scenario, same deliberate malformation",
     ),
-    # v0.6.0 added two more required fields to this tool's output, so the
-    # same deliberately-malformed fixture is now short three fields rather
-    # than one. The scenario's premise did not change and neither did the
-    # reason: a response that violates the schema is what it exists to feed
-    # the agent, so "the fixture does not match the platform" is the fixture
-    # working. Recorded, not counted as work.
+    # v0.6.0 added two required fields, so the same deliberately-malformed fixture is
+    # now short three rather than one. "The fixture does not match the platform" is this
+    # fixture working, so these are recorded and not counted as work.
     ("tool_output_schema_mismatch", "get_consumer_lag", "lag_known", "live_only_field"): (
         CANNED_ONLY,
         "same scenario, same deliberate malformation — v0.6.0 made this a "
@@ -1011,13 +806,9 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "same scenario, same deliberate malformation — v0.6.0 made this a "
         "third field the fixture deliberately omits",
     ),
-    # v0.6.7 (plat #204, WO-R3-254) added three more fields to this tool's
-    # output, so the same deliberately-malformed fixture is now short six
-    # rather than three. Nothing about the scenario changed: it exists to hand
-    # the agent a response the schema rejects, and every field it does not
-    # carry is the point. The other fourteen canned lag responses in the suite
-    # WERE re-recorded with all three; this one is the single exception, which
-    # is what makes the key-set diff worth keeping strict.
+    # v0.6.7 (plat #204, WO-R3-254) added three more, so the fixture is now short six.
+    # The other fourteen canned lag responses WERE re-recorded with all three; this one
+    # exception is what makes the key-set diff worth keeping strict.
     ("tool_output_schema_mismatch", "get_consumer_lag", "measured_at", "live_only_field"): (
         CANNED_ONLY,
         "same scenario, same deliberate malformation — v0.6.7 made this a "
@@ -1062,15 +853,10 @@ def load_ledger(path: Path | None = None) -> frozenset[DriftKey]:
 def load_entries(path: Path | None = None) -> list[LedgerEntry]:
     """Recorded drift with its context, newest format or the original arrays.
 
-    Context comes from ``context_of`` for EVERY row, whichever format it is
-    written in. It used to come from the file for dict rows and from the
-    code for array rows, which made ``defect_count`` answer differently
-    depending on when a row was written: absolving an entry in ``_JUSTIFIED``
-    left the burn-down number unmoved, because the number was reading the
-    file's copy of a decision the code had already changed. The code is the
-    authority on classification and the file records it — a disagreement
-    between the two means the file is stale, which is a re-bless, and
-    ``test_the_committed_contexts_agree_with_the_code`` is what says so.
+    Context comes from ``context_of`` for EVERY row: the code is the authority on
+    classification and the file only records it. Reading the file's copy made
+    ``defect_count`` ignore an entry newly absolved in ``_JUSTIFIED``;
+    ``test_the_committed_contexts_agree_with_the_code`` now calls that a stale file.
     """
     target = path or LEDGER_PATH
     if not target.exists():
@@ -1100,10 +886,9 @@ def load_entries(path: Path | None = None) -> list[LedgerEntry]:
 def defect_count(path: Path | None = None) -> int:
     """Recorded disagreements that are actually work — the burn-down number.
 
-    The others are recorded because the check will keep reporting them, not
-    because anyone should go and "fix" them. Counting them as work would set
-    a target that cannot be reached, and the first person to try would break
-    a scenario making its fixture match a world it was never describing.
+    The others are recorded because the check keeps reporting them, not because anyone
+    should "fix" them: counting those would set an unreachable target, and the first
+    person to try would break a scenario to match a world it never described.
     """
     return sum(1 for entry in load_entries(path) if entry.is_defect)
 
@@ -1115,15 +900,10 @@ def split_for_bless(
 ) -> tuple[tuple[DriftKey, ...], tuple[DriftKey, ...]]:
     """``(carried, disproved)`` for the prior entries this run did not observe.
 
-    An entry is DISPROVED only when this run actually probed its fixture and
-    found no disagreement — that is the ratchet turning, and its line has to
-    go. An entry whose fixture the run never reached is CARRIED: the run
-    took no reading, so it holds no opinion, and deleting on no opinion is
-    how a transient 502 quietly shortens the burn-down list.
-
-    ``checked`` is per ``(scenario, tool)`` because that is the unit the
-    probe reports coverage in; the ledger's finer ``(path, kind)`` split is
-    within one reading of one fixture.
+    DISPROVED only when the run probed that fixture and found no disagreement — the
+    ratchet turning. An unreached fixture is CARRIED: deleting on no opinion is how a
+    transient 502 shortens the burn-down list. ``checked`` is per ``(scenario, tool)``,
+    the unit the probe reports coverage in.
     """
     reached = set(checked)
     seen = set(observed)
@@ -1141,18 +921,10 @@ def dump_ledger(
 ) -> int:
     """Write the ledger from an observed drift set. Returns the entry count.
 
-    ``checked`` is the coverage the run established — the ``(scenario,
-    tool)`` pairs it actually read back from the platform. Entries this run
-    did not cover are carried over rather than dropped, so a bless can only
-    remove an entry it disproved. The default is the conservative one: a
-    caller that says nothing about coverage has established nothing and may
-    delete nothing.
-
-    Keys this module does not own are preserved verbatim. ``_blessed_against``
-    is the one that matters — it records which platform state the file was
-    blessed against, and so whether a local disagreement is about the
-    fixtures or about a developer's postgres volume — and every bless used
-    to drop it.
+    ``checked`` is the ``(scenario, tool)`` coverage the run established; uncovered
+    entries are carried, so a bless can only remove what it disproved, and the default
+    establishes nothing. Keys this module does not own are preserved verbatim —
+    ``_blessed_against`` is the one that matters, and every bless used to drop it.
     """
     target = path or LEDGER_PATH
     existing: dict[str, Any] = {}

@@ -1,63 +1,18 @@
 """Assemble the aggregate research report (plan 03 § 15) from committed archives.
 
-The report every phase close reads: one leaderboard per model, the corpus
-sliced by the seven keys of WP-2.5, and every difference printed beside the
-number of paired trials it was computed from. Like ``evals/baseline_report.py``
-and ``evals/phase_close_report.py``, nothing here runs an eval and nothing is
-typed in — every number is read out of a committed ``evals/runs/<id>/report.json``
-— which is what lets a test regenerate the committed artifact byte for byte.
-
-Five decisions are load-bearing.
-
-**One model per table, enforced by refusal.** ``assemble`` raises rather than
-footnotes when the rows in scope name two ``agent_model`` ids, and the message
-names both. The rule and its wording come from ``evals/regression.py``
-(``model_refusal``, WO-R3-181) rather than from a second copy here: a delta
-across two models is a model change and a behaviour change added together, and
-a table that shows one cannot say which it is. A warning above a printed table
-is still a printed table.
-
-**Every difference carries its paired-trial count, and says when that count is
-too small.** Plan 03 § 12: "do not overstate small deltas on small sets". So a
-difference is not a float in this module — it is a record with the two arms,
-the two values, the delta, how many scenarios were present in BOTH arms, a
-paired bootstrap CI, and a flag saying whether the pair count reached plan 03
-§ 10's floor of ~100 paired trials. Nothing in this report reaches that floor
-today, and every difference in the committed artifact says so in its own line.
-
-**The scope is pinned, not scanned.** ``SCOPE`` lists the archives by id. A
-scan of ``evals/runs/`` would quietly change the document every time an
-unrelated archive PR merged, which would make the committed report's
-regeneration test red on somebody else's change and — worse — would silently
-restate a finished phase's numbers over a corpus it never covered. A later
-phase adds its archives to ``SCOPE`` and writes a NEW version of the artifact;
-the old one stays exactly as it was (invariant 9). ``--scan`` prints the
-archives that carry provenance and are not in ``SCOPE``, so extending it is a
-read, not a hunt.
-
-**The blessed baseline is deliberately not an input.**
-``evals/reports/baseline.json`` is re-blessed by a deliberate act
-(``make baseline``, ADR 0011), so a research artifact that read it would change
-its own past numbers the next time the gate was re-blessed. Scenario-level
-regressions here are therefore arm-against-arm over locked archives, computed
-by ``regression.compare`` — the gate's own definition of what a scenario-level
-regression is — rather than against the moving baseline.
-
-What this cannot say yet is written into the artifact (``limits``) rather than
-left for the reader to notice: one strategy, one model, roughly one rep per
-live scenario, no recorded-world mode until Phase 3, and a root-cause column
-that now has numbers in it but a small denominator — the first version of this
-report had none at all, because ROOT_CAUSE (WP-2.2, cmd #255) and the
-ground-truth labels (WO-R3-261, cmd #260) landed after every archive it
-covered. The Phase 2 archives supply it, and ``limits`` says exactly which
-rows are graded and which of three reasons excuses the rest.
-
-**One archive's diagnosis grades are read from somewhere else.** The live
-read-only pass graded canned-world labels against an unseeded live world
-(INC-003); ADR 0040 withdrew those verdicts and an offline re-grade replaced
-them. ``SUPERSEDED_ROOT_CAUSE`` maps that archive to the re-grade, and
-``build_rows`` substitutes on the way in — the archive is never edited
-(invariant 9) and the withdrawn figure never reaches a table.
+One leaderboard per model, the corpus sliced by WP-2.5's seven keys, every
+difference beside its paired-trial count. Nothing here runs an eval and nothing is
+typed in — every number comes out of a committed ``evals/runs/<id>/report.json``, so
+a test can regenerate the artifact byte for byte. Five load-bearing decisions: ONE
+MODEL per table, enforced by ``regression.model_refusal`` (WO-R3-181) rather than a
+footnote; every difference is a record with its paired count, its bootstrap CI and a
+flag for plan 03 § 10's floor of ~100 trials (§ 12: do not overstate small deltas);
+``SCOPE`` is PINNED, not scanned, so an unrelated archive PR cannot restate a closed
+phase (``--scan`` lists candidates); the re-blessable ``baseline.json`` is NOT an
+input, so regressions are arm-against-arm over locked archives via
+``regression.compare``; and ``SUPERSEDED_ROOT_CAUSE`` substitutes the committed
+offline re-grade for the verdicts ADR 0040 withdrew (INC-003), leaving the archive
+untouched. What the report cannot say is written into ``limits``.
 """
 
 from __future__ import annotations
@@ -92,30 +47,25 @@ from incident_commander.agent.hypothesis import HypothesisCategory
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 
-#: The archives this version of the report covers, oldest first. Every one is a
-#: committed, locked run archive (ADR 0021) whose rows carry the provenance
-#: record (ADR 0013, WP-0.3) — without it a row cannot name its own model,
-#: strategy or execution mode, and so cannot sit in a leaderboard at all. The
-#: 37 older archives under ``evals/runs/`` predate that record; they are
-#: evidence and they stay, but they are not rows in this table.
+#: The archives this version covers, oldest first: committed, locked (ADR 0021) and
+#: carrying the provenance record (ADR 0013, WP-0.3), without which a row cannot name
+#: its own model, strategy or mode. The 37 older archives predate it — still evidence,
+#: not rows in this table.
 SCOPE: Final[tuple[str, ...]] = (
-    # Canned full suite, development role — the run that produced the blessed
-    # baseline's sibling on 2026-09-15 (cmd #238's bless run is its own,
-    # uncommitted archive; this one is the committed twin of that sweep).
+    # Canned full suite, development role: the committed twin of the sweep that
+    # produced the blessed baseline on 2026-09-15 (cmd #238).
     "2408b07ef532",
     # Canned full suite, benchmark role — the Phase 1 close sweep (cmd #248).
     "32ae38f6b38b",
-    # The four live legs of the Phase 1 reduced close, in the order the owner
-    # released them. The first is the RED; a leaderboard that listed only the
-    # greens would be a selected sample of itself.
+    # The four live legs of the Phase 1 reduced close, in release order. The first is
+    # the RED: a leaderboard of only the greens is a selected sample of itself.
     "42000dfda188",
     "845bdae22195",
     "ee183c85429c",
     "47abb70a2b9e",
     # --- added by the Phase 2 close (WO-R3-195) ---
-    # Canned full suite, benchmark role, the first sweep run AFTER the
-    # ground-truth labels landed (cmd #260). This is the archive that ends
-    # "no root-cause number": 32 of its 41 rows carry a graded diagnosis.
+    # Canned full suite, benchmark role, the first sweep AFTER the ground-truth labels
+    # (cmd #260) — the archive that ends "no root-cause number": 32 of 41 rows graded.
     "b75527784077",
     # The live read-only pass. Its own ROOT_CAUSE verdicts are superseded —
     # see SUPERSEDED_ROOT_CAUSE below — and every other dimension on it stands.
@@ -126,56 +76,42 @@ SCOPE: Final[tuple[str, ...]] = (
     "648a32f2339d",
     "fc896b25a09c",
     # --- added by the FINAL Phase 2 close (WO-R3-195) ---
-    # The two re-runs of those reds, after their fixes merged: the stale-cache
-    # sensor (platform v0.6.8, commander cmd #269) and ADR 0041's whole-queue
-    # rule (cmd #270). Both green. They sit BESIDE the reds rather than in place
-    # of them — same arm, same scenario, one change between the two runs — so a
-    # per-scenario pairing in this table has two rows for each of them and the
-    # pass rate over the seeded legs is 3 of 5, not 3 of 3.
+    # The two re-runs of those reds after their fixes merged (v0.6.8's stale-cache
+    # sensor, cmd #269; ADR 0041's whole-queue rule, cmd #270). Both green, and BESIDE
+    # the reds rather than instead of them — so the seeded legs pass 3 of 5, not 3 of 3.
     "d16aa18dce08",
     "42c675d9c145",
 )
 
-#: Archives whose ROOT_CAUSE verdicts have been withdrawn and replaced by a
-#: committed offline re-grade, mapped to the document that replaces them.
-#:
-#: `0db6fe722f7c` graded its diagnoses against labels written for each
-#: scenario's CANNED world while running against an unseeded LIVE one
-#: (INC-003), which made seven correct "nothing is wrong here" answers read as
-#: misdiagnoses. ADR 0040 scoped a label to the world it describes, and the
-#: archive was re-graded offline at no cost. The archive itself is untouched
-#: and stays untouched (invariant 9) — the substitution happens here, on the
-#: way into the table, so that this report never restates a number the project
-#: has formally withdrawn. The re-grade's verdicts are read, not recomputed:
-#: it is the reviewed answer for that run and a second opinion assembled here
-#: would be exactly the kind of quiet re-scoring this module exists to avoid.
+#: Archives whose ROOT_CAUSE verdicts were withdrawn, mapped to the committed re-grade
+#: that replaces them. `0db6fe722f7c` graded canned-world labels against an unseeded
+#: LIVE world (INC-003), so seven correct "nothing is wrong here" answers read as
+#: misdiagnoses; ADR 0040 scoped a label to its world. The archive stays untouched
+#: (invariant 9) and the substitution happens here, with the re-grade's verdicts READ
+#: rather than recomputed — a second opinion assembled here would be quiet re-scoring.
 SUPERSEDED_ROOT_CAUSE: Final[dict[str, str]] = {
     "0db6fe722f7c": "evals/reports/regrades/regrade_report.20260917T133824Z.0db6fe722f7c.json",
 }
 
-#: Plan 03 § 10: ~100 paired trials per arm to detect a 15-point difference at
-#: 80% power. Every difference below it is labelled in the artifact and in the
-#: rendered document — that label is the whole point of § 12.
+#: Plan 03 § 10: ~100 paired trials per arm to detect a 15-point difference at 80%
+#: power. Every difference below it is labelled, in the artifact and the document.
 PAIRED_TRIAL_FLOOR: Final[int] = 100
 
-#: Paired bootstrap over the per-scenario deltas. Fixed seed, fixed count: the
-#: report is a function of the archives, so its CIs have to be too — a CI that
-#: moved between two runs of the same assembler would break the byte-for-byte
-#: regeneration test and, more importantly, would not be a fact about the runs.
+#: Paired bootstrap over the per-scenario deltas, fixed seed and count: the report is
+#: a function of the archives, so a CI that moved between two assemblies of the same
+#: scope would not be a fact about the runs (and would break the regeneration test).
 BOOTSTRAP_RESAMPLES: Final[int] = 2000
 BOOTSTRAP_SEED: Final[int] = 194
 BOOTSTRAP_CONFIDENCE: Final[float] = 0.95
 
-#: What identifies an arm. Not the same as ``regression.GROUPING_KEYS``: those
-#: seven are how the RESULTS are sliced, these three are what was being
-#: measured. ``agent_model`` is deliberately absent — it is the table's, not
-#: the arm's, and the refusal above is what keeps that true.
+#: What identifies an arm — not ``regression.GROUPING_KEYS``, which slices the
+#: RESULTS. ``agent_model`` is deliberately absent: it is the table's, not the arm's,
+#: and the refusal above is what keeps that true.
 ARM_KEYS: Final[tuple[str, ...]] = ("strategy", "model_role", "execution_mode")
 
-#: Plan 03 § 15's aggregate contents, in its order, plus the grouping WP-2.5
-#: opens with. Closed list: ``assemble`` refuses to emit a section outside it
-#: and refuses to leave one empty — a section that quietly disappeared would
-#: read as "nothing to report" when it means "nobody computed it".
+#: Plan 03 § 15's aggregate contents in its order, plus WP-2.5's grouping. A closed
+#: list: ``assemble`` refuses a section outside it and refuses to leave one empty,
+#: because a vanished section reads as "nothing to report" and means "nobody computed".
 SECTION_KEYS: Final[tuple[str, ...]] = (
     "grouping",
     "strategy_leaderboard",
@@ -234,11 +170,9 @@ class Source:
     def filtered(self) -> bool:
         """Whether the run was produced under ``--only``.
 
-        The regression gate refuses a filtered report as a gate input, and for
-        the same reason this report will not put one in a suite-level
-        comparison: the scenarios it does not contain are missing, not failed.
-        Its rows are still rows — a live leg IS a one-scenario run — so it is
-        excluded from the suite diff and nothing else.
+        Excluded from the suite diff for the gate's own reason — its absent scenarios
+        are missing, not failed — and from nothing else: a live leg IS a one-scenario
+        run, so its rows are still rows.
         """
         return bool(self.report.only_patterns)
 
@@ -265,9 +199,8 @@ def read_scope(root: Path, archives: Sequence[str] = SCOPE) -> list[Source]:
 def provenance_carrying_archives(root: Path) -> list[str]:
     """Every committed archive whose rows all carry provenance, sorted.
 
-    The reading behind ``SCOPE``, kept as code so extending the scope is a
-    command rather than a hand-audit of 44 directories. Not used by
-    ``assemble``: see the module docstring on why the scope is pinned.
+    The reading behind ``SCOPE``, as code, so extending it is a command rather than a
+    hand-audit of 44 directories. Not used by ``assemble`` — the scope is pinned.
     """
     found = []
     for directory in sorted((root / "evals/runs").iterdir()):
@@ -292,10 +225,9 @@ def provenance_carrying_archives(root: Path) -> list[str]:
 class Row:
     """One scenario-run, flattened out of a ``ScenarioOutcome``.
 
-    Every field is read off the row itself, never joined back to today's
-    scenario corpus: the row says what the scenario WAS when it ran, which is
-    the property that stops a reclassification from silently re-labelling
-    history (``ScenarioOutcome.template_id``'s comment).
+    Every field comes off the row itself, never joined back to today's corpus: the row
+    says what the scenario WAS when it ran, so a reclassification cannot re-label
+    history (``ScenarioOutcome.template_id``).
     """
 
     archive: str
@@ -306,9 +238,8 @@ class Row:
     execution_mode: str
     group: dict[str, str]
     passed: bool
-    #: ``(dimension, passed, detail)`` per graded dimension. The detail travels
-    #: with the verdict because one of them has to be read to tell a forbidden
-    #: action from an unsatisfied argument assertion — see ``safety_kind``.
+    #: ``(dimension, passed, detail)`` per graded dimension. The detail travels with
+    #: the verdict because ``safety_kind`` has to read it.
     dimensions: tuple[tuple[str, bool, str], ...]
     root_cause_graded: bool
     root_cause_correct: bool
@@ -331,10 +262,9 @@ class Row:
 def _root_cause_verdict(outcome: ScenarioOutcome) -> tuple[bool, bool]:
     """``(graded, correct)`` for one row's ROOT_CAUSE dimension.
 
-    "Graded" is a substantive detail, exactly as ``runner.root_cause_coverage``
-    defines it — reusing ``is_vacuous_detail`` rather than re-deriving the
-    condition keeps this number, the run summary's and the regression gate's
-    vacated-assertion check reading one signal.
+    "Graded" means a substantive detail, as ``runner.root_cause_coverage`` defines it:
+    reusing ``is_vacuous_detail`` keeps this number, the run summary and the gate's
+    vacated-assertion check on one signal.
     """
     for dimension in outcome.report.dimensions:
         if dimension.dimension is GradeDimension.ROOT_CAUSE:
@@ -355,13 +285,10 @@ class Regraded:
 def regraded_verdicts(root: Path, archive: str) -> dict[str, Regraded]:
     """``{scenario: Regraded}`` from the re-grade that supersedes an archive.
 
-    Read out of the committed re-grade document rather than recomputed, and
-    scored with the same ``is_vacuous_detail`` test ``_root_cause_verdict``
-    uses, so "graded" means the same thing on both sides of the substitution.
-    The whole row is replaced, not only the ROOT_CAUSE cell: a withdrawn
-    dimension verdict changes whether the ROW passed, and a pass rate computed
-    from one and a diagnosis column computed from the other would be two
-    different runs printed side by side.
+    Read out of the committed document, not recomputed, and scored with
+    ``_root_cause_verdict``'s own ``is_vacuous_detail`` test. The WHOLE row is
+    replaced: a withdrawn dimension changes whether the row passed, and mixing the two
+    would print two different runs side by side.
     """
     document = json.loads((root / SUPERSEDED_ROOT_CAUSE[archive]).read_text())
     if document["archive"] != archive:
@@ -443,9 +370,8 @@ def build_rows(root: Path, sources: Iterable[Source]) -> list[Row]:
 def refusal_for(rows: Sequence[Row]) -> str | None:
     """The cross-model refusal over a whole scope, by archive.
 
-    ``regression.model_refusal`` writes the sentence; this only says which
-    sides to name, and the sides are the archives, because the reader's next
-    move is to drop or re-run one of them.
+    ``regression.model_refusal`` writes the sentence; this names the sides, and they
+    are archives because the reader's next move is to drop or re-run one.
     """
     by_archive: dict[str, set[str]] = {}
     for row in rows:
@@ -464,9 +390,8 @@ def refusal_for(rows: Sequence[Row]) -> str | None:
 def _rate(numerator: int, denominator: int) -> float | None:
     """A rate rounded for rendering, or ``None`` when the denominator is 0.
 
-    ``None``, never 0.0: "nothing was measured" and "everything measured was
-    wrong" are different claims, and the second one is the kind of untrue
-    statement about the agent this whole tree exists to avoid.
+    ``None``, never 0.0: "nothing was measured" and "everything measured was wrong"
+    are different claims about the agent.
     """
     return None if denominator == 0 else round(numerator / denominator, 4)
 
@@ -483,10 +408,8 @@ def _usd(total: Decimal) -> str:
 def _bootstrap_ci(deltas: Sequence[float]) -> list[float] | None:
     """Percentile CI of the mean paired delta, or ``None`` below two pairs.
 
-    A paired bootstrap: the resampling unit is the PAIR, which is what makes
-    the interval a statement about the difference rather than about two
-    independent samples (plan 03 § 12). With one pair there is nothing to
-    resample and the honest answer is no interval at all.
+    The resampling unit is the PAIR, which is what makes the interval a statement
+    about the difference rather than about two independent samples (plan 03 § 12).
     """
     if len(deltas) < 2:
         return None
@@ -525,11 +448,9 @@ def _dimension_rates(rows: Sequence[Row]) -> dict[str, float | None]:
     return {name: _rate(passed[name], graded[name]) for name in sorted(graded)}
 
 
-#: Phrases ``_grade_safety`` writes for the half of the dimension that is about
-#: what the agent DID (a forbidden tool, a forbidden job id, an out-of-scope
-#: replay category). The other half — ``expected_action_arguments`` — fails
-#: whenever the sanctioned action did not fire at all, which on an escalated
-#: run is a missing action and not an unsafe one.
+#: Phrases ``_grade_safety`` writes for the half of the dimension about what the agent
+#: DID. The other half (``expected_action_arguments``) fails whenever the sanctioned
+#: action did not fire, which on an escalated run is missing, not unsafe.
 _FORBIDDEN_MARKERS: Final[tuple[str, ...]] = (
     "forbidden tool(s) called or attempted",
     "forbidden job_ids",
@@ -541,15 +462,12 @@ _FORBIDDEN_MARKERS: Final[tuple[str, ...]] = (
 def safety_kind(detail: str) -> str:
     """Which half of a failed SAFETY dimension fired.
 
-    Plan 03 § 7.7 wants a forbidden-action RATE, and the SAFETY dimension is
-    two rules in one: "did it touch something forbidden?" and "was the
-    sanctioned action aimed at the right resource?". A run that escalated
-    without acting fails the second and cannot have broken the first — calling
-    that a safety violation would be a false statement about the agent, which
-    is the class of error ``context/INCIDENTS.md`` exists to record. The detail
-    string is the only place the two are distinguishable in a committed
-    archive, so the marker list above is narrow and the detail is carried into
-    the report beside the verdict for a reader to check.
+    Plan 03 § 7.7 wants a forbidden-action RATE, and SAFETY is two rules in one: did it
+    touch something forbidden, and was the sanctioned action aimed right? A run that
+    escalated without acting fails the second and cannot have broken the first, so
+    calling it a violation would be untrue about the agent. The detail string is the
+    only place a committed archive distinguishes them, so the marker list stays narrow
+    and the detail is carried into the report for a reader to check.
     """
     return (
         "forbidden_action"
@@ -561,17 +479,11 @@ def safety_kind(detail: str) -> str:
 def arm_summary(arm: tuple[str, str, str], rows: Sequence[Row]) -> dict[str, Any]:
     """One leaderboard row: correctness, and the budget beside it (02 § 8).
 
-    ``judge_mean_overall`` is gated (WP-6.3). It is the one number in this row
-    that is a statement about a MODEL'S OPINION rather than about the run, and it
-    is withheld until ``LEADERBOARD_JUDGE`` has an id in
-    ``JUDGE_CALIBRATION_REPORTS`` — the same rule, the same wording and the same
-    ``WITHHELD`` string the selector fields use two sections down.
-
-    ``judged_runs`` is NOT gated, on the same split ``_selector_number`` makes:
-    how many runs carry a judge score is a coverage fact about this arm, true
-    whatever the judge's calibration turns out to be. Withholding it would hide
-    the denominator as well as the number, and a reader could no longer tell "not
-    calibrated" from "never judged".
+    ``judge_mean_overall`` is a statement about a MODEL'S OPINION, so it is withheld
+    until ``LEADERBOARD_JUDGE`` has an id in ``JUDGE_CALIBRATION_REPORTS`` (WP-6.3).
+    ``judged_runs`` is NOT gated, on ``_selector_number``'s split: it is a coverage
+    fact, and hiding it would leave "not calibrated" indistinguishable from
+    "never judged".
     """
     coverage = coverage_over(
         ((row.root_cause_graded, row.root_cause_correct) for row in rows), total=len(rows)
@@ -621,9 +533,8 @@ def _by_arm(rows: Sequence[Row]) -> dict[tuple[str, str, str], list[Row]]:
 # Differences — never a bare float
 # --------------------------------------------------------------------------
 
-#: What can be differenced, and how each value is read off a row. Rates are
-#: 0/1 per run so that "accuracy" and "mean tokens" go through one code path
-#: and one paired-trial count.
+#: What can be differenced, and how each value is read off a row. Rates are 0/1 per
+#: run, so "accuracy" and "mean tokens" share one code path and one paired count.
 METRICS: Final[dict[str, Callable[[Row], float]]] = {
     "pass_rate": lambda row: float(row.passed),
     "tool_calls": lambda row: float(row.tool_calls),
@@ -649,12 +560,10 @@ def paired_difference(
 ) -> dict[str, Any]:
     """One difference, with everything a reader needs to not overstate it.
 
-    Paired on the scenario name, because that is the strongest instance
-    identity the evidence carries today: ``template_id``/``seed`` are absent
-    from every pre-WP-1.4 row, and plan 03 § 12's "same recorded world id"
-    arrives with Phase 3. Reps of the same scenario inside one arm are
-    averaged first, so an arm that ran one scenario twice does not weigh it
-    twice against an arm that ran it once.
+    Paired on the scenario NAME, the strongest instance identity today's evidence
+    carries (``template_id``/``seed`` are absent pre-WP-1.4, and § 12's recorded world
+    id arrives with Phase 3). Reps inside one arm are averaged first, so an arm that
+    ran a scenario twice does not weigh it twice.
     """
     left_values = _per_scenario(grouped[left], metric)
     right_values = _per_scenario(grouped[right], metric)
@@ -696,10 +605,8 @@ def comparable_arm_pairs(
 ) -> list[tuple[tuple[str, str, str], tuple[str, str, str]]]:
     """Arms that differ in exactly ONE arm key, so a delta has one candidate cause.
 
-    Two arms apart in both role and mode produce a number nothing can
-    attribute — the same failure the cross-model refusal exists to prevent,
-    one level down. Those pairs are not compared; they are listed as skipped,
-    with their two differing keys named.
+    Two arms apart in both role and mode give a number nothing can attribute — the
+    cross-model refusal one level down. Those are listed as skipped, keys named.
     """
     pairs = []
     for index, left in enumerate(arms):
@@ -927,9 +834,8 @@ def _tools_vs_accuracy(rows: Sequence[Row]) -> dict[str, Any]:
 def _not_measurable(what: str, why: str, requires: Sequence[str]) -> dict[str, Any]:
     """A section that exists, says it has no number, and says what it needs.
 
-    Kept as a section rather than dropped: plan 03 § 15 lists it, and a reader
-    who finds it missing cannot tell "nobody computed it" from "there was
-    nothing to compute".
+    Kept rather than dropped: plan 03 § 15 lists it, and a missing section cannot say
+    "nobody computed it" apart from "there was nothing to compute".
     """
     return {
         "metric": what,
@@ -943,16 +849,10 @@ def _not_measurable(what: str, why: str, requires: Sequence[str]) -> dict[str, A
 def step_records_in(root: Path, archive: str) -> dict[str, list[dict[str, Any]]]:
     """Every ``step`` trace record in one archive, by scenario name (WP-5.2).
 
-    An archive's ``traces/<scenario>.jsonl`` holds the per-step research records
-    when the run had ``EVAL_TRACE_DIR`` set; a canned sweep does not, so most
-    archives have no ``traces/`` directory at all and this returns nothing. That
-    absence is why ``_pass_at_k`` below still reports the metric as not
-    measurable over today's scope — the code path exists, and there is no data
-    in scope for it to read.
-
-    Malformed lines are skipped rather than raising. A trace file is append-only
-    evidence written across a run that can be killed mid-line (F-002's cousin),
-    and a half-written last line must not take out a report over ten archives.
+    ``traces/<scenario>.jsonl`` exists only when the run had ``EVAL_TRACE_DIR`` set, so
+    most archives have none and this returns nothing — which is why ``_pass_at_k``
+    still reports itself unmeasurable. Malformed lines are skipped rather than raising:
+    a run killed mid-line must not take out a report over ten archives.
     """
     found: dict[str, list[dict[str, Any]]] = {}
     traces = archive_dir(root, archive) / "traces"
@@ -974,10 +874,9 @@ def step_records_in(root: Path, archive: str) -> dict[str, list[dict[str, Any]]]
 def _ground_truths(root: Path) -> dict[str, tuple[HypothesisCategory, ...]]:
     """Scenario name → declared root causes, for the scenarios that declare any.
 
-    Read from the corpus rather than from an archive: the labels are the
-    evaluator's (ADR 0038) and the archive holds the agent's answers. A scenario
-    that declares none is absent here, and a run of it is *not graded* rather
-    than scored a miss (ADR 0040).
+    From the corpus, not an archive: the labels are the evaluator's (ADR 0038) and the
+    archive holds the agent's answers. A scenario that declares none is absent, and a
+    run of it is NOT GRADED rather than a miss (ADR 0040).
     """
     return {
         scenario.name: scenario.ground_truth.root_causes
@@ -986,86 +885,48 @@ def _ground_truths(root: Path) -> dict[str, tuple[HypothesisCategory, ...]]:
     }
 
 
-#: The smallest candidate set this section will report a pass@k over.
-#:
-#: Three live archives in scope already carry ``step`` records — ``baseline``
-#: wrote them, one candidate each — so "no candidate sets exist" stopped being
-#: the reason this section is unmeasurable the moment WP-2.1 landed. The reason
-#: now is sharper and it is this constant: **pass@1 over a one-candidate set is
-#: the ROOT_CAUSE dimension under a second name.** It asks "was the top
-#: diagnosis correct", which the report already answers, and printing it here as
-#: pass@k would put one measurement in the table twice — the same relabelling
-#: the ``calibration`` section refuses when it declines to call the briefing
-#: judge's scores a calibration. pass@k exists to say what ENUMERATION bought,
-#: so it is reported for the arms that enumerate.
-#:
-#: Pinned by ``tests/unit/test_candidate_metrics.py::
-#: TestTheReportSectionScopesItselfToEnumeratingArms``, both ways.
+#: The smallest candidate set this section will report a pass@k over. Three archives
+#: in scope carry ``step`` records, all ``baseline``'s one-candidate sets, and **pass@1
+#: over a one-candidate set is the ROOT_CAUSE dimension under a second name** — the
+#: same relabelling the ``calibration`` section refuses. pass@k says what ENUMERATION
+#: bought, so it is reported for the arms that enumerate. Pinned both ways by
+#: ``test_candidate_metrics.py::TestTheReportSectionScopesItselfToEnumeratingArms``.
 ENUMERATING_SET_SIZE: Final[int] = 2
 
 
-#: Calibration report id per selector arm, declared rather than discovered.
-#:
-#: Plan 02:243 is categorical: "NO SELECTOR NUMBER IS REPORTED BEFORE ITS
-#: CALIBRATION REPORT EXISTS", and plan 04:169 makes it WP-6.3's acceptance — no
-#: selector number appears in a report without a calibration report id beside it.
-#: This is where that id lives, keyed by the arm it calibrates
-#: (``strategy_config``'s generator plus its N, which is the arm identity plan
-#: 02 § 12 defines).
-#:
-#: **Empty today, which is the correct state**: WP-6.3 has not run, so every
-#: selector number in this document is withheld and says so. Declared as a
-#: constant, the same shape as ``SCOPE`` and ``SUPERSEDED_ROOT_CAUSE`` above,
-#: because the register is a claim a reviewer should see in a diff: adding an id
-#: here is the act of saying "this arm's uncertainty has been calibrated, and
-#: here is the artefact". Deriving it from whatever file happens to be on disk
-#: would make the gate open itself.
-#:
-#: Pinned both ways by ``tests/unit/test_candidate_selector.py::
-#: TestNoSelectorNumberWithoutACalibrationReport``.
+#: Calibration report id per selector arm, declared rather than discovered. Plan 02:243
+#: is categorical — "NO SELECTOR NUMBER IS REPORTED BEFORE ITS CALIBRATION REPORT
+#: EXISTS" — and plan 04:169 makes it WP-6.3's acceptance. Keyed by the arm identity
+#: plan 02 § 12 defines (generator plus N). EMPTY today, which is correct: every
+#: selector number is withheld and says so. A constant, because adding an id is a claim
+#: a reviewer should see in a diff; deriving it from disk would let the gate open
+#: itself. Pinned both ways by
+#: ``test_candidate_selector.py::TestNoSelectorNumberWithoutACalibrationReport``.
 CALIBRATION_REPORTS: Final[Mapping[str, str]] = MappingProxyType({})
 
 
-#: Calibration report id per JUDGE, declared exactly as the selector register
-#: above is, and for the same reason: adding an id here is the act of saying
-#: "this judge's numbers have been checked, and here is the artefact".
-#:
-#: The same rule, one role further out. Plan 02:243 is written about the selector,
-#: and plan 04:169's acceptance is written about selector numbers — but the
-#: argument does not depend on which model is speaking. A briefing-judge mean is
-#: a number whose scale nobody has checked until its judge is calibrated, and
-#: ``judge_mean_overall`` has been printed in this document's leaderboard since
-#: WP-2.5 with nothing beside it. INC-002 is what an unchecked judge number looks
-#: like when it is wrong: 0.38 on a briefing that was right, on a green archive,
-#: and the only reason it misled nobody is that nothing gated on it.
-#:
-#: **Empty today, which is the correct state.** WP-6.3 built the harness; the
-#: sweep that fills this is a paid run and is deferred (owner instruction O-22).
-#: So every judge number in this document is withheld and says so.
-#:
-#: Keyed by the role's normative name (plan 02 § 3) —
-#: ``evals/judge_calibration/roles.CALIBRATED_ROLES``. A fake-client calibration
-#: must never be entered here; ``CalibrationReport.is_a_measurement`` is the
-#: property that distinguishes one, and the reports say ``judge_client: fake``
-#: on their face.
-#:
-#: Pinned both ways by ``tests/unit/test_judge_calibration.py::
-#: TestNoJudgeNumberWithoutACalibrationReport``.
+#: The same register one role further out, for the JUDGE: plan 02:243's argument does
+#: not depend on which model is speaking, and INC-002 is what an unchecked judge number
+#: looks like when it is wrong (0.38 on a briefing that was right, on a green archive).
+#: EMPTY today, which is correct — WP-6.3 built the harness and the sweep that fills
+#: this is a deferred paid run (O-22) — so every judge number is withheld and says so.
+#: Keyed by the role's normative name (``judge_calibration/roles.CALIBRATED_ROLES``). A
+#: fake-client calibration must never be entered here; ``is_a_measurement`` is what
+#: distinguishes one. Pinned both ways by
+#: ``test_judge_calibration.py::TestNoJudgeNumberWithoutACalibrationReport``.
 JUDGE_CALIBRATION_REPORTS: Final[Mapping[str, str]] = MappingProxyType({})
 
-#: The judge whose scores ``judge_overall`` carries. ``evals/graders/llm_judge.py``
-#: is the briefing judge and nothing else writes that column, so the gate on the
-#: leaderboard's judge number is a question about exactly this role. Named rather
-#: than spelled at the call site so a second judge column arriving later has to
-#: choose its own register key instead of inheriting this one by accident.
+#: The judge whose scores ``judge_overall`` carries — ``evals/graders/llm_judge.py`` is
+#: the only writer of that column. Named rather than spelled at the call site, so a
+#: second judge column has to choose its own register key instead of inheriting this.
 LEADERBOARD_JUDGE: Final[str] = "briefing_judge"
 
 
 def judge_calibration_report_for(judge: str) -> str | None:
     """The calibration report id for one judge, or ``None``.
 
-    One reader of the register, for the reason its selector sibling gives: a gate
-    with two spellings is a gate one section can check a different way.
+    One reader of the register: a gate with two spellings is one a section can check a
+    different way.
     """
     return JUDGE_CALIBRATION_REPORTS.get(judge)
 
@@ -1082,10 +943,9 @@ def calibration_report_for(arm: str) -> str | None:
 def selector_arm_key(strategy: str, config: Mapping[str, Any]) -> str:
     """The arm a selector number belongs to: strategy, generator and N.
 
-    Plan 02 § 12's arm is ``(generator, N, selector)``, and the finding that made
-    it explicit is that two different generators under one selector are two arms —
-    a report keyed on the strategy name alone would collapse them into one row and
-    average two oracle gaps that answer different questions.
+    Plan 02 § 12's arm is ``(generator, N, selector)``: two generators under one
+    selector are two arms, and keying on the strategy name would average two oracle
+    gaps that answer different questions.
     """
     generator = str(config.get("generator", "")) or "unknown"
     n = config.get("n", "unknown")
@@ -1095,12 +955,9 @@ def selector_arm_key(strategy: str, config: Mapping[str, Any]) -> str:
 def _outcome_of(source: Source, scenario: str) -> ScenarioOutcome | None:
     """One scenario's outcome inside one archive's report, or ``None``.
 
-    The world a run happened in and the arm that ran it are both properties of the
-    RUN, not of its trace file, so ``selected@k`` cannot be paired without this.
-    Two things are read off it: ``provenance`` (the execution mode and the arm's
-    stamped config) and, on a recorded run, ``replay["world_fingerprint"]`` — the
-    recording's own identity, which is what makes two archives of one recording a
-    paired comparison (ADR 0049).
+    The world and the arm are properties of the RUN, not of its trace file, so
+    ``selected@k`` cannot be paired without this: ``provenance`` and, on a recorded
+    run, ``replay["world_fingerprint"]`` (ADR 0049).
     """
     for outcome in source.report.outcomes:
         if outcome.scenario == scenario:
@@ -1111,9 +968,8 @@ def _outcome_of(source: Source, scenario: str) -> ScenarioOutcome | None:
 def recorded_fingerprint(outcome: ScenarioOutcome) -> str | None:
     """The recording's identity on a recorded outcome, or ``None``.
 
-    One reader, so the key the report pairs on and the value the runner wrote have
-    one spelling between them. ``None`` for every non-recorded run — the ``replay``
-    row is only present in recorded mode (``runner._replay_record``).
+    One reader, so the key the report pairs on and the value the runner wrote have one
+    spelling. ``None`` off recorded mode, where ``replay`` is absent.
     """
     replay = outcome.replay
     if not isinstance(replay, Mapping):
@@ -1125,16 +981,10 @@ def recorded_fingerprint(outcome: ScenarioOutcome) -> str | None:
 def _candidate_rows(root: Path, sources: Sequence[Source]) -> list[dict[str, Any]]:
     """One row per (archive, scenario) whose trace carries enumerated sets.
 
-    Empty over today's scope: every ``step`` record in it was written by
-    ``baseline``, whose sets hold one candidate — see ``ENUMERATING_SET_SIZE``.
-    The sections below therefore still report themselves unmeasurable, and become
-    measurable the moment a best-of-N or selector archive enters the scope,
-    without another packet editing this file.
-
-    Each row carries its ``world`` (WP-6.2). That is what makes ``pass@k`` and
-    ``selected@k`` a PAIRED pair: both are computed off the same run's own steps,
-    in one world, and the oracle-gap section refuses to difference two rows whose
-    worlds differ (``OracleGapAcrossWorlds``).
+    Empty over today's scope (every ``step`` record is ``baseline``'s one-candidate
+    set, ``ENUMERATING_SET_SIZE``), and measurable the moment a best-of-N or selector
+    archive enters it, with no edit here. Each row carries its ``world`` (WP-6.2),
+    which is what makes ``pass@k`` and ``selected@k`` a PAIRED pair.
     """
     rows: list[dict[str, Any]] = []
     truths: dict[str, tuple[HypothesisCategory, ...]] | None = None
@@ -1144,8 +994,8 @@ def _candidate_rows(root: Path, sources: Sequence[Source]) -> list[dict[str, Any
                 truths = _ground_truths(root)
             expected = truths.get(scenario)
             if expected is None:
-                # No label: not graded, not a miss. Counted nowhere rather than
-                # counted as zero — the mistake INC-003 cost $2.15 to learn.
+                # No label: not graded, not a miss — counted nowhere rather than as
+                # zero, the mistake INC-003 cost $2.15 to learn.
                 continue
             metrics = measure(records, expected)
             if metrics.candidates_generated == 0:
@@ -1219,10 +1069,8 @@ def _candidate_rows(root: Path, sources: Sequence[Source]) -> list[dict[str, Any
 def _group_of_scenario(root: Path, scenario: str) -> dict[str, str]:
     """This scenario's family and difficulty, for the by-group breakdowns.
 
-    Read from the corpus, like ``_ground_truths``, and for the same reason: the
-    grouping is the evaluator's classification. ``unknown`` rather than an
-    omission for a scenario that declares none, so a row is never silently
-    dropped out of a group table.
+    From the corpus, like ``_ground_truths``: the grouping is the evaluator's.
+    ``unknown`` rather than an omission, so no row silently leaves a group table.
     """
     for candidate in load_scenarios(root / "evals" / "scenarios"):
         if candidate.name == scenario:
@@ -1236,26 +1084,16 @@ def _group_of_scenario(root: Path, scenario: str) -> dict[str, str]:
 def _pass_at_k(root: Path, sources: Sequence[Source]) -> dict[str, Any]:
     """pass@k, appeared-at-any-step, the two duplicate rates, and selected@k.
 
-    Measured when an archive in scope persisted per-step candidate sets; the
-    same "not measurable, and here is what it needs" block as before when none
-    did, which is every archive in scope today.
-
-    ``selected@k`` sits in the same section as ``pass@k`` rather than in its own,
-    because the whole point of the pair is that both terms come off the same run's
-    own steps in one world — putting them in two sections would be the first step
-    toward differencing two numbers measured somewhere else (plan 03 § 12).
-    It is WITHHELD, row by row, until that arm has a calibration report
-    (plan 02:243) — see ``_selector_number``.
+    Measured when an archive in scope persisted per-step candidate sets, which none in
+    scope does today. ``selected@k`` shares this section rather than taking its own,
+    because both terms have to come off one run's own steps in one world (plan 03 § 12);
+    it is WITHHELD row by row until that arm has a calibration report (``_selector_number``).
     """
     rows = _candidate_rows(root, sources)
     if not rows:
-        # The metric NAME and every string here are the ones the committed
-        # document already carries, deliberately. This packet adds selected@k to
-        # the measurable branch and must not move a byte of the unmeasurable one:
-        # the research report is versioned evidence (invariant 9), and a
-        # re-render that differs only in a section heading would either rewrite a
-        # committed artefact or spend a new version on a change no reader asked
-        # for. ``tests/unit/test_research_report.py`` pins it both ways.
+        # Every string here is the one the committed document already carries: the
+        # report is versioned evidence (invariant 9), so a re-render differing only in
+        # a heading would spend a version on nothing. Pinned by test_research_report.
         return _not_measurable(
             "pass@k (plan 03 § 7.2)",
             "pass@k reads the final-step candidate SET; a committed report carries one graded "
@@ -1274,8 +1112,8 @@ def _pass_at_k(root: Path, sources: Sequence[Source]) -> dict[str, Any]:
     }
 
 
-#: The rule every selector number in this document is subject to, in the
-#: document, in its own words. Plan 02:243 and plan 04:169.
+#: The rule every selector number here is subject to, in the document, in its own
+#: words (plan 02:243, plan 04:169).
 SELECTOR_GATE_RULE: Final[str] = (
     "plan 02:243 — NO SELECTOR NUMBER IS REPORTED BEFORE ITS CALIBRATION REPORT "
     "EXISTS. Every selected@k, oracle gap and selector-uncertainty value below is "
@@ -1285,9 +1123,8 @@ SELECTOR_GATE_RULE: Final[str] = (
     "attribute to selection whatever the miscalibration did."
 )
 
-#: What a withheld selector field reads as. A string rather than ``None``, so a
-#: reader of the JSON cannot mistake "this was not reported" for "this was zero"
-#: — the distinction INC-003 turned on one level up.
+#: What a withheld selector field reads as. A string, not ``None``, so a reader of the
+#: JSON cannot mistake "not reported" for "zero" — INC-003's distinction one level up.
 WITHHELD: Final[str] = "withheld: no calibration report for this arm (plan 02:243)"
 
 #: The same rule for a JUDGE number, in the document, in its own words (WP-6.3).
@@ -1302,9 +1139,8 @@ JUDGE_GATE_RULE: Final[str] = (
     "a statement about the judge."
 )
 
-#: What a withheld judge number reads as. A string, not ``None`` and not 0.0, for
-#: the reason its selector sibling gives: a reader of the JSON must not be able to
-#: mistake "this was not reported" for "this was zero" (INC-003, one level up).
+#: What a withheld judge number reads as: a string, for the reason its selector
+#: sibling gives — "not reported" must not read as "zero".
 WITHHELD_JUDGE: Final[str] = (
     f"withheld: no calibration report for {LEADERBOARD_JUDGE} (plan 02:243, plan 04:169)"
 )
@@ -1313,11 +1149,9 @@ WITHHELD_JUDGE: Final[str] = (
 def _selector_number(row: dict[str, Any]) -> dict[str, Any]:
     """One candidate row with its selector fields gated on a calibration report.
 
-    The generation half (``pass@k``, the duplicate rates) is NOT gated: it is a
-    measurement of what the generator produced and has nothing to do with the
-    selector's calibration. Only the fields that are statements about the
-    SELECTOR are withheld, and each one is replaced by a sentence saying so
-    rather than by ``null``.
+    The generation half (``pass@k``, the duplicate rates) is NOT gated — it measures
+    the generator. Only statements about the SELECTOR are withheld, each replaced by a
+    sentence rather than by ``null``.
     """
     if row["calibration_report_id"] is not None or row["selector_calls"] == 0:
         return row
@@ -1334,33 +1168,17 @@ def _selector_number(row: dict[str, Any]) -> dict[str, Any]:
 def _oracle_gap(root: Path, sources: Sequence[Source]) -> dict[str, Any]:
     """``oracle_gap@k = pass@k − selected@k``, by family and difficulty.
 
-    The headline analysis of the whole buildout (plan 02:241, plan 03 § 7.3): a
-    small gap says generation limits the agent, a large one says selection does.
-
-    Three things make the number honest, and each is a refusal rather than a
-    footnote.
-
-    **It is paired within one world.** Both terms come off one run's own steps, and
-    every row carries the ``WorldKey`` they were measured in. The aggregate below
-    groups rows by world before it differences anything, and a caller that asks
-    for a gap across two worlds gets ``OracleGapAcrossWorlds`` — the refusal
-    exists because INC-003 is what applying one world's expectations to another
-    cost: a live root-cause figure of "61%" that meant nothing.
-
-    **It is gated on a calibration report.** Plan 02:243. Every value here is
-    withheld until the arm has one.
-
-    **It is the EVALUATOR's number.** Nothing in it is computed from anything the
-    agent can read: ``pass@k`` and ``selected@k`` both need the scenario's
-    ``ground_truth``, which is evaluator-only by construction (ADR 0038, ADR 0049)
-    and reaches neither the planner's context nor the selector's. The gap exists
-    only in this file and in ``evals/candidate_metrics.py``, neither of which is
-    importable from ``src/incident_commander``.
+    The buildout's headline analysis (plan 02:241, 03 § 7.3): a small gap says
+    generation limits the agent, a large one says selection does. Three refusals keep
+    it honest — it is PAIRED within one world (rows carry their ``WorldKey`` and a
+    cross-world gap raises ``OracleGapAcrossWorlds``, because INC-003 is what applying
+    one world's labels to another cost), it is gated on a calibration report (02:243),
+    and it is the EVALUATOR's number: both terms need ``ground_truth``, which reaches
+    neither the planner nor the selector (ADR 0038, ADR 0049).
     """
     rows = [row for row in _candidate_rows(root, sources) if row["selector_calls"] > 0]
     if not rows:
-        # Byte-identical to what the committed document carries, for the reason
-        # given in ``_pass_at_k``.
+        # Byte-identical to the committed document, for ``_pass_at_k``'s reason.
         return _not_measurable(
             "oracle_gap@k = pass@k − selected@k (plan 03 § 7.3)",
             "both terms are unavailable for the reason above, and the selector strategy "
@@ -1407,10 +1225,8 @@ def _gap_by(
 ) -> list[dict[str, Any]]:
     """The gap at each k, grouped, with the paired count that produced it.
 
-    The count travels with the number for the reason plan 03 § 12 gives about
-    every difference in this document: a gap of 1.0 over one paired trial and a
-    gap of 1.0 over fifty are not the same claim, and only one of them is a
-    finding.
+    Plan 03 § 12's reason: a gap of 1.0 over one paired trial and over fifty are not
+    the same claim, and only one is a finding.
     """
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
@@ -1451,20 +1267,11 @@ def _gap_by(
 def _scenario_level_regressions(sources: Sequence[Source], rows: Sequence[Row]) -> dict[str, Any]:
     """Arm against arm, using the gate's own ``compare`` (WO-R2-79's definition).
 
-    Full-suite sources only, and "full" is two exclusions rather than one.
-
-    A FILTERED report is excluded for the reason the gate excludes it: its
-    absent scenarios would read as dropped coverage.
-
-    A PARTIAL report is excluded for the same reason one layer out. A run that
-    covers a subset of the corpus without being filtered — the read-only smoke
-    pass is the example: it selects the read-only scenarios by scope, not by
-    ``--only`` — produces the identical distortion. Comparing it to a full
-    sweep printed "7 regressions, 14 dropped scenarios", and those seven were
-    precisely the verdicts INC-003 withdrew: a live unseeded world graded
-    against labels written for a canned one. The scenarios it does not contain
-    are missing, not failed, and the world it ran in is not the world the other
-    side ran in.
+    Full-suite sources only, and "full" excludes two things. A FILTERED report, for the
+    gate's reason: its absent scenarios read as dropped coverage. And a PARTIAL one —
+    the read-only smoke pass selects by scope, not ``--only``, and comparing it to a
+    full sweep printed "7 regressions, 14 dropped scenarios", which were exactly the
+    verdicts INC-003 withdrew.
     """
     widest = max((len(source.report.outcomes) for source in sources), default=0)
     full = [
@@ -1526,9 +1333,8 @@ def _scenario_level_regressions(sources: Sequence[Source], rows: Sequence[Row]) 
 def _root_cause_difference_refusal(rows: Sequence[Row]) -> str:
     """Why no arm-vs-arm diagnosis difference is printed, in today's terms.
 
-    It used to be "nothing is graded". That stopped being true in Phase 2, and
-    a stale reason is worse than none — so the sentence is rebuilt from the
-    rows, and it now names the real obstacle: the graded rows do not PAIR.
+    "Nothing is graded" stopped being true in Phase 2, and a stale reason is worse than
+    none, so the sentence is rebuilt from the rows: the graded rows do not PAIR.
     """
     by_arm: dict[str, list[Row]] = {}
     for row in rows:
@@ -1591,9 +1397,8 @@ def _paired_differences(rows: Sequence[Row]) -> dict[str, Any]:
 def _root_cause_limit(root: Path, rows: Sequence[Row], sources: Sequence[Source]) -> str:
     """Which rows carry a diagnosis verdict, which do not, and why not.
 
-    Every number in this sentence is counted, not typed, because the point of
-    the sentence is that the denominator is small and the reasons it is small
-    are three different things.
+    Every number is counted, not typed: the point is that the denominator is small and
+    the three reasons it is small are different things.
     """
     graded = [row for row in rows if row.root_cause_graded]
     correct = sum(1 for row in graded if row.root_cause_correct)
@@ -1604,8 +1409,7 @@ def _root_cause_limit(root: Path, rows: Sequence[Row], sources: Sequence[Source]
         for outcome in source.report.outcomes
         if not any(d.dimension is GradeDimension.ROOT_CAUSE for d in outcome.report.dimensions)
     )
-    # Only archives actually in scope: the map is a repository-wide fact, the
-    # count is a fact about this document.
+    # Only archives in scope: the map is repository-wide, the count is this document's.
     world_mismatch = sum(
         json.loads((root / SUPERSEDED_ROOT_CAUSE[source.archive]).read_text())["root_cause"][
             "regraded"
@@ -1777,9 +1581,8 @@ def _table(header: Sequence[str], rows: Iterable[Sequence[str]]) -> list[str]:
 def render_difference(difference: dict[str, Any]) -> str:
     """One difference as one line — the only place a delta is written.
 
-    Single rendering point on purpose: "every difference carries its
-    paired-trial count" is a property that has to hold for every line, and the
-    cheapest way to guarantee it is to have one line-writer.
+    One line-writer, because "every difference carries its paired-trial count" has to
+    hold for every line.
     """
     ci = difference["bootstrap_ci"]
     interval = (
@@ -1806,12 +1609,9 @@ def render_difference(difference: dict[str, Any]) -> str:
 def _render_candidate_rows(value: dict[str, Any]) -> list[str]:
     """The pass@k table, when there was a candidate set to compute one from.
 
-    Prints every k that was asked for beside the ``effective_k`` the run could
-    answer, because pass@8 over a 4-candidate set is pass@4 wearing a bigger
-    number, and a table that hid the cap would invite exactly that reading. The
-    two duplicate rates are printed as two columns for the reason
-    ``evals/candidate_metrics.py`` keeps them apart: one is a schema refusal and
-    one is a modelling finding.
+    Every k asked for sits beside the ``effective_k`` the run could answer, because
+    pass@8 over a 4-candidate set is pass@4 wearing a bigger number. The two duplicate
+    rates stay two columns: one is a schema refusal, one a modelling finding.
     """
     ks = [entry["k"] for entry in value["rows"][0]["pass_at_k"]]
     lines = [
@@ -2142,12 +1942,10 @@ def render_markdown(document: dict[str, Any]) -> str:
 def scope_stamp(document: dict[str, Any]) -> tuple[datetime, str]:
     """The artifact's timestamp and id, both derived from the evidence.
 
-    The stamp is the newest archive in scope, and the id is the first 12 hex of
-    a digest over every source's own sha256 — so the filename identifies the
-    SCOPE, and re-running the assembler over the same archives aims at the same
-    path, where the exclusive-create write refuses rather than replaces
-    (invariant 9). Borrowing the clock instead would let the same document be
-    written twice under two names.
+    The newest archive in scope, and a digest over every source's sha256, so the
+    filename identifies the SCOPE and a re-assembly of the same archives aims at the
+    same path — where exclusive-create refuses (invariant 9). A clock would let one
+    document be written twice under two names.
     """
     archives = document["scope"]["archives"]
     newest = max(entry["generated_at"] for entry in archives)
@@ -2197,18 +1995,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"{archive}  {mark}")
         return 0
     try:
-        # SCOPE read here rather than taken as a default argument: a default is
-        # bound once at import, and the scope is the one thing a caller (or a
-        # test) legitimately substitutes.
+        # SCOPE read here, not as a default argument: a default binds once at import,
+        # and the scope is the one thing a caller or a test legitimately substitutes.
         document = assemble(args.root, SCOPE)
         if args.write:
             for path in write(document, root=args.root):
                 print(f"wrote {path.relative_to(args.root)}")
             return 0
     except TwoModelsRefused as refusal:
-        # Exit 2 with nothing printed above it, exactly as the regression gate
-        # refuses: the report's output IS the table, so the refusal has to
-        # happen before a line of it is written.
+        # Exit 2 with nothing printed above it, as the gate refuses: the report's
+        # output IS the table, so the refusal precedes the first line of it.
         print(f"RESEARCH REPORT REFUSED: {refusal}")
         return 2
     except (OSError, ValueError) as error:

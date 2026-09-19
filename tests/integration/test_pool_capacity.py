@@ -1,22 +1,15 @@
 """Run admission vs. connection-pool capacity against real Postgres (ADR 0022).
 
-The failure these tests pin down needs no broken database to reproduce, which
-is what makes it nasty: Postgres is healthy, the CPU is idle, and the agent is
-wedged anyway. A run holds one pooled connection for its entire life (the
-single-flight lease, ADR 0016) and asks the same pool for a second one every
-time it checkpoints. Let enough runs start and every connection is held by a
-lease whose owner is blocked waiting for a connection — hold-and-wait, and
-nobody is coming.
+The failure needs no broken database, which is what makes it nasty: Postgres is
+healthy, the CPU is idle, and the agent is wedged anyway. A run holds one pooled
+connection for its whole life (the single-flight lease, ADR 0016) and asks the same
+pool for a second one at every checkpoint, so past a certain concurrency every
+connection is held by a lease whose owner is blocked waiting for a connection.
 
-Reproducing it does not need fifteen runs; it needs a pool small enough that
-two runs exhaust it. The pool here is 2 connections with a 1-second timeout,
-so "the second run wedges the pool" takes a second to demonstrate instead of
-thirty, and the arithmetic is the same arithmetic.
-
-Real Postgres rather than a fake pool because the lease is a session-scoped
-advisory lock — the pinning that causes the problem only exists if the
-connection is a real session. Skips cleanly without Docker like every test in
-this tree (see conftest).
+Reproducing it needs a pool small enough that two runs exhaust it, not fifteen runs:
+2 connections and a 1-second timeout, so the demonstration takes a second and the
+arithmetic is the same. Real Postgres, because the lease is a session-scoped advisory
+lock and the pinning only exists if the connection is a real session.
 """
 
 from __future__ import annotations
@@ -108,9 +101,8 @@ class TestPoolSizing:
     ) -> None:
         """The bug's precondition was an engine nobody configured.
 
-        ``create_engine(url)`` alone yields QueuePool(5, overflow 10,
-        timeout 30) — numbers no one chose, sitting right where a modest
-        incident burst wedges the lease.
+        ``create_engine(url)`` alone yields QueuePool(5, overflow 10, timeout 30) — numbers
+        no one chose, sitting right where a modest incident burst wedges the lease.
         """
         pool = tiny_engine.pool
         assert pool.size() == _POOL_SIZE  # type: ignore[attr-defined]
@@ -131,10 +123,9 @@ class TestCheckpointWriteConnectionCost:
     ) -> None:
         """One checkout per write, so a run's peak demand is 2 and not 3.
 
-        This is what makes ``_CONNECTIONS_PER_RUN = 2`` true. ``write`` used
-        to read the next version on its own connection and then take a second
-        one for the INSERT — two checkouts, and a window between them where
-        another writer could claim the version just read.
+        What makes ``_CONNECTIONS_PER_RUN = 2`` true. ``write`` used to read the next version
+        on its own connection and then take a second for the INSERT — two checkouts, with a
+        window between them where another writer could claim the version just read.
         """
         checkpointer = PostgresCheckpointer(tiny_engine)
         run = _run_state(tiny_settings, uuid4())
@@ -183,15 +174,11 @@ class TestConcurrencyBound:
     ) -> None:
         """Two runs, two DIFFERENT incidents, a pool that fits one of them.
 
-        Different incident ids on purpose: the lease would serialize two runs
-        of the SAME incident, and that would prove nothing about the pool.
-        These two have no reason to contend except the connections they hold.
-
-        Without the bound the second run takes the last connection for its own
-        lease, then blocks for the pool timeout on the very first checkpoint
-        load and dies of ``sqlalchemy.exc.TimeoutError`` — and the failure rail
-        that would record why needs a connection too. With it, the second run
-        never starts, says so, and the first run is untouched.
+        Different incident ids on purpose: the lease would serialize two runs of the SAME
+        incident, which would prove nothing about the pool. Without the bound the second run
+        takes the last connection for its own lease, blocks for the pool timeout on its first
+        checkpoint load and dies of ``TimeoutError`` — and the failure rail that would record
+        why needs a connection too. With it, the second run never starts and says so.
         """
         checkpointer = PostgresCheckpointer(tiny_engine)
         slots = RunSlots(tiny_settings.max_concurrent_runs)
@@ -229,9 +216,8 @@ class TestConcurrencyBound:
                 )
                 elapsed = time.monotonic() - started
 
-            # Fast refusal, not a pool-timeout wait. Under the pre-fix path
-            # this line is never reached — the call raises TimeoutError — and
-            # if it ever were, it would have taken at least the pool timeout.
+            # Fast refusal, not a pool-timeout wait. Under the pre-fix path this line is never
+            # reached, and if it were it would have taken at least the pool timeout.
             assert elapsed < _POOL_TIMEOUT_SECONDS, (
                 f"the run over the bound took {elapsed:.2f}s to be refused; it waited on "
                 "the pool instead of being shed"
@@ -240,9 +226,8 @@ class TestConcurrencyBound:
                 "an alert the agent had no capacity for must say so; silence here is the "
                 "alert vanishing"
             )
-            # Shed, not failed: no FAILED record, still sitting at its
-            # durable ingress TRIAGE row (invariant 5 — the platform pages a
-            # human off this alert regardless).
+            # Shed, not failed: no FAILED record, still at its durable ingress TRIAGE row
+            # (invariant 5 — the platform pages a human off this alert regardless).
             assert [snap.state for snap in checkpointer.history(excess.incident_id)] == [
                 IncidentState.TRIAGE
             ]

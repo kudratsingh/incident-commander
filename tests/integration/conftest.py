@@ -1,8 +1,7 @@
 """Integration-test fixtures.
 
-Requires a running Docker daemon. Every test in this tree is skipped when
-Docker isn't reachable — CI runs them, local runs skip cleanly unless the
-developer starts Docker Desktop first.
+Requires a running Docker daemon: every test in this tree skips cleanly when
+Docker is not reachable, and CI runs them.
 """
 
 from __future__ import annotations

@@ -108,83 +108,46 @@ _SCENARIOS_DIR = _REPO_ROOT / "evals" / "scenarios"
 _REPORTS_DIR = _REPO_ROOT / "evals" / "reports"
 _TRAJECTORIES_DIR = _REPO_ROOT / "evals" / "trajectories"
 _BRIEFINGS_DIR = _REPO_ROOT / "evals" / "briefings"
-# The three directories above hold VERSIONED files, never overwritten:
-# ``<scenario>.<YYYYMMDDTHHMMSSZ>.<invocation_id>.json``, and
-# ``report.<stamp>.<invocation_id>.json`` for the aggregate. They used to
-# be flat "refreshable pointers" that every run rewrote in place — a
-# documented exception to CLAUDE.md invariant 9, now withdrawn: nothing in
-# the eval output tree overwrites a prior file. Every write here is
-# exclusive-create, the same convention as the archive writes below.
+# The three directories above hold VERSIONED files, never overwritten, every write
+# exclusive-create (invariant 9 — the old flat "refreshable pointers" are withdrawn).
+# There is no ``latest.json`` and no symlink: the newest version is resolved in exactly
+# one place, ``evals/artifacts.py``, by the stamp in the FILENAME and never by mtime.
 #
-# There is no ``latest.json`` and no symlink standing in for one. The
-# newest version is resolved in exactly one place — ``evals/artifacts.py``
-# (``artifacts.newest(kind, scenario)``), ordering by the stamp in the
-# FILENAME and then by invocation_id, never by mtime — and every reader in
-# the repo goes through it. Pre-versioning flat files still on disk are
-# left exactly where they are (they are evidence) and resolve as the
-# oldest version. Cost: a few KB per scenario per run that is never
-# reclaimed; see the ``evals/artifacts.py`` docstring.
-#
-# Immutable per-invocation archive. This directory is the append-only
-# record of a whole run (CLAUDE.md invariant 9). Writing the archive with
-# exclusive-create means a path collision fails loudly instead of
-# deleting a prior run.
-#
-# The archive is written INCREMENTALLY: main() creates
-# runs/<invocation_id>/ before the suite starts, and each scenario's
-# trajectory, briefing and trace slice land as that scenario finishes
-# (archive_scenario). ``report.json`` is written LAST (finalize_archive)
-# and is the completion marker — a run directory without it is a killed
-# or crashed run whose per-scenario files are still first-class evidence
-# (ADR 0017). Archived files are locked read-only (+``uchg`` on macOS)
-# as they land, and the whole directory is sealed when the marker goes
-# down (ADR 0021) — invariant 9, enforced by the filesystem.
+# ``evals/runs/<invocation_id>/`` is the append-only archive of a whole run, written
+# INCREMENTALLY — each scenario's files land as it finishes (``archive_scenario``) and
+# ``report.json`` is written LAST as the completion marker, so a directory without one
+# is a killed run whose per-scenario files are still evidence (ADR 0017). Files are
+# locked read-only (+``uchg``) as they land and the tree is sealed with the marker
+# (ADR 0021): invariant 9, enforced by the filesystem.
 _RUNS_DIR = _REPO_ROOT / "evals" / "runs"
 _TRACE_DIR_ENV = "EVAL_TRACE_DIR"
 
 
 _UNKNOWN: Final[str] = "unknown"
 _COMPOSE_FILE = _REPO_ROOT / "demo" / "compose.yml"
-# The compose service that publishes the MCP surface the agent is evaluated
-# through. Its ``image:`` line is where the platform digest is READ FROM, so
-# the recorded digest cannot drift from the stack that ran: there is no second
-# copy to keep in step (C-10). The other two platform services carry the same
-# digest, and that they move together is pinned by
-# ``tests/unit/test_demo_docs.py::test_every_repository_resolves_to_one_ref``
-# rather than re-checked here.
+# The compose service publishing the MCP surface the agent is evaluated through. Its
+# ``image:`` line is where the digest is READ FROM, so there is no second copy to keep
+# in step (C-10); that the other services move with it is pinned by
+# ``test_demo_docs.py::test_every_repository_resolves_to_one_ref``.
 _PLATFORM_SERVICE: Final[str] = "platform"
 # How many scenario names the non-closing mark spells out before counting the
 # rest (see ``RunReport.non_closing_reason``).
 _NON_CLOSING_NAMES_SHOWN: Final[int] = 5
-# Where a failed chaos teardown records that the shared world is dirty.
-#
-# On DISK and not in memory, because the thing it protects is the NEXT
-# invocation: a teardown compensator that did not fire leaves a fault
-# standing in a platform the next live run will read as its baseline, and
-# that run is the one that pays for it. A flag that dies with the process
-# protects nothing.
-#
-# Not evidence, so not under ``evals/runs/`` — it is mutable operational
-# state with exactly two transitions (a teardown failed; an operator reset
-# the world), and invariant 9 covers the append-only record, not the latch.
-# The durable record of the same event is the run's own report row
-# (``ScenarioOutcome.teardown_error``), which is append-only like everything
-# else in the archive.
+# Where a failed chaos teardown records that the shared world is dirty. On DISK
+# because what it protects is the NEXT invocation, which would read a standing fault as
+# its baseline — a flag that dies with the process protects nothing. Not under
+# ``evals/runs/``: it is mutable operational state with two transitions, and the
+# durable record of the same event is ``ScenarioOutcome.teardown_error``.
 _CHAOS_BLOCK_PATH = _REPO_ROOT / "evals" / ".chaos-teardown-block.json"
 
 
 class ExecutionMode(StrEnum):
     """How the world under a run was produced.
 
-    ``RECORDED`` arrived with WP-3.3 and is the third: the platform is a
-    recording of one moment of the live world (ADR 0043), replayed from disk,
-    while the agent's model calls are real. It is appended rather than
-    interleaved for the reason ``GradeDimension`` gives — archived reports and
-    the committed baseline are read back against this enum — and it is a
-    distinct value rather than ``LIVE`` with a flag because the whole of
-    ADR 0013 is that a run must never be mistakable for a more-real run than it
-    is. A recorded row's grades are valid for diagnosis, plan, candidate metrics
-    and calibration, and for nothing else (plan 02 § 189, 03 § 52).
+    ``RECORDED`` (WP-3.3) replays one moment of the live world from disk (ADR 0043)
+    while the model calls stay real. Its own value, not ``LIVE`` with a flag (ADR 0013),
+    and APPENDED, because archived reports are read back against this enum. Valid for
+    diagnosis, plan, candidate metrics and calibration only (plan 02 § 189, 03 § 52).
     """
 
     CANNED = "canned"
@@ -195,27 +158,10 @@ class ExecutionMode(StrEnum):
 class RunProvenance(BaseModel):
     """Exactly what produced one run: code, world, models, role, budgets.
 
-    ADR 0013 made provenance part of the eval result and answered one
-    question with it — "was this measured against the real system or the
-    canned model of it?". This record extends that same logic to identity:
-    a saved run has to answer "which code, which platform image, which
-    model under which role, which strategy, and what was it allowed to
-    spend?" without anyone reconstructing the invocation's environment
-    afterwards. Before it existed, a report carried no model id, no
-    commander revision, no platform digest and none of the four budget
-    meters, so the Phase 0 baseline would have been un-attributable the day
-    it was written.
-
-    Every string field is populated or explicitly ``"unknown"`` — never
-    omitted and never silently empty. ``unknown`` is a claim a reader can
-    act on ("this ran outside a git checkout"); a missing key is one they
-    have to interpret.
-
-    Attached per scenario rather than once per invocation: a scenario is the
-    unit a leaderboard row, a cost column and a phase report are all built
-    from, so it is the unit that has to be able to name its own model. The
-    duplication across a 40-scenario offline report is a few kilobytes and
-    buys rows that stay attributable when they are read one at a time.
+    ADR 0013's question ("real system or canned model of it?") extended to identity, so
+    a saved run names its code, image, model, role, strategy and seeded budgets. Every
+    string field is populated or explicitly ``"unknown"``, a claim a reader can act on.
+    Per SCENARIO, because a scenario is the unit a leaderboard row is built from.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -237,11 +183,9 @@ class RunProvenance(BaseModel):
     invocation_id: str
     recorded_at: datetime
     execution_mode: ExecutionMode
-    # The run's OWN ledger: max_* are the budgets actually seeded (which are
-    # not the documented defaults — a scenario's declared cap overrides
-    # BUDGET_MAX_TOOL_CALLS per ADR 0019, and the paid-run protocol's
-    # budgets live only in the operator's .env), and the *_used fields are
-    # the four meters ADR 0015 tracks and the report used to drop.
+    # The run's OWN ledger: ``max_*`` are the budgets actually seeded, not the
+    # documented defaults (ADR 0019's per-scenario cap, and the paid-run protocol's
+    # .env-only ceilings), and ``*_used`` are ADR 0015's four meters.
     budget: BudgetLedger
 
 
@@ -249,11 +193,9 @@ class RunProvenance(BaseModel):
 def commander_revision() -> str:
     """``git rev-parse HEAD``, or ``"unknown"`` outside a git checkout.
 
-    Recorded, never inferred, and never omitted: a report that cannot name
-    the revision it ran is still a report about *some* revision, and saying
-    so is the honest form of not knowing. Failure is tolerated in every
-    shape it comes in (no git binary, no repository, a broken index) because
-    the alternative is an eval run that cannot start over a metadata read.
+    Never omitted: a report that cannot name its revision is still about SOME revision,
+    and saying so is the honest form of not knowing. Every failure shape is tolerated —
+    the alternative is a run that cannot start over a metadata read.
     """
     try:
         completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
@@ -274,11 +216,9 @@ def commander_revision() -> str:
 def platform_image_digest() -> str:
     """The platform image digest from ``demo/compose.yml``, or ``"unknown"``.
 
-    Read from the compose file rather than from a constant in this repo, so
-    the recorded digest is the one the stack was actually brought up on.
-    A second copy of a pinned digest is a copy that goes stale two releases
-    later (C-10, demo/README.md's inlined digest), and a run whose record
-    names the wrong platform is worse than one that names none.
+    From the compose file, not a constant here, so the recorded digest is the one the
+    stack came up on: a second copy goes stale two releases later (C-10), and a record
+    naming the wrong platform is worse than one naming none.
     """
     try:
         document: object = yaml.safe_load(_COMPOSE_FILE.read_text(encoding="utf-8"))
@@ -303,19 +243,10 @@ def platform_image_digest() -> str:
 def strategy_knobs(settings: Settings) -> StrategyKnobs:
     """The inference block the selected strategy is built with (WP-5.2).
 
-    This is the edge configuration is wired at: nothing under
-    ``src/incident_commander/agent/`` reads ``Settings``, so N and the sampling
-    temperature reach a strategy from here or not at all. One function, called by
-    both places that build a strategy — the run itself and the provenance record
-    — so the arm that ran and the arm the artifact names cannot be built from
-    different knobs.
-
-    The budget multipliers are deliberately absent: they are read in
-    ``config.py`` and applied once, where ``agent/factory.py::start_run`` seeds
-    the ledger (``tests/unit/test_budgets.py::TestNoOtherCallSiteScalesABudget``
-    refuses a second reader). A BUDGET result for an N-arm is read beside the
-    ``n`` the strategy stamps and the seeded ledger already in the provenance
-    record.
+    The edge configuration is wired at: nothing under ``agent/`` reads ``Settings``.
+    One function for both builders, so the arm that ran and the arm the artifact names
+    cannot differ. The budget multipliers are absent: ``factory.start_run`` applies them
+    once, and ``test_budgets.py::TestNoOtherCallSiteScalesABudget`` refuses a second.
     """
     return StrategyKnobs(
         n=settings.best_of_n,
@@ -337,18 +268,10 @@ def build_provenance(
 ) -> RunProvenance:
     """Assemble one run's provenance record from the run's own inputs.
 
-    Deliberately takes the ledger rather than reading the settings twice:
-    the budgets in the record must be the ones the run was seeded with, not
-    the ones the configuration documents (ADR 0019's per-scenario cap, and
-    the paid-run protocol's .env-only ceilings, both make those different
-    numbers).
-
-    ``strategy`` is the object that actually made the run's planner calls
-    (WP-0.2), so the stamped name and config come from the thing that ran
-    rather than from a second read of the configuration. ``None`` is the crash
-    path: a scenario can crash before a strategy is built, and there the
-    configured one is the only honest answer available — the same reasoning the
-    crash row's ``execution_mode`` already uses.
+    Takes the LEDGER rather than re-reading the settings: the record's budgets must be
+    the seeded ones (ADR 0019, and the protocol's .env-only ceilings). ``strategy`` is
+    the object that made the planner calls (WP-0.2), so the stamp comes from what ran;
+    ``None`` is the crash path, where the configured strategy is the only honest answer.
     """
     configured = (
         STRATEGIES.create(settings.inference_strategy, strategy_knobs(settings))
@@ -364,11 +287,8 @@ def build_provenance(
         strategy=configured.name,
         strategy_config=dict(configured.config),
         scenario=scenario_name,
-        # "" is how a run with no invocation id reaches here (a direct
-        # ``run_scenario`` call; the runner's own entry point always has
-        # one). Recorded as "unknown" for the same reason the two reads
-        # above are: an empty string in a provenance field reads like a
-        # value, and it is not one.
+        # "" reaches here from a direct ``run_scenario`` call. Recorded as "unknown"
+        # for the reason the two reads above are: an empty string reads like a value.
         invocation_id=invocation_id or _UNKNOWN,
         recorded_at=recorded_at or datetime.now(UTC),
         execution_mode=execution_mode,
@@ -379,21 +299,16 @@ def build_provenance(
 class RoleAccounting(BaseModel):
     """One prompt role's share of a run's bill (plan 03 § 7.8).
 
-    Role is the unit because it is the one a strategy changes: a best-of-N
-    arm spends its extra tokens in ``investigation_planner`` and nowhere
-    else, so a run total alone cannot tell "the strategy cost more" from
-    "the incident needed more remediation".
+    Role is the unit a strategy changes — a best-of-N arm spends its extra tokens in
+    ``investigation_planner`` alone — so a run total cannot tell "the strategy cost
+    more" from "the incident needed more remediation".
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     role: str
-    # Whether this role's calls reached the run's own BudgetLedger. False for
-    # the EVALUATOR's roles only: the briefing judge grades the run and is not
-    # part of it, so folding it in would fail the reconciliation on every run.
-    # The briefing writer is also billed after the terminal state and IS
-    # charged (WO-R3-260) — it is the agent's own prose, and whose money a
-    # call is decides this flag, not when the call happened.
+    # Whether this role reached the run's BudgetLedger. False for the EVALUATOR's roles
+    # only: WHOSE money a call is decides this, not when it happened (WO-R3-260).
     charged_to_ledger: bool
     calls: int
     input_tokens: int
@@ -409,20 +324,10 @@ class RoleAccounting(BaseModel):
 class RunAccountingRecord(BaseModel):
     """What one run cost, how long it took, and how much context it carried.
 
-    Divergence D3, the half WP-0.3 left open. WP-0.3 put the run's own ledger
-    on the row, which answers "what did this run spend in total?". It cannot
-    answer "on which role?", "over how many planner steps?" or "how much
-    context did each step carry?" — and those are the columns the
-    accuracy/cost frontier in Phases 6, 9, 12 and 13 is drawn from. Divergence
-    D4 is the same gap one layer out: the campaign's cost figures live in
-    prose because no artifact carried them.
-
-    ``reconciled`` is the field that makes the rest usable. The charged split
-    is built from the same ``LLMUsage`` objects the ledger was charged with,
-    so it should equal the ledger exactly; the row states both sides and
-    whether they matched, rather than asserting agreement a reader cannot
-    check (``agent/accounting.py::RunAccounting.reconciles_with`` names the
-    one path that can legitimately differ, and in which direction).
+    Divergence D3: WP-0.3's ledger answers the total and not "on which role, over how
+    many steps, carrying how much context?", which are the accuracy/cost frontier's
+    columns. ``reconciled`` makes the rest usable — the row states both sides rather
+    than asserting an agreement the reader cannot check.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -432,10 +337,9 @@ class RunAccountingRecord(BaseModel):
     # From the run's own ledger, not counted again here.
     tool_calls: int = 0
     wall_seconds: float = 0.0
-    # Time spent inside LLM calls. Deliberately not the same number as
-    # ``wall_seconds``: the loop also probes, waits out ADR 0009's freshness
-    # window and grades, and a latency column that conflated the two would
-    # attribute a 75-second sleep to the model.
+    # Time inside LLM calls, deliberately not ``wall_seconds``: the loop also probes,
+    # waits out ADR 0009's window and grades, and conflating them would attribute a
+    # 75-second sleep to the model.
     llm_elapsed_ms: int = 0
     # Every role, the evaluator's own spend included.
     tokens_used: int = 0
@@ -446,9 +350,8 @@ class RunAccountingRecord(BaseModel):
     ledger_tokens_used: int = 0
     ledger_usd_used: Decimal = Decimal("0")
     reconciled: bool = True
-    # Zero for ``baseline``, and WRITTEN as zero rather than omitted: a
-    # later strategy's row carries real numbers here, and a reader comparing
-    # the two must not have to decide what a missing key meant.
+    # Zero for ``baseline``, WRITTEN rather than omitted: a reader comparing it to a
+    # later strategy's row must not have to decide what a missing key meant.
     selector_calls: int = 0
     branch_count: int = 0
     planner_steps: int = 0
@@ -462,9 +365,8 @@ class RunAccountingRecord(BaseModel):
 def build_accounting(accounting: RunAccounting, budget: BudgetLedger) -> RunAccountingRecord:
     """Assemble one run's accounting row from the run's own measurements.
 
-    Takes the ledger rather than reading it back off the report for the same
-    reason ``build_provenance`` does: the number the row reconciles against
-    has to be the one the run actually finished with.
+    Takes the ledger, for ``build_provenance``'s reason: the number the row reconciles
+    against has to be the one the run finished with.
     """
     return RunAccountingRecord(
         by_role=tuple(
@@ -510,21 +412,9 @@ class ScenarioOutcome(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     scenario: str
-    # The benchmark's grouping keys (WP-1.4), carried on the row rather than
-    # re-derived by the reader. From Phase 2 onward every report slices by
-    # family, difficulty and split, and a reader that joins a report back to
-    # ``evals/scenarios/`` to get them is reading TODAY's classification of a
-    # scenario against LAST MONTH's run — which silently re-labels history
-    # every time a scenario is reclassified, and is the same shape as
-    # invariant 9's "a derived metric computed from a mutable artifact is a
-    # lower bound". Present here, the row says what the scenario was when it
-    # ran.
-    #
-    # ``None`` means "predates the record", which every archived report and
-    # the committed baseline do — they are append-only evidence and are never
-    # rewritten, so the reader tolerates their absence exactly as it does for
-    # ``provenance`` below (ADR 0013's precedent). WP-2.5 groups on these; it
-    # needs no schema change to do it.
+    # The benchmark's grouping keys (WP-1.4) on the ROW: joining a report back to
+    # ``evals/scenarios/`` reads today's classification against last month's run.
+    # ``None`` predates the record, tolerated as ``provenance``'s absence is.
     template_id: str | None = None
     seed: int | None = None
     family: str | None = None
@@ -534,73 +424,44 @@ class ScenarioOutcome(BaseModel):
     tool_calls_used: int
     report: GradeReport
     judge_score: JudgeScore | None = None
-    # Five-bucket noise-source classification (docs/lessons/
-    # live-eval-noise-sources.md) + "passed" + "unclassified". Heuristic,
-    # derived from the grade report and the run's evidence — a starting
-    # point for bucket-before-you-debug, not a verdict.
+    # Five-bucket noise-source classification (docs/lessons/live-eval-noise-sources.md)
+    # plus "passed" and "unclassified". Heuristic: a starting point for
+    # bucket-before-you-debug, not a verdict.
     failure_class: str = "unclassified"
-    # Why the bucket, in enough detail to act on without opening the
-    # trajectory. Empty on a pass and on buckets whose name already says
-    # everything. `grader-brittleness` is the one that earns it: WO-R2-175
-    # (INC-001) — the class was correct on live run 4974811d236f and the
-    # coordinator still had to read the whole trace to learn WHICH claim and
-    # WHICH call shape disagreed.
+    # Why the bucket, in enough detail to act on without opening the trajectory: on
+    # INC-001 the class was right and the whole trace still had to be read.
     failure_class_detail: str = ""
     # Set when the briefing judge call itself failed: the scenario result
     # stands (graded deterministically); only the judge column is missing.
     judge_error: str | None = None
-    # Set when post-grade briefing enrichment failed: the deterministic
-    # briefing stands and the run keeps its grade; only the LLM-written
-    # findings/recommendation are missing.
+    # Set when post-grade briefing enrichment failed: the deterministic briefing stands
+    # and the grade holds; only the LLM-written findings/recommendation are missing.
     briefing_error: str | None = None
-    # What the scenario's ChaosPlan did, setup then teardown, in the order
-    # the hooks fired (WP-1.1). Evaluator-only: the archive's answer to
-    # "what world was this run actually graded in?", which used to be
-    # answerable only from a trace file, and only when tracing was on.
-    # Empty on every canned run, and on every live run seeding nothing.
+    # What the ChaosPlan did, setup then teardown, in firing order (WP-1.1).
+    # Evaluator-only: the archive's answer to "what world was this graded in?", which
+    # used to need a trace file. Empty on canned runs and live runs that seed nothing.
     chaos_hooks: tuple[ChaosHookRecord, ...] = ()
-    # Set when a teardown hook failed. DISTINCT from every field above,
-    # because it is not a statement about this run at all: the grade stands
-    # exactly as reported, and what is wrong is the SHARED environment the
-    # next run would inherit. It travels with the latch on disk
-    # (``_CHAOS_BLOCK_PATH``), which is what actually refuses the next live
-    # invocation — this is the durable record of why.
+    # Set when a teardown hook failed — not a statement about THIS run, whose grade
+    # stands, but about the SHARED environment the next run would inherit. The latch on
+    # disk (``_CHAOS_BLOCK_PATH``) refuses that run; this is the durable record of why.
     teardown_error: str | None = None
-    # Run provenance (ADR 0013): which legs actually ran live, and whether a
-    # declared-live leg silently fell back to canned. Defaults are load-
-    # bearing — archived reports and the committed baseline predate these
-    # fields and must keep parsing (same precedent as failure_class above).
+    # Run provenance (ADR 0013): which legs ran live, and whether a declared-live leg
+    # fell back to canned. The defaults are load-bearing — archived reports and the
+    # committed baseline predate these fields and must keep parsing.
     live_mcp: bool = False
     live_llm: bool = False
     degraded: bool = False
-    # What produced this row (WP-0.3): code revision, platform digest, model
-    # + role, strategy, seeded budgets and what was spent. ``None`` means
-    # "predates the record", which every archived report and the committed
-    # baseline do — they are append-only evidence and are never rewritten, so
-    # the reader tolerates its absence (ADR 0013's own precedent for
-    # ``live_mcp``/``live_llm`` above).
+    # What produced this row (WP-0.3): revision, digest, model and role, strategy,
+    # seeded budgets and spend. ``None`` means "predates the record", which every
+    # archived report does — tolerated on ADR 0013's own precedent above.
     provenance: RunProvenance | None = None
-    # What the run cost, by role and by step (WP-2.3). ``None`` means "no
-    # measurement exists", which is every archived report, the committed
-    # baseline, and a crash that died before a single call was made — never
-    # "this run was free", which is what a zeroed record would have said.
+    # What the run cost, by role and by step (WP-2.3). ``None`` means "no measurement
+    # exists" — every archived report, and a crash before the first call — never "this
+    # run was free", which a zeroed record would have said.
     accounting: RunAccountingRecord | None = None
-    # What the REPLAY did, on a recorded run only (WP-3.3): which recording,
-    # its world fingerprint, the replay clock and offset, how many calls it
-    # answered, how many it MISSED, whether it refused anything, the coherence
-    # findings the recording carries, and the plan a truncated run stopped at.
-    # ``None`` on every other run and on every archived report, which is the
-    # same default-bearing reasoning as the two fields above.
-    #
-    # An untyped mapping, exactly like ``RunProvenance.strategy_config``: its
-    # shape is ``RecordedMCPClient.summary()``'s plus the plan block, it exists
-    # to be read by a person and grouped by a report, and nothing grades on it.
-    # A second schema for it here would be a second place for the replay's own
-    # vocabulary to drift from the module that produces it.
-    #
-    # The miss count is the load-bearing number: a recorded run that asked the
-    # recording for something it does not hold is not a comparable run, and
-    # ``degraded`` above is set from it for exactly that reason.
+    # What the REPLAY did, on a recorded run only (WP-3.3), in
+    # ``RecordedMCPClient.summary()``'s own shape — untyped, so that vocabulary has one
+    # home. The miss count is load-bearing: it sets ``degraded``.
     replay: dict[str, Any] | None = None
 
 
@@ -617,10 +478,8 @@ class _GroupingKeys(TypedDict):
 def _grouping_keys(scenario: Scenario) -> _GroupingKeys:
     """The benchmark keys a ``ScenarioOutcome`` carries, from the scenario.
 
-    One function for both construction sites — the clean row and the crash
-    row — because a crashed run is still a run of a scenario in a family, and
-    a crash row missing its keys would drop out of exactly the per-family
-    counts that would have shown the family was crashing.
+    One function for the clean row and the crash row: a crash row missing its keys
+    would drop out of exactly the per-family counts that show a family crashing.
     """
     return {
         "template_id": scenario.template_id,
@@ -634,18 +493,10 @@ def _grouping_keys(scenario: Scenario) -> _GroupingKeys:
 class UngradedScenario(BaseModel):
     """A scenario that was abandoned before any grade could exist.
 
-    Its own collection, beside ``outcomes`` rather than inside it, and that
-    placement IS the decision: a ``ScenarioOutcome`` carries a
-    ``GradeReport``, and there is no honest ``GradeReport`` for a run that
-    never happened. A red row saying "crashed" would enter the failed count
-    and the pass rate, and every derived number would then quietly describe
-    the agent using an event that had nothing to do with it — the same
-    mistake `bb1fa70abb4c` made one layer up (`PreconditionNotMet`'s
-    docstring).
-
-    So the report says three things instead of two: how many scenarios
-    passed, how many failed, and how many never ran. A reader who wants the
-    third number can no longer get it by subtraction, which is the point.
+    Beside ``outcomes``, not inside it, and the placement IS the decision: there is no
+    honest ``GradeReport`` for a run that never happened, and a red "crashed" row would
+    enter the pass rate (`bb1fa70abb4c`). So the report says three things, and the third
+    cannot be got by subtraction.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -673,29 +524,20 @@ class RunReport(BaseModel):
     judge_useful_count: int = 0
     judge_mean_overall: float | None = None
     invocation_id: str = ""
-    # None = pre-schema report ("unknown"), deliberately distinct from 0
-    # ("verified fully live"): the committed baseline was a 32/37-degraded
-    # canned run, and defaulting to 0 would make that artifact assert a
-    # falsehood — the exact honesty failure these fields exist to fix.
+    # ``None`` = pre-schema ("unknown"), deliberately distinct from 0 ("verified fully
+    # live"): the committed baseline was a 32/37-degraded canned run, and defaulting to
+    # 0 would make that artifact assert a falsehood.
     degraded_count: int | None = None
     # Which --only filters produced this report, so filtered runs
     # self-describe in latest.json and in the archive. Empty = full suite.
     only_patterns: tuple[str, ...] = ()
-    # Whether this report may be used to CLOSE a phase (plan 03 § 14: "a
-    # phase report generated with any development run in it is marked
-    # non-closing"). Tri-state on the same reasoning as ``degraded_count``
-    # above: ``None`` = predates model roles, deliberately distinct from
-    # ``True`` = "every run in it was made under the benchmark role". The
-    # validator below refuses a report that claims ``True`` while carrying a
-    # development run, so the mark cannot disagree with the rows it
-    # summarizes — it is written into the artifact because artifacts outlive
-    # the scrollback (ADR 0013).
+    # Whether this report may CLOSE a phase (plan 03 § 14). Tri-state on
+    # ``degraded_count``'s reasoning, and the validator below refuses a ``True`` over a
+    # development run, so the mark cannot disagree with its own rows.
     closing: bool | None = None
     outcomes: tuple[ScenarioOutcome, ...]
     # Scenarios whose fault world could not be built (WP-1.1). Defaulted for
-    # the same back-compatibility reason as ``degraded_count`` and
-    # ``closing`` above: every archived report and the committed baseline
-    # predate the field and must keep parsing.
+    # ``degraded_count``'s reason: every archived report predates the field.
     ungraded: tuple[UngradedScenario, ...] = ()
 
     @property
@@ -727,11 +569,8 @@ class RunReport(BaseModel):
             return ""
         development = self.development_scenarios
         if development:
-            # Named, but bounded: a full-suite offline run puts 40 names in
-            # this line, and a sentence nobody finishes reading is a mark
-            # nobody acts on. The count is exact; the list is a sample, and
-            # ``development_scenarios`` has all of them for a caller that
-            # needs the rest.
+            # Named but bounded: 40 names is a sentence nobody finishes. The count is
+            # exact, the list a sample, and ``development_scenarios`` has them all.
             shown = ", ".join(development[:_NON_CLOSING_NAMES_SHOWN])
             remainder = len(development) - _NON_CLOSING_NAMES_SHOWN
             if remainder > 0:
@@ -773,10 +612,8 @@ class Trajectory(BaseModel):
     scenario: str
     incident_id: str
     checkpoints: tuple[RunState, ...]
-    # Which runner invocation produced this. Mixed-vintage directories
-    # self-describe even if filenames are lost — the trajectory writer
-    # overwrote by scenario name until 2026-08-08 and Run 001's live
-    # trajectories were erased by a later offline `make eval`.
+    # Which invocation produced this, so a mixed-vintage directory self-describes even
+    # with the filenames lost — how Run 001's live trajectories were erased (F-003).
     invocation_id: str = ""
 
 
@@ -803,44 +640,28 @@ def _is_offline_api_key(key: str) -> bool:
 class ScenarioCrash(Exception):
     """A scenario's run raised, wrapped with the history it had accumulated.
 
-    The crash row used to be built from the exception alone, which is why
-    it hardcoded ``tool_calls_used=0``: nothing else was reachable from
-    ``run_suite``'s handler. A scenario that crashed after spending nine
-    tool calls therefore reported spending none, and the suite's cost and
-    budget columns were a lower bound that read like a measurement.
-
-    ``checkpoints`` is the run's own checkpoint history up to the last
-    completed transition — the same tuple the success path puts on the
-    trajectory. It is still a lower bound (work inside the transition that
-    crashed is not checkpointed) but it is a bound derived from what the
-    run did, not from a constant.
-
-    Raised only from ``run_scenario``'s own handler. Failures that happen
-    before the loop starts — chaos seeding, preconditions — propagate
-    unwrapped, because there is no run to describe.
+    The crash row used to be built from the exception alone, so it hardcoded
+    ``tool_calls_used=0`` and a scenario that crashed after nine calls reported none.
+    ``checkpoints`` is the run's own history to the last completed transition — still a
+    lower bound, but one derived from what the run did. Raised only from
+    ``run_scenario``'s handler: seeding and precondition failures propagate unwrapped,
+    because there is no run to describe.
     """
 
     def __init__(self, cause: BaseException, checkpoints: tuple[RunState, ...]) -> None:
         super().__init__(f"{type(cause).__name__}: {cause}")
         self.cause = cause
         self.checkpoints = checkpoints
-        # Set by ``run_scenario`` when the chaos teardown that follows a
-        # crashed run ALSO failed. Carried beside the cause rather than
-        # folded into it: the crash says what happened to the agent, this
-        # says what happened to the world, and the second one decides
-        # whether the next live run may start at all.
+        # Set when the teardown after a crashed run ALSO failed. Beside the cause, not
+        # folded in: the crash is about the agent, this is about the world, and the
+        # second decides whether the next live run may start.
         self.teardown_error: str | None = None
-        # What the run had billed when it died, by role (WP-2.3). Same
-        # reasoning as ``checkpoints``: a crashed run's spend is still spend,
-        # and a crash row that cannot name it leaves the cost columns a lower
-        # bound that reads like a measurement.
+        # What the run had billed when it died, by role (WP-2.3): a crashed run's spend
+        # is spend, and a row that cannot name it makes the cost columns a lower bound.
         self.accounting: RunAccounting | None = None
-        # The ledger that spend was charged to, when the run reached a
-        # terminal state before dying. It is NOT ``final.budget``: the
-        # briefing writer's post-terminal call is charged after the last
-        # checkpoint is written (WO-R3-260), so reconciling against the
-        # checkpoint would report a disagreement that is an artefact of
-        # which object was read, not of anything the run got wrong.
+        # The ledger the spend was charged to, NOT ``final.budget``: the briefing
+        # writer bills after the last checkpoint (WO-R3-260), so reconciling against
+        # the checkpoint would report which object was read as a disagreement.
         self.ledger: BudgetLedger | None = None
 
     @property
@@ -856,27 +677,18 @@ class PreconditionFailure(RuntimeError):
 class PreconditionNotMet(PreconditionFailure):
     """The world answered, and the scenario's premise is false.
 
-    Deliberately NOT a graded failure. A run that never happened has nothing
-    to say about the agent, and recording it as an agent failure is how
-    `bb1fa70abb4c` came to report that the agent fixed the wrong thing when
-    the right thing could not be made to exist.
+    NOT a graded failure: a run that never happened has nothing to say about the agent,
+    and `bb1fa70abb4c` is what recording it as one produces.
     """
 
 
 class PreconditionUnverifiable(PreconditionFailure):
     """The probe never returned a usable answer, so the premise is unknown.
 
-    Distinct from ``PreconditionNotMet`` on purpose, and the distinction is
-    the whole point of the pair. "The fault was never manufactured" is a
-    claim about the world; it requires the world to have answered. A refused
-    scope, a dead platform, or a malformed response tells you nothing about
-    the fault, and reporting one as the other sends the reader to seeding
-    when the problem is the platform.
-
-    "Answered" means the DECISIVE attempt answered — the one that ended the
-    polling window. A readable-but-unmet reading followed by a dead platform
-    is Unverifiable, because the reading that was current when polling gave
-    up is the transport error, and the earlier one is stale.
+    The pair's whole point: "the fault was never manufactured" is a claim about the
+    world and needs the world to have answered, so reporting a dead platform as one
+    sends the reader to seeding. "Answered" means the DECISIVE attempt — the one that
+    ended the polling window — because an earlier readable reading is stale.
     """
 
 
@@ -887,13 +699,9 @@ def _assert_preconditions(
 ) -> None:
     """Probe the world for the scenario's premise, polling where declared."""
     for probe in scenario.expected_precondition:
-        # Only the DECISIVE attempt — the one that ended the polling window —
-        # speaks for the world. `reading` holds that attempt's verdict when it
-        # answered with something we could read (empty list = met), and is
-        # None while the newest attempt was unreadable; `unreadable` holds why.
-        # Latching "did any attempt ever answer" across the window is what let
-        # a dead platform on the last attempt report as "the fault was never
-        # manufactured" — a claim about the world, quoting a transport error.
+        # Only the DECISIVE attempt speaks for the world: `reading` is its verdict when
+        # readable (empty list = met), `None` otherwise. Latching "did any attempt ever
+        # answer" let a dead platform report as "the fault was never manufactured".
         reading: list[str] | None = None
         unreadable: list[str] = []
         # Kept only to say, in the Unverifiable message, that a now-stale
@@ -931,9 +739,8 @@ def _assert_preconditions(
                     "arguments": dict(probe.arguments),
                     "met": not failures,
                     "answered": answered,
-                    # Whether the platform answered at any point in the window.
-                    # Diagnostic only — it must never decide Not-Met vs
-                    # Unverifiable, which is exactly the bug this pair records.
+                    # Whether the platform answered at any point. Diagnostic only: it
+                    # must never decide Not-Met vs Unverifiable.
                     "ever_answered": answered or bool(stale_reading),
                     "failures": failures,
                 }
@@ -964,10 +771,9 @@ def _assert_preconditions(
 def _first_json_object(result: ToolResult) -> dict[str, Any] | None:
     """First text block that parses as a JSON object, or None.
 
-    Tolerates unparseable text rather than raising: a bare ``json.loads``
-    here escaped the polling loop entirely, so one malformed block ended the
-    run as an uncaught crash bucketed "transport" — losing both the probe
-    that failed and the fact that it was a precondition at all.
+    Tolerates unparseable text: a bare ``json.loads`` escaped the polling loop, so one
+    malformed block ended the run as a crash bucketed "transport", losing both the
+    failing probe and the fact that it was a precondition.
     """
     for block in result.content:
         if block.get("type") == "text" and isinstance(block.get("text"), str):
@@ -983,33 +789,20 @@ def _first_json_object(result: ToolResult) -> dict[str, Any] | None:
 class ChaosSetupFailed(RuntimeError):
     """A setup hook did not fire, so the scenario's world was never built.
 
-    Deliberately NOT a graded failure, and deliberately not a
-    ``ScenarioCrash``. The two say different things: a crash is "the agent's
-    run died", and this is "there was no world to run the agent in". Grading
-    a run whose fault was never manufactured is how a report comes to
-    describe the agent when it is describing the environment — the same
-    mistake ``PreconditionNotMet`` exists to avoid one step later, and the
-    reason ``run_all`` records this as *ungraded* rather than as a failed
-    scenario (plan 01 § 4: "setup failure → benchmark world invalid; do not
-    grade the agent").
+    NOT a graded failure and not a ``ScenarioCrash``: a crash is "the agent's run
+    died", this is "there was no world to run the agent in". Hence ``run_all`` records
+    it as UNGRADED (plan 01 § 4: setup failure → world invalid, do not grade the agent).
     """
 
 
 class ChaosHookRecord(BaseModel):
     """What one chaos invocation did, recorded evaluator-side.
 
-    Evaluator-only by construction: it is reachable from the grader's
-    ``ScenarioOutcome`` and the run archive, and from nowhere the agent
-    reads. Nothing here is ever put on ``RunState``, on the evidence ledger,
-    or into a prompt — a scenario that told the agent which faults were
-    seeded would be measuring recall of the answer key (WP-1.3 tests that
-    boundary; this packet must not be the thing that breaches it).
-
-    ``result`` holds the hook's own parsed response (seeded ids, fixture
-    names, TTLs), which is what makes a post-hoc reading of the archive able
-    to say what the world was — the question "what exactly was seeded?" was
-    previously answerable only from the trace file, and only when tracing
-    happened to be on.
+    Evaluator-only by construction: reachable from ``ScenarioOutcome`` and the archive,
+    never from ``RunState``, the evidence ledger or a prompt — telling the agent which
+    faults were seeded would measure recall of the answer key (WP-1.3 tests that
+    boundary). ``result`` holds the hook's own parsed response, so the archive can say
+    what the world WAS without a trace file.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -1030,18 +823,10 @@ CHAOS_SETUP_PHASE: Final[str] = "setup"
 def seeded_chaos(records: Iterable[ChaosHookRecord]) -> bool:
     """Did this run manufacture its own fault world?
 
-    The second half of INC-003's rule (``root_cause.label_describes_this_world``
-    is the rule itself): a live run whose scenario planted the fault is in the
-    world its ground truth describes, and a live run that planted nothing is
-    not. Setup records only — a teardown record says the world was put BACK,
-    which is the opposite claim — and successful ones only, since a failed
-    setup hook abandons the scenario ungraded anyway.
-
-    Reads the records rather than ``Scenario.seeds_chaos`` on purpose: this is
-    the question "what world was this run actually in?", and the archive
-    answers it for a run that finished months ago, whose scenario file may
-    since have gained or lost a hook. ``scripts/regrade_archive.py`` asks it
-    of ``ScenarioOutcome.chaos_hooks`` for exactly that reason.
+    INC-003's rule needs it (``root_cause.label_describes_this_world`` is the rule).
+    Successful SETUP records only — a teardown says the world was put BACK. Reads the
+    RECORDS, not ``Scenario.seeds_chaos``: the question is what world this run was
+    actually in, and a scenario file may have gained or lost a hook since.
     """
     return any(record.phase == CHAOS_SETUP_PHASE and record.ok for record in records)
 
@@ -1056,22 +841,10 @@ def _invoke_plan_hook(
 ) -> ChaosHookRecord:
     """Fire one hook under the chaos principal and record what happened.
 
-    "The chaos principal" is a literal second credential since platform
-    v0.6.5: ``PLATFORM_CHAOS_TOKEN``, the ``incident-commander-chaos`` service
-    account. It used to be ``settings.platform_token`` — the agent's own token,
-    which then carried ``chaos:invoke`` — and that is exactly why the
-    platform's chaos-audit filter was inert: the principal that seeded the
-    fault was the principal being graded, so ``list_audit_events`` handed the
-    agent the hook name and its arguments (divergence G3, owner decision O-4).
-
-    Never raises for a hook failure: both callers want the record, and they
-    disagree about what a failure MEANS — a failed setup abandons the
-    scenario, a failed teardown lets the graded run stand and latches the
-    environment dirty. Deciding that here would put both policies in the wrong
-    place. A MISSING chaos credential is not that kind of failure and is not
-    recorded as one: ``require_chaos_token`` raises, because nothing was
-    attempted and no world was touched, and a run that silently recorded
-    "seeding failed" would send the reader to the platform.
+    A literal second credential since v0.6.5: while the agent's own token carried
+    ``chaos:invoke``, the chaos-audit filter was inert and ``list_audit_events`` handed
+    the agent the hook (G3, O-4). Never raises for a hook failure — the callers disagree
+    about what one MEANS. A MISSING credential DOES raise: nothing was attempted.
     """
     record = ChaosHookRecord(phase=phase, name=hook.name, arguments=dict(hook.arguments))
     chaos_token = settings.require_chaos_token()
@@ -1083,22 +856,18 @@ def _invoke_plan_hook(
             dict(hook.arguments),
         )
     except ChaosInvocationError as err:
-        # ``err`` already carries the platform's own refusal NAME out of
-        # ``error.data.error_code`` (evals/chaos_hooks.py) — the difference
-        # between "poison_fixture_name_in_use: reset, do not retry" and an
-        # anonymous JSON-RPC -32011 that reads like flakiness. It is carried
-        # verbatim rather than re-summarized for that reason.
+        # ``err`` carries the platform's own refusal NAME (evals/chaos_hooks.py), which
+        # is the difference between "poison_fixture_name_in_use: reset, do not retry"
+        # and an anonymous -32011 that reads like flakiness. Verbatim for that reason.
         record = record.model_copy(update={"ok": False, "error": str(err)})
     else:
         record = record.model_copy(update={"result": result})
     if tracer is not None:
         tracer.write(
             {
-                # One kind for both halves of a plan, with ``phase`` saying
-                # which. A second TraceKind would have to land in
-                # evals/tracing.py and gain a renderer in the trace
-                # formatter, neither of which this packet owns — and the
-                # record is the same shape either way.
+                # One kind for both halves of a plan, with ``phase`` saying which: a
+                # second TraceKind would need a renderer, and the record is the same
+                # shape either way.
                 "kind": TraceKind.CHAOS_SETUP,
                 "scenario": scenario.name,
                 "phase": phase,
@@ -1119,10 +888,9 @@ def _seed_chaos_plan(
 ) -> tuple[ChaosHookRecord, ...]:
     """Run the plan's setup hooks in declared order; stop at the first failure.
 
-    Order is the declaration, not an implementation detail: a cascading world
-    is only the world it claims to be if its second fault lands on top of the
-    first. Stopping at the first failure follows from the same reading — the
-    hooks after it would be seeding into a world that does not exist yet.
+    Order is the declaration, not an implementation detail: a cascade is only the world
+    it claims to be if its second fault lands on the first — which is also why the
+    hooks after a failure are not fired.
     """
     records: list[ChaosHookRecord] = []
     for position, hook in enumerate(plan.setup, start=1):
@@ -1146,19 +914,11 @@ def _teardown_chaos_plan(
 ) -> tuple[tuple[ChaosHookRecord, ...], str | None]:
     """Run every teardown hook; return the records and a combined failure text.
 
-    Never raises, and never stops early. Both are deliberate: this runs on
-    the way out of a run that may already be carrying an exception, so
-    raising would replace the run's own cause with the janitor's, and
-    stopping at the first failure would skip compensators that might still
-    have worked. Every hook gets its turn, and the caller decides what a
-    failure means.
-
-    ``ChaosTokenNotConfigured`` is the one non-hook failure that can reach
-    here, and it is turned into the same combined text rather than raised, for
-    the reason the paragraph above gives: this is the janitor. A run that
-    reached teardown with no chaos credential cannot compensate anything, so
-    the right outcome is the dirty-world latch the caller writes from this
-    text, not an exception that replaces the run's own cause.
+    Never raises and never stops early: this is the janitor on the way out of a run
+    that may already carry an exception, so raising would replace the run's own cause
+    and stopping early would skip compensators that might still work.
+    ``ChaosTokenNotConfigured`` becomes the same text for that reason — the right
+    outcome is the dirty-world latch the caller writes from it.
     """
     records: list[ChaosHookRecord] = []
     failures: list[str] = []
@@ -1182,13 +942,9 @@ def _teardown_chaos_plan(
 def chaos_block_reason(path: Path | None = None) -> str | None:
     """Why live runs are blocked, or ``None`` when the world is believed clean.
 
-    Reads the latch a failed teardown wrote. An unreadable or malformed file
-    still blocks — it can only exist because something wrote it, and the safe
-    reading of "we cannot tell what went wrong" is not "carry on spending".
-
-    The path is resolved at CALL time rather than bound as a default, so the
-    module constant is one thing a test can redirect — the alternative is a
-    unit suite that latches the real checkout's world dirty.
+    Reads the latch a failed teardown wrote. A malformed file still BLOCKS: something
+    wrote it, and "we cannot tell what went wrong" does not read as "carry on
+    spending". The path resolves at CALL time so a test can redirect the constant.
     """
     path = path or _CHAOS_BLOCK_PATH
     if not path.exists():
@@ -1233,14 +989,10 @@ def write_chaos_block(
 def clear_chaos_block(path: Path | None = None) -> str | None:
     """Drop the latch, returning what it said — or ``None`` if there was none.
 
-    Not instead of ``make eval-reset``: the reset is what actually restores
-    the world, and this only records that it happened. They are separate
-    entry points because the reset runs inside the platform's container and
-    this file lives in the commander's checkout — but since cmd #233 the
-    reset's last recipe line runs this itself, so the operator's normal path
-    is one command. Invoking it alone is for the case with no world left to
-    reset. Last line deliberately: make abandons a recipe at the first
-    failing line, so a reset that did not succeed never clears the latch.
+    Not instead of ``make eval-reset``, which is what restores the world; this only
+    records that it happened. The reset's LAST recipe line runs this, deliberately last:
+    make abandons a recipe at the first failing line, so a reset that did not succeed
+    never clears the latch.
     """
     path = path or _CHAOS_BLOCK_PATH
     reason = chaos_block_reason(path)
@@ -1253,22 +1005,10 @@ def clear_chaos_block(path: Path | None = None) -> str | None:
 def _step_sink(tracer: JsonlTracer) -> StepSink:
     """Send each planner step's ``StepRecord`` to the trace store (WP-2.1).
 
-    The strategy produces a record every step whether or not anyone is
-    listening; this is what gives the records somewhere to land. One line of
-    JSONL per planner step, beside the ``llm`` and ``mcp`` records of the same
-    invocation, joinable to them by ``call_id`` — and append-only like every
-    other record, so a re-run of a scenario adds its steps rather than
-    replacing the earlier attempt's (invariant 9, F-002).
-
-    Wired whenever a tracer exists, which includes a canned run with
-    ``EVAL_TRACE_DIR`` set: the fake clients are not traced (they have no
-    request or response to capture) but the *decisions* a canned run makes are
-    the research data, and they are real. That is the offline landing place
-    divergence D1 says WP-2.1 needs.
-
-    The kind is stamped here rather than inside the record, so every trace
-    record's kind still comes from the ``TraceKind`` enumeration the human
-    renderer is held to.
+    One JSONL line per step, beside the same invocation's ``llm`` and ``mcp`` records
+    and joinable by ``call_id``, append-only (invariant 9, F-002). Wired whenever a
+    tracer exists, canned runs included: a canned run's DECISIONS are real research data
+    (divergence D1). The kind is stamped here, so it comes from ``TraceKind``.
     """
 
     def sink(record: StepRecord) -> None:
@@ -1286,21 +1026,10 @@ def _replay_record(
 ) -> dict[str, Any] | None:
     """The ``replay`` row on a recorded outcome, or ``None`` on every other run.
 
-    Three things a reader of a recorded result needs and cannot get anywhere
-    else:
-
-    * **which world**, by fingerprint and by path — the fingerprint because that
-      is what ``make world-drift`` compares, and a row naming only a file would
-      not say whether the world in it had moved;
-    * **how complete the replay was** — answered, missed, refused. A miss means
-      the agent asked the recording for something it does not hold, so the run is
-      not comparable with another run of the same world, and the count is the
-      only place that fact survives;
-    * **the plan**, when the run was truncated. ``ACTION`` stays not-applicable
-      (nothing executed), so "grade the plan" (04:117) is reported HERE rather
-      than as a dimension: the planned tool, its arguments, and whether it is one
-      the scenario expected. A paired comparison reads this field; nothing gates
-      on it.
+    Three things a reader cannot get elsewhere: WHICH WORLD, by fingerprint as well as
+    path, because that is what ``make world-drift`` compares; HOW COMPLETE the replay
+    was, since a miss makes the run incomparable; and THE PLAN when truncated, because
+    ``ACTION`` stays not-applicable and "grade the plan" (04:117) needs somewhere.
     """
     if replay_client is None or recorded_world is None:
         return None
@@ -1312,10 +1041,8 @@ def _replay_record(
         for f in replay_client.world.findings
     ]
     record["truncated_at_planning_handoff"] = handoff.fired
-    # ``RunState.remediation_plan`` is a plain mapping on the checkpoint
-    # (``state.py``: ``dict[str, object] | None``), so it is read by key. The
-    # plan's own model lives in ``agent/remediation.py`` and is not imported for
-    # this — a report row needs the three values, not the schema.
+    # ``RunState.remediation_plan`` is a plain mapping on the checkpoint, so it is read
+    # by key: a report row needs the three values, not ``remediation.py``'s schema.
     plan = final.remediation_plan
     planned_tool = None if plan is None else plan.get("action_tool")
     expected = tuple(scenario.expectation.expected_action_tools)
@@ -1324,9 +1051,8 @@ def _replay_record(
         "planned_action_tool": planned_tool,
         "planned_action_arguments": None if plan is None else plan.get("action_arguments"),
         "planned_verify_tool": None if plan is None else plan.get("verify_tool"),
-        # ``None`` — not ``False`` — when there is nothing to compare: no plan was
-        # made, or the scenario expects no action. A boolean there would read as
-        # "the plan was wrong", and "there was no plan" is a different fact.
+        # ``None``, not ``False``, when there is nothing to compare: a boolean would
+        # read as "the plan was wrong", and "there was no plan" is a different fact.
         "matches_expected": (
             None if (planned_tool is None or not expected) else planned_tool in expected
         ),
@@ -1334,10 +1060,9 @@ def _replay_record(
     return record
 
 
-#: What a recorded run's evidence ledger records where it stopped. Written down
-#: once because three readers compare against it: the trajectory a person opens,
-#: the ``replay`` row on the outcome, and the test that proves the run really was
-#: truncated rather than merely unlucky.
+#: What a recorded run's evidence ledger records where it stopped. Once, because three
+#: readers compare against it: the trajectory, the ``replay`` row, and the test that
+#: proves the run was truncated rather than merely unlucky.
 RECORDED_HANDOFF_REASON: Final[str] = (
     "recorded mode: stopped at the PLANNING handoff. A recording has no state to "
     "change and no audit log to observe a change in, so the plan was made and not "
@@ -1348,21 +1073,10 @@ RECORDED_HANDOFF_REASON: Final[str] = (
 class RecordedHandoff:
     """Ends a recorded run where the plan is made, before anything is executed.
 
-    Installed for ``REMEDIATING`` **and** ``AWAITING_APPROVAL`` on every recorded
-    run — not only on the scenarios that declare ``expected_action_tools``. The
-    declaration says what a run is GRADED on; what a run DOES is decided by the
-    agent, and an agent that reaches the remediate handoff on a read-only
-    scenario would otherwise hand a Tier-1 call to the replay client. That call
-    is refused (ADR 0044), which is correct and is also a crashed scenario. This
-    makes the refusal unreachable rather than merely right: in recorded mode
-    there is no transition that could execute anything.
-
-    It stops at ``ESCALATED`` rather than inventing a state, because the state
-    machine's terminal set is an ADR-0002 decision and a new one would need an
-    ADR of its own for no measurement gained. The plan itself is kept — it is
-    what "grade the plan" (04:117) reads — and ``fired`` is what tells the caller
-    the run was truncated, which is a different question from what the terminal
-    state says.
+    Installed for BOTH acting successors on EVERY recorded run, not only those declaring
+    ``expected_action_tools``: an agent that reaches the handoff anyway would hand the
+    replay client a Tier-1 call, which is refused (ADR 0044) and is also a crash. Stops
+    at ``ESCALATED`` rather than inventing a state (ADR 0002); ``fired`` says truncated.
     """
 
     def __init__(self) -> None:
@@ -1388,38 +1102,12 @@ class RecordedHandoff:
 def recorded_not_applicable(*, truncated: bool) -> dict[GradeDimension, str]:
     """Which dimensions a recorded run makes no claim about, and why (plan 02 §189).
 
-    Three always, and a fourth when the run was truncated at the handoff:
-
-    ``OUTCOME``
-        A recorded run's terminal state is partly the harness's own choice — the
-        handoff transition above ends it — so an outcome claim would be a claim
-        about this function. Plan 02 § 189 says recorded mode is not for outcome
-        claims at all, and 03 § 52 lists what it IS for: diagnosis, plan
-        selection, candidate metrics, calibration.
-    ``ACTION``
-        Nothing was executed, so there is no action to be the right one.
-    ``SAFETY``
-        Safety is graded from the platform's audit log as ground truth
-        (invariant 6) and a recording has none. A green SAFETY here would be the
-        most dangerous number in the repo: "zero unauthorized actions" asserted
-        by a run that could not have taken one.
-    ``EVIDENCE``, only when truncated
-        This one is a DIVERGENCE from WO-R3-198's stated scope (it names the
-        three above) and it is reported as one. Two facts force it. A truncated
-        run never calls the action tool, and these scenarios' evidence claims
-        read that tool's own response — ``remediate_consumer_lag_success``
-        asserts ``kill_key_cleared`` on ``restart_consumer_group``, which no
-        replay can produce. And the handoff transition adds an evidence entry of
-        its own, so leaving EVIDENCE graded would let harness prose satisfy a
-        scenario's substring claim. Grading it would therefore be red for a
-        reason that is the mode rather than the agent, which is the
-        mis-attribution INCIDENTS.md exists to record.
-
-    ``BUDGET`` and ``ROOT_CAUSE`` stay graded, and ``MODE_APPLICABLE_DIMENSIONS``
-    refuses any attempt to mark ROOT_CAUSE — recorded mode exists to measure
-    diagnosis. BUDGET is a real ceiling check over the calls that were actually
-    made; a truncated run cannot fail it, which is equally true of any run that
-    escalates early, so it is a weak claim rather than a false one.
+    ``OUTCOME``, because the handoff partly chose the terminal state; ``ACTION``, because
+    nothing executed; ``SAFETY``, because invariant 6 grades it from an audit log a
+    recording has none of. Plus ``EVIDENCE`` when truncated — a DIVERGENCE from
+    WO-R3-198's three, forced because those claims read the action tool's own response
+    and the handoff writes an entry that would satisfy a substring claim. ``BUDGET`` and
+    ``ROOT_CAUSE`` stay graded, and ``MODE_APPLICABLE_DIMENSIONS`` refuses the latter.
     """
     reasons = {
         GradeDimension.OUTCOME: not_applicable_detail(
@@ -1457,37 +1145,13 @@ def run_scenario(
 ) -> ScenarioResult:
     """Drive one scenario end-to-end and grade the result.
 
-    Uses ``CannedMCPClient`` for tool calls and ``CannedLLMClient`` for both
-    the investigation planner and the briefing writer, each with its own
-    per-scenario response queue keyed under ``canned_llm_responses``.
-
-    ``recorded_world`` selects RECORDED mode (WP-3.3): the path to one
-    recording, and the path IS the mode — there is no separate flag that could
-    disagree with it. It changes four things and nothing else:
-
-    * the agent's client is a ``RecordedMCPClient`` over that recording, so no
-      platform is reached at all;
-    * nothing is seeded, nothing settles, no precondition is polled and nothing
-      is torn down — the world is a file, and a reset would be a reset of
-      something this run never touched;
-    * ``REMEDIATING`` and ``AWAITING_APPROVAL`` are replaced by a transition
-      that stops the run at the ``PLANNING`` handoff, so no Tier-1 call is ever
-      attempted (04:117). The replay client would refuse one anyway; this is
-      what makes the refusal unreachable rather than merely correct;
-    * OUTCOME, ACTION and SAFETY are graded as not-applicable-in-this-mode, and
-      the row is stamped ``ExecutionMode.RECORDED``.
-
-    What it does NOT change: the model. A recorded run's planner calls are real
-    calls, so a recorded run spends real money at roughly live per-scenario
-    rates. The LLM leg still degrades to the canned client under a placeholder
-    key exactly as every other mode does, and a run that degraded says so in
-    ``degraded`` — which is how the machinery is exercised at zero cost.
-
-    ``model_role`` is recorded, not resolved, here: ``main`` resolves
-    ``settings.agent_model`` from the role before the suite starts, and this
-    is the label that travels with the result so a row can say which of the
-    two roles produced it. It defaults to ``DEVELOPMENT`` because a run that
-    did not say is not a benchmark run.
+    Offline: ``CannedMCPClient`` plus ``CannedLLMClient`` per role, each with its own
+    ``canned_llm_responses`` queue. ``recorded_world`` IS the RECORDED mode selector
+    (WP-3.3) — a path, so no flag can disagree — and it changes four things: a
+    ``RecordedMCPClient`` reaches no platform; nothing is seeded, settled, polled or torn
+    down; the run stops at the ``PLANNING`` handoff (04:117); and OUTCOME, ACTION and
+    SAFETY become not-applicable. NOT the model: its planner calls are real and cost
+    live rates. ``model_role`` is recorded, not resolved, and defaults to ``DEVELOPMENT``.
     """
     tick = clock or (lambda: datetime.now(UTC))
     now = tick()
@@ -1549,10 +1213,8 @@ def run_scenario(
             }
         )
 
-    # The scenario's fault, in one shape whichever way the YAML spells it:
-    # a legacy ``chaos_setup`` normalizes to a one-hook plan (plan 01 § 4).
-    # Read once, here, so the hooks that run and the hooks that are torn
-    # down are provably the same tuple.
+    # The fault in one shape however the YAML spells it (a legacy ``chaos_setup``
+    # normalizes to a one-hook plan). Read once, so setup and teardown share a tuple.
     chaos_plan = scenario.chaos
     chaos_records: tuple[ChaosHookRecord, ...] = ()
     teardown_error: str | None = None
@@ -1585,10 +1247,9 @@ def run_scenario(
     live_mcp_client: MCPClient | None = None
     replay_client: RecordedMCPClient | None = None
     if recorded_world is not None:
-        # The replay clock is the run's OWN clock, so every age the agent can
-        # compute is the age the recorder observed (ADR 0044). Built before the
-        # LLM clients and before the transitions, like the live client, so a
-        # recording that will not load costs nothing.
+        # The replay clock is the run's OWN clock, so every age the agent computes is
+        # the one the recorder observed (ADR 0044). Built first, so a recording that
+        # will not load costs nothing.
         replay_client = RecordedMCPClient.from_path(recorded_world, replay_clock=now)
         mcp_client = replay_client
         print(
@@ -1620,10 +1281,8 @@ def run_scenario(
         # fired are exactly what ``plan.teardown`` compensates.
         try:
             chaos_records = _seed_chaos_plan(scenario, chaos_plan, settings, tracer)
-            # Let the fault become observable before anything looks for it.
-            # One wait for the whole plan, ahead of the per-probe polling the
-            # preconditions do: a cascade's second-order effect is not
-            # visible the instant its last hook returns.
+            # One wait for the whole plan, ahead of the preconditions' per-probe
+            # polling: a cascade's second-order effect is not visible instantly.
             if chaos_plan.settle_seconds:
                 time.sleep(chaos_plan.settle_seconds)
             live_mcp_client = make_client(
@@ -1632,11 +1291,9 @@ def run_scenario(
                 token=mcp_token,
             )
             mcp_client = live_mcp_client
-            # Establish the scenario's premise before spending anything on
-            # it. Runs after seeding and before the first model call, so a
-            # fault that was never manufactured costs one read instead of a
-            # full graded run (see evals/preconditions.py, and
-            # `bb1fa70abb4c` for the run that paid for this lesson).
+            # The premise, after seeding and before the first model call, so a fault
+            # that was never manufactured costs one read instead of a graded run
+            # (`bb1fa70abb4c` paid for this lesson).
             if scenario.expected_precondition:
                 try:
                     _assert_preconditions(scenario, live_mcp_client, tracer)
@@ -1645,11 +1302,9 @@ def run_scenario(
                     live_mcp_client = None
                     raise
         except BaseException:
-            # The world was touched, so it has to be put back — even though
-            # nothing will be graded. Same call the normal exit makes. Its
-            # return value is dropped rather than carried: there is no row to
-            # carry it on, and ``_tear_down`` has already written the latch,
-            # which is the half that reaches the next invocation.
+            # The world was touched, so it goes back even though nothing is graded.
+            # The return value is dropped — there is no row to carry it on, and
+            # ``_tear_down`` has already written the latch.
             _tear_down()
             raise
     else:
@@ -1669,10 +1324,8 @@ def run_scenario(
             api_key=api_key,
             tracer=tracer.llm_hook("investigation_planner") if tracer else None,
         )
-        # WP-6.2's new role. Its own underlying client so its trace records
-        # carry its own hook label, exactly like the five above: that label is
-        # what makes the JSONL readable per role, and the selector is the role a
-        # reader of this arm wants to find first.
+        # WP-6.2's new role, with its own client so its trace records carry their own
+        # hook label — what makes the JSONL readable per role.
         selector_llm = LLMClient(
             api_key=api_key,
             tracer=tracer.llm_hook(SELECTOR_ROLE) if tracer else None,
@@ -1707,37 +1360,21 @@ def run_scenario(
         briefing_llm = CannedLLMClient(scenario.canned_llm_responses.get("briefing_writer", []))
         judge_llm = CannedLLMClient(scenario.canned_llm_responses.get("briefing_judge", []))
 
-    # The two clients whose queues are read AFTER the run, to decide whether
-    # there is a canned response left to spend. Bound before the metering
-    # wrappers below, because ``has_remaining`` is the canned client's own
-    # question and a wrapper is not a ``CannedLLMClient``.
+    # The two clients whose queues are read AFTER the run. Bound before the metering
+    # wrappers, because ``has_remaining`` is the canned client's own question.
     briefing_canned = briefing_llm if isinstance(briefing_llm, CannedLLMClient) else None
     judge_canned = judge_llm if isinstance(judge_llm, CannedLLMClient) else None
 
-    # Cost, latency and context accounting for this run (WP-2.3). Every LLM
-    # client the run can reach is wrapped, so the split is complete by
-    # construction rather than by remembering to instrument each new call
-    # site — and it covers the canned suite, where there is no tracer to
-    # derive a split from (divergence D1).
+    # Cost, latency and context accounting (WP-2.3). Every reachable LLM client is
+    # wrapped, so the split is complete by construction and covers the canned suite,
+    # where no tracer exists to derive one from (divergence D1).
     #
-    # ``charged_to_ledger`` is declared HERE because this is the only place
-    # that knows it, and the line it draws is WHOSE money a call is — not when
-    # the call happened. Both post-run roles are billed after the state machine
-    # has reached a terminal state, and they part company there:
-    #
-    # * ``briefing_writer`` is the AGENT's own cost. It writes the handoff the
-    #   agent hands a human, on the agent's model, and until WO-R3-260 it
-    #   reached no ledger at all — so every cost-per-run number undercounted
-    #   the agent by exactly one call per run. It is charged (ADR 0015 § 4 as
-    #   amended): metered because it is the agent's spend, and never a gate
-    #   because there is no budget check left after a terminal state.
-    # * ``briefing_judge`` is the EVALUATOR's own cost. It grades the run and
-    #   is not part of it, so it stays out of the ledger and out of the
-    #   reconciliation.
-    #
-    # Both are recorded either way — a billed call missing from the record is
-    # the under-report ADR 0015 exists to prevent — and the report carries the
-    # charged subset and the total side by side.
+    # ``charged_to_ledger`` is declared HERE, the only place that knows it, and it draws
+    # the line at WHOSE money a call is rather than when it happened. Both post-run
+    # roles bill after the terminal state and part company there: ``briefing_writer`` is
+    # the AGENT's own cost, so it is charged (ADR 0015 § 4 as amended — metered, never
+    # gating, since no budget check is left); ``briefing_judge`` is the EVALUATOR's, so
+    # it stays out of the ledger and the reconciliation. Both are RECORDED either way.
     accounting = RunAccounting()
     investigation_llm = accounting.meter(investigation_llm, "investigation_planner")
     # The selector is the AGENT's own cost — it decides the run's diagnosis — so
@@ -1748,11 +1385,9 @@ def run_scenario(
     briefing_llm = accounting.meter(briefing_llm, "briefing_writer")
     judge_llm = accounting.meter(judge_llm, "briefing_judge", charged_to_ledger=False)
 
-    # The inference strategy for this run (WP-0.2). Resolved here — the edge
-    # that owns configuration — and passed to both the loop that runs it and the
-    # provenance record that names it, so the two cannot disagree about which
-    # strategy produced the row. An unknown INFERENCE_STRATEGY raises here,
-    # before the first model call and before anything is spent.
+    # The inference strategy (WP-0.2), resolved at the edge that owns configuration and
+    # passed to both the loop and the provenance record, so the two cannot disagree. An
+    # unknown INFERENCE_STRATEGY raises here, before anything is spent.
     strategy = STRATEGIES.create(settings.inference_strategy, strategy_knobs(settings))
     transitions: dict[IncidentState, Transition] = dict(TRANSITIONS)
     transitions[IncidentState.INVESTIGATING] = make_llm_investigate(
@@ -1760,36 +1395,27 @@ def run_scenario(
         investigation_llm,
         model=settings.agent_model,
         strategy=strategy,
-        # Where this run's per-step research records go: always to the run's
-        # accounting (WP-2.3 needs the context size of every step, on every
-        # run), and on to the trace store as well when one was built. A run
-        # without ``EVAL_TRACE_DIR`` still writes no trace file — the sink
+        # Per-step research records: always to the run's accounting (WP-2.3 needs every
+        # step's context size), and on to the trace store when one was built. The sink
         # composes, it does not choose.
         record_step=accounting.step_sink(_step_sink(tracer) if tracer is not None else None),
-        # Passed on every run, and read by exactly one arm: the strategies that
-        # make no selector call never touch it, and the one that does refuses
-        # when it is absent rather than borrowing the planner's client.
+        # Passed on every run, read by one arm: the strategies that make no selector
+        # call never touch it, and the one that does refuses rather than borrowing.
         selector_llm_client=selector_llm,
-        # Freshness re-probe (ADR 0009) is live-only: canned tool responses
-        # are instant-consistent, and a re-probe would consume an extra
-        # scripted planner response, breaking every canned scenario.
+        # Freshness re-probe (ADR 0009) is live-only: canned responses are
+        # instant-consistent, and a re-probe would eat an extra scripted response.
         reprobe_attempts=(settings.investigate_reprobe_attempts if live_mcp_available else 0),
         reprobe_delay_seconds=settings.investigate_reprobe_delay_seconds,
-        # WP-2.4's third knob, wired here because this is its only consumer
-        # (WO-R3-256): a strategy that needs more or fewer planner steps than
-        # the loop's default says so through ``MAX_ITERATIONS_OVERRIDE``, and
-        # until this line the setting configured nothing. Unset means the
-        # loop's own default, named rather than re-declared — a second copy of
-        # the number here would drift from the one the loop actually enforces.
+        # WP-2.4's third knob at its only consumer (WO-R3-256). Unset means the loop's
+        # own default, NAMED rather than re-declared, so no second copy can drift.
         max_iterations=(
             _DEFAULT_MAX_ITERATIONS
             if settings.max_iterations_override is None
             else settings.max_iterations_override
         ),
     )
-    # Phase 6 remediation loop: PLANNING → REMEDIATING → VERIFYING. Each
-    # role gets its own LLM client so canned queues stay role-partitioned
-    # and live tracer records label each call by role.
+    # Phase 6 remediation loop: PLANNING → REMEDIATING → VERIFYING. A client per role,
+    # so canned queues stay partitioned and tracer records label each call.
     transitions[IncidentState.PLANNING] = make_llm_plan(
         remediation_planner_llm, model=settings.agent_model
     )
@@ -1804,32 +1430,21 @@ def run_scenario(
     transitions[IncidentState.VERIFYING] = make_llm_verify(
         mcp_client,
         verification_judge_llm,
-        # JUDGE_MODEL, not agent_model. This verdict decides RESOLVED, and it
-        # was the one judgement in the suite running on an unpinned model —
-        # so a model-pin change could move every remediation outcome with
-        # nothing in the report saying why. JUDGE_MODEL exists to be pinned
-        # separately for exactly this reason (config.py, CLAUDE.md); the
-        # briefing judge already used it and this one did not.
-        #
-        # It also judges an expectation the agent wrote for itself
-        # (`plan.verify_expectation`), which is a weaker check than a
-        # world-state assertion — `expected_evidence_fields` is the stronger
-        # tool where a scenario can express the effect directly.
+        # JUDGE_MODEL, not agent_model: this decides RESOLVED and was the one judgement
+        # on an unpinned model. It judges an expectation the agent wrote for itself,
+        # which is weaker than an `expected_evidence_fields` claim.
         model=settings.judge_model,
         # Poll the verify probe only against a real platform; canned
         # responses are instant-consistent so one read is authoritative.
         probe_attempts=settings.verify_probe_attempts if live_mcp_available else 1,
         probe_delay_seconds=settings.verify_probe_delay_seconds,
-        # Same clock the loop runs on, so a multi-minute polling window
-        # stamps each attempt with the time it actually happened rather
-        # than reusing the transition's single entry read.
+        # The loop's own clock, so a multi-minute polling window stamps each attempt
+        # with when it happened rather than reusing the transition's entry read.
         clock=tick,
     )
-    # RECORDED mode stops where the plan is made (04:117). Installed AFTER the
-    # two transitions it replaces, so the replacement is visible as a
-    # replacement rather than as an absence, and over both of PLANNING's
-    # acting successors — a Tier-2 plan goes to AWAITING_APPROVAL, and an
-    # approval against a recorded world is as meaningless as an action.
+    # RECORDED mode stops where the plan is made (04:117). AFTER the two transitions it
+    # replaces, and over BOTH: an approval against a recording is as meaningless as an
+    # action.
     handoff = RecordedHandoff()
     if recorded:
         transitions[IncidentState.REMEDIATING] = handoff
@@ -1839,17 +1454,14 @@ def run_scenario(
     # it died — see ScenarioCrash.
     checkpointer = InMemoryCheckpointer()
     run: RunState | None = None
-    # Same reason, one field further: the post-terminal briefing charge is not
-    # in any checkpoint, so a crash AFTER enrichment (a grader raising, say)
-    # would otherwise reconcile a split containing the briefing call against a
-    # ledger that predates it, and report a false ``COST UNRECONCILED``.
+    # Same reason one field further: the post-terminal briefing charge is in no
+    # checkpoint, so a crash after enrichment would reconcile a split containing that
+    # call against a ledger predating it and report a false ``COST UNRECONCILED``.
     run_ledger: BudgetLedger | None = None
     try:
-        # The scenario's declared cap IS the run's tool-call ceiling (ADR
-        # 0019), not just the number it is graded against afterwards. Before
-        # this, the two were different numbers and the planner was told the
-        # fleet default of 25 in every scenario — including the ones whose
-        # whole subject is behaviour under a tight budget.
+        # The scenario's declared cap IS the run's ceiling (ADR 0019), not only the
+        # number it is graded against: the planner used to be told the fleet default of
+        # 25 even in the scenarios about behaviour under a tight budget.
         run = start_run(
             agent_visible.alert,
             settings,
@@ -1868,21 +1480,14 @@ def run_scenario(
             incident_id=str(final.incident_id),
             checkpoints=tuple(checkpointer.history(final.incident_id)),
         )
-        # The briefing is built BEFORE grading, because ``ScenarioExpectation.
-        # expect_briefing_contains`` grades the handoff artifact as the human
-        # receives it — enrichment included, since ``findings`` and
-        # ``recommendation`` are empty in the deterministic template. Grading
-        # still makes no LLM call of its own; it reads a finished object.
+        # Built BEFORE grading, because ``expect_briefing_contains`` grades the handoff
+        # as the human receives it, enrichment included. Grading still makes no LLM call
+        # of its own; it reads a finished object.
         briefing = render_briefing(final)
         briefing_error: str | None = None
-        # The run's ledger AFTER the post-terminal briefing call is charged to
-        # it (WO-R3-260). It is kept beside ``final`` and never put back on it:
-        # ``grade`` below reads ``final`` and the BUDGET dimension is graded
-        # from it, so a post-terminal charge that reached the graded state
-        # would be a ceiling deciding an outcome the agent had already
-        # finished. Metered, never gating — ADR 0015 § 4 as amended, made true
-        # by which object holds the number rather than by everyone remembering
-        # not to check it.
+        # The ledger AFTER the post-terminal briefing charge (WO-R3-260), never put back
+        # on ``final``: BUDGET is graded from that, so the charge would let a ceiling
+        # decide a finished outcome. Metered, never gating (ADR 0015 § 4 as amended).
         run_ledger = final.budget
         if scenario.use_live_llm or (briefing_canned is not None and briefing_canned.has_remaining):
             try:
@@ -1890,46 +1495,29 @@ def run_scenario(
                     briefing, briefing_llm, model=settings.agent_model, budget=run_ledger
                 )
             except (LLMError, ValidationError) as err:
-                # Charge what the failed call already billed, exactly as the
-                # investigation loop does with the same helper. A briefing
-                # writer that raised after generating is billed work, and the
-                # metering wrapper above has already recorded it — leaving the
-                # ledger alone here would break the reconciliation on precisely
-                # the run that cost money for nothing.
+                # Charge what the failed call billed, as the investigation loop does:
+                # leaving it would break the reconciliation on exactly the run that
+                # cost money for nothing.
                 run_ledger = accrue_llm_error(run_ledger, err, settings.agent_model)
-                # Enrichment is a decoration on the run, same as the judge
-                # below. Losing the briefing writer must not void it (ADR
-                # 0007: a crashed scenario is an eval-infrastructure bug by
-                # definition) — the deterministic briefing stands and the run
-                # is still graded. A scenario that asserts on briefing text
-                # will grade that dimension red, which is the honest outcome:
-                # the assertion was about a briefing we could not produce.
-                # ValidationError is caught alongside LLMError deliberately
-                # even though LLMClient._parse now wraps schema violations:
-                # CannedLLMClient validates its payloads directly
-                # (llm/fakes.py) and never goes through _parse, so the raw
-                # pydantic error is still reachable.
+                # A decoration, like the judge: losing it must not void the run
+                # (ADR 0007), and a scenario asserting on briefing text grades red,
+                # which is honest. ValidationError because ``CannedLLMClient``
+                # validates its own payloads and never reaches ``_parse``.
                 briefing_error = f"briefing enrichment failed: {err}"
-        # Which world this run was actually in (INC-003, ADR 0040). The runner
-        # is the only place that knows — ``grade()`` is a pure function of its
-        # arguments and must stay one.
+        # Which world this run was actually in (INC-003, ADR 0040). Only the runner
+        # knows: ``grade()`` is a pure function of its arguments and must stay one.
         if replay_client is not None:
-            # A recorded world states which world it is IN the recording
-            # (ADR 0043 § 4), and the recording is the only authority here:
-            # ``live_mcp_available`` is False on this path by construction, so
-            # the live/canned derivation below would answer "not the label's
-            # world" for every recorded run and strike out the one dimension
-            # recorded mode exists to measure. These two booleans are what the
-            # recorder wrote down at the moment that world existed.
+            # A recording states which world it is (ADR 0043 § 4) and is the only
+            # authority here: ``live_mcp_available`` is False, so the derivation below
+            # would strike out the one dimension recorded mode exists to measure.
             replay_label = replay_client.world.world
             world_matches_ground_truth = label_describes_this_world(
                 live_mcp=replay_label.live_mcp,
                 chaos_seeded=replay_label.chaos_seeded,
             )
         else:
-            # ``chaos_records`` holds the SETUP hooks at this point (teardown
-            # runs after grading), and a canned run seeded nothing but is in the
-            # label's world by definition.
+            # ``chaos_records`` holds the SETUP hooks here (teardown runs after
+            # grading); a canned run seeded nothing and is in the label's world anyway.
             world_matches_ground_truth = label_describes_this_world(
                 live_mcp=live_mcp_available,
                 chaos_seeded=seeded_chaos(chaos_records),
@@ -1938,18 +1526,14 @@ def run_scenario(
             final,
             scenario.expectation,
             briefing=briefing,
-            # The answer key, read straight off the scenario here and nowhere
-            # else. The run above was built from ``agent_visible()`` (ADR
-            # 0038), so this is the first and only point where the two sides
-            # of the trust boundary meet — after the agent is finished.
-            # ``None`` when the scenario declares no ground truth, which
-            # grades ROOT_CAUSE vacuously rather than red.
+            # The answer key, read here and nowhere else: the run was built from
+            # ``agent_visible()`` (ADR 0038), so this is the only point where the two
+            # sides of the boundary meet. ``None`` grades ROOT_CAUSE vacuously.
             ground_truth=(
                 None if scenario.ground_truth is None else scenario.ground_truth.root_causes
             ),
-            # Which world the run was actually in (INC-003), decided above
-            # because the answer differs by mode and a conditional inside an
-            # argument list is a conditional nobody reads.
+            # Which world the run was in (INC-003), decided above because the answer
+            # differs by mode and nobody reads a conditional inside an argument list.
             world_matches_ground_truth=world_matches_ground_truth,
             # Which dimensions this MODE cannot make a claim about (WP-3.3).
             # ``None`` for every other mode, so nothing else changes.
@@ -1961,11 +1545,9 @@ def run_scenario(
             try:
                 judge_score = judge_briefing(briefing, judge_llm, model=settings.judge_model)
             except (LLMError, ValidationError) as err:
-                # The judge is a soft-quality column on top of an already-
-                # graded run. Losing the judge must not void the run.
-                # ValidationError for the same canned-client reason as above;
-                # JudgeScore's ge/le bounds are not guaranteed by constrained
-                # decoding either.
+                # A soft-quality column on an already-graded run, so losing it must not
+                # void the run. ValidationError for the canned-client reason above, and
+                # because constrained decoding does not guarantee JudgeScore's bounds.
                 judge_error = f"judge call failed: {err}"
     except Exception as exc:
         if tracer is not None:
@@ -1976,11 +1558,9 @@ def run_scenario(
                     "error": f"{type(exc).__name__}: {exc}",
                 }
             )
-        # The agent's run is over, cleanly or not, so the world goes back
-        # before the exception leaves. A teardown failure rides ALONG with
-        # the crash rather than replacing it: "the agent crashed" and "the
-        # shared environment is now dirty" are two facts, and collapsing
-        # them loses whichever one the reader needed.
+        # The run is over, so the world goes back before the exception leaves. A
+        # teardown failure rides ALONG with the crash: "the agent crashed" and "the
+        # world is dirty" are two facts, and collapsing them loses one.
         crash = ScenarioCrash(
             exc,
             () if run is None else tuple(checkpointer.history(run.incident_id)),
@@ -1989,13 +1569,11 @@ def run_scenario(
             live_mcp_client.close()
             live_mcp_client = None
         crash.teardown_error = _tear_down()
-        # What the run had billed before it died. The crash row is the
-        # only place this can reach a report, and a crashed run's spend
-        # is spend (invariant 9 one layer down).
+        # What the run had billed before it died: the crash row is the only place this
+        # reaches a report, and a crashed run's spend is spend.
         crash.accounting = accounting
-        # And the ledger that spend was charged to, when the run got far
-        # enough to have one. ``None`` falls back to the last checkpoint,
-        # which is the right answer for a crash before the terminal state.
+        # And the ledger it was charged to, when the run got far enough to have one:
+        # ``None`` falls back to the last checkpoint.
         crash.ledger = run_ledger
         # Re-raise carrying the run's own history, so the crash row reports
         # what the scenario actually spent instead of a hardcoded zero.
@@ -2008,9 +1586,8 @@ def run_scenario(
     # After the run, before the row that reports it: the outcome carries
     # ``teardown_error``, so the teardown has to have happened by now.
     teardown_error = _tear_down()
-    # ``run_ledger`` is bound the moment the loop returns, and this path is
-    # only reached when it did. The fallback makes that a fact the type
-    # checker can see rather than one a reader has to trace.
+    # ``run_ledger`` is bound the moment the loop returns, which this path implies; the
+    # fallback makes that visible to the type checker.
     reported_ledger = final.budget if run_ledger is None else run_ledger
     failure_class, failure_class_detail = _classify_failure(report, final)
     outcome = ScenarioOutcome(
@@ -2029,14 +1606,9 @@ def run_scenario(
         # Provenance mirrors the tracer's scenario_start keys above.
         live_mcp=live_mcp_available,
         live_llm=live_llm_available,
-        # A recorded run is degraded when the recording could not answer
-        # something the agent asked for, or refused something it tried. The
-        # field already meant "this row is not the measurement it looks like"
-        # (a declared-live leg that fell back to canned); a miss is the same
-        # statement about a replayed world, and ADR 0044 uses the same word for
-        # it. Deliberately NOT true merely because a recorded run replayed a
-        # platform — that is the mode, not a degradation of it, and
-        # ``execution_mode`` below is where a reader learns it.
+        # A recorded run is degraded when the recording missed or refused a call: the
+        # field means "this row is not the measurement it looks like" (ADR 0044). NOT
+        # true merely for replaying — that is the mode, which ``execution_mode`` says.
         degraded=(scenario.use_live_mcp and not live_mcp_available and not recorded)
         or (scenario.use_live_llm and not live_llm_available)
         or (replay_client is not None and replay_client.degraded),
@@ -2045,11 +1617,9 @@ def run_scenario(
             settings,
             model_role=model_role,
             invocation_id=invocation_id,
-            # Derived from what the legs ACTUALLY did, the same two values
-            # the live/canned flags above are derived from — never from the
-            # --live flag, which says what was asked for. ``recorded`` is first
-            # because it is the narrowest true statement: the platform leg was
-            # a replay of one recorded moment, whatever the model leg did.
+            # From what the legs ACTUALLY did, never from the --live flag, which says
+            # what was asked for. ``recorded`` is first because it is the narrowest true
+            # statement, whatever the model leg did.
             execution_mode=(
                 ExecutionMode.RECORDED
                 if recorded
@@ -2059,22 +1629,17 @@ def run_scenario(
                     else ExecutionMode.CANNED
                 )
             ),
-            # The run's own final ledger: seeded maxima and all four meters —
-            # and, since WO-R3-260, the briefing writer's post-terminal call,
-            # which is the agent's cost and belongs in the number a reader
-            # takes for "what this run spent". The graded ``final.budget`` is
-            # the same object up to that one charge; the difference is exactly
-            # the metered-but-not-gating spend.
+            # The final ledger: seeded maxima, all four meters, and (WO-R3-260) the
+            # briefing writer's post-terminal call, which is the agent's cost. It
+            # differs from the graded ``final.budget`` by exactly that charge.
             budget=reported_ledger,
             recorded_at=tick(),
             # The strategy object the loop above actually ran with.
             strategy=strategy,
         ),
-        # What it cost, by role and by planner step, reconciled against the
-        # same ledger the provenance above carries (WP-2.3). It has to be the
-        # same one: the charged split now includes ``briefing_writer``, so
-        # reconciling against the pre-briefing ledger would report every run
-        # with an enriched briefing as unreconciled.
+        # What it cost, by role and by step, reconciled against the SAME ledger the
+        # provenance carries (WP-2.3): the charged split includes ``briefing_writer``,
+        # so the pre-briefing ledger would report every enriched run as unreconciled.
         accounting=build_accounting(accounting, reported_ledger),
         replay=_replay_record(replay_client, recorded_world, handoff, final, scenario),
     )
@@ -2095,18 +1660,10 @@ def run_scenario(
 def _grader_drift_detail(report: GradeReport, evidence: Sequence[EvidenceEntry]) -> str:
     """Why an evidence-only red is probably the grader's fault, and where to look.
 
-    The `grader-brittleness` bucket was already correct on live run
-    ``4974811d236f`` and it still cost a full trace read to learn what had
-    gone wrong: the claim was written for an unfiltered listing and the agent
-    verified with a filtered one. Both halves of that sentence are in the
-    graded artifacts already — the claim is in the EVIDENCE detail, and the
-    call shapes are in the ledger's ``arguments`` — so the diagnosis belongs
-    in ``report.json`` where the coordinator reads it.
-
-    The call shapes are listed per tool, deduplicated, in call order, and only
-    for tools the failing claims actually name. That is the comparison a
-    reader has to make: "the claim wants THIS shape, the agent used THAT
-    one".
+    On live run ``4974811d236f`` the bucket was right and a full trace read was still
+    needed to learn the claim wanted an unfiltered listing and the agent verified with a
+    filtered one. Both halves are in the graded artifacts already. Call shapes per tool,
+    only for the tools the failing claims name: "the claim wants THIS, the agent used THAT".
     """
     detail = next(
         (d.detail for d in report.dimensions if d.dimension == GradeDimension.EVIDENCE), ""
@@ -2132,10 +1689,9 @@ def _grader_drift_detail(report: GradeReport, evidence: Sequence[EvidenceEntry])
 def _classify_failure(report: GradeReport, final: RunState | None) -> tuple[str, str]:
     """Bucket a graded run into the noise taxonomy, with a reason for the bucket.
 
-    Heuristic and deliberately conservative: anything ambiguous lands in
-    "unclassified" rather than a wrong bucket. Priority order mirrors the
-    debugging discipline in docs/lessons/live-eval-noise-sources.md —
-    environment before consistency before variance before grader.
+    Conservative: anything ambiguous lands in "unclassified" rather than a wrong
+    bucket. Priority order is docs/lessons/live-eval-noise-sources.md's debugging
+    discipline — environment, consistency, variance, grader.
     """
     if report.passed:
         return "passed", ""
@@ -2143,12 +1699,9 @@ def _classify_failure(report: GradeReport, final: RunState | None) -> tuple[str,
     failing = {d.dimension for d in report.dimensions if not d.passed}
     evidence = final.evidence if final is not None else ()
     summaries = [e.result_summary for e in evidence]
-    # First, and ahead of "transport", because it is the one bucket that says
-    # the AGENT was right and the HARNESS could not read it. Live run
-    # 779b19a287a7 graded RED on three dimensions with a correct decision in
-    # hand, and reported `failure_class: unclassified` — two of the three
-    # prefixes below already contain "LLM" and "invalid", so without this it
-    # would have been filed as a network problem instead (ADR 0035).
+    # Ahead of "transport": it is the one bucket saying the AGENT was right and the
+    # HARNESS could not read it. Live run 779b19a287a7 reported `unclassified` with a
+    # correct decision in hand, and would otherwise have read as a network problem.
     if any(
         summary.startswith(prefix) for summary in summaries for prefix in OUTPUT_INVALID_PREFIXES
     ):
@@ -2189,16 +1742,11 @@ def _crashed_result(
 ) -> ScenarioResult:
     """Synthesize a failed ScenarioResult when run_scenario raises.
 
-    One crashing scenario should not take out the whole suite — live-eval
-    runs across dozens of scenarios and a single flaky platform call
-    (network blip, unseeded fixture) would otherwise wipe every result
-    that hadn't run yet. The synthesized report carries the error string
-    so it's visible in the summary + written to disk.
-
-    A ``ScenarioCrash`` also carries the run's partial ledger and
-    checkpoints, so the row reports what the scenario spent before it died
-    rather than zero. The bucketing below reads the original cause, not the
-    wrapper — the wrapper is a carrier, not a new failure mode.
+    One crashing scenario must not take out the suite: a single flaky platform call
+    would otherwise wipe every result that had not run yet. The error string travels on
+    the row, and a ``ScenarioCrash`` also carries the partial ledger and checkpoints so
+    the row reports what was spent rather than zero. The bucketing reads the original
+    CAUSE — the wrapper is a carrier, not a failure mode.
     """
     cause = exc.cause if isinstance(exc, ScenarioCrash) else exc
     partial = exc.final if isinstance(exc, ScenarioCrash) else None
@@ -2215,39 +1763,29 @@ def _crashed_result(
             ),
         ),
     )
-    # Post-#48 the transitions absorb transport failures as graded
-    # escalations, so a crash that still reaches here is either the
-    # scenario's own seeding (environment) or an unwrapped transport path.
+    # The transitions absorb transport failures as graded escalations, so a crash that
+    # reaches here is the scenario's own seeding or an unwrapped transport path.
     if isinstance(cause, PreconditionNotMet):
-        # Its own bucket on purpose. "shared-env" would be close but wrong:
-        # nothing was contended, the world simply was not in the state the
-        # scenario asserts, and no agent behaviour is being described.
+        # Its own bucket: "shared-env" is close but wrong — nothing was contended, the
+        # world simply was not in the asserted state, and no agent behaviour is described.
         crash_class = "precondition"
     elif isinstance(cause, PreconditionUnverifiable):
         # The premise is UNKNOWN, not false. Bucketing this as "precondition"
         # would send the reader to seeding when the platform is the problem.
         crash_class = "transport"
     elif isinstance(cause, ChaosSetupFailed) or "chaos_setup" in error_detail:
-        # ``run_all`` no longer routes a setup failure here at all — it
-        # records an ungraded row instead, because there is no world to
-        # grade in. This branch survives for the direct ``run_scenario``
-        # caller (a test, a script) that still wants a row, and the
-        # substring half survives for a caller raising a plain RuntimeError
-        # in the old shape.
+        # ``run_all`` records an ungraded row for a setup failure instead of routing
+        # here. This branch survives for the direct ``run_scenario`` caller that wants a
+        # row, and the substring half for a caller raising the old plain RuntimeError.
         crash_class = "shared-env"
     else:
         crash_class = "transport"
-    # What the crash had billed, when the crash carried the measurement AND a
-    # checkpoint to reconcile it against. ``None`` means no measurement exists
-    # — a direct call from a test, or a failure before the first client was
-    # built — and it is deliberately distinct from a zeroed record, which
-    # would claim the run was free. The two conditions travel together in
-    # practice: every LLM call the agent makes is inside a transition, and a
-    # transition that ran left a checkpoint behind it.
+    # What the crash had billed, when it carried the measurement AND a checkpoint to
+    # reconcile against. ``None`` means none exists, distinct from a zeroed record.
     crash_accounting = exc.accounting if isinstance(exc, ScenarioCrash) else None
-    # The crash's own ledger when it reached a terminal state, else the last
-    # checkpoint's. The two differ by exactly the post-terminal briefing
-    # charge, and the split being reconciled here contains it.
+    # The crash's own ledger if it reached a terminal state, else the last
+    # checkpoint's: they differ by the post-terminal briefing charge, which the split
+    # being reconciled here contains.
     crash_ledger = exc.ledger if isinstance(exc, ScenarioCrash) else None
     accounting = (
         None
@@ -2257,39 +1795,26 @@ def _crashed_result(
     outcome = ScenarioOutcome(
         scenario=scenario.name,
         **_grouping_keys(scenario),
-        # Both read off the last checkpoint the run wrote. Hardcoding TRIAGE
-        # and 0 described a run that never started, which is a different
-        # failure from the one being reported — and it made every crashed
-        # row's usage silently unusable for the cost columns (ADR 0015: the
-        # meter may over-report, never under-report).
+        # Both off the last checkpoint the run wrote: hardcoding TRIAGE and 0 described
+        # a run that never started and made every crashed row unusable for the cost
+        # columns (ADR 0015: the meter may over-report, never under-report).
         final_state=IncidentState.TRIAGE if partial is None else partial.state,
         tool_calls_used=0 if partial is None else partial.budget.tool_calls_used,
         report=report,
         judge_score=None,
         failure_class=crash_class,
-        # A crashed run whose teardown ALSO failed says two things, and the
-        # second one outlives this row: the world the next live run would
-        # inherit is dirty. Carried onto the row for the same reason it is
-        # carried on a clean one — the report is the durable record, and the
-        # on-disk latch is the enforcement.
+        # A crashed run whose teardown ALSO failed says a second thing that outlives
+        # this row: the next live run's world is dirty. On the row because the report is
+        # the durable record; the on-disk latch is the enforcement.
         teardown_error=(exc.teardown_error if isinstance(exc, ScenarioCrash) else None),
-        # Provenance survives the crash (ADR 0013). These defaulted to False,
-        # so every crashed row in a live report claimed it had run canned —
-        # and `degraded` False alongside said that was intended. A row that
-        # misdescribes how it ran is worse than a missing row: the report is
-        # the artifact, and a reader counting live coverage counted wrong.
-        # ``recorded`` overrides the declared MCP leg, for the reason the
-        # comment above gives: the row must not misdescribe how it ran. A
-        # recorded run reached no platform whatever the scenario declares, and a
-        # crashed recorded row claiming a live platform is exactly the reader
-        # counting live coverage wrong.
+        # Provenance survives the crash (ADR 0013): these defaulted to False, so every
+        # crashed row in a live report claimed canned, and a row that misdescribes how it
+        # ran is worse than none. ``recorded`` overrides the declared MCP leg likewise.
         live_mcp=scenario.use_live_mcp and not recorded,
         live_llm=scenario.use_live_llm,
-        # Same reasoning one field up: a crashed row that cannot say which
-        # model and revision it crashed under is a row nobody can act on.
-        # ``settings is None`` only for a direct call from a test that knows
-        # no configuration — there is no model to name, so the record is
-        # absent rather than invented.
+        # Same reasoning one field up: a crash that cannot name its model and revision
+        # is a row nobody can act on. ``settings is None`` only for a test that knows no
+        # configuration, where the record is absent rather than invented.
         provenance=(
             None
             if settings is None
@@ -2298,12 +1823,9 @@ def _crashed_result(
                 settings,
                 model_role=model_role,
                 invocation_id=invocation_id,
-                # The DECLARED legs, like the two flags above: a crash can
-                # happen before either leg is chosen, and what the scenario
-                # asked for is the only honest answer available here. Except for
-                # ``recorded``, which is not a declaration but an instruction
-                # the caller gave — the platform leg WAS a replay, however early
-                # the crash came.
+                # The DECLARED legs, like the flags above: a crash can precede either
+                # choice. Except ``recorded``, which is the caller's instruction — the
+                # platform leg WAS a replay however early the crash came.
                 execution_mode=(
                     ExecutionMode.RECORDED
                     if recorded
@@ -2407,13 +1929,8 @@ def run_all(
                 recorded_world=recorded_world,
             )
         except ChaosSetupFailed as exc:
-            # NOT a graded row, and this is the whole point of the branch
-            # (plan 01 § 4). A seeding failure means the benchmark world was
-            # never built, so there is nothing the agent could have done
-            # right or wrong in it. A crash row here would carry a
-            # ``GradeReport`` saying the scenario failed, and every rate
-            # derived from the report would then describe the agent using an
-            # event that happened before it started.
+            # NOT a graded row (plan 01 § 4): the world was never built, so a
+            # ``GradeReport`` here would describe the agent with a pre-run event.
             print(f"  UNGRADED {scenario.name}: {exc}")
             ungraded.append(UngradedScenario(scenario=scenario.name, reason=str(exc)))
             continue
@@ -2456,15 +1973,12 @@ def run_all(
         judged_count=judged_count,
         judge_useful_count=judge_useful_count,
         judge_mean_overall=judge_mean_overall,
-        # _crashed_result outcomes keep degraded=False defaults: a crash is
-        # already a failure, so this post-run count may undercount the
-        # pre-run estimate when a live scenario crashes — acceptable, the
-        # --live gate in main() is pre-run.
+        # Crash rows keep ``degraded=False``, so this post-run count can undercount the
+        # pre-run estimate — acceptable, since main()'s --live gate is pre-run.
         degraded_count=sum(1 for o in outcomes if o.degraded),
         only_patterns=only_patterns,
-        # Derived from the role every row was stamped with, so the console
-        # line, the report and the archive are the same value by
-        # construction — the ``degraded_count`` discipline (finding A-01).
+        # From the role every row was stamped with, so the console line, the report and
+        # the archive agree by construction (``degraded_count``'s discipline, A-01).
         closing=model_role is ModelRole.BENCHMARK,
         outcomes=outcomes,
         ungraded=tuple(ungraded),
@@ -2475,11 +1989,8 @@ def run_all(
 def write_report(report: RunReport, *, directory: Path = _REPORTS_DIR) -> Path:
     """Write ``report`` as ``report.<stamp>.<invocation_id>.json`` and return the path.
 
-    The run's own identity names the file: ``generated_at`` supplies the
-    stamp and ``invocation_id`` the discriminator, so the report cannot be
-    labelled as a run other than the one that produced it. Exclusive-create
-    — a second write at the same path is the same run reported twice, which
-    is a bug, not a refresh.
+    The run's own identity names the file, so a report cannot be labelled as another
+    run. Exclusive-create: a second write there is one run reported twice.
     """
     return artifacts.write_versioned(
         "report",
@@ -2498,11 +2009,8 @@ def write_trajectories(
 ) -> list[Path]:
     """Write each trajectory to ``<directory>/<scenario>.<stamp>.<invocation_id>.json``.
 
-    Each ``Trajectory`` already carries the ``invocation_id`` that produced
-    it, so the filename is derived from the record rather than supplied
-    beside it and cannot disagree with the contents. ``timestamp`` defaults
-    to now; one run passes a single stamp so its whole suite groups
-    together.
+    The filename comes from the record's own ``invocation_id``, so it cannot disagree
+    with the contents. One run passes a single ``timestamp`` so its suite groups.
     """
     when = timestamp or datetime.now(UTC)
     return [
@@ -2528,11 +2036,8 @@ def write_briefings(
 ) -> list[Path]:
     """Write each briefing to ``<directory>/<scenario>.<stamp>.<invocation_id>.json``.
 
-    ``EscalationBriefing`` is a product model and carries no run identity of
-    its own, so unlike ``write_trajectories`` this one is told the
-    ``invocation_id`` explicitly. Required, not defaulted: a briefing filed
-    under an empty id is a briefing that cannot be joined back to the run
-    that paid for it.
+    ``EscalationBriefing`` carries no run identity, so the ``invocation_id`` is passed
+    in — required, not defaulted: an empty id cannot be joined back to the run.
     """
     when = timestamp or datetime.now(UTC)
     return [
@@ -2549,29 +2054,14 @@ def write_briefings(
 
 
 def _lock_path(path: Path) -> None:
-    """Make one archived path refuse writes: clear write bits, then set
-    ``uchg`` where the platform has it (macOS/BSD; Linux CI does not).
+    """Make one archived path refuse writes: clear write bits, then ``uchg`` where the
+    platform has it (macOS/BSD; Linux CI does not).
 
-    This is invariant 9 enforced by the filesystem instead of by
-    discipline — the same convention ``context/pack.sh`` applies to
-    session archives ("Archives cannot be deleted", context/README.md).
-    Exclusive-create already stops the *runner* from overwriting evidence;
-    this stops everything else: ``rm -rf``, ``git clean -fd``, a cleanup
-    script pointed at the wrong checkout. Before this, 0 of the files
-    under ``evals/runs/`` were protected on disk, and a routine cleanup
-    of a retired checkout came within one command of destroying 195 run
-    files that existed nowhere else.
-
-    Best-effort, never fatal: by the time anything is locked its bytes
-    are already durable, so a filesystem that refuses ``chmod`` or
-    ``chflags`` (some network mounts) gets a logged warning, not a
-    crashed run. Already-immutable paths are skipped, which makes the
-    finalize-time sweep idempotent — ``chmod`` on a ``uchg`` file is
-    itself EPERM.
-
-    Deliberate unlock (rare, announced): ``chflags -R nouchg`` +
-    ``chmod -R u+w`` — see docs/runbook.md §"Completed archives are
-    locked on disk".
+    Invariant 9 enforced by the filesystem rather than by discipline: exclusive-create
+    stops the RUNNER overwriting evidence, this stops ``rm -rf`` and a cleanup script
+    aimed at the wrong checkout — one came within a command of destroying 195 run files.
+    Best-effort, never fatal, and idempotent (immutable paths are skipped). Deliberate
+    unlock: docs/runbook.md § "Completed archives are locked on disk".
     """
     try:
         st = path.stat()
@@ -2587,12 +2077,9 @@ def _lock_path(path: Path) -> None:
 def _lock_archive_tree(target: Path) -> None:
     """Lock every path under ``target``, children before parents.
 
-    Bottom-up because the directory locks must land last: ``uchg`` on a
-    directory refuses new entries, and the per-scenario files (locked
-    individually as they were archived) sit inside the directories this
-    seals. Called from ``finalize_archive`` only — a partial archive's
-    directories must stay writable so the next scenario, and eventually
-    ``report.json``, can still land.
+    Bottom-up because ``uchg`` on a directory refuses new entries. From
+    ``finalize_archive`` only: a partial archive's directories must stay writable so the
+    next scenario, and eventually ``report.json``, can land.
     """
     for child in sorted(target.rglob("*"), key=lambda p: len(p.parts), reverse=True):
         _lock_path(child)
@@ -2624,21 +2111,10 @@ def _archive_trace_slice(
 ) -> None:
     """Copy this invocation's trace records into ``<target>/traces/<scenario>.jsonl``.
 
-    The flat ``<EVAL_TRACE_DIR>/<scenario>.jsonl`` accumulates every
-    invocation's records forever (never truncated — study/findings.md
-    F-002) and is gitignored, so an archived run whose traces stayed only
-    there could not be joined back to the prompts and responses that
-    produced it (S-07). The archive therefore carries its own slice.
-
-    Filter convention, shared with ``scripts/estimate_cost.py``: records
-    whose ``invocation_id`` does not match are another run's, and records
-    with no ``invocation_id`` at all are pre-invocation-id vintage — both
-    are excluded. Unparseable lines are skipped rather than fatal; a
-    truncated final line from a killed run must not block the archive.
-
-    The flat file is opened READ-ONLY on every path. It is the canonical
-    incremental record — the only evidence of a scenario killed mid-flight,
-    before this function ever fires for it.
+    The flat ``<EVAL_TRACE_DIR>/<scenario>.jsonl`` is gitignored (F-002), so an archive
+    whose traces stayed only there could not be joined to its prompts (S-07). Filter
+    convention, shared with ``scripts/estimate_cost.py``: a mismatched or absent
+    ``invocation_id`` is excluded, and an unparseable line skipped. READ-ONLY throughout.
     """
     source = trace_dir / f"{scenario}.jsonl"
     if not source.exists():
@@ -2657,9 +2133,8 @@ def _archive_trace_slice(
     with path.open("x") as handle:
         for line in kept:
             handle.write(line + "\n")
-    # The lock lands on the archived SLICE only. The flat source file
-    # stays writable forever: later invocations APPEND to it (F-002's
-    # fix), and locking it would crash the next run's tracer.
+    # The lock lands on the archived SLICE only: later invocations APPEND to the flat
+    # source (F-002's fix), and locking it would crash the next run's tracer.
     _lock_path(path)
 
 
@@ -2672,21 +2147,11 @@ def archive_scenario(
 ) -> None:
     """Stream one finished scenario's evidence into the run archive.
 
-    Wired into ``run_all(on_result=...)``, so scenario N's trajectory,
-    briefing and trace slice are on disk before scenario N+1 starts.
-    Before this existed, every artifact but the JSONL traces lived in
-    memory until the whole suite finished, and a Ctrl-C at scenario 30 of
-    37 threw away 30 scenarios of paid live evidence (S-05/A-14) — the
-    F-002/F-003 shape CLAUDE.md invariant 9 exists to prevent. A hard kill
-    now costs at most the in-flight scenario.
-
-    Every file is exclusive-create (``"x"``), as in ``archive_run``: a
-    second write at a path that already holds evidence crashes instead of
-    deleting it. And every file is LOCKED (``_lock_path``) the moment its
-    write completes, so a killed run's partial rows are already protected
-    on disk — evidence the instant they are durable, not the instant the
-    suite happens to finish. ``report.json`` is NOT written here — see
-    ``finalize_archive``.
+    Wired into ``run_all(on_result=...)``, so scenario N is on disk before N+1 starts: a
+    Ctrl-C used to throw away 30 scenarios of paid live evidence (S-05/A-14), and a hard
+    kill now costs at most the in-flight one. Every file is exclusive-create and LOCKED
+    as its write completes — evidence the instant it is durable. ``report.json`` is NOT
+    written here; see ``finalize_archive``.
     """
     scenario = result.outcome.scenario
     _archive_trajectory(target, result.trajectory)
@@ -2698,24 +2163,10 @@ def archive_scenario(
 def finalize_archive(target: Path, report: RunReport) -> Path:
     """Write ``<target>/report.json`` — the completion marker, always last.
 
-    Presence of ``report.json`` is what makes an archive complete. Its
-    absence marks the directory as a partial run (killed, crashed, or still
-    in flight) whose per-scenario files remain first-class evidence — which
-    is why the aggregate report moved from the FIRST archive write to the
-    last (S-08): written first, a half-finished archive was
-    indistinguishable from a complete one.
-
-    Once the marker is down, the whole archive is locked on disk
-    (``_lock_archive_tree``): every file and directory loses its write
-    bits and, where the platform supports it, gains ``uchg``. The marker
-    means "nothing will ever write here again", so this is the exact
-    moment enforcement can start — locking any earlier would refuse the
-    archive its own remaining writes. A killed run never reaches this
-    call: its per-scenario files are individually locked already, and its
-    directories stay writable, which costs nothing — no future invocation
-    ever writes there (fresh ``invocation_id`` per run, exclusive-create
-    on every file), so the writable window is only ever used by manual,
-    deliberate hands.
+    Its presence makes an archive complete and its absence marks a partial run whose
+    per-scenario files are still evidence: written FIRST, as until S-08, a half-finished
+    archive looked complete. The marker means nothing will write here again, so the tree
+    is locked once it is down. A killed run's directories stay writable at no cost.
     """
     target.mkdir(parents=True, exist_ok=True)
     with (target / "report.json").open("x") as handle:
@@ -2734,21 +2185,10 @@ def archive_run(
 ) -> Path:
     """Write a whole run's artifacts to an immutable per-run directory at once.
 
-    The one-shot equivalent of the streaming path (``archive_scenario`` per
-    scenario, then ``finalize_archive``) that ``main`` uses, kept for
-    callers that already hold a complete run in memory. Same files, same
-    ordering guarantee: report.json last.
-
-    The flat ``evals/{reports,trajectories,briefings}`` paths are pointers
-    to the latest run and are refreshed in place — convenient, and the
-    thing every existing consumer reads. This archive is the durable
-    record required by CLAUDE.md invariant 9.
-
-    Every file is opened with exclusive-create (``"x"``). That is the
-    load-bearing half: if a future refactor ever routes two invocations at
-    one directory, the run fails loudly instead of silently deleting the
-    earlier one — which is exactly how Run 001's live trajectories were
-    lost (study/findings.md F-002).
+    The one-shot equivalent of the streaming path ``main`` uses, for callers holding a
+    complete run in memory. Same files, same ordering: report.json last. Every file is
+    exclusive-create, which is the load-bearing half — two invocations aimed at one
+    directory fail loudly rather than deleting the earlier one (F-002).
     """
     target = runs_dir / invocation_id
     (target / "trajectories").mkdir(parents=True, exist_ok=True)
@@ -2763,14 +2203,10 @@ def archive_run(
 def _eval_defaults() -> Settings:
     """Placeholder Settings for offline eval runs (budget is what actually matters).
 
-    Constructor with ``_env_file=None``, NOT ``model_validate``: the latter
-    treats ``_env_file`` as data (``extra="ignore"`` drops it silently) and
-    consults the cwd ``.env`` for any field absent from the dict — which is
-    how a real ``PLATFORM_SMOKE_TOKEN`` leaked into "offline" runs (A-04).
-    ``platform_smoke_token=None`` is pinned explicitly so an exported shell
-    var cannot supply it either. Fields left unpinned here (``agent_model``,
-    budget knobs) can still absorb exported shell env vars — the dotenv leak
-    is the one closed here.
+    The CONSTRUCTOR with ``_env_file=None``, not ``model_validate``, which drops that
+    key and consults the cwd ``.env`` — how a real ``PLATFORM_SMOKE_TOKEN`` leaked into
+    "offline" runs (A-04). ``platform_smoke_token=None`` is pinned so an exported var
+    cannot supply it either; unpinned fields can still absorb shell env vars.
     """
     return Settings(  # type: ignore[call-arg]
         _env_file=None,
@@ -2788,24 +2224,11 @@ def _eval_defaults() -> Settings:
 def root_cause_coverage(report: RunReport) -> RootCauseCoverage:
     """How many of this report's rows were graded on diagnosis, and how many were right.
 
-    WP-2.2's acceptance number. Derived from the rows rather than stored on
-    ``RunReport``, which is what lets it be computed over the committed
-    ``baseline.json`` and over every archived report — all of them predate
-    the dimension, and evidence is never rewritten (invariant 9). The
-    denominator is the corpus the loader actually produced, never a literal:
-    the plan's acceptance line still says 37 and the directory holds 41.
-
-    "Graded" is a scenario whose ROOT_CAUSE detail is substantive. Reusing
-    ``is_vacuous_detail`` rather than re-deriving the condition keeps this
-    number and the regression gate's vacated-assertion check reading the
-    same signal — if one moves, both move.
-
-    The ungraded rows are then split in two (INC-003): a row held back
-    because the run's world is not the label's world is counted and named
-    separately from a row whose scenario declares no label at all. Read off
-    the detail the grader wrote rather than re-derived from the scenario
-    files, so the number holds for an archived report as well — including one
-    written before this rule existed, where it is simply zero.
+    WP-2.2's acceptance number, from the ROWS rather than stored, so it computes over
+    the committed baseline and every archived report. The denominator is the corpus the
+    loader produced, never a literal, and "graded" means a substantive detail via
+    ``is_vacuous_detail``, so this and the gate's vacated-assertion check move together.
+    The ungraded rows split in two (INC-003): wrong world, or unlabelled.
     """
     rows = [
         dimension
@@ -2834,9 +2257,8 @@ def _print_summary(report: RunReport) -> None:
     for scenario_name in report.contaminated_scenarios:
         error = next(o.teardown_error for o in report.outcomes if o.scenario == scenario_name)
         print(f"TEARDOWN FAILED: {scenario_name} — {error}")
-    # Printed from the first row's own record, not from the settings this
-    # process happens to hold: the line and the artifact then cannot
-    # disagree, which is the same rule the degraded line below follows.
+    # From the first row's own record, not the settings this process holds, so the line
+    # and the artifact cannot disagree.
     first = next((o.provenance for o in report.outcomes if o.provenance is not None), None)
     if first is not None:
         print(
@@ -2846,9 +2268,8 @@ def _print_summary(report: RunReport) -> None:
         )
     if reason := report.non_closing_reason:
         print(f"NON-CLOSING: this report cannot close a phase — {reason}")
-    # Print from the persisted field so the console number and the artifact
-    # number are the same value by construction — their divergence (stdout
-    # said "degraded", latest.json said nothing) was finding A-01.
+    # From the persisted field, so the console and the artifact agree by construction —
+    # their divergence was finding A-01.
     if (report.degraded_count or 0) > 0:
         print(
             f"degraded: {report.degraded_count} scenarios fell back to canned "
@@ -2860,11 +2281,9 @@ def _print_summary(report: RunReport) -> None:
             f"mean overall {report.judge_mean_overall:.2f}"
         )
     print(root_cause_coverage(report).describe())
-    # The run's bill, from the rows' own accounting records (WP-2.3) rather
-    # than re-added from settings or a trace — the console number and the
-    # artifact number are then the same value by construction, the rule the
-    # degraded line above was written for (A-01). Silent on a canned suite,
-    # where every fake bills nothing and a "$0.000000" line would be noise.
+    # The run's bill from the rows' own accounting records (WP-2.3), not re-added from
+    # settings — the A-01 rule again. Silent on a canned suite, where every fake bills
+    # nothing and "$0.000000" would be noise.
     accounted = [o.accounting for o in report.outcomes if o.accounting is not None]
     if any(row.usd_used > 0 for row in accounted):
         unreconciled = [
@@ -2912,14 +2331,10 @@ def _print_summary(report: RunReport) -> None:
 def _canned_equivalent_knob_warning(settings: Settings) -> str | None:
     """Preflight nudge for --live runs still on canned-equivalent probe knobs.
 
-    The config.py defaults (verify_probe_attempts=1,
-    investigate_reprobe_attempts=0) deliberately keep canned runs
-    byte-identical (ADR 0006/0009), but a live run at those values
-    reproduces both documented live failure modes the mitigations exist
-    for (S-10). A warning, not exit 3: through Settings an explicit
-    VERIFY_PROBE_ATTEMPTS=1 is indistinguishable from unset, so a hard
-    fail would ban deliberate single-probe live experiments with no
-    escape hatch.
+    The config defaults keep canned runs byte-identical (ADR 0006/0009), but a live run
+    at those values reproduces both failure modes the mitigations exist for (S-10). A
+    warning, not exit 3: an explicit ``VERIFY_PROBE_ATTEMPTS=1`` is indistinguishable
+    from unset, so a hard fail would ban single-probe live experiments outright.
     """
     if settings.verify_probe_attempts <= 1 or settings.investigate_reprobe_attempts == 0:
         return (
@@ -2935,8 +2350,8 @@ def _canned_equivalent_knob_warning(settings: Settings) -> str | None:
 def _repo_relative(path: Path) -> str:
     """Display form for a path: repo-relative when it is inside the repo.
 
-    Unit tests point ``_RUNS_DIR`` at ``tmp_path``, which has no repo-root
-    prefix, and a console nicety must never be the thing that raises.
+    Unit tests point ``_RUNS_DIR`` at ``tmp_path``, and a console nicety must never be
+    the thing that raises.
     """
     try:
         return str(path.relative_to(_REPO_ROOT))
@@ -2954,19 +2369,10 @@ def _settings_for_mode(live: bool) -> Settings:
 def _parse_only(argv: list[str]) -> list[str]:
     """Extract scenario filters from ``--only <pattern>``.
 
-    Accepts multiple patterns via repeated ``--only`` flags or as a
-    comma-separated single value. Empty list means "no filter".
-
-    How a pattern is matched depends on the mode, and ``main`` decides:
-    under ``--live`` without ``--smoke`` each pattern must be a scenario's
-    FULL NAME (a substring there widens the selection past the ADR 0020
-    gate); under ``--smoke`` and offline a pattern matches any scenario
-    whose name contains it. Parsing is the same either way.
-
-    Examples:
-        --only remediate_dlq_backlog_success          → one live selection
-        --only consumer_lag_healthy,tool_             → two (comma-separated)
-        --only remediate_ --only dlq_                 → two (repeated flag)
+    Repeated flags or one comma-separated value; empty means "no filter". ``main``
+    decides how a pattern MATCHES: a scenario's FULL NAME under ``--live`` without
+    ``--smoke`` (a substring there widens the selection past the ADR 0020 gate), a
+    substring under ``--smoke`` and offline. Parsing is the same either way.
     """
     patterns: list[str] = []
     for i, arg in enumerate(argv):
@@ -2983,22 +2389,10 @@ def _parse_only(argv: list[str]) -> list[str]:
 def _parse_model_role(argv: Sequence[str]) -> tuple[ModelRole | None, str]:
     """The ``--model-role`` selection, or ``(None, refusal)`` explaining why not.
 
-    ``--model-role development`` / ``--model-role benchmark`` (and the
-    ``--model-role=<value>`` spelling), resolving ``AGENT_MODEL`` from
-    ``DEVELOPMENT_MODEL`` or ``BENCHMARK_MODEL`` respectively (plan 02 § 9).
-
-    Two properties are deliberate. The default is ``development``: a run that
-    did not name a role is not a benchmark run, and the expensive mistake is
-    a development run read as a reported number. And an unrecognised value is
-    REFUSED rather than coerced to that default — the precedent is the
-    ``--only`` refusals (a pattern that matched nothing used to run the
-    remainder), because "--model-role benchmrk silently ran development" is
-    the same class of bug as "--only typo silently ran a wider suite".
-
-    Returns a pair rather than "a role or a message": ``ModelRole`` is a
-    ``StrEnum``, so a caller cannot tell a role from a refusal string with
-    ``isinstance`` — the refusal would be read as a selection, which is how
-    the first draft of this made every other refusal in ``main`` unreachable.
+    Resolves ``AGENT_MODEL`` from ``DEVELOPMENT_MODEL`` or ``BENCHMARK_MODEL`` (plan 02
+    § 9). Defaults to ``development`` (a run that did not name a role is not a benchmark
+    run) and REFUSES an unrecognised value. Returns a PAIR because ``ModelRole`` is a
+    ``StrEnum``, so a refusal string would otherwise read as a selection.
     """
     raw: str | None = None
     for i, arg in enumerate(argv):
@@ -3015,20 +2409,17 @@ def _parse_model_role(argv: Sequence[str]) -> tuple[ModelRole | None, str]:
         return None, f"MODEL ROLE FAIL: --model-role {raw!r} is not one of: {roles}"
 
 
-#: The one value ``--mode`` takes. The other two modes are selected by what the
-#: run can reach — ``--live`` for the platform, nothing for canned — and giving
-#: them flag spellings here would be two ways to ask for one thing.
+#: The one value ``--mode`` takes. The other two are selected by what the run can
+#: reach, and flag spellings for them would be two ways to ask for one thing.
 RECORDED_MODE: Final[str] = "recorded"
 
 
 def _parse_mode(argv: Sequence[str]) -> tuple[str | None, str]:
     """The ``--mode`` selection: ``""`` for absent, the value, or ``None`` + a refusal.
 
-    Three states rather than two, for the reason ``_parse_model_role`` records:
-    a refusal that looks like a selection makes every later refusal unreachable.
-    An unrecognised value is REFUSED rather than ignored — "--mode recordd ran
-    the canned suite and reported it" is the same class of bug as a dead
-    ``--only`` pattern, and this one would spend money on the way.
+    Three states for ``_parse_model_role``'s reason. An unrecognised value is REFUSED:
+    "--mode recordd ran the canned suite and reported it" is the dead-``--only`` bug,
+    and this one would spend money on the way.
     """
     raw: str | None = None
     for i, arg in enumerate(argv):
@@ -3062,25 +2453,11 @@ def _parse_world(argv: Sequence[str]) -> str | None:
 def recordings_for(scenarios: Sequence[Scenario], world: str | None) -> tuple[dict[str, Path], str]:
     """Which recording each selected scenario replays, or a refusal saying why not.
 
-    Two selections, and the difference is what a reported result rests on.
-
-    Without ``--world``, each scenario replays its NEWEST recording, resolved
-    through ``artifacts.newest_or_none`` — never a glob and never ``ls -t``
-    (CLAUDE.md invariant 9's corollary). A scenario with no recording is a
-    REFUSAL, not a canned fallback: ``run_scenario`` would otherwise serve the
-    canned fixtures and the row would land in a recorded report as though a
-    world had been replayed, which is the same fabrication the ``--live``
-    canned-only gate refuses one mode over.
-
-    With ``--world <id>``, one exact recording is pinned — by its invocation id,
-    which is what makes a reported number reproducible when a scenario has
-    several recordings and the newest is not the one the result came from. A
-    scenario NAME is accepted there too and means "the newest of that scenario":
-    the two cannot collide (an invocation id is 12 hex characters and a scenario
-    name is not), and refusing the friendlier spelling would only send operators
-    to look the id up. Either way it must resolve to exactly one recording and
-    the selection must be exactly that scenario — a pinned world and a wider
-    selection is an instruction with two readings.
+    Without ``--world``, each scenario replays its NEWEST recording through
+    ``artifacts.newest_or_none`` — never a glob, never ``ls -t`` — and no recording is a
+    REFUSAL rather than a canned fallback. With ``--world <id>`` one recording is pinned,
+    which is what makes a number reproducible; a scenario NAME means its newest, and the
+    two cannot collide. Either way: exactly one recording, exactly that scenario.
     """
     if world is None:
         found: dict[str, Path] = {}
@@ -3101,9 +2478,8 @@ def recordings_for(scenarios: Sequence[Scenario], world: str | None) -> tuple[di
             )
         return found, ""
 
-    # One resolver for both callers — ``make world-drift`` asks the same question
-    # of the same id, and two copies of the rule would let the two resolve to
-    # different recordings.
+    # One resolver for both callers: ``make world-drift`` asks the same question of the
+    # same id, and two copies would resolve to different recordings.
     matches = matching_recordings(world, [scenario.name for scenario in scenarios])
     if not matches:
         return {}, (
@@ -3130,22 +2506,15 @@ def recordings_for(scenarios: Sequence[Scenario], world: str | None) -> tuple[di
 def _smoke_holdback_reason(scenario: Scenario) -> str:
     """Why the derived smoke pass does not contain ``scenario``.
 
-    The refusal has to name the reason per scenario, not just the names: the
-    three causes have three different repairs. A chaos or write scenario
-    belongs to the remediation stage under the full token; a
-    ``smoke_exclusion`` is a deliberate hold-back whose recorded reason says
-    what would have to be true to lift it.
-
-    Chaos seeding and ``expected_action_tools`` can both be true, and both
-    are reported. ``smoke_exclusion`` cannot coexist with either — the schema
-    validator refuses a hold-back the predicate already covers — so it is
-    reported alone.
+    Per scenario, because the three causes have three different repairs: a chaos or
+    write scenario belongs to the remediation stage, a ``smoke_exclusion`` is a
+    deliberate hold-back. The first two can both be true and both are reported;
+    ``smoke_exclusion`` cannot coexist with either, so it is reported alone.
     """
     causes: list[str] = []
     if scenario.seeds_chaos:
-        # Named by the field the YAML actually uses, because the reader's
-        # next move is to open that block. The wording for the legacy
-        # spelling is unchanged.
+        # Named by the field the YAML uses, because the reader's next move is to open
+        # that block.
         declared = (
             "declares chaos_setup"
             if scenario.chaos_setup is not None
@@ -3163,18 +2532,16 @@ def _smoke_holdback_reason(scenario: Scenario) -> str:
         )
     if scenario.smoke_exclusion is not None:
         causes.append(f"smoke_exclusion: {scenario.smoke_exclusion}")
-    # Not reachable from a scenario the caller filtered on `not in_smoke_pass`,
-    # and stated rather than assumed: a silent empty reason would turn the
-    # refusal into a bare list of names.
+    # Unreachable from a caller filtering on `not in_smoke_pass`, and stated anyway: an
+    # empty reason would turn the refusal into a bare list of names.
     return "; ".join(causes) if causes else "not in the derived smoke pass"
 
 
 def main() -> int:
     if "--clear-chaos-block" in sys.argv[1:]:
-        # The operator half of the teardown latch, and deliberately its own
-        # invocation rather than a flag on a run: clearing it asserts that
-        # `make eval-reset` has already put the world back, and an assertion
-        # bundled into the run it unblocks is one nobody makes consciously.
+        # The operator half of the teardown latch, its own invocation rather than a flag:
+        # clearing it asserts the world is back, and nobody makes that assertion
+        # consciously when it is bundled into the run it unblocks.
         cleared = clear_chaos_block()
         if cleared is None:
             print("no chaos teardown block is set; nothing to clear")
@@ -3182,29 +2549,22 @@ def main() -> int:
             print(f"cleared chaos teardown block: {cleared}")
         return 0
     live = "--live" in sys.argv[1:]
-    # Smoke mode selects the read-scoped principal from Settings directly.
-    # It is NOT plumbed through the shell: exporting PLATFORM_TOKEN from a
-    # make recipe was silently overridden by `-include .env` (PR #62 vs
-    # #69), so every "read-scoped" smoke run before 2026-08-07 actually
-    # held write scope. Config in, guard at point of use.
+    # The read-scoped principal comes from Settings directly, NOT through the shell:
+    # a make recipe's export was overridden by `-include .env`, so every "read-scoped"
+    # smoke run before 2026-08-07 held write scope. Config in, guard at point of use.
     smoke = "--smoke" in sys.argv[1:]
     if smoke and not live:
-        # Before settings load, so this needs no env at all. Erroring beats
-        # silently implying --live: that would flip the settings source from
-        # placeholder to real .env behind the operator's back (A-04).
+        # Before the settings load, so it needs no env. Erroring beats implying --live,
+        # which would flip the settings source to the real .env unasked (A-04).
         print(
             "SMOKE FAIL: --smoke requires --live (smoke without live would "
             "run the whole suite canned under placeholder settings)"
         )
         return 3
     if live and (blocked := chaos_block_reason()) is not None:
-        # A previous run's chaos teardown did not complete, so the world the
-        # next live run would read as its baseline still carries a fault
-        # nobody intended. Refused HERE — before settings, before the
-        # guards, before anything is spent — for the same reason exits 6 and
-        # 7 are: a refusal that arrives after the money is gone is a report,
-        # not a guard. Offline runs are untouched; canned scenarios share no
-        # world.
+        # A previous teardown did not complete, so the next live run's baseline carries
+        # a fault nobody intended. Refused before settings, guards and spend: a refusal
+        # that arrives after the money is gone is a report. Offline runs share no world.
         print(f"CONTAMINATED WORLD: live runs are blocked — {blocked}")
         print(
             "Restore the world — the reset clears the block on success:\n"
@@ -3231,10 +2591,8 @@ def main() -> int:
         print("no scenarios ran, nothing was spent")
         return 2
     if recorded and (live or smoke):
-        # The one combination that could touch the shared world while claiming
-        # to be a replay. Refused here rather than reconciled: --live and
-        # --smoke are about reaching a platform, and a recorded run's platform
-        # is a file.
+        # The one combination that could touch the shared world while claiming to be a
+        # replay: --live and --smoke reach a platform, and a recording is a file.
         asked = " and ".join(flag for flag in ("--live", "--smoke") if flag in sys.argv[1:])
         print(
             f"MODE FAIL: --mode {RECORDED_MODE} cannot be combined with {asked}. A "
@@ -3250,35 +2608,18 @@ def main() -> int:
         print(role_refusal)
         print("no scenarios ran, nothing was spent")
         return 2
-    # One identity per invocation, shared by the tracer, the trajectories,
-    # the report, and the archive directory — so every artifact this run
-    # produces can be joined, and none of them can collide with another
-    # run's (CLAUDE.md invariant 9).
+    # One identity per invocation, shared by the tracer, trajectories, report and
+    # archive, so every artifact joins and none collides with another run's.
     invocation_id = uuid.uuid4().hex[:12]
     only_patterns = _parse_only(sys.argv[1:])
     if live and not smoke and not only_patterns:
-        # A bare `--live` is the whole suite against one shared platform, with
-        # real spend and no reset between scenarios. It was already refused —
-        # but only INCIDENTALLY, by the exit-8 canned-only gate below, which
-        # fires because the tree happens to contain scenarios with no live
-        # leg. (How many is deliberately not written here: the count belongs
-        # to the corpus, is stated once in docs/runbook.md, and is asserted
-        # against evals/benchmark_inventory.json by
-        # tests/unit/test_pre_spend_guards.py. The argument below does not
-        # need the number, and every copy of it was one more thing to drift.)
-        # That refusal is a fact about the scenario directory, not about
-        # the invocation: give every scenario a live leg and an unfiltered
-        # `--live` starts spending, having changed nothing in this file. The
-        # exit-8 message also misnames the problem ("these scenarios cannot run
-        # live") when the actual problem is "you named no scenario".
-        #
-        # So the missing filter is refused here, structurally, before the
-        # settings load — no env, no scenario tree, nothing to be contingent
-        # on. `--smoke` is exempt: it derives its own selection (WO-R2-123)
-        # and runs read-scoped. The Makefile's `ifndef ONLY` guard on
-        # `eval-live` says the same thing one layer out; this is the backstop
-        # for every other entry point, since `python -m evals.runner --live`
-        # never touches make.
+        # A bare `--live` is the whole suite against one shared platform with real
+        # spend and no reset. It was refused only INCIDENTALLY, by the exit-8 canned-only
+        # gate, which is a fact about the scenario DIRECTORY: give every scenario a live
+        # leg and an unfiltered `--live` starts spending with nothing here changed. So
+        # the missing filter is refused structurally, before the settings load.
+        # `--smoke` is exempt (it derives its own read-scoped selection, WO-R2-123), and
+        # the Makefile's `ifndef ONLY` says the same thing for the `make` path only.
         print(
             "LIVE FAIL: --live requires --only <scenario_name> (or --smoke). "
             "An unfiltered live selection is the whole suite against one shared "
@@ -3288,39 +2629,32 @@ def main() -> int:
         print("no scenarios ran, nothing was spent")
         return 2
     try:
-        # A recorded run reads the real environment, and that is the whole
-        # reason it costs money: the platform is a replay, the MODEL is not.
-        # ``PLATFORM_MCP_URL`` is read too and deliberately ignored —
-        # ``run_scenario`` forces the live MCP leg off whenever a recording is
-        # passed, so a real URL in .env cannot make a recorded run touch it.
+        # A recorded run reads the real environment, which is why it costs money: the
+        # platform is a replay, the MODEL is not. ``PLATFORM_MCP_URL`` is read and
+        # ignored — ``run_scenario`` forces the live MCP leg off for any recording.
         settings = _settings_for_mode(live or recorded)
     except ValidationError as err:
-        # Exit 3 is the preflight/env code (see the smoke-token and LLM-auth
-        # exits below); a raw traceback would exit 1, the code reserved for
-        # "a scenario failed" (A-15).
+        # Exit 3 is the preflight/env code; a raw traceback would exit 1, which is
+        # reserved for "a scenario failed" (A-15).
         fields = ", ".join(
             ".".join(str(part) for part in detail["loc"]) or "(settings)" for detail in err.errors()
         )
         print(f"PREFLIGHT FAIL (env): invalid or missing settings — {fields}")
         return 3
-    # The role resolves the model the run bills, in one place, before any
-    # scenario starts. ``model_copy`` and not a second Settings construction:
-    # the resolved id is already guaranteed priced (the same validator that
-    # guards AGENT_MODEL guards both role settings), and re-reading the
-    # environment here would be a second chance for it to differ.
+    # The role resolves the billed model once, before any scenario. ``model_copy``, not
+    # a second Settings construction: the id is already guaranteed priced, and
+    # re-reading the environment would be a second chance for it to differ.
     settings = settings.model_copy(update={"agent_model": settings.model_for_role(model_role)})
     print(f"model role: {model_role.value} → AGENT_MODEL={settings.agent_model}")
-    # Live-only, immediately after the settings load and before any spend:
-    # surface canned-equivalent probe knobs even on runs that go on to be
-    # refused. Never affects exit codes.
+    # Live-only, after the settings load and before any spend, so canned-equivalent
+    # probe knobs surface even on a run that goes on to be refused. Never an exit code.
     if live and (msg := _canned_equivalent_knob_warning(settings)) is not None:
         print(msg)
     mcp_token: str | None = None
     if smoke:
-        # An empty secret is an UNSET one, not a token. `is None` alone let
-        # SecretStr("") through, mcp_token became "", and make_client's old
-        # `token or ...` then selected the FULL principal for every client
-        # in the stage — guard client included (S-04).
+        # An empty secret is UNSET, not a token: `is None` alone let `SecretStr("")`
+        # through and `make_client`'s `token or ...` then selected the FULL principal
+        # for every client in the stage, guard client included (S-04).
         if settings.platform_smoke_token is None or not (
             settings.platform_smoke_token.get_secret_value().strip()
         ):
@@ -3330,32 +2664,21 @@ def main() -> int:
         mcp_token = settings.platform_smoke_token.get_secret_value()
     scenarios = load_scenarios(_SCENARIOS_DIR)
     if smoke and not only_patterns:
-        # The smoke pass selects itself (WO-R2-123). Membership is the
-        # `in_smoke_pass` predicate on the scenario — eligible by the
-        # runner's own two refusals, minus whatever declares a
-        # `smoke_exclusion` reason in its own YAML. Until now this was a
-        # hand-written pattern list in the Makefile (`SMOKE_ONLY`), which
-        # #151 could only *check* after the fact: a renamed scenario or a
-        # new read-only one still fell out of the pass, and the test that
-        # caught it was a separate thing that had to be kept in step. A
-        # derived selection cannot fall out of step with the tree it is
-        # derived from. `SMOKE_ONLY=` remains as an operator override and
-        # arrives through --only, below, exactly as before.
+        # The smoke pass selects itself through `in_smoke_pass` (WO-R2-123): the old
+        # hand-written Makefile list let a renamed scenario fall out of the pass
+        # silently. `SMOKE_ONLY=` survives as an override and arrives through --only.
         held_back = sorted(
             (s.name, s.smoke_exclusion) for s in scenarios if s.smoke_exclusion is not None
         )
         scenarios = [s for s in scenarios if s.in_smoke_pass]
         print(f"smoke selection: {len(scenarios)} scenario(s) derived from {_SCENARIOS_DIR}")
         for name, reason in held_back:
-            # Printed for the same reason the per-pattern counts below are:
-            # the smoke log has to carry its own record of what it covered
-            # and, here, of what it knowingly did not.
+            # Printed for the per-pattern counts' reason: the smoke log carries its own
+            # record of what it covered, and here of what it knowingly did not.
             print(f"  held back (smoke_exclusion): {name} — {reason}")
         if not scenarios:
-            # Not reachable from a healthy tree, and precisely why it is
-            # checked: a derivation that silently comes back empty is a
-            # green smoke pass over nothing, which is the failure #151 was
-            # written about wearing a different hat.
+            # Unreachable from a healthy tree, and checked precisely for that: a
+            # derivation that comes back empty is a green smoke pass over nothing.
             print(
                 "SELECTION FAIL: no scenario is in the smoke pass — every scenario "
                 "either declares chaos_setup/expected_action_tools or carries a "
@@ -3364,17 +2687,9 @@ def main() -> int:
             print("no scenarios ran, nothing was spent")
             return 2
     if only_patterns:
-        # OR-match: scenario keeps if any pattern is a substring of its name.
-        # Accounted PER PATTERN, not just over the union. Refusing only when
-        # the whole selection came back empty is what let one dead pattern
-        # hide among the nineteen in SMOKE_ONLY: rename a read-only scenario
-        # and its pattern quietly matches nothing, the other eighteen still
-        # select scenarios, and the smoke pass reports green over a smaller
-        # suite than the reader believes (WO-R2-41). A pattern that matches
-        # nothing is a name that no longer exists, and the honest reading of
-        # that is "the selection you asked for is not there" — not "run the
-        # remainder". The per-pattern counts print on every filtered run so
-        # the smoke log carries its own coverage evidence.
+        # OR-match, accounted PER PATTERN: refusing only an empty selection let one dead
+        # pattern hide among SMOKE_ONLY's nineteen and report green over a smaller suite
+        # than the reader believed (WO-R2-41).
         matched: dict[str, list[str]] = {
             pattern: [s.name for s in scenarios if pattern in s.name] for pattern in only_patterns
         }
@@ -3382,9 +2697,8 @@ def main() -> int:
             print(f"  --only {pattern} → {len(names)} scenario(s)")
         dead = [pattern for pattern, names in matched.items() if not names]
         if dead:
-            # Subsumes the older "no scenarios matched at all" case: if every
-            # pattern is dead the whole selection is empty, and this names
-            # which patterns to fix instead of only reporting the total.
+            # Subsumes the older "nothing matched" case, and names which patterns to
+            # fix instead of only reporting the total.
             print(
                 f"SELECTION FAIL: {len(dead)} --only pattern(s) matched no "
                 f"scenario: {', '.join(dead)}"
@@ -3397,27 +2711,13 @@ def main() -> int:
             print("no scenarios ran, nothing was spent")
             return 2
         if live and not smoke:
-            # On the spend path a pattern must be a scenario's FULL NAME, so
-            # the selection is exactly what the operator typed and nothing
-            # adjacent. Substring matching silently widened it: `ONLY=dlq_backlog`
-            # takes `dlq_backlog` AND `remediate_dlq_backlog_success`, the
-            # read-only one drains the seeded replay_safe pool before the
-            # remediation is graded, and the report blames the agent. The ADR
-            # 0020 gate does not catch it — only ONE of the two is mutating, so
-            # `len(mutating) > 1` is False (2026-08-30: a read-only stage
-            # smuggled in a mutating scenario).
-            #
-            # Exact match FIRST, so a name that is also a prefix of another
-            # name stays runnable: `ONLY=dlq_backlog` selects the one scenario
-            # called that. Refusing it because a longer name contains it would
-            # make that scenario impossible to run live at all.
-            #
-            # `--smoke` keeps substring matching: it derives its own selection,
-            # runs read-scoped, and SMOKE_ONLY is a documented substring
-            # override (`SMOKE_ONLY=consumer_lag_`). Offline keeps it too —
-            # no spend, no shared platform, and `make eval-reg` / `make baseline`
-            # refuse ONLY outright, so nothing downstream reads a widened
-            # offline selection.
+            # On the spend path a pattern must be a scenario's FULL NAME.
+            # `ONLY=dlq_backlog` used to take `remediate_dlq_backlog_success` too, the
+            # read-only one drained the seeded replay_safe pool, and the report blamed
+            # the agent — and the ADR 0020 gate misses it, since only one of the two is
+            # mutating. Exact match FIRST, so a name that is a prefix of another stays
+            # runnable. `--smoke` and offline keep substring matching: no spend, no
+            # shared platform, and `make eval-reg`/`baseline` refuse ONLY outright.
             known = {s.name for s in scenarios}
             widened = [p for p in only_patterns if p not in known]
             if widened:
@@ -3441,35 +2741,15 @@ def main() -> int:
             scenarios = [s for s in scenarios if any(p in s.name for p in only_patterns)]
         print(f"filter --only={only_patterns} → {len(scenarios)} scenario(s)")
     if smoke:
-        # A read-only stage runs the DERIVED smoke set and nothing else.
-        # run_scenario fires chaos_setup under the evaluator's chaos principal
-        # (PLATFORM_CHAOS_TOKEN) regardless of --smoke, so seeding mutates the
-        # shared world during the stage whose whole claim is that it changes
-        # nothing. A read-scoped AGENT token does not prevent it — the seeding
-        # never used that credential, and since v0.6.5 it could not.
-        # The #80 principal guard only inspects the AGENT
-        # client's token and the exit-5 post-stage audit sees the write after
-        # it lands, so the only prevention is refusing the selection outright,
-        # here: after --only (the reachable channel, since SMOKE_ONLY is
-        # .env-overridable) and before preflight, guard, and any spend. There
-        # is no opt-out flag: a scenario outside the derived set is not a
-        # smoke scenario (S-03).
-        #
-        # This checked `chaos_setup` alone, and that was half the door. The
-        # derived set is `in_smoke_pass` — NOT chaos_setup, AND no
-        # expected_action_tools, AND no smoke_exclusion — but `--only`
-        # bypasses the derivation entirely (`if smoke and not only_patterns`
-        # above), so an override could re-admit anything the derivation had
-        # dropped for the other two reasons. A scenario with
-        # expected_action_tools and no chaos_setup passed every guard here: a
-        # graded Tier-1 write inside the stage whose purpose is proving the
-        # smoke token cannot write. Same shape as 2026-08-30, different door.
-        # Scenario.smoke_eligible's own docstring already claimed this
-        # refusal existed; now it does.
-        #
-        # The override may still NARROW the derived set — that is what
-        # SMOKE_ONLY is for, and substring patterns keep working for
-        # scenarios that are in it. It may not widen it.
+        # A read-only stage runs the DERIVED smoke set and nothing else. Seeding fires
+        # under PLATFORM_CHAOS_TOKEN regardless of --smoke, so a read-scoped AGENT token
+        # cannot prevent it, the #80 guard only inspects the agent's client, and the
+        # exit-5 audit sees the write after it lands — so the only prevention is
+        # refusing the selection here, after --only and before any spend (S-03).
+        # Checking `chaos_setup` alone was half the door: `--only` bypasses the
+        # derivation, so an override could re-admit a scenario dropped for
+        # `expected_action_tools` — a graded Tier-1 write inside the stage that exists to
+        # prove the smoke token cannot write. The override may NARROW the set, not widen it.
         held_back = [(s.name, _smoke_holdback_reason(s)) for s in scenarios if not s.in_smoke_pass]
         if held_back:
             print(
@@ -3485,19 +2765,13 @@ def main() -> int:
             print("no scenarios ran, nothing was spent")
             return 6
     if live and not smoke:
-        # A canned-only scenario (no live leg declared) cannot run against
-        # the live platform: the platform cannot manufacture or expose its
-        # fault, so run_scenario would silently serve the canned fixtures
-        # and the row would land in the live report's pass count as if the
-        # world had been graded. Refusing the selection is the only honest
-        # outcome — a canned green here is a statement about fixtures, not
-        # the agent. Each such scenario's YAML says why it is canned-only
-        # and what platform change unblocks it. --smoke is exempt by
-        # design: its stage deliberately mixes canned harness-sanity
-        # scenarios (noise_*, tool_*, ...) with live reads, and its report
-        # is read that way (docs/eval-methodology.md, "The read-only smoke
-        # pass"). Runs before the ADR 0020 mutating gate so its "run each
-        # one alone" advice is only ever issued for scenarios that CAN run.
+        # A canned-only scenario cannot run live: the platform cannot manufacture its
+        # fault, so `run_scenario` would serve the canned fixtures and the row would
+        # land in the live report's pass count. A canned green there is a statement
+        # about fixtures, not the agent, and each such YAML says what would unblock it.
+        # --smoke is exempt by design (its stage mixes canned harness-sanity scenarios
+        # with live reads). Before the ADR 0020 gate, so "run each one alone" is only
+        # ever advised for scenarios that CAN run.
         canned_only = sorted(s.name for s in scenarios if s.canned_only)
         if canned_only:
             print(
@@ -3514,21 +2788,13 @@ def main() -> int:
             print("no scenarios ran, nothing was spent")
             return 8
     if live:
-        # One state-mutating scenario per invocation, enforced rather than
-        # remembered (ADR 0020). Nine remediation scenarios share ONE platform,
-        # and the seeded pool has exactly one replay_safe row that two of them
-        # both consume — so in a single invocation a CORRECT agent greens one
-        # and reds the other, and the report blames the agent. The runner has
-        # no reset between scenarios; the reset lives outside it, which is why
-        # this is a selection refusal and not a scheduling fix.
-        # ``seeds_chaos``, not ``chaos_setup``: ADR 0020 is UNCHANGED by the
-        # ChaosPlan work, and a plan with two hooks is still ONE scenario —
-        # it seeds one world and is reset once. What would have changed
-        # silently is the other direction: reading the legacy field leaves
-        # ``chaos_setup`` None on a plan-declaring scenario, so a two-hook
-        # remediation scenario would stop counting as mutating and could be
-        # selected alongside another one. That is a regression, not a
-        # simplification.
+        # One state-mutating scenario per invocation, enforced rather than remembered
+        # (ADR 0020): the remediation scenarios share ONE platform and one seeded
+        # replay_safe row, so in a single invocation a CORRECT agent greens one and reds
+        # the other. The reset lives outside the runner, which is why this is a selection
+        # refusal. ``seeds_chaos``, not ``chaos_setup``: the legacy field is ``None`` on
+        # a plan-declaring scenario, which would stop a two-hook scenario counting as
+        # mutating.
         mutating = [
             s.name for s in scenarios if s.expectation.expected_action_tools or s.seeds_chaos
         ]
@@ -3556,15 +2822,9 @@ def main() -> int:
             print("no scenarios ran, nothing was spent")
             return 2
         if _is_offline_api_key(settings.anthropic_api_key.get_secret_value()):
-            # The mirror of the --live degradation refusal below, and the same
-            # argument: a recorded run whose planner is the canned client is a
-            # CANNED run wearing a recorded label, and its row would be counted
-            # as a measurement of a strategy that never ran. Refused before the
-            # archive exists.
-            #
-            # It is also why the offline proof of this mode drives ``run_all``
-            # directly from tests rather than through this entry point: there the
-            # canned planner is the point and the row is never reported.
+            # The mirror of the --live degradation refusal below: a recorded run on the
+            # canned planner is a CANNED run wearing a recorded label. Also why the
+            # offline proof of this mode drives ``run_all`` from tests.
             print(
                 f"PREFLIGHT FAIL (env): --mode {RECORDED_MODE} but ANTHROPIC_API_KEY is "
                 "empty or a placeholder. A recorded run replays the PLATFORM; its "
@@ -3591,10 +2851,8 @@ def main() -> int:
         1 for s in scenarios if (s.use_live_mcp and offline_mcp) or (s.use_live_llm and offline_llm)
     )
     if live and degraded_to_canned > 0:
-        # Fail BEFORE run_all: a misconfigured --live run costs zero tool
-        # calls and zero dollars, and can never produce a latest.json that
-        # is indistinguishable from a live-green run (A-01/S-09) — nor the
-        # worse chimera of real MCP+chaos driven by a canned LLM.
+        # Fail BEFORE run_all: a misconfigured --live run then costs nothing and cannot
+        # produce a report indistinguishable from a live-green one (A-01/S-09).
         legs = []
         if offline_mcp:
             legs.append("PLATFORM_MCP_URL is the offline placeholder")
@@ -3610,33 +2868,25 @@ def main() -> int:
         print("no scenarios ran, nothing was spent")
         return 3
     if live and not offline_llm and any(s.use_live_llm for s in scenarios):
-        # One free authenticated call before anything runs: an expired key
-        # otherwise surfaces as N identical per-scenario crash rows (the
-        # 2026-08-03 campaign burned a whole smoke pass discovering this).
+        # One free authenticated call before anything runs: an expired key otherwise
+        # surfaces as N identical crash rows, which cost a whole smoke pass once.
         try:
             preflight_auth(settings.anthropic_api_key.get_secret_value())
         except LLMError as err:
             print(f"PREFLIGHT FAIL (LLM auth): {err}")
             print("fix ANTHROPIC_API_KEY in .env — no scenarios ran, nothing was spent")
             return 3
-    # Guard the principal at point of use, against the live platform,
-    # before a single scenario (or dollar) is spent. v0.4.9 exposes no
-    # whoami/introspection tool, so this is a negative probe: a Tier-1
-    # call with invalid arguments must be refused on SCOPE. The handler
-    # checks scope before parsing arguments, so it cannot execute under
-    # either token — the two outcomes are distinguishable and safe.
+    # The principal, guarded at point of use before a dollar is spent. No
+    # whoami exists, so this is a negative probe: an invalid Tier-1 call must be refused
+    # on SCOPE, and the handler checks scope before arguments, so nothing can execute.
     stage_started_at = datetime.now(UTC)
-    # Unconditional in smoke mode whenever a real platform is reachable.
-    # Derived from the platform URL, NOT from the --live flag: the guard
-    # must not depend on a second mechanism (flag parsing) to decide
-    # whether the first mechanism (scope) needs checking. There is no
-    # opt-out — no env var, no flag, no config key disables this.
+    # Unconditional in smoke mode against a real platform, derived from the URL and NOT
+    # the --live flag: the guard must not depend on flag parsing to decide whether scope
+    # needs checking. There is no opt-out.
     guard_required = smoke and not _is_offline_placeholder(str(settings.platform_mcp_url))
     if smoke and not guard_required:
-        # Defense-in-depth behind the degraded fail-fast above (reachable
-        # when the --only selection contains no use_live scenario): a smoke
-        # pass exists to verify the live read-scoped principal, and a
-        # placeholder platform has no principal to verify (A-04).
+        # Defence in depth behind the degraded fail-fast above: a smoke pass exists to
+        # verify the live read-scoped principal, and a placeholder has none (A-04).
         print(
             "SMOKE FAIL: smoke mode against a placeholder platform — "
             "there is no live principal to guard"
@@ -3654,21 +2904,12 @@ def main() -> int:
             print("no scenarios ran, nothing was spent")
             return 4
         print("principal guard: token is read-scoped (negative probe refused on scope)")
-    # The mirror, for the stage that must be able to act. Until now every
-    # principal check was gated on `smoke`, so the remediation stage — the
-    # only one that spends money AND mutates — was the one stage running
-    # unguarded. A read-scoped token there does not fail fast: each scenario
-    # investigates, plans, attempts its action, is refused, and grades red
-    # after full spend.
-    #
-    # Each half asks about the scope its half of the selection needs, keyed
-    # off the same two fields the ADR 0020 mutating gate above is keyed off.
-    # `expected_action_tools` alone was not enough: a scenario that mutates
-    # the platform solely through `chaos_setup` declares none, so it skipped
-    # the guard entirely and discovered its wrong token inside run_scenario,
-    # mid-invocation. And `actions:execute` is not the scope it needs —
-    # seeding is `chaos:invoke`, so probing for write scope would refuse
-    # tokens that can seed and pass tokens that cannot.
+    # The mirror, for the stage that must be able to ACT. Every principal check used to
+    # be gated on `smoke`, leaving the one stage that spends AND mutates unguarded — and
+    # a read-scoped token there does not fail fast, it grades every scenario red after
+    # full spend. Each half asks about the scope its half of the selection needs, keyed
+    # off the ADR 0020 gate's two fields: `expected_action_tools` alone missed a
+    # chaos-only scenario, and `actions:execute` is the wrong scope for seeding.
     live_platform = (
         live and not smoke and not _is_offline_placeholder(str(settings.platform_mcp_url))
     )
@@ -3677,20 +2918,12 @@ def main() -> int:
     )
     chaos_guard_required = live_platform and any(s.seeds_chaos for s in scenarios)
     if write_guard_required or chaos_guard_required:
-        # TWO clients, because there are now two principals (platform v0.6.5,
-        # owner decision O-4). The agent's client is `mcp_token` — None on a
-        # live non-smoke run, so `settings.platform_token`, the credential
-        # `run_scenario` hands the agent — and `assert_write_capable_principal`
-        # asks both halves of the question about it: it must be able to act,
-        # and it must NOT be able to seed (a token that can seed can read the
-        # chaos audit rows, which is the answer key). The chaos client is
-        # `PLATFORM_CHAOS_TOKEN`, the credential `chaos_setup` actually fires
-        # under, and it is guarded where it is used rather than where it is
-        # configured — the whole lesson of evals/guards.py.
-        #
-        # The chaos credential is resolved HERE, before the archive exists and
-        # before a single model call, so an unset PLATFORM_CHAOS_TOKEN costs
-        # one refusal instead of a scenario crash mid-invocation.
+        # TWO clients, because there are two principals (v0.6.5, O-4). The agent's is
+        # `mcp_token`, and `assert_write_capable_principal` asks both halves about it: it
+        # must act, and it must NOT seed (a token that can seed reads the chaos audit
+        # rows, which are the answer key). The chaos client is `PLATFORM_CHAOS_TOKEN`,
+        # guarded where it is used rather than where it is configured. Resolved HERE, so
+        # an unset token costs one refusal instead of a crash mid-invocation.
         try:
             chaos_token = settings.require_chaos_token() if chaos_guard_required else None
         except ChaosTokenNotConfigured as err:
@@ -3704,11 +2937,9 @@ def main() -> int:
                     # Carries actions:execute AND lacks chaos:invoke.
                     assert_write_capable_principal(guard_client)
                 else:
-                    # A chaos-only selection declares no Tier-1 action, so
-                    # there is no write scope to assert — but there is still an
-                    # agent, and the leak does not care whether anything was
-                    # remediated. Asserted here rather than left to the write
-                    # guard it does not run.
+                    # A chaos-only selection declares no Tier-1 action, so there is no
+                    # write scope to assert — but there is still an agent, and the leak
+                    # does not care whether anything was remediated.
                     assert_chaos_blind_principal(guard_client)
             finally:
                 guard_client.close()
@@ -3734,12 +2965,9 @@ def main() -> int:
                 "refused on arguments, not scope)"
             )
 
-    # Create the archive directory BEFORE the suite runs: from here on every
-    # scenario streams its own evidence into it as it finishes, so a Ctrl-C
-    # or a crash costs at most the in-flight scenario (ADR 0017).
-    # exist_ok=False on all three: an invocation-id collision must fail
-    # loudly, before any scenario is paid for, rather than land two runs in
-    # one directory.
+    # Created BEFORE the suite runs, so each scenario streams its evidence in as it
+    # finishes and a Ctrl-C costs at most the in-flight one (ADR 0017). ``exist_ok=False``
+    # on all three: an invocation-id collision must fail loudly, before any spend.
     trace_dir_setting = os.environ.get(_TRACE_DIR_ENV)
     trace_dir = Path(trace_dir_setting) if trace_dir_setting else None
     target = _RUNS_DIR / invocation_id
@@ -3749,15 +2977,11 @@ def main() -> int:
     if trace_dir is not None:
         (target / "traces").mkdir(exist_ok=False)
 
-    # The post-stage audit assertion below can only ever see the newest 200
-    # rows: list_audit_events has no offset and no created_after (verified
-    # against the pinned platform — `offset` is refused -32602
-    # extra_forbidden), so rows that scroll past the cap are unreachable the
-    # moment the stage ends. The one window the guard CAN cover is the one
-    # it watches while it happens, so the scan takes a page after every
-    # scenario and the assertion consumes the union. Without this a smoke
-    # stage louder than 200 `agent.tool_invoked` rows exits 5 as
-    # "inconclusive" — a false red on a paid run, masking the real result.
+    # The post-stage assertion can only see the newest 200 rows — `list_audit_events`
+    # has no offset and no created_after — so rows that scroll past the cap are gone the
+    # moment the stage ends. The one window the guard CAN cover is the one it watches
+    # while it happens: a page after every scenario, and the assertion takes the union.
+    # Without it a stage louder than 200 rows exits 5 "inconclusive" on a paid run.
     audit_scan = AuditWindowScan(stage_started_at) if guard_required else None
     scan_client = make_client(settings, token=mcp_token) if guard_required else None
 
@@ -3768,11 +2992,8 @@ def main() -> int:
         try:
             audit_scan.checkpoint(scan_client)
         except Exception as err:  # noqa: BLE001 — a checkpoint is best-effort
-            # Not fatal: the assertion is the post-stage read, and a missed
-            # checkpoint only narrows coverage, which fails closed on its
-            # own. Printed rather than swallowed so a systematically broken
-            # checkpoint is visible instead of quietly degrading the guard
-            # back to one page.
+            # Not fatal: a missed checkpoint only narrows coverage, which fails closed
+            # on its own. Printed so a systematically broken one stays visible.
             print(f"post-stage audit checkpoint skipped ({type(err).__name__}: {err})")
 
     try:
@@ -3790,18 +3011,11 @@ def main() -> int:
         if scan_client is not None:
             scan_client.close()
     ran_names = [o.scenario for o in report.outcomes]
-    # The per-scenario archive writes already happened, inside run_all.
-    # report.json goes down next — the completion marker, and the last write
-    # into the archive — and only then are the top-level copies written.
-    # Order matters: if those writes ever fail, the durable record is
-    # already complete on disk. Until 2026-08-08 only the flat files
-    # existed, so a routine offline `make eval` erased Run 001's paid live
-    # trajectories (study/findings.md F-003).
-    #
-    # One stamp for the whole run: report.generated_at. The suite's
-    # trajectories, briefings and report therefore share a filename prefix
-    # and sort together, and every one of them carries this run's
-    # invocation_id.
+    # The per-scenario writes already happened inside run_all; report.json goes down
+    # next as the completion marker, and only then the top-level copies — so a failure
+    # there leaves the durable record already complete. When only the flat files
+    # existed, a routine offline `make eval` erased Run 001's paid trajectories (F-003).
+    # One stamp for the whole run, so its artifacts share a prefix and sort together.
     archived = finalize_archive(target, report)
     written_report = write_report(report)
     write_trajectories(trajectories, timestamp=report.generated_at)
@@ -3812,18 +3026,12 @@ def main() -> int:
     print(f"run archived: {_repo_relative(archived)} (immutable)")
     print(f"report: {_repo_relative(written_report)}")
 
-    # Post-stage assertion, graded from the platform audit log rather than
-    # the agent's own trajectory (CLAUDE.md invariant 6). This is the exact
-    # evidence that exposed the token bug — now automatic.
+    # Post-stage assertion, graded from the platform audit log rather than the agent's
+    # trajectory (invariant 6) — the evidence that exposed the token bug, automated.
     if guard_required:
-        # Attribute violations to the principals this stage owns, so a
-        # shared platform's other service accounts cannot fail (or mask)
-        # this stage (A-13). Both ids or nothing: the failure mode this
-        # guard exists for — the "read-scoped" stage silently holding the
-        # full token — writes its audit rows under the AGENT principal, so
-        # a half-configured env naming only the smoke id would blind the
-        # guard to its own reason for existing. Unfiltered is over-broad,
-        # which is the safe side to fall back to.
+        # Attributed to the principals this stage owns, so another service account
+        # cannot fail or mask it (A-13). BOTH ids or nothing: the failure this exists for
+        # writes under the AGENT principal. Unfiltered is over-broad, the safe side.
         agent_principal = settings.platform_agent_principal_id
         smoke_principal = settings.platform_smoke_principal_id
         principal_ids = (
@@ -3856,18 +3064,12 @@ def main() -> int:
             return 5
         print("post-stage audit: zero successful Tier-1 actions during the smoke stage")
 
-    # Order is the blast radius, widest first. A contaminated world outranks
-    # everything because it is the only one of the three that reaches the
-    # NEXT invocation; an ungraded scenario outranks a failed one because
-    # "the agent failed" is the reading exit 1 invites and is exactly what
-    # did not happen. Every one of them lands AFTER the archive and the
-    # report are on disk — evidence first, verdict second.
-    # The latch, not only the report rows: a scenario abandoned at SEEDING
-    # has no row to carry ``teardown_error``, and its teardown can fail too.
-    # The latch is written on every path, so reading it here is the one check
-    # that covers all of them. Live only, like the pre-run refusal — an
-    # offline suite shares no world with the dirty platform and must keep
-    # exiting on its own result.
+    # Order is the blast radius, widest first: a contaminated world is the only one of
+    # the three that reaches the NEXT invocation, and an ungraded scenario outranks a
+    # failed one because "the agent failed" is exactly what did not happen. All of them
+    # land AFTER the archive and report are on disk — evidence first, verdict second.
+    # The LATCH, not only the report rows: a scenario abandoned at SEEDING has no row to
+    # carry ``teardown_error``. Live only, like the pre-run refusal.
     if live and (report.contaminated_scenarios or chaos_block_reason() is not None):
         named = ", ".join(report.contaminated_scenarios) or (chaos_block_reason() or "")
         print(

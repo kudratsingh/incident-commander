@@ -1,27 +1,12 @@
 """``python -m evals.judge_calibration`` — run the calibration, free by default.
 
-Three modes, and the default is the one that cannot spend:
-
-* no flags — the scripted fake judge. Proves the harness end to end, prints the
-  same report a real run would, and says on every line of the summary that it is
-  not a measurement. Writes nothing.
-* ``--write`` — the same, persisted. Allowed on the fake path because a
-  fake-client report is still evidence that the harness ran; the report's own
-  ``judge_client`` field is ``fake`` and ``is_a_measurement`` is false, so it can
-  never be mistaken for a calibration or entered in the register.
-* ``--live --yes-spend`` — the real judge, the paid leg. **Both flags are
-  required.** ``--live`` alone refuses and says so, because PROTOCOL's rule is
-  that readiness is not authorization: a run that spends money on the strength of
-  one flag somebody typed while exploring is the failure that rule exists to stop.
-
-The paid leg is DEFERRED at the time of writing: the owner's instruction O-22 is
-to build every phase with no paid runs, so the command below has been proved
-against the fake and its cost is estimated in
-``.coordination/DEFERRED-PAID-RUNS.md``, not spent.
-
-``--scan`` answers what the free legs can see without asking any judge anything:
-how many trap cases per judge, and which committed archives carry a real
-``action_verifier`` verdict.
+Three modes, and the default cannot spend. No flags runs the scripted fake, prints the
+report a real run would and says on every summary line that it is not a measurement.
+``--write`` persists that, which is allowed because ``judge_client: fake`` and
+``is_a_measurement: false`` keep it out of the register. ``--live --yes-spend`` is the
+paid leg and BOTH flags are required, because readiness is not authorization. The paid
+leg is DEFERRED (O-22): proved against the fake, costed in
+``.coordination/DEFERRED-PAID-RUNS.md``. ``--scan`` shows what the free legs can see.
 """
 
 from __future__ import annotations
@@ -44,13 +29,10 @@ from evals.judge_calibration.harness import (
 from evals.judge_calibration.roles import ABSENT_ROLES, CALIBRATED_ROLES
 from evals.judge_calibration.traps import traps_for
 
-#: The imperfection the fake judge is scripted with, per judge, and it is
-#: deliberate. A fake that agreed with every trap would exercise the accuracy
-#: numerator and nothing else — no false approve, no false reject, no unstable
-#: case — so the end-to-end proof would not reach the fields a real calibration is
-#: read for. Each entry names a case and the verdict the fake gives it instead.
-#:
-#: These are NOT claims about the real judges. They are a script.
+#: The imperfection the fake judge is scripted with, deliberately: a fake that agreed
+#: with every trap would exercise the accuracy numerator and nothing else, so the
+#: end-to-end proof would never reach the fields a calibration is read for. NOT claims
+#: about the real judges — a script.
 _SCRIPTED_WRONG: Final[dict[str, dict[str, str]]] = {
     "action_verifier": {"av-02-read-shows-no-movement": "verified"},
     "briefing_judge": {"bj-05-inc-002-honest-after-a-filtered-read": "grounded=no actionable=yes"},
@@ -176,9 +158,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     if args.live:
-        # Imported here, not at module scope: building Settings reads the
-        # environment and refuses to start without a priced JUDGE_MODEL, which a
-        # fake-path run has no business requiring.
+        # Imported here, not at module scope: Settings refuses to start without a
+        # priced JUDGE_MODEL, which a fake-path run has no business requiring.
         from incident_commander.config import get_settings
         from incident_commander.llm.client import LLMClient
 

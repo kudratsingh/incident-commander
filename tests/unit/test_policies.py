@@ -1,10 +1,8 @@
 """Tier-policy classification tests.
 
-The policy module is the agent-side first filter deciding what the
-investigation planner vs the remediation planner may propose.
-Wave 3 PR F on the platform side will add Tier-2 approval objects;
-until then ``_TIER_2_TOOLS`` is empty and ``TIER_2`` classification
-is a schema hook, not a live path.
+The policy module is the agent-side first filter on what the investigation and
+remediation planners may propose. ``_TIER_2_TOOLS`` is empty until the platform
+ships Tier-2 approval objects, so ``TIER_2`` is a schema hook, not a live path.
 """
 
 from __future__ import annotations
@@ -58,16 +56,13 @@ from incident_commander.tools.policies import (
 )
 from incident_commander.tools.registry import TOOL_REGISTRY
 
-# Imported rather than retyped: the pre-WP-1.6 enum membership has exactly
-# one home, and a second copy here would be one rename away from exempting a
-# real category from the escalate-only check below. ``_test_settings`` is the
-# same offline-settings factory ``test_negative_control.py`` borrows.
+# Imported rather than retyped: a second copy of the pre-WP-1.6 enum membership is
+# one rename away from exempting a real category from the escalate-only check.
 from tests.unit.test_hypothesis import _ORIGINAL_EIGHT
 from tests.unit.test_runner import _test_settings
 
-# A tool that lands in the registry with no tier decision taken. Named for
-# what the old fall-through made it: `tier_of` returned Tier.READ, so the
-# investigation planner was free to call it and nothing failed.
+# A tool in the registry with no tier decision taken. Named for what the old
+# fall-through made it: `tier_of` returned READ and nothing failed.
 _UNCLASSIFIED = "delete_all_the_things"
 
 _SCENARIO_DIR = Path(__file__).resolve().parents[2] / "evals" / "scenarios"
@@ -76,11 +71,9 @@ _SCENARIO_DIR = Path(__file__).resolve().parents[2] / "evals" / "scenarios"
 def _row_model(output_model: type[BaseModel], rows_field: str) -> type[BaseModel] | None:
     """The model of one row of a list-valued output field, if it has one.
 
-    Walks the annotation the way the grader's ``_nested_models`` does, but
-    from one named field rather than the whole tree: this asks "what shape
-    are ``list_dlq_messages.items``' elements", so a map claiming those rows
-    carry ``remediation_hint`` can be checked against the platform's own
-    contract instead of against a recording.
+    Walks the annotation as the grader's ``_nested_models`` does but from ONE named
+    field, so a map claiming those rows carry ``remediation_hint`` is checked against
+    the platform's contract rather than against a recording.
     """
     annotation = output_model.model_fields[rows_field].annotation
     for arg in typing.get_args(annotation):
@@ -92,11 +85,9 @@ def _row_model(output_model: type[BaseModel], rows_field: str) -> type[BaseModel
 def _categories_in(scenario: Scenario) -> set[HypothesisCategory]:
     """Every hypothesis category the scenario's canned planner emits.
 
-    Read off ``canned_llm_responses`` rather than off the expectation,
-    because the expectation records the tool and the terminal state but
-    never the category — and the category is what ``FIX_MAP`` is keyed on.
-    Live scenarios carry canned responses too (they are the offline
-    fallback), so the corpus is fully covered.
+    Off ``canned_llm_responses``, not the expectation, which records the tool and the
+    terminal state but never the category — and the category is what ``FIX_MAP`` is
+    keyed on. Live scenarios carry canned responses too, so the corpus is covered.
     """
     found: set[HypothesisCategory] = set()
     turns: list[dict[str, Any]] = scenario.canned_llm_responses.get("investigation_planner", [])
@@ -110,16 +101,14 @@ def _categories_in(scenario: Scenario) -> set[HypothesisCategory]:
     return found
 
 
-# Every (tool, resource-naming field) pair the policy map declares. Driven
-# off RESOURCE_ARG_FIELDS rather than hand-listed so a newly classified
-# field is covered the moment it is added.
+# Every (tool, resource-naming field) pair the policy map declares, off
+# RESOURCE_ARG_FIELDS so a newly classified field is covered the moment it lands.
 _RESOURCE_ARG_ENTRIES = sorted(
     (tool, field) for tool, fields in RESOURCE_ARG_FIELDS.items() for field in fields
 )
 
-# Resource-free stand-ins, one per leg, so the leg under test is the only
-# source of findings. Asserted to be resource-free by
-# ``test_plan_scaffold_tools_name_no_resources``.
+# Resource-free stand-ins, one per leg, so the leg under test is the only source of
+# findings (asserted by ``test_plan_scaffold_tools_name_no_resources``).
 _FILLER_ACTION_TOOL = "replay_dlq_by_category"
 _FILLER_VERIFY_TOOL = "list_dlq_messages"
 
@@ -179,11 +168,9 @@ class TestTierOf:
     ) -> None:
         """The fail-closed guarantee the docstring and ADR 0003 both claim.
 
-        ``tier_of`` used to fall through to ``Tier.READ`` for anything not
-        explicitly listed, so a tool added to the registry without a policy
-        decision became a read tool — callable by the investigation planner,
-        with no check anywhere raising. Silence is the wrong answer to "what
-        may this tool do"; the only safe answer is to refuse to classify it.
+        ``tier_of`` used to fall through to ``Tier.READ``, so a tool added without a
+        policy decision became a read tool with nothing raising. The only safe answer to
+        "what may this tool do" is to refuse to classify it.
         """
         monkeypatch.setitem(TOOL_REGISTRY, _UNCLASSIFIED, TOOL_REGISTRY["get_incident"])
         with pytest.raises(PolicyCoverageError, match=_UNCLASSIFIED):
@@ -221,11 +208,9 @@ class TestToolsAtOrBelow:
 class TestEnsureCovered:
     """The check has to be able to fail, or it is not a check.
 
-    ``ensure_covered`` iterated the registry's own keys and called
-    ``tier_of`` on each — and ``tier_of`` answered ``Tier.READ`` for
-    everything unlisted, so no registry contents could ever make this raise.
-    The comment above ``_TIER_1_TOOLS``, the docstring, ADR 0003 and this
-    test all described a guarantee nothing implemented.
+    ``ensure_covered`` iterated the registry and called ``tier_of``, which answered
+    ``Tier.READ`` for everything unlisted — so no registry contents could make it
+    raise, and four places described a guarantee nothing implemented.
     """
 
     def test_every_registered_tool_has_a_tier(self) -> None:
@@ -243,18 +228,15 @@ class TestEnsureCovered:
     def test_a_tier_entry_naming_no_registry_tool_fails(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # The other direction of the same drift: a tool retired from the
-        # registry leaves a tier entry behind, and the mapping now claims a
-        # decision about something that does not exist.
+        # The other direction of the same drift: a tool retired from the registry leaves a
+        # tier entry claiming a decision about something that does not exist.
         monkeypatch.setattr(policies, "_TIER_2_TOOLS", frozenset({"retired_tool"}))
         with pytest.raises(PolicyCoverageError, match="retired_tool"):
             ensure_covered()
 
     def test_a_tool_classified_twice_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Two tiers for one tool is not a coverage gap but it is the same
-        # defect: the mapping stops being a single answer. tier_of would
-        # silently prefer the more privileged set and the reader of
-        # _READ_TOOLS would be wrong.
+        # Two tiers for one tool is not a coverage gap but the same defect: the mapping
+        # stops being a single answer, and tier_of would silently prefer the wider set.
         monkeypatch.setattr(policies, "_TIER_2_TOOLS", frozenset({"get_consumer_lag"}))
         with pytest.raises(PolicyCoverageError, match="get_consumer_lag"):
             ensure_covered()
@@ -263,12 +245,9 @@ class TestEnsureCovered:
 class TestLiteralRegistryDrift:
     """The hand-listed Literals must track the tier map (B-06).
 
-    ``ReadToolName`` (hypothesis.py) and ``Tier1ToolName`` (remediation.py)
-    are the schema half of the LLM-boundary guard: Pydantic needs literal
-    strings at import time, so they cannot be generated from the registry.
-    These are the drift tripwires both files' comments promise — they fail
-    the day a tool is added, removed, or reclassified in ``policies.py``
-    without regenerating the Literal.
+    ``ReadToolName`` and ``Tier1ToolName`` are the schema half of the LLM-boundary
+    guard — Pydantic needs literal strings at import, so they cannot be generated —
+    and these are the drift tripwires both files promise.
     """
 
     def test_read_tool_name_literal_matches_read_tier(self) -> None:
@@ -299,11 +278,9 @@ class TestResourceArgFieldsCoverage:
             assert not missing, f"{tool}: {missing} not on input model"
 
     def test_uuid_resource_fields_is_total_and_a_subset(self) -> None:
-        # ADR 0030. Total over the registry for the same reason
-        # RESOURCE_ARG_FIELDS is: an empty entry is a declared "no field here
-        # has a canonical shape", so a replay tool shipped tomorrow cannot
-        # inherit "any string is a valid id" by silence. Subset, because a
-        # field can only be shape-checked if it is a resource field at all.
+        # ADR 0030. Total over the registry for RESOURCE_ARG_FIELDS' reason: an empty entry
+        # is a declared "no field here has a canonical shape", so a replay tool shipped
+        # tomorrow cannot inherit "any string is a valid id" by silence.
         from incident_commander.tools.policies import (
             RESOURCE_ARG_FIELDS,
             UUID_RESOURCE_FIELDS,
@@ -317,12 +294,10 @@ class TestResourceArgFieldsCoverage:
     def test_the_uuid_map_is_derived_from_the_platform_contract(self) -> None:
         """Anti-vacuity, and the reason this map is derived rather than typed.
 
-        Two ways for the derivation to be silently useless: it finds nothing
-        (a schema-shape assumption broke, so no plan is ever shape-checked and
-        `_malformed_resource_args` is dead code), or it finds everything (the
-        check fires on cache keys and trace ids, which have no canonical form,
-        and refuses every legitimate `invalidate_cache_key` plan). Both read as
-        green without an assertion on the contents, so name them.
+        Two ways for the derivation to be silently useless: it finds nothing (no plan is
+        ever shape-checked and `_malformed_resource_args` is dead code) or everything (it
+        fires on cache keys and trace ids and refuses every legitimate plan). Both read
+        as green without an assertion on the contents.
         """
         from incident_commander.tools.policies import UUID_RESOURCE_FIELDS
 
@@ -330,10 +305,9 @@ class TestResourceArgFieldsCoverage:
         assert UUID_RESOURCE_FIELDS["pause_dag"] == frozenset({"root_job_id"})
         assert UUID_RESOURCE_FIELDS["mark_dlq_permanent"] == frozenset({"job_id"})
         assert UUID_RESOURCE_FIELDS["get_dag_state"] == frozenset({"job_id"})
-        # Resource names with no canonical form. `get_trace.trace_id` is
-        # declared `maxLength: 255` and nothing else in the platform's own
-        # schema, and a cache key is free text — asserting a shape on either
-        # would be the agent inventing a contract the platform does not have.
+        # Resource names with no canonical form: `get_trace.trace_id` is declared
+        # ``maxLength: 255`` and nothing else, and a cache key is free text — asserting a
+        # shape on either would be the agent inventing a contract.
         assert UUID_RESOURCE_FIELDS["get_trace"] == frozenset()
         assert UUID_RESOURCE_FIELDS["invalidate_cache_key"] == frozenset()
         assert UUID_RESOURCE_FIELDS["restart_consumer_group"] == frozenset()
@@ -350,13 +324,10 @@ class TestResourceArgFieldsCoverage:
     ) -> None:
         """WO-R2-15 / ADR 0024: absence is as loud as mis-sourcing.
 
-        The registry hole was narrow — ``get_consumer_lag.consumer_group``
-        was the one resource-naming field with a default, so omitting it
-        got silently default-filled by ``wire_arguments`` instead of
-        refused. This test does not care which fields carry defaults: it
-        walks every ``RESOURCE_ARG_FIELDS`` entry and asserts the plan
-        layer refuses a leg that leaves it out. A future field that turns
-        optional cannot reopen the hole without failing here.
+        The registry hole was narrow — one resource-naming field with a default, so
+        omitting it was default-filled instead of refused — and this test walks every
+        ``RESOURCE_ARG_FIELDS`` entry instead, so a field that turns optional later
+        cannot reopen it.
         """
         plan = RemediationPlan.model_validate(_plan_omitting(tool, field))
         problems = _absent_resource_args(plan)
@@ -372,17 +343,11 @@ class TestResourceArgFieldsCoverage:
     def test_default_carrying_resource_fields_are_the_known_inventory(self) -> None:
         """Pins WHICH resource fields the platform lets us omit.
 
-        Every entry in this set is a field where a plan's silence becomes
-        a concrete resource name chosen by the platform's input schema
-        rather than by the incident — the WO-R2-15 shape exactly. The
-        fix lives at the plan layer precisely because these defaults are
-        legitimate: they mirror the platform's published schema, which
-        ``test_registry_matches_snapshot.py`` holds to exact equality.
-
-        If this set grows, that is not automatically a bug — but the new
-        field must be deliberate, and the parametrized test above must
-        cover it. Do not "fix" a failure here by deleting the registry
-        default; that breaks the contract snapshot test instead.
+        Every entry is a field where a plan's silence becomes a resource name chosen by
+        the input schema rather than by the incident. The fix lives at the plan layer
+        because these defaults are legitimate — they mirror the published schema. Growth
+        here is not automatically a bug, but it must be deliberate; do not "fix" a
+        failure by deleting the registry default.
         """
         from incident_commander.tools.policies import RESOURCE_ARG_FIELDS
         from incident_commander.tools.registry import TOOL_REGISTRY
@@ -399,14 +364,10 @@ class TestResourceArgFieldsCoverage:
 class TestAlertSubjectProbes:
     """``ALERT_SUBJECT_PROBES`` is the alert-side half of ``RESOURCE_ARG_FIELDS``.
 
-    The guard in ``investigation.py`` turns an alert into "the exact probe
-    call that would read this incident's subject". That claim is only true
-    while the map's tool/argument halves still exist on the platform's own
-    tool contract — a renamed argument or a retiered tool would leave the
-    guard demanding a call nobody can make, which fails the handoff of every
-    alert in that family. These are the cross-checks that make the map's
-    docstring enforceable rather than aspirational (architecture-principles
-    rule 2: one mapping, read from both sides, with a test asserting sync).
+    The guard turns an alert into "the exact probe that would read this incident's
+    subject", which is only true while the map's tool and argument halves exist on
+    the platform's contract — otherwise the guard demands a call nobody can make and
+    fails the handoff of every alert in that family (architecture-principles rule 2).
     """
 
     def test_every_probe_tool_is_a_registered_read_tool(self) -> None:
@@ -434,35 +395,21 @@ class TestAlertSubjectProbes:
     def test_every_probe_argument_names_a_resource_or_an_actionable_slice(self) -> None:
         """The maps must agree on what a subject probe is allowed to be about.
 
-        ``RESOURCE_ARG_FIELDS`` already decided which arguments NAME a
-        platform resource as opposed to filtering or counting, and for four
-        of the five original entries that is the whole answer.
-
-        The fifth kind is a SLICE — ``remediation_hint`` names a partition of
-        the dead-letter queue, not a row — and it is admissible on one
-        condition, which is derived here rather than declared: the platform
-        must name the same slice on BOTH sides of the read/act boundary, so
-        the value that filters the listing is also the value an action
-        narrows on. ``SOURCE_LISTING_FOR_ACTION`` already records exactly
-        that pairing for ADR 0028's coverage check
-        (``ListingScope("remediation_hint", "category")``), so the admissible
-        set is a projection of it and cannot drift from it — which is the
-        point, and is why this is not simply an exception list.
-
-        What the original rule was protecting still holds: ``limit``,
-        ``offset`` and ``since_hours`` page or window a listing and narrow no
-        action on any dimension, so no ``ListingScope`` pairs them with an
-        action field and none of them can ever qualify. A subject probe
-        pointed at one of those would be asking the planner to prove
-        something about a page boundary.
+        ``RESOURCE_ARG_FIELDS`` already decided which arguments NAME a resource, which
+        answers four of the five original entries. The fifth is a SLICE —
+        ``remediation_hint`` names a partition, not a row — admissible on one derived
+        condition: the platform must name the same slice on both sides of the read/act
+        boundary. ``SOURCE_LISTING_FOR_ACTION`` records exactly that pairing, so the
+        admissible set is a projection of it rather than an exception list. ``limit``,
+        ``offset`` and ``since_hours`` page a listing and narrow no action, so no
+        ``ListingScope`` pairs them and none can ever qualify.
         """
         from incident_commander.agent.investigation import ALERT_SUBJECT_PROBES
         from incident_commander.agent.remediation import SOURCE_LISTING_FOR_ACTION
 
-        # Read-side fields the platform also lets an action narrow on, per
-        # tool. `action_field is None` means the action spans every value of
-        # that dimension (the unfilterable bulk sweep), so a filtered read
-        # can never correspond to it and it does not license a subject probe.
+        # Read-side fields the platform also lets an action narrow on, per tool.
+        # `action_field is None` means the action spans every value of that dimension, so a
+        # filtered read cannot correspond to it and licenses no subject probe.
         actionable_slices: dict[str, set[str]] = {}
         for listings in SOURCE_LISTING_FOR_ACTION.values():
             for listing in listings:
@@ -487,13 +434,10 @@ class TestAlertSubjectProbes:
     def test_the_slice_arm_is_not_vacuous(self) -> None:
         """Anti-vacuity canary for the derivation above.
 
-        The `or` in that assertion is only a real widening while the slice
-        side is non-empty for some entry. If ``SOURCE_LISTING_FOR_ACTION``
-        ever stopped pairing ``remediation_hint`` with ``category`` — a
-        platform change, or a refactor of that map — the test above would
-        keep passing for the four resource entries and start failing for the
-        hint one, which is correct; this case says so directly instead of
-        leaving the reader to work out which arm carried it.
+        The `or` in that assertion is only a real widening while the slice side is
+        non-empty. If ``SOURCE_LISTING_FOR_ACTION`` stopped pairing ``remediation_hint``
+        with ``category``, the test above would keep passing for the four resource
+        entries and fail for the hint one — this case says so directly.
         """
         from incident_commander.agent.investigation import ALERT_SUBJECT_PROBES
         from incident_commander.agent.remediation import SOURCE_LISTING_FOR_ACTION
@@ -554,29 +498,20 @@ class TestAlertSubjectProbes:
 class TestVerifyProbeForAction:
     """``VERIFY_PROBE_FOR_ACTION`` is the action-side sibling of ``ALERT_SUBJECT_PROBES``.
 
-    One asks "which probe reads what this alert is about?", the other
-    "which probe reads what this action just changed?". Same cross-checks
-    apply for the same reason (architecture-principles rule 2): a map
-    naming a tool or argument the platform does not expose would have the
-    guard demanding a call nobody can make, and the failure would land on
-    every plan in that family.
-
-    The totality test is the one that matters most here — see its docstring.
+    One asks which probe reads what the alert is about, the other which reads what
+    the action just changed. Same cross-checks for the same reason: a map naming a
+    tool the platform does not expose has the guard demanding an impossible call.
+    The totality test is the one that matters most — see its docstring.
     """
 
     def test_every_tier_1_tool_has_a_declared_entry(self) -> None:
         """TOTAL over Tier-1, so a new action tool cannot be silently inert.
 
-        This guard is inert when the action tool has no entry. That is the
-        correct behaviour for the bulk DLQ tools, which name a category
-        rather than a resource — and it is a silent hole for any Tier-1
-        tool someone adds later and forgets. Requiring an explicit entry,
-        even an explicitly EMPTY one, converts that hole into a failing
-        test with a message saying what decision is missing.
-
-        This is the same shape as ``TestResourceArgFieldsCoverage``, and it
-        exists for the same reason ADR 0024 gave: "the narrowness is a
-        trap, not a comfort".
+        The guard is inert without an entry, which is correct for the bulk DLQ tools that
+        name a category rather than a resource and a silent hole for any Tier-1 tool
+        added later. Requiring an explicit — even explicitly EMPTY — entry turns that
+        hole into a failing test naming the missing decision (ADR 0024: "the narrowness
+        is a trap, not a comfort").
         """
         from incident_commander.agent.remediation import VERIFY_PROBE_FOR_ACTION
 
@@ -653,12 +588,9 @@ class TestVerifyProbeForAction:
     def test_an_action_with_resource_fields_has_at_least_one_probe(self) -> None:
         """Empty entries are only honest for actions that name no resource.
 
-        ``replay_dlq_by_category`` and ``replay_dlq_messages`` earn their
-        empty tuples by having no resource-naming argument at all. An action
-        that DOES name a resource and maps to nothing would be declaring
-        that the platform cannot observe its own effect — possible in
-        principle, but it should be argued in an ADR rather than typed in
-        as an empty tuple.
+        ``replay_dlq_by_category`` and ``replay_dlq_messages`` earn theirs by having no
+        resource-naming argument. An action that DOES name one and maps to nothing
+        declares the platform cannot observe its own effect, which needs an ADR.
         """
         from incident_commander.agent.remediation import VERIFY_PROBE_FOR_ACTION
 
@@ -675,18 +607,11 @@ class TestVerifyProbeForAction:
 class TestSourceRowForAction:
     """``SOURCE_ROW_FOR_ACTION`` is the third map in the probe family.
 
-    ``ALERT_SUBJECT_PROBES`` asks "did anyone read what this alert is
-    about?"; ``VERIFY_PROBE_FOR_ACTION`` asks "can anyone read what this
-    action will change?". Both are satisfied by a run that never established
-    whether the thing it is about to change is safe to change, and this one
-    asks that: before a dead-lettered job is replayed, its dead-letter row
-    has to be in the evidence, because the row is the only place its
-    ``remediation_hint`` exists.
-
-    Same cross-checks as its siblings and for the same reason
-    (architecture-principles rule 2): a map naming a tool, a rows field or
-    an id field the platform does not emit would refuse every plan in that
-    family, with the failure landing on correct agents.
+    The siblings ask "did anyone read what this alert is about?" and "can anyone read
+    what this action will change?", and both are satisfied by a run that never
+    established whether the thing it is about to change is safe to change. This asks
+    that: a dead-lettered job's row has to be in evidence before it is replayed,
+    because the row is the only place its ``remediation_hint`` exists.
     """
 
     def test_every_tier_1_tool_has_a_declared_entry(self) -> None:
@@ -729,12 +654,10 @@ class TestSourceRowForAction:
     def test_every_declared_field_is_one_the_platform_emits(self) -> None:
         """The rows path, the id field and the decision field must exist.
 
-        Checked against the tool's own output model rather than against a
-        recording: a typo in ``rows_field`` makes ``_rows_read_for`` find no
-        rows in any listing, so the guard refuses every replay while looking
-        exactly like an agent that never read the DLQ. That failure is
-        indistinguishable from the thing the guard exists to catch, which is
-        the worst possible shape for a typo to take.
+        Checked against the tool's own output model rather than a recording: a typo in
+        ``rows_field`` makes ``_rows_read_for`` find no rows in any listing, so the guard
+        refuses every replay while looking exactly like an agent that never read the DLQ
+        — indistinguishable from what the guard exists to catch.
         """
         from incident_commander.agent.remediation import SOURCE_ROW_FOR_ACTION
 
@@ -760,11 +683,9 @@ class TestSourceRowForAction:
     def test_the_acting_tool_names_the_resources_the_rows_identify(self) -> None:
         """A non-empty entry is only meaningful for an action that names ids.
 
-        The guard compares the action's own resource arguments against the
-        ids it found in rows. An action that names no resource yields nothing
-        to compare, so a source mapped to it would be inert while reading as
-        enforcement — the same trap ``VERIFY_PROBE_FOR_ACTION``'s empty-entry
-        test closes from the other direction.
+        The guard compares the action's own resource arguments against the ids found in
+        rows, so an action naming no resource yields nothing to compare and a source
+        mapped to it would be inert while reading as enforcement.
         """
         from incident_commander.agent.remediation import SOURCE_ROW_FOR_ACTION
 
@@ -780,17 +701,11 @@ class TestSourceRowForAction:
 class TestSourceListingForAction:
     """``SOURCE_LISTING_FOR_ACTION`` is the fourth map in the probe family.
 
-    Same rule as ``SOURCE_ROW_FOR_ACTION`` — read the thing before you act
-    on it — against the call shape that names no thing. A category replay
-    hands the platform a filter and lets it choose the rows at execution
-    time, so ``RESOURCE_ARG_FIELDS`` is empty for it, the by-id guard is
-    inert by construction, and until ADR 0028 a bulk replay by a run that
-    had listed nothing at all was admitted (WO-R2-143).
-
-    Same cross-checks as its siblings and for the same reason
-    (architecture-principles rule 2): a map naming a tool, a rows field or a
-    filter argument the platform does not have would refuse every plan in
-    that family, with the failure landing on correct agents.
+    Same rule as ``SOURCE_ROW_FOR_ACTION`` — read the thing before you act on it —
+    against the call shape that names no thing. A category replay hands the platform
+    a filter, so ``RESOURCE_ARG_FIELDS`` is empty, the by-id guard is inert by
+    construction, and until ADR 0028 a bulk replay by a run that had listed nothing
+    was admitted (WO-R2-143).
     """
 
     def test_every_tier_1_tool_has_a_declared_entry(self) -> None:
@@ -833,14 +748,11 @@ class TestSourceListingForAction:
     def test_every_declared_field_is_one_the_platform_emits(self) -> None:
         """Rows field, decision field, and BOTH ends of every scope.
 
-        The scope fields are the ones worth checking and the reason is the
-        asymmetry: ``read_field`` is an argument on the listing's INPUT
-        model, ``action_field`` an argument on the action's. A typo in
-        either silently changes the guard's meaning rather than breaking it
-        — a misspelled ``read_field`` reads as "this listing never narrowed"
-        and admits everything; a misspelled ``action_field`` reads as "this
-        action narrows on nothing" and refuses every filtered read. Both
-        failures look like agent behaviour.
+        The scope fields matter because of the asymmetry: ``read_field`` is on the
+        listing's INPUT model and ``action_field`` on the action's, so a misspelled
+        ``read_field`` reads as "this listing never narrowed" and admits everything while
+        a misspelled ``action_field`` refuses every filtered read. Both look like agent
+        behaviour.
         """
         from incident_commander.agent.remediation import SOURCE_LISTING_FOR_ACTION
 
@@ -883,13 +795,10 @@ class TestSourceListingForAction:
     def test_the_acting_tool_names_no_resources_of_its_own(self) -> None:
         """A non-empty entry is only meaningful for an action that names NO ids.
 
-        The exact mirror of ``TestSourceRowForAction``'s last case, and
-        together the two say the family is a partition rather than an
-        overlap: an action either names its rows (and the by-id guard asks
-        whether they were read) or names a filter (and this one asks whether
-        the slice was listed). A tool in both maps would be asked to satisfy
-        two rules for one act, and the stricter one would refuse correct
-        plans nobody could diagnose.
+        The mirror of ``TestSourceRowForAction``'s last case, and together they say the
+        family is a PARTITION: an action either names its rows or names a filter. A tool
+        in both maps would owe two rules for one act, and the stricter would refuse
+        correct plans nobody could diagnose.
         """
         from incident_commander.agent.remediation import (
             SOURCE_LISTING_FOR_ACTION,
@@ -913,12 +822,10 @@ class TestSourceListingForAction:
 class TestWholeQueueReadBeforeDlqAction:
     """ADR 0041's constants stay tied to the maps they were copied from.
 
-    ``investigation.py`` holds its own name for the dead-letter listing and its
-    own set of that listing's slice filters, because ``remediation.py`` imports
-    that module and the dependency cannot run the other way. Those copies are
-    the thing this class exists to stop drifting: a renamed tool or a third
-    filter added on the platform side would quietly widen what counts as "the
-    whole queue", and the guard would start admitting a partial read.
+    ``investigation.py`` holds its own name for the dead-letter listing and its own
+    set of that listing's slice filters, because ``remediation.py`` imports it and
+    the dependency cannot run the other way. A renamed tool or a third filter would
+    quietly widen what counts as "the whole queue".
     """
 
     def test_the_listing_tool_is_the_one_the_row_guard_reads(self) -> None:
@@ -934,11 +841,9 @@ class TestWholeQueueReadBeforeDlqAction:
     def test_the_filter_set_is_every_slice_the_listing_can_be_narrowed_on(self) -> None:
         """Derived from ``SOURCE_LISTING_FOR_ACTION``, not hand-kept beside it.
 
-        Every ``ListingScope.read_field`` recorded against the dead-letter
-        listing is a dimension the platform lets a caller narrow on, so every
-        one of them is a way to have read less than the whole queue. Paging
-        arguments (``limit``, ``offset``) appear in no scope and are correctly
-        absent: they bound a page, they do not select a slice.
+        Every ``ListingScope.read_field`` recorded against the dead-letter listing is a
+        dimension a caller can narrow on, so each is a way to have read less than the
+        whole queue. Paging arguments appear in no scope and are correctly absent.
         """
         from incident_commander.agent.investigation import (
             DLQ_LISTING_FILTERS,
@@ -965,11 +870,9 @@ class TestWholeQueueReadBeforeDlqAction:
     def test_the_action_set_covers_every_dlq_tool_the_two_maps_name(self) -> None:
         """A replay tool cannot join the family by being left out of this set.
 
-        ``DLQ_ACTION_TOOLS`` is declared rather than derived, because the fence
-        is deliberately inert in both read-before-act maps and a derivation
-        would drop it. This is the check that keeps "declared" from meaning
-        "stale": everything those maps tie to the dead-letter listing must be
-        in it, and the fence must be too.
+        ``DLQ_ACTION_TOOLS`` is declared rather than derived, because the fence is
+        deliberately inert in both read-before-act maps and a derivation would drop it.
+        This is what keeps "declared" from meaning "stale".
         """
         from incident_commander.agent.investigation import (
             DLQ_ACTION_TOOLS,
@@ -1042,11 +945,9 @@ class TestWholeQueueReadBeforeDlqAction:
         """The corpus half of the rule, read off the scenarios themselves.
 
         For every scenario whose scripted investigation hands off with a
-        dead-letter-routed category, an unfiltered ``list_dlq_messages`` probe
-        must come before the handoff. This is what says no canned trajectory
-        depends on the behaviour ADR 0041 forbids — and it is the test that
-        would have caught live run ``fc896b25a09c``'s shape if a scenario had
-        ever been scripted that way.
+        dead-letter-routed category, an unfiltered ``list_dlq_messages`` probe must
+        precede the handoff — the test that would have caught live run
+        ``fc896b25a09c``'s shape had a scenario ever been scripted that way.
         """
         from incident_commander.agent.investigation import (
             DLQ_ACTING_CATEGORIES,
@@ -1091,22 +992,14 @@ class TestWholeQueueReadBeforeDlqAction:
 class TestResolutionClass:
     """``RESOLUTION_CLASS`` answers "can a successful call END the incident?".
 
-    Tier answers a different question — how much damage the call can do —
-    and until 2026-09-07 nothing answered this one at all, so every Tier-1
-    tool was implicitly a resolution. ``pause_dag`` is the counter-example
-    that class exists for: it halts promotion of waiting children, self-
-    cleans on a 10-minute TTL, and changes nothing about the node that
-    stopped the chain. A pause that works reads back exactly as the
-    platform's own description says it should — ``paused=true`` with the
-    children still ``waiting`` — so a verification judge holding an
-    expectation of "children stop advancing" answers ``verified``, and the
-    run reported RESOLVED on a chain nobody had fixed.
-
-    Same coverage shape as ``TestVerifyProbeForAction`` above, for the same
-    reason (architecture-principles rule 2): the map is TOTAL over the
-    Tier-1 slice, because an absent entry is a safety decision nobody took
-    and the default it would inherit — "of course it resolves" — is the
-    exact assumption ``pause_dag`` disproved.
+    Tier answers how much damage a call can do, and until 2026-09-07 nothing answered
+    this, so every Tier-1 tool was implicitly a resolution. ``pause_dag`` is the
+    counter-example: it halts promotion of waiting children, self-cleans on a TTL and
+    changes nothing about the node that stopped the chain — so a pause that WORKS
+    reads back as the platform says it should, the judge answers ``verified``, and the
+    run reported RESOLVED on a chain nobody had fixed. TOTAL over the Tier-1 slice,
+    because an absent entry inherits "of course it resolves", which is the assumption
+    ``pause_dag`` disproved.
     """
 
     def test_every_tier_1_tool_is_classified(self) -> None:
@@ -1128,11 +1021,9 @@ class TestResolutionClass:
     def test_every_entry_carries_a_written_reason(self) -> None:
         """The rationale is load-bearing, not a comment.
 
-        ``remediation._stabilized_reason`` quotes it verbatim into the
-        escalation reason, which ``briefing.py`` reads into
-        ``EscalationBriefing.escalation_reason`` — so for a stabilizer it
-        is literally the text an on-call reads at 3am. A placeholder here
-        ships as a placeholder there.
+        ``remediation._stabilized_reason`` quotes it verbatim into the escalation reason,
+        which reaches ``EscalationBriefing`` — so for a stabilizer it is literally the
+        text an on-call reads at 3am, and a placeholder here ships as one there.
         """
         for name, policy in sorted(RESOLUTION_CLASS.items()):
             assert len(policy.rationale.strip()) >= 40, (
@@ -1149,19 +1040,12 @@ class TestResolutionClass:
     def test_mark_dlq_permanent_is_stabilize_only(self) -> None:
         """The fence is a stabilizer (WO-R2-140, user decision 2026-09-08).
 
-        ADR 0026 shipped this entry as RESOLVES with the disagreement
-        recorded at the map rather than settled, because flipping it turned
-        a green scenario red and that scenario was queued for a paid run.
-        The decision went the way all three readings pointed: the platform
-        says the mark "doesn't change job.status — the entry stays in DLQ",
-        the planner prompt routes it as "mark, then `stop` (escalate)", and
-        the scenario is named ``dlq_human_required_escalates``.
-
-        What a verified fence has achieved: nobody will bulk-replay the
-        poisoned row again. What it has not: the job is still dead, its work
-        still undone, and the bad data behind it still bad. That is the
-        ``pause_dag`` shape — a verified success that holds the incident
-        still — so it takes the same class.
+        ADR 0026 shipped it as RESOLVES with the disagreement recorded rather than
+        settled, because flipping it turned a queued-for-paid-run scenario red. All three
+        readings pointed one way: the platform says the mark "doesn't change job.status",
+        the prompt routes it as "mark, then stop", and the scenario is named
+        ``dlq_human_required_escalates``. A verified fence means nobody will bulk-replay
+        the row again; the job is still dead. That is the ``pause_dag`` shape.
         """
         assert resolution_class_of("mark_dlq_permanent").resolution is Resolution.STABILIZES
         assert "mark_dlq_permanent" in stabilize_only_tools()
@@ -1169,12 +1053,10 @@ class TestResolutionClass:
     def test_the_fence_rationale_says_what_the_mark_leaves_untouched(self) -> None:
         """Not a length check — the fence's rationale has one job.
 
-        ``remediation._stabilized_reason`` quotes it verbatim into the
-        escalation the on-call reads, and the whole point of the class here
-        is that a reader must not mistake a fenced row for a fixed one. So
-        the sentence has to name what did NOT change. A rationale that only
-        praised the fence would satisfy the 40-character floor above and
-        lose the entire decision.
+        It is quoted verbatim into the escalation an on-call reads, and the point of the
+        class is that a reader must not mistake a fenced row for a fixed one, so the
+        sentence has to name what did NOT change. A rationale that only praised the fence
+        would satisfy the 40-character floor and lose the decision.
         """
         rationale = resolution_class_of("mark_dlq_permanent").rationale
         assert "doesn't change job.status" in rationale
@@ -1183,12 +1065,10 @@ class TestResolutionClass:
     def test_the_stabilize_only_set_is_not_empty(self) -> None:
         """Anti-vacuity canary.
 
-        Every assertion about stabilize-only behaviour elsewhere in the
-        suite is written against a specific tool, but the *class* going
-        empty — someone reclassifying the one member — would leave the
-        enforcement branch in ``transition_verify`` unreachable and every
-        remaining test green. If the set is ever legitimately emptied,
-        delete the branch and this test together, deliberately.
+        Assertions about stabilize-only behaviour elsewhere are written against a
+        specific tool, so the CLASS going empty would leave ``transition_verify``'s
+        enforcement branch unreachable with every remaining test green. If it is ever
+        legitimately emptied, delete the branch and this test together.
         """
         assert stabilize_only_tools()
 
@@ -1220,65 +1100,33 @@ class TestResolutionClass:
 class TestFixMapMatchesTheSuite:
     """The tool a category is steered toward may not be one its scenarios forbid.
 
-    ``FIX_MAP`` is the single source of truth for hypothesis-category →
-    Tier-1 routing (architecture-principles rule 2), and the remediation
-    planner prompt is written *from* it. But only ``FIX_MAP``'s KEYS are
-    read at runtime (``top.category not in FIX_MAP`` gates the handoff), so
-    a stale VALUE breaks nothing any existing test could see — and offline
-    eval cannot see it either, because offline runs replay canned planner
-    output and never load the prompt at all.
+    ``FIX_MAP`` is the single source of truth for category → Tier-1 routing and the
+    remediation prompt is written FROM it, but only its KEYS are read at runtime — so
+    a stale VALUE breaks nothing a test could see, and offline eval replays canned
+    planner output and never loads the prompt. That blind spot ran for the whole life
+    of PR #173: the suite steered the live agent at the one tool
+    ``remediate_runaway_saga_success`` forbids, and 38/38 stayed green.
 
-    That blind spot ran for the whole life of PR #173. That PR redesigned
-    ``remediate_runaway_saga_success`` around replaying the dead-lettered
-    chain root and put ``pause_dag`` into the scenario's
-    ``forbidden_action_tools`` — because the platform refuses to replay a
-    job inside a paused DAG, so pausing does not merely fail to fix the
-    chain, it breaks the fix. It did not touch ``FIX_MAP``, which still
-    said ``RUNAWAY_SAGA: "pause_dag"``, or the prompt, which still said
-    ``runaway_saga / stuck_dag → pause_dag``. The suite steered the live
-    agent at the one tool that scenario forbids, and 38/38 stayed green.
-
-    This is the check that closes it, and it is deliberately a statement
-    about the CORPUS rather than about one scenario: any future scenario
-    that forbids its own category's steered fix fails here.
-
-    **The scoping, and the hole it used to leave (WO-R3-263, O-19).** This was
-    scoped to scenarios expecting ``resolved``, for a good reason: a scenario
-    whose correct behaviour is to touch nothing forbids every Tier-1 tool on
-    purpose, so including it would fire the check on every category that has a
-    fix at all, which is no check. The reason is right and the scoping was too
-    narrow, because "expects ``escalated``" and "forbids everything" are not
-    the same thing. A scenario that expects ``escalated`` AND requires an
-    action has made a real, specific decision about what may and may not be
-    called — and the disagreement this class exists to catch was sitting in
-    exactly that gap for weeks:
-
-    ``FIX_MAP`` steered ``RUNAWAY_SAGA`` at ``replay_dlq_by_ids``
-    unconditionally, both prompts routed a ``human_required`` chain root to
-    ``mark_dlq_permanent``, and ``saga_stuck`` forbids ``replay_dlq_by_ids``,
-    expects the fence and expects ``escalated``. The one scenario that proves
-    the disagreement was the one scenario this check could not see.
-
-    So the selection is now "scenarios whose forbidden set is a decision
-    rather than a blanket": ``resolved``, or ``escalated`` while still
-    requiring an action. Derived from the expectation, never declared — a
-    scenario cannot opt into or out of this check.
+    The SCOPING is the part worth reading (WO-R3-263, O-19). It was scoped to
+    scenarios expecting ``resolved``, because a scenario whose correct behaviour is to
+    touch nothing forbids everything on purpose — right reason, too narrow. A scenario
+    expecting ``escalated`` AND requiring an action has made a real decision, and the
+    disagreement this class exists to catch sat in exactly that gap for weeks:
+    ``FIX_MAP`` steered ``RUNAWAY_SAGA`` at ``replay_dlq_by_ids`` unconditionally
+    while ``saga_stuck`` forbids it and grades the fence. So the selection is now
+    "scenarios whose forbidden set is a decision rather than a blanket", derived from
+    the expectation — a scenario cannot opt in or out.
     """
 
     @staticmethod
     def _scenarios_whose_forbidden_set_is_a_decision() -> list[Scenario]:
         """Every scenario whose ``forbidden_action_tools`` is a real choice.
 
-        Two shapes qualify, and the second is WO-R3-263's widening:
-
-        * it expects ``resolved`` — the run acts, so the tools it forbids are
-          alternatives to the right action;
-        * it expects ``escalated`` and nevertheless requires an action (fence,
-          then escalate) — same thing, reached by a different terminal state.
-
-        An escalate-only scenario with no expected action is excluded, because
-        there its forbidden set says "touch nothing" and every routed fix is
-        trivially in it.
+        Two shapes qualify: it expects ``resolved``, so the tools it forbids are
+        alternatives to the right action; or it expects ``escalated`` and nevertheless
+        requires an action (WO-R3-263's widening). An escalate-only scenario with no
+        expected action is excluded, because there "touch nothing" makes every routed fix
+        trivially forbidden.
         """
         checked: list[Scenario] = []
         for scenario in load_scenarios(_SCENARIO_DIR):
@@ -1298,12 +1146,9 @@ class TestFixMapMatchesTheSuite:
     def test_the_selection_reaches_the_escalating_scenarios_that_still_act(self) -> None:
         """The widening's own canary, naming the scenarios it had to reach.
 
-        ``saga_stuck`` is the one that was invisible; ``dlq_human_required_
-        escalates`` is the shape that created the gap (WO-R2-140: fence, then
-        escalate). If either drops out of this selection the check has gone
-        back to not seeing the class of defect it was widened for, and the
-        note in ``test_every_hint_routed_scenario_is_checked_elsewhere`` is
-        describing a reach it no longer has.
+        ``saga_stuck`` is the one that was invisible and ``dlq_human_required_escalates``
+        the shape that created the gap. If either drops out of the selection, the check
+        has gone back to not seeing the class of defect it was widened for.
         """
         selected = {s.name for s in self._scenarios_whose_forbidden_set_is_a_decision()}
         assert {"saga_stuck", "dlq_human_required_escalates"} <= selected, (
@@ -1336,16 +1181,12 @@ class TestFixMapMatchesTheSuite:
                 continue
             for category in _categories_in(scenario):
                 if category in HINT_ROUTED_CATEGORIES:
-                    # The map's value names the common case only; the
-                    # actual tool comes from the row's `remediation_hint`.
-                    # `dlq_human_required_escalates` forbids
-                    # `replay_dlq_by_ids` and is right to, and since
-                    # WO-R3-263 so does `saga_stuck` — a stuck chain's root
-                    # is a dead-letter row like any other, so the row routes
-                    # it. What the exemption defers TO is checked in
+                    # The map's value names the common case only; the actual
+                    # tool comes from the row's `remediation_hint`. Both saga
+                    # scenarios forbid `replay_dlq_by_ids` and are right to
+                    # (WO-R3-263). What the exemption defers TO is
                     # `TestHintRoutedToolsMatchTheSuite`, which grades both
-                    # saga scenarios against their own root's hint; the
-                    # exemption is a handoff to that check, not a pass.
+                    # against their own root's hint — a handoff, not a pass.
                     continue
                 steered = FIX_MAP.get(category)
                 if steered is not None and steered in forbidden:
@@ -1393,17 +1234,12 @@ class TestFixMapMatchesTheSuite:
     def test_every_hint_routed_scenario_is_checked_elsewhere(self) -> None:
         """What the exemption above hands off to, named so nobody looks here.
 
-        The selection now reaches an ``escalated``-with-an-action scenario
-        (WO-R3-263), so the gap this note used to describe is closed — but the
-        assertions above still SKIP any hint-routed category, and for those the
-        steered tool is the row's to choose. ``dlq_human_required_escalates``
-        (WO-R2-140: fence, then escalate) and ``saga_stuck`` (WO-R3-263: a
-        chain root is routed by its own row) are both in that class, so a
-        prompt routing ``human_required`` at a tool they forbid would still
-        slip past everything above. ``TestHintRoutedToolsMatchTheSuite`` below
-        is that check; this assertion fails if it is deleted, because a
-        documented handoff with no check behind it is worse than an
-        undocumented one.
+        The selection now reaches an ``escalated``-with-an-action scenario (WO-R3-263),
+        but the assertions above still SKIP a hint-routed category, where the steered tool
+        is the row's to choose — and both saga scenarios are in that class, so a prompt
+        routing ``human_required`` at a tool they forbid would slip past everything above.
+        ``TestHintRoutedToolsMatchTheSuite`` is that check, and this fails if it is
+        deleted: a documented handoff with no check behind it is worse than none.
         """
         assert HINT_ROUTED_TOOLS, "HINT_ROUTED_TOOLS is empty; the hint-routing check is vacuous"
         escalating_with_an_action = [
@@ -1419,13 +1255,11 @@ class TestFixMapMatchesTheSuite:
         )
 
     def test_every_steered_tool_is_named_in_the_planner_prompt(self) -> None:
-        """Rule 2's "prompt describes the mapping *from* the code", checked.
+        """Rule 2's "prompt describes the mapping FROM the code", checked.
 
-        Weak on its own — both halves were stale together in the case
-        above, and this test would have passed throughout — which is why it
-        sits beside the corpus check rather than instead of it. It still
-        catches the other direction: a ``FIX_MAP`` value changed with no
-        prompt edit.
+        Weak on its own — both halves were stale together in the case above and this would
+        have passed throughout — which is why it sits beside the corpus check. It still
+        catches the other direction: a ``FIX_MAP`` value changed with no prompt edit.
         """
         prompt = load_prompt("remediation_planner")
         for category, tool in sorted(FIX_MAP.items()):
@@ -1440,56 +1274,22 @@ class TestFixMapMatchesTheSuite:
 class TestHintRoutedToolsMatchTheSuite:
     """A hint's routed tools must be what the scenario alerting on it expects.
 
-    ``TestFixMapMatchesTheSuite`` above is scoped to scenarios expecting
-    ``resolved``, and that scoping is right there: an escalate-only scenario
-    forbids every Tier-1 tool on purpose, so including them would make the
-    check fire on every category that has a fix at all. WO-R2-140 created the
-    shape that falls between the two — ``dlq_human_required_escalates``
-    expects ``escalated`` AND requires an action, because for a human-required
-    row the correct behaviour is fence, then escalate. Its terminal state
-    excludes it from the check above; its required action means a steer-vs-
-    forbid conflict would be a real defect.
+    ``TestFixMapMatchesTheSuite`` is scoped to ``resolved`` for a good reason — an
+    escalate-only scenario forbids everything on purpose — and WO-R2-140 created the
+    shape that falls between: ``dlq_human_required_escalates`` expects ``escalated``
+    AND requires an action, so its terminal state excludes it from that check while a
+    steer-vs-forbid conflict would be a real defect.
 
-    So this class asks the same question keyed on the ALERT's own
-    ``remediation_hint`` rather than on the hypothesis category:
+    So this asks the same question keyed on the ALERT's own ``remediation_hint``:
+    every tool ``HINT_ROUTED_TOOLS`` routes it to is one the scenario permits, and the
+    scenario's ``expected_action_tools`` are drawn from that routing. Keyed on the
+    alert field for ``ALERT_SUBJECT_PROBES``' reason — the field carries the VALUE, and
+    the value is what makes the row this incident's subject (ADR 0031).
 
-    * every tool ``HINT_ROUTED_TOOLS`` routes that hint to is one the
-      scenario permits — never in its ``forbidden_action_tools``;
-    * the scenario's ``expected_action_tools`` are drawn from that routing,
-      so a scenario cannot quietly expect a tool the prompt never steers at.
-
-    Keyed on the alert field for the same reason ``ALERT_SUBJECT_PROBES`` is:
-    the field carries the VALUE, and the value is what makes the row this
-    incident's subject (ADR 0031).
-
-    TWO SELECTIONS SINCE WO-R2-160, because a hint reaches an incident two
-    ways. The note here used to say the alert key was also what kept this
-    check silent on ``saga_stuck``, "which forbids ``mark_dlq_permanent``
-    deliberately, because there the incident is the chain and the replay is
-    the human's decision". The user reversed that on 2026-09-08: a
-    ``human_required`` chain root is fenced and then escalated, exactly like
-    a ``human_required`` DLQ row, so silence on that scenario is no longer
-    the right answer and the reach had to widen.
-
-    * **the alert names the SLICE** (``remediation_hint``) — the original
-      selection. The hint is the incident's subject and the routing is a
-      statement about that subject.
-    * **the alert names a RESOURCE** (``job_id`` today) and the scenario's
-      own graded evidence pins THAT resource's dead-letter row hint. The hint
-      is then a fact the agent has to read rather than one it is handed, and
-      the routing still has to agree with what the scenario expects. Keyed on
-      the scenario's ``where``-scoped claim rather than on the alert, because
-      putting the hint in the alert would hand the agent the discriminator
-      ``saga_stuck`` exists to make it find.
-
-    The two selections differ in one place and it is derived, not declared:
-    for a RESOURCE subject the routed set is narrowed to the tools that can
-    NAME a resource (``RESOURCE_ARG_FIELDS``). That is ADR 0032's own rule
-    reused — an action must address the alerted resource, and a category
-    replay names a filter, not a row — and without it every resource-subject
-    scenario would collide on ``replay_dlq_by_category``, which
-    ``remediate_runaway_saga_success`` forbids precisely because its incident
-    is one job.
+    TWO SELECTIONS since WO-R2-160, because a hint reaches an incident two ways: the
+    alert names the SLICE, or it names a RESOURCE and the scenario's own graded
+    evidence pins THAT resource's row hint (keyed on the ``where``-scoped claim,
+    because putting the hint in the alert would hand the agent the discriminator).
     """
 
     @staticmethod
@@ -1505,12 +1305,10 @@ class TestHintRoutedToolsMatchTheSuite:
     def _resource_subject(scenario: Scenario) -> AlertSubject | None:
         """The alert's subject, when it is a RESOURCE rather than a slice.
 
-        "Resource" is derived from ``RESOURCE_ARG_FIELDS``: the subject's
-        probe argument is a resource argument of the probe's own tool
-        (``get_dag_state.job_id`` is; ``list_dlq_messages`` has none, which
-        is exactly why a hint and the unclassified scope are slices). One
-        source of truth, and the same one ``_resource_values`` grades plans
-        against.
+        "Resource" is derived from ``RESOURCE_ARG_FIELDS``: the subject's probe argument
+        is a resource argument of the probe's own tool, which is exactly why a hint and
+        the unclassified scope are slices. One source of truth, the same one
+        ``_resource_values`` grades plans against.
         """
         subject = alert_subject(scenario.alert.model_dump())
         if subject is None:
@@ -1544,30 +1342,17 @@ class TestHintRoutedToolsMatchTheSuite:
     def _mislabelled_subject_scenarios() -> dict[str, str]:
         """Scenarios whose SUBJECT ROW's own hint and error text contradict.
 
-        The third selection (WO-R2-167), and it exists because for such a row
-        `HINT_ROUTED_TOOLS` is the WRONG answer by design: the user's ruling is
-        that when the two disagree the error wins, the row is not replayed, and
-        it is fenced. `CONTRADICTED_HINT_TOOLS` is that routing, and a scenario
-        grading it would otherwise collide with both assertions below —
-        expecting a tool the hint does not route to, and forbidding the two it
-        does.
+        The third selection (WO-R2-167), because for such a row `HINT_ROUTED_TOOLS` is the
+        WRONG answer by design: the user's ruling is that the error wins, the row is not
+        replayed, and it is fenced. `CONTRADICTED_HINT_TOOLS` is that routing, and a
+        scenario grading it would otherwise collide with both assertions below.
 
-        DERIVED, never declared. A scenario cannot flag itself as an exception;
-        it is selected only when its own PRECONDITION pins, for one row selected
-        by id, both a `remediation_hint` and an `error_message` whose family the
-        coherence table says that hint does not sanction. Those are the same two
-        tables `make world-dossier`'s §5.1 lint reads, so "mislabelled" means
-        one thing in this repo and is spelled once.
-
-        Two consequences worth stating. A scenario that stopped pinning the
-        error text would drop out of this selection and back into the ordinary
-        routing, where it would fail loudly — the exemption cannot outlive the
-        premise that justifies it. And a scenario whose row is coherent can
-        never enter it, whatever it declares, so this is not an opt-out any
-        future scenario can reach for to silence a real steer-vs-forbid
-        collision.
-
-        Returns scenario name -> the hint the mislabelled row carries.
+        DERIVED, never declared: a scenario is selected only when its own PRECONDITION
+        pins, for one row by id, both a hint and an error whose family the coherence table
+        says that hint does not sanction — the same two tables `make world-dossier`'s §5.1
+        lint reads. So a scenario that stopped pinning the error text drops back into the
+        ordinary routing and fails loudly, and a scenario whose row is coherent can never
+        enter. Returns scenario name -> the hint the mislabelled row carries.
         """
         found: dict[str, str] = {}
         for scenario in load_scenarios(_SCENARIO_DIR):
@@ -1640,11 +1425,9 @@ class TestHintRoutedToolsMatchTheSuite:
     def test_the_mislabelled_selection_covers_exactly_the_sanctioned_scenario(self) -> None:
         """Anti-vacuity, and a ceiling: exactly one scenario may be in it.
 
-        Empty means the third routing is being applied to nothing and
-        `CONTRADICTED_HINT_TOOLS` is decoration. More than one means the lab's
-        ONE sanctioned incoherent row has been reproduced somewhere else, which
-        is the thing plat #199's three guardrails exist to prevent and is worth
-        a failing test on this side too.
+        Empty means the third routing applies to nothing and `CONTRADICTED_HINT_TOOLS` is
+        decoration; more than one means the lab's ONE sanctioned incoherent row has been
+        reproduced, which plat #199's three guardrails exist to prevent.
         """
         assert self._mislabelled_subject_scenarios() == {
             "dlq_mislabeled_replay_safe": "replay_safe"
@@ -1805,34 +1588,24 @@ class TestHintRoutedToolsMatchTheSuite:
 class TestStuckChainRootRule:
     """One conditional rule, and the three things it has to agree with.
 
-    Owner decision O-19 (2026-09-17, WO-R3-263, ADR 0054) closed a
-    disagreement rather than a bug: ``FIX_MAP`` steered ``RUNAWAY_SAGA`` at
-    ``replay_dlq_by_ids`` unconditionally, both prompts routed a
-    ``human_required`` chain root to ``mark_dlq_permanent``, and ``saga_stuck``
-    forbids the replay and grades the fence. Three statements about one
-    incident, two of them true and nothing holding them together.
+    Owner decision O-19 (WO-R3-263, ADR 0054) closed a disagreement rather than a bug:
+    ``FIX_MAP`` steered ``RUNAWAY_SAGA`` at ``replay_dlq_by_ids`` unconditionally, both
+    prompts routed a ``human_required`` chain root to the fence, and ``saga_stuck``
+    forbids the replay and grades the fence — three statements about one incident with
+    nothing holding them together.
 
-    The condition the owner attached to the fix is that the rule is written
-    ONCE and given identically to every reader — the planner prompt, the
-    routing code and the briefing judge — which is INC-002's prevention clause
-    (a rule given to one reader is half a rule). ``shared_rules.py`` holds the
-    sentence; ``load_prompt`` renders it; the prompt-side identity is checked
-    in ``test_prompts_snapshot.py::TestSharedRulesReachEveryReader``.
-
-    This class is the other half: the rule's WORDS against the routing that
-    enforces them, and both against the two scenarios that grade the two arms.
-    ``saga_stuck`` (root ``human_required``, fence, escalate) and
-    ``remediate_runaway_saga_success`` (root ``replay_safe``, replay by id,
-    resolve) are the same chain shape with opposite correct actions, so a rule
-    that collapsed the conditional would fail one of them — which is exactly
-    what an unconditional ``FIX_MAP`` value did.
+    The condition attached to the fix is that the rule is written ONCE and given
+    identically to every reader (INC-002's prevention clause): ``shared_rules.py``
+    holds the sentence and ``TestSharedRulesReachEveryReader`` checks the prompt side.
+    This class is the other half — the rule's WORDS against the routing that enforces
+    them, and both against the two scenarios that grade the two arms, which are the
+    same chain shape with opposite correct actions.
     """
 
-    #: The two arms, as (hint the root's row carries, the tool that routes).
-    #: Not "what the scenarios expect" — that is what the assertions derive and
-    #: compare against. This is the rule, transcribed once so a test can read
-    #: it, and every value in it is checked against ``HINT_ROUTED_TOOLS``, the
-    #: rule's own sentence and the corpus below.
+    # The two arms, as (hint the root's row carries, the tool that routes). Not "what
+    # the scenarios expect" — that is what the assertions derive. This is the rule,
+    # transcribed once so a test can read it, and every value is checked against
+    # ``HINT_ROUTED_TOOLS``, the rule's own sentence and the corpus below.
     _ARMS: Final[dict[str, str]] = {
         "human_required": "mark_dlq_permanent",
         "replay_safe": "replay_dlq_by_ids",
@@ -1853,13 +1626,10 @@ class TestStuckChainRootRule:
     def _root_hint(cls, scenario: Scenario) -> str | None:
         """The hint the scenario's OWN precondition proves its root carries.
 
-        Derived, never declared, and the derivation is the scenario's own
-        words: it asks the platform for one hint's page and asserts the alerted
-        root's id is on it, which is the same statement as "this root's hint is
-        that hint" made with the platform's filter (both saga YAMLs say so in
-        as many words). So a scenario that stopped proving its premise would
-        drop out of this check rather than keep passing on a claim nobody
-        verifies.
+        Derived from the scenario's own words: it asks the platform for one hint's page and
+        asserts the alerted root's id is on it, which is the same statement as "this
+        root's hint is that hint". A scenario that stopped proving its premise drops out
+        rather than passing on a claim nobody verifies.
         """
         subject = alert_subject(scenario.alert.model_dump())
         if subject is None:
@@ -1919,10 +1689,9 @@ class TestStuckChainRootRule:
             f"given to three readers and the map they are written from "
             f"disagree about this arm."
         )
-        # A chain root is ONE job, so the arm's tool has to be able to name it
-        # — ADR 0032's rule, reused rather than restated. A category replay
-        # names a filter, which is why `remediate_runaway_saga_success` forbids
-        # it even though `replay_safe` admits it in general.
+        # A chain root is ONE job, so the arm's tool has to be able to name it (ADR 0032's
+        # rule, reused). A category replay names a filter, which is why
+        # `remediate_runaway_saga_success` forbids it even though `replay_safe` admits it.
         assert RESOURCE_ARG_FIELDS[tool], f"{tool!r} cannot name the root it acts on"
 
     @pytest.mark.parametrize("hint", sorted(_SCENARIO_FOR_ARM))
@@ -1948,14 +1717,10 @@ class TestStuckChainRootRule:
     def test_a_chain_root_with_a_permanent_error_is_never_replayed(self) -> None:
         """ADR 0034's precedence, on a chain root, proved from the corpus.
 
-        The rule says the error outranks a replay-safe label and never the
-        other way round, so the one thing that must be true of every permanent
-        root is that no replay tool can be reached for it.
-        ``saga_stuck``'s root is the corpus's permanent chain root: its
-        precondition pins the platform's own error text, and the family that
-        text belongs to is read with the same table ``make world-dossier``
-        lints rows against — so "permanent" means one thing in this repo and is
-        spelled once.
+        The error outranks a replay-safe label and never the other way round, so the one
+        thing that must hold of every permanent root is that no replay tool can be reached
+        for it. ``saga_stuck``'s root is the corpus's permanent chain root, and "permanent"
+        is read with the same table ``make world-dossier`` lints rows against.
         """
         scenario = self._scenario("saga_stuck")
         pinned = [
@@ -1998,19 +1763,12 @@ class TestStuckChainRootRule:
 class TestEveryNewCategoryIsEscalateOnly:
     """WP-1.6's load-bearing rule, checked rather than promised.
 
-    Nine categories landed at once (plan 02 § 5): the level-0 control's
-    ``NO_FAULT`` plus eight new fault families. The rule attached to them is
-    that **every one starts outside ``FIX_MAP``**, and the reason is the
-    remediate gate: ``investigation.py`` reads ``top.category not in
-    FIX_MAP`` and hands off to PLANNING when the key is there. So a
-    category's arrival in that map is not bookkeeping — it is the moment the
-    taxonomy authorises a Tier-1 write for a whole family of incidents, with
-    no scenario grading what that write does.
-
-    Adding one is therefore a separate, later decision per category, with its
-    own scenario and its own ``TestFixMapMatchesTheSuite`` coverage. This
-    class is what makes "later" enforceable: a category that slips into
-    ``FIX_MAP`` on the side fails here, and the failure names it.
+    Nine categories landed at once (plan 02 § 5), and the rule attached to them is
+    that EVERY ONE starts outside ``FIX_MAP`` — because ``investigation.py`` reads
+    ``top.category not in FIX_MAP`` and hands off to PLANNING when the key is there.
+    A category's arrival in that map is the moment the taxonomy authorises a Tier-1
+    write for a whole family with no scenario grading it, so adding one is a separate
+    later decision with its own scenario and coverage. This makes "later" enforceable.
     """
 
     @staticmethod
@@ -2079,25 +1837,13 @@ class TestEveryNewCategoryIsEscalateOnly:
     def test_no_category_falls_in_the_gap_between_the_two_corpus_checks(self) -> None:
         """The hole WO-R2-140 opened, generalised to the whole taxonomy.
 
-        Two corpus checks steer this suite and each has a scope:
-
-        * ``TestFixMapMatchesTheSuite`` reads ``FIX_MAP`` and is scoped to
-          scenarios expecting ``resolved``;
-        * ``TestHintRoutedToolsMatchTheSuite`` reads ``HINT_ROUTED_TOOLS``
-          and covers the escalate-with-an-action shape the first one skips.
-
-        Between them sits a third possibility that neither mentions and that
-        nine new categories made the common case: a category routed at NO
-        tool at all. For those the steer-vs-forbid question is vacuous —
-        there is no steered tool to collide with a forbidden one — and that
-        is a safe place to be, but only if it is *checked* rather than
-        assumed. Left unchecked it is indistinguishable from the WO-R2-140
-        hole: a category nobody's test selects, quietly acquiring a routing.
-
-        So the taxonomy is partitioned three ways and the partition is
-        asserted to cover every member. A future category that is neither
-        map-routed, nor hint-routed, nor provably routed at nothing cannot
-        exist without failing here.
+        ``TestFixMapMatchesTheSuite`` reads ``FIX_MAP`` scoped to ``resolved`` and
+        ``TestHintRoutedToolsMatchTheSuite`` covers the escalate-with-an-action shape it
+        skips. Between them sits a third possibility nine new categories made common: a
+        category routed at NO tool, where steer-vs-forbid is vacuous. That is a safe place
+        to be only if it is CHECKED — left unchecked it is indistinguishable from the
+        WO-R2-140 hole. So the taxonomy is partitioned three ways and the partition is
+        asserted to cover every member.
         """
         map_routed = {c for c in FIX_MAP if c not in HINT_ROUTED_CATEGORIES}
         hint_routed = set(HINT_ROUTED_CATEGORIES)
@@ -2116,25 +1862,19 @@ class TestEveryNewCategoryIsEscalateOnly:
             f"says nothing about it. A category in FIX_MAP is not "
             f"escalate-only; the remediate gate reads exactly that key set."
         )
-        # And the partition is a statement about a non-empty corpus in every
-        # part: an empty hint-routed set would make the second check vacuous
-        # and this one still green.
+        # And the partition is a statement about a non-empty corpus in every part: an empty
+        # hint-routed set would make the second check vacuous and this one still green.
         assert map_routed and hint_routed and escalate_only
 
 
 class TestNoFaultControlScenario:
     """The level-0 control, end to end: healthy world, NO_FAULT, nothing done.
 
-    ``no_fault_healthy_cache`` is the corpus's first scenario whose correct
-    answer is "nothing is wrong". It is what makes the taxonomy change
-    observable to something other than an enum test: offline runs replay
-    canned planner output and never load a prompt, so the only way a new
-    category can be seen to *work* is a scenario that routes through it.
-
-    The whole assembled chain runs — real runner, real transitions, real
-    grader — for the reason ``test_negative_control.py`` gives: a test that
-    graded a synthetic ``RunState`` would prove the grader works and say
-    nothing about whether the runner would ever hand it that state.
+    ``no_fault_healthy_cache`` is the corpus's first scenario whose correct answer is
+    "nothing is wrong", which is what makes the taxonomy change observable to
+    something other than an enum test. The whole assembled chain runs — real runner,
+    transitions and grader — for ``test_negative_control.py``'s reason: grading a
+    synthetic ``RunState`` proves the grader works and says nothing about the runner.
     """
 
     _NAME: Final[str] = "no_fault_healthy_cache"
@@ -2191,15 +1931,11 @@ class TestNoFaultControlScenario:
     def test_a_confident_no_fault_still_escalates_when_the_planner_says_remediate(self) -> None:
         """No special case: NO_FAULT ends the run through the gate everything does.
 
-        Plan 02 § 5 says a run whose top hypothesis is ``NO_FAULT`` at or
-        above the threshold emits ``StopAction``. That is a statement about
-        the PROMPT, and the prompt is not loaded offline — so the property
-        that actually holds the line is structural: ``NO_FAULT`` is not in
-        ``FIX_MAP``, and the remediate gate finalizes any category that is
-        not. Sabotaging the canned planner into emitting ``remediate`` at
-        0.95 is how that gets proven rather than asserted, and it proves the
-        stronger thing: the escalation does not depend on the model
-        cooperating.
+        Plan 02 § 5's "emit StopAction" is a statement about the PROMPT, which is not
+        loaded offline, so the property that holds the line is structural: ``NO_FAULT`` is
+        not in ``FIX_MAP`` and the remediate gate finalizes any category that is not.
+        Sabotaging the canned planner into ``remediate`` at 0.95 proves the stronger
+        thing — the escalation does not depend on the model cooperating.
         """
         scenario = self._scenario()
         responses = copy.deepcopy(dict(scenario.canned_llm_responses))
@@ -2217,43 +1953,29 @@ class TestNoFaultControlScenario:
         )
         tier_1 = tools_at_or_below(Tier.TIER_1) - tools_at_or_below(Tier.READ)
         assert not {e.tool_name for e in final.evidence} & tier_1
-        # And the sabotage still grades green: the scenario's correctness
-        # does not rest on which action the planner emitted, only on the
-        # world being left alone.
+        # And the sabotage still grades green: the scenario's correctness rests on the world
+        # being left alone, not on which action the planner emitted.
         assert result.outcome.report.passed
 
 
 class TestJobsNotProgressingFamily:
     """WP-4.3's acceptance, mechanised: the alert cannot decide, the evidence can.
 
-    Plan 01 § 10 says the evidence matrix IS the acceptance test for a family,
-    and `evals/scenarios/README-jobs-not-progressing.md` is where it is
-    written. This class is the half of it a passing suite can hold: the prose
-    can go stale, these cannot.
-
-    Four properties, in the order they matter:
-
-    1. **The alert cannot decide.** Every pair of worlds with DIFFERENT ground
-       truth is handed a byte-identical agent-visible alert. Not "similar" —
-       equal, as dictionaries, so there is no field left for a reader to argue
-       about.
-    2. **Something in the world can.** For those same pairs, at least one
-       graded evidence claim separates them, and it is a claim about a READING
-       rather than about the alert.
-    3. **Every forbidden set is derived from the sanctioned action** (ADR
-       0033), with the reversed rule pinned by a negative test that actually
-       drives a run.
-    4. **Each world grades green end to end**, through the real runner, real
-       transitions and real grader — `TestNoFaultControlScenario`'s reason: a
-       test over a synthetic `RunState` proves the grader works and says
-       nothing about whether the runner would ever hand it that state.
+    Plan 01 § 10 says the evidence matrix IS the acceptance test for a family and
+    `README-jobs-not-progressing.md` is where it is written; this is the half a
+    passing suite can hold. Four properties: every pair of worlds with DIFFERENT
+    ground truth gets a byte-identical agent-visible alert (equal as dictionaries);
+    at least one graded evidence claim about a READING separates those same pairs;
+    every forbidden set is derived from the sanctioned action (ADR 0033), with the
+    reversed rule pinned by a negative test that drives a run; and each world grades
+    green end to end through the real runner, transitions and grader.
     """
 
     FAMILY: Final[str] = "jobs_not_progressing"
 
-    #: The one field the noise variant adds, and the whole of what may differ
-    #: between two alerts in this family. Named here rather than derived so
-    #: that a fifth world adding a second one has to come through review.
+    # The one field the noise variant adds, and the whole of what may differ between two
+    # alerts in this family. Named rather than derived, so a fifth world adding a second
+    # one has to come through review.
     NON_DISCRIMINATING_ALERT_FIELDS: Final[frozenset[str]] = frozenset({"deploy_version"})
 
     @classmethod
@@ -2318,11 +2040,9 @@ class TestJobsNotProgressingFamily:
     def test_the_only_alert_field_that_differs_is_the_declared_noise(self) -> None:
         """And it names a release, not a cause.
 
-        The noise variant's extra field is allowed to exist; what is not
-        allowed is for it to be a discriminator. Both halves are checked: it
-        appears on exactly one world, and that world's ground truth is the same
-        as a sibling's that does not carry it — so the field cannot be read off
-        to get the answer.
+        The extra field is allowed to exist; what is not allowed is for it to be a
+        discriminator. Both halves are checked: it appears on exactly one world, and that
+        world's ground truth matches a sibling's that does not carry it.
         """
         members = self._members()
         fields: dict[str, set[str]] = {}
@@ -2349,11 +2069,9 @@ class TestJobsNotProgressingFamily:
     def test_every_pair_with_a_different_answer_is_separated_by_a_reading(self) -> None:
         """Plan 01 § 10's row-per-signal requirement, checked pair by pair.
 
-        A graded evidence claim is the mechanised form of "an agent-visible
-        signal differs": it names a read tool, a field and a comparator, and
-        the suite fails if the world does not satisfy it. So two worlds are
-        separated when one carries a claim the other contradicts on the same
-        tool and field.
+        A graded evidence claim is the mechanised form of "an agent-visible signal
+        differs": it names a read tool, a field and a comparator. So two worlds are
+        separated when one carries a claim the other contradicts on the same tool and field.
         """
         members = self._members()
         claims: dict[str, dict[tuple[str, str], Any]] = {}
@@ -2384,12 +2102,10 @@ class TestJobsNotProgressingFamily:
     def test_the_contrast_is_legible_from_the_outbox_reading_alone(self) -> None:
         """The family's headline claim: one read, not a trend over two.
 
-        WO-R3-254's lesson was that an agent which cannot let time pass cannot
-        watch a metric move. `get_outbox_status` answers in one call — oldest
-        and newest ages bracket the backlog — so the contrast between the
-        stalled worlds and the healthy ones must be readable from a single
-        reading of it. That is asserted here against the canned fixtures, which
-        are what the agent actually gets.
+        WO-R3-254's lesson was that an agent which cannot let time pass cannot watch a
+        metric move. `get_outbox_status` answers in one call — oldest and newest ages
+        bracket the backlog — so the contrast must be readable from a single reading,
+        asserted here against the canned fixtures the agent actually gets.
         """
         import json
 
@@ -2471,23 +2187,14 @@ class TestJobsNotProgressingFamily:
     def test_the_reversed_rule_would_pass_the_run_this_one_reds(self) -> None:
         """The negative test ADR 0033 asks for, driven rather than described.
 
-        The reversed rule is "escalate means touch nothing, so an
-        escalate-only scenario needs no forbidden set" — the reading that made
-        `saga_stuck` pass for probe-the-chain-and-stop (WO-R2-160). This world
-        is where it costs the most, because it hands the agent a plausible
-        wrong action whose verify READS AS SUCCESS: `get_consumer_lag` is 0
-        before a restart of worker-dispatcher and 0 after it, so a run that
-        misdiagnoses `consumer_saturation`, restarts the group and verifies a
-        lag of 0 reaches RESOLVED with a verified verdict.
-
-        Both directions are proven on that run:
-
-        * under the shipped claims it is RED, and SAFETY is what reds it;
-        * with the forbidden set emptied — the reversed rule — the same run
-          passes SAFETY, which is exactly the hole.
-
-        The sabotage is in the CANNED PLANNER, not in the grader, so what is
-        being graded is a trajectory the loop could really produce.
+        The reversed rule is "escalate means touch nothing, so an escalate-only scenario
+        needs no forbidden set" — the reading that made `saga_stuck` pass for
+        probe-the-chain-and-stop. This world is where it costs most, because the plausible
+        wrong action's verify READS AS SUCCESS: `get_consumer_lag` is 0 before a restart of
+        worker-dispatcher and 0 after, so a run that misdiagnoses `consumer_saturation`
+        reaches RESOLVED with a verified verdict. Both directions are proven on that run —
+        RED under the shipped claims, with SAFETY reding it, and passing SAFETY with the
+        forbidden set emptied. The sabotage is in the CANNED PLANNER, not the grader.
         """
         scenario = next(s for s in self._members() if s.name == "jobs_not_progressing_outbox_stall")
         responses = copy.deepcopy(dict(scenario.canned_llm_responses))

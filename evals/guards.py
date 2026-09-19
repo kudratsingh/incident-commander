@@ -1,36 +1,14 @@
 """Point-of-use assertions for the eval runner's effective principal.
 
-The 2026-08-07 Run 001 stage 1 ran with full write scope while every
-label said "read-scoped smoke": PR #62's ``-include .env`` silently
-overrode the token PR #69's ``eval-smoke`` recipe exported, and make
-re-exported the file's value. Ten Tier-1 writes landed under the full
-principal before the platform audit log revealed it.
-
-The lesson these guards encode: **a control must be asserted where it is
-used, not assumed from where it was configured.** Every check runs against
-the live platform with tools that exist on v0.4.9 — no whoami, no
-introspection endpoint, no platform change required.
-
-Each stage asserts the scope it actually needs, and only that one:
-``assert_read_only_principal`` (smoke: must NOT carry ``actions:execute``),
-``assert_write_capable_principal`` (remediation: must carry it, and must NOT
-carry ``chaos:invoke``), and ``assert_chaos_capable_principal`` (the
-evaluator's own client, on any selection that seeds a fault: must carry
-``chaos:invoke``). Asking about the wrong scope is its own bug — it refuses
-runs that are entitled to proceed and passes runs that are not.
-
-Since platform v0.6.5 the agent principal is asserted in BOTH directions, and
-the negative half is the load-bearing one for the eval's honesty. The platform
-withholds the ``chaos.%`` audit rows from principals that cannot fire chaos
-(``app/services/operator_audit.py::hidden_audit_action_prefixes``, keyed on
-``chaos:invoke``), so an agent token carrying that scope reads
-``kill_consumer(worker-dispatcher)`` out of ``list_audit_events`` seconds
-before its own alert — the answer key, in the tool surface, at no cost. That
-filter is inert unless the agent's token genuinely lacks the scope, and
-"genuinely" is the word this module exists for: the configuration said
-read-only for four months of runs that were not (F-001). So the same
-negative-probe shape that proves the smoke token cannot write now proves the
-agent token cannot seed.
+Run 001 stage 1 ran with full write scope while every label said "read-scoped
+smoke" (F-001), so: **a control is asserted where it is used, not assumed from
+where it was configured.** Each stage probes the one scope it needs —
+``assert_read_only_principal`` (no ``actions:execute``),
+``assert_write_capable_principal`` (carries it, and NOT ``chaos:invoke``),
+``assert_chaos_capable_principal`` (the evaluator's client carries ``chaos:invoke``).
+The agent's chaos-blindness is load-bearing: the platform hides the ``chaos.%``
+audit rows only from principals that genuinely lack the scope, so a token holding
+it reads the answer key out of ``list_audit_events`` (owner decision O-4).
 """
 
 from __future__ import annotations
@@ -45,14 +23,12 @@ from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError
 from incident_commander.tools.policies import Tier, tools_at_or_below
 from incident_commander.tools.registry import TOOL_REGISTRY, AuditEventEntry
 
-# Any Tier-1 tool works as the probe; mark_dlq_permanent is the cheapest
-# (no side effect even if it somehow executed — but see below, it can't).
+# Any Tier-1 tool works as the probe; mark_dlq_permanent is the cheapest.
 _PROBE_TOOL: Final[str] = "mark_dlq_permanent"
 
-# Deliberately invalid arguments. The platform's tool handler checks scope
-# BEFORE parsing arguments, so a token WITHOUT actions:execute is refused
-# on scope and a token WITH it fails argument validation — two
-# distinguishable outcomes, neither of which can execute the action.
+# Deliberately invalid arguments. The handler checks scope BEFORE parsing them, so
+# a token without actions:execute is refused on scope and one with it fails argument
+# validation — two distinguishable outcomes, neither of which can execute.
 _PROBE_ARGS: Final[dict[str, Any]] = {
     "job_id": "00000000-0000-0000-0000-000000000000-INVALID",
     "reason": "",
@@ -61,64 +37,40 @@ _PROBE_ARGS: Final[dict[str, Any]] = {
 
 _SCOPE_REFUSAL_CODE: Final[int] = -32002
 
-# The ONLY codes that count as "the scope check passed and the arguments were
-# rejected". Anything else — a vanished tool (-32601), an internal error
-# (-32603), a transport code — means the probe never reached argument
-# validation, and a probe that never got there proves nothing about the scope.
-#
-# The positive guards used to pass on any non-scope MCPError at all, which
-# made them vacuous the day the probe tool disappeared from the platform: a
-# read-scoped token answering "tool not found" read as "this principal can
-# act". A guard whose green survives the removal of the thing it probes is
-# not a guard.
+# The ONLY codes meaning "scope check passed, arguments rejected". Anything else —
+# a vanished tool (-32601), an internal error, a transport code — never reached
+# argument validation and proves nothing. The positive guards used to pass on any
+# non-scope MCPError, so they went vacuously green when the probe tool vanished.
 _ARGUMENT_REFUSAL_CODES: Final[frozenset[int]] = frozenset({-32602})
 
-# The chaos half. A scenario that mutates the platform solely through
-# ``chaos_setup`` executes no Tier-1 action, so ``actions:execute`` is the
-# wrong question to ask about it — it would refuse tokens that can seed and
-# pass tokens that cannot. The scope such a scenario cannot run without is
-# ``chaos:invoke``, so that is what gets probed, and the probe is a chaos
-# hook. ``inject_latency`` is the smallest blast radius on offer: the
-# snapshot marks it ``[chaos: single_consumer]``, against one named group,
-# self-cleaning on a TTL.
+# The chaos half: a ``chaos_setup``-only scenario executes no Tier-1 action, so
+# ``actions:execute`` is the wrong question about it. ``inject_latency`` is the
+# smallest blast radius on offer — one named group, self-cleaning on a TTL.
 _CHAOS_PROBE_TOOL: Final[str] = "inject_latency"
 
-# Deliberately invalid, and invalid twice over against the hook's committed
-# inputSchema (contracts/platform-tools.snapshot.json): ``consumer_group``
-# violates minLength 1 and ``latency_ms`` is not an integer at all. The type
-# error is the load-bearing one — it cannot be coerced into a value that
-# seeds anything, whatever the platform's constraint checking does.
-# ``tests/unit/test_guards.py`` pins both facts against the snapshot rather
-# than restating them here.
+# Invalid twice over against the hook's committed inputSchema: ``consumer_group``
+# violates minLength 1 and ``latency_ms`` is not an integer at all. The type error is
+# load-bearing — it cannot be coerced into a value that seeds anything.
+# ``tests/unit/test_guards.py`` pins both against the snapshot.
 _CHAOS_PROBE_ARGS: Final[dict[str, Any]] = {
     "consumer_group": "",
     "latency_ms": "not-a-latency",
 }
 
-# The scope the AGENT principal must never carry (owner decision O-4). Named
-# once, here, because two facts depend on it being the same string: the
-# negative probe ``assert_write_capable_principal`` fires, and the platform's
-# own ``hidden_audit_action_prefixes`` predicate, which is what makes holding
-# it a leak rather than merely a wider grant.
+# The scope the AGENT principal must never carry (owner decision O-4). Named once,
+# because the negative probe and the platform's own ``hidden_audit_action_prefixes``
+# predicate must key on the same string.
 _AGENT_FORBIDDEN_SCOPE: Final[str] = "chaos:invoke"
-# Derived from the tier map, never hand-copied. A second list of Tier-1
-# names would be one more mirror to drift out of sync — the same defect
-# issue #79 tracks for ReadToolName, and the same class as the audit
-# payload shape this module got wrong (F-004): a fact restated instead of
-# referenced. If a Tier-1 tool is added to policies.py, this guard covers
-# it with no edit here.
+# Derived from the tier map, never hand-copied: a second list of Tier-1 names is one
+# more mirror to drift (the F-004 class — a fact restated instead of referenced).
 _TIER_1_TOOLS: Final[frozenset[str]] = tools_at_or_below(Tier.TIER_1) - tools_at_or_below(Tier.READ)
 
-# The page size the post-stage audit asks for, and the same number the
-# saturation check below compares against — one constant, because a
-# request for N rows checked against a hardcoded 200 would be a silent
-# lie the moment either moved. 200 is the platform's ceiling
-# (ListAuditEventsInput.limit is le=200), not a tuning choice.
+# One constant for both the page request and the saturation check below. 200 is the
+# platform's ceiling (ListAuditEventsInput.limit is le=200), not a tuning choice.
 _AUDIT_PAGE_LIMIT: Final[int] = 200
 
-# Memory ceiling on one stage's accumulated in-window rows. Not a tuning
-# knob: a read-only stage that produces 2000 audit rows is anomalous on
-# its face, so hitting this reports inconclusive rather than silently
+# Memory ceiling on one stage's in-window rows. Not a knob: 2000 audit rows from a
+# read-only stage is anomalous, so hitting this reports inconclusive rather than
 # grading a partial merge clean.
 _AUDIT_SCAN_ROW_CAP: Final[int] = 2000
 
@@ -130,15 +82,9 @@ class PrincipalGuardError(RuntimeError):
 def assert_read_only_principal(client: MCPClientProtocol) -> None:
     """Hard-fail unless the client's token genuinely lacks write scope.
 
-    Negative probe: invoke a Tier-1 tool with invalid arguments.
-
-    * Scope refusal (``-32002 missing required scope``) → the token is
-      read-scoped. Pass.
-    * Anything else (validation error, success, unexpected code) → the
-      token carries ``actions:execute``. Fail before any scenario runs.
-
-    Safe by construction: the handler's scope check precedes argument
-    parsing, so the malformed payload cannot execute under either token.
+    Negative probe on a Tier-1 tool with invalid arguments: a ``-32002`` scope
+    refusal passes, anything else fails before a scenario runs. Safe by
+    construction — the scope check precedes argument parsing.
     """
     _assert_scope_absent(
         client,
@@ -157,45 +103,12 @@ def assert_read_only_principal(client: MCPClientProtocol) -> None:
 def assert_write_capable_principal(client: MCPClientProtocol) -> None:
     """Hard-fail unless the client's token genuinely CARRIES write scope.
 
-    The mirror of ``assert_read_only_principal``, and it exists because the
-    guards were only ever wired into ``--smoke``. A remediation stage run
-    under a read-scoped token does not fail fast: every scenario
-    investigates, plans, attempts its Tier-1 action, gets ``-32002``, and
-    escalates. Each one grades red on ACTION or OUTCOME after a full
-    investigation, so the report reads as eight agent failures and the model
-    spend is already gone. The token was wrong before the first call.
-
-    Same negative probe, opposite expectation. A Tier-1 tool invoked with
-    invalid arguments:
-
-    * Scope refusal (``-32002 missing required scope``) → the token is
-      read-scoped. Fail: this stage needs ``actions:execute``.
-    * Argument validation refusal (``-32602``) → the scope check passed and
-      the arguments were rejected. That is exactly what we want to see, and
-      nothing executed. This is the ONLY passing outcome.
-    * Any other MCP error → fail closed. The probe did not reach argument
-      validation, so it says nothing about the scope. ``-32601 tool not
-      found`` is the case that mattered: this branch used to pass on it, so
-      the guard went green — vacuously — for a read-scoped token the day the
-      probe tool left the platform.
-    * Success → fail loudly. A deliberately malformed payload must never be
-      accepted; if it was, the probe is no longer safe and the platform's
-      contract has moved.
-
-    Safe by construction, same as its mirror: the handler's scope check
-    precedes argument parsing, so the malformed payload cannot execute under
-    either token.
-
-    **Two probes since platform v0.6.5**, because "the right principal for the
-    remediation stage" is now two claims and one of them is about what the
-    token must NOT be able to do. After the carried-scope probe above, a
-    second negative probe fires a chaos hook with deliberately invalid
-    arguments and requires a SCOPE refusal: the agent must not hold
-    ``chaos:invoke``, or the platform serves it the ``chaos.%`` audit rows and
-    every diagnosis claim on the run is unfalsifiable (owner decision O-4,
-    platform ADR 0012's 2026-09-15 amendment). Anything that could have
-    executed fails the guard; the probe itself seeds nothing under either
-    token, exactly like the malformed Tier-1 payload above.
+    The mirror of ``assert_read_only_principal``: only an argument refusal
+    (``-32602``) passes, a scope refusal fails, and anything else fails closed.
+    Without it a read-scoped remediation stage grades every scenario red on ACTION
+    after a full investigation — environment failures dressed as agent failures,
+    after the spend. Then ``assert_chaos_blind_principal``, because the right
+    principal here is two claims (owner decision O-4).
     """
     _assert_scope_carried(
         client,
@@ -220,23 +133,11 @@ def assert_write_capable_principal(client: MCPClientProtocol) -> None:
 def assert_chaos_blind_principal(client: MCPClientProtocol) -> None:
     """Hard-fail unless the AGENT's token genuinely lacks ``chaos:invoke``.
 
-    The negative half of the two-principal split, and the one the eval's
-    honesty rests on. The platform hides every ``chaos.%`` audit row from
-    principals that cannot fire chaos, so this scope is not merely a wider
-    grant on the agent — it is a read of the answer key: ``list_audit_events``
-    returns the hook name and its arguments, stamped seconds before the alert
-    the agent is investigating (divergence G3; platform ADR 0012's 2026-09-15
-    amendment; owner decision O-4).
-
-    Called by ``assert_write_capable_principal`` — the remediation stage's
-    agent client — and separately by the runner for a live selection that
-    seeds chaos without declaring a Tier-1 action, because that selection has
-    an agent in it too and the leak does not care whether anything was
-    remediated.
-
-    Safe by construction, like every probe here: the hook's arguments are
-    invalid against its own committed ``inputSchema``, and the platform's scope
-    check precedes argument parsing, so nothing is seeded under either token.
+    Carrying it is a read of the answer key, not merely a wider grant:
+    ``list_audit_events`` would return the hook and its arguments, stamped seconds
+    before the alert (divergence G3, platform ADR 0012's 2026-09-15 amendment, O-4).
+    Called by ``assert_write_capable_principal``, and by the runner for a live
+    selection that seeds chaos without declaring a Tier-1 action.
     """
     _assert_scope_absent(
         client,
@@ -259,26 +160,11 @@ def assert_chaos_blind_principal(client: MCPClientProtocol) -> None:
 def assert_chaos_capable_principal(client: MCPClientProtocol) -> None:
     """Hard-fail unless the client's token genuinely carries ``chaos:invoke``.
 
-    The third guard, and it exists because the second one asks the wrong
-    question for a whole class of live scenario. ``assert_write_capable_principal``
-    is gated on ``expected_action_tools``; a scenario that mutates the
-    platform solely through ``chaos_setup`` declares none — it seeds a fault
-    and grades what the agent does about it, executing no Tier-1 action
-    itself. So that selection ran with no principal check at all, under a
-    token that may well be read-scoped, and the wrongness surfaced inside
-    ``run_scenario``: the hook fires under ``settings.platform_token``, the
-    platform refuses it, and the scenario crashes with the run archive
-    already open and the invocation already under way.
-
-    Probing ``actions:execute`` here would be wrong in both directions — it
-    would refuse a chaos-only token that can seed perfectly well, and pass a
-    write token that cannot seed at all. Same negative-probe shape, aimed at
-    the scope the selection actually needs.
-
-    Since platform v0.6.5 this runs on the EVALUATOR's client
-    (``PLATFORM_CHAOS_TOKEN``), not the agent's. The two are different
-    principals on purpose, and the pair of guards says so from both sides: the
-    agent's token must fail this probe, and the runner's must pass it.
+    A ``chaos_setup``-only scenario declares no ``expected_action_tools``, so the
+    write guard never fired for it and the wrongness surfaced inside
+    ``run_scenario``, with the archive open. Probing ``actions:execute`` here would
+    be wrong both ways. Runs on the EVALUATOR's client (``PLATFORM_CHAOS_TOKEN``):
+    the agent's token must FAIL this probe, the runner's must pass it.
     """
     _assert_scope_carried(
         client,
@@ -311,26 +197,10 @@ def _assert_scope_absent(
 ) -> None:
     """Shared body of the two negative guards: prove one scope is NOT carried.
 
-    The mirror of ``_assert_scope_carried``, and shared for the same reason:
-    the fail-open bug that made the write guard vacuous — passing on any
-    non-scope error — is the bug a second hand-written copy reintroduces.
-
-    Every outcome fails except the scope refusal, but they do not all fail for
-    the same REASON, and saying which is the difference between a message an
-    operator can act on and one that sends them to the wrong file:
-
-    * ``-32002`` naming a scope → the platform refused on scope. Pass.
-    * an argument refusal (``-32602``) → the scope check let the call through
-      and the arguments were rejected. The token CARRIES the scope.
-    * anything else — a vanished tool (``-32601``), an internal error, a
-      transport code, an unexpected exception → the probe never reached
-      argument validation, so it proves nothing either way. Fail closed. This
-      branch is the one that matters when chaos is simply switched off
-      (``CHAOS_ENABLED=false``): reporting that as "the token carries
-      chaos:invoke" would send the reader to re-mint a credential that was
-      never the problem.
-    * success → the malformed payload was accepted, so the probe is no longer
-      safe to fire and the token evidently carries the scope.
+    Only a ``-32002`` scope refusal passes. The other outcomes fail for different
+    REASONS and each says so, because "the token carries chaos:invoke" and "chaos is
+    switched off" send an operator to different files. Shared, not copied: the
+    fail-open bug that made the write guard vacuous is what a second copy reintroduces.
     """
     try:
         result = client.call_tool(probe_tool, probe_args)
@@ -354,10 +224,8 @@ def _assert_scope_absent(
             "the run does not proceed on an unverified control."
         ) from err
     except Exception as err:  # noqa: BLE001 — fail closed, deliberately
-        # Transport blip, unknown response shape, anything at all: an
-        # unverified guard is an unmet precondition, not a warning. A
-        # safety check that shrugs on an unexpected error is the bypass
-        # F-001 is about.
+        # Anything at all: an unverified guard is an unmet precondition, not a
+        # warning. A safety check that shrugs is the bypass F-001 is about.
         raise PrincipalGuardError(
             f"{label}: could not verify the principal "
             f"({type(err).__name__}: {err}). Failing closed — the run does "
@@ -383,9 +251,8 @@ def _assert_scope_carried(
 ) -> None:
     """Shared body of the two positive guards: prove one scope is carried.
 
-    One implementation, two configurations, because the fail-open bug the
-    write guard shipped with — passing on any non-scope error — is exactly
-    the bug a second hand-written copy would reintroduce.
+    One implementation, two configurations, because the fail-open bug the write guard
+    shipped with is what a second hand-written copy would reintroduce.
     """
     try:
         result = client.call_tool(probe_tool, probe_args)
@@ -426,51 +293,20 @@ def _assert_scope_carried(
 class AuditWindowScan:
     """The union of every audit page read across one stage.
 
-    ``list_audit_events`` has no ``offset`` and no ``created_after``. The
-    live v0.6.0 ``inputSchema`` declares ``additionalProperties: false``
-    over exactly four filters (``action``, ``action_prefix``,
-    ``principal_type``, ``limit``), and sending ``offset`` anyway is
-    refused ``-32602 extra_forbidden`` — verified against the pinned stack,
-    not inferred. The tool in this platform that *does* page is
-    ``list_dlq_messages`` (its description carries the ``PAGING:`` note and
-    its schema carries ``offset``); the audit log is not it. So rows older
-    than the newest 200 are unreachable **after the fact**, and no
-    post-stage loop can recover them.
-
-    What IS reachable is the same window read repeatedly *while the stage
-    runs*. Two pages compose into one contiguous scan whenever the newer
-    page reaches back to at least the read time of the older one, and far
-    fewer than 200 matching rows land between two consecutive scenarios in
-    any run this repo produces. Checkpointing per scenario therefore covers
-    a window that a single post-stage page cannot — no platform change, no
-    new scope, no hand-edited snapshot.
-
-    Coverage is tracked as the interval ``[_covered_from, _covered_upto]``,
-    extended checkpoint by checkpoint:
-
-    * A page the server did not truncate (its ``total`` equals what came
-      back **and** the page is off the cap) holds every row matching the
-      filter, so it proves coverage of all time and latches ``_complete``.
-    * A truncated page whose oldest row reaches back to ``_covered_upto``
-      extends the interval forward.
-    * A truncated page that does **not** reach back is a GAP: rows fell
-      between the two reads that neither page can return, so coverage
-      restarts at that page's oldest row rather than pretending the hole
-      was scanned.
-
-    Both bounds are read off the ROWS, never off a clock. Coverage is a
-    claim about what the audit log contains, and the only evidence for it
-    is the rows themselves; stamping ``datetime.now()`` would quietly make
-    the guard depend on the runner and the platform agreeing about the
-    time, which is a second mechanism to get wrong.
+    ``list_audit_events`` has no ``offset`` and no ``created_after`` (verified:
+    sending one is refused ``-32602 extra_forbidden``), so rows older than the newest
+    200 are unreachable after the fact. Repeated reads DURING the stage compose:
+    coverage is the interval ``[_covered_from, _covered_upto]``, extended when a
+    truncated page reaches back to it, restarted at that page's oldest row when it
+    does not, latched ``_complete`` by an untruncated page. Both bounds come off the
+    ROWS, never off a clock, so the guard needs no agreement about the time.
     """
 
     def __init__(self, since: datetime) -> None:
         self.since = since
         self.checkpoints = 0
-        # Only in-window rows are retained: a row older than ``since`` can
-        # never be a violation, and its timestamp has already done its one
-        # job (extending coverage) by the time it is dropped.
+        # Only in-window rows are retained: an older row can never be a violation,
+        # and its timestamp has already extended coverage by the time it is dropped.
         self._rows: dict[str, AuditEventEntry] = {}
         self._covered_from: datetime | None = None
         self._covered_upto: datetime | None = None
@@ -492,10 +328,9 @@ class AuditWindowScan:
         self.checkpoints += 1
         self._last_page = (len(events), total)
         self._merge(events)
-        # The server's ``total`` is a COUNT over the same filter with no
-        # limit (platform ``repositories/audit.py:86``), so ``total >
-        # len(events)`` is the server itself saying it withheld rows —
-        # honest even if the page cap ever moves off 200.
+        # ``total`` is an unlimited COUNT over the same filter (platform
+        # ``repositories/audit.py:86``), so ``total > len(events)`` is the server
+        # saying it withheld rows — honest even if the cap moves off 200.
         if not (total > len(events) or len(events) >= _AUDIT_PAGE_LIMIT):
             self._complete = True
             return
@@ -507,9 +342,8 @@ class AuditWindowScan:
         if self._covered_upto is not None and page_oldest <= self._covered_upto:
             self._covered_upto = max(self._covered_upto, page_newest)
         else:
-            # More than a page of rows landed since the last checkpoint, so
-            # the rows between them are gone for good. Coverage restarts
-            # here rather than spanning the hole.
+            # More than a page landed since the last checkpoint, so the rows between
+            # them are gone. Coverage restarts here rather than spanning the hole.
             self._covered_from = page_oldest
             self._covered_upto = page_newest
 
@@ -584,30 +418,12 @@ def assert_no_tier1_successes(
 ) -> list[AuditEventEntry]:
     """Fail if the platform audit records any successful Tier-1 call since ``since``.
 
-    Graded from the platform's own audit log — the ground truth that
-    caught the token bug — rather than from the agent's trajectory. An
-    agent cannot grade itself honest (CLAUDE.md invariant 6).
-
-    ``principal_ids`` is the set of principals THIS stage owns (the agent
-    SA and the smoke SA, both minted by ``bootstrap_agent_token.py``).
-    When given, only their rows can fail the stage, so a neighbouring
-    tenant's legitimate Tier-1 success on a shared platform is not our
-    exit 5. When omitted or empty the guard stays deliberately over-broad
-    — any service account's success fails — because without the ids we
-    cannot tell ours from theirs, and over-broad is the safe side. Note
-    it must be BOTH ids: the F-001 failure mode is the stage silently
-    holding the FULL token, and those rows carry the AGENT principal.
-
-    ``scan`` is an ``AuditWindowScan`` the caller has been checkpointing
-    during the stage. Pass one and this call contributes the final page to
-    a window that is already largely covered; omit it and the assertion
-    degrades to exactly what it was before — a single post-stage page,
-    which for any stage louder than 200 matching rows is inconclusive by
-    construction. The runner passes one.
-
-    Returns the offending rows (empty on success) so callers can report
-    them; raises ``PrincipalGuardError`` when any are found, or when the
-    scan cannot prove it covered the whole window.
+    Graded from the platform's audit log, not the agent's trajectory (invariant 6).
+    ``principal_ids`` are the principals THIS stage owns — BOTH the agent and smoke
+    SAs, since the F-001 rows carry the AGENT principal — and omitting them leaves
+    the guard deliberately over-broad. ``scan`` is the caller's in-stage
+    ``AuditWindowScan``; without one a single post-stage page is inconclusive above
+    200 rows. Returns the offending rows, or raises ``PrincipalGuardError``.
     """
     if scan is None:
         scan = AuditWindowScan(since)
@@ -622,8 +438,7 @@ def assert_no_tier1_successes(
     except PrincipalGuardError:
         raise
     except Exception as err:  # noqa: BLE001 — fail closed, deliberately
-        # An audit query we couldn't run proves nothing. Inconclusive is
-        # a failure, not a pass.
+        # An audit query we couldn't run proves nothing: inconclusive is a failure.
         raise PrincipalGuardError(
             "post-stage audit could not be read "
             f"({type(err).__name__}: {err}); treating as a failure — an "
@@ -631,11 +446,9 @@ def assert_no_tier1_successes(
         ) from err
     violations = scan.violations(principal_ids)
     if not scan.fully_scanned:
-        # A-13: the window is not covered, so the rows we could not fetch
-        # may hold the very successes this assertion exists to catch.
-        # Inconclusive is a failure, exactly like an unreadable audit — but
-        # anything already visible is the more actionable signal and is
-        # named here rather than swallowed.
+        # A-13: the rows we could not fetch may hold the successes this exists to
+        # catch, so inconclusive is a failure — and anything already visible is
+        # named rather than swallowed.
         raise PrincipalGuardError(scan.inconclusive_reason() + _visible_suffix(violations))
     if violations:
         raise PrincipalGuardError(
@@ -664,23 +477,12 @@ def _visible_suffix(violations: list[AuditEventEntry]) -> str:
 def _parse_events(result: Any) -> tuple[int, list[AuditEventEntry]]:
     """Parse the tool result through the REGISTRY'S typed output model.
 
-    Not a hand-rolled dict walk. The first version of this function read
-    ``payload["items"]``; v0.4.9 emits ``{"total": N, "events": [...]}``,
-    so it silently returned an empty list on every real call and the
-    assertion below passed unconditionally — the guard built to catch the
-    Run 001 token bug could not have caught it (F-004). The correct shape
-    was already encoded, typed, in ``registry.ListAuditEventsOutput``, one
-    import away.
-
-    Parsing through the registry model means the contract test and the
-    registry-consistency test now also protect this guard: if the platform
-    changes the audit payload, CI fails before a run does. An unrecognized
-    payload raises rather than yielding zero events — parsing nothing must
-    fail closed, exactly like an unreadable audit.
-
-    Returns ``(total, events)``. ``total`` is the platform's unlimited
-    COUNT over the same filter, which is how the caller learns the page
-    was truncated; ``events`` is what actually came back.
+    Not a hand-rolled dict walk: the first version read ``payload["items"]`` against
+    a ``{"total", "events"}`` payload, so it returned zero events on every real call
+    and the assertion passed unconditionally (F-004). Through the registry model the
+    contract test protects this guard too, and an unrecognized payload raises rather
+    than yielding nothing. Returns ``(total, events)``; ``total`` is the unlimited
+    COUNT, which is how the caller learns the page was truncated.
     """
     spec = TOOL_REGISTRY["list_audit_events"]
     for block in getattr(result, "content", []) or []:

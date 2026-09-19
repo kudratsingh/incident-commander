@@ -25,7 +25,6 @@ from __future__ import annotations
 import difflib
 import hashlib
 import json
-import re
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -36,7 +35,6 @@ import pytest
 
 from evals import artifacts
 from evals.graders.deterministic import DimensionResult, GradeDimension, GradeReport
-from evals.graders.root_cause import NOT_GRADED_PREFIX
 from evals.runner import ChaosHookRecord, RunReport, ScenarioOutcome, Trajectory
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
 from incident_commander.agent.state import (
@@ -295,6 +293,12 @@ class TestTheReportIsVersionedEvidence:
             _regrade(runs_dir)
         )
 
+    def test_a_new_regrade_records_the_taxonomy_it_used(self, tmp_path: Path) -> None:
+        document = _regrade(_archive(tmp_path))
+        snapshot = document["taxonomy_at_regrade"]
+        assert snapshot["labels"]["postgres_slow"] == ["db_query_latency"]
+        assert len(snapshot["sha256"]) == 64
+
 
 class TestTheCommittedReGradeOfThePaidArchive:
     """The real one: `0db6fe722f7c`, the $2.15 read-only pass, INC-003's subject.
@@ -321,24 +325,9 @@ class TestTheCommittedReGradeOfThePaidArchive:
     def test_the_committed_report_regenerates_byte_for_byte(self) -> None:
         """Anybody can re-derive it; nothing here was typed in.
 
-        One thing it quotes is not frozen, and WO-R3-263 is where that showed
-        up: the re-grade applies TODAY's rules, so it also quotes TODAY's
-        ground-truth labels, and the corpus may re-decide one. It did —
-        ``trace_investigation``'s world was labelled ``unknown`` because the
-        taxonomy had no member for a worker running out of memory, and O-19
-        added ``resource_exhaustion``. The row it appears on is one of the
-        sixteen ADR 0040 does NOT grade (a live run that seeded no fault), so
-        the label moved inside a detail string that says the label was held
-        back — the document's verdicts, totals and every other line are
-        unchanged.
-
-        So the comparison allows a ROOT_CAUSE detail whose only difference is
-        the label it names after "ground truth ", and nothing else. A moved
-        verdict, a moved count or a moved archive digest still fails, and the
-        failure prints the line. Same reasoning as
-        ``test_phase_close_report.py::_ASSEMBLY_TIME_FACTS``; the alternative —
-        rewriting a committed document to match today's corpus — is the one
-        thing invariant 9 forbids.
+        The re-grade preserves the taxonomy wording it recorded for a world
+        that was not observable in that run. A later taxonomy change cannot
+        rewrite that evidence, and no exception is allowed in this comparison.
         """
         document = self._document()
         committed = self._committed(document).read_text()
@@ -350,16 +339,9 @@ class TestTheCommittedReGradeOfThePaidArchive:
             )
             if line[:1] in {"+", "-"} and not line.startswith(("+++", "---"))
         ]
-        labels = "|".join(category.value for category in HypothesisCategory)
-        allowed = re.compile(
-            rf'^\s*"detail": "{re.escape(NOT_GRADED_PREFIX)}.*'
-            rf"ground truth (?:{labels})(?:, (?:{labels}))*\",?$"
-        )
-        unexplained = [line for line in changed if not allowed.match(line[1:])]
-        assert not unexplained, (
-            "the committed re-grade no longer regenerates, and the change is "
-            "not a re-decided ground-truth label on a not-graded row:\n  "
-            + "\n  ".join(unexplained)
+        assert not changed, (
+            "the committed re-grade no longer regenerates byte for byte:\n  "
+            + "\n  ".join(changed)
             + "\n\nRead what moved before touching anything: a verdict, a total "
             "or an archive digest moving means something has rewritten evidence."
         )

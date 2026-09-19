@@ -24,7 +24,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from evals import artifacts, regression
 from evals.runner import RunReport, root_cause_coverage
@@ -588,11 +588,25 @@ ADJUDICATED_HITS: Final[dict[str, str]] = {
 }
 
 
+def _frozen_section(root: Path, scope: PhaseScope, name: str) -> dict[str, Any] | None:
+    """Read a committed section when regenerating its frozen report."""
+    try:
+        path, _ = committed(scope.phase, root=root)
+    except ValueError:
+        return None
+    return cast(dict[str, Any], json.loads(path.read_text())["sections"][name])
+
+
 def leak_hunt(root: Path, scope: PhaseScope) -> dict[str, Any]:
     # The phase's OWN scenarios, off its canned sweep — the one archive covering the
     # suite as it stood. ``leak_terms`` says why the list must come from the evidence.
     swept, _, _ = _read_report(archive_dir(root, scope.canned_sweep) / "report.json")
-    groups = leak_terms(root, {outcome.scenario for outcome in swept.outcomes})
+    frozen = _frozen_section(root, scope, "leak_hunt")
+    groups = (
+        cast(dict[str, tuple[str, ...]], frozen["terms"])
+        if frozen is not None
+        else leak_terms(root, {outcome.scenario for outcome in swept.outcomes})
+    )
     terms = _all_terms(groups)
     files = _trajectory_files(root, scope)
     read_only = () if scope.read_only_pass is None else (scope.read_only_pass.archive_id,)
@@ -1115,11 +1129,17 @@ def _budget_profile(root: Path, scope: PhaseScope) -> dict[str, Any]:
 
 def _judge_calibration(root: Path, scope: PhaseScope) -> dict[str, Any]:
     """Section 5. None this phase — and the claim is checkable, not asserted."""
+    frozen = _frozen_section(root, scope, "judge_calibration")
     prompts = root / "src/incident_commander/llm/prompts"
     judge_prompts = sorted(path.name for path in prompts.glob("*.md") if "judge" in path.name)
-    digests = {
-        name: hashlib.sha256((prompts / name).read_bytes()).hexdigest() for name in judge_prompts
-    }
+    digests = (
+        frozen["judge_prompts_unchanged"]
+        if frozen is not None
+        else {
+            name: hashlib.sha256((prompts / name).read_bytes()).hexdigest()
+            for name in judge_prompts
+        }
+    )
     return {
         "reruns_required": scope.judge_reruns_required,
         "why": scope.judge_why,
@@ -1851,6 +1871,21 @@ _PHASE2_FOLLOW_UPS: Final[tuple[dict[str, str], ...]] = (
         "id": "O-8",
         "what": "`bad_deploy`'s alert source vs the reset predicate — untouched by this close.",
         "status": "open",
+    },
+)
+
+
+#: Dated after the close, because the committed reports are append-only evidence.
+#: This does not alter their still-honest O-19 line.
+FOLLOW_UP_ADDENDA: Final[tuple[dict[str, str], ...]] = (
+    {
+        "id": "O-19",
+        "date": "2026-09-17",
+        "status": "closed by WO-R3-263 / ADR 0054",
+        "detail": (
+            "Resource exhaustion is now a taxonomy member, and the conditional "
+            "stuck-chain routing rule is rendered identically to every reader."
+        ),
     },
 )
 

@@ -42,9 +42,25 @@ STUCK_CHAIN_ROOT_RULE: Final[str] = (
 )
 
 
+#: How the briefing's structured remainder is read, by the writer that must name it and the
+#: judge that grades whether it did (WP-11.3, ADR 0065). ONE sentence for both, because the
+#: failure it prevents is the judge marking down the honesty the writer is required to show
+#: (INC-002). It quotes the block's own heading, which ``agent/briefing.py`` renders.
+UNRESOLVED_REMAINDER_RULE: Final[str] = (
+    "The run context carries a structured remainder — the block headed `Remaining (not "
+    "addressed by this run):` — which is computed from the run's own ranking and its own "
+    "attempts rather than written by anyone, so every cause listed there is still open and "
+    "is grounded by the block alone: `findings` must name each of them as remaining, none of "
+    "them may be called cleared, addressed, fixed or resolved however well a verified action "
+    "worked, and when the block is absent this run left no such remainder and none may be "
+    "invented."
+)
+
+
 #: Every shared rule, by the key a prompt file names it with.
 SHARED_RULES: Final[dict[str, str]] = {
     "stuck_chain_root": STUCK_CHAIN_ROOT_RULE,
+    "unresolved_remainder": UNRESOLVED_REMAINDER_RULE,
 }
 
 

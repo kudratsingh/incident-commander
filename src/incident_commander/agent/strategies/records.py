@@ -17,6 +17,7 @@ from decimal import Decimal
 from typing import Any
 
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory, InvestigationStep
+from incident_commander.agent.incidents import IncidentSlots
 from incident_commander.llm.client import LLMUsage
 
 
@@ -365,6 +366,10 @@ class StepRecord:
     emitted_step: InvestigationStep
     hypothesis_state_before: tuple[Hypothesis, ...] = ()
     hypothesis_state_after: tuple[Hypothesis, ...] = ()
+    #: This step's causes by slot — primary, secondary, and the remainder nothing in the run has
+    #: acted on (WP-11.3). Stamped by the loop, not by a strategy: the bar stays in
+    #: ``investigation.py``. ``None`` means nobody computed them, never "there were none".
+    incidents: IncidentSlots | None = None
     llm_calls: tuple[LLMCallRecord, ...] = ()
     #: Context size fed to the planner this step (``PlannerCall.context_tokens``). ``None`` when
     #: no call was measured; a canned run reports 0, the true number it was charged.
@@ -401,6 +406,7 @@ class StepRecord:
             "hypothesis_state_after": [
                 hypothesis.model_dump(mode="json") for hypothesis in self.hypothesis_state_after
             ],
+            "incidents": None if self.incidents is None else self.incidents.model_dump(mode="json"),
             "llm_calls": [call.as_record() for call in self.llm_calls],
             "planner_input_tokens": self.planner_input_tokens,
             "planner_context_chars": self.planner_context_chars,

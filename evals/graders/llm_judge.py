@@ -12,7 +12,11 @@ from typing import Final
 
 from pydantic import ConfigDict, Field
 
-from incident_commander.agent.briefing import EscalationBriefing, render_trail
+from incident_commander.agent.briefing import (
+    EscalationBriefing,
+    render_incidents,
+    render_trail,
+)
 from incident_commander.llm.client import LLMClientProtocol
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.repair import call_with_output_repair
@@ -87,6 +91,9 @@ def format_briefing_context(briefing: EscalationBriefing) -> str:
             f"without checking its effect first): {briefing.attempted_action.tool} "
             f"{briefing.attempted_action.arguments}"
         )
+    # Same block, same words, same place as the writer's (WP-11.3): the remainder is run
+    # state, so a judge blind to it would score the writer down for naming it (INC-002).
+    lines.extend(render_incidents(briefing.incidents))
     lines.extend(render_trail(briefing.investigation_trail))
     lines.append(f"Findings: {briefing.findings}")
     lines.append(f"Recommendation: {briefing.recommendation}")

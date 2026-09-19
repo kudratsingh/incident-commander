@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import datetime
 from enum import StrEnum
 from typing import Any, Final, NamedTuple
@@ -25,6 +26,7 @@ from incident_commander.agent.hypothesis import (
     RemediateAction,
     StopAction,
 )
+from incident_commander.agent.incidents import incident_slots
 from incident_commander.agent.planner_context import format_planner_context
 from incident_commander.agent.state import (
     EvidenceEntry,
@@ -37,7 +39,7 @@ from incident_commander.agent.strategies.protocol import (
     InvestigationStrategy,
     StrategyContext,
 )
-from incident_commander.agent.strategies.records import PlannerCall, StepSink
+from incident_commander.agent.strategies.records import PlannerCall, StepRecord, StepSink
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.prompts.shared_rules import STUCK_CHAIN_ROOT_RULE
@@ -60,9 +62,9 @@ _ESCALATION_MARKER: Final[str] = "_investigate_escalate"
 # a run can collect one of each, naming different missing reads.
 _WHOLE_QUEUE_REFUSED_MARKER: Final[str] = "_handoff_refused_unlisted_queue"
 _DEFAULT_MAX_ITERATIONS: Final[int] = 5
-# The bar a hypothesis must clear before the loop will act on it. Public because two
-# other readers need the SAME number: ADR 0059's resolve gate in `remediation.py` and
-# the diagnosis set the ROOT_CAUSE grader reads.
+# The bar a hypothesis must clear before the loop will act on it. Public because three
+# other readers need the SAME number: ADR 0059's resolve gate in `remediation.py`, the
+# incident slots (`agent/incidents.py`, ADR 0065) and the diagnosis set read off them.
 REMEDIATE_CONFIDENCE_THRESHOLD: Final[float] = 0.7
 
 # How many remediate handoffs may be refused for never probing the alert's subject before
@@ -405,6 +407,31 @@ def _control_group() -> InvestigationStrategy:
     return default_strategy()
 
 
+def _with_incident_slots(sink: StepSink | None, run_state: RunState) -> StepSink | None:
+    """Stamp each ``StepRecord`` with the causes that step named, and the remainder (WP-11.3).
+
+    Here rather than in the five strategies: they all emit one record shape and none of them
+    learns the bar (ADR 0036). The ranking is the record's own — what THIS step asserted — and
+    the attempts are the run's ledger as it stood when the step was planned.
+    """
+    if sink is None:
+        return None
+
+    def stamped(record: StepRecord) -> None:
+        sink(
+            replace(
+                record,
+                incidents=incident_slots(
+                    hypotheses=record.hypothesis_state_after,
+                    evidence=run_state.evidence,
+                    bar=REMEDIATE_CONFIDENCE_THRESHOLD,
+                ),
+            )
+        )
+
+    return stamped
+
+
 def make_llm_investigate(
     mcp_client: MCPClientProtocol,
     llm_client: LLMClientProtocol,
@@ -468,7 +495,7 @@ def make_llm_investigate(
                         model=model,
                         iteration=iteration,
                         config=chosen.config,
-                        record_step=record_step,
+                        record_step=_with_incident_slots(record_step, run_state),
                         selector_llm_client=selector_llm_client,
                         critic_llm_client=critic_llm_client,
                         branch_prober=branch_prober,

@@ -11,7 +11,11 @@ from __future__ import annotations
 from pydantic import ConfigDict, Field
 
 from incident_commander.agent.accounting import accrue_structured_call
-from incident_commander.agent.briefing import EscalationBriefing, render_trail
+from incident_commander.agent.briefing import (
+    EscalationBriefing,
+    render_incidents,
+    render_trail,
+)
 from incident_commander.agent.state import BudgetLedger
 from incident_commander.llm.client import LLMClientProtocol
 from incident_commander.llm.prompts.loader import load_prompt
@@ -59,8 +63,8 @@ def enrich_briefing(
 def _format_context(briefing: EscalationBriefing) -> str:
     """What the briefing writer is shown.
 
-    How the run ended, why it stopped, any Tier-1 action already attempted,
-    the investigation trail, and the budget it spent.
+    How the run ended, why it stopped, any Tier-1 action already attempted, the causes it
+    named and the remainder it left (WP-11.3), the investigation trail, and what it spent.
     """
     lines = [
         f"Incident {briefing.incident_id}",
@@ -77,6 +81,9 @@ def _format_context(briefing: EscalationBriefing) -> str:
             f"without checking its effect first): {briefing.attempted_action.tool} "
             f"{briefing.attempted_action.arguments}"
         )
+    # The slots come before the trail: they are what the run concluded about the trail, and
+    # the remainder block is the one part of the handoff the writer may not contradict.
+    lines.extend(render_incidents(briefing.incidents))
     lines.extend(render_trail(briefing.investigation_trail))
     lines.append(f"Budget used: {briefing.budget_used}")
     return "\n".join(lines)

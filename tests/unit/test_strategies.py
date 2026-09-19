@@ -569,6 +569,71 @@ _FORBIDDEN_NAMES: Final[frozenset[str]] = frozenset(
 )
 
 
+class TestEveryStepRecordCarriesItsIncidentSlots:
+    """WP-11.3 (ADR 0065): the trace side of the multi-incident representation.
+
+    Stamped by the loop rather than by the strategy, so all five arms emit one record shape and
+    none of them learns the 0.7 bar (ADR 0036). The ranking is the step's own; the attempts are
+    the run's ledger as it stood when the step was planned.
+    """
+
+    def _records(self, run_state: RunState, now: datetime) -> list[StepRecord]:
+        sink: list[StepRecord] = []
+        mcp = _FakeMCPClient(lambda _n, _a: _lag_response())
+        llm = CannedLLMClient([_probe_payload(), _stop_payload()])
+        make_llm_investigate(mcp, llm, model="m", record_step=sink.append)(
+            _investigating(run_state), now
+        )
+        return sink
+
+    def test_each_record_names_the_cause_that_step_asserted(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        first, second = self._records(run_state, now)
+        for record in (first, second):
+            assert record.incidents is not None
+            assert record.incidents.primary is not None
+            assert record.incidents.primary.category is HypothesisCategory.CONSUMER_SATURATION
+        assert first.incidents is not None and second.incidents is not None
+        assert first.incidents.primary is not None and second.incidents.primary is not None
+        # The record's OWN ranking, not the run's latest: the confidences either side of the
+        # call differ, and a step recorded against the wrong one would misreport the walk.
+        assert first.incidents.primary.confidence == 0.55
+        assert second.incidents.primary.confidence == 0.9
+
+    def test_nothing_is_addressed_on_a_run_that_only_investigated(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # No plan marker on the ledger, so every cause the step names is still standing —
+        # which is what the remainder means mid-run.
+        for record in self._records(run_state, now):
+            assert record.incidents is not None
+            assert record.incidents.addressed_any is False
+            assert [slot.name for slot in record.incidents.unresolved_extra] == [
+                "consumer_saturation"
+            ]
+
+    def test_the_slots_survive_the_trace_serialisation(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # The record's only consumer is a JSONL trace file (invariant 9): a field filled in
+        # memory and dropped on the way out is the same null one layer later.
+        written = json.loads(json.dumps(self._records(run_state, now)[-1].as_trace_record()))
+        assert written["incidents"]["primary"]["name"] == "consumer_saturation"
+        assert written["incidents"]["primary"]["addressed"] is False
+        assert written["incidents"]["secondary"] == []
+
+    def test_a_record_built_outside_the_loop_says_not_measured(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """``None``, not empty slots. A strategy called directly records no slots, and empty
+        ones would read as "this step asserted nothing" — a different claim."""
+        _state, _step, record = BaselineStrategy().plan_next_step(
+            _investigating(run_state), now, _context(CannedLLMClient([_stop_payload()]))
+        )
+        assert record.incidents is None
+
+
 class TestStrategiesHoldNoExecutionPolicy:
     """The seam replaces one call. It does not carry the policy around it.
 

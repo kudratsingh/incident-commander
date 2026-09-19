@@ -33,6 +33,7 @@ from incident_commander.agent.investigation import (
 )
 from incident_commander.agent.planner_context import (
     ATTEMPT_FAILED_MARKER,
+    PLAN_MARKER,
     render_already_attempted,
 )
 from incident_commander.agent.state import (
@@ -665,7 +666,7 @@ def make_llm_plan(
                 )
 
         entry = EvidenceEntry(
-            tool_name="_planner_plan",
+            tool_name=PLAN_MARKER,
             arguments={"target_hypothesis": plan.target_hypothesis},
             result_summary=(
                 f"plan: {plan.action_tool}({json.dumps(plan.action_arguments)}) "

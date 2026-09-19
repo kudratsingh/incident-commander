@@ -12,6 +12,8 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from incident_commander.agent.incidents import IncidentSlot, IncidentSlots, incident_slots
+from incident_commander.agent.investigation import REMEDIATE_CONFIDENCE_THRESHOLD
 from incident_commander.agent.planner_context import render_already_attempted
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 
@@ -80,6 +82,59 @@ def _render_arguments(arguments: Mapping[str, Any]) -> str:
     return ", ".join(f"{key}={value!r}" for key, value in arguments.items())
 
 
+#: How the slot block opens, and how its remainder does. Named because three readers must
+#: agree on them: ``render_incidents`` writes them, the deterministic grader searches the text
+#: they head, and the shared prompt rule quotes the second one to both LLM readers (ADR 0065).
+INCIDENTS_HEADING: Final = "Incidents this run named:"
+REMAINDER_HEADING: Final = "Remaining (not addressed by this run):"
+
+
+def incidents_of(run_state: RunState) -> IncidentSlots:
+    """A run's incident slots at the bar the loop acts on (WP-11.3, ADR 0065).
+
+    The one place the briefing side applies ``REMEDIATE_CONFIDENCE_THRESHOLD``: the grader
+    reads the slots through here, so the handoff a human sees and the grade a run gets are
+    computed from the same projection of the same run state (INC-002).
+    """
+    return incident_slots(
+        hypotheses=run_state.hypotheses,
+        evidence=run_state.evidence,
+        bar=REMEDIATE_CONFIDENCE_THRESHOLD,
+    )
+
+
+def render_incidents(slots: IncidentSlots) -> list[str]:
+    """The incident-slot block, as both LLM readers are shown it.
+
+    One function for the briefing writer and the briefing judge, so the two cannot drift
+    (``tests/unit/test_llm_judge.py`` pins that). Empty for a run that produced no ranking,
+    which is why every context that predates WP-11.3 renders byte-identically.
+    """
+    if slots.primary is None:
+        return []
+    lines = [INCIDENTS_HEADING, _slot_line("PRIMARY", slots.primary)]
+    lines.extend(_slot_line("SECONDARY", slot) for slot in slots.secondary)
+    if slots.unresolved_extra:
+        lines.append(REMAINDER_HEADING)
+        lines.extend(f"  - {_named_slot(slot)}" for slot in slots.unresolved_extra)
+    return lines
+
+
+def _slot_line(role: str, slot: IncidentSlot) -> str:
+    """One slot line: which slot, which cause, and whether this run acted on it."""
+    acted = (
+        "an action in this run targeted this cause"
+        if slot.addressed
+        else "no action in this run targeted this cause"
+    )
+    return f"  - {role}: {_named_slot(slot)} — {acted}"
+
+
+def _named_slot(slot: IncidentSlot) -> str:
+    """A cause as every reader names it: the agent's own label, name and confidence."""
+    return f"{slot.category.value} / {slot.name} (confidence {slot.confidence:.2f})"
+
+
 class AttemptedAction(BaseModel):
     """A Tier-1 action that was invoked before the agent escalated.
 
@@ -102,6 +157,10 @@ class EscalationBriefing(BaseModel):
     alert_summary: str
     escalation_reason: str = ""
     attempted_action: AttemptedAction | None = None
+    # Structural, not prose: a run that fixed one cause and left another names the remainder
+    # here, from its own ranking and its own attempts, whatever the writer goes on to say
+    # (WP-11.3, ADR 0065). Empty for a run that produced no ranking.
+    incidents: IncidentSlots = Field(default_factory=IncidentSlots)
     investigation_trail: tuple[ProbeSummary, ...] = ()
     findings: str = ""
     recommendation: str = ""
@@ -117,6 +176,7 @@ def render_briefing(run_state: RunState) -> EscalationBriefing:
         alert_summary=_render_alert_summary(run_state),
         escalation_reason=_escalation_reason(terminal_marker, run_state.evidence),
         attempted_action=_attempted_action(terminal_marker),
+        incidents=incidents_of(run_state),
         # ``trail_of`` filters out the escalation marker; the reason it carries
         # is read back out above into its own field, never faked as a probe.
         investigation_trail=trail_of(run_state.evidence),

@@ -80,7 +80,7 @@ make eval-reg         # the offline suite and the regression gate
 
 ## How it talks to the platform
 
-The agent's tool registry declares **20 tools** — 13 read tools (consumer lag, DLQ contents, traces, deploy history, DAG state, Redis and Postgres health, incidents, alerts, audit events, cache key info) and 7 Tier-1 actions (`restart_consumer_group`, `replay_dlq_messages`, `replay_dlq_by_ids`, `replay_dlq_by_category`, `pause_dag`, `invalidate_cache_key`, `mark_dlq_permanent`).
+The agent's tool registry declares **21 tools** — 14 read tools (consumer lag, DLQ contents, traces, deploy history, DAG state, Redis and Postgres health, incidents, alerts, audit events, cache key info, outbox status) and 7 Tier-1 actions (`restart_consumer_group`, `replay_dlq_messages`, `replay_dlq_by_ids`, `replay_dlq_by_category`, `pause_dag`, `invalidate_cache_key`, `mark_dlq_permanent`).
 
 `contracts/platform-tools.snapshot.json` holds **30**. The extra ten are the platform's lab hooks — the fault injectors an evaluator uses to build a scenario's world. The agent never registers them, and since platform v0.6.5 its token cannot call them either.
 

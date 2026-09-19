@@ -53,7 +53,6 @@ from evals import artifacts
 from evals import phase_close_report as close
 from evals.graders.deterministic import GradeReport
 from evals.runner import ExecutionMode, RunProvenance, RunReport, ScenarioOutcome
-from incident_commander.agent.hypothesis import HypothesisCategory
 from incident_commander.agent.state import BudgetLedger, IncidentState
 from incident_commander.config import ModelRole
 
@@ -105,32 +104,7 @@ def _case_ids() -> list[str]:
 #: reported with the line in it. The same class as the corpus-size gate cmd
 #: #284 hit (LESSONS 2026-09-17): a frozen artifact regenerated from a living
 #: repo can only be pinned on what the repo is not allowed to move.
-_ASSEMBLY_TIME_FACTS: Final[tuple[tuple[str, str], ...]] = (
-    (
-        r'^\s*"term_count": \d+,?$',
-        "the leak vocabulary's size, derived from the enum and the corpus",
-    ),
-    (
-        r'^\s*"(?:' + "|".join(c.value for c in HypothesisCategory) + r')",?$',
-        "one derived leak term: a HypothesisCategory value",
-    ),
-    (
-        r"^\d+ terms in three families",
-        "the same size, in the markdown's own sentence",
-    ),
-    (
-        r"Per-run counts for all \d+ terms",
-        "and again where the markdown points at the JSON companion",
-    ),
-    (
-        r'^\s*"(?:briefing|verification)_judge\.md": "[0-9a-f]{64}",?$',
-        "a judge prompt digest, recorded at assembly time",
-    ),
-    (
-        r"^- `(?:briefing|verification)_judge\.md` — `sha256:[0-9a-f]{64}`$",
-        "the same digest, rendered",
-    ),
-)
+_ASSEMBLY_TIME_FACTS: Final[tuple[tuple[str, str], ...]] = ()
 
 
 def _unexplained_drift(committed: str, regenerated: str) -> list[str]:

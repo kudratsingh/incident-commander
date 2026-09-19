@@ -1211,6 +1211,135 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "here, which is the pair worth reading together — the yardstick is the "
         "platform's, only the count is the premise",
     ),
+    # The cascading world (WO-R3-229, WP-11.2, ADR 0067). Ten rows, and NONE of them is
+    # POST_FAULT, because the chain this world describes cannot be seeded today:
+    # `saturate_redis` writes at most 256 MiB and the eval stack's Redis has no `maxmemory`
+    # for that to reach, so no hook call makes Redis refuse the write that starves the lag
+    # cache. Calling these post-fault would name a mechanism that is not there, which is
+    # the mistake COLD_STACK was invented to avoid. Not NO_HOOK either: the hook exists and
+    # the platform's own code carries the chain — what is missing is a memory ceiling on
+    # the eval Redis. The seven `get_slo_status` rows are CANNED_ONLY (the scenario never
+    # runs live, so its numbers are its premise); the three `get_consumer_lag` rows are
+    # WARM_STACK for the reason below.
+    # DELIBERATELY ABSENT: `get_outbox_status` and `get_redis_health`. The outbox fixture
+    # is a HEALTHY reading (that is its job — it rules out the neighbouring world), so it
+    # agrees with the un-faulted stack field for field; and every Redis field this world
+    # moves is already volatile, with `ok`/`error` matching live.
+    # The three `get_consumer_lag` rows are WARM_STACK, not canned-only, and the reason is
+    # a coincidence worth reading twice: this fixture's fault signature — no measurement at
+    # all — is byte-identical to what a JUST-BOOTED stack answers, because the metrics loop
+    # has not completed a pass yet either. So on CI's fresh stack these three do not drift
+    # (PR #311's first `contract` run reported them stale), and on a warm volume that has
+    # measured a 0 with samples they do. Timing on the CHECK's side, not on the fixture's,
+    # which is exactly what WO-R3-273 added the word for; `classify()` keeps a warm-stack
+    # row off the stale list when the run was cold.
+    ("cascading_redis_starves_backpressure", "get_consumer_lag", "lag", "value"): (
+        WARM_STACK,
+        "the premise is the ABSENCE of a measurement: a degraded Redis stops the metrics "
+        "loop refreshing the cached lag and the previous entry expires, so `lag` is null. "
+        "A stack that has been up long enough to measure one reads 0 and this drifts; a "
+        "fresh one has no measurement either and it does not. `lag_known` is already "
+        "volatile and this is the half that is not — the null IS the fault, and the "
+        "cold-stack rows on the `jobs_not_progressing` worlds are this one's mirror",
+    ),
+    (
+        "cascading_redis_starves_backpressure",
+        "get_consumer_lag",
+        "recent_samples[].lag",
+        "live_only_field",
+    ): (
+        WARM_STACK,
+        "the recorded window goes quiet with the value it dates: the loop writes the "
+        "number and then the samples under the same 90s TTL, so a fixture whose value is "
+        "absent carries no samples either. A warm volume has a window and every row field "
+        "it sends reads as live-only; a fresh one has none and nothing drifts. The empty "
+        "list is part of the premise (the tool's own description: an empty window is "
+        "missing history, never a flat line)",
+    ),
+    (
+        "cascading_redis_starves_backpressure",
+        "get_consumer_lag",
+        "recent_samples[].measured_at",
+        "live_only_field",
+    ): (
+        WARM_STACK,
+        "same quiet window, its other absent row field",
+    ),
+    (
+        "cascading_redis_starves_backpressure",
+        "get_slo_status",
+        "objectives[].total[]",
+        "not_live_reachable",
+    ): (
+        CANNED_ONLY,
+        "the fourth link of the chain, counted: 500 settled jobs and 480 dispatched "
+        "over the window, against an un-faulted stack whose window holds whatever its "
+        "own traffic put there. Both objectives share this row, because the ledger is "
+        "keyed per path and the check reads a list of objects as one merged row",
+    ),
+    (
+        "cascading_redis_starves_backpressure",
+        "get_slo_status",
+        "objectives[].failed[]",
+        "not_live_reachable",
+    ): (
+        CANNED_ONLY,
+        "same link, its numerator: 384 of the 480 dispatched jobs left PENDING later "
+        "than 30s because admission stopped refusing work, where an un-faulted world "
+        "counts almost none. The contrast with the completion objective's 2 is the "
+        "finding this world grades — late, not failing",
+    ),
+    (
+        "cascading_redis_starves_backpressure",
+        "get_slo_status",
+        "objectives[].current_success_rate[]",
+        "not_live_reachable",
+    ): (
+        CANNED_ONLY,
+        "derived from the two counts above by the platform's own arithmetic, so it "
+        "drifts exactly where they do",
+    ),
+    (
+        "cascading_redis_starves_backpressure",
+        "get_slo_status",
+        "objectives[].budget_remaining_pct[]",
+        "not_live_reachable",
+    ): (
+        CANNED_ONLY,
+        "same derivation, clamped at -100 for the spent objective",
+    ),
+    (
+        "cascading_redis_starves_backpressure",
+        "get_slo_status",
+        "objectives[].burn_rate[]",
+        "not_live_reachable",
+    ): (
+        CANNED_ONLY,
+        "same derivation again: 16x the sustainable rate is the premise, and it is the "
+        "number the platform's own alert threshold (14.4) is read against",
+    ),
+    (
+        "cascading_redis_starves_backpressure",
+        "get_slo_status",
+        "objectives[].healthy[]",
+        "not_live_reachable",
+    ): (
+        CANNED_ONLY,
+        "an un-faulted stack reports every objective healthy, so the `false` this "
+        "world's dispatch objective carries is not a value it can emit. The `true` "
+        "beside it agrees with live and rides this row because both objectives merge "
+        "into one",
+    ),
+    (
+        "cascading_redis_starves_backpressure",
+        "get_slo_status",
+        "objectives[].fast_burn[]",
+        "not_live_reachable",
+    ): (
+        CANNED_ONLY,
+        "same reason as `healthy`: nothing burns fast on a stack where nothing failed, "
+        "and a fast burn is what raised this world's alert",
+    ),
 }
 
 

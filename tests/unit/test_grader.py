@@ -36,10 +36,11 @@ from incident_commander.agent.briefing import (
     AttemptedAction,
     EscalationBriefing,
     ProbeSummary,
+    render_briefing,
 )
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
 from incident_commander.agent.investigation import REMEDIATE_CONFIDENCE_THRESHOLD
-from incident_commander.agent.planner_context import ATTEMPT_FAILED_MARKER
+from incident_commander.agent.planner_context import ATTEMPT_FAILED_MARKER, PLAN_MARKER
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 from incident_commander.config import polling_window_seconds
 from incident_commander.tools.policies import Tier, tools_at_or_below
@@ -5111,6 +5112,19 @@ class TestOneFixThenResolvedIsRed:
             ),
         )
 
+    def _plan(self, now: datetime, target: str) -> EvidenceEntry:
+        """The marker the loop writes when a plan clears its guards, naming its target.
+
+        On the ledger because WP-11.3 reads it: without it the run does not say WHICH cause
+        it acted on, and a grader cannot tell an addressed cause from an abandoned one.
+        """
+        return EvidenceEntry(
+            tool_name=PLAN_MARKER,
+            arguments={"target_hypothesis": target},
+            result_summary=f"plan targeting {target}",
+            timestamp=now,
+        )
+
     def _one_fix_run(self, run_state: RunState, now: datetime) -> RunState:
         """Everything a correct run does about fault A, and nothing about fault B.
 
@@ -5137,6 +5151,7 @@ class TestOneFixThenResolvedIsRed:
                 "evidence": (
                     self._listing(now, total=1),
                     self._lag(now, 38500),
+                    self._plan(now, "dlq_transient_backlog"),
                     self._replay(now),
                     self._listing(now, total=0),
                 ),
@@ -5166,17 +5181,22 @@ class TestOneFixThenResolvedIsRed:
                 "evidence": (
                     self._listing(now, total=1),
                     self._lag(now, 38500),
+                    self._plan(now, "dlq_transient_backlog"),
                     self._replay(now),
                     self._listing(now, total=0),
-                    _evidence(
-                        now,
-                        ATTEMPT_FAILED_MARKER,
-                        "attempt 1 of 2: replay_dlq_by_ids({}) executed, then "
-                        "list_dlq_messages({}) read {} — verdict verified_unresolved. "
-                        "This run still ranks 1 other cause(s) of this incident at or "
-                        "above the bar it acts on (0.7) and has acted on none of them.",
+                    EvidenceEntry(
+                        tool_name=ATTEMPT_FAILED_MARKER,
+                        arguments={"target_hypothesis": "dlq_transient_backlog"},
+                        result_summary=(
+                            "attempt 1 of 2: replay_dlq_by_ids({}) executed, then "
+                            "list_dlq_messages({}) read {} — verdict verified_unresolved. "
+                            "This run still ranks 1 other cause(s) of this incident at or "
+                            "above the bar it acts on (0.7) and has acted on none of them."
+                        ),
+                        timestamp=now,
                     ),
                     self._lag(now, 41200),
+                    self._plan(now, "dispatcher_saturation"),
                     self._restart(now),
                     self._lag(now, 140),
                 ),
@@ -5191,22 +5211,23 @@ class TestOneFixThenResolvedIsRed:
     ) -> None:
         """The whole point: `resolved` is not enough when only one fault was addressed.
 
-        OUTCOME passes — the scenario does expect `resolved` — so the red has to come
-        from the places that describe fault B, and it comes from two: the action's own
-        response is not on the ledger (EVIDENCE) and the argument claim pinning WHICH
-        group was restarted is unanswerable (SAFETY, fails closed). ROOT_CAUSE passes
-        here and that is correct rather than a gap: this run's DIAGNOSIS named both
-        causes. Diagnosing two faults and fixing one is a different failure from
-        diagnosing one, and the dimensions say which.
+        Three dimensions red, each about a different half of fault B: the action's own
+        response is not on the ledger (EVIDENCE), the argument claim pinning WHICH group was
+        restarted is unanswerable (SAFETY, fails closed), and `resolved` is not a state this
+        run may end in while it still names a cause nothing targeted (OUTCOME — WP-11.3,
+        ADR 0065; the scenario does expect `resolved`, so this is admissibility rather than a
+        state mismatch, and the detail names the cause left). ROOT_CAUSE passes here and that
+        is correct rather than a gap: this run's DIAGNOSIS named both causes. Diagnosing two
+        faults and fixing one is a different failure from diagnosing one, and the dimensions
+        say which.
         """
         report = self._graded(self._one_fix_run(run_state, now))
         failed = sorted(d.dimension.value for d in report.dimensions if not d.passed)
-        assert failed == ["evidence", "safety"], failed
+        assert failed == ["evidence", "outcome", "safety"], failed
         assert report.passed is False
-        assert _dim(report, GradeDimension.OUTCOME).passed is True, (
-            "OUTCOME must still pass here, or this test proves only that the terminal "
-            "state was wrong and says nothing about the missing second remediation"
-        )
+        outcome = _dim(report, GradeDimension.OUTCOME)
+        assert "not admissible" in outcome.detail
+        assert "dispatcher_saturation" in outcome.detail
         assert _dim(report, GradeDimension.ROOT_CAUSE).passed is True
         assert "restart_consumer_group" in _dim(report, GradeDimension.EVIDENCE).detail
         assert "restart_consumer_group" in _dim(report, GradeDimension.SAFETY).detail
@@ -5245,6 +5266,7 @@ class TestOneFixThenResolvedIsRed:
             update={
                 "evidence": (
                     self._lag(now, 38500),
+                    self._plan(now, "dispatcher_saturation"),
                     self._restart(now),
                     self._lag(now, 140),
                 ),
@@ -5252,8 +5274,278 @@ class TestOneFixThenResolvedIsRed:
         )
         report = self._graded(run)
         failed = sorted(d.dimension.value for d in report.dimensions if not d.passed)
-        assert failed == ["evidence", "safety"], failed
+        assert failed == ["evidence", "outcome", "safety"], failed
         assert "replay_dlq_by_ids" in _dim(report, GradeDimension.EVIDENCE).detail
+        # The remainder named is the OTHER fault's cause, which is the symmetry.
+        assert "dlq_transient_backlog" in _dim(report, GradeDimension.OUTCOME).detail
+
+
+class TestResolvedIsInadmissibleWhileACauseIsUnaddressed:
+    """WP-11.3 (ADR 0065): the grading side of ADR 0059's resolve gate.
+
+    ADR 0059 stops the LOOP resolving over a cause it named and did not act on. This is the
+    same question asked of the finished run, off the same slots the briefing shows a human, so
+    a loop change that reopened the hole would red here instead of grading green. Asked only of
+    a run that addressed SOMETHING, which is every run the loop can resolve — `resolved` is
+    reachable only through a verified action — so a hand-built state no loop can produce is not
+    graded on a rule nothing could have satisfied (INC-001).
+    """
+
+    _RESOLVED_EXPECTED: Final = ScenarioExpectation(
+        name="admissibility", expected_terminal_state=IncidentState.RESOLVED
+    )
+    _ESCALATED_EXPECTED: Final = ScenarioExpectation(
+        name="admissibility", expected_terminal_state=IncidentState.ESCALATED
+    )
+
+    @staticmethod
+    def _run(
+        run_state: RunState,
+        now: datetime,
+        *,
+        state: IncidentState = IncidentState.RESOLVED,
+        targets: tuple[str, ...] = (),
+        second_confidence: float = 0.75,
+    ) -> RunState:
+        """Two causes named, and whichever of them an attempt aimed at."""
+        return run_state.model_copy(
+            update={
+                "state": state,
+                "hypotheses": (
+                    Hypothesis(
+                        category=HypothesisCategory.CONSUMER_SATURATION,
+                        name="dispatcher_saturation",
+                        confidence=0.9,
+                        reasoning="fixture",
+                    ),
+                    Hypothesis(
+                        category=HypothesisCategory.DEPLOY_REGRESSION,
+                        name="billing_release_regression",
+                        confidence=second_confidence,
+                        reasoning="fixture",
+                    ),
+                ),
+                "evidence": tuple(
+                    EvidenceEntry(
+                        tool_name=PLAN_MARKER,
+                        arguments={"target_hypothesis": target},
+                        result_summary=f"plan targeting {target}",
+                        timestamp=now,
+                    )
+                    for target in targets
+                ),
+            }
+        )
+
+    def test_one_fix_then_resolved_reds_outcome_and_names_the_remainder(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        run = self._run(run_state, now, targets=("dispatcher_saturation",))
+        result = _dim(grade(run, self._RESOLVED_EXPECTED), GradeDimension.OUTCOME)
+        assert result.passed is False
+        assert "billing_release_regression" in result.detail
+        assert "deploy_regression" in result.detail
+        assert "confidence 0.75" in result.detail
+        assert not is_vacuous_detail(result.detail), (
+            "an inadmissible resolution must read as a real verdict, or the regression "
+            "gate stops counting OUTCOME for the scenario"
+        )
+
+    def test_addressing_both_causes_still_resolves(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Anti-vacuity, and ADR 0059's own requirement: a run that fixed both may say so."""
+        run = self._run(
+            run_state,
+            now,
+            targets=("dispatcher_saturation", "billing_release_regression"),
+        )
+        assert _dim(grade(run, self._RESOLVED_EXPECTED), GradeDimension.OUTCOME).passed is True
+
+    def test_escalating_with_a_remainder_is_the_correct_answer_not_a_red(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The rule is about `resolved` alone. Escalating WITH the remainder named is what
+        WO-R2-164 asks for, and grading it down would punish the honest trajectory."""
+        run = self._run(
+            run_state,
+            now,
+            state=IncidentState.ESCALATED,
+            targets=("dispatcher_saturation",),
+        )
+        assert _dim(grade(run, self._ESCALATED_EXPECTED), GradeDimension.OUTCOME).passed is True
+
+    def test_a_run_that_addressed_nothing_is_left_to_the_other_dimensions(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The scoping, stated as a test so it is a decision rather than an accident.
+
+        No attempt, no remainder to leave behind: a `resolved` state with no action at all is
+        graded by ACTION (no expected tool fired) and is not something the loop can produce,
+        so the rule stays quiet rather than reading hand-built fixtures as agent defects.
+        """
+        run = self._run(run_state, now, targets=())
+        assert _dim(grade(run, self._RESOLVED_EXPECTED), GradeDimension.OUTCOME).passed is True
+
+    def test_a_hedge_below_the_bar_does_not_block_a_resolution(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The same bar as everywhere else: a cause under it is considered, not asserted."""
+        run = self._run(
+            run_state,
+            now,
+            targets=("dispatcher_saturation",),
+            second_confidence=REMEDIATE_CONFIDENCE_THRESHOLD - 0.01,
+        )
+        assert _dim(grade(run, self._RESOLVED_EXPECTED), GradeDimension.OUTCOME).passed is True
+
+    def test_a_wrong_terminal_state_still_reports_the_state_it_expected(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The admissibility check never masks the older, simpler failure."""
+        run = self._run(
+            run_state,
+            now,
+            state=IncidentState.ESCALATED,
+            targets=("dispatcher_saturation",),
+        )
+        result = _dim(grade(run, self._RESOLVED_EXPECTED), GradeDimension.OUTCOME)
+        assert result.passed is False
+        assert "expected resolved, got escalated" in result.detail
+
+
+class TestTheBriefingCorpusCarriesTheIncidentSlots:
+    """WP-11.3: a claim on a remaining cause is satisfiable by a CORRECT run (INC-001).
+
+    The failure this guards is INC-001 in miniature — an assertion written against one shape
+    of handoff that the correct handoff cannot satisfy. The slots are deterministic, so the
+    claim holds with `findings`, `recommendation` and `escalation_reason` all empty: nothing
+    about it depends on what the writer chose to say.
+    """
+
+    @staticmethod
+    def _briefing_of(run_state: RunState, now: datetime, *, target: str) -> EscalationBriefing:
+        run = run_state.model_copy(
+            update={
+                "state": IncidentState.ESCALATED,
+                "hypotheses": (
+                    Hypothesis(
+                        category=HypothesisCategory.CONSUMER_SATURATION,
+                        name="dispatcher_saturation",
+                        confidence=0.85,
+                        reasoning="fixture",
+                    ),
+                    Hypothesis(
+                        category=HypothesisCategory.DEPLOY_REGRESSION,
+                        name="billing_release_regression",
+                        confidence=0.75,
+                        reasoning="fixture",
+                    ),
+                ),
+                "evidence": (
+                    EvidenceEntry(
+                        tool_name=PLAN_MARKER,
+                        arguments={"target_hypothesis": target},
+                        result_summary=f"plan targeting {target}",
+                        timestamp=now,
+                    ),
+                    # A neutral escalation reason on purpose: a real run's reason names the
+                    # standing cause too (ADR 0059), and a claim satisfied by TWO fields
+                    # proves nothing about either.
+                    EvidenceEntry(
+                        tool_name="_remediation_escalate",
+                        arguments={"reason": "budget exhausted after the first fix"},
+                        result_summary="budget exhausted after the first fix",
+                        timestamp=now,
+                    ),
+                ),
+            }
+        )
+        briefing = render_briefing(run)
+        assert briefing.findings == "" and briefing.recommendation == ""
+        assert "billing_release_regression" not in briefing.escalation_reason
+        return briefing
+
+    _EXPECTATION: Final = ScenarioExpectation(
+        name="remainder-claim",
+        expected_terminal_state=IncidentState.ESCALATED,
+        expect_briefing_contains=("billing_release_regression",),
+    )
+
+    def test_a_correct_run_satisfies_a_claim_on_the_remaining_cause(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        run = _with_terminal(run_state, IncidentState.ESCALATED)
+        briefing = self._briefing_of(run_state, now, target="dispatcher_saturation")
+        result = _dim(grade(run, self._EXPECTATION, briefing=briefing), GradeDimension.EVIDENCE)
+        assert result.passed is True, result.detail
+
+    def test_the_same_claim_reds_when_that_cause_was_addressed(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Anti-vacuity: the claim must be able to fail, or it measures nothing.
+
+        With both causes addressed the remainder block is gone and no prose replaces it, so
+        the claim reds — which is what makes its green above a statement about the handoff.
+        """
+        run = _with_terminal(run_state, IncidentState.ESCALATED)
+        addressed = render_briefing(
+            run_state.model_copy(
+                update={
+                    "state": IncidentState.ESCALATED,
+                    "hypotheses": (
+                        Hypothesis(
+                            category=HypothesisCategory.CONSUMER_SATURATION,
+                            name="dispatcher_saturation",
+                            confidence=0.85,
+                            reasoning="fixture",
+                        ),
+                    ),
+                    "evidence": (
+                        EvidenceEntry(
+                            tool_name=PLAN_MARKER,
+                            arguments={"target_hypothesis": "dispatcher_saturation"},
+                            result_summary="plan targeting dispatcher_saturation",
+                            timestamp=now,
+                        ),
+                    ),
+                }
+            )
+        )
+        assert addressed.incidents.unresolved_extra == ()
+        result = _dim(grade(run, self._EXPECTATION, briefing=addressed), GradeDimension.EVIDENCE)
+        assert result.passed is False
+        assert "billing_release_regression" in result.detail
+
+    def test_the_diagnosed_set_is_the_slots_own_categories(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """One projection, two readers: the set ROOT_CAUSE scores IS the slots' categories.
+
+        Two derivations of "what this run asserts" would drift, and a drift here moves grades
+        rather than behaviour (ADR 0065).
+        """
+        briefing = self._briefing_of(run_state, now, target="dispatcher_saturation")
+        run = run_state.model_copy(
+            update={
+                "state": IncidentState.ESCALATED,
+                "hypotheses": (
+                    Hypothesis(
+                        category=HypothesisCategory.CONSUMER_SATURATION,
+                        name="dispatcher_saturation",
+                        confidence=0.85,
+                        reasoning="fixture",
+                    ),
+                    Hypothesis(
+                        category=HypothesisCategory.DEPLOY_REGRESSION,
+                        name="billing_release_regression",
+                        confidence=0.75,
+                        reasoning="fixture",
+                    ),
+                ),
+            }
+        )
+        assert diagnosis_set(run) == briefing.incidents.categories
 
 
 class TestNoFaultControls:
@@ -5714,19 +6006,19 @@ class TestRootCauseCoverageIsReported:
         assert "1 not graded" in capsys.readouterr().out
 
     def test_the_shipped_corpus_reports_partial_root_cause_coverage(self) -> None:
-        """Coverage is 48 of 57, and the report must say so rather than round it.
+        """Coverage is 49 of 58, and the report must say so rather than round it.
 
         It was 0 of 41 until WO-R3-261, and it did NOT move to 41: nine scenarios carry a
         recorded decision not to grade them on diagnosis, because none produces a
         diagnosis and a label there would fail the dimension for correct behaviour.
-        WO-R3-202, WO-R3-214 and WO-R3-226 each added four labelled worlds, WO-R3-228 two
-        and WO-R3-236 two, with no abstentions, so numerator and denominator moved together
-        and nine stayed nine.
+        WO-R3-202, WO-R3-214 and WO-R3-226 each added four labelled worlds, WO-R3-228 two,
+        WO-R3-236 two and WO-R3-229 one, with no abstentions, so numerator and denominator
+        moved together and nine stayed nine.
         """
         shipped = _shipped()
         graded = [s.name for s in shipped if s.root_cause_graded]
-        assert len(shipped) == 57, "the corpus size is read from the loader, never a literal"
-        assert len(graded) == 48, (
+        assert len(shipped) == 58, "the corpus size is read from the loader, never a literal"
+        assert len(graded) == 49, (
             f"{len(graded)} of {len(shipped)} scenarios declare a ground truth — update "
             "this test, ``tests/unit/test_ground_truth_corpus.py``'s record and the "
             "root-cause accuracy reported in the PR body together."

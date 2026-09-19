@@ -136,13 +136,13 @@ class TestSplitsAreByTemplate:
         }
 
     def test_the_shipped_corpus_loads(self) -> None:
-        """57 scenarios, no straddle. The check is inert until it is not.
+        """58 scenarios, no straddle. The check is inert until it is not.
 
         41 until WO-R3-202's four, 45 until WO-R3-214's four, 49 until WO-R3-226's
-        four, 53 until WO-R3-228's two and 55 until WO-R3-236's two. A pin, not a
-        derivation.
+        four, 53 until WO-R3-228's two, 55 until WO-R3-236's two and 57 until
+        WO-R3-229's cascade. A pin, not a derivation.
         """
-        assert len(CORPUS) == 57
+        assert len(CORPUS) == 58
 
 
 class TestClosedVocabularies:
@@ -444,6 +444,14 @@ class TestPromotionIsReconciled:
             "single",
             "temporal",
             "same timeline, positioned inside the verify window instead",
+        ),
+        # WO-R3-229 (WP-11.2). One hook, so the rule sees one fault and answers `single`;
+        # what it cannot see is that three of the four things wrong with this world are
+        # consequences of the fourth. The difficulty is following the chain to its root.
+        "cascading_redis_starves_backpressure": (
+            "single",
+            "cascading",
+            "one fault and four links; the alert names the last of them",
         ),
     }
 

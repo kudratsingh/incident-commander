@@ -25,6 +25,11 @@ EVIDENCE_ID_PREFIX: Final[str] = "evidence_id="
 #: render it whole, and a second spelling of the name is how one of them stops matching.
 ATTEMPT_FAILED_MARKER: Final[str] = "_remediation_attempt_failed"
 
+#: The ledger entry ``agent/remediation.py`` writes when a plan clears its guards, carrying the
+#: cause that plan targets. Named here for the same reason as the marker above: ``agent/
+#: incidents.py`` reads both to tell a cause this run acted on from one it only named.
+PLAN_MARKER: Final[str] = "_planner_plan"
+
 #: How that block is headed, in the words the model reads.
 ALREADY_ATTEMPTED_HEADING: Final[str] = "Already attempted in this incident — do NOT repeat:"
 

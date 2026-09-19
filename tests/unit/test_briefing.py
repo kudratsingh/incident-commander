@@ -1,11 +1,17 @@
 from datetime import datetime
+from pathlib import Path
 
 from incident_commander.agent.briefing import (
+    INCIDENTS_HEADING,
+    REMAINDER_HEADING,
     EscalationBriefing,
     ProbeSummary,
     render_briefing,
+    render_incidents,
 )
-from incident_commander.agent.planner_context import ATTEMPT_FAILED_MARKER
+from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
+from incident_commander.agent.investigation import REMEDIATE_CONFIDENCE_THRESHOLD
+from incident_commander.agent.planner_context import ATTEMPT_FAILED_MARKER, PLAN_MARKER
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 from incident_commander.tools.registry import TOOL_REGISTRY
 
@@ -15,6 +21,20 @@ def _evidence(now: datetime, tool: str, summary: str) -> EvidenceEntry:
         tool_name=tool,
         arguments={},
         result_summary=summary,
+        timestamp=now,
+    )
+
+
+def _hypothesis(category: HypothesisCategory, name: str, confidence: float) -> Hypothesis:
+    return Hypothesis(category=category, name=name, confidence=confidence, reasoning="fixture")
+
+
+def _targeted(now: datetime, marker: str, target: str) -> EvidenceEntry:
+    """A ledger marker saying an attempt in this run aimed at ``target``."""
+    return EvidenceEntry(
+        tool_name=marker,
+        arguments={"target_hypothesis": target},
+        result_summary=f"plan targeting {target}",
         timestamp=now,
     )
 
@@ -348,3 +368,217 @@ class TestRenderBriefing:
         briefing = render_briefing(run_state)
         loaded = EscalationBriefing.model_validate_json(briefing.model_dump_json())
         assert loaded == briefing
+
+
+class TestTheBriefingCarriesItsIncidentsBySlot:
+    """WP-11.3 (ADR 0065): primary / secondary / unresolved-extra, structurally.
+
+    The rule being made structural is WO-R2-164's — "stabilize what one action can, then
+    escalate naming every remainder". As prose it is advice the writer may ignore; as a slot
+    filled from the run's own ranking and its own attempts it is in the handoff either way.
+    """
+
+    _SATURATION = HypothesisCategory.CONSUMER_SATURATION
+    _DEPLOY = HypothesisCategory.DEPLOY_REGRESSION
+
+    def _dual_fault(
+        self, run_state: RunState, now: datetime, *, targets: tuple[str, ...]
+    ) -> RunState:
+        """The shipped dual-fault shape: two causes at the bar, some of them acted on."""
+        return run_state.model_copy(
+            update={
+                "state": IncidentState.ESCALATED,
+                "hypotheses": (
+                    _hypothesis(self._SATURATION, "dispatcher_saturation", 0.85),
+                    _hypothesis(self._DEPLOY, "billing_release_regression", 0.75),
+                ),
+                "evidence": tuple(_targeted(now, PLAN_MARKER, target) for target in targets),
+            }
+        )
+
+    def test_the_second_asserted_cause_is_a_secondary_and_a_remainder(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        slots = render_briefing(
+            self._dual_fault(run_state, now, targets=("dispatcher_saturation",))
+        ).incidents
+        assert slots.primary is not None
+        assert slots.primary.name == "dispatcher_saturation"
+        assert slots.primary.addressed is True
+        assert [slot.name for slot in slots.secondary] == ["billing_release_regression"]
+        assert [slot.name for slot in slots.unresolved_extra] == ["billing_release_regression"]
+
+    def test_the_remainder_comes_from_run_state_and_not_from_prose(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # The whole point of the slot. `findings` and `recommendation` are the writer's and are
+        # empty in the deterministic template, so a run that leaves a cause standing cannot
+        # render an empty remainder by writing nothing about it.
+        briefing = render_briefing(
+            self._dual_fault(run_state, now, targets=("dispatcher_saturation",))
+        )
+        assert briefing.findings == ""
+        assert briefing.recommendation == ""
+        assert briefing.incidents.unresolved_extra != ()
+        assert REMAINDER_HEADING in "\n".join(render_incidents(briefing.incidents))
+
+    def test_a_cause_the_run_acted_on_is_not_a_remainder(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # The other direction: a run that fixed BOTH faults must be able to say so, or the
+        # sibling template could never resolve (ADR 0059).
+        slots = render_briefing(
+            self._dual_fault(
+                run_state,
+                now,
+                targets=("dispatcher_saturation", "billing_release_regression"),
+            )
+        ).incidents
+        assert slots.unresolved_extra == ()
+        assert slots.addressed_any is True
+
+    def test_a_cause_is_addressed_by_its_category_spelling_too(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # `RemediationPlan.target_hypothesis` is a free string and the corpus spells it both
+        # ways; reading one spelling would call a remediated cause unaddressed (ADR 0059).
+        slots = render_briefing(
+            self._dual_fault(run_state, now, targets=("consumer_saturation",))
+        ).incidents
+        assert slots.primary is not None
+        assert slots.primary.addressed is True
+
+    def test_a_failed_attempt_also_counts_as_addressed(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # ADR 0056's attempt record: a cause aimed at and missed is a cause the human is
+        # already told about under "already attempted", not a silent remainder.
+        slots = render_briefing(
+            run_state.model_copy(
+                update={
+                    "state": IncidentState.ESCALATED,
+                    "hypotheses": (_hypothesis(self._SATURATION, "dispatcher_saturation", 0.85),),
+                    "evidence": (_targeted(now, ATTEMPT_FAILED_MARKER, "dispatcher_saturation"),),
+                }
+            )
+        ).incidents
+        assert slots.unresolved_extra == ()
+
+    def test_a_hedge_below_the_bar_is_neither_secondary_nor_remainder(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # The anti-hedging half of ADR 0059, in the slots: a cause under the bar is one the
+        # agent is considering, and a remainder block padded with them tells a human nothing.
+        slots = render_briefing(
+            run_state.model_copy(
+                update={
+                    "state": IncidentState.ESCALATED,
+                    "hypotheses": (
+                        _hypothesis(self._SATURATION, "dispatcher_saturation", 0.85),
+                        _hypothesis(
+                            self._DEPLOY,
+                            "a-hedge",
+                            REMEDIATE_CONFIDENCE_THRESHOLD - 0.01,
+                        ),
+                    ),
+                    "evidence": (_targeted(now, PLAN_MARKER, "dispatcher_saturation"),),
+                }
+            )
+        ).incidents
+        assert slots.secondary == ()
+        assert slots.unresolved_extra == ()
+
+    def test_a_cause_exactly_at_the_bar_is_asserted(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        slots = render_briefing(
+            run_state.model_copy(
+                update={
+                    "state": IncidentState.ESCALATED,
+                    "hypotheses": (
+                        _hypothesis(self._SATURATION, "dispatcher_saturation", 0.85),
+                        _hypothesis(self._DEPLOY, "at-the-bar", REMEDIATE_CONFIDENCE_THRESHOLD),
+                    ),
+                }
+            )
+        ).incidents
+        assert [slot.name for slot in slots.secondary] == ["at-the-bar"]
+
+    def test_the_top_cause_is_the_primary_whatever_its_confidence(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # Same reading as `final_diagnosis`: an escalating run's best guess at 0.55 is still
+        # what it concluded, and a human handed it needs to be told so.
+        slots = render_briefing(
+            run_state.model_copy(
+                update={
+                    "state": IncidentState.ESCALATED,
+                    "hypotheses": (_hypothesis(self._SATURATION, "a-weak-guess", 0.55),),
+                }
+            )
+        ).incidents
+        assert slots.primary is not None
+        assert slots.primary.name == "a-weak-guess"
+        assert [slot.name for slot in slots.unresolved_extra] == ["a-weak-guess"]
+        assert slots.addressed_any is False
+
+    def test_a_run_with_no_ranking_has_no_slots_and_renders_nothing(
+        self, run_state: RunState
+    ) -> None:
+        # Every context that predates WP-11.3 renders byte-identically, which is what keeps
+        # the prompt snapshots and the canned suite where they were.
+        slots = render_briefing(run_state).incidents
+        assert slots.primary is None
+        assert slots.asserted == ()
+        assert render_incidents(slots) == []
+
+    def test_the_block_names_the_heading_and_every_remaining_cause(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        rendered = "\n".join(
+            render_incidents(
+                render_briefing(
+                    self._dual_fault(run_state, now, targets=("dispatcher_saturation",))
+                ).incidents
+            )
+        )
+        assert INCIDENTS_HEADING in rendered
+        assert REMAINDER_HEADING in rendered
+        assert "billing_release_regression" in rendered
+        assert "deploy_regression" in rendered
+        assert "confidence 0.75" in rendered
+
+    def test_the_slots_survive_the_json_round_trip(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # The briefing is archived as JSON (invariant 9) and read back by the regrade path.
+        briefing = render_briefing(
+            self._dual_fault(run_state, now, targets=("dispatcher_saturation",))
+        )
+        loaded = EscalationBriefing.model_validate_json(briefing.model_dump_json())
+        assert loaded.incidents == briefing.incidents
+
+    def test_an_archive_written_before_the_slots_reads_back_as_empty_ones(self) -> None:
+        # Invariant 9: archives are append-only, so every briefing written before WP-11.3 has
+        # no `incidents` key. Empty slots are the honest reading — the projection did not exist
+        # when that run happened — and a required field would make old evidence unreadable.
+        older = {
+            "incident_id": "11111111-1111-1111-1111-111111111111",
+            "final_state": "escalated",
+            "alert_summary": "source=platform.kafka severity=high",
+        }
+        loaded = EscalationBriefing.model_validate(older)
+        assert loaded.incidents.primary is None
+        assert loaded.incidents.unresolved_extra == ()
+
+
+class TestTheDecisionIsRecorded:
+    """ADR 0065 exists, is accepted, and is in the index — the repo's own convention."""
+
+    def test_the_adr_exists_and_is_indexed(self) -> None:
+        adr = Path(__file__).resolve().parents[2] / "docs" / "ADR"
+        matches = sorted(adr.glob("0065-*.md"))
+        assert len(matches) == 1
+        assert "accepted" in matches[0].read_text(encoding="utf-8").lower()
+        index = (adr / "README.md").read_text(encoding="utf-8")
+        assert matches[0].name.removesuffix(".md").split("-", 1)[1] in index

@@ -17,8 +17,8 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict
 
+from incident_commander.agent.briefing import incidents_of
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
-from incident_commander.agent.investigation import REMEDIATE_CONFIDENCE_THRESHOLD
 from incident_commander.agent.state import RunState
 
 #: How a ROOT_CAUSE detail opens when the run's world is not the label's.
@@ -64,17 +64,11 @@ def diagnosis_set(run: RunState) -> tuple[HypothesisCategory, ...]:
     The top hypothesis, plus any other the ranking still holds at or above the bar the
     loop acts on. Hedging below the bar stays free and uncounted; naming a second cause
     at the bar costs precision when it is wrong, which is why this cannot be padded.
-    Empty only when the run produced no ranking at all.
+    Empty only when the run produced no ranking at all. Read off the SLOTS the briefing
+    shows a human (WP-11.3, ADR 0065) rather than re-derived here: the set the grader
+    scores and the decomposition the handoff names are one projection, or they drift.
     """
-    top = final_diagnosis(run)
-    if top is None:
-        return ()
-    asserted = {top.category} | {
-        hypothesis.category
-        for hypothesis in run.hypotheses
-        if hypothesis.confidence >= REMEDIATE_CONFIDENCE_THRESHOLD
-    }
-    return _sorted(frozenset(asserted))
+    return incidents_of(run).categories
 
 
 def final_diagnosis(run: RunState) -> Hypothesis | None:

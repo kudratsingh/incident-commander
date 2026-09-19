@@ -61,6 +61,12 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
     # `records_referenced` / `records_found`: they are counts of SEEDED records, so
     # a fresh stack answers 3 / 3 every time and a recording can be right.
     "get_cache_key_info": frozenset({"ttl_seconds"}),
+    # v0.6.11 (plat #218, WO-R3-217), read by WO-R3-229's cascade. One field, and it is a
+    # clock by the tool's own description: `measured_at` is the answering process's time,
+    # and every objective's window ends at it. Nothing else here is exempt — the counts,
+    # the rates and both flags ARE the reading a scenario grades, so a canned world's
+    # numbers stay guarded and its disagreement with an un-faulted stack is ledgered.
+    "get_slo_status": frozenset({"measured_at"}),
     # v0.6.9 (plat #211, WO-R3-201), made from the four recordings under
     # `evals/recorded_worlds/jobs_not_progressing_*`. Two clocks (`measured_at`,
     # `relay_last_tick_at`), the two ages derived from them, `last_publish_at` (the

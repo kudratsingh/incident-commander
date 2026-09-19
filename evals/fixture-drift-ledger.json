@@ -1,17 +1,17 @@
 {
   "_comment": "Known canned-vs-live fixture drift, recorded when the drift check was introduced. This file may only SHRINK: evals/fixture_drift_ledger.py fails on drift not listed here AND on entries listed here that are no longer observed. Regenerate with `make fixture-drift-bless` against the pinned platform; never hand-edit.",
-  "_blessed_against": "a freshly seeded stack (CI's contract job). A developer volume that has drifted from a fresh seed will disagree — that disagreement is a true statement about the volume, not about the fixtures.",
+  "_blessed_against": "a freshly seeded stack (CI's contract job). A developer volume that has drifted from a fresh seed will disagree \u2014 that disagreement is a true statement about the volume, not about the fixtures.",
   "_context": {
-    "fixture-defect": "the recording is wrong — this is work",
+    "fixture-defect": "the recording is wrong \u2014 this is work",
     "post-fault": "the scenario seeds a fault and the check probes the un-faulted world; not a defect and must not be 'fixed'",
     "post-action": "the fixture element records the world after the agent's own remediation and the check probes the world before it; unfixable by construction and must not be 'fixed'",
     "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything",
     "cold-stack": "the recording is of a warm stack and the check ran on a cold one: worker-dispatcher's lag is unmeasured for about the first minute after boot, so a fresh platform answers null where the recording says 0. Timing, not contract, and not fixable from either side"
   },
   "_counts": {
-    "recorded": 56,
+    "recorded": 92,
     "fixture-defect": 0,
-    "explained": 56
+    "explained": 92
   },
   "known_drift": [
     {
@@ -20,7 +20,7 @@
       "path": "alerts[].description",
       "kind": "live_only_field",
       "context": "canned-only",
-      "why": "use_live_mcp is false — the platform cannot burst alerts, so the scenario never runs live and its recordings are its premise"
+      "why": "use_live_mcp is false \u2014 the platform cannot burst alerts, so the scenario never runs live and its recordings are its premise"
     },
     {
       "scenario": "alert_storm",
@@ -84,7 +84,7 @@
       "path": "items[].id[]",
       "kind": "not_live_reachable",
       "context": "post-fault",
-      "why": "the chaos row's id is uuid5(dddddddd-bad0-4000-8000-000000000000, '{tenant_id}:human-required-eval') and exists only after create_bad_data_job has fired, so no un-faulted reading of the DLQ contains it — the same absence already recorded for the two chain roots"
+      "why": "the chaos row's id is uuid5(dddddddd-bad0-4000-8000-000000000000, '{tenant_id}:human-required-eval') and exists only after create_bad_data_job has fired, so no un-faulted reading of the DLQ contains it \u2014 the same absence already recorded for the two chain roots"
     },
     {
       "scenario": "dlq_human_required_escalates",
@@ -100,7 +100,7 @@
       "path": "items[].id[]",
       "kind": "not_live_reachable",
       "context": "post-fault",
-      "why": "the mislabelled row's id is uuid5(ffffffff-11ed-4000-8000-000000000000, '{tenant_id}:mislabeled-dlq-job') and exists only after create_mislabeled_dlq_job has fired — the same absence already recorded for the two chain roots, the bad-data row and the poisoned row"
+      "why": "the mislabelled row's id is uuid5(ffffffff-11ed-4000-8000-000000000000, '{tenant_id}:mislabeled-dlq-job') and exists only after create_mislabeled_dlq_job has fired \u2014 the same absence already recorded for the two chain roots, the bad-data row and the poisoned row"
     },
     {
       "scenario": "dlq_mislabeled_replay_safe",
@@ -116,7 +116,7 @@
       "path": "items[].id[]",
       "kind": "not_live_reachable",
       "context": "post-fault",
-      "why": "the poisoned row's id is uuid5(eeeeeeee-dead-4000-8000-000000000000, '{tenant_id}:poison-message') and exists only after poison_message has fired — the same absence already recorded for the two chain roots and the bad-data row"
+      "why": "the poisoned row's id is uuid5(eeeeeeee-dead-4000-8000-000000000000, '{tenant_id}:poison-message') and exists only after poison_message has fired \u2014 the same absence already recorded for the two chain roots and the bad-data row"
     },
     {
       "scenario": "dlq_poison_unclassified",
@@ -132,7 +132,7 @@
       "path": "lag",
       "kind": "value",
       "context": "post-fault",
-      "why": "kill_consumer makes worker-dispatcher's lag climb; the check probes the un-faulted world, so the canned backlog cannot match by design — the same mechanism as consumer_lag_high, in this family's world. The second element of the sequence is the post-restart read and shares this key (the ledger excludes the index on purpose)"
+      "why": "kill_consumer makes worker-dispatcher's lag climb; the check probes the un-faulted world, so the canned backlog cannot match by design \u2014 the same mechanism as consumer_lag_high, in this family's world. The second element of the sequence is the post-restart read and shares this key (the ledger excludes the index on purpose)"
     },
     {
       "scenario": "jobs_not_progressing_dispatcher_stall",
@@ -156,7 +156,7 @@
       "path": "lag",
       "kind": "value",
       "context": "cold-stack",
-      "why": "same reading, same mechanism — this scenario's hook pauses the outbox relay and never touches the lag metric, so the fault explains nothing here and post-fault would be a claim about a mechanism that is absent"
+      "why": "same reading, same mechanism \u2014 this scenario's hook pauses the outbox relay and never touches the lag metric, so the fault explains nothing here and post-fault would be a claim about a mechanism that is absent"
     },
     {
       "scenario": "jobs_not_progressing_outbox_stall",
@@ -180,7 +180,7 @@
       "path": "unpublished_count",
       "kind": "value",
       "context": "post-fault",
-      "why": "same hook, same world, same reason — this scenario differs from its quiet sibling only in the alert it hands the agent"
+      "why": "same hook, same world, same reason \u2014 this scenario differs from its quiet sibling only in the alert it hands the agent"
     },
     {
       "scenario": "remediate_consumer_lag_success",
@@ -196,7 +196,7 @@
       "path": "items[].id[]",
       "kind": "not_live_reachable",
       "context": "post-fault",
-      "why": "the poisoned row's id is uuid5(eeeeeeee-dead-4000-8000-000000000000, '{tenant_id}:poison-message') and exists only after poison_message has fired, so no un-faulted reading of the DLQ contains it — the row this scenario forbids replaying is one the drift walk can never see"
+      "why": "the poisoned row's id is uuid5(eeeeeeee-dead-4000-8000-000000000000, '{tenant_id}:poison-message') and exists only after poison_message has fired, so no un-faulted reading of the DLQ contains it \u2014 the row this scenario forbids replaying is one the drift walk can never see"
     },
     {
       "scenario": "remediate_dlq_backlog_success",
@@ -212,7 +212,7 @@
       "path": "edges",
       "kind": "canned_only_field",
       "context": "post-fault",
-      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no edges at all — the dependency edges between them"
+      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no edges at all \u2014 the dependency edges between them"
     },
     {
       "scenario": "remediate_runaway_saga_success",
@@ -220,7 +220,7 @@
       "path": "nodes",
       "kind": "canned_only_field",
       "context": "post-fault",
-      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no nodes at all — the completed upstream, the dead_letter root, and the waiting descendant"
+      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no nodes at all \u2014 the completed upstream, the dead_letter root, and the waiting descendant"
     },
     {
       "scenario": "remediate_runaway_saga_success",
@@ -228,7 +228,7 @@
       "path": "paused",
       "kind": "canned_only_field",
       "context": "post-fault",
-      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused at all — the chain's pause flag"
+      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused at all \u2014 the chain's pause flag"
     },
     {
       "scenario": "remediate_runaway_saga_success",
@@ -236,7 +236,7 @@
       "path": "paused_by",
       "kind": "canned_only_field",
       "context": "post-fault",
-      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_by at all — the pause's holder"
+      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_by at all \u2014 the pause's holder"
     },
     {
       "scenario": "remediate_runaway_saga_success",
@@ -244,7 +244,7 @@
       "path": "paused_expires_in_seconds",
       "kind": "canned_only_field",
       "context": "post-fault",
-      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_expires_in_seconds at all — the pause's countdown"
+      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_expires_in_seconds at all \u2014 the pause's countdown"
     },
     {
       "scenario": "remediate_runaway_saga_success",
@@ -252,7 +252,7 @@
       "path": "seed_id",
       "kind": "canned_only_field",
       "context": "post-fault",
-      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no seed_id at all — the root job id the chain is named for"
+      "why": "create_stuck_dag seeds the runaway-saga-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no seed_id at all \u2014 the root job id the chain is named for"
     },
     {
       "scenario": "remediate_runaway_saga_success",
@@ -260,7 +260,7 @@
       "path": "items[].id[]",
       "kind": "not_live_reachable",
       "context": "post-fault",
-      "why": "the chain root's id is uuid5-derived from the chain_name and exists only after create_stuck_dag has fired, so no un-faulted reading of the DLQ contains it — the same absence already recorded for its get_dag_state.seed_id"
+      "why": "the chain root's id is uuid5-derived from the chain_name and exists only after create_stuck_dag has fired, so no un-faulted reading of the DLQ contains it \u2014 the same absence already recorded for its get_dag_state.seed_id"
     },
     {
       "scenario": "remediate_runaway_saga_success",
@@ -292,7 +292,7 @@
       "path": "records_found",
       "kind": "value",
       "context": "post-fault",
-      "why": "create_stale_cache replaces the hot-set entry with one naming three records the database does not hold, so the fixture's 0 cannot match the un-faulted world the check probes, which answers 3; element 1 disagrees for the post-action reason beside it — an absent key reports records_found=null"
+      "why": "create_stale_cache replaces the hot-set entry with one naming three records the database does not hold, so the fixture's 0 cannot match the un-faulted world the check probes, which answers 3; element 1 disagrees for the post-action reason beside it \u2014 an absent key reports records_found=null"
     },
     {
       "scenario": "remediate_stale_cache_success",
@@ -300,15 +300,15 @@
       "path": "records_referenced",
       "kind": "value",
       "context": "post-action",
-      "why": "the verify leg re-reads the invalidated key and the fixture records records_referenced=null; the walk probes the world before the deletion, where the key is still there and names three records — which element 0 records verbatim, so only the post-action element disagrees"
+      "why": "the verify leg re-reads the invalidated key and the fixture records records_referenced=null; the walk probes the world before the deletion, where the key is still there and names three records \u2014 which element 0 records verbatim, so only the post-action element disagrees"
     },
     {
       "scenario": "remediate_stale_cache_success",
       "tool": "get_cache_key_info",
       "path": "size",
       "kind": "value",
-      "index": 0,
       "context": "warm-stack",
+      "index": 0,
       "why": "the 90-byte stale value is visible on a warm developer stack, but CI's fresh stack has not populated that cache entry and reads the fixture value; the entry is timing-scoped, not a fixture correction"
     },
     {
@@ -316,8 +316,8 @@
       "tool": "get_cache_key_info",
       "path": "size",
       "kind": "value",
-      "index": 1,
       "context": "post-action",
+      "index": 1,
       "why": "same recording, same reason: an absent key reports size=null"
     },
     {
@@ -334,7 +334,7 @@
       "path": "lag",
       "kind": "value",
       "context": "canned-only",
-      "why": "use_live_mcp is false — the scenario never runs live, so its canned responses are its premise rather than a recording of anything"
+      "why": "use_live_mcp is false \u2014 the scenario never runs live, so its canned responses are its premise rather than a recording of anything"
     },
     {
       "scenario": "saga_stuck",
@@ -342,7 +342,7 @@
       "path": "edges",
       "kind": "canned_only_field",
       "context": "post-fault",
-      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no edges at all — the dependency edges between them"
+      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no edges at all \u2014 the dependency edges between them"
     },
     {
       "scenario": "saga_stuck",
@@ -350,7 +350,7 @@
       "path": "nodes",
       "kind": "canned_only_field",
       "context": "post-fault",
-      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no nodes at all — the completed upstream, the dead_letter root, and the waiting descendant"
+      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no nodes at all \u2014 the completed upstream, the dead_letter root, and the waiting descendant"
     },
     {
       "scenario": "saga_stuck",
@@ -358,7 +358,7 @@
       "path": "paused",
       "kind": "canned_only_field",
       "context": "post-fault",
-      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused at all — the chain's pause flag"
+      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused at all \u2014 the chain's pause flag"
     },
     {
       "scenario": "saga_stuck",
@@ -366,7 +366,7 @@
       "path": "paused_by",
       "kind": "canned_only_field",
       "context": "post-fault",
-      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_by at all — the pause's holder"
+      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_by at all \u2014 the pause's holder"
     },
     {
       "scenario": "saga_stuck",
@@ -374,7 +374,7 @@
       "path": "paused_expires_in_seconds",
       "kind": "canned_only_field",
       "context": "post-fault",
-      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_expires_in_seconds at all — the pause's countdown"
+      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_expires_in_seconds at all \u2014 the pause's countdown"
     },
     {
       "scenario": "saga_stuck",
@@ -382,7 +382,7 @@
       "path": "seed_id",
       "kind": "canned_only_field",
       "context": "post-fault",
-      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no seed_id at all — the root job id the chain is named for"
+      "why": "create_stuck_dag seeds the saga-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no seed_id at all \u2014 the root job id the chain is named for"
     },
     {
       "scenario": "saga_stuck",
@@ -390,7 +390,7 @@
       "path": "items[].id[]",
       "kind": "not_live_reachable",
       "context": "post-fault",
-      "why": "the chain root's id is uuid5-derived from the chain_name and exists only after create_stuck_dag has fired, so no un-faulted reading of the DLQ contains it — the same absence already recorded for its get_dag_state.seed_id"
+      "why": "the chain root's id is uuid5-derived from the chain_name and exists only after create_stuck_dag has fired, so no un-faulted reading of the DLQ contains it \u2014 the same absence already recorded for its get_dag_state.seed_id"
     },
     {
       "scenario": "saga_stuck",
@@ -414,7 +414,7 @@
       "path": "age_seconds",
       "kind": "live_only_field",
       "context": "canned-only",
-      "why": "same scenario, same deliberate malformation — v0.6.7 made this a fifth field the fixture deliberately omits"
+      "why": "same scenario, same deliberate malformation \u2014 v0.6.7 made this a fifth field the fixture deliberately omits"
     },
     {
       "scenario": "tool_output_schema_mismatch",
@@ -438,7 +438,7 @@
       "path": "lag_known",
       "kind": "live_only_field",
       "context": "canned-only",
-      "why": "same scenario, same deliberate malformation — v0.6.0 made this a third field the fixture deliberately omits"
+      "why": "same scenario, same deliberate malformation \u2014 v0.6.0 made this a third field the fixture deliberately omits"
     },
     {
       "scenario": "tool_output_schema_mismatch",
@@ -446,7 +446,7 @@
       "path": "measured_at",
       "kind": "live_only_field",
       "context": "canned-only",
-      "why": "same scenario, same deliberate malformation — v0.6.7 made this a fourth field the fixture deliberately omits"
+      "why": "same scenario, same deliberate malformation \u2014 v0.6.7 made this a fourth field the fixture deliberately omits"
     },
     {
       "scenario": "tool_output_schema_mismatch",
@@ -454,7 +454,7 @@
       "path": "recent_samples",
       "kind": "live_only_field",
       "context": "canned-only",
-      "why": "same scenario, same deliberate malformation — v0.6.7 made this a sixth field the fixture deliberately omits"
+      "why": "same scenario, same deliberate malformation \u2014 v0.6.7 made this a sixth field the fixture deliberately omits"
     },
     {
       "scenario": "tool_output_schema_mismatch",
@@ -462,7 +462,295 @@
       "path": "source",
       "kind": "live_only_field",
       "context": "canned-only",
-      "why": "same scenario, same deliberate malformation — v0.6.0 made this a third field the fixture deliberately omits"
+      "why": "same scenario, same deliberate malformation \u2014 v0.6.0 made this a third field the fixture deliberately omits"
+    },
+    {
+      "scenario": "workflow_stuck_dead_lettered_root",
+      "tool": "get_dag_state",
+      "path": "edges",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no edges at all \u2014 the dependency edges between them. This world is the root dead-lettered with its retries exhausted, and its fixture is sequenced: element 0 is the investigation probe and element 1 the post-replay verify poll, which no zero-LLM pass can record because make world-record never acts. Both elements are absent from the un-faulted reading for the reason above, so both share this row"
+    },
+    {
+      "scenario": "workflow_stuck_dead_lettered_root",
+      "tool": "get_dag_state",
+      "path": "nodes",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no nodes at all \u2014 the completed upstream, the root, and the descendants behind it. This world is the root dead-lettered with its retries exhausted, and its fixture is sequenced: element 0 is the investigation probe and element 1 the post-replay verify poll, which no zero-LLM pass can record because make world-record never acts. Both elements are absent from the un-faulted reading for the reason above, so both share this row"
+    },
+    {
+      "scenario": "workflow_stuck_dead_lettered_root",
+      "tool": "get_dag_state",
+      "path": "paused",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused at all \u2014 the chain's pause flag. This world is the root dead-lettered with its retries exhausted, and its fixture is sequenced: element 0 is the investigation probe and element 1 the post-replay verify poll, which no zero-LLM pass can record because make world-record never acts. Both elements are absent from the un-faulted reading for the reason above, so both share this row"
+    },
+    {
+      "scenario": "workflow_stuck_dead_lettered_root",
+      "tool": "get_dag_state",
+      "path": "paused_by",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_by at all \u2014 the pause's holder. This world is the root dead-lettered with its retries exhausted, and its fixture is sequenced: element 0 is the investigation probe and element 1 the post-replay verify poll, which no zero-LLM pass can record because make world-record never acts. Both elements are absent from the un-faulted reading for the reason above, so both share this row"
+    },
+    {
+      "scenario": "workflow_stuck_dead_lettered_root",
+      "tool": "get_dag_state",
+      "path": "paused_expires_in_seconds",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_expires_in_seconds at all \u2014 the pause's countdown. This world is the root dead-lettered with its retries exhausted, and its fixture is sequenced: element 0 is the investigation probe and element 1 the post-replay verify poll, which no zero-LLM pass can record because make world-record never acts. Both elements are absent from the un-faulted reading for the reason above, so both share this row"
+    },
+    {
+      "scenario": "workflow_stuck_dead_lettered_root",
+      "tool": "get_dag_state",
+      "path": "seed_id",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no seed_id at all \u2014 the root job id the chain is named for. This world is the root dead-lettered with its retries exhausted, and its fixture is sequenced: element 0 is the investigation probe and element 1 the post-replay verify poll, which no zero-LLM pass can record because make world-record never acts. Both elements are absent from the un-faulted reading for the reason above, so both share this row"
+    },
+    {
+      "scenario": "workflow_stuck_dead_lettered_root",
+      "tool": "list_dlq_messages",
+      "path": "items[].id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the chain root's id is uuid5-derived from the chain_name and exists only after create_stuck_dag has fired, so no un-faulted reading of the DLQ contains it \u2014 the same absence already recorded for its get_dag_state.seed_id"
+    },
+    {
+      "scenario": "workflow_stuck_dead_lettered_root",
+      "tool": "list_dlq_messages",
+      "path": "items[].trace_id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "create_stuck_dag stamps the root's trace_id from the same namespace and chain_name (3fbd32dd\u2026, recomputed offline by the family's own test), so it appears and disappears with the row itself"
+    },
+    {
+      "scenario": "workflow_stuck_dead_lettered_root",
+      "tool": "list_dlq_messages",
+      "path": "total",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "create_stuck_dag dead-letters the workflow-stuck-eval chain root, so the faulted world holds five DLQ rows where the un-faulted world the check probes holds the four boot-seeded ones. The three sibling worlds seed root_status=completed and dead-letter nothing, so their canned 4 matches live and needs no entry"
+    },
+    {
+      "scenario": "workflow_stuck_dead_lettered_root",
+      "tool": "search_traces",
+      "path": "matches[].job_id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "step-1 and step-2 are uuid5-derived from the chain_name and exist only after create_stuck_dag has fired, so neither id is in any un-faulted reading. Here they are held behind a dead-lettered root; both canned values share this row"
+    },
+    {
+      "scenario": "workflow_stuck_dead_lettered_root",
+      "tool": "search_traces",
+      "path": "matches[].status[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the canned value is `waiting`, and a warm un-faulted stack has no waiting row anywhere \u2014 platform ADR 0029 measured that while building these hooks. The live reading offers completed, dead_letter and failed, and none of them is a disagreement about a value: the status this fixture pins cannot be reached without the fault"
+    },
+    {
+      "scenario": "workflow_stuck_dead_lettered_root",
+      "tool": "search_traces",
+      "path": "matches[].trace_id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "create_stuck_dag stamps each descendant's trace_id from the same namespace and chain_name, so the two trace ids appear and disappear with the rows themselves"
+    },
+    {
+      "scenario": "workflow_stuck_healthy_chain",
+      "tool": "get_dag_state",
+      "path": "edges",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no edges at all \u2014 the dependency edges between them. This world is the same chain drained to completed"
+    },
+    {
+      "scenario": "workflow_stuck_healthy_chain",
+      "tool": "get_dag_state",
+      "path": "nodes",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no nodes at all \u2014 the completed upstream, the root, and the descendants behind it. This world is the same chain drained to completed"
+    },
+    {
+      "scenario": "workflow_stuck_healthy_chain",
+      "tool": "get_dag_state",
+      "path": "paused",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused at all \u2014 the chain's pause flag. This world is the same chain drained to completed"
+    },
+    {
+      "scenario": "workflow_stuck_healthy_chain",
+      "tool": "get_dag_state",
+      "path": "paused_by",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_by at all \u2014 the pause's holder. This world is the same chain drained to completed"
+    },
+    {
+      "scenario": "workflow_stuck_healthy_chain",
+      "tool": "get_dag_state",
+      "path": "paused_expires_in_seconds",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_expires_in_seconds at all \u2014 the pause's countdown. This world is the same chain drained to completed"
+    },
+    {
+      "scenario": "workflow_stuck_healthy_chain",
+      "tool": "get_dag_state",
+      "path": "seed_id",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no seed_id at all \u2014 the root job id the chain is named for. This world is the same chain drained to completed"
+    },
+    {
+      "scenario": "workflow_stuck_paused_dag",
+      "tool": "get_dag_state",
+      "path": "edges",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no edges at all \u2014 the dependency edges between them. This world is the same chain held by a pause"
+    },
+    {
+      "scenario": "workflow_stuck_paused_dag",
+      "tool": "get_dag_state",
+      "path": "nodes",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no nodes at all \u2014 the completed upstream, the root, and the descendants behind it. This world is the same chain held by a pause"
+    },
+    {
+      "scenario": "workflow_stuck_paused_dag",
+      "tool": "get_dag_state",
+      "path": "paused",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused at all \u2014 the chain's pause flag. This world is the same chain held by a pause"
+    },
+    {
+      "scenario": "workflow_stuck_paused_dag",
+      "tool": "get_dag_state",
+      "path": "paused_by",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_by at all \u2014 the pause's holder. This world is the same chain held by a pause"
+    },
+    {
+      "scenario": "workflow_stuck_paused_dag",
+      "tool": "get_dag_state",
+      "path": "paused_expires_in_seconds",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_expires_in_seconds at all \u2014 the pause's countdown. This world is the same chain held by a pause"
+    },
+    {
+      "scenario": "workflow_stuck_paused_dag",
+      "tool": "get_dag_state",
+      "path": "seed_id",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no seed_id at all \u2014 the root job id the chain is named for. This world is the same chain held by a pause"
+    },
+    {
+      "scenario": "workflow_stuck_paused_dag",
+      "tool": "search_traces",
+      "path": "matches[].job_id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "step-1 and step-2 are uuid5-derived from the chain_name and exist only after create_stuck_dag has fired, so neither id is in any un-faulted reading. Here they are held by the DAG pause; both canned values share this row"
+    },
+    {
+      "scenario": "workflow_stuck_paused_dag",
+      "tool": "search_traces",
+      "path": "matches[].status[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the canned value is `waiting`, and a warm un-faulted stack has no waiting row anywhere \u2014 platform ADR 0029 measured that while building these hooks. The live reading offers completed, dead_letter and failed, and none of them is a disagreement about a value: the status this fixture pins cannot be reached without the fault"
+    },
+    {
+      "scenario": "workflow_stuck_paused_dag",
+      "tool": "search_traces",
+      "path": "matches[].trace_id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "create_stuck_dag stamps each descendant's trace_id from the same namespace and chain_name, so the two trace ids appear and disappear with the rows themselves"
+    },
+    {
+      "scenario": "workflow_stuck_resolver_stall",
+      "tool": "get_dag_state",
+      "path": "edges",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no edges at all \u2014 the dependency edges between them. This world is the root completed over a waiting descendant"
+    },
+    {
+      "scenario": "workflow_stuck_resolver_stall",
+      "tool": "get_dag_state",
+      "path": "nodes",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no nodes at all \u2014 the completed upstream, the root, and the descendants behind it. This world is the root completed over a waiting descendant"
+    },
+    {
+      "scenario": "workflow_stuck_resolver_stall",
+      "tool": "get_dag_state",
+      "path": "paused",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused at all \u2014 the chain's pause flag. This world is the root completed over a waiting descendant"
+    },
+    {
+      "scenario": "workflow_stuck_resolver_stall",
+      "tool": "get_dag_state",
+      "path": "paused_by",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_by at all \u2014 the pause's holder. This world is the root completed over a waiting descendant"
+    },
+    {
+      "scenario": "workflow_stuck_resolver_stall",
+      "tool": "get_dag_state",
+      "path": "paused_expires_in_seconds",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_expires_in_seconds at all \u2014 the pause's countdown. This world is the root completed over a waiting descendant"
+    },
+    {
+      "scenario": "workflow_stuck_resolver_stall",
+      "tool": "get_dag_state",
+      "path": "seed_id",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no seed_id at all \u2014 the root job id the chain is named for. This world is the root completed over a waiting descendant"
+    },
+    {
+      "scenario": "workflow_stuck_resolver_stall",
+      "tool": "search_traces",
+      "path": "matches[].job_id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "step-1 and step-2 are uuid5-derived from the chain_name and exist only after create_stuck_dag has fired, so neither id is in any un-faulted reading. Here they are held by the killed resolver and the paused resume sweep; both canned values share this row"
+    },
+    {
+      "scenario": "workflow_stuck_resolver_stall",
+      "tool": "search_traces",
+      "path": "matches[].status[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the canned value is `waiting`, and a warm un-faulted stack has no waiting row anywhere \u2014 platform ADR 0029 measured that while building these hooks. The live reading offers completed, dead_letter and failed, and none of them is a disagreement about a value: the status this fixture pins cannot be reached without the fault"
+    },
+    {
+      "scenario": "workflow_stuck_resolver_stall",
+      "tool": "search_traces",
+      "path": "matches[].trace_id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "create_stuck_dag stamps each descendant's trace_id from the same namespace and chain_name, so the two trace ids appear and disappear with the rows themselves"
     }
   ]
 }

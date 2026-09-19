@@ -37,7 +37,7 @@ from typing import Any, Final
 
 import pytest
 
-from evals import artifacts, export
+from evals import artifacts, export, reward
 from evals.graders.deterministic import ScenarioExpectation
 from evals.scenarios.schema import (
     BenchmarkSplit,
@@ -265,6 +265,7 @@ def _build(traces: list[Path], corpus: tuple[Scenario, ...], **kwargs: Any) -> e
         corpus=corpus,
         timestamp=kwargs.pop("timestamp", _WHEN),
         invocation_id=kwargs.pop("invocation_id", _INVOCATION),
+        **kwargs,
     )
 
 
@@ -351,12 +352,71 @@ class TestTheManifestRecordsWhatWasExported:
         assert set(built.manifest.absent_fields) == {
             "execution_mode",
             "recorded_world_id",
-            "reward_components",
             "root_cause_grade",
         }
         assert all(len(reason) > 40 for reason in built.manifest.absent_fields.values())
-        line = json.loads(built.trajectories_jsonl.splitlines()[0])
-        assert "reward_components" not in set(_keys(line))
+
+    def test_reward_components_are_no_longer_absent(self, traces: list[Path]) -> None:
+        """WP-15.2 filled the gap WP-15.1 left: the reward is defined once, in one module."""
+        built = _build(traces, _corpus(_scenario("lag_dev", truth=_TRUTH)))
+        assert "reward_components" not in built.manifest.absent_fields
+        assert built.manifest.reward["module"] == "evals/reward.py"
+        assert built.manifest.reward["spec"] == "docs/reward-spec.md"
+        assert built.trajectories[0].reward is not None
+
+    def test_without_an_audit_window_every_reward_is_withheld_with_its_reason(
+        self, traces: list[Path]
+    ) -> None:
+        """Invariant 6: no audit log, no action credit — and the manifest says so once."""
+        built = _build(traces, _corpus(_scenario("lag_dev", truth=_TRUTH)))
+        assert built.manifest.reward["graded"] == 0
+        assert built.manifest.reward["withheld"] == built.manifest.trajectory_count
+        assert built.manifest.reward["withheld_reasons"] == [reward.WITHHELD_NO_AUDIT]
+        training = built.trajectories[0].reward
+        assert training is not None and training.total is None and not training.graded
+
+    def test_an_audit_window_scores_the_line(self, traces: list[Path]) -> None:
+        """The reward comes from `evals/reward.py`; the export never recomputes it."""
+        built = _build(
+            traces,
+            _corpus(_scenario("lag_dev", truth=_TRUTH)),
+            audit_windows={
+                "lag_dev:inv000000001": reward.AuditWindow(
+                    calls=(
+                        reward.AuditedCall(
+                            tool_name="restart_consumer_group",
+                            outcome="success",
+                            at=_WHEN,
+                        ),
+                    )
+                )
+            },
+        )
+        training = built.trajectories[0].reward
+        assert training is not None
+        assert training.graded
+        assert training.components["action"] == 1.0
+        assert set(training.components) == {
+            "root_cause",
+            "action",
+            "budget",
+            "process",
+            "judge",
+        }
+        assert sum(training.weights.values()) == pytest.approx(1.0)
+        assert built.manifest.reward["graded"] == 1
+        # The SECOND attempt got no window, so it is withheld — both reasons are named.
+        assert built.manifest.reward["withheld"] == 1
+
+    def test_the_reward_s_reasons_are_in_the_labels_file_only(self, traces: list[Path]) -> None:
+        """A withheld reason is a statement about the SCENARIO, so it travels with labels."""
+        built = _build(traces, _corpus(_scenario("lag_dev", truth=_TRUTH)))
+        detail = built.labels[0].reward_detail
+        assert detail is not None
+        assert detail.withheld_reason == reward.WITHHELD_NO_AUDIT
+        assert reward.WITHHELD_NO_AUDIT not in built.trajectories_jsonl
+        first = json.loads(built.trajectories_jsonl.splitlines()[0])
+        assert "escalation_because" not in set(_keys(first))
 
     def test_it_names_the_two_files_it_describes(self, traces: list[Path], tmp_path: Path) -> None:
         built = _build(traces, _corpus(_scenario("lag_dev", truth=_TRUTH)))
@@ -525,6 +585,7 @@ class TestNoModelProseAndNoChainOfThought:
             "candidates",
             "category",
             "complete",
+            "components",
             "confidence",
             "content_bytes",
             "content_sha256",
@@ -540,6 +601,7 @@ class TestNoModelProseAndNoChainOfThought:
             "difficulty",
             "generation_call_id",
             "generation_rejections",
+            "graded",
             "input_tokens",
             "invocation_id",
             "invocation_started_at",
@@ -565,7 +627,9 @@ class TestNoModelProseAndNoChainOfThought:
             "ranking_before",
             "record_kind",
             "result",
+            "reward",
             "role",
+            "safety_violated",
             "scenario",
             "schema_version",
             "scores",
@@ -573,16 +637,19 @@ class TestNoModelProseAndNoChainOfThought:
             "selected_candidate_id",
             "selector",
             "sequence",
+            "spec_version",
             "step_id",
             "strategy",
             "template_id",
             "tokens_used",
             "tool_calls_used",
             "tool_name",
+            "total",
             "trace_file",
             "trajectory_id",
             "uncertainty",
             "usd_used",
+            "weights",
         }
 
     def test_a_decision_still_says_what_was_decided(self, traces: list[Path]) -> None:

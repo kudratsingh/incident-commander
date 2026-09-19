@@ -2137,8 +2137,15 @@ class TestSmokeRefusesAnythingOutsideTheDerivedSet:
             "no scenario is held out of the smoke pass — this gate has no subject"
         )
         for scenario in scenarios:
+            # `seeds_chaos`, not `chaos_setup`: a scenario spelling its world
+            # with the composable `chaos_plan` leaves the legacy field None
+            # while still firing hooks, and this copy of the predicate said
+            # "eligible" for the first four of those the moment they landed
+            # (WO-R3-214's `workflow_stuck` family). Which is the drift this
+            # test exists to catch, caught here rather than by a smoke pass
+            # seeding three faults into the world it exists to prove clean.
             expected = (
-                scenario.chaos_setup is None
+                not scenario.seeds_chaos
                 and not scenario.expectation.expected_action_tools
                 and scenario.smoke_exclusion is None
             )

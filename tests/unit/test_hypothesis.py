@@ -55,6 +55,16 @@ _WO_R3_263_ADDITION: dict[str, str] = {
     "RESOURCE_EXHAUSTION": "resource_exhaustion",
 }
 
+#: WO-R3-214's addition (WP-7.2, ADR 0053), its own table for the same reason
+#: the one above is: a label's provenance is what a reader of a committed
+#: archive wants. Same shape of discovery, too — the ``workflow_stuck`` family
+#: built a world whose cause the enum could not name. A chain that is held by a
+#: DAG pause is not broken, so ``runaway_saga``, ``resolver_stall`` and
+#: ``unknown`` are each wrong in a way that misdirects a human.
+_WO_R3_214_ADDITION: dict[str, str] = {
+    "DAG_PAUSED": "dag_paused",
+}
+
 
 class TestHypothesisCategory:
     def test_enum_values_are_stable(self) -> None:
@@ -65,6 +75,7 @@ class TestHypothesisCategory:
             **_ORIGINAL_EIGHT,
             **_WP_1_6_ADDITIONS,
             **_WO_R3_263_ADDITION,
+            **_WO_R3_214_ADDITION,
         }
 
     @pytest.mark.parametrize(("name", "value"), sorted(_ORIGINAL_EIGHT.items()))

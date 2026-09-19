@@ -12,7 +12,7 @@ Two guards, and the second is the one that matters:
    or that it deliberately has none. A YAML whose label is edited without the
    record moving fails here, and so does a record entry naming a scenario
    that has left the corpus. This is a hand-maintained list on purpose: the
-   labels are a reviewed judgement about 45 worlds, and a test that derived
+   labels are a reviewed judgement about 49 worlds, and a test that derived
    them from the YAMLs would assert that the files equal themselves.
 
 2. **The abstention rule.** "No label" is only admissible for a scenario that
@@ -105,6 +105,16 @@ _DECIDED: Final[Mapping[str, tuple[Category, ...] | None]] = {
     # and `unknown` ("the probes left me unable to tell") was never true of a
     # trace that names the cause in its own error text.
     "trace_investigation": (Category.RESOURCE_EXHAUSTION,),
+    # WO-R3-214 (WP-7.2, ADR 0053). Family C: one chain under four faults, so
+    # four labels read off four worlds and never off a canned planner. The pair
+    # worth reading twice is `resolver_stall` and `dag_paused` — the same chain,
+    # one boolean apart in `get_dag_state`, and these two labels are the ONLY
+    # thing that separates them, because both worlds escalate with no action.
+    # `dag_paused` is the label WP-7.2 had to add: the chain is held, not broken.
+    "workflow_stuck_dead_lettered_root": (Category.RUNAWAY_SAGA,),
+    "workflow_stuck_healthy_chain": (Category.NO_FAULT,),
+    "workflow_stuck_paused_dag": (Category.DAG_PAUSED,),
+    "workflow_stuck_resolver_stall": (Category.RESOLVER_STALL,),
 }
 
 #: Families whose scenarios measure the harness rather than a world. Neither
@@ -210,10 +220,11 @@ class TestEveryScenarioCarriesADecision:
         """The number in the PR body, checked against the corpus that produced it."""
         corpus = _corpus()
         graded = [s for s in corpus if s.root_cause_graded]
-        assert (len(graded), len(corpus)) == (36, 45), (
+        assert (len(graded), len(corpus)) == (40, 49), (
             f"{len(graded)} of {len(corpus)} scenarios are root-cause graded; "
-            "WO-R3-261 landed 32 of 41 and WO-R3-202 took it to 36 of 45 — all "
-            "four `jobs_not_progressing` worlds carry a label, because ADR 0038 "
+            "WO-R3-261 landed 32 of 41, WO-R3-202 took it to 36 of 45 and "
+            "WO-R3-214 to 40 of 49 — all four `jobs_not_progressing` worlds and "
+            "all four `workflow_stuck` worlds carry a label, because ADR 0038 "
             "makes one mandatory for a new scenario. Update this number and the "
             "run summary's coverage line together."
         )

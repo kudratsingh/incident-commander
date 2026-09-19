@@ -768,9 +768,14 @@ class TestShippedScenariosRoundTripToPlans:
     """Every shipped YAML normalizes to the plan the runner will execute.
 
     The migration claim, stated over the whole corpus rather than over a
-    sample: no YAML changed, and no scenario's seeding changed either — the
-    plan derived from each one fires exactly the hook the legacy field named,
-    with exactly its arguments.
+    sample. It was written when every scenario spelled its one fault with the
+    legacy ``chaos_setup`` field, and WO-R3-214 (WP-7.2) is the packet that
+    ended that: the `workflow_stuck` family's worlds need up to three ordered
+    hooks and a settle wait, so they declare ``chaos_plan``. The claim being
+    checked did not change — one spelling per scenario, and whichever one it
+    uses is what the runner fires — so the two tests whose PREMISE was "nobody
+    uses the new form yet" are rewritten to assert the rule instead of the
+    premise.
     """
 
     def test_every_scenario_normalizes_without_loss(self) -> None:
@@ -778,6 +783,14 @@ class TestShippedScenariosRoundTripToPlans:
         assert len(scenarios) >= 40
         for scenario in scenarios:
             plan = scenario.chaos
+            if scenario.chaos_plan is not None:
+                # The composable form is authoritative for itself: `chaos`
+                # returns it unchanged, and the legacy field is absent (the
+                # model validator refuses both).
+                assert plan == scenario.chaos_plan, scenario.name
+                assert scenario.chaos_setup is None, scenario.name
+                assert scenario.seeds_chaos is bool(plan.setup), scenario.name
+                continue
             if scenario.chaos_setup is None:
                 assert plan == ChaosPlan(), scenario.name
                 assert scenario.seeds_chaos is False, scenario.name
@@ -788,17 +801,79 @@ class TestShippedScenariosRoundTripToPlans:
             assert scenario.seeds_chaos is True, scenario.name
 
     def test_no_shipped_scenario_declares_a_plan_yet(self) -> None:
-        # The migration is additive and nothing has moved: this is the
-        # statement that the round-trip above covers the WHOLE corpus rather
-        # than the legacy half of a half-migrated one.
-        assert [s.name for s in load_scenarios(_SCENARIOS_DIR) if s.chaos_plan is not None] == []
+        """REWRITTEN by WO-R3-214: the corpus now uses both spellings.
+
+        The premise ("nothing declares a ``chaos_plan``") was true for the
+        packet that added the field and is false by design now — the
+        `workflow_stuck` family is the first world set that needs more than one
+        ordered hook. What the test was FOR survives: the round-trip above must
+        cover the whole corpus rather than the legacy half of a half-migrated
+        one, and no scenario may spell its fault twice.
+
+        So it asserts three things it could not assert before:
+
+        * every scenario declares AT MOST one of the two forms — the model
+          validator refuses both, and this is the corpus-wide statement of it,
+          because two spellings would compose into a third world nobody wrote;
+        * the composable form is in use, and by whom. Named rather than
+          counted, so the day a fifth scenario adopts it somebody reads this
+          test and decides whether the legacy field should be retired;
+        * every hook in every declared plan validates against the snapshot,
+          which is what stops a plan-only scenario from skipping the closed-set
+          check the legacy field used to be the only carrier of.
+        """
+        scenarios = load_scenarios(_SCENARIOS_DIR)
+        both = [s.name for s in scenarios if s.chaos_plan is not None and s.chaos_setup is not None]
+        assert both == [], (
+            f"{both} declare both `chaos_setup` and `chaos_plan`. One world, one spelling: two "
+            "would silently compose into a third."
+        )
+        planned = sorted(s.name for s in scenarios if s.chaos_plan is not None)
+        assert planned == [
+            "workflow_stuck_dead_lettered_root",
+            "workflow_stuck_healthy_chain",
+            "workflow_stuck_paused_dag",
+            "workflow_stuck_resolver_stall",
+        ], (
+            f"the scenarios using the composable form are {planned}. Update this list when a "
+            "scenario adopts it, and say in the PR why the world needs more than one hook."
+        )
+        for scenario in scenarios:
+            if scenario.chaos_plan is None:
+                continue
+            for hook in scenario.chaos_plan.setup + scenario.chaos_plan.teardown:
+                # Re-validating through `ChaosHook` is the closed-name and
+                # snapshot-argument check; a plan that reached here having
+                # skipped it would be a scenario YAML able to call any tool the
+                # chaos principal can reach (S-03).
+                assert ChaosHook(name=hook.name, arguments=dict(hook.arguments)) == hook, (
+                    f"{scenario.name}: plan hook {hook.name!r} does not re-validate against "
+                    "contracts/platform-tools.snapshot.json"
+                )
 
     def test_seeds_chaos_agrees_with_the_legacy_field_everywhere(self) -> None:
-        # The gates moved from `chaos_setup is not None` to `seeds_chaos`.
-        # Over today's corpus the two must be the same predicate, or the
-        # smoke derivation and the ADR 0020 selection just changed silently.
+        """REWRITTEN by WO-R3-214, same reason and same rule.
+
+        The gates moved from ``chaos_setup is not None`` to ``seeds_chaos``, and
+        while every scenario used the legacy field the two were the same
+        predicate. They are not any more: four scenarios seed chaos through a
+        plan. What has to hold — or the smoke derivation and the ADR 0020
+        selection changed silently — is that ``seeds_chaos`` is true of exactly
+        the scenarios that fire a hook, whichever spelling they use.
+        """
         for scenario in load_scenarios(_SCENARIOS_DIR):
-            assert scenario.seeds_chaos is (scenario.chaos_setup is not None), scenario.name
+            fires_a_hook = bool(scenario.chaos.setup)
+            assert scenario.seeds_chaos is fires_a_hook, scenario.name
+            assert fires_a_hook is (
+                scenario.chaos_setup is not None
+                or (scenario.chaos_plan is not None and bool(scenario.chaos_plan.setup))
+            ), scenario.name
+            # And the derived gates agree with it, which is the thing the
+            # predicate is actually for: a scenario that seeds chaos is not
+            # eligible for the read-only smoke pass, because seeding fires under
+            # the write+chaos principal.
+            if fires_a_hook:
+                assert scenario.smoke_eligible is False, scenario.name
 
 
 class TestGroundTruth:
@@ -986,17 +1061,19 @@ class TestTheGraderSideCanReadTheAnswerKey:
     def test_coverage_is_reportable_over_the_whole_corpus(self) -> None:
         corpus = load_scenarios(_SCENARIOS_DIR)
         graded = [s.name for s in corpus if s.root_cause_graded]
-        # 36 of 45: 32 of 41 since WO-R3-261, which wrote a decision for every
+        # 40 of 49: 32 of 41 since WO-R3-261, which wrote a decision for every
         # scenario from the world it manufactures, plus WO-R3-202's four
-        # `jobs_not_progressing` worlds, every one of them labelled. The other
-        # nine are recorded abstentions rather than omissions — the tool-failure
-        # tests, the harness control and the noise controls, none of which
-        # produces a diagnosis to grade. WHICH scenarios, and why each one, is
-        # pinned by ``tests/unit/test_ground_truth_corpus.py``; what this asserts
-        # is only that the predicate the report is built from can still be
-        # computed over the whole corpus and is no longer vacuous.
-        assert len(graded) == 36
-        assert len(corpus) >= 45
+        # `jobs_not_progressing` worlds and WO-R3-214's four `workflow_stuck`
+        # ones, every one of them labelled — ADR 0038 makes a label mandatory for
+        # a new scenario. The other nine are recorded abstentions rather than
+        # omissions — the tool-failure tests, the harness control and the noise
+        # controls, none of which produces a diagnosis to grade. WHICH scenarios,
+        # and why each one, is pinned by
+        # ``tests/unit/test_ground_truth_corpus.py``; what this asserts is only
+        # that the predicate the report is built from can still be computed over
+        # the whole corpus and is no longer vacuous.
+        assert len(graded) == 40
+        assert len(corpus) >= 49
 
 
 class TestTheAgentVisibleProjection:

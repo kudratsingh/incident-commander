@@ -155,22 +155,24 @@ class TestSplitsAreByTemplate:
         }
 
     def test_the_shipped_corpus_loads(self) -> None:
-        """45 scenarios, no straddle. The check is inert until it is not.
+        """49 scenarios, no straddle. The check is inert until it is not.
 
         41 until WO-R3-202 (WP-4.3) added the four `jobs_not_progressing`
-        worlds. The number is a pin rather than a derivation on purpose: a
+        worlds, and 45 until WO-R3-214 (WP-7.2) added the four `workflow_stuck`
+        ones. The number is a pin rather than a derivation on purpose: a
         scenario that appears without anybody noticing is the thing this
         catches.
         """
-        assert len(CORPUS) == 45
+        assert len(CORPUS) == 49
 
 
 class TestClosedVocabularies:
     def test_family_outside_the_enum_is_a_load_error(self, tmp_path: Path) -> None:
-        # Was `jobs_not_progressing`, which WO-R3-202 made real. `workflow_stuck`
-        # is the next of plan 01 § 7's future families and will do the same to
-        # this case when WP-7.2 lands; the test below is what forces the swap.
-        _write(tmp_path, "solo", extra="family: workflow_stuck\n")
+        # Was `jobs_not_progressing`, which WO-R3-202 made real, then
+        # `workflow_stuck`, which WO-R3-214 (WP-7.2) did. `api_latency` is the
+        # last of plan 01 § 7's future families, so it is what stands here now;
+        # the test below is what forces the swap when its packet lands.
+        _write(tmp_path, "solo", extra="family: api_latency\n")
         with pytest.raises(ScenarioLoadError, match="family"):
             load_scenarios(tmp_path)
 
@@ -207,12 +209,39 @@ class TestClosedVocabularies:
         An empty group in a report reads as a measured zero, which is worse
         than an absent one.
 
-        `jobs_not_progressing` left this set in WO-R3-202 (WP-4.3), which is the
-        rule working: the member landed in the same change as the four scenarios
-        that fill it. `workflow_stuck` goes the same way with WP-7.2, and
-        `api_latency` with Phase 8.
+        REWRITTEN BY WO-R3-214 (WP-7.2), because its premise was that
+        `workflow_stuck` was one of those worlds and it now is not. The rule the
+        test was protecting has not moved: a family member lands in the SAME
+        change as the scenarios that fill it, never before. So the assertion is
+        now the rule itself, in both directions —
+
+        * the families that have arrived (`jobs_not_progressing` in WO-R3-202,
+          `workflow_stuck` in WO-R3-214) are in the enum AND populated, which
+          `test_the_family_that_arrived_brought_its_scenarios_with_it` below
+          checks over the whole enum; and
+        * `api_latency`, the one world of plan 01 § 7 nobody has built, is in
+          neither.
+
+        Deleting this test when `workflow_stuck` landed would have removed the
+        second half with nothing left to keep an unpopulated member out. Naming
+        the remaining witness is what keeps it a real check rather than a
+        tautology: when `api_latency` ships, this list empties and the test's own
+        docstring says so out loud.
         """
-        assert not {"workflow_stuck", "api_latency"} & {member.value for member in ScenarioFamily}
+        remaining_future_worlds = {"api_latency"}
+        members = {member.value for member in ScenarioFamily}
+        assert not remaining_future_worlds & members, (
+            "a family member arrived without the scenarios that fill it. Add the member in the "
+            "same change as its worlds, and take it off this list there."
+        )
+        # And the rule's other half, at the two families that HAVE arrived: each
+        # is in the enum because something manufactures that world.
+        populated = {s.family.value for s in CORPUS if s.family is not None}
+        for arrived in ("jobs_not_progressing", "workflow_stuck"):
+            assert arrived in members and arrived in populated, (
+                f"{arrived} is a family this corpus built; it must be in the enum AND carry "
+                "scenarios, or one half of WO-R3-202's rule has come undone"
+            )
 
     def test_the_family_that_arrived_brought_its_scenarios_with_it(self) -> None:
         """The other direction, and the one that makes the rule above a rule.
@@ -337,6 +366,35 @@ class TestPromotionIsReconciled:
             "jobs_not_progressing",
             "the deploy in the name is the distractor, not the family",
         ),
+        # WO-R3-214 (WP-7.2). The rule DID answer for all four, and answered
+        # `workflow` — the family that groups the saga/chain scenarios written
+        # one at a time before families existed. It is not wrong about the
+        # subject, it is one word short of the distinction: `workflow_stuck` is
+        # the family of FOUR worlds sharing one alert, and folding them into
+        # `workflow` would average a family's per-world numbers into a grouping
+        # that is not one. The substring `workflow` is a prefix of
+        # `workflow_stuck`, so the rule will keep answering this way for every
+        # future member.
+        "workflow_stuck_dead_lettered_root": (
+            "workflow",
+            "workflow_stuck",
+            "plan 01 section 7.2's Family C, not the pre-family `workflow` grouping",
+        ),
+        "workflow_stuck_resolver_stall": (
+            "workflow",
+            "workflow_stuck",
+            "same family, the world nothing is coming for",
+        ),
+        "workflow_stuck_paused_dag": (
+            "workflow",
+            "workflow_stuck",
+            "same family, the world one boolean away from the one above",
+        ),
+        "workflow_stuck_healthy_chain": (
+            "workflow",
+            "workflow_stuck",
+            "same family, the level-0 control where the chain already ran",
+        ),
     }
 
     #: scenario -> (provisional difficulty, authoritative difficulty, why)
@@ -377,6 +435,19 @@ class TestPromotionIsReconciled:
             "single",
             "noisy",
             "a real but unrelated release named in the alert is the variable",
+        ),
+        # WO-R3-214 (WP-7.2). Two of the four move, and each for a reason the
+        # provisional rule cannot see from a name: one is a control, and one
+        # takes three reads to answer.
+        "workflow_stuck_healthy_chain": (
+            "single",
+            "control",
+            "its own header: level-0 control, the chain has already drained",
+        ),
+        "workflow_stuck_dead_lettered_root": (
+            "single",
+            "multi_hop",
+            "dag state -> the root's own DLQ row -> replay -> verify on the chain",
         ),
     }
 

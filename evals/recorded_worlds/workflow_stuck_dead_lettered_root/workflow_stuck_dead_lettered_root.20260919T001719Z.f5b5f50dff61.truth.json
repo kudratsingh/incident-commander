@@ -1,0 +1,38 @@
+{
+  "absent_reason": null,
+  "applies": true,
+  "ground_truth": {
+    "affected_components": [
+      "workflow-stuck-eval"
+    ],
+    "causal_chain": [
+      "root 4a30546f dead-lettered on an unacknowledged upstream timeout after 3 retries",
+      "the resolver holds descendants 7fb11dea and 2ebfbbf8 in waiting behind a terminal parent",
+      "the workflow never finishes, although nothing downstream of the timeout was written"
+    ],
+    "incident_count": 1,
+    "root_causes": [
+      "runaway_saga"
+    ]
+  },
+  "provenance": {
+    "commander_head": "8c1ed3f",
+    "invocation_id": "f5b5f50dff61",
+    "platform_mcp_url": "http://localhost:8001/mcp",
+    "read_principal": "PLATFORM_SMOKE_TOKEN (read-scoped)",
+    "recorded_at": "2026-09-19T00:17:19.686494+00:00"
+  },
+  "recording": "workflow_stuck_dead_lettered_root.20260919T001719Z.f5b5f50dff61.json",
+  "scenario": "workflow_stuck_dead_lettered_root",
+  "schema_version": 1,
+  "why_this_file_is_separate": "ADR 0038: the wall around the answer key is structural. The replay client loads the recording through `recorder.load_recording`, which takes one path and has no way to reach this file; `RecordedWorld` forbids extra keys, so a ground truth cannot ride inside a recording either. Pinned by tests/unit/test_recorder.py.",
+  "world": {
+    "chaos_hooks": [
+      "create_stuck_dag"
+    ],
+    "chaos_seeded": true,
+    "label": "the live platform with `workflow_stuck_dead_lettered_root`'s fault plan seeded (1 hook(s): `create_stuck_dag`), settled 5.0s, read under the read-scoped principal",
+    "live_mcp": true,
+    "settle_seconds": 5.0
+  }
+}

@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Final
 
+from incident_commander.agent.strategies.adaptive import AdaptiveStrategy
 from incident_commander.agent.strategies.baseline import BaselineStrategy
 from incident_commander.agent.strategies.best_of_n_enumerated import BestOfNEnumeratedStrategy
 from incident_commander.agent.strategies.best_of_n_sampled import BestOfNSampledStrategy
@@ -80,6 +81,7 @@ STRATEGIES: Final[StrategyRegistry] = StrategyRegistry(
         StrategyName.CANDIDATE_SELECTOR.value: CandidateSelectorStrategy,
         StrategyName.REFLECTION.value: ReflectionStrategy,
         StrategyName.SEARCH.value: SearchStrategy,
+        StrategyName.ADAPTIVE.value: AdaptiveStrategy,
     }
 )
 

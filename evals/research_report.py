@@ -125,6 +125,8 @@ SECTION_KEYS: Final[tuple[str, ...]] = (
     "calibration",
     "scenario_level_regressions",
     "paired_differences",
+    "adaptive_cost_frontier",
+    "adaptive_rung_distribution",
 )
 
 SECTION_TITLES: Final[dict[str, str]] = {
@@ -140,6 +142,8 @@ SECTION_TITLES: Final[dict[str, str]] = {
     "calibration": "10. Calibration",
     "scenario_level_regressions": "11. Scenario-level regressions",
     "paired_differences": "12. Paired differences",
+    "adaptive_cost_frontier": "13. Adaptive: the accuracy/cost frontier",
+    "adaptive_rung_distribution": "14. Adaptive: where the ladder terminated",
 }
 
 _REFUSAL_REMEDY: Final[str] = (
@@ -249,10 +253,22 @@ class Row:
     usd: Decimal
     wall_seconds: float
     judge_overall: float | None
+    #: The recording this row replayed, or ``None`` off recorded mode (``recorded_fingerprint``).
+    recorded_world: str | None = None
 
     @property
     def arm(self) -> tuple[str, str, str]:
         return (self.strategy, self.model_role, self.execution_mode)
+
+    @property
+    def instance(self) -> str:
+        """What two arms are paired ON: the recorded world id, or the scenario name.
+
+        Plan 03 § 12 pairs within one instance, and a recorded world id IS one (ADR 0049). Off
+        recorded mode there is no such id, so the pairing falls back to the NAME — a weaker
+        claim, which the frontier states beside every comparison rather than in a footnote.
+        """
+        return self.recorded_world or self.scenario
 
     @property
     def arm_label(self) -> str:
@@ -350,6 +366,7 @@ def build_row(
         usd=provenance.budget.usd_used,
         wall_seconds=provenance.budget.wall_seconds_used,
         judge_overall=outcome.judge_score.overall if outcome.judge_score else None,
+        recorded_world=recorded_fingerprint(outcome),
     )
 
 
@@ -1390,6 +1407,372 @@ def _paired_differences(rows: Sequence[Row]) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------
+# Adaptive: the frontier, and where the ladder terminated (WP-13.2)
+# --------------------------------------------------------------------------
+
+#: The arm plan 02 § 15's ladder runs under. Spelled here rather than imported from
+#: ``agent/strategies/names.py`` for the reason ``ThresholdSplit`` is pinned rather than
+#: imported: this module reads ARCHIVES, and an archive's strategy string is whatever was
+#: written at the time. ``test_adaptive.py`` pins the two spellings equal.
+ADAPTIVE_STRATEGY: Final[str] = "adaptive"
+
+#: The frontier's axes: accuracy and safety are better HIGHER, the costs better LOWER. Plan 04
+#: WP-13.2's five, with dollars beside tokens because a report that prints one prints both.
+FRONTIER_HIGHER_IS_BETTER: Final[tuple[str, ...]] = ("pass_rate", "safety_rate")
+FRONTIER_LOWER_IS_BETTER: Final[tuple[str, ...]] = (
+    "mean_tokens",
+    "mean_tool_calls",
+    "mean_usd",
+    "mean_wall_seconds",
+)
+
+#: What a comparison is called. ``trade_off`` is the interesting answer and the one a summary
+#: would hide, so it is a verdict of its own rather than an absence of one.
+DOMINATES: Final[str] = "dominates"
+DOMINATED: Final[str] = "dominated"
+TRADE_OFF: Final[str] = "trade_off"
+EQUAL: Final[str] = "equal"
+
+
+@dataclass(frozen=True)
+class FrontierPoint:
+    """One arm on the frontier: what it got right, and what it spent getting there."""
+
+    arm: str
+    instances: int
+    runs: int
+    #: Better higher. ``safety_rate`` is 1 − forbidden-action rate, so both axes point one way.
+    pass_rate: float
+    safety_rate: float
+    root_cause_accuracy: float | None
+    #: Better lower.
+    mean_tokens: float
+    mean_tool_calls: float
+    mean_usd: float
+    mean_wall_seconds: float
+
+    def value_of(self, axis: str) -> float:
+        """This point's value on one axis. Every axis is a field name."""
+        return float(getattr(self, axis))
+
+    def as_row(self, *, on_frontier: bool, dominated_by: Sequence[str]) -> dict[str, Any]:
+        return {
+            "arm": self.arm,
+            "instances": self.instances,
+            "runs": self.runs,
+            "pass_rate": round(self.pass_rate, 4),
+            "safety_rate": round(self.safety_rate, 4),
+            "root_cause_accuracy": (
+                None if self.root_cause_accuracy is None else round(self.root_cause_accuracy, 4)
+            ),
+            "mean_tokens": round(self.mean_tokens, 4),
+            "mean_tool_calls": round(self.mean_tool_calls, 4),
+            "mean_usd": round(self.mean_usd, 6),
+            "mean_wall_seconds": round(self.mean_wall_seconds, 4),
+            "on_frontier": on_frontier,
+            "dominated_by": list(dominated_by),
+        }
+
+
+def compare_points(left: FrontierPoint, right: FrontierPoint) -> dict[str, Any]:
+    """Which axes ``left`` is better, worse and equal on, and what that adds up to.
+
+    Every axis is named in the output. A verdict is a summary OF the lists and never a
+    replacement for them: "adaptive wins" over a row that is worse on tokens is the exact
+    sentence plan 03 § 173 says a report must not be able to print.
+    """
+    better: list[str] = []
+    worse: list[str] = []
+    equal: list[str] = []
+    for axis in (*FRONTIER_HIGHER_IS_BETTER, *FRONTIER_LOWER_IS_BETTER):
+        gain = left.value_of(axis) - right.value_of(axis)
+        if gain == 0:
+            equal.append(axis)
+            continue
+        wins = gain > 0 if axis in FRONTIER_HIGHER_IS_BETTER else gain < 0
+        (better if wins else worse).append(axis)
+    if not better and not worse:
+        verdict = EQUAL
+    elif not worse:
+        verdict = DOMINATES
+    elif not better:
+        verdict = DOMINATED
+    else:
+        verdict = TRADE_OFF
+    return {
+        "left": left.arm,
+        "right": right.arm,
+        "paired_instances": min(left.instances, right.instances),
+        "verdict": verdict,
+        "better_on": better,
+        "worse_on": worse,
+        "equal_on": equal,
+    }
+
+
+def pareto_frontier(points: Sequence[FrontierPoint]) -> dict[str, list[str]]:
+    """``{arm: the arms that dominate it}`` — empty list means the arm is on the frontier.
+
+    Strict Pareto dominance over the axes above: an arm is off the frontier only when another
+    arm is at least as good on every one of them and better on at least one.
+    """
+    dominated: dict[str, list[str]] = {}
+    for point in points:
+        dominated[point.arm] = sorted(
+            other.arm
+            for other in points
+            if other.arm != point.arm and compare_points(other, point)["verdict"] == DOMINATES
+        )
+    return dominated
+
+
+def frontier_point(arm: str, rows: Sequence[Row], instances: Sequence[str]) -> FrontierPoint:
+    """One arm's point, over the instances every compared arm covers.
+
+    Reps of one instance are averaged before the arm is, so an arm with more repetitions of a
+    cheap scenario does not look cheaper than one with fewer (``paired_difference``'s rule).
+    """
+    shared = [row for row in rows if row.instance in set(instances)]
+    graded = [row for row in shared if row.root_cause_graded]
+    forbidden = {
+        (row.archive, row.scenario)
+        for row in shared
+        for name, ok, detail in row.dimensions
+        if name == "safety" and not ok and safety_kind(detail) == "forbidden_action"
+    }
+    return FrontierPoint(
+        arm=arm,
+        instances=len({row.instance for row in shared}),
+        runs=len(shared),
+        pass_rate=_instance_mean(shared, lambda row: float(row.passed)),
+        safety_rate=1.0
+        - _instance_mean(shared, lambda row: float((row.archive, row.scenario) in forbidden)),
+        root_cause_accuracy=(
+            None
+            if not graded
+            else _instance_mean(graded, lambda row: float(row.root_cause_correct))
+        ),
+        mean_tokens=_instance_mean(shared, lambda row: float(row.tokens)),
+        mean_tool_calls=_instance_mean(shared, lambda row: float(row.tool_calls)),
+        mean_usd=_instance_mean(shared, lambda row: float(row.usd)),
+        mean_wall_seconds=_instance_mean(shared, lambda row: row.wall_seconds),
+    )
+
+
+def _instance_mean(rows: Sequence[Row], read: Callable[[Row], float]) -> float:
+    """Mean over INSTANCES, each instance's reps averaged first."""
+    per_instance: dict[str, list[float]] = {}
+    for row in rows:
+        per_instance.setdefault(row.instance, []).append(read(row))
+    if not per_instance:
+        return 0.0
+    means = [sum(values) / len(values) for values in per_instance.values()]
+    return sum(means) / len(means)
+
+
+def _shared_instances(grouped: Mapping[tuple[str, str, str], list[Row]]) -> list[str]:
+    """The instances EVERY arm in scope covers — the frontier's paired set."""
+    covered = [{row.instance for row in rows} for rows in grouped.values()]
+    if not covered:
+        return []
+    return sorted(set.intersection(*covered))
+
+
+def _adaptive_cost_frontier(rows: Sequence[Row]) -> dict[str, Any]:
+    """The accuracy/cost frontier against the fixed arms (plan 02 § 265, plan 04 WP-13.2).
+
+    Computed over the instances every arm shares, so it is a paired comparison and not two
+    averages over different corpora. Withheld entirely — rather than computed over one arm —
+    until an archive carrying the ladder is in scope: a frontier over a single point is that
+    point, and printing it would answer the buildout's headline question with the control group.
+    """
+    grouped = _by_arm(rows)
+    arms = arms_of(rows)
+    adaptive = [arm for arm in arms if arm[0] == ADAPTIVE_STRATEGY]
+    if not adaptive:
+        return _not_measurable(
+            "the accuracy/cost frontier of `adaptive` against the fixed arms "
+            "(plan 02 § 265, plan 04 WP-13.2)",
+            "no archive in scope carries an `adaptive` arm, so there is no ladder to place on a "
+            "frontier; the fixed arms alone would be a frontier of the control group",
+            (
+                f"a committed archive whose provenance names `{ADAPTIVE_STRATEGY}` (WP-13.2's "
+                "recorded matrix, a deferred paid run)",
+                "the same recorded world ids under at least one fixed arm, so the comparison is "
+                "paired (plan 03 § 12)",
+            ),
+        )
+    instances = _shared_instances(grouped)
+    if not instances or len(arms) < 2:
+        return _not_measurable(
+            "the accuracy/cost frontier of `adaptive` against the fixed arms",
+            "the arms in scope share no instance, so nothing here could be a paired comparison; "
+            "an unpaired frontier compares two corpora and calls the difference a strategy",
+            ("one recorded world id (or scenario) run under `adaptive` and under a fixed arm",),
+        )
+    points = [frontier_point(arm_label(arm), grouped[arm], instances) for arm in arms]
+    dominated = pareto_frontier(points)
+    by_arm = {point.arm: point for point in points}
+    comparisons = [
+        compare_points(by_arm[arm_label(left)], by_arm[arm_label(right)])
+        for left in adaptive
+        for right in arms
+        if right != left
+    ]
+    return {
+        "metric": "accuracy, safety, tokens, tool calls, dollars and latency (plan 04 WP-13.2)",
+        "measurable": True,
+        "value": {
+            "paired_on": (
+                "recorded world id where the rows carry one, scenario name otherwise — every "
+                "arm's number below is over the same instances, listed here"
+            ),
+            "instances": instances,
+            "axes": {
+                "higher_is_better": list(FRONTIER_HIGHER_IS_BETTER),
+                "lower_is_better": list(FRONTIER_LOWER_IS_BETTER),
+            },
+            "rows": [
+                point.as_row(
+                    on_frontier=not dominated[point.arm], dominated_by=dominated[point.arm]
+                )
+                for point in sorted(points, key=lambda point: point.arm)
+            ],
+            "adaptive_against_each_fixed_arm": comparisons,
+            "every_regression_is_named": (
+                "each comparison lists the axes the ladder is WORSE on beside the ones it is "
+                "better on, and a trade-off is its own verdict. A row that is better on accuracy "
+                "and worse on tokens cannot be reported as a win (plan 03 § 173)"
+            ),
+        },
+        "why": "",
+        "requires": [],
+    }
+
+
+def ladder_records_in(root: Path, archive: str) -> dict[str, list[dict[str, Any]]]:
+    """Every ``step`` record carrying a ``ladder`` block, by scenario (WP-13.2)."""
+    return {
+        scenario: [record for record in records if isinstance(record.get("ladder"), dict)]
+        for scenario, records in step_records_in(root, archive).items()
+        if any(isinstance(record.get("ladder"), dict) for record in records)
+    }
+
+
+def _rung_row(
+    archive: str, scenario: str, difficulty: str, records: Sequence[dict[str, Any]]
+) -> dict[str, Any]:
+    """One run's climb: where each step terminated, what opened each rung, what it added."""
+    ladders = [record["ladder"] for record in records]
+    terminated = Counter(str(ladder["terminated_on"]) for ladder in ladders)
+    opened: Counter[str] = Counter()
+    rung_tokens: Counter[str] = Counter()
+    for ladder in ladders:
+        for rung in ladder.get("rungs", ()):
+            opened.update(str(signal) for signal in rung.get("entered_because", ()))
+            rung_tokens[str(rung["rung"])] += int(rung.get("tokens_used", 0))
+    extra = [int(ladder.get("extra_llm_calls", 0)) for ladder in ladders]
+    baseline_steps = terminated.get(BASELINE_RUNG, 0)
+    return {
+        "archive": archive,
+        "scenario": scenario,
+        "difficulty": difficulty,
+        "strategy": str(records[0].get("strategy", "")),
+        "steps": len(ladders),
+        "terminated_on": dict(sorted(terminated.items())),
+        "baseline_rung_share": _rate(baseline_steps, len(ladders)),
+        "extra_llm_calls": sum(extra),
+        "mean_extra_llm_calls": _mean([float(value) for value in extra]),
+        "opened_by_signal": dict(sorted(opened.items())),
+        "tokens_by_rung": dict(sorted(rung_tokens.items())),
+        "search_available": all(bool(ladder.get("search_available")) for ladder in ladders),
+        "unclearable_at_termination": sorted(
+            {str(signal) for ladder in ladders for signal in ladder.get("unclearable", ())}
+        ),
+    }
+
+
+#: The rung an easy step terminates on, as the record spells it. Plan 00 § 7 item 10's first
+#: half is the share of steps that got no further than this one.
+BASELINE_RUNG: Final[str] = "baseline"
+
+
+def _adaptive_rung_distribution(root: Path, sources: Sequence[Source]) -> dict[str, Any]:
+    """Which rung each step terminated on, by difficulty (plan 04 WP-13.2, plan 03 § 173).
+
+    Read off the ``ladder`` blocks in the committed traces, so it needs a run that persisted
+    per-step records (``EVAL_TRACE_DIR``). Difficulty comes off the ROW, like every other
+    grouping here, never from today's corpus.
+    """
+    rows: list[dict[str, Any]] = []
+    for source in sources:
+        for scenario, records in ladder_records_in(root, source.archive).items():
+            outcome = _outcome_of(source, scenario)
+            if outcome is None:  # pragma: no cover - a trace without its own outcome
+                continue
+            rows.append(
+                _rung_row(
+                    source.archive,
+                    scenario,
+                    regression.grouping_values(outcome).get("difficulty", regression.UNKNOWN_GROUP),
+                    records,
+                )
+            )
+    if not rows:
+        return _not_measurable(
+            "the distribution of terminating rungs by difficulty (plan 04 WP-13.2)",
+            "no archive in scope carries a step record with a `ladder` block; the ladder writes "
+            "one per planner step, and a run only persists step records when it was traced",
+            (
+                "a traced `adaptive` run (EVAL_TRACE_DIR set) whose archive is in SCOPE",
+                "the difficulty on each row's own metadata (WP-1.4), which every archive in "
+                "scope already carries",
+            ),
+        )
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(row["difficulty"], []).append(row)
+    return {
+        "metric": "terminating rung per planner step, by difficulty",
+        "measurable": True,
+        "value": {
+            "rows": sorted(rows, key=lambda row: (row["archive"], row["scenario"])),
+            "by_difficulty": [
+                {
+                    "difficulty": difficulty,
+                    "runs": len(members),
+                    "steps": sum(row["steps"] for row in members),
+                    "terminated_on": dict(
+                        sorted(
+                            sum(
+                                (Counter(row["terminated_on"]) for row in members),
+                                Counter(),
+                            ).items()
+                        )
+                    ),
+                    "baseline_rung_share": _rate(
+                        sum(row["terminated_on"].get(BASELINE_RUNG, 0) for row in members),
+                        sum(row["steps"] for row in members),
+                    ),
+                    "mean_extra_llm_calls": _mean(
+                        [float(row["extra_llm_calls"]) / row["steps"] for row in members]
+                    ),
+                }
+                for difficulty, members in sorted(grouped.items())
+            ],
+            "two_sided_claim": (
+                "plan 00 § 7 item 10 is easy-cases-cheap AND hard-cases-with-headroom. "
+                "`baseline_rung_share` is the first half per difficulty; an arm whose share is "
+                "near zero on the easy slices is the control group plus overhead, and saying so "
+                "is the point of printing the share rather than an average (plan 03 § 173)"
+            ),
+        },
+        "why": "",
+        "requires": [],
+    }
+
+
+# --------------------------------------------------------------------------
 # The document
 # --------------------------------------------------------------------------
 
@@ -1501,6 +1884,8 @@ def assemble(root: Path, archives: Sequence[str] = SCOPE) -> dict[str, Any]:
         ),
         "scenario_level_regressions": _scenario_level_regressions(sources, rows),
         "paired_differences": _paired_differences(rows),
+        "adaptive_cost_frontier": _adaptive_cost_frontier(rows),
+        "adaptive_rung_distribution": _adaptive_rung_distribution(root, sources),
     }
     if tuple(sections) != SECTION_KEYS:
         raise ValueError("section keys drifted from plan 03 section 15's aggregate contents")
@@ -1933,10 +2318,116 @@ def render_markdown(document: dict[str, Any]) -> str:
         lines.append(f"- Not computed: {skipped['metric']} — {skipped['why']}.")
     lines.append("")
 
+    lines.extend(_render_adaptive(sections))
+
     lines += ["## What this report cannot say yet", ""]
     lines.extend(f"- {limit}" for limit in document["limits"])
     lines.append("")
     return "\n".join(lines) + "\n"
+
+
+#: What a section that a document predates reads as, for the renderer alone: nothing to print.
+_ABSENT_SECTION: Final[Mapping[str, Any]] = MappingProxyType({"measurable": False, "value": None})
+
+
+def _render_adaptive(sections: Mapping[str, Any]) -> list[str]:
+    """The two WP-13.2 sections, rendered ONLY when they have a number.
+
+    Deliberately asymmetric with the JSON, which always carries both (the section list is
+    closed, so a missing section cannot read as "nothing to report"). The Markdown half is
+    byte-compared against a committed artifact, and a heading that says "not measurable" would
+    spend a version of versioned evidence on nothing (invariant 9) — the same reason
+    ``_pass_at_k`` keeps the wording the committed document already has. Once an archive with an
+    `adaptive` arm is in scope, both sections render and the document that carries them is a new
+    version beside this one.
+    """
+    lines: list[str] = []
+    # ``get``, not ``[]``: a committed document written before these sections existed is still
+    # renderable, which is how the artifact test re-renders one.
+    frontier = sections.get("adaptive_cost_frontier", _ABSENT_SECTION)
+    if frontier["measurable"]:
+        value = frontier["value"]
+        lines += [
+            f"## {SECTION_TITLES['adaptive_cost_frontier']}",
+            "",
+            f"Paired on: {value['paired_on']}. {len(value['instances'])} instance(s).",
+            "",
+            f"{value['every_regression_is_named']}.",
+            "",
+        ]
+        lines.extend(
+            _table(
+                (
+                    "arm",
+                    "instances",
+                    "pass rate",
+                    "root cause",
+                    "safety",
+                    "mean tokens",
+                    "mean tools",
+                    "mean USD",
+                    "mean wall s",
+                    "frontier",
+                ),
+                (
+                    (
+                        f"`{row['arm']}`",
+                        str(row["instances"]),
+                        _number(row["pass_rate"]),
+                        _number(row["root_cause_accuracy"]),
+                        _number(row["safety_rate"]),
+                        _number(row["mean_tokens"], 0),
+                        _number(row["mean_tool_calls"], 2),
+                        _number(row["mean_usd"], 4),
+                        _number(row["mean_wall_seconds"], 1),
+                        "yes" if row["on_frontier"] else f"no ({', '.join(row['dominated_by'])})",
+                    )
+                    for row in value["rows"]
+                ),
+            )
+        )
+        lines.extend(
+            f"- `{c['left']}` vs `{c['right']}`: **{c['verdict']}** over "
+            f"{c['paired_instances']} paired instance(s) — better on "
+            f"{', '.join(c['better_on']) or 'nothing'}; worse on "
+            f"{', '.join(c['worse_on']) or 'nothing'}."
+            for c in value["adaptive_against_each_fixed_arm"]
+        )
+        lines.append("")
+
+    rungs = sections.get("adaptive_rung_distribution", _ABSENT_SECTION)
+    if rungs["measurable"]:
+        value = rungs["value"]
+        lines += [
+            f"## {SECTION_TITLES['adaptive_rung_distribution']}",
+            "",
+            f"{value['two_sided_claim']}.",
+            "",
+        ]
+        lines.extend(
+            _table(
+                ("difficulty", "runs", "steps", "baseline-rung share", "mean extra calls/step"),
+                (
+                    (
+                        row["difficulty"],
+                        str(row["runs"]),
+                        str(row["steps"]),
+                        _number(row["baseline_rung_share"]),
+                        _number(row["mean_extra_llm_calls"], 2),
+                    )
+                    for row in value["by_difficulty"]
+                ),
+            )
+        )
+        lines.extend(
+            f"- `{row['archive']}` / {row['scenario']} ({row['difficulty']}): "
+            f"{row['steps']} step(s), terminated "
+            + ", ".join(f"{rung}×{count}" for rung, count in row["terminated_on"].items())
+            + f"; opened by {', '.join(row['opened_by_signal']) or 'nothing'}."
+            for row in value["rows"]
+        )
+        lines.append("")
+    return lines
 
 
 def scope_stamp(document: dict[str, Any]) -> tuple[datetime, str]:

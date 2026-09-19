@@ -16,7 +16,8 @@ split that default came from, so the tests are grouped that way:
 * ``TestTheReportRecordsTheSplit`` — the projection and the documented table agree, and an
   operator override reports no split at all.
 * ``TestTheSignalsFireOnTheirThresholds`` — each signal on and off its own number.
-* ``TestNothingShippedReadsThePolicyYet`` — no arm imports it, so no baseline number can move.
+* ``TestTheLadderIsTheOnlyReaderOfThePolicy`` — ``adaptive`` imports it and nothing else does, so
+  no fixed arm's number can move (ADR 0064; this was "nothing reads it yet" before WP-13.2).
 """
 
 from __future__ import annotations
@@ -593,16 +594,41 @@ class TestTheDecisionIsRecorded:
         assert matches[0].name.removesuffix(".md").split("-", 1)[1] in index
 
 
-class TestNothingShippedReadsThePolicyYet:
-    """WP-13.1 ships the thresholds; WP-13.2's ``adaptive`` arm is what reads them."""
+class TestTheLadderIsTheOnlyReaderOfThePolicy:
+    """WP-13.1 shipped the thresholds; WP-13.2's ``adaptive`` arm reads them (ADR 0064).
 
-    def test_no_other_module_under_src_imports_the_policy(self) -> None:
+    This was ``TestNothingShippedReadsThePolicyYet`` until the ladder landed. The pin moved from
+    "nobody reads it" to "exactly one arm does", which is the same guarantee for every other arm:
+    a threshold cannot change a number `baseline` or any fixed arm reports.
+    """
+
+    def test_the_ladder_is_the_only_module_under_src_that_reads_the_policy(self) -> None:
         importers = sorted(
             path.relative_to(_REPO_ROOT).as_posix()
             for path in _SRC.rglob("*.py")
             if path != _POLICY and "strategies.policy" in path.read_text(encoding="utf-8")
         )
-        assert importers == [], (
-            f"{importers} read the uncertainty policy. Until WP-13.2 lands the adaptive arm, "
-            "nothing does — which is what makes the canned baseline provably unmoved."
+        assert importers == ["src/incident_commander/agent/strategies/adaptive.py"], (
+            f"{importers} read the uncertainty policy. Only the adaptive ladder may: a second "
+            "reader would let a threshold move a fixed arm's numbers, and the canned baseline "
+            "is provably unmoved only while that stays true."
+        )
+
+    def test_the_ladder_compares_against_the_declared_table(self) -> None:
+        from incident_commander.agent.strategies.adaptive import AdaptiveStrategy
+
+        assert AdaptiveStrategy().thresholds == UncertaintyThresholds()
+
+    def test_no_other_arm_carries_a_threshold_in_its_provenance_stamp(self) -> None:
+        from incident_commander.agent.strategies.names import StrategyName
+        from incident_commander.agent.strategies.registry import STRATEGIES
+
+        stamped = sorted(
+            name.value
+            for name in StrategyName
+            if "thresholds" in STRATEGIES.create(name.value).config
+        )
+        assert stamped == [StrategyName.ADAPTIVE.value], (
+            f"{stamped} stamp an escalation threshold into strategy_config. Only the arm that "
+            "compares against one may report it."
         )

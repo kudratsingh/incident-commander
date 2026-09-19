@@ -259,6 +259,23 @@ def strategy_knobs(settings: Settings) -> StrategyKnobs:
         selector_generator=settings.selector_generator.value,
         search_depth=settings.search_depth,
         search_branch=settings.search_branch,
+        # The adaptive ladder's eight thresholds (WP-13.1, ADR 0061). All optional and all
+        # ``None`` unless an operator set one: the DEFAULTS live in the policy's own table,
+        # which is the only declaration with a benchmark split behind it.
+        uncertainty_top1_confidence_floor=settings.uncertainty_top1_confidence_floor,
+        uncertainty_top1_top2_margin_floor=settings.uncertainty_top1_top2_margin_floor,
+        uncertainty_selector_uncertainty_ceiling=settings.uncertainty_selector_uncertainty_ceiling,
+        uncertainty_candidate_disagreement_ceiling=(
+            settings.uncertainty_candidate_disagreement_ceiling
+        ),
+        uncertainty_confidence_floor_after_probes=(
+            settings.uncertainty_confidence_floor_after_probes
+        ),
+        uncertainty_contradictory_evidence_count=settings.uncertainty_contradictory_evidence_count,
+        uncertainty_failed_attempt_count=settings.uncertainty_failed_attempt_count,
+        uncertainty_probe_count_before_confidence_check=(
+            settings.uncertainty_probe_count_before_confidence_check
+        ),
     )
 
 

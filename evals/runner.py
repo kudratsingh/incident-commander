@@ -69,6 +69,7 @@ from incident_commander.agent.briefing_enrichment import enrich_briefing
 from incident_commander.agent.factory import start_run
 from incident_commander.agent.investigation import (
     _DEFAULT_MAX_ITERATIONS,
+    make_branch_prober,
     make_llm_investigate,
 )
 from incident_commander.agent.loop import run_to_completion
@@ -79,9 +80,11 @@ from incident_commander.agent.remediation import (
     make_llm_verify,
     make_remediate,
 )
+from incident_commander.agent.search import SEARCH_IS_RECORDED_MODE_ONLY
 from incident_commander.agent.selection import SELECTOR_ROLE
 from incident_commander.agent.state import BudgetLedger, EvidenceEntry, IncidentState, RunState
 from incident_commander.agent.strategies.knobs import StrategyKnobs
+from incident_commander.agent.strategies.names import StrategyName
 from incident_commander.agent.strategies.protocol import InvestigationStrategy
 from incident_commander.agent.strategies.records import StepRecord, StepSink
 from incident_commander.agent.strategies.registry import STRATEGIES
@@ -253,7 +256,20 @@ def strategy_knobs(settings: Settings) -> StrategyKnobs:
         n=settings.best_of_n,
         sample_temperature=settings.sample_temperature,
         selector_generator=settings.selector_generator.value,
+        search_depth=settings.search_depth,
+        search_branch=settings.search_branch,
     )
+
+
+def search_mode_refusal(settings: Settings, *, recorded: bool) -> str | None:
+    """Why this invocation may not run ``search``, or ``None`` when it may (WP-12.1).
+
+    Checked at the edge, before a client exists or a token is spent: a strategy whose
+    branches read the world can only be measured in a world that does not move (ADR 0060).
+    """
+    if settings.inference_strategy is not StrategyName.SEARCH or recorded:
+        return None
+    return SEARCH_IS_RECORDED_MODE_ONLY
 
 
 def build_provenance(
@@ -358,6 +374,11 @@ class RunAccountingRecord(BaseModel):
     critic_calls: int = 0
     revised_steps: int = 0
     branch_count: int = 0
+    # Zero for every arm but ``search`` (WP-12.1), WRITTEN for ``selector_calls``'s reason:
+    # branches TAKEN, and the reads every branch and the chosen path together made against
+    # the one ceiling. ``tool_calls`` above is the run's total, so the two can be compared.
+    search_branches: int = 0
+    search_branch_tool_calls: int = 0
     planner_steps: int = 0
     # Per step, in order, and the total beside it (plan 02 § 17).
     planner_input_tokens: tuple[int, ...] = ()
@@ -404,6 +425,8 @@ def build_accounting(accounting: RunAccounting, budget: BudgetLedger) -> RunAcco
         critic_calls=accounting.critic_calls,
         revised_steps=accounting.revised_steps,
         branch_count=accounting.branch_count,
+        search_branches=accounting.search_branches,
+        search_branch_tool_calls=accounting.search_branch_tool_calls,
         planner_steps=len(accounting.steps),
         planner_input_tokens=accounting.planner_input_tokens,
         planner_input_tokens_total=sum(accounting.planner_input_tokens),
@@ -1174,6 +1197,13 @@ def run_scenario(
     # settling, preconditions, teardown, the real transport — is off.
     recorded = recorded_world is not None
 
+    # ``search`` is refused here, before a client exists, a hook fires or a token is
+    # spent (WP-12.1, ADR 0060). ``run_all`` refuses the whole invocation earlier for
+    # the same reason; this is the guard for a direct call.
+    refusal = search_mode_refusal(settings, recorded=recorded)
+    if refusal is not None:
+        raise ValueError(refusal)
+
     # use_live_* means "prefer live if env is real, else fall back to canned."
     # Nothing skips just because env is placeholder — canned data is the
     # deterministic offline fallback for `make eval` / CI.
@@ -1418,6 +1448,11 @@ def run_scenario(
         # critic call never touch these, and the ones that do refuse rather than borrowing.
         selector_llm_client=selector_llm,
         critic_llm_client=critic_llm,
+        # How a ``search`` branch reads the world (WP-12.1), and ONLY in recorded mode: a live
+        # world would have moved between two branches, and a canned client answers per-tool
+        # sequences rather than per call, so a second branch would be served the first
+        # branch's answer. ``None`` is what ``search`` refuses on; every other arm ignores it.
+        branch_prober=(make_branch_prober(mcp_client) if recorded else None),
         # Freshness re-probe (ADR 0009) is live-only: canned responses are
         # instant-consistent, and a re-probe would eat an extra scripted response.
         reprobe_attempts=(settings.investigate_reprobe_attempts if live_mcp_available else 0),
@@ -1937,7 +1972,20 @@ def run_all(
     results: list[ScenarioResult] = []
     ungraded: list[UngradedScenario] = []
     worlds = dict(recorded_worlds or {})
-    for scenario in scenarios:
+    # Read once: the refusal below needs the names, and a generator read twice would be
+    # empty by the time the loop ran.
+    planned = tuple(scenarios)
+    # ``search`` is recorded-mode only (ADR 0060), and this is the one place that knows
+    # which scenarios have a recording. Refused for the WHOLE invocation before the first
+    # one starts: a per-scenario crash row would spend every other scenario's budget to
+    # say the same thing once each.
+    unrecorded = tuple(scenario.name for scenario in planned if scenario.name not in worlds)
+    if settings.inference_strategy is StrategyName.SEARCH and unrecorded:
+        raise ValueError(
+            f"{SEARCH_IS_RECORDED_MODE_ONLY} Scenarios in this invocation with no "
+            f"recording to replay: {', '.join(unrecorded)}."
+        )
+    for scenario in planned:
         recorded_world = worlds.get(scenario.name)
         try:
             result = run_scenario(

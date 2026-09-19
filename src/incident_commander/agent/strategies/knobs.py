@@ -29,3 +29,10 @@ class StrategyKnobs:
     #: Which generator a ``candidate_selector`` decides over (plan 02 § 12, WP-6.2). A plain
     #: ``str`` — this module imports nothing from its own package — resolved by the registry.
     selector_generator: str = "best_of_n_enumerated"
+    #: How far and how wide a ``search`` walk may go (plan 02 § 14, WP-12.1). These are
+    #: REQUESTS: ``agent/search.py`` holds the structural maximums (2 and 3) and refuses
+    #: anything above them at construction, which is why the defaults here are those numbers
+    #: written as literals — this module imports nothing, and
+    #: ``tests/unit/test_search.py::TestTheBoundsAreStructural`` pins the two spellings equal.
+    search_depth: int = 2
+    search_branch: int = 3

@@ -435,9 +435,10 @@ class TestTheDefaultIsBaseline:
 
     def test_an_unknown_configured_strategy_is_refused_at_construction(self) -> None:
         # A name from plan 02 § 4 with no implementation yet is the right stand-in — the
-        # placeholder was ``best_of_n_sampled``, then ``reflection`` (WP-5.3, WP-9.1).
+        # placeholder was ``best_of_n_sampled``, then ``reflection``, then ``search``
+        # (WP-5.3, WP-9.1, WP-12.1). ``adaptive`` is plan 02 § 15's, which WP-13.2 builds.
         with pytest.raises(ValidationError) as caught:
-            _settings(inference_strategy="search")
+            _settings(inference_strategy="adaptive")
         message = str(caught.value)
         assert "baseline" in message, (
             "the refusal must name the permitted values; an operator who typed "
@@ -633,6 +634,9 @@ class TestStrategiesHoldNoExecutionPolicy:
     def test_a_strategy_cannot_reach_a_tool_through_its_context(self) -> None:
         # The whole of a strategy's reach: models, its own settings, a sink. The selector and critic
         # clients are further LLM clients, not a widening; an MCP client or the run itself would be.
+        # ``branch_prober`` (WP-12.1, ADR 0060) is no client either: it is a function the LOOP
+        # builds, keeping the tier re-check, the wire serializer, the client and the ledger accrual
+        # on its own side of the seam: a strategy handed it asks for one READ and nothing else.
         fields = set(StrategyContext.__dataclass_fields__)
         assert fields == {
             "llm_client",
@@ -642,6 +646,7 @@ class TestStrategiesHoldNoExecutionPolicy:
             "record_step",
             "selector_llm_client",
             "critic_llm_client",
+            "branch_prober",
         }
         assert all("client" not in name or name.endswith("llm_client") for name in fields), (
             f"a non-LLM client reached StrategyContext: {sorted(fields)}. A "

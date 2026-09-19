@@ -31,7 +31,12 @@ from incident_commander.agent.state import (
     IncidentState,
     RunState,
 )
-from incident_commander.agent.strategies.protocol import InvestigationStrategy, StrategyContext
+from incident_commander.agent.strategies.protocol import (
+    BranchProbeOutcome,
+    BranchProber,
+    InvestigationStrategy,
+    StrategyContext,
+)
 from incident_commander.agent.strategies.records import PlannerCall, StepSink
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
@@ -409,6 +414,7 @@ def make_llm_investigate(
     record_step: StepSink | None = None,
     selector_llm_client: LLMClientProtocol | None = None,
     critic_llm_client: LLMClientProtocol | None = None,
+    branch_prober: BranchProber | None = None,
 ) -> Callable[[RunState, datetime], RunState]:
     """Bind clients + model to the Phase 2 INVESTIGATING transition.
 
@@ -430,6 +436,10 @@ def make_llm_investigate(
     ``critic_llm_client`` the ``reflection_critic`` role's (WP-9.1), each separate so accounting
     meters the roles apart. ``record_step`` takes each ``StepRecord``; ``None`` means nobody is
     recording (the tracer is opt-in via ``EVAL_TRACE_DIR``), but the record is built either way.
+
+    ``branch_prober`` is how a ``search`` branch reads the world (WP-12.1, ADR 0060), wired by
+    the eval runner in RECORDED mode alone. ``None`` — every other caller and every other mode —
+    is the refusal ``search`` stops on, and no other strategy reads it.
     """
     chosen: Final[InvestigationStrategy] = strategy if strategy is not None else _control_group()
 
@@ -458,6 +468,7 @@ def make_llm_investigate(
                         record_step=record_step,
                         selector_llm_client=selector_llm_client,
                         critic_llm_client=critic_llm_client,
+                        branch_prober=branch_prober,
                     ),
                 )
             except (ValueError, ValidationError, LLMError) as err:
@@ -693,6 +704,85 @@ def _execute_probe(
             "updated_at": at,
         }
     )
+
+
+#: Why a branch's read did not happen, as ``BranchProbeOutcome.refused`` carries it. Named so a
+#: test asserts the guard's own marker rather than that a string contains a word (F-007).
+BRANCH_PROBE_NOT_A_READ: Final[str] = "not a read tool"
+BRANCH_PROBE_UNKNOWN_TOOL: Final[str] = "not in the tool registry"
+BRANCH_PROBE_BAD_ARGUMENTS: Final[str] = "arguments invalid"
+BRANCH_PROBE_TOOL_ERROR: Final[str] = "tool error"
+BRANCH_PROBE_UNPARSED: Final[str] = "output parse failed"
+
+
+def make_branch_prober(mcp_client: MCPClientProtocol) -> BranchProber:
+    """The read-only prober a search branch gathers evidence through (WP-12.1, ADR 0060).
+
+    Built HERE, so the tier re-check, the wire serialization, the client and the ledger accrual
+    stay in the loop: a strategy is handed this, never a client. Refuses instead of escalating —
+    a branch is explored, and the run's state is the chosen path's business.
+    """
+
+    def probe(run_state: RunState, action: ProbeAction) -> BranchProbeOutcome:
+        spec = TOOL_REGISTRY.get(action.tool_name)
+        if spec is None:
+            return BranchProbeOutcome(run_state=run_state, refused=BRANCH_PROBE_UNKNOWN_TOOL)
+        # The same runtime guard `_execute_probe` makes (B-06), and the reason a branch can
+        # never act: a tool reclassified READ → TIER_1 after the Literal was hand-listed is
+        # refused here as well, so "no world-changing action inside a branch" is not a promise
+        # about what the planner proposes (plan 02 § 14, § 18).
+        if tier_of(action.tool_name) is not Tier.READ:
+            return BranchProbeOutcome(
+                run_state=run_state,
+                refused=(
+                    f"{BRANCH_PROBE_NOT_A_READ}: {action.tool_name} is "
+                    f"{tier_of(action.tool_name).value}. A branch gathers evidence; it never "
+                    "changes the world, and a recorded world has no state to change and no "
+                    "audit log to grade the change from (invariant 6)"
+                ),
+            )
+        try:
+            arguments = wire_arguments(spec, action.arguments)
+        except ValidationError as err:
+            return BranchProbeOutcome(
+                run_state=run_state, refused=f"{BRANCH_PROBE_BAD_ARGUMENTS} ({err})"
+            )
+        try:
+            result = mcp_client.call_tool(action.tool_name, arguments)
+        except MCPError as err:
+            return BranchProbeOutcome(
+                run_state=run_state, refused=f"{BRANCH_PROBE_TOOL_ERROR}: {err}"
+            )
+        if result.is_error:
+            return BranchProbeOutcome(
+                run_state=run_state, refused=f"{BRANCH_PROBE_TOOL_ERROR}: is_error=True"
+            )
+        try:
+            summary = _summarize_probe(spec.output_model, result)
+        except (ValueError, ValidationError) as err:
+            return BranchProbeOutcome(
+                run_state=run_state, refused=f"{BRANCH_PROBE_UNPARSED}: {err}"
+            )
+        entry = EvidenceEntry(
+            tool_name=action.tool_name,
+            arguments=arguments,
+            result_summary=summary,
+            timestamp=run_state.updated_at,
+        )
+        # The read is charged to the run's OWN ledger, the one the chosen path spends from:
+        # that shared ceiling is what makes exploring a trade-off (plan 02 § 8).
+        return BranchProbeOutcome(
+            run_state=run_state.model_copy(
+                update={
+                    "evidence": (*run_state.evidence, entry),
+                    "budget": run_state.budget.model_copy(
+                        update={"tool_calls_used": run_state.budget.tool_calls_used + 1}
+                    ),
+                }
+            )
+        )
+
+    return probe
 
 
 def _summarize_probe(output_model: type[BaseModel], result: ToolResult) -> str:

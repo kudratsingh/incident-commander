@@ -32,7 +32,7 @@ trap one layer up).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
 from types import MappingProxyType
@@ -43,6 +43,7 @@ from incident_commander.agent.candidates import DiagnosisCandidate
 from incident_commander.agent.hypothesis import (
     Hypothesis,
     InvestigationStep,
+    NextAction,
     StopAction,
 )
 from incident_commander.agent.selection import (
@@ -182,49 +183,11 @@ class CandidateSelectorStrategy:
     def _step_for(
         self, decision: SelectionResult, generation: CandidateGeneration
     ) -> InvestigationStep:
-        """The decision, as the step the loop runs (``SelectionDecision`` is closed)."""
-        chosen = self._chosen(decision, generation)
-        if decision.decision is SelectionDecision.ESCALATE:
-            return InvestigationStep(
-                hypotheses=(_hypothesis_of(generation.candidates[0], decision),),
-                next_action=StopAction(reason=f"selector escalated: {decision.reasoning}"),
-            )
-        if chosen is None:
-            # Only reachable if ``scores`` were empty on a ``probe_more``, which the schema
-            # forbids. Stated rather than asserted away, in case that rule ever loosens.
-            return InvestigationStep(
-                hypotheses=(_hypothesis_of(generation.candidates[0], decision),),
-                next_action=StopAction(reason=PROBE_MORE_WITHOUT_A_PROBE),
-            )
-        if decision.decision is SelectionDecision.SELECT:
-            # One hypothesis, the selected one: the schema re-sorts by confidence, so a set
-            # emitted here could gate the run on a diagnosis the selector rejected.
-            return InvestigationStep(
-                hypotheses=(_hypothesis_of(chosen, decision),),
-                next_action=generation.proposed_step.next_action,
-            )
-        if chosen.next_probe is None:
-            return InvestigationStep(
-                hypotheses=(_hypothesis_of(chosen, decision),),
-                next_action=StopAction(
-                    reason=f"{PROBE_MORE_WITHOUT_A_PROBE} ({chosen.candidate_id})"
-                ),
-            )
-        return InvestigationStep(
-            hypotheses=(_hypothesis_of(chosen, decision),),
-            next_action=chosen.next_probe,
-        )
-
-    @staticmethod
-    def _chosen(
-        decision: SelectionResult, generation: CandidateGeneration
-    ) -> DiagnosisCandidate | None:
-        """The candidate the decision points at. ``None`` is ``escalate`` or empty ``scores``."""
-        chosen_id = decision.chosen_candidate_id
-        if chosen_id is None:
-            return None
-        return next(
-            candidate for candidate in generation.candidates if candidate.candidate_id == chosen_id
+        """The decision, as the step the loop runs."""
+        return step_for_selection(
+            decision,
+            generation.candidates,
+            committed_action=generation.proposed_step.next_action,
         )
 
     def _record(
@@ -272,6 +235,58 @@ class CandidateSelectorStrategy:
                 ),
             ),
         )
+
+
+def chosen_candidate(
+    decision: SelectionResult, candidates: Sequence[DiagnosisCandidate]
+) -> DiagnosisCandidate | None:
+    """The candidate the decision points at. ``None`` is ``escalate`` or empty ``scores``."""
+    chosen_id = decision.chosen_candidate_id
+    if chosen_id is None:
+        return None
+    return next(candidate for candidate in candidates if candidate.candidate_id == chosen_id)
+
+
+def step_for_selection(
+    decision: SelectionResult,
+    candidates: Sequence[DiagnosisCandidate],
+    *,
+    committed_action: NextAction,
+) -> InvestigationStep:
+    """One selection, as the step the loop runs (``SelectionDecision`` is closed).
+
+    Module-level and shared, so ``search``'s chosen path hands the loop the same shape this
+    arm does (WP-12.1); ``committed_action`` is what a ``select`` acts on.
+    """
+    chosen = chosen_candidate(decision, candidates)
+    if decision.decision is SelectionDecision.ESCALATE:
+        return InvestigationStep(
+            hypotheses=(_hypothesis_of(candidates[0], decision),),
+            next_action=StopAction(reason=f"selector escalated: {decision.reasoning}"),
+        )
+    if chosen is None:
+        # Only reachable if ``scores`` were empty on a ``probe_more``, which the schema
+        # forbids. Stated rather than asserted away, in case that rule ever loosens.
+        return InvestigationStep(
+            hypotheses=(_hypothesis_of(candidates[0], decision),),
+            next_action=StopAction(reason=PROBE_MORE_WITHOUT_A_PROBE),
+        )
+    if decision.decision is SelectionDecision.SELECT:
+        # One hypothesis, the selected one: the schema re-sorts by confidence, so a set
+        # emitted here could gate the run on a diagnosis the selector rejected.
+        return InvestigationStep(
+            hypotheses=(_hypothesis_of(chosen, decision),),
+            next_action=committed_action,
+        )
+    if chosen.next_probe is None:
+        return InvestigationStep(
+            hypotheses=(_hypothesis_of(chosen, decision),),
+            next_action=StopAction(reason=f"{PROBE_MORE_WITHOUT_A_PROBE} ({chosen.candidate_id})"),
+        )
+    return InvestigationStep(
+        hypotheses=(_hypothesis_of(chosen, decision),),
+        next_action=chosen.next_probe,
+    )
 
 
 def _hypothesis_of(candidate: DiagnosisCandidate, decision: SelectionResult) -> Hypothesis:

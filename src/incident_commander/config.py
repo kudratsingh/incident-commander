@@ -114,6 +114,19 @@ class Settings(BaseSettings):
     # ``baseline`` is refused because one diagnosis is not a set to select from.
     # Default is the enumerated arm, the cheaper generator. Unread by other arms.
     selector_generator: StrategyName = StrategyName.BEST_OF_N_ENUMERATED
+    # How far and how wide a `search` walk goes (plan 02 § 14, WP-12.1). Env vars
+    # SEARCH_DEPTH and SEARCH_BRANCH. Both are requests BELOW a structural maximum held
+    # in agent/search.py (depth 2, branch 3, ADR 0060): the `le=` bounds here refuse a
+    # typo early, and the strategy refuses again at construction, so a walk is never
+    # quietly clamped to less than the number a report row would print. The experiment
+    # matrix varies branch 2 vs 3 (plan 03 § 8), which is what these are for.
+    #
+    # There is deliberately NO budget knob for search. Its token and tool-call ceilings
+    # are the run's own, shared by every branch and the chosen path — tool calls are never
+    # multiplied (plan 02 § 8), and that shared ceiling IS the experiment: a branch that
+    # could mint its own budget would make exploring free.
+    search_depth: int = Field(default=2, ge=1, le=2)
+    search_branch: int = Field(default=3, ge=1, le=3)
     # `reflection` (WP-9.1) has NO field here on purpose: its one revision pass per
     # step is the safety property, held by a token in agent/reflection.py (ADR 0055),
     # and a bound an operator could raise would not be one. The arm stamps `passes`

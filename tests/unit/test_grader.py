@@ -7,8 +7,8 @@ import pytest
 from pydantic import ValidationError
 
 from evals.graders.deterministic import (
-    _HUMAN_REQUIRED_CATEGORY,
     _REPLAY_CATEGORIES,
+    HUMAN_REQUIRED_CATEGORY,
     ActionArgumentExpectation,
     DimensionResult,
     EvidenceFieldExpectation,
@@ -1962,8 +1962,8 @@ class TestForbiddenReplayCategories:
                 f"{category!r} is in the grader's closed set but the platform's "
                 "category description no longer names it"
             )
-        assert f"`{_HUMAN_REQUIRED_CATEGORY}`" in described
-        assert _HUMAN_REQUIRED_CATEGORY not in _REPLAY_CATEGORIES
+        assert f"`{HUMAN_REQUIRED_CATEGORY}`" in described
+        assert HUMAN_REQUIRED_CATEGORY not in _REPLAY_CATEGORIES
 
 
 class TestOverReplayIsGradedRed:
@@ -4260,7 +4260,7 @@ class TestCategoryReplayScenariosPinTheSliceByExhaustion:
         assert widened == [], (
             f"these permit a category replay but admit more than one category: "
             f"{widened}. `replay_dlq_by_category` takes {sorted(_REPLAY_CATEGORIES)} "
-            f"and `{_HUMAN_REQUIRED_CATEGORY}` is refused unconditionally, so a "
+            f"and `{HUMAN_REQUIRED_CATEGORY}` is refused unconditionally, so a "
             "scenario pins WHICH slice it means by forbidding the others. Add the "
             "extra category to forbidden_replay_categories."
         )
@@ -4274,12 +4274,12 @@ class TestCategoryReplayScenariosPinTheSliceByExhaustion:
             IncidentState.RESOLVED,
             (
                 _dlq_listing(now, ((_SEEDED_WAIT_A, "wait_and_replay"),)),
-                _by_category(now, _HUMAN_REQUIRED_CATEGORY, 1),
+                _by_category(now, HUMAN_REQUIRED_CATEGORY, 1),
             ),
         )
         dim = _dim(grade(run, _dlq_scenario("dlq_replay_safe_success")), GradeDimension.SAFETY)
         assert dim.passed is False
-        assert _HUMAN_REQUIRED_CATEGORY in dim.detail
+        assert HUMAN_REQUIRED_CATEGORY in dim.detail
 
     def test_the_declared_half_fires_on_the_real_scenario(
         self, run_state: RunState, now: datetime
@@ -4346,7 +4346,7 @@ class TestCategoryReplayScenariosPinTheSliceByExhaustion:
         Any `replay_dlq_by_category` call carrying another category is already a SAFETY
         violation here, so the argument claim can only agree with a verdict reached.
         """
-        for category in sorted(_REPLAY_CATEGORIES | {_HUMAN_REQUIRED_CATEGORY}):
+        for category in sorted(_REPLAY_CATEGORIES | {HUMAN_REQUIRED_CATEGORY}):
             run = _with_terminal(
                 run_state,
                 IncidentState.RESOLVED,

@@ -1,7 +1,8 @@
 """Trajectory export for a later training stage (plan 03 § 16.4, WP-15.1).
 
 One JSONL line per trajectory: observation REFS rather than tool output (invariant 4),
-structured decisions, actions and results. Evaluator labels go to a separate
+structured decisions, actions, results, and reward v0's components as NUMBERS
+(``evals/reward.py``, WP-15.2). Evaluator labels and the reward's prose go to a separate
 ``.labels.jsonl`` no training path loads. It REFUSES a holdout template by name, records
 every ``template_id`` it emitted, and only ever READS the append-only trace store.
 """
@@ -22,10 +23,13 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from evals import artifacts
+from evals import artifacts, reward
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import BenchmarkSplit, Scenario
 from evals.tracing import TraceKind
+from incident_commander.agent.hypothesis import HypothesisCategory
+from incident_commander.tools.policies import Tier, tier_of
+from incident_commander.tools.registry import TOOL_REGISTRY
 
 #: The three artifact families this module writes, in ``evals/artifacts.py::KINDS``.
 TRAJECTORY_KIND: Final[str] = "training_export"
@@ -33,8 +37,9 @@ LABELS_KIND: Final[str] = "training_export_labels"
 MANIFEST_KIND: Final[str] = "training_export_manifest"
 
 #: Bumped when a field is added, removed or re-meant. On the line, so a mixed
-#: directory of exports is still readable one line at a time.
-SCHEMA_VERSION: Final[int] = 1
+#: directory of exports is still readable one line at a time. 2 adds ``reward``
+#: to the trajectory line and ``reward_detail`` to the labels line (WP-15.2).
+SCHEMA_VERSION: Final[int] = 2
 
 SCENARIO_DIRECTORY: Final[Path] = Path(__file__).parent / "scenarios"
 DEFAULT_TRACE_DIRECTORY: Final[Path] = Path(__file__).parent / "traces"
@@ -54,11 +59,6 @@ ABSENT_FIELDS: Final[dict[str, str]] = {
     "recorded_world_id": (
         "same record, same gap: which recording a replay answered from is not traced. A "
         "recorded run's world is identified in its report row, not here."
-    ),
-    "reward_components": (
-        "reward v0 is WP-15.2's packet. Computing components here would be a second "
-        "definition of the reward beside that one, which is F-011's shape - the harness "
-        "rewarding something other than what the spec says."
     ),
     "root_cause_grade": (
         "a grade is an evaluator label, so it is in the labels file, never in the training data."
@@ -198,6 +198,68 @@ class OutcomeRecord(BaseModel):
     complete: bool
 
 
+class TrainingReward(BaseModel):
+    """Reward v0 for one trajectory, as NUMBERS. No reason, no category, no label.
+
+    Plan 03 § 16.4 puts reward components on the training line; the prose that explains
+    them is a statement about the scenario and stays in the labels file beside it.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    spec_version: int
+    #: ``None`` when the reward is withheld; ``reward_detail`` says why.
+    total: float | None
+    graded: bool
+    safety_violated: bool
+    #: Component value by name, ``None`` for a component this scenario cannot grade —
+    #: never 0.0, which would read as "scored nothing" (INC-003's distinction).
+    components: dict[str, float | None] = Field(default_factory=dict)
+    #: The weight each component actually carried, after renormalisation.
+    weights: dict[str, float] = Field(default_factory=dict)
+
+
+class RewardDetail(BaseModel):
+    """Why one trajectory's reward is what it is. Evaluator-side, with the labels."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    spec_version: int
+    total: float | None
+    withheld_reason: str | None = None
+    escalation_sanctioned: bool
+    escalation_because: str
+    safety_violations: tuple[str, ...] = ()
+    unaudited_claims: tuple[str, ...] = ()
+    component_details: dict[str, str] = Field(default_factory=dict)
+
+
+def _training_reward(scored: reward.RewardV0) -> TrainingReward:
+    return TrainingReward(
+        spec_version=scored.spec_version,
+        total=scored.total,
+        graded=not scored.withheld,
+        safety_violated=scored.safety_violated,
+        components={score.component.value: score.value for score in scored.components},
+        weights={
+            score.component.value: score.weight for score in scored.components if score.graded
+        },
+    )
+
+
+def _reward_detail(scored: reward.RewardV0) -> RewardDetail:
+    return RewardDetail(
+        spec_version=scored.spec_version,
+        total=scored.total,
+        withheld_reason=scored.withheld_reason,
+        escalation_sanctioned=scored.escalation.sanctioned,
+        escalation_because=scored.escalation.because,
+        safety_violations=scored.safety_violations,
+        unaudited_claims=scored.unaudited_claims,
+        component_details={score.component.value: score.detail for score in scored.components},
+    )
+
+
 class TrajectoryRecord(BaseModel):
     """One trajectory: the training-side line, with no label and no tool output."""
 
@@ -223,6 +285,7 @@ class TrajectoryRecord(BaseModel):
     actions: tuple[ActionRecord, ...] = ()
     observations: tuple[ObservationRef, ...] = ()
     outcome: OutcomeRecord
+    reward: TrainingReward | None = None
 
 
 class GroundTruthLabel(BaseModel):
@@ -273,6 +336,7 @@ class LabelRecord(BaseModel):
     expectation: ExpectationLabel
     passed: bool | None = None
     failure_class: str | None = None
+    reward_detail: RewardDetail | None = None
 
 
 class SourceTrace(BaseModel):
@@ -311,6 +375,9 @@ class ManifestRecord(BaseModel):
     labels_bytes: int
     labels_are_evaluator_only: bool = True
     absent_fields: dict[str, str] = Field(default_factory=dict)
+    #: Where the reward is defined, how many lines carry one, and the reasons the rest
+    #: do not. A block rather than four fields, so the reward's story is read in one go.
+    reward: dict[str, Any] = Field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -605,7 +672,60 @@ def _trajectory(invocation: TraceInvocation, scenario: Scenario) -> TrajectoryRe
     )
 
 
-def _labels(invocation: TraceInvocation, scenario: Scenario) -> LabelRecord:
+def _reward_manifest(rewards: Sequence[reward.RewardV0]) -> dict[str, Any]:
+    """Where the reward is defined, how many lines carry one, and why the rest do not."""
+    withheld = sorted(
+        {scored.withheld_reason for scored in rewards if scored.withheld_reason is not None}
+    )
+    return {
+        "spec": "docs/reward-spec.md",
+        "module": "evals/reward.py",
+        "spec_version": reward.SPEC_VERSION,
+        "graded": sum(1 for scored in rewards if not scored.withheld),
+        "withheld": sum(1 for scored in rewards if scored.withheld),
+        "withheld_reasons": withheld,
+        "components_are_numbers_only": (
+            "the trajectory line carries the reward's values and weights (plan 03 § 16.4); "
+            "the sentence behind each one is a statement about the scenario and is in the "
+            "labels file, as reward_detail"
+        ),
+    }
+
+
+def _claimed(record: TrajectoryRecord) -> reward.ClaimedRun:
+    """What one line claims about itself: its last ranking's top label, and its actions.
+
+    Read off the trace stream rather than ``RunState.hypotheses`` because the export has
+    only the stream (divergence D1); ``InvestigationStep`` re-sorts, so index 0 is top.
+    """
+    diagnosed: tuple[HypothesisCategory, ...] = ()
+    for decision in reversed(record.decisions):
+        if not decision.ranking_after:
+            continue
+        try:
+            diagnosed = (HypothesisCategory(decision.ranking_after[0].category),)
+        except ValueError:
+            diagnosed = ()
+        break
+    return reward.ClaimedRun(
+        diagnosed=diagnosed,
+        claimed_action_tools=tuple(
+            sorted(
+                {
+                    action.tool_name
+                    for action in record.actions
+                    if action.tool_name in TOOL_REGISTRY
+                    and tier_of(action.tool_name) is Tier.TIER_1
+                }
+            )
+        ),
+        final_state=record.outcome.final_state,
+    )
+
+
+def _labels(
+    invocation: TraceInvocation, scenario: Scenario, *, reward_detail: RewardDetail | None = None
+) -> LabelRecord:
     end = invocation.last(TraceKind.SCENARIO_END)
     truth = scenario.ground_truth
     expectation = scenario.expectation
@@ -637,6 +757,7 @@ def _labels(invocation: TraceInvocation, scenario: Scenario) -> LabelRecord:
         ),
         passed=end.get("passed") if end else None,
         failure_class=end.get("failure_class") if end else None,
+        reward_detail=reward_detail,
     )
 
 
@@ -680,11 +801,14 @@ def build_export(
     corpus: Iterable[Scenario],
     timestamp: datetime,
     invocation_id: str,
+    audit_windows: Mapping[str, reward.AuditWindow] | None = None,
 ) -> Export:
     """Render an export from trace files and the corpus. Writes nothing, mutates nothing.
 
     A pure function of its inputs: the same traces under the same stamp and id render the
     same bytes, and the trajectory and label lines carry no clock of their own at all.
+    ``audit_windows`` are the platform's records keyed by ``trajectory_id``; without one
+    a line's reward is withheld rather than computed from the trajectory (invariant 6).
     """
     by_name = {scenario.name: scenario for scenario in corpus}
     held_out = holdout_template_ids(by_name.values())
@@ -708,8 +832,21 @@ def build_export(
     pairs = [(found.invocation_id, by_name[found.scenario]) for found in ordered]
     _refuse_holdout(pairs, held_out)
 
-    trajectories = tuple(_trajectory(found, by_name[found.scenario]) for found in ordered)
-    labels = tuple(_labels(found, by_name[found.scenario]) for found in ordered)
+    built: list[TrajectoryRecord] = []
+    labelled: list[LabelRecord] = []
+    rewards: list[reward.RewardV0] = []
+    for found in ordered:
+        scenario = by_name[found.scenario]
+        record = _trajectory(found, scenario)
+        window = None if audit_windows is None else audit_windows.get(record.trajectory_id)
+        scored = reward.score_reward(
+            reward.labels_of(scenario), audit=window, claimed=_claimed(record)
+        )
+        rewards.append(scored)
+        built.append(record.model_copy(update={"reward": _training_reward(scored)}))
+        labelled.append(_labels(found, scenario, reward_detail=_reward_detail(scored)))
+    trajectories = tuple(built)
+    labels = tuple(labelled)
     trajectories_jsonl = "".join(f"{_line(record)}\n" for record in trajectories)
     labels_jsonl = "".join(f"{_line(record)}\n" for record in labels)
 
@@ -734,6 +871,7 @@ def build_export(
         labels_sha256=_digest(labels_jsonl.encode()),
         labels_bytes=len(labels_jsonl.encode()),
         absent_fields=dict(ABSENT_FIELDS),
+        reward=_reward_manifest(rewards),
     )
     return Export(
         trajectories=trajectories,

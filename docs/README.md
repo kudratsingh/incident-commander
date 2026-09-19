@@ -11,6 +11,7 @@ One line per document, so you can find the right one without opening five.
 | [safety-model.md](safety-model.md) | The enforceable safety contract: trust boundaries, the READ / Tier-1 / Tier-2 ladder, what each action can touch, budgets, the kill switch, fail-open behaviour |
 | [architecture-principles.md](architecture-principles.md) | The rules that came out of past pull requests — structural fixes over prose, single source of truth for mappings. Read before touching schemas, prompts or the state machine |
 | [eval-methodology.md](eval-methodology.md) | How the harness measures: scenario taxonomy, grader design, metric definitions, judge pinning, the regression gate |
+| [reward-spec.md](reward-spec.md) | Reward v0: its five components, where each number comes from, the ordering proofs that make "always escalate" and "probe nothing, escalate" strictly dominated, and what it refuses to score |
 | [runbook.md](runbook.md) | Operating the agent: live-eval procedure, bumping the pinned platform image, rollbacks, the kill switch |
 
 ## Decisions

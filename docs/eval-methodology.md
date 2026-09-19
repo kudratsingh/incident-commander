@@ -969,6 +969,93 @@ from a lazy escalation, the reward is withheld with a named reason instead of
 guessed — 31 of 49 templates can carry one today, and the spec lists the rest by
 name.
 
+## Dataset quality checks — `make dataset-checks`
+
+The gate that decides whether an export is usable at all (WP-15.3, plan 03 § 16.4,
+[ADR 0063](ADR/0063-a-dataset-check-can-fail-a-dataset-and-refuses-to-guess.md)).
+`evals/dataset_checks.py` reads the three files `make training-export` wrote and
+**can fail them**. That is the point: an incomplete trajectory or a leaked answer
+key in a training set is worse than no dataset, because it is invisible once
+training starts, and a quality report nobody can act on is a footnote.
+
+```bash
+make dataset-checks                                  # the newest export
+make dataset-checks MANIFEST=evals/exports/training_export.<stamp>.<inv>.manifest.json
+make dataset-checks TRACE_DIR=evals/traces AUDIT=windows.json
+```
+
+**Nine classes.** `missing_result` — an action whose result reference resolves to
+nothing, an observation no action asked for, an observation that digests the
+canonical rendering of `null` (a traced call that recorded neither a result nor an
+error), or a line whose observation ids identify nothing at all: a trace written
+before `record_id` existed gives every reading the same blank id, so no action on
+that line can be bound to its own result. That is one fact about the line, reported
+once, not one mismatch per action. `incomplete_trajectory` — a trajectory with a
+`scenario_start` and no `scenario_end`; structural, from the boundaries the
+append-only tracer writes, never from how short the run looks.
+`leaked_hidden_truth` — the answer key on a training line, by key name anywhere
+however deeply nested, or by value. `scenario_drift` — a line or a label the
+corpus no longer agrees with. `duplicate` — one trajectory under one id twice, or
+one *run* under two ids: the same decisions, the same calls with the same
+arguments and the same readings by digest, compared over named fields so that a
+fresh uuid per observation cannot hide it. `invalid_reward` — a total outside
+[0, 1], a graded flag without a number, a safety violation that still scores, a
+weight with a null value. `action_result_mismatch` — an action bound to another
+call's result, a count that disagrees with the line, and a Tier-1 action the
+platform audit log does not show (or one it shows and the line does not).
+`holdout_contamination` — a held-out template in the export. `manifest_disagreement`
+— the manifest's digests, counts and template sets against the files themselves,
+plus the join between the two files.
+
+**Three severities, and `unclassified` is one of them.** `blocking` means the
+dataset is not usable. `unclassified` means something is wrong or unknown and the
+checker will not guess which — a line the trajectory model refuses for no visible
+reason, a reward from another spec version whose ranges cannot be checked here, a
+scenario the corpus does not hold, an audit window that was not fully scanned. It
+fails the dataset exactly like `blocking` does, because *"nobody could classify
+it" is not evidence that it is harmless*: two live reds in one day were
+auto-classified as benign and one of them was a real agent finding. `advisory`
+states something a reader of the dataset needs — which layer did not run, or a
+benchmark key that is its own root-cause label — and never classifies a defect.
+
+**Exit 1 on either.** The report leads with the verdict, then counts per severity,
+counts per class, and every finding naming the record it is about; the header
+carries the dataset's exported `template_id` set, because that set is what the
+report later refuses to score a policy on.
+
+**Two layers, not one wrapper.** The holdout check is computed from the corpus
+and the exported lines — it reuses `export.holdout_template_ids`, which is a
+projection, and never the export's own refusal — so it catches a template that
+moved into `holdout` *after* an export was written, which the export by then
+cannot. Same for incompleteness: `TRACE_DIR=` re-derives the boundaries from the
+trace store rather than trusting the line's own claim about itself, and the two
+disagreeing is itself a blocking finding.
+
+**The leak check has no list to keep up to date.** The key names it hunts are
+computed as *what the labels record carries and the trajectory record does not* —
+`ground_truth`, `discriminating_probes`, their nested keys, the expectation, the
+reward's prose. A label field added tomorrow joins that set on its own, and a key
+living on both sides cannot be evidence of a leak. This is WO-R3-185's argument
+applied to the export: a hand-maintained exclusion list fails by omission, which
+is silent. By value it reads the trajectory's own answer key out of the labels
+file and looks for it on the training line, everywhere except the one `category`
+slot where a root-cause label is the agent's own ranking rather than the answer.
+
+**And the value side is scoped, twice, so it stays usable.** A string the scenario
+already lets the agent read — decided by `Scenario.agent_visible()`, the same
+projection — is not evidence of a leak: a real component name is usually in the
+alert *and* in `affected_components`, and the agent naming it is the agent doing its
+job. Unscoped, that alone fired 191 times on the shipped trace store. The line's own
+benchmark keys are out of scope too: the export carries them deliberately and the
+agent never saw one, so `redis_saturation` being a template named after its fault is
+a fact about the corpus, reported as an advisory rather than failing every dataset
+that corpus can produce.
+
+**What it does not do.** It writes nothing and it never touches the export
+(invariant 9). Without `AUDIT=` the action/result comparison against the platform
+log does not run at all — an offline or recorded run has no audit log — and the
+report says so as an advisory with the reason, rather than passing quietly.
+
 ## Cost, latency, and context accounting
 
 Every row of the aggregate report carries an `accounting` record beside its `provenance` one: what the run spent, on which prompt role, over how many planner steps, and how much context each of those steps carried (plan 03 § 7.8, plan 02 § 17). It is built by `src/incident_commander/agent/accounting.py::RunAccounting` and written by `evals/runner.py::build_accounting`.

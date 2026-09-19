@@ -75,6 +75,10 @@ help:
 	@echo "                   later training stage; TRACE_DIR= picks the trace store,"
 	@echo "                   ONLY=<name> one scenario, WRITE=1 persists. REFUSES a"
 	@echo "                   holdout template by name and never touches the traces"
+	@echo "  dataset-checks   FREE (reads only) quality gate over a training export;"
+	@echo "                   MANIFEST= picks one (default: the newest), TRACE_DIR= turns on"
+	@echo "                   the boundary re-check, AUDIT=<json> the action check."
+	@echo "                   Exit 1 = a blocking or unclassified finding"
 	@echo "  chaos-help       list chaos setup subcommands (kill-consumer, etc.)"
 	@echo "  eval-reg         full offline eval + regression gate vs baseline (refuses ONLY=)"
 	@echo "  eval-reset       clear leftover chaos state between live scenarios;"
@@ -444,6 +448,23 @@ training-export:
 		$(if $(TRACE_DIR),--trace-dir $(TRACE_DIR),) \
 		$(if $(ONLY),--only $(ONLY),) \
 		$(if $(WRITE),--write,)
+
+# The quality gate over that export (WP-15.3, evals/dataset_checks.py). Reads only, and
+# it can FAIL a dataset: exit 1 on any blocking finding and on any it cannot classify,
+# because "nobody could classify it" is not evidence that it is harmless.
+#
+# MANIFEST= names the export to check (default: the newest under evals/exports).
+# TRACE_DIR= turns on the second layer for incompleteness — the line's boundary claim is
+# re-derived from the append-only trace store instead of trusted.
+# AUDIT=<json> is {trajectory_id: audit window}; without it the action/result check
+# against the platform log does not run, and the report says so rather than passing quietly.
+.PHONY: dataset-checks
+dataset-checks:
+	uv run python -m evals.dataset_checks \
+		$(if $(MANIFEST),--manifest $(MANIFEST),) \
+		$(if $(TRACE_DIR),--trace-dir $(TRACE_DIR),) \
+		$(if $(AUDIT),--audit $(AUDIT),) \
+		$(if $(JSON),--json,)
 
 # --- Chaos setup helpers (live-eval prep) -------------------------------
 # All wrap scripts/chaos_setup.py. Effects self-clean on TTL. Requires

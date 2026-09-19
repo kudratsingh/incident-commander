@@ -9,14 +9,39 @@ rendering and no execution policy lives here. Read-tier tools only, pinned by
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from typing import Final
 
-from incident_commander.agent.state import RunState
+from incident_commander.agent.state import EvidenceEntry, RunState
 from incident_commander.tools.policies import Tier, tools_at_or_below
 from incident_commander.tools.registry import TOOL_REGISTRY, description_of
 
 #: How an evidence line opens when ids are rendered. Named so prompt and test agree.
 EVIDENCE_ID_PREFIX: Final[str] = "evidence_id="
+
+#: The ledger entry ``agent/remediation.py`` writes for an attempt that did not end the
+#: incident (ADR 0056). Named HERE, in the lower module, because both planner contexts —
+#: this one and the remediation planner's — must pull it out of the evidence dump and
+#: render it whole, and a second spelling of the name is how one of them stops matching.
+ATTEMPT_FAILED_MARKER: Final[str] = "_remediation_attempt_failed"
+
+#: How that block is headed, in the words the model reads.
+ALREADY_ATTEMPTED_HEADING: Final[str] = "Already attempted in this incident — do NOT repeat:"
+
+
+def render_already_attempted(evidence: Sequence[EvidenceEntry]) -> str:
+    """The "Already attempted" block, or ``""`` when nothing has been attempted.
+
+    Rendered LAST and never truncated, for the same reason a plan refusal is: it is an
+    instruction about this run's own earlier decision, and a cut sentence is worse than
+    none. Empty for every run that has made no failed attempt, which is why adding this
+    left every pre-ADR-0056 prompt byte-identical.
+    """
+    attempts = [entry for entry in evidence if entry.tool_name == ATTEMPT_FAILED_MARKER]
+    if not attempts:
+        return ""
+    lines = [ALREADY_ATTEMPTED_HEADING, *(f"  - {entry.result_summary}" for entry in attempts)]
+    return "\n".join(lines)
 
 
 def format_planner_context(run_state: RunState, *, show_evidence_ids: bool = False) -> str:
@@ -35,6 +60,10 @@ def format_planner_context(run_state: RunState, *, show_evidence_ids: bool = Fal
     if run_state.evidence:
         lines.append("Evidence so far:")
         for entry in run_state.evidence:
+            # Attempt records are pulled out and rendered whole at the end, like the
+            # remediation planner's refusal block.
+            if entry.tool_name == ATTEMPT_FAILED_MARKER:
+                continue
             # The id goes first, so a model scanning for something to cite finds it
             # at a fixed offset on every line.
             cited = f"{EVIDENCE_ID_PREFIX}{entry.evidence_id} " if show_evidence_ids else ""
@@ -44,6 +73,9 @@ def format_planner_context(run_state: RunState, *, show_evidence_ids: bool = Fal
     lines.append("")
     # Read tools only (Tier.READ) — the planner emits RemediateAction rather than acting.
     lines.append(format_tool_block())
+    attempted = render_already_attempted(run_state.evidence)
+    if attempted:
+        lines.extend(("", attempted))
     return "\n".join(lines)
 
 

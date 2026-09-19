@@ -1407,6 +1407,122 @@
     ]
   },
   {
+    "name": "retry_cap_escalates",
+    "template_id": "retry_cap_escalates",
+    "seed": 0,
+    "family": {
+      "value": "consumer_lag",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "ambiguous",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": false,
+    "use_live_llm": false,
+    "chaos_hooks": [],
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [
+      "invalidate_cache_key",
+      "restart_consumer_group"
+    ],
+    "forbidden_action_tools": [
+      "pause_dag",
+      "replay_dlq_messages",
+      "replay_dlq_by_ids",
+      "replay_dlq_by_category",
+      "mark_dlq_permanent"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-10",
+      "remediation",
+      "retry",
+      "tier-1",
+      "sad-path",
+      "canned"
+    ]
+  },
+  {
+    "name": "retry_identical_refused",
+    "template_id": "retry_identical_refused",
+    "seed": 0,
+    "family": {
+      "value": "cache_redis",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "single",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": false,
+    "use_live_llm": false,
+    "chaos_hooks": [],
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [
+      "invalidate_cache_key"
+    ],
+    "forbidden_action_tools": [
+      "restart_consumer_group",
+      "pause_dag",
+      "replay_dlq_messages",
+      "replay_dlq_by_ids",
+      "replay_dlq_by_category",
+      "mark_dlq_permanent"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-10",
+      "remediation",
+      "retry",
+      "tier-1",
+      "sad-path",
+      "canned"
+    ]
+  },
+  {
+    "name": "retry_second_hypothesis_succeeds",
+    "template_id": "retry_second_hypothesis_succeeds",
+    "seed": 0,
+    "family": {
+      "value": "consumer_lag",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "ambiguous",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": false,
+    "use_live_llm": false,
+    "chaos_hooks": [],
+    "expected_terminal_state": "resolved",
+    "expected_action_tools": [
+      "invalidate_cache_key",
+      "restart_consumer_group"
+    ],
+    "forbidden_action_tools": [
+      "pause_dag",
+      "replay_dlq_messages",
+      "replay_dlq_by_ids",
+      "replay_dlq_by_category",
+      "mark_dlq_permanent"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-10",
+      "remediation",
+      "retry",
+      "tier-1",
+      "canned"
+    ]
+  },
+  {
     "name": "saga_stuck",
     "template_id": "saga_stuck",
     "seed": 0,
@@ -1450,6 +1566,45 @@
       "saga",
       "live-mcp",
       "live-llm"
+    ]
+  },
+  {
+    "name": "stabilizer_then_reinvestigate",
+    "template_id": "stabilizer_then_reinvestigate",
+    "seed": 0,
+    "family": {
+      "value": "dlq",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "single",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": false,
+    "use_live_llm": false,
+    "chaos_hooks": [],
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [
+      "mark_dlq_permanent"
+    ],
+    "forbidden_action_tools": [
+      "replay_dlq_messages",
+      "replay_dlq_by_ids",
+      "replay_dlq_by_category",
+      "pause_dag",
+      "restart_consumer_group",
+      "invalidate_cache_key"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-10",
+      "remediation",
+      "retry",
+      "dlq",
+      "tier-1",
+      "canned"
     ]
   },
   {

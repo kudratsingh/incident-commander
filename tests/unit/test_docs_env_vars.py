@@ -37,6 +37,7 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "ALLOWED_TRANSITIONS",  # transition graph, agent/orchestrator.py
         "RESOURCE_ARG_FIELDS",  # per-tool resource-naming fields, tools/policies.py
         "ALERT_SUBJECT_PROBES",  # alert field -> subject probe, agent/investigation.py
+        "FIX_MAP",  # hypothesis category -> Tier-1 tool, agent/investigation.py
         "VERIFY_PROBE_FOR_ACTION",  # tier-1 action -> observing read, agent/remediation.py
         "RESOLUTION_CLASS",  # tier-1 action -> resolves-or-stabilizes, tools/policies.py
         # tier-1 action -> the read whose rows classify it, agent/remediation.py

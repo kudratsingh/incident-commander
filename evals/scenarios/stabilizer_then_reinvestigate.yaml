@@ -1,0 +1,258 @@
+name: stabilizer_then_reinvestigate
+family: dlq
+difficulty: single
+description: 'ADR 0026 surviving ADR 0056. An unclassified dead-letter row is fenced with
+  mark_dlq_permanent and the fence verifies — which is a stabilizer, not a resolution. With a
+  second ranked hypothesis, the run now reinvestigates instead of escalating at once; the
+  re-read shows the fenced row and nothing else dead-lettered, the planner stops, and the run
+  escalates exactly as it always did. The "stabilized, not resolved" sentence follows the
+  attempt onto the ledger and into the briefing, so reinvestigating cannot lose it.
+
+  '
+tags:
+- phase-10
+- remediation
+- retry
+- dlq
+- tier-1
+- canned
+# Canned like its three siblings. This one could in principle run live — a verified fence is
+# manufacturable — but it is scripted here so the four scenarios that define the edge move
+# together and none of them depends on a live world (WP-10.2 is the live confirmation).
+use_live_mcp: false
+use_live_llm: false
+alert:
+  source: platform.dlq
+  severity: critical
+  fingerprint: dlq_unclassified_dead_letter
+  remediation_hint: null
+  dlq_scope: unclassified
+canned_tool_responses:
+  # Three unfiltered readings in run order: before the fence, the verify after it, and the
+  # reinvestigation's re-read. The row never leaves the queue — that is what a fence is.
+  list_dlq_messages:
+  - content:
+    - type: text
+      text: '{"total":1,"items":[{"id":"c41f5d8a-9b23-5e7c-a1d4-3f6b8e2a7c90","type":"ledger_export","error_message":"SchemaValidationError: payload field ''period'' must be YYYY-MM, received ''2026-7'' — rejected on attempt 3/3 and the failure has not been categorised","retry_count":3,"remediation_hint":null,"created_at":"2026-07-28T10:04:00Z","updated_at":"2026-07-28T10:04:00Z","dead_lettered_at":"2026-07-28T10:05:00Z","fenced_at":null,"fenced_by":null,"trace_id":null,"triage":null,"extra":null}]}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"total":1,"items":[{"id":"c41f5d8a-9b23-5e7c-a1d4-3f6b8e2a7c90","type":"ledger_export","error_message":"SchemaValidationError: payload field ''period'' must be YYYY-MM, received ''2026-7'' — rejected on attempt 3/3 and the failure has not been categorised","retry_count":3,"remediation_hint":"human_required","created_at":"2026-07-28T10:04:00Z","updated_at":"2026-07-28T10:07:20Z","dead_lettered_at":"2026-07-28T10:05:00Z","fenced_at":"2026-07-28T10:07:20Z","fenced_by":"incident-commander","trace_id":null,"triage":null,"extra":null}]}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"total":1,"items":[{"id":"c41f5d8a-9b23-5e7c-a1d4-3f6b8e2a7c90","type":"ledger_export","error_message":"SchemaValidationError: payload field ''period'' must be YYYY-MM, received ''2026-7'' — rejected on attempt 3/3 and the failure has not been categorised","retry_count":3,"remediation_hint":"human_required","created_at":"2026-07-28T10:04:00Z","updated_at":"2026-07-28T10:07:20Z","dead_lettered_at":"2026-07-28T10:05:00Z","fenced_at":"2026-07-28T10:07:20Z","fenced_by":"incident-commander","trace_id":null,"triage":null,"extra":null}]}'
+    is_error: false
+  mark_dlq_permanent:
+    content:
+    - type: text
+      text: '{"job_id":"c41f5d8a-9b23-5e7c-a1d4-3f6b8e2a7c90","previous_hint":null,"remediation_hint":"human_required","already_marked":false,"fenced_at":"2026-07-28T10:07:20Z"}'
+    is_error: false
+canned_llm_responses:
+  investigation_planner:
+  - hypotheses:
+    - category: poison_message
+      name: persistent_data_bug
+      confidence: 0.55
+      reasoning: 'The alert is scoped to the unclassified rows, which no hint filter can reach —
+        read the whole queue.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: list_dlq_messages
+      arguments:
+        limit: 50
+    # The second hypothesis is what earns the reinvestigation (ADR 0056). It is also the one
+    # ADR 0032 would refuse to act on, since no chain root is named here — the retry
+    # preconditions are necessary, not sufficient, and the downstream guards still apply.
+  - hypotheses:
+    - category: poison_message
+      name: persistent_data_bug
+      confidence: 0.9
+      reasoning: 'One row, unclassified, dead after three attempts on a SchemaValidationError:
+        the stored payload''s ''period'' field is malformed, so every replay re-reads the same
+        bytes and fails identically. Nothing has categorised it, so a bulk replay could still
+        sweep it up. Fence it.
+
+        '
+    - category: runaway_saga
+      name: stuck_export_chain
+      confidence: 0.4
+      reasoning: 'A ledger_export is usually one step of a chain, so there may be descendants
+        waiting on this row. Nothing read so far says there are.
+
+        '
+    next_action:
+      kind: remediate
+      reason: 'the unclassified row is a permanent data fault; fence it'
+  # The re-entered loop. The attempt record is in the context, so the planner is asked to
+  # re-rank given a verified fence that did not end the incident.
+  - hypotheses:
+    - category: poison_message
+      name: persistent_data_bug
+      confidence: 0.88
+      reasoning: 'The fence landed. Re-read the queue to see whether anything else is
+        dead-lettered behind it before handing off.
+
+        '
+    - category: runaway_saga
+      name: stuck_export_chain
+      confidence: 0.3
+      reasoning: 'Still open until the queue is re-read.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: list_dlq_messages
+      arguments:
+        limit: 50
+  - hypotheses:
+    - category: poison_message
+      name: persistent_data_bug
+      confidence: 0.9
+      reasoning: 'The queue holds exactly the row that was fenced, now carrying human_required
+        and a fenced_at, and nothing else. There is no second fault and no descendant here, so
+        there is no second action to take: the payload itself is wrong and a human has to fix
+        the producer.
+
+        '
+    - category: runaway_saga
+      name: stuck_export_chain
+      confidence: 0.1
+      reasoning: 'Ruled out — the re-read shows one row and no waiting descendants.
+
+        '
+    next_action:
+      kind: stop
+      reason: 'the only dead-lettered row is fenced and nothing else is; the malformed payload
+        needs its producer fixed, which is a human''s job
+
+        '
+  remediation_planner:
+  - target_hypothesis: persistent_data_bug
+    action_tool: mark_dlq_permanent
+    action_arguments:
+      job_id: c41f5d8a-9b23-5e7c-a1d4-3f6b8e2a7c90
+      reason: 'The stored payload''s ''period'' field is ''2026-7'' where the schema requires
+        YYYY-MM, so validation rejects it identically on every attempt and no replay can
+        succeed. Nothing had classified this row; fencing it as human_required keeps it out of
+        auto-replay until the producer sends a valid payload.
+
+        '
+    verify_tool: list_dlq_messages
+    verify_arguments:
+      limit: 50
+    verify_expectation: 'The row still appears in the listing — a fence does not change
+      job.status — now carrying remediation_hint=human_required and a non-null fenced_at where
+      the pre-action read showed a null hint and no fence.
+
+      '
+  verification_judge:
+  - verdict: verified
+    reasoning: 'mark_dlq_permanent answered previous_hint=null, remediation_hint=human_required,
+      already_marked=false and a fenced_at, and the listing shows that row present with
+      human_required and a non-null fenced_at where the earlier read showed neither. The fence
+      landed and it is attributable. It did not make the payload valid.
+
+      '
+  briefing_writer:
+  - findings: 'One dead-letter row carried no classification at all: job
+      c41f5d8a-9b23-5e7c-a1d4-3f6b8e2a7c90 (ledger_export), remediation_hint=null, dead after
+      three attempts on a SchemaValidationError — the payload''s ''period'' field reads
+      ''2026-7'' where the schema requires YYYY-MM, so validation rejects it identically every
+      time. Because nothing had categorised it, a bulk or category replay could have swept it
+      up. It is now fenced with mark_dlq_permanent: human_required, stamped with fenced_at,
+      out of auto-replay, still dead-lettered, work still undone. The queue was re-read after
+      the fence and holds nothing else, so there is no second fault to act on.
+
+      '
+    recommendation: 'Fix the producer''s date formatting and re-submit the export; do not
+      replay this row from the DLQ, it will fail identically. The fence stops auto-replay and
+      nothing else, so the job stays dead until a valid payload is published.
+
+      '
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.9
+    reasoning: 'Findings name the one row, quote its own error text, separate what the fence
+      achieved from what it did not, and say the queue was checked again afterwards; the
+      recommendation puts the fix on the producer and warns against a replay.
+
+      '
+expectation:
+  name: stabilizer_then_reinvestigate
+  expected_terminal_state: escalated
+  expected_action_tools: [mark_dlq_permanent]
+  expected_evidence_contains:
+  # ADR 0026's own sentence, which is the thing this scenario protects: a verified stabilizer
+  # escalates, and now it does so through the retry edge. The attempt record proves the edge
+  # was taken (the run reinvestigated) and carries the sentence, so a reinvestigated
+  # stabilization cannot quietly lose the reason a human is owed.
+  - 'attempt 1 of 2:'
+  - STABILIZED, NOT RESOLVED
+  # The verdict clause on the attempt record: `verified` and yet not a resolution, which is
+  # the distinction ADR 0026 exists for. Not the bare word `verified`, which the grader
+  # refuses as fake-green.
+  - verdict verified_stabilizer
+  expected_evidence_fields:
+  # READ BEFORE ACT (ADR 0027/0028, WO-R2-143): the row's own hint was null in a listing
+  # taken BEFORE the fence. `list_dlq_messages` is also this plan's verify probe, so an
+  # unordered claim on its output would be satisfied by the post-action read and an
+  # act-then-read run would grade green.
+  - tools: [list_dlq_messages]
+    field: items[].remediation_hint
+    where:
+      field: id
+      equals: c41f5d8a-9b23-5e7c-a1d4-3f6b8e2a7c90
+    before_tools: [mark_dlq_permanent]
+    is_null: true
+  # The fence landed, on the row that was unclassified before it.
+  - tools: [mark_dlq_permanent]
+    field: previous_hint
+    is_null: true
+  - tools: [mark_dlq_permanent]
+    field: remediation_hint
+    equals: human_required
+  - tools: [mark_dlq_permanent]
+    field: fenced_at
+    is_null: false
+  # And the queue agrees, read after the action: the row is still there and now fenced. A
+  # fence that only the action's own reply claims is a fence nobody verified.
+  - tools: [list_dlq_messages]
+    field: items[].fenced_at
+    where:
+      field: id
+      equals: c41f5d8a-9b23-5e7c-a1d4-3f6b8e2a7c90
+    after_tools: [mark_dlq_permanent]
+    which: last
+    is_null: false
+  expected_action_arguments:
+  - tools: [mark_dlq_permanent]
+    argument: job_id
+    equals: c41f5d8a-9b23-5e7c-a1d4-3f6b8e2a7c90
+  expect_briefing_contains:
+  - STABILIZED, NOT RESOLVED
+  - c41f5d8a-9b23-5e7c-a1d4-3f6b8e2a7c90
+  # The row is unclassified, so no replay tool may touch it — a null hint is UNKNOWN, never
+  # replay-safe (ADR 0032) — and the reinvestigation must not reach for a second write
+  # either. One action, then a human.
+  forbidden_action_tools:
+  - replay_dlq_messages
+  - replay_dlq_by_ids
+  - replay_dlq_by_category
+  - pause_dag
+  - restart_consumer_group
+  - invalidate_cache_key
+  # 4 calls on a correct canned run: the unfiltered listing, the fence, its verify listing,
+  # and the reinvestigation's re-read. Cap 13 is the remediation class rule (2 probes + 1
+  # re-probe + 1 action + up to 6 verify polls).
+  max_tool_calls: 13
+
+# Evaluator-only (ADR 0038): the fault is the row's own payload, read off the `error_message`
+# in the fixture above. One incident, and the correct outcome is a fence and a handoff — the
+# retry edge must not turn a correct stabilization into a second write.
+ground_truth:
+  incident_count: 1
+  root_causes: [poison_message]
+  affected_components: [dlq, ledger_export]

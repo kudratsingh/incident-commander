@@ -252,6 +252,12 @@ _JUSTIFIED_WITHOUT_PRECONDITION: dict[str, str] = {
     # use_live_mcp: false — it never runs live, and preconditions are about
     # the live world. Its canned responses ARE its premise.
     "remediate_verify_fails": "canned-only scenario; never runs live",
+    # WO-R3-226 (WP-10.1): the four retry scenarios need a chaos variant that survives the
+    # fix (WP-10.0), which the platform does not have — so there is no live world yet.
+    "retry_second_hypothesis_succeeds": "canned-only scenario; needs WP-10.0's sticky fault",
+    "retry_identical_refused": "canned-only scenario; needs WP-10.0's sticky fault",
+    "retry_cap_escalates": "canned-only scenario; needs WP-10.0's sticky fault",
+    "stabilizer_then_reinvestigate": "canned-only scenario; ships with the edge, not a world",
 }
 
 

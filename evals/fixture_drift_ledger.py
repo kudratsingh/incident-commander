@@ -824,6 +824,159 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "same scenario, same deliberate malformation — v0.6.7 made this a "
         "sixth field the fixture deliberately omits",
     ),
+    # The four retry scenarios (WO-R3-226, WP-10.1, ADR 0056). All four are canned by
+    # necessity rather than preference: the edge needs a first Tier-1 action that LANDS and
+    # still leaves the fault, which needs a chaos variant surviving the fix (WP-10.0,
+    # WO-R2-165) that the platform does not have. So `use_live_mcp` is false and these
+    # fixtures are a premise, like `alert_storm`'s and `remediate_verify_fails`'.
+    #
+    # Three named mechanisms below, one per group, and what is NOT here is the point: the
+    # `get_cache_key_info` reads in the two lag worlds were CORRECTED rather than ledgered
+    # (the platform's own answer for a lag cache key is `size` = the digits it holds and null
+    # record fields), so they hold no row at all. A fabricated value that the platform can
+    # tell us is a fixture defect, and this packet fixed its three.
+    #
+    # Group 1: the lag sequence. Both worlds read `billing-consumer` three times — a frozen
+    # 40 from one stale cache generation, then a live 42000, then the post-action reading —
+    # and the sequence is the scenario. A seeded group answers `source: "static"` with the
+    # seed script's standing 15000, no hook produces a frozen-then-fresh pair inside one run,
+    # and `kill_consumer` supplies a climbing lag rather than this shape. One row per path:
+    # the key carries no index, so all three elements share it.
+    ("retry_second_hypothesis_succeeds", "get_consumer_lag", "lag", "value"): (
+        CANNED_ONLY,
+        "the world is a THREE-reading sequence on billing-consumer — 40 measured 58s ago "
+        "with five identical samples, then a live 42000, then 120 after the restart — and "
+        "the platform answers a seed-script group with its standing 15000. No chaos hook "
+        "produces a frozen reading followed by a fresh one inside a single run, which is "
+        "the discriminator this scenario is built on, so the sequence is the premise "
+        "rather than a recording. All three elements share this row",
+    ),
+    ("retry_second_hypothesis_succeeds", "get_consumer_lag", "source", "value"): (
+        CANNED_ONLY,
+        "same premise, the field that says so: the fixture claims a live measurement "
+        "because the frozen-then-fresh story is about measurement age, and the platform "
+        "answers `static` for a group whose lag the seed script wrote. All three elements "
+        "share this row",
+    ),
+    ("retry_cap_escalates", "get_consumer_lag", "lag", "value"): (
+        CANNED_ONLY,
+        "same world as retry_second_hypothesis_succeeds with the restart failing too "
+        "(40, then 42000, then 42000 again), so the same premise and the same three "
+        "elements on one row",
+    ),
+    ("retry_cap_escalates", "get_consumer_lag", "source", "value"): (
+        CANNED_ONLY,
+        "same premise, same field, same three elements",
+    ),
+    # Group 2: a hot-set key nothing seeds. `create_stale_cache` writes
+    # `cache:jobs:worker-dispatcher:hot_set`; this scenario's key is a different one, so the
+    # un-faulted world answers `exists: false` with every field null. Five rows because an
+    # absent key disagrees about each field it does not have.
+    ("retry_identical_refused", "get_cache_key_info", "exists", "value"): (
+        CANNED_ONLY,
+        "the fault IS this key, and no hook seeds it: create_stale_cache writes the "
+        "worker-dispatcher hot set, so the world the walk probes holds no "
+        "cache:jobs:billing-consumer:hot_set at all and answers exists=false. Both "
+        "elements share this row — and the second one is the state that makes this "
+        "scenario, the key BACK after the agent deleted it, which no zero-LLM recording "
+        "pass can capture because make world-record never acts",
+    ),
+    ("retry_identical_refused", "get_cache_key_info", "type", "value"): (
+        CANNED_ONLY,
+        "same absent key: a key that does not exist has no type, so the platform "
+        "answers null where the fixture says string",
+    ),
+    ("retry_identical_refused", "get_cache_key_info", "size", "value"): (
+        CANNED_ONLY,
+        "same absent key: 184 bytes of hot set against null. The size is part of the "
+        "premise (a stale set holding four references) and not a reading",
+    ),
+    ("retry_identical_refused", "get_cache_key_info", "records_referenced", "value"): (
+        CANNED_ONLY,
+        "same absent key. The four references and the zero finds are the fault the "
+        "scenario states — a set that points at records it can no longer resolve",
+    ),
+    ("retry_identical_refused", "get_cache_key_info", "records_found", "value"): (
+        CANNED_ONLY,
+        "same absent key, the other half of that statement",
+    ),
+    # Group 3: a one-row dead-letter queue holding an invented row. The seeded queue holds
+    # four rows the seed script writes, a reset restores them, and nothing removes them — so
+    # neither the total nor the row is a state the live world reaches. The platform's triage
+    # block is written by its own classifier for its own rows, so the fixture's row carries
+    # none and every triage field reads as live-only.
+    ("stabilizer_then_reinvestigate", "list_dlq_messages", "total", "value"): (
+        CANNED_ONLY,
+        "the premise is a queue holding exactly ONE unclassified row, because the scenario "
+        "grades what happens after the only actionable thing is fenced. The seeded queue "
+        "holds four rows, a reset restores them and no hook removes a row, so a one-row "
+        "DLQ is not a state the live world reaches. All three elements — before the fence, "
+        "the verify read, and the reinvestigation's re-read — share this row",
+    ),
+    ("stabilizer_then_reinvestigate", "list_dlq_messages", "items[].id[]", "not_live_reachable"): (
+        CANNED_ONLY,
+        "the row c41f5d8a-9b23-5e7c-a1d4-3f6b8e2a7c90 is invented: the seeded queue's ids "
+        "are fixed by the seed script and no hook mints a new dead-letter row, so this id "
+        "is in no live reading. Same premise as the total above",
+    ),
+    (
+        "stabilizer_then_reinvestigate",
+        "list_dlq_messages",
+        "items[].type[]",
+        "not_live_reachable",
+    ): (
+        CANNED_ONLY,
+        "same invented row: a `ledger_export` job type is one the seeded queue does not "
+        "hold (it offers bulk_api_sync and csv_upload), and nothing produces one",
+    ),
+    (
+        "stabilizer_then_reinvestigate",
+        "list_dlq_messages",
+        "items[].triage[].confidence",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "the platform's classifier writes a triage block for the rows IT dead-lettered; "
+        "this fixture's row is not one of them and carries no triage, so every field of "
+        "that block reads as live-only. Deliberately not modelled: the scenario is about "
+        "an UNCLASSIFIED row, and a triage block is the classification",
+    ),
+    (
+        "stabilizer_then_reinvestigate",
+        "list_dlq_messages",
+        "items[].triage[].is_retryable",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "same absent triage block, second field",
+    ),
+    (
+        "stabilizer_then_reinvestigate",
+        "list_dlq_messages",
+        "items[].triage[].root_cause_category",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "same absent triage block, third field",
+    ),
+    (
+        "stabilizer_then_reinvestigate",
+        "list_dlq_messages",
+        "items[].triage[].suggested_fix",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "same absent triage block, fourth field",
+    ),
+    (
+        "stabilizer_then_reinvestigate",
+        "list_dlq_messages",
+        "items[].triage[].summary",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "same absent triage block, fifth field",
+    ),
 }
 
 

@@ -140,7 +140,7 @@ class TestSplitsAreByTemplate:
 
         41 until WO-R3-202's four, 45 until WO-R3-214's four. A pin, not a derivation.
         """
-        assert len(CORPUS) == 49
+        assert len(CORPUS) == 53
 
 
 class TestClosedVocabularies:
@@ -332,6 +332,18 @@ class TestPromotionIsReconciled:
             "workflow_stuck",
             "same family, the level-0 control where the chain already ran",
         ),
+        # WO-R3-226 (WP-10.1). Two retry scenarios share one world and the rule has no needle
+        # for `pipeline_stalled`. The family is the SYMPTOM, not the agent's behaviour.
+        "retry_second_hypothesis_succeeds": (
+            "uncategorized",
+            "consumer_lag",
+            "the world is a lagging consumer; the retry is the agent's behaviour, not the family",
+        ),
+        "retry_cap_escalates": (
+            "uncategorized",
+            "consumer_lag",
+            "same world as its sibling, with the second attempt failing too",
+        ),
     }
 
     #: scenario -> (provisional difficulty, authoritative difficulty, why)
@@ -381,6 +393,18 @@ class TestPromotionIsReconciled:
             "single",
             "multi_hop",
             "dag state -> the root's own DLQ row -> replay -> verify on the chain",
+        ),
+        # WO-R3-226 (WP-10.1). Both are `ambiguous` and invisible from a name: the world
+        # offers two readings of one symptom.
+        "retry_second_hypothesis_succeeds": (
+            "single",
+            "ambiguous",
+            "two readings of one symptom; the first action is the discriminator",
+        ),
+        "retry_cap_escalates": (
+            "single",
+            "ambiguous",
+            "same two readings, and neither action clears the fault",
         ),
     }
 

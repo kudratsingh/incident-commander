@@ -948,7 +948,7 @@ class TestTheGraderSideCanReadTheAnswerKey:
         graded = [s.name for s in corpus if s.root_cause_graded]
         # 40 of 49 carry a ground-truth label (ADR 0038 makes one mandatory); the other
         # nine are recorded abstentions, pinned by test_ground_truth_corpus.py.
-        assert len(graded) == 40
+        assert len(graded) == 44
         assert len(corpus) >= 49
 
 

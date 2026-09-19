@@ -38,10 +38,16 @@ ALLOWED_TRANSITIONS: dict[IncidentState, frozenset[IncidentState]] = {
     IncidentState.REMEDIATING: frozenset(
         {IncidentState.VERIFYING, IncidentState.ESCALATED, IncidentState.FAILED}
     ),
-    # No PLANNING successor: one Tier-1 attempt per incident (ADR 0008).
-    # A ``not_verified`` verdict escalates instead of re-planning.
+    # INVESTIGATING, never PLANNING (ADR 0056, superseding ADR 0008): a failed
+    # attempt says the diagnosis was wrong, so the retry gathers evidence rather
+    # than re-planning against the ledger that produced the failure.
     IncidentState.VERIFYING: frozenset(
-        {IncidentState.RESOLVED, IncidentState.ESCALATED, IncidentState.FAILED}
+        {
+            IncidentState.INVESTIGATING,
+            IncidentState.RESOLVED,
+            IncidentState.ESCALATED,
+            IncidentState.FAILED,
+        }
     ),
     IncidentState.RESOLVED: frozenset(),
     IncidentState.ESCALATED: frozenset(),

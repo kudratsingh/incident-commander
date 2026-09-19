@@ -76,6 +76,12 @@ _DECIDED: Final[Mapping[str, tuple[Category, ...] | None]] = {
     "workflow_stuck_healthy_chain": (Category.NO_FAULT,),
     "workflow_stuck_paused_dag": (Category.DAG_PAUSED,),
     "workflow_stuck_resolver_stall": (Category.RESOLVER_STALL,),
+    # WO-R3-226 (WP-10.1, ADR 0056). All four retry scenarios are diagnosable and carry
+    # a label read off their fixtures; in `retry_identical_refused` the diagnosis is right.
+    "retry_cap_escalates": (Category.CONSUMER_SATURATION,),
+    "retry_identical_refused": (Category.STALE_CACHE,),
+    "retry_second_hypothesis_succeeds": (Category.CONSUMER_SATURATION,),
+    "stabilizer_then_reinvestigate": (Category.POISON_MESSAGE,),
 }
 
 #: Families that measure the harness rather than a world: ``TOOL_FAULT``
@@ -176,11 +182,11 @@ class TestEveryScenarioCarriesADecision:
         """The number in the PR body, checked against the corpus that produced it."""
         corpus = _corpus()
         graded = [s for s in corpus if s.root_cause_graded]
-        assert (len(graded), len(corpus)) == (40, 49), (
+        assert (len(graded), len(corpus)) == (44, 53), (
             f"{len(graded)} of {len(corpus)} scenarios are root-cause graded; "
-            "WO-R3-261 landed 32 of 41, WO-R3-202 took it to 36 of 45 and "
-            "WO-R3-214 to 40 of 49 — all four `jobs_not_progressing` worlds and "
-            "all four `workflow_stuck` worlds carry a label, because ADR 0038 "
+            "WO-R3-261 landed 32 of 41, WO-R3-202 took it to 36 of 45, WO-R3-214 "
+            "to 40 of 49 and WO-R3-226 to 44 of 53 — every `jobs_not_progressing`, "
+            "`workflow_stuck` and retry scenario carries a label, because ADR 0038 "
             "makes one mandatory for a new scenario. Update this number and the "
             "run summary's coverage line together."
         )

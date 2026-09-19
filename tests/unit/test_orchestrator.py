@@ -55,13 +55,44 @@ class TestAllowedTransitions:
                 f"{start.value} cannot reach any terminal state"
             )
 
-    def test_verifying_has_no_planning_successor(self) -> None:
-        # ADR 0008: single-attempt remediation. VERIFYING resolves, escalates or fails, never
-        # re-plans; the deleted edge is asserted so a retry PR flags it.
+    def test_verifying_retries_through_investigating_and_never_through_planning(self) -> None:
+        # ADR 0056 replaced the single attempt with a capped retry, and the retry edge goes
+        # to INVESTIGATING: a second attempt is planned from later evidence.
         assert IncidentState.PLANNING not in ALLOWED_TRANSITIONS[IncidentState.VERIFYING]
         assert ALLOWED_TRANSITIONS[IncidentState.VERIFYING] == frozenset(
-            {IncidentState.RESOLVED, IncidentState.ESCALATED, IncidentState.FAILED}
+            {
+                IncidentState.INVESTIGATING,
+                IncidentState.RESOLVED,
+                IncidentState.ESCALATED,
+                IncidentState.FAILED,
+            }
         )
+
+    def test_planning_is_reachable_only_from_investigating(self) -> None:
+        # A second Tier-1 action is reachable only by re-entering the investigation loop.
+        sources = sorted(
+            state.value
+            for state, successors in ALLOWED_TRANSITIONS.items()
+            if IncidentState.PLANNING in successors
+        )
+        assert sources == [IncidentState.INVESTIGATING.value]
+
+    def test_the_only_cycle_runs_through_investigating(self) -> None:
+        # A cycle is now legal, so this names the one cycle the design intends.
+        on_a_cycle = sorted(
+            state.value
+            for state in IncidentState
+            if any(state in _reachable_from(s) for s in ALLOWED_TRANSITIONS[state])
+        )
+        assert on_a_cycle == sorted(
+            [
+                IncidentState.AWAITING_APPROVAL.value,
+                IncidentState.INVESTIGATING.value,
+                IncidentState.PLANNING.value,
+                IncidentState.REMEDIATING.value,
+                IncidentState.VERIFYING.value,
+            ]
+        ), "the retry edge is the one cycle; a second loop is a design change"
 
 
 class TestTransitionsRegistry:

@@ -5,6 +5,7 @@ from incident_commander.agent.briefing import (
     ProbeSummary,
     render_briefing,
 )
+from incident_commander.agent.planner_context import ATTEMPT_FAILED_MARKER
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 from incident_commander.tools.registry import TOOL_REGISTRY
 
@@ -196,6 +197,49 @@ class TestRenderBriefing:
                 }
             )
             assert render_briefing(run).escalation_reason == reason
+
+    def test_a_retried_run_tells_the_human_about_the_first_attempt(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        # ADR 0056: an escalation can be two attempts deep, so the first write would go untold.
+        evidence = (
+            EvidenceEntry(
+                tool_name=ATTEMPT_FAILED_MARKER,
+                arguments={"attempt": 1, "of": 2, "action_tool": "invalidate_cache_key"},
+                result_summary="attempt 1 of 2: invalidate_cache_key(...) — verdict not_verified.",
+                timestamp=now,
+            ),
+            EvidenceEntry(
+                tool_name="_investigate_escalate",
+                arguments={"reason": "nothing else actionable"},
+                result_summary="nothing else actionable",
+                timestamp=now,
+            ),
+        )
+        run = run_state.model_copy(update={"state": IncidentState.ESCALATED, "evidence": evidence})
+        reason = render_briefing(run).escalation_reason
+        assert reason.startswith("nothing else actionable")
+        assert "invalidate_cache_key" in reason
+        # And the trail stays a trail: the attempt record is a marker, not a probe.
+        assert render_briefing(run).investigation_trail == ()
+
+    def test_a_run_with_no_failed_attempt_carries_only_its_reason(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        run = run_state.model_copy(
+            update={
+                "state": IncidentState.ESCALATED,
+                "evidence": (
+                    EvidenceEntry(
+                        tool_name="_investigate_escalate",
+                        arguments={"reason": "budget exhausted"},
+                        result_summary="budget exhausted",
+                        timestamp=now,
+                    ),
+                ),
+            }
+        )
+        assert render_briefing(run).escalation_reason == "budget exhausted"
 
     def test_attempted_tier_1_action_reaches_the_human(
         self, run_state: RunState, now: datetime

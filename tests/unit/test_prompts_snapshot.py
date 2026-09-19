@@ -80,7 +80,10 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
         "005dea4d2724b11d99734a5d4ebf1ce809358a53f6ad3f80bae7f65e4d1b2c98"
     ),
     "briefing_judge": ("479334d1a4a79ff9db84a5f5aa697d8d048196b0f966145ac776a9179c82e689"),
-    "remediation_planner": ("24829c8109392039c172631b3bb48a088b4017dc18c9840fba71696b0259d85f"),
+    # Moved by WO-R3-226 / ADR 0056: two sentences cited ADR 0008 for "you get one Tier-1
+    # call", which is now true of a PLAN and not of a run. The rules themselves are
+    # unchanged — a plan still proposes exactly one action.
+    "remediation_planner": ("964a5f39b23ee1767b9455ff8017849b8a188c0b78e0bb1e290280c90edbc3b4"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
     "output_repair": ("461943691f22c6fb6c0c1b62a1cb356dc43eab3ec963b21db069a5701e86a1a0"),
 }
@@ -493,13 +496,14 @@ class TestRemediationPlannerInvariants:
         writing `verify_expectation` about the INCIDENT instead of the ACTION — the judge
         is asked only whether the call did what the sentence said, so an incident-shaped
         expectation reads `not_verified` on a correct run (ADR 0025's shape in a different
-        dress). ADR 0008 is named rather than implied, so a planner told the reason does
-        not spend a turn proposing a second call.
+        dress). The ADR is named rather than implied, so a planner told the reason does
+        not spend a turn proposing a second call — ADR 0056 since the retry edge landed,
+        because "one Tier-1 call" is a property of this PLAN and no longer of the run.
         """
         content = load_prompt("remediation_planner").lower()
         assert "the run escalates after your action, not resolves" in content
         assert "this is structural, not advice" in content
-        assert "adr 0008" in content
+        assert "adr 0056" in content
         # Act anyway, and write the expectation about the call.
         assert "plan the action anyway" in content
         assert "about the action, not about the incident" in content

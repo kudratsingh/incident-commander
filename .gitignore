@@ -82,6 +82,17 @@ evals/reports/human/*
 evals/reports/dossiers/*
 !evals/reports/dossiers/.gitkeep
 
+# `make training-export WRITE=1` output (WP-15.1, evals/export.py): the training
+# JSONL, the evaluator labels beside it, and the manifest naming every template the
+# data covers. Ignored, and the labels file is the reason to be strict about it — a
+# training export is derived, re-derivable byte for byte from the traces it names, and
+# the file that must not travel with it lives in the same folder. What is durable is
+# the manifest's claim about which templates a policy saw; commit THAT deliberately
+# (`git add -f`) when a reported result rests on it, exactly as a recording is
+# committed. `.gitkeep` keeps the folder in a fresh clone.
+evals/exports/*
+!evals/exports/.gitkeep
+
 # `make world-record` output (WP-3.1, evals/recorder.py) is deliberately NOT
 # ignored, and it is the one family here that a run does not produce: a
 # recording is a FIXTURE a later run is executed against, not an output of one.

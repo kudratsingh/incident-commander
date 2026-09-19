@@ -436,10 +436,10 @@ class TestTheDefaultIsBaseline:
         assert default_strategy().name == _settings().inference_strategy.value == "baseline"
 
     def test_an_unknown_configured_strategy_is_refused_at_construction(self) -> None:
-        # A name from plan 02 § 4 with no implementation yet is the right stand-in: it is what
-        # an operator would actually mistype.
+        # A name from plan 02 § 4 with no implementation yet is the right stand-in — the
+        # placeholder was ``best_of_n_sampled``, then ``reflection`` (WP-5.3, WP-9.1).
         with pytest.raises(ValidationError) as caught:
-            _settings(inference_strategy="reflection")
+            _settings(inference_strategy="search")
         message = str(caught.value)
         assert "baseline" in message, (
             "the refusal must name the permitted values; an operator who typed "
@@ -634,8 +634,8 @@ class TestStrategiesHoldNoExecutionPolicy:
         assert "below threshold" in result.evidence[-1].result_summary
 
     def test_a_strategy_cannot_reach_a_tool_through_its_context(self) -> None:
-        # The whole of a strategy's reach: models, its own settings, a sink. ``selector_llm_client``
-        # is a second LLM client, not a widening; an MCP client or the run itself would be.
+        # The whole of a strategy's reach: models, its own settings, a sink. The selector and critic
+        # clients are further LLM clients, not a widening; an MCP client or the run itself would be.
         fields = set(StrategyContext.__dataclass_fields__)
         assert fields == {
             "llm_client",
@@ -644,6 +644,7 @@ class TestStrategiesHoldNoExecutionPolicy:
             "config",
             "record_step",
             "selector_llm_client",
+            "critic_llm_client",
         }
         assert all("client" not in name or name.endswith("llm_client") for name in fields), (
             f"a non-LLM client reached StrategyContext: {sorted(fields)}. A "

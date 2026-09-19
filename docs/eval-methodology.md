@@ -779,6 +779,7 @@ A trace record of kind `step` is written once per planner iteration, by the infe
 | `strategy`, `model` | which strategy made the call, under which model id |
 | `candidate_set` | every diagnosis the strategy considered this step — `baseline` records exactly one, because one call returns one ranking and nothing was enumerated behind it |
 | `selector` | the `candidate_selector`'s decision, or `null` when there was nothing to select between (every `baseline` step) |
+| `revision` | the `reflection` pass over this step — the step the planner proposed FIRST, the critique's verdict and findings, the ledger ids it said the step contradicts, whether a second planner call ran, and `passes_used` beside `passes_allowed`. `null` on every other arm. Both steps are here because a pass that recorded only its output could not be measured for HARM |
 | `emitted_step` | the `InvestigationStep` actually handed back to the loop — the one part of the record with consequences |
 | `hypothesis_state_before` / `_after` | the ranking either side of the call |
 | `llm_calls` | per call: the ledger's own delta (`tokens_used`, `usd_used` — ADR 0015's number, repairs included) *and* the four provider counters for the call that parsed, plus `call_id`, which joins this record to the `llm` record holding its full request and response |
@@ -827,6 +828,83 @@ This replaced four "refreshable pointer" files that each run rewrote in place. T
 
 **Cost.** Disk use now grows with every run rather than staying flat: on the order of a few KB per scenario per run, so a daily 38-scenario suite adds a few MB a month across all four families. That is the price of these files being evidence, and it is the price `evals/runs/` already pays. Pruning is a deliberate, announced operation — never something a run does to itself.
 
+## The training export — `make training-export`
+
+The artifact this buildout leaves behind (WP-15.1, plan 03 § 16.4, [ADR
+0057](ADR/0057-the-training-export-carries-refs-and-labels-and-no-prose.md)).
+`evals/export.py` reads the append-only trace store and writes three files beside
+each other, versioned and exclusive-create like every other output:
+
+```
+evals/exports/training_export.<stamp>.<inv>.jsonl          ← the training data
+evals/exports/training_export.<stamp>.<inv>.labels.jsonl   ← the evaluator's answer key
+evals/exports/training_export.<stamp>.<inv>.manifest.json  ← what the export covers
+```
+
+```bash
+make training-export                                       # say what it would contain
+make training-export TRACE_DIR=evals/runs/<id>/traces      # one archived run
+make training-export ONLY=remediate_stale_cache_success WRITE=1
+```
+
+Zero LLM calls, no platform, no money. It **reads** evidence and never moves,
+rewrites or consumes it (invariant 9; F-002 is what consuming it looks like), and
+the manifest digests every trace file it read so that claim is checkable.
+
+**One line per trajectory, where a trajectory is one `invocation_id` in one trace
+file.** Two attempts at one scenario are two lines, never one (invariant 9 again).
+A line carries the five benchmark keys, the run's models, the planner's
+**decisions** (candidate set, selector decision, the emitted action's kind and
+tool, the ranking either side, the per-step bill), the **actions** with their
+arguments, and each action's **result as a reference**.
+
+**Observations are refs, never content.** A result is
+`(trace_file, observation_id)` plus a SHA-256 of a canonical rendering of it and
+its byte length — so the content is one lookup away in the store that already
+holds it, and the digest proves it is the same content. Tool output is untrusted
+data (invariant 4): inlined, whatever a DLQ payload said would be *in the training
+set*. Error strings are platform output too, so a failed call is `ok: false` and a
+digest, with no message.
+
+**No model prose travels at all** — not a candidate's free-form `name`, not an
+action's `reason`, and not the short `reasoning` the hypothesis schema carries and
+plan 02 § 7 permits in the *trace* record. Every value on a line is a closed-enum
+label, an id, a number, a boolean, a tool name or a digest; the one exception is
+an action's `arguments`, which the agent chose and which are the action.
+`tests/unit/test_export.py` pins the whole key set, so a field added to the line
+lands in that diff.
+
+**The answer key is a separate file with its own artifact kind**, joined by
+`trajectory_id` — ground truth, the discriminating probes, the expectation, and
+whether the run passed. `artifacts.newest("training_export")` cannot resolve to
+it, the same way a recording cannot reach its truth sibling (ADR 0040).
+
+**The holdout gate, second of three.** The loader refuses a `template_id` in two
+splits; the export refuses to *emit* a held-out template, naming it; the report
+refuses to *score* a policy on one it emitted. The export's refusal is a hard
+error that writes nothing — not a filter, because a filter emits everything else
+and leaves the promise resting on somebody reading a warning. It refuses a
+scenario whose split is `holdout`, a `dev` scenario that shares a held-out
+template (every instance of a held-out template is held out — plan 06 D7), and a
+scenario the corpus does not hold at all, since without a split it cannot show
+that one is not held out. The third gate is
+`export.refuse_templates_seen_in_training(template_ids)`, which reads the newest
+manifest by default; nothing exported yet is a pass.
+
+**Re-derivable.** The export is a pure function of (traces, corpus, timestamp,
+invocation id), and the data lines carry no clock of their own, so re-exporting
+the same traces moves only the manifest. An export that could not be re-derived
+would prove nothing about what a policy saw.
+
+**What is deliberately not in it**, stated once in the manifest's
+`absent_fields` rather than as a null on every line: `execution_mode` and
+`recorded_world_id`, because the trace store's `scenario_start` record does not
+carry them and a recorded run is indistinguishable from a live one in it — the
+line carries `live_mcp` and `live_llm`, which is what the record does say;
+`reward_components`, because reward v0 is WP-15.2's and defining it here as well
+is how a harness comes to reward the wrong thing (F-011); and `root_cause_grade`,
+because a grade is a label and labels are in the other file.
+
 ## Cost, latency, and context accounting
 
 Every row of the aggregate report carries an `accounting` record beside its `provenance` one: what the run spent, on which prompt role, over how many planner steps, and how much context each of those steps carried (plan 03 § 7.8, plan 02 § 17). It is built by `src/incident_commander/agent/accounting.py::RunAccounting` and written by `evals/runner.py::build_accounting`.
@@ -841,7 +919,7 @@ The reason it exists is comparison. A strategy that samples eight candidates per
 | `tokens_used` / `usd_used` | every role, the evaluator's own spend included |
 | `charged_tokens_used` / `charged_usd_used` | only the roles the ledger was charged for |
 | `ledger_tokens_used` / `ledger_usd_used` / `reconciled` | the ledger's own totals, and whether the charged split equals them |
-| `selector_calls`, `branch_count` | the strategy dimensions. Both **0 for `baseline`, written rather than omitted**: a later strategy's row carries real numbers, and a reader comparing the two must not have to guess what a missing key meant. `branch_count` counts candidates considered *beyond* the one emitted, so the control group's is zero by construction rather than equal to its step count |
+| `selector_calls`, `critic_calls`, `revised_steps`, `branch_count` | the strategy dimensions. Both **0 for `baseline`, written rather than omitted**: a later strategy's row carries real numbers, and a reader comparing the two must not have to guess what a missing key meant. `branch_count` counts candidates considered *beyond* the one emitted, so the control group's is zero by construction rather than equal to its step count |
 | `planner_steps`, `planner_input_tokens`, `planner_context_chars` | per step, in order, each with its total. The first is the provider's count of the context the planner was fed — honestly `0` on a canned run, which bills nothing — and the second is that same context measured locally in characters, which is the measurement the offline suite *can* make |
 
 Three rules hold this record down:
@@ -861,6 +939,12 @@ Three rules hold this record down:
 [ADR 0045](ADR/0045-a-sampled-step-is-one-samples-and-every-draw-is-charged.md) records the two decisions that make its numbers readable: the emitted step is **one sample's, verbatim** — ranking and action from the same draw, never composed, because a composed step is one no model proposed — and every billed leg of the step reaches the ledger once, on the failure path as well as the success path. The N-call cost multiplier is **declared** (`TOKEN_BUDGET_MULTIPLIER`, 03 § 11 prices `sampled-8` at 6–8× planner cost, blended ~2.5) and **not yet measured**: the comparison is the `investigation_planner` role's token total against a `baseline` run over the same scenarios, against a ±20% tolerance, and it needs a run. Divergence J3 already records that the plan's own arm count and cost estimate disagree, so the measured figure is what gets reported and the table is re-priced from it.
 
 **One judge caveat comes with the same arm.** `DiagnosisCandidate` has no `reasoning` field (ADR 0042), so `best_of_n_enumerated` derives the emitted hypothesis's `reasoning` from the candidate's citations. On that arm the text a briefing and the LLM judge read is a deterministic citation list rather than model prose, so **the judge's soft dimensions are not comparable between that arm and `baseline`**. The deterministic dimensions — outcome, evidence, action, safety, budget, root cause — are unaffected.
+
+**The revision arm, and the one number it exists to produce.** `reflection` (WP-9.1, plan 02 § 13, [ADR 0055](ADR/0055-one-revision-pass-per-step-spent-by-a-token-not-promised-by-a-prompt.md)) makes `baseline`'s planner call, asks one `reflection_critic` call what is wrong with the step it produced, and — only if the critique named a finding — makes ONE more planner call carrying that critique. So a step is at most two `investigation_planner` calls plus one `reflection_critic` call, and **the cap is a token spent once in code**, not a sentence in the critic's prompt: `RevisionPass.spend()` raises on a second call, and it raises a `RuntimeError` rather than an `LLMError`, so a breached cap crashes the packet instead of being absorbed as an escalation. Nothing configures it — there is no `REFLECTION_PASSES` — and `strategy_config` stamps `passes: 1`, `cap: "structural"` so a report row carries the bound it ran under.
+
+Both planner turns are rendered with `show_evidence_ids` **off**, so this arm's planner sees `baseline`'s context bytes plus two appended blocks (the step under review, and the critique with each cited id resolved to the ledger line it names). Its `reasoning` is the model's own prose, so its judge dimensions are comparable with `baseline`'s and not with `best_of_n_enumerated`'s. It stamps `evidence_ids_rendered: false` and, separately, `critic_sees_evidence_ids: true` — the critic does see ids, because a grounded contradiction is unaskable without them.
+
+`StepRecord.revision` carries the step the planner proposed FIRST beside the one the run acted on. That is what makes the pass measurable for harm: `evals/reflection_metrics.py` reads the pair and reports FIXED / HARMED / UNCHANGED_CORRECT / UNCHANGED_WRONG / NOT_REVISED / NOT_GRADED per step and at the deciding step, plus the paired across-arm comparison against `baseline` on the same `WorldKey` (plan 03 § 12) with added tokens and added tool calls by family and difficulty. **Cases harmed is printed on its own line beside cases fixed, never folded into a net**: a positive average that hides a regression on the obvious faults is the wrong summary. `planner_input_tokens` and `planner_context_chars` are the SUM of both planner turns on a revised step — the field is the context the step fed the planner, and a revised step fed it twice — with the per-turn split in `llm_calls`. The accounting row gains `critic_calls` and `revised_steps`, both **0 for every other arm, written rather than omitted**. The fixed-versus-harmed number against a real model needs a paid arm sweep (WP-9.2) and is not measured yet; the arithmetic and a fixture of each case are in `tests/unit/test_reflection.py`.
 
 Two things the record deliberately does not claim. Per-call latency is measured twice on purpose and neither number is the other: the accounting wrapper times the call from outside, which is the one measurement that exists for every client including the canned one, and since WO-R3-260 the real client also times its own logical call — every retried attempt and every backoff sleep inside it — and carries that onto `StepRecord.llm_calls[].elapsed_ms`. A `0` in either means "under half a millisecond"; a `null` means **not measured**, which is what a fake that does not time itself honestly reports, and is why a canned run's step records still read `null` rather than a fabricated zero. And `accounting` itself is `null` on every archived report, on the committed baseline, and on a crash that died before the first call: absent means "no measurement exists", never "this run was free".
 

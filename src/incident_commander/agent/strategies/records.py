@@ -17,6 +17,7 @@ from decimal import Decimal
 from typing import Any
 
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory, InvestigationStep
+from incident_commander.llm.client import LLMUsage
 
 
 def _new_id() -> str:
@@ -46,6 +47,10 @@ class PlannerCall:
     #: Wall time of the call that PARSED, as the client measured it: a repair's rejected leg
     #: is its own logical call. ``None`` when the client does not time itself.
     elapsed_ms: int | None = None
+    #: Everything this step's planner call billed, repair legs included — the sum a strategy
+    #: composing over it must carry when a LATER call of the same step fails, because the loop
+    #: charges ``accrue_llm_error`` against the state held before ``plan_next_step`` (ADR 0045).
+    billed_usage: LLMUsage | None = None
 
     @property
     def context_tokens(self) -> int:
@@ -96,12 +101,57 @@ class SelectorRecord:
     scores: dict[str, float] = field(default_factory=dict)
     uncertainty: float | None = None
     #: ``select`` | ``probe_more`` | ``escalate`` — ``SelectionDecision``'s value as a ``str``,
-    #: not the enum: this module imports nothing but ``hypothesis``.
+    #: not the enum: a records module that imported it would import the selector.
     decision: str
     call_id: str = ""
 
     def as_record(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RevisionRecord:
+    """The ``reflection`` pass over one step: the step first proposed, and the critique of it.
+
+    ``None`` on every other strategy. Both steps are here — ``initial_step`` and the
+    ``StepRecord``'s own ``emitted_step`` — because a pass that recorded only its output could
+    not be measured for HARM, which is the number that decides whether reflection ships.
+    """
+
+    #: What the first planner call proposed, before any critique. Equal in shape to what
+    #: ``baseline`` would have emitted from the same turn.
+    initial_step: InvestigationStep
+    #: ``keep`` | ``revise`` — ``RevisionVerdict``'s value as a ``str``, for the reason
+    #: ``SelectorRecord.decision`` is one.
+    verdict: str
+    #: Every finding the critique named, class-prefixed (``StepCritique.findings``). Empty on
+    #: a ``keep``, which the verdict already says — kept so a reader needs one field, not two.
+    findings: tuple[str, ...] = ()
+    #: Ledger entries the critique said the step contradicts, as strings.
+    contradicted_evidence_ids: tuple[str, ...] = ()
+    #: Did a second planner call actually run? ``verdict == "revise"`` and this are the same
+    #: fact today; written separately so a future gate between them is visible.
+    revised: bool = False
+    #: Passes taken and the cap they were taken against. Written rather than implied: a reader
+    #: of an archive must not have to know this release's constant.
+    passes_used: int = 0
+    passes_allowed: int = 1
+    critic_call_id: str = ""
+    revision_call_id: str = ""
+
+    def as_record(self) -> dict[str, Any]:
+        """JSON-safe dict. ``initial_step`` is a Pydantic model and needs dumping."""
+        return {
+            "initial_step": self.initial_step.model_dump(mode="json"),
+            "verdict": self.verdict,
+            "findings": list(self.findings),
+            "contradicted_evidence_ids": list(self.contradicted_evidence_ids),
+            "revised": self.revised,
+            "passes_used": self.passes_used,
+            "passes_allowed": self.passes_allowed,
+            "critic_call_id": self.critic_call_id,
+            "revision_call_id": self.revision_call_id,
+        }
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -148,6 +198,8 @@ class StepRecord:
     model: str
     candidate_set: tuple[CandidateRecord, ...]
     selector: SelectorRecord | None = None
+    #: The ``reflection`` pass over this step, or ``None`` when none ran (every other strategy).
+    revision: RevisionRecord | None = None
     #: The ``InvestigationStep`` handed back to the loop — the one thing in
     #: this record that has consequences for the run.
     emitted_step: InvestigationStep
@@ -179,6 +231,7 @@ class StepRecord:
             "model": self.model,
             "candidate_set": [candidate.as_record() for candidate in self.candidate_set],
             "selector": None if self.selector is None else self.selector.as_record(),
+            "revision": None if self.revision is None else self.revision.as_record(),
             "emitted_step": self.emitted_step.model_dump(mode="json"),
             "hypothesis_state_before": [
                 hypothesis.model_dump(mode="json") for hypothesis in self.hypothesis_state_before

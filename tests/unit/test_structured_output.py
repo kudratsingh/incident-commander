@@ -44,6 +44,7 @@ from incident_commander.agent.hypothesis import (
     RemediateAction,
     StopAction,
 )
+from incident_commander.agent.reflection import StepCritique
 from incident_commander.agent.remediation import RemediationPlan, VerificationJudgment
 from incident_commander.agent.selection import SelectionResult
 from incident_commander.llm.structured import (
@@ -70,6 +71,9 @@ RECORD_OUTPUT_MODELS: Final[tuple[type[StructuredOutput], ...]] = (
     # ``StructuredOutput`` is a model whose nested fields are back to
     # escalating a run over their wrapping.
     SelectionResult,
+    # WP-9.1's, for the same reason: ``StepCritique`` nests ``LedgerContradiction``, so a
+    # payload that arrived with that object stringified must decode rather than escalate.
+    StepCritique,
 )
 
 # Verbatim evidence, not sample data: the two long lines below are the exact

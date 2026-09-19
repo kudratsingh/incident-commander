@@ -102,6 +102,11 @@ class Settings(BaseSettings):
     # ``baseline`` is refused because one diagnosis is not a set to select from.
     # Default is the enumerated arm, the cheaper generator. Unread by other arms.
     selector_generator: StrategyName = StrategyName.BEST_OF_N_ENUMERATED
+    # `reflection` (WP-9.1) has NO field here on purpose: its one revision pass per
+    # step is the safety property, held by a token in agent/reflection.py (ADR 0055),
+    # and a bound an operator could raise would not be one. The arm stamps `passes`
+    # and `cap` into `strategy_config` instead, so a report row carries what it ran
+    # under. tests/unit/test_reflection.py refuses a knob with that name here.
 
     # --- The selected strategy's budget policy (plan 02 § 8, WP-2.4) -------
     # A strategy that samples N candidates spends ~N× the control group's tokens

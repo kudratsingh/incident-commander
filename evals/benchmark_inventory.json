@@ -1563,6 +1563,99 @@
     ]
   },
   {
+    "name": "workflow_stuck_dead_lettered_root",
+    "template_id": "workflow_stuck_dead_lettered_root",
+    "seed": 0,
+    "family": {
+      "value": "workflow_stuck",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "multi_hop",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hooks": [
+      "create_stuck_dag"
+    ],
+    "expected_terminal_state": "resolved",
+    "expected_action_tools": [
+      "replay_dlq_by_ids"
+    ],
+    "forbidden_action_tools": [
+      "invalidate_cache_key",
+      "mark_dlq_permanent",
+      "pause_dag",
+      "replay_dlq_by_category",
+      "replay_dlq_messages",
+      "restart_consumer_group"
+    ],
+    "forbidden_replay_job_ids": [
+      "fc8d2a03-23b3-5371-9acb-46443c73baa5",
+      "f030f975-974e-5ce3-aa6b-444136507d86",
+      "af67d1b1-13f8-5a2c-8c44-66ec5564597d",
+      "97d91272-9774-5b8e-980b-f0d2fa6ed619"
+    ],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-7",
+      "workflow-stuck",
+      "dag",
+      "remediation",
+      "tier-1",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "workflow_stuck_healthy_chain",
+    "template_id": "workflow_stuck_healthy_chain",
+    "seed": 0,
+    "family": {
+      "value": "workflow_stuck",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "control",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hooks": [
+      "create_stuck_dag"
+    ],
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [
+      "invalidate_cache_key",
+      "mark_dlq_permanent",
+      "pause_dag",
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids",
+      "replay_dlq_messages",
+      "restart_consumer_group"
+    ],
+    "forbidden_replay_job_ids": [
+      "fc8d2a03-23b3-5371-9acb-46443c73baa5",
+      "f030f975-974e-5ce3-aa6b-444136507d86",
+      "af67d1b1-13f8-5a2c-8c44-66ec5564597d",
+      "97d91272-9774-5b8e-980b-f0d2fa6ed619"
+    ],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-7",
+      "workflow-stuck",
+      "dag",
+      "control",
+      "no-fault",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
     "name": "workflow_stuck_paused_dag",
     "template_id": "workflow_stuck_paused_dag",
     "seed": 0,

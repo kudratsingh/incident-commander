@@ -45,7 +45,11 @@ use_live_llm: true
 # promotes it on the next `job.completed` and `_resume_unblocked_waiting_loop`
 # promotes it within about ten seconds regardless. Seeding the chain alone
 # manufactures a world that drains itself before the agent is started — which
-# is exactly what `workflow_stuck_healthy_chain` will be built on.
+# is exactly what `workflow_stuck_healthy_chain`, this family's control, IS
+# built on: the same hook, the same arguments, neither stall, and a settle wait.
+# So this world and the control differ by exactly the two hooks that hold
+# promotion, which was measured rather than reasoned about — the control's
+# recording is the reading where the chain drained.
 #
 # So the stall is the composition WO-R3-213 proved: the chain, plus the killed
 # resolver, plus the paused resume sweep. Only the pause's TTL heals it,

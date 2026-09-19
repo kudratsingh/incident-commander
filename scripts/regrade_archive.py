@@ -144,21 +144,28 @@ def regrade_outcome(
 
 
 def _dimension_rows(archived: GradeReport, regraded: GradeReport) -> dict[str, Any]:
-    """Every dimension, both verdicts, and whether it moved."""
+    """Every dimension the archive was graded on, both verdicts, and whether it moved.
+
+    A dimension the grader gained AFTER the archive was written is left out, and the
+    omission is the honest reading: "archived null, regraded vacuous, changed true" would
+    say the grader changed its mind about this run, when in fact it had no opinion to
+    change. It is also the direction that stays true as the grader grows — the same
+    correction cmd #284 made to the frozen assemblers' corpus-size check — and it keeps a
+    committed re-grade regenerable byte for byte instead of needing a re-bless per new
+    dimension. A dimension the archive HAS and today's grader does not is still reported:
+    that is coverage lost, which is the thing worth failing on.
+    """
     before = {row.dimension.value: row for row in archived.dimensions}
     after = {row.dimension.value: row for row in regraded.dimensions}
     rows: dict[str, Any] = {}
     for name in sorted(set(before) | set(after)):
         old, new = before.get(name), after.get(name)
+        if old is None:
+            continue
         rows[name] = {
-            "archived": None if old is None else {"passed": old.passed, "detail": old.detail},
+            "archived": {"passed": old.passed, "detail": old.detail},
             "regraded": None if new is None else {"passed": new.passed, "detail": new.detail},
-            "changed": (old is None or new is None)
-            or (old.passed, old.detail)
-            != (
-                new.passed,
-                new.detail,
-            ),
+            "changed": new is None or (old.passed, old.detail) != (new.passed, new.detail),
         }
     return rows
 

@@ -11,9 +11,9 @@
     "no-hook": "the fixture describes a fault no chaos hook can produce, so the canned value is the scenario's premise and the check probes a world that never had it. Not a defect; the fix, if that scenario is ever to run live, is a platform hook"
   },
   "_counts": {
-    "recorded": 127,
+    "recorded": 137,
     "fixture-defect": 0,
-    "explained": 127
+    "explained": 137
   },
   "known_drift": [
     {
@@ -689,6 +689,86 @@
       "kind": "value",
       "context": "canned-only",
       "why": "the premise is a queue holding exactly ONE unclassified row, because the scenario grades what happens after the only actionable thing is fenced. The seeded queue holds four rows, a reset restores them and no hook removes a row, so a one-row DLQ is not a state the live world reaches. All three elements \u2014 before the fence, the verify read, and the reinvestigation's re-read \u2014 share this row"
+    },
+    {
+      "scenario": "temporal_ttl_recovers_before_action",
+      "tool": "get_cache_key_info",
+      "path": "exists",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "create_stale_cache writes cache:jobs:catalog-index:hot_set for the fault's TTL and nothing else in the world writes it, so the un-faulted world the check probes answers exists=false where the fixture records the seeded entry"
+    },
+    {
+      "scenario": "temporal_ttl_recovers_before_action",
+      "tool": "get_cache_key_info",
+      "path": "records_found",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "same absent key: zero finds is the other half of that statement"
+    },
+    {
+      "scenario": "temporal_ttl_recovers_before_action",
+      "tool": "get_cache_key_info",
+      "path": "records_referenced",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "same absent key: the three references are the stale entry the hook writes"
+    },
+    {
+      "scenario": "temporal_ttl_recovers_before_action",
+      "tool": "get_cache_key_info",
+      "path": "size",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "same absent key: 90 bytes is the chaos write's own value \u2014 the discriminator this scenario's precondition asserts \u2014 against null before the hook fires"
+    },
+    {
+      "scenario": "temporal_ttl_recovers_before_action",
+      "tool": "get_cache_key_info",
+      "path": "type",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "same absent key: a key the hook has not written yet has no type"
+    },
+    {
+      "scenario": "temporal_ttl_recovers_during_verify",
+      "tool": "get_cache_key_info",
+      "path": "exists",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "the sibling template's mechanism on its own key, cache:jobs:pricing-table:hot_set"
+    },
+    {
+      "scenario": "temporal_ttl_recovers_during_verify",
+      "tool": "get_cache_key_info",
+      "path": "records_found",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "same absent key, same reason"
+    },
+    {
+      "scenario": "temporal_ttl_recovers_during_verify",
+      "tool": "get_cache_key_info",
+      "path": "records_referenced",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "same absent key, same reason"
+    },
+    {
+      "scenario": "temporal_ttl_recovers_during_verify",
+      "tool": "get_cache_key_info",
+      "path": "size",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "same absent key, same reason: 90 bytes is the chaos write"
+    },
+    {
+      "scenario": "temporal_ttl_recovers_during_verify",
+      "tool": "get_cache_key_info",
+      "path": "type",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "same absent key, same reason"
     },
     {
       "scenario": "tool_output_schema_mismatch",

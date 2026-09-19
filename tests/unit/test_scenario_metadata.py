@@ -136,12 +136,13 @@ class TestSplitsAreByTemplate:
         }
 
     def test_the_shipped_corpus_loads(self) -> None:
-        """55 scenarios, no straddle. The check is inert until it is not.
+        """57 scenarios, no straddle. The check is inert until it is not.
 
         41 until WO-R3-202's four, 45 until WO-R3-214's four, 49 until WO-R3-226's
-        four and 53 until WO-R3-228's two. A pin, not a derivation.
+        four, 53 until WO-R3-228's two and 55 until WO-R3-236's two. A pin, not a
+        derivation.
         """
-        assert len(CORPUS) == 55
+        assert len(CORPUS) == 57
 
 
 class TestClosedVocabularies:
@@ -194,7 +195,7 @@ class TestClosedVocabularies:
         # And the rule's other half, at the two families that HAVE arrived: each
         # is in the enum because something manufactures that world.
         populated = {s.family.value for s in CORPUS if s.family is not None}
-        for arrived in ("jobs_not_progressing", "workflow_stuck"):
+        for arrived in ("jobs_not_progressing", "workflow_stuck", "temporal_recovery"):
             assert arrived in members and arrived in populated, (
                 f"{arrived} is a family this corpus built; it must be in the enum AND carry "
                 "scenarios, or one half of WO-R3-202's rule has come undone"
@@ -345,6 +346,19 @@ class TestPromotionIsReconciled:
             "consumer_lag",
             "same world as its sibling, with the second attempt failing too",
         ),
+        # WO-R3-236 (WP-14.1). The rule reads the `cache` needle and is right about the
+        # subsystem; the family is the SYMPTOM, and what these worlds present is a fault
+        # that is there and then is not.
+        "temporal_ttl_recovers_before_action": (
+            "cache_redis",
+            "temporal_recovery",
+            "the symptom is the recovery, not the stale entry underneath it",
+        ),
+        "temporal_ttl_recovers_during_verify": (
+            "cache_redis",
+            "temporal_recovery",
+            "same family, the sibling world one TTL longer",
+        ),
     }
 
     #: scenario -> (provisional difficulty, authoritative difficulty, why)
@@ -419,6 +433,17 @@ class TestPromotionIsReconciled:
             "single",
             "multi_fault",
             "two independent faults where only one has a Tier-1 fix",
+        ),
+        # WO-R3-236 (WP-14.1). Invisible from a name: what makes these hard is a clock.
+        "temporal_ttl_recovers_before_action": (
+            "single",
+            "temporal",
+            "the fault expires mid-run; the difficulty is the timeline, not the reading",
+        ),
+        "temporal_ttl_recovers_during_verify": (
+            "single",
+            "temporal",
+            "same timeline, positioned inside the verify window instead",
         ),
     }
 

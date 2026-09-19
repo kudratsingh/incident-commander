@@ -911,6 +911,58 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         CANNED_ONLY,
         "same absent key, the other half of that statement",
     ),
+    # Group 2b: the two temporal templates (WO-R3-236, WP-14.1), one named mechanism for
+    # both. Each seeds `create_stale_cache` on a key of its OWN — not the seeded
+    # worker-dispatcher hot set, which a timed expiry would destroy — so the un-faulted
+    # world the walk probes holds no such key at all and answers the absent shape, every
+    # field null. POST-FAULT rather than CANNED_ONLY (the neighbouring
+    # `retry_identical_refused` rows): these scenarios DO run live and a hook does write
+    # the key; it is the walk that reads the world before it. Element 1 of each sequence
+    # records the same absence the walk observes, so it disagrees about nothing and the
+    # rows carry no index.
+    ("temporal_ttl_recovers_before_action", "get_cache_key_info", "exists", "value"): (
+        POST_FAULT,
+        "create_stale_cache writes cache:jobs:catalog-index:hot_set for the fault's "
+        "TTL and nothing else in the world writes it, so the un-faulted world the check "
+        "probes answers exists=false where the fixture records the seeded entry",
+    ),
+    ("temporal_ttl_recovers_before_action", "get_cache_key_info", "type", "value"): (
+        POST_FAULT,
+        "same absent key: a key the hook has not written yet has no type",
+    ),
+    ("temporal_ttl_recovers_before_action", "get_cache_key_info", "size", "value"): (
+        POST_FAULT,
+        "same absent key: 90 bytes is the chaos write's own value — the discriminator "
+        "this scenario's precondition asserts — against null before the hook fires",
+    ),
+    ("temporal_ttl_recovers_before_action", "get_cache_key_info", "records_referenced", "value"): (
+        POST_FAULT,
+        "same absent key: the three references are the stale entry the hook writes",
+    ),
+    ("temporal_ttl_recovers_before_action", "get_cache_key_info", "records_found", "value"): (
+        POST_FAULT,
+        "same absent key: zero finds is the other half of that statement",
+    ),
+    ("temporal_ttl_recovers_during_verify", "get_cache_key_info", "exists", "value"): (
+        POST_FAULT,
+        "the sibling template's mechanism on its own key, cache:jobs:pricing-table:hot_set",
+    ),
+    ("temporal_ttl_recovers_during_verify", "get_cache_key_info", "type", "value"): (
+        POST_FAULT,
+        "same absent key, same reason",
+    ),
+    ("temporal_ttl_recovers_during_verify", "get_cache_key_info", "size", "value"): (
+        POST_FAULT,
+        "same absent key, same reason: 90 bytes is the chaos write",
+    ),
+    ("temporal_ttl_recovers_during_verify", "get_cache_key_info", "records_referenced", "value"): (
+        POST_FAULT,
+        "same absent key, same reason",
+    ),
+    ("temporal_ttl_recovers_during_verify", "get_cache_key_info", "records_found", "value"): (
+        POST_FAULT,
+        "same absent key, same reason",
+    ),
     # Group 3: a one-row dead-letter queue holding an invented row. The seeded queue holds
     # four rows the seed script writes, a reset restores them, and nothing removes them — so
     # neither the total nor the row is a state the live world reaches. The platform's triage

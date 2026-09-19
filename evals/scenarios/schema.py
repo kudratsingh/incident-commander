@@ -8,6 +8,7 @@ agent offline against a fake platform, one response (or ordered list) per tool n
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Mapping
 from enum import StrEnum
@@ -26,6 +27,7 @@ from evals.graders.deterministic import (
 )
 from incident_commander.agent.hypothesis import HypothesisCategory
 from incident_commander.api.schemas import AlertPayload
+from incident_commander.config import polling_window_seconds
 from incident_commander.tools.mcp_client import ToolResult
 from incident_commander.tools.policies import Tier, tier_of
 from incident_commander.tools.registry import TOOL_REGISTRY
@@ -236,6 +238,87 @@ def chaos_argument_errors(name: str, arguments: Mapping[str, Any]) -> list[str]:
     return errors
 
 
+#: The hook argument a TTL derivation resolves into. One spelling, because the
+#: platform names it the same way on every hook that has one.
+TTL_ARGUMENT: Final[str] = "ttl_seconds"
+
+
+def _ttl_bound_errors(name: str, resolved: int) -> list[str]:
+    """Ways a resolved TTL falls outside the snapshot's own bounds for that hook.
+
+    ``chaos_argument_errors`` checks names, types and closed sets — not ``minimum`` and
+    ``maximum``, which no hand-written argument had ever needed. A DERIVED one does: the
+    knobs decide the number, the platform caps ``ttl_seconds`` at 3600, and a refusal
+    mid-seeding would arrive after the world had been touched.
+    """
+    schema = chaos_tool_schemas().get(name) or {}
+    raw = schema.get("properties")
+    if not isinstance(raw, dict) or TTL_ARGUMENT not in raw:
+        return []
+    resolved_property = resolve_schema_ref(raw[TTL_ARGUMENT], schema)
+    if not isinstance(resolved_property, Mapping):
+        return []
+    errors = []
+    minimum = resolved_property.get("minimum")
+    maximum = resolved_property.get("maximum")
+    if isinstance(minimum, int | float) and resolved < minimum:
+        errors.append(
+            f"{name}.{TTL_ARGUMENT}={resolved} is outside the snapshot's minimum of {minimum}"
+        )
+    if isinstance(maximum, int | float) and resolved > maximum:
+        errors.append(
+            f"{name}.{TTL_ARGUMENT}={resolved} is outside the snapshot's maximum of {maximum}"
+        )
+    return errors
+
+
+class TtlFromWindows(BaseModel):
+    """A self-recovering fault's TTL, as a multiple of the agent's own timing knobs.
+
+    WP-14.1. A bare ``ttl_seconds: 45`` reads as a fact and is really a bet on
+    ``INVESTIGATE_REPROBE_DELAY_SECONDS`` still being 75 — change the knob and the
+    template silently becomes a different experiment (the fault outlives the run, or
+    expires before the agent's first probe). So the TTL is DERIVED: what the
+    precondition spends proving the fault is there, plus a declared multiple of the
+    window each knob pair gives the investigation and the verify poll.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: Multiple of the ADR 0009 investigation re-probe window. 0.6 puts the expiry
+    #: inside the investigation (the fault is gone before the agent can act); 1.0 or
+    #: more carries it past the action.
+    investigation_multiple: float = Field(default=0.0, ge=0.0, le=10.0)
+    #: Multiple of the ADR 0006 verify polling window, added on top.
+    verify_multiple: float = Field(default=0.0, ge=0.0, le=10.0)
+    #: The smallest TTL that still leaves the fault observable at run start, in the
+    #: units the world imposes (a metric's refresh interval, a heartbeat's staleness
+    #: bar). Load-bearing at the OFFLINE knob defaults, where both windows are 0.
+    floor_seconds: float = Field(default=30.0, ge=1.0, le=3600.0)
+    #: Why this floor, in the scenario author's own words. Required, because a floor
+    #: is the one number in the derivation that is not derived.
+    floor_reason: str = Field(min_length=20)
+
+    def seconds(
+        self,
+        *,
+        precondition_window: float,
+        investigation_window: float,
+        verify_window: float,
+    ) -> int:
+        """The TTL to seed, in whole seconds — the platform types it as an integer.
+
+        Rounded UP: a half-second lost to truncation is a half-second of fault the
+        precondition may not get to see.
+        """
+        derived = (
+            precondition_window
+            + investigation_window * self.investigation_multiple
+            + verify_window * self.verify_multiple
+        )
+        return int(math.ceil(max(derived, self.floor_seconds)))
+
+
 class ChaosHook(BaseModel):
     """Declarative chaos-hook invocation the runner fires before a live run.
 
@@ -251,6 +334,9 @@ class ChaosHook(BaseModel):
 
     name: str = Field(min_length=1, description="Platform hook name, e.g. `inject_latency`.")
     arguments: dict[str, Any] = Field(default_factory=dict)
+    #: WP-14.1: derive ``ttl_seconds`` from the agent's timing knobs instead of writing
+    #: one. Set only by a temporal template; ``None`` leaves ``arguments`` as declared.
+    ttl_from_windows: TtlFromWindows | None = None
 
     @field_validator("name")
     @classmethod
@@ -279,6 +365,66 @@ class ChaosHook(BaseModel):
                 "(docs/runbook.md). Never hand-edit the snapshot."
             )
         return self
+
+    @model_validator(mode="after")
+    def _a_derived_ttl_replaces_a_written_one(self) -> ChaosHook:
+        """A derivation is the hook's only TTL, and only where the hook has one.
+
+        Two spellings of one fact is how ``FIX_MAP`` drifted (divergence C5): a written
+        ``ttl_seconds`` beside a derivation would seed one value and document another.
+        And a derivation on a hook whose schema has no TTL is fiction — the argument
+        would be rejected live, after the world was touched.
+        """
+        if self.ttl_from_windows is None:
+            return self
+        if TTL_ARGUMENT in self.arguments:
+            raise ValueError(
+                f"chaos hook {self.name!r} declares both ttl_from_windows and a "
+                f"written {TTL_ARGUMENT}. The derivation resolves into that argument, "
+                "so keeping both leaves the seeded value and the documented one free "
+                "to disagree. Drop the written one."
+            )
+        schema = chaos_tool_schemas().get(self.name) or {}
+        properties = schema.get("properties")
+        if not isinstance(properties, dict) or TTL_ARGUMENT not in properties:
+            raise ValueError(
+                f"chaos hook {self.name!r} declares ttl_from_windows, but the snapshot "
+                f"gives it no {TTL_ARGUMENT} argument — the fault it seeds does not "
+                "recover on a clock, so a TTL derivation describes something the "
+                "platform will not do. Pick a hook that carries a TTL."
+            )
+        return self
+
+    def seeded_arguments(
+        self,
+        *,
+        precondition_window: float,
+        investigation_window: float,
+        verify_window: float,
+    ) -> dict[str, Any]:
+        """The arguments to send, with a derived TTL resolved into them.
+
+        Validated against the snapshot on the way out, because the resolved integer is
+        the one argument value no load-time check has seen.
+        """
+        if self.ttl_from_windows is None:
+            return dict(self.arguments)
+        resolved = self.ttl_from_windows.seconds(
+            precondition_window=precondition_window,
+            investigation_window=investigation_window,
+            verify_window=verify_window,
+        )
+        arguments = {**self.arguments, TTL_ARGUMENT: resolved}
+        errors = chaos_argument_errors(self.name, arguments)
+        errors += _ttl_bound_errors(self.name, resolved)
+        if errors:
+            raise ValueError(
+                f"chaos hook {self.name!r} resolved {TTL_ARGUMENT}={resolved} from its "
+                f"ttl_from_windows derivation and the snapshot refuses it: "
+                f"{'; '.join(errors)}. The knobs this run carries put the derivation "
+                "outside what the platform accepts."
+            )
+        return arguments
 
 
 class ChaosPlan(BaseModel):
@@ -317,6 +463,15 @@ class ChaosPlan(BaseModel):
     def hook_names(self) -> tuple[str, ...]:
         """Every hook this plan fires, setup then teardown, in declared order."""
         return tuple(hook.name for hook in self.setup + self.teardown)
+
+    @property
+    def self_recovering(self) -> bool:
+        """Whether any setup hook's fault is timed to expire during the run (WP-14.1).
+
+        Reads the DERIVATION, not a written ``ttl_seconds``: every TTL hook has one, and
+        most are set long enough to outlast the run, which is not a temporal experiment.
+        """
+        return any(hook.ttl_from_windows is not None for hook in self.setup)
 
 
 class PreconditionField(FieldComparator):
@@ -540,6 +695,10 @@ class ScenarioFamily(StrEnum):
     JOBS_NOT_PROGRESSING = "jobs_not_progressing"
     NOISE_CONTROL = "noise_control"
     POSTGRES = "postgres"
+    # Plan 00 § 113's capability level 7 (WO-R3-236, WP-14.1): the symptom is a fault
+    # that is there and then is not, on its own clock. Its own family because what the
+    # world PRESENTS is the recovery, not the fault underneath it.
+    TEMPORAL_RECOVERY = "temporal_recovery"
     TOOL_FAULT = "tool_fault"
     TRACES = "traces"
     WORKFLOW = "workflow"
@@ -763,6 +922,68 @@ class Scenario(BaseModel):
         a plan-declaring scenario, so reading it directly stops counting a plan.
         """
         return self.chaos.seeds_chaos
+
+    @property
+    def is_temporal(self) -> bool:
+        """Whether this scenario's fault is timed to recover during the run (WP-14.1)."""
+        return self.chaos.self_recovering
+
+    @property
+    def precondition_window_seconds(self) -> float:
+        """Wall-clock the preconditions may spend before the agent's first call.
+
+        Summed across probes, because they run in sequence, and with
+        ``polling_window_seconds``' own arithmetic per probe: the delay falls BETWEEN
+        attempts, so a one-look probe waits nothing. Part of a derived TTL, since this is
+        fault-time the run has already spent by the time the agent starts.
+        """
+        return sum(
+            polling_window_seconds(probe.attempts, probe.delay_seconds)
+            for probe in self.expected_precondition
+        )
+
+    @property
+    def recorded_refusal(self) -> str | None:
+        """Why a recorded run of this scenario would not be a run of it — or ``None``.
+
+        WP-14.1, and the one refusal this repo makes about a MODE rather than a world: a
+        recording answers the call that was made at the clock it is replayed at (ADR
+        0046), so a fault whose whole content is when it expires replays as a fault that
+        never expires. The row would carry a temporal label over a static world.
+        """
+        if not self.is_temporal:
+            return None
+        return (
+            f"scenario {self.name!r} is a temporal template: its fault is timed to "
+            "recover on its own during the run, and that clock IS the experiment. A "
+            "recording replays each call's stored answer (ADR 0046), so the expiry "
+            "never happens and the false-attribution grade has no timeline to compare "
+            "against — the row would claim a temporal measurement from a static world. "
+            "Run it live (WP-14.1), one scenario per invocation, or not at all."
+        )
+
+    @model_validator(mode="after")
+    def _a_timed_fault_asserts_it_is_present_at_run_start(self) -> Scenario:
+        """A temporal template proves its fault is THERE, not that it was seeded.
+
+        A time-windowed fixture drifts by the clock rather than by the data (LESSONS
+        2026-09-07: ``failed_traces_scan``'s seeded traces age out of their own probe
+        window), and a TTL fault is a time-windowed fixture BY DESIGN. Without a
+        precondition the two failure modes are indistinguishable from the grade: a fault
+        so short the agent never saw it reads as an agent that missed it, which measures
+        the harness. So the precondition is structural here, not a scenario author's
+        habit.
+        """
+        if self.is_temporal and not self.expected_precondition:
+            raise ValueError(
+                f"scenario {self.name!r} seeds a fault with a ttl_from_windows "
+                "derivation and declares no expected_precondition. A timed fault must "
+                "be asserted PRESENT at the moment the run starts — seeding it is not "
+                "evidence it is still there, and a fault that expired before the "
+                "agent's first probe grades the agent for missing something that had "
+                "already gone. Add a precondition that reads the fault itself."
+            )
+        return self
 
     @model_validator(mode="before")
     @classmethod

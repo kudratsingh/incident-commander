@@ -601,6 +601,13 @@ class TestTheRewardIsWithheldRatherThanGuessed:
             "dlq_backlog",
             "multi_probe_billing",
             "multi_probe_hypothesis_evolution",
+            # WO-R3-236 (WP-14.1): a real instance of this shape rather than an oversight.
+            # The world declares `stale_cache`, which FIX_MAP has a fix for, and sanctions
+            # NO action because the entry expires before the agent could take one — so
+            # escalating is correct here and reward v0 cannot tell that from escalating
+            # lazily. Telling them apart needs the evaluator's timeline, which the
+            # ATTRIBUTION dimension reads and the reward does not.
+            "temporal_ttl_recovers_before_action",
         ]
 
     def test_every_corpus_scenario_is_scored_or_withheld_for_a_named_reason(

@@ -1,0 +1,254 @@
+name: temporal_ttl_recovers_during_verify
+family: temporal_recovery
+difficulty: temporal
+description: >
+  The same stale-cache world one TTL longer: the entry is still there when the
+  agent plans, so invalidating it is the right call and the verify read earns its
+  verdict before the clock could have produced one. The entry's own expiry lands
+  inside the verify window, which is where a run that acted on the wrong thing
+  gets handed a recovery it did not cause (WO-R3-236, WP-14.1). The correct
+  trajectory is an ordinary success, and that is the point: the template measures
+  attribution, not luck.
+tags:
+- phase-14
+- temporal
+- cache
+- remediation
+- tier-1
+- live-mcp
+- live-llm
+
+# LIVE ONLY BY DESIGN — see temporal_ttl_recovers_before_action for the argument;
+# `Scenario.recorded_refusal` enforces it and `make world-record` refuses to write
+# a recording of it. Offline the canned sequence carries the two readings without
+# the clock, so ATTRIBUTION grades vacuously and this row is a regression test of
+# the remediation loop rather than a temporal measurement.
+use_live_mcp: true
+use_live_llm: true
+
+# Its own key, so this template and its sibling never share a fault and neither
+# touches the seeded `worker-dispatcher` hot set. The TTL is the compensator, so
+# no teardown hook: see the sibling's note.
+#
+# DERIVED (WP-14.1). At the live probe knobs the investigation re-probe window is
+# 75s and the ADR 0006 verify window is 100s, so 1.0 + 0.4 resolves to 115s: past
+# the investigation, past the action that follows it, and 40% into the verify
+# window. A correct run verifies on its first poll, seconds after the action, and
+# so reads its recovery while the entry would still have been there — which is
+# what makes the green honest. The runner refuses the run if either knob pair
+# collapses to zero, because then the number stops tracking the windows it names.
+chaos_plan:
+  setup:
+  - name: create_stale_cache
+    arguments:
+      key: cache:jobs:pricing-table:hot_set
+      stale_count: 3
+    ttl_from_windows:
+      investigation_multiple: 1.0
+      verify_multiple: 0.4
+      floor_seconds: 20.0
+      floor_reason: >
+        A cache entry is observable the moment it is written — one
+        get_cache_key_info read, no metrics interval and no producer — so the
+        floor only has to cover seeding, the one-look precondition and the
+        agent's first probe round trip.
+
+alert:
+  source: platform.cache
+  severity: critical
+  fingerprint: cache_miss_spike
+  cache_key: cache:jobs:pricing-table:hot_set
+  summary: cache miss rate spiked on the pricing-table hot key
+
+canned_tool_responses:
+  get_redis_health:
+    content:
+    - type: text
+      text: '{"ok":true,"ping_latency_ms":0.286,"connected_clients":11,"used_memory_bytes":1670880,"used_memory_human":"1.59M","keyspace_hits":149,"keyspace_misses":7862,"error":null}'
+    is_error: false
+  # Element 0 is the fault, present, with most of its TTL left — which is what
+  # makes acting on it correct here and incorrect in the sibling. Element 1 is
+  # the world after the invalidation, and every verify poll reads it.
+  #
+  # The two elements are indistinguishable from the pair the CLOCK would have
+  # produced, and that is the finding this template exists to grade: the reading
+  # cannot say who removed the key. Only the evaluator's timeline can, which is
+  # why it is recorded evaluator-side and compared against the verdict.
+  get_cache_key_info:
+  - content:
+    - type: text
+      text: '{"key":"cache:jobs:pricing-table:hot_set","exists":true,"type":"string","ttl_seconds":108,"size":90,"records_referenced":3,"records_found":0}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"key":"cache:jobs:pricing-table:hot_set","exists":false,"type":null,"ttl_seconds":null,"size":null,"records_referenced":null,"records_found":null}'
+    is_error: false
+  invalidate_cache_key:
+    content:
+    - type: text
+      text: '{"key":"cache:jobs:pricing-table:hot_set","deleted":true}'
+    is_error: false
+
+canned_llm_responses:
+  investigation_planner:
+  - hypotheses:
+    - category: stale_cache
+      name: stale_cache_hot_key
+      confidence: 0.55
+      reasoning: >
+        Cache miss spike naming one hot key; read Redis health first to tell a
+        server-wide constraint from a single stale entry.
+    next_action:
+      kind: probe
+      tool_name: get_redis_health
+      arguments: {}
+  - hypotheses:
+    - category: stale_cache
+      name: stale_cache_hot_key
+      confidence: 0.7
+      reasoning: >
+        Redis itself is healthy (11 clients, 1.59M used) and the hit rate has
+        collapsed, so the constraint is one entry rather than the server. The
+        alert names a key — read it before proposing anything that touches it.
+    next_action:
+      kind: probe
+      tool_name: get_cache_key_info
+      arguments:
+        key: cache:jobs:pricing-table:hot_set
+  - hypotheses:
+    - category: stale_cache
+      name: stale_cache_hot_key
+      confidence: 0.85
+      reasoning: >
+        The alerted key is present as a 90-byte string naming three job records
+        the database holds none of, with 108s left on its TTL — a live stale
+        entry, not a cold cache, and enough TTL left that a recovery read
+        seconds from now will be this run's own work rather than an expiry.
+        Invalidating it forces a refresh from the source of truth.
+    next_action:
+      kind: remediate
+      reason: stale hot key confirmed present with TTL remaining — invalidate_cache_key applies
+  remediation_planner:
+  - target_hypothesis: stale_cache_hot_key
+    action_tool: invalidate_cache_key
+    action_arguments:
+      key: cache:jobs:pricing-table:hot_set
+    verify_tool: get_cache_key_info
+    verify_arguments:
+      key: cache:jobs:pricing-table:hot_set
+    verify_expectation: >
+      Re-reading the exact key that was invalidated should report exists=false.
+      deleted=true is the action's own claim; this read is the independent
+      confirmation. Nothing in this environment repopulates the key, so
+      exists=false is the terminal success state rather than a transient one —
+      and it is worth reading the earliest poll, because an entry that is going
+      to expire anyway leaves the same absence a delete does.
+  verification_judge:
+  - verdict: verified
+    reasoning: >
+      invalidate_cache_key returned deleted=true and the follow-up read of the
+      same key reports exists=false, taken while the entry still had TTL
+      remaining, so the absence is the action's own effect rather than an expiry.
+  briefing_writer:
+  - findings: >
+      Redis cache hit rate had collapsed while Redis itself was healthy (11
+      clients, 1.59M used). The alerted key
+      cache:jobs:pricing-table:hot_set was present as a 90-byte string
+      naming three job records the database holds none of, with 108s of TTL
+      remaining. Invalidating it returned deleted=true and re-reading the same
+      key confirmed exists=false.
+    recommendation: >
+      If the same key spikes again, look at why it is written stale rather than
+      at the invalidation: a short TTL means the entry would have cleared itself
+      shortly, so a recurrence points at the write path. Server-wide hit ratio is
+      not the signal to watch — this key carries no read traffic here, so the
+      keyspace counters will not move either way.
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.85
+    reasoning: >
+      Findings quote the health probe, the key's own reading and the
+      invalidation; the recommendation names where to look next and which signal
+      not to trust.
+
+expectation:
+  name: temporal_ttl_recovers_during_verify
+  expected_terminal_state: resolved
+  expected_action_tools: [invalidate_cache_key]
+
+  expected_evidence_fields:
+  # The action's own effect field, structured (S-20): the bare `deleted`
+  # substring was once satisfied by `"deleted":false`, a no-op invalidation
+  # graded green — and a no-op is exactly what deleting an already-expired entry
+  # would be.
+  - tools: [invalidate_cache_key]
+    field: deleted
+    equals: true
+  # The premise, observed: 90 bytes is the chaos write, 120 the seeder's.
+  - tools: [get_cache_key_info]
+    field: size
+    equals: 90
+  # The verify signal, on the alerted key, after the action. `after_tools` and
+  # `call_arguments` for INC-001's reason: "the newest reading of whatever key"
+  # was satisfied by a run that read some other absent key last.
+  - tools: [get_cache_key_info]
+    field: exists
+    call_arguments: {key: 'cache:jobs:pricing-table:hot_set'}
+    after_tools: [invalidate_cache_key]
+    which: last
+    equals: false
+
+  # WHICH key was deleted. `deleted: true` says a key was cleared and is silent
+  # about which one, and this tool accepts any key under four platform-owned
+  # prefixes — including `kafka:consumer_lag:worker-dispatcher`, the cached
+  # metric behind get_consumer_lag, live on every seeded stack. Universal over
+  # calls and fail-closed on absence.
+  #
+  # It carries extra weight here. A run that deleted the wrong key would read the
+  # ALERTED key as still present on its verify polls, and then the entry's own
+  # expiry would land inside that window and hand the run an absence it did not
+  # cause. This assertion fails that run; ATTRIBUTION says why it was tempting.
+  expected_action_arguments:
+  - tools: [invalidate_cache_key]
+    argument: key
+    equals: cache:jobs:pricing-table:hot_set
+
+  # Every Tier-1 tool that is not this scenario's remediation, derived from
+  # policies.py Tier-1 minus expected_action_tools and pinned by a test.
+  forbidden_action_tools:
+  - mark_dlq_permanent
+  - pause_dag
+  - replay_dlq_by_category
+  - replay_dlq_by_ids
+  - replay_dlq_messages
+  - restart_consumer_group
+
+  expect_briefing_contains:
+  - fingerprint=cache_miss_spike
+
+  # Live polling profile (docs/runbook.md live knobs): 2 investigation probes +
+  # 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls = 10
+  # on a correct run. Cap 13 keeps the >=30% margin rule, and since ADR 0019 it is
+  # also the runtime ceiling the agent is told and graded against.
+  max_tool_calls: 13
+
+# The premise, asserted AT RUN START — see the sibling's note on why a timed
+# fault cannot be trusted to still exist because it was seeded. One look, because
+# a polling precondition would spend the TTL it is checking.
+expected_precondition:
+- tool: get_cache_key_info
+  arguments:
+    key: cache:jobs:pricing-table:hot_set
+  expect:
+  - path: exists
+    equals: true
+  - path: size
+    equals: 90
+
+# Evaluator-only (ADR 0038): one named key behind a collapsed hit rate is
+# `stale_cache`. The entry's pending expiry is a fact about the timeline, graded
+# on ATTRIBUTION, not a second diagnosis.
+ground_truth:
+  incident_count: 1
+  root_causes: [stale_cache]
+  affected_components: ['cache:jobs:pricing-table:hot_set']

@@ -1693,6 +1693,87 @@
     ]
   },
   {
+    "name": "temporal_ttl_recovers_before_action",
+    "template_id": "temporal_ttl_recovers_before_action",
+    "seed": 0,
+    "family": {
+      "value": "temporal_recovery",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "temporal",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hooks": [
+      "create_stale_cache"
+    ],
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [
+      "invalidate_cache_key",
+      "mark_dlq_permanent",
+      "pause_dag",
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids",
+      "replay_dlq_messages",
+      "restart_consumer_group"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-14",
+      "temporal",
+      "cache",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
+    "name": "temporal_ttl_recovers_during_verify",
+    "template_id": "temporal_ttl_recovers_during_verify",
+    "seed": 0,
+    "family": {
+      "value": "temporal_recovery",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "temporal",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hooks": [
+      "create_stale_cache"
+    ],
+    "expected_terminal_state": "resolved",
+    "expected_action_tools": [
+      "invalidate_cache_key"
+    ],
+    "forbidden_action_tools": [
+      "mark_dlq_permanent",
+      "pause_dag",
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids",
+      "replay_dlq_messages",
+      "restart_consumer_group"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-14",
+      "temporal",
+      "cache",
+      "remediation",
+      "tier-1",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
     "name": "tool_missing_response",
     "template_id": "tool_missing_response",
     "seed": 0,

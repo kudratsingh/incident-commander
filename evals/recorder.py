@@ -678,6 +678,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if scenario is None:
         return code
 
+    # WP-14.1: refuse at the SOURCE, not only at replay. A recording of a self-expiring
+    # fault is a file that will be replayed later and read as a world — the cheapest
+    # place to stop that is never writing it.
+    if (refusal := scenario.recorded_refusal) is not None:
+        print(f"RECORD FAIL (mode): {refusal}")
+        print("nothing was seeded")
+        return EXIT_PREFLIGHT
+
     try:
         settings = Settings()  # type: ignore[call-arg]
     except ValidationError as err:

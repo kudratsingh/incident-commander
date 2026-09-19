@@ -281,6 +281,19 @@ class Settings(BaseSettings):
         return polling_window_seconds(self.verify_probe_attempts, self.verify_probe_delay_seconds)
 
     @property
+    def investigation_reprobe_window_seconds(self) -> float:
+        """Wall-clock the ADR 0009 re-probes add: 0.0 at the defaults, 75.0 live.
+
+        ``attempts * delay``, NOT ``polling_window_seconds``: a verify attempt is a probe
+        with the delay between attempts, while a re-probe is an EXTRA probe each preceded
+        by its own sleep (``investigation.py``'s ``sleep`` then probe). One attempt there
+        costs a whole delay; one verify attempt costs none. WP-14.1's TTL derivation is
+        the first reader, and reading it off the wrong formula would put a temporal
+        fault's expiry a full delay from where the template meant it.
+        """
+        return self.investigate_reprobe_attempts * self.investigate_reprobe_delay_seconds
+
+    @property
     def db_pool_capacity(self) -> int:
         """Total connections the pool will ever hand out at once."""
         return self.db_pool_size + self.db_max_overflow

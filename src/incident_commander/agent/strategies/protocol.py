@@ -40,6 +40,10 @@ class StrategyContext:
     #: The client the ``candidate_selector`` role calls through (WP-6.2). Separate because the
     #: accounting splits on ROLE; the selector strategy refuses rather than sharing this one.
     selector_llm_client: LLMClientProtocol | None = None
+    #: The client the ``reflection_critic`` role calls through (WP-9.1), for the same reason:
+    #: "added tokens" is the number reflection is judged on, so the critique's cost is metered
+    #: apart from the planner's. ``reflection`` refuses rather than borrowing ``llm_client``.
+    critic_llm_client: LLMClientProtocol | None = None
 
 
 class InvestigationStrategy(Protocol):

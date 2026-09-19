@@ -827,6 +827,83 @@ This replaced four "refreshable pointer" files that each run rewrote in place. T
 
 **Cost.** Disk use now grows with every run rather than staying flat: on the order of a few KB per scenario per run, so a daily 38-scenario suite adds a few MB a month across all four families. That is the price of these files being evidence, and it is the price `evals/runs/` already pays. Pruning is a deliberate, announced operation — never something a run does to itself.
 
+## The training export — `make training-export`
+
+The artifact this buildout leaves behind (WP-15.1, plan 03 § 16.4, [ADR
+0057](ADR/0057-the-training-export-carries-refs-and-labels-and-no-prose.md)).
+`evals/export.py` reads the append-only trace store and writes three files beside
+each other, versioned and exclusive-create like every other output:
+
+```
+evals/exports/training_export.<stamp>.<inv>.jsonl          ← the training data
+evals/exports/training_export.<stamp>.<inv>.labels.jsonl   ← the evaluator's answer key
+evals/exports/training_export.<stamp>.<inv>.manifest.json  ← what the export covers
+```
+
+```bash
+make training-export                                       # say what it would contain
+make training-export TRACE_DIR=evals/runs/<id>/traces      # one archived run
+make training-export ONLY=remediate_stale_cache_success WRITE=1
+```
+
+Zero LLM calls, no platform, no money. It **reads** evidence and never moves,
+rewrites or consumes it (invariant 9; F-002 is what consuming it looks like), and
+the manifest digests every trace file it read so that claim is checkable.
+
+**One line per trajectory, where a trajectory is one `invocation_id` in one trace
+file.** Two attempts at one scenario are two lines, never one (invariant 9 again).
+A line carries the five benchmark keys, the run's models, the planner's
+**decisions** (candidate set, selector decision, the emitted action's kind and
+tool, the ranking either side, the per-step bill), the **actions** with their
+arguments, and each action's **result as a reference**.
+
+**Observations are refs, never content.** A result is
+`(trace_file, observation_id)` plus a SHA-256 of a canonical rendering of it and
+its byte length — so the content is one lookup away in the store that already
+holds it, and the digest proves it is the same content. Tool output is untrusted
+data (invariant 4): inlined, whatever a DLQ payload said would be *in the training
+set*. Error strings are platform output too, so a failed call is `ok: false` and a
+digest, with no message.
+
+**No model prose travels at all** — not a candidate's free-form `name`, not an
+action's `reason`, and not the short `reasoning` the hypothesis schema carries and
+plan 02 § 7 permits in the *trace* record. Every value on a line is a closed-enum
+label, an id, a number, a boolean, a tool name or a digest; the one exception is
+an action's `arguments`, which the agent chose and which are the action.
+`tests/unit/test_export.py` pins the whole key set, so a field added to the line
+lands in that diff.
+
+**The answer key is a separate file with its own artifact kind**, joined by
+`trajectory_id` — ground truth, the discriminating probes, the expectation, and
+whether the run passed. `artifacts.newest("training_export")` cannot resolve to
+it, the same way a recording cannot reach its truth sibling (ADR 0040).
+
+**The holdout gate, second of three.** The loader refuses a `template_id` in two
+splits; the export refuses to *emit* a held-out template, naming it; the report
+refuses to *score* a policy on one it emitted. The export's refusal is a hard
+error that writes nothing — not a filter, because a filter emits everything else
+and leaves the promise resting on somebody reading a warning. It refuses a
+scenario whose split is `holdout`, a `dev` scenario that shares a held-out
+template (every instance of a held-out template is held out — plan 06 D7), and a
+scenario the corpus does not hold at all, since without a split it cannot show
+that one is not held out. The third gate is
+`export.refuse_templates_seen_in_training(template_ids)`, which reads the newest
+manifest by default; nothing exported yet is a pass.
+
+**Re-derivable.** The export is a pure function of (traces, corpus, timestamp,
+invocation id), and the data lines carry no clock of their own, so re-exporting
+the same traces moves only the manifest. An export that could not be re-derived
+would prove nothing about what a policy saw.
+
+**What is deliberately not in it**, stated once in the manifest's
+`absent_fields` rather than as a null on every line: `execution_mode` and
+`recorded_world_id`, because the trace store's `scenario_start` record does not
+carry them and a recorded run is indistinguishable from a live one in it — the
+line carries `live_mcp` and `live_llm`, which is what the record does say;
+`reward_components`, because reward v0 is WP-15.2's and defining it here as well
+is how a harness comes to reward the wrong thing (F-011); and `root_cause_grade`,
+because a grade is a label and labels are in the other file.
+
 ## Cost, latency, and context accounting
 
 Every row of the aggregate report carries an `accounting` record beside its `provenance` one: what the run spent, on which prompt role, over how many planner steps, and how much context each of those steps carried (plan 03 § 7.8, plan 02 § 17). It is built by `src/incident_commander/agent/accounting.py::RunAccounting` and written by `evals/runner.py::build_accounting`.

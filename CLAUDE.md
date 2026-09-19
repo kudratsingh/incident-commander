@@ -147,6 +147,7 @@ incident-commander/
 │   ├── recorded_client.py          # replays one recording to the agent — misses counted, Tier-1 refused
 │   ├── inventory.py                # counts and classifies the corpus (make inventory)
 │   ├── candidate_metrics.py        # pass@k, appeared-at-any-step, duplicate rate (WP-5.2)
+│   ├── export.py                   # trajectory export for training — refs, not output; refuses holdout
 │   ├── judge_calibration/          # trap sets + the calibration harness per judge (WP-6.3)
 │   ├── fixture_drift.py            # canned fixture VALUES vs live, against a blessed ledger
 │   ├── world_drift.py              # a RECORDED world vs live, reusing that walk (make world-drift)
@@ -155,6 +156,7 @@ incident-commander/
 │   ├── trajectories/               # captured runs for debugging and analysis
 │   ├── briefings/                  # escalation briefings emitted during runs
 │   ├── recorded_worlds/            # recorded fault worlds + their ground-truth siblings
+│   ├── exports/                    # training-export JSONL + its labels + its manifest (WP-15.1)
 │   └── reports/                    # baseline.json + a folder per report family (README.md maps it)
 ├── contracts/
 │   └── platform-tools.snapshot.json   # generated from platform, diffed in CI

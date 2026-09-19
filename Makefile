@@ -71,6 +71,10 @@ help:
 	@echo "                   recording's own calls and diffs them with the fixture-drift"
 	@echo "                   walk. Run it before reporting any recorded result. Exit 1 = drift"
 	@echo "  trace-report     render evals/traces/*.jsonl → readable txt files"
+	@echo "  training-export  FREE (reads only) JSONL export of traced trajectories for a"
+	@echo "                   later training stage; TRACE_DIR= picks the trace store,"
+	@echo "                   ONLY=<name> one scenario, WRITE=1 persists. REFUSES a"
+	@echo "                   holdout template by name and never touches the traces"
 	@echo "  chaos-help       list chaos setup subcommands (kill-consumer, etc.)"
 	@echo "  eval-reg         full offline eval + regression gate vs baseline (refuses ONLY=)"
 	@echo "  eval-reset       clear leftover chaos state between live scenarios;"
@@ -419,6 +423,27 @@ endif
 # permanent file (invariant 9).
 trace-report:
 	PYTHONPATH=. uv run python scripts/format_traces.py $(ARGS)
+
+# The trajectory export a later training stage reads (WP-15.1, evals/export.py).
+# Zero LLM calls, no platform, no money: it READS the append-only trace store and
+# writes three files beside each other (invariant 9 — it never consumes evidence).
+#
+# Dry by default: it says what the export would contain and stops. WRITE=1 persists
+#   evals/exports/training_export.<stamp>.<invocation_id>.jsonl           (training data)
+#   evals/exports/training_export.<stamp>.<invocation_id>.labels.jsonl    (EVALUATOR ONLY)
+#   evals/exports/training_export.<stamp>.<invocation_id>.manifest.json   (what it covers)
+# Exclusive-create, so a re-export lands beside the last one.
+#
+# TRACE_DIR= names the trace store (default $$EVAL_TRACE_DIR or evals/traces); point it
+# at evals/runs/<id>/traces/ to export one archived run. ONLY=<scenario> narrows it.
+# It REFUSES, by name, any scenario whose template is held out, and the refusal is the
+# whole export rather than a filter (plan 03 § 4, plan 06 D7).
+.PHONY: training-export
+training-export:
+	uv run python -m evals.export \
+		$(if $(TRACE_DIR),--trace-dir $(TRACE_DIR),) \
+		$(if $(ONLY),--only $(ONLY),) \
+		$(if $(WRITE),--write,)
 
 # --- Chaos setup helpers (live-eval prep) -------------------------------
 # All wrap scripts/chaos_setup.py. Effects self-clean on TTL. Requires

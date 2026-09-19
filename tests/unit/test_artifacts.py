@@ -359,6 +359,14 @@ class TestTheLayoutIsOneFamilyPerFolder:
         # (`tests/unit/test_recorder.py` owns why).
         "recorded_world": ("evals", "recorded_worlds", "consumer_lag_pass"),
         "recorded_world_truth": ("evals", "recorded_worlds", "consumer_lag_pass"),
+        # WP-15.1, and outside `evals/reports/` for `recorded_world`'s reason: an
+        # export is data a later stage reads, not a document. Three families in one
+        # folder — the training data, the evaluator labels a training path must not
+        # load, and the manifest naming every template the data covers
+        # (`tests/unit/test_export.py` owns why, and that they stay disjoint).
+        "training_export": ("evals", "exports"),
+        "training_export_labels": ("evals", "exports"),
+        "training_export_manifest": ("evals", "exports"),
     }
 
     @staticmethod

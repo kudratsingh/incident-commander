@@ -185,6 +185,11 @@ class StepAccounting:
     #: 1 when the critique was acted on and a second planner call ran, else 0. Apart from
     #: ``critic_calls`` because a pass that cost tokens and changed nothing is its own case.
     revised: int = 0
+    #: Branches a ``search`` walk took this step, and the reads the whole walk made — the
+    #: chosen path's included, since one shared ceiling paid for all of them (WP-12.1).
+    #: 0 for every other arm.
+    search_branches: int = 0
+    search_branch_tool_calls: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,6 +285,12 @@ class RunAccounting:
                 selector_calls=0 if record.selector is None else 1,
                 critic_calls=0 if record.revision is None else 1,
                 revised=1 if record.revision is not None and record.revision.revised else 0,
+                search_branches=0 if record.search is None else record.search.branches_taken,
+                search_branch_tool_calls=(
+                    0
+                    if record.search is None
+                    else sum(node.tool_calls_used for node in record.search.nodes)
+                ),
             )
         )
 
@@ -382,6 +393,16 @@ class RunAccounting:
     def revised_steps(self) -> int:
         """Steps whose critique was acted on. Below ``critic_calls`` by the kept ones."""
         return sum(step.revised for step in self.steps)
+
+    @property
+    def search_branches(self) -> int:
+        """Branches taken across the run. 0 for every arm but ``search`` (WP-12.1)."""
+        return sum(step.search_branches for step in self.steps)
+
+    @property
+    def search_branch_tool_calls(self) -> int:
+        """Reads the walks made, against the one ceiling the whole run spends from."""
+        return sum(step.search_branch_tool_calls for step in self.steps)
 
     @property
     def branch_count(self) -> int:

@@ -30,3 +30,6 @@ class StrategyName(StrEnum):
     #: WP-9.1, plan 02 § 13: ``baseline``'s call, one critique of it, at most one revision.
     #: One pass per step, capped in code rather than in the critic's instructions.
     REFLECTION = "reflection"
+    #: WP-12.1, plan 02 § 14: a bounded walk over evidence-gathering decisions — depth ≤ 2,
+    #: branch ≤ 3, one shared ledger, RECORDED mode only (a live world would move under it).
+    SEARCH = "search"

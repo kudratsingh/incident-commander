@@ -8,15 +8,35 @@ that would move a piece of that policy in here.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
 
-from incident_commander.agent.hypothesis import InvestigationStep
+from incident_commander.agent.hypothesis import InvestigationStep, ProbeAction
 from incident_commander.agent.state import RunState
 from incident_commander.agent.strategies.records import StepRecord, StepSink
 from incident_commander.llm.client import LLMClientProtocol
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BranchProbeOutcome:
+    """What a ``search`` branch's read did to the run: evidence and ledger, or a refusal.
+
+    ``run_state`` comes back accrued — one tool call, one evidence entry — so every branch's
+    cost lands in the SHARED ledger before the next branch starts (WP-12.1). A refusal returns
+    the state unchanged and names its reason; the walk records and prunes, never escalates.
+    """
+
+    run_state: RunState
+    refused: str | None = None
+
+
+#: The loop's own read-only prober, handed to a strategy that explores (WP-12.1). It is NOT a
+#: client: the tier re-check, the wire serialization, the MCP call and the ledger accrual are
+#: all behind it in ``investigation.py``, which is where execution policy stays (ADR 0036).
+#: ``None`` on the context means nobody may branch — every mode but RECORDED.
+BranchProber = Callable[[RunState, ProbeAction], BranchProbeOutcome]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -44,6 +64,10 @@ class StrategyContext:
     #: "added tokens" is the number reflection is judged on, so the critique's cost is metered
     #: apart from the planner's. ``reflection`` refuses rather than borrowing ``llm_client``.
     critic_llm_client: LLMClientProtocol | None = None
+    #: How a ``search`` branch gathers evidence (WP-12.1): the loop's own read-only prober,
+    #: wired ONLY in recorded mode. ``None`` is the refusal — ``search`` stops rather than
+    #: degrading into a strategy that explores without reading (ADR 0060).
+    branch_prober: BranchProber | None = None
 
 
 class InvestigationStrategy(Protocol):

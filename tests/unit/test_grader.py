@@ -5203,12 +5203,13 @@ class TestTheFinalDiagnosisIsTheTopCandidate:
         The permitted writers are the loop's ``_plan_next_step`` and each strategy that
         makes its own planner call (``best_of_n_enumerated``, ``best_of_n_sampled``,
         ``candidate_selector``, whose write most needs the guard because it emits the
-        SELECTED candidate as the whole ranking, and ``reflection``, which writes the
+        SELECTED candidate as the whole ranking, ``reflection``, which writes the
         REVISED step's ranking — the one the run acted on, the step it replaced being kept
-        in ``StepRecord.revision`` rather than in ``RunState``). Each writes the field
-        exactly once, in the ``model_copy`` that also accrues that call. A write anywhere
-        else fails here, which is the moment the grader would start scoring a different
-        answer.
+        in ``StepRecord.revision`` rather than in ``RunState`` — and ``search``, which writes
+        the CHOSEN PATH's ranking, every other node it explored being kept in
+        ``StepRecord.search``). Each writes the field exactly once, in the ``model_copy``
+        that also accrues that call. A write anywhere else fails here, which is the moment
+        the grader would start scoring a different answer.
         """
         package = Path(__file__).resolve().parents[2] / "src" / "incident_commander"
         writers = sorted(
@@ -5222,6 +5223,7 @@ class TestTheFinalDiagnosisIsTheTopCandidate:
             "agent/strategies/best_of_n_sampled.py",
             "agent/strategies/candidate_selector.py",
             "agent/strategies/reflection.py",
+            "agent/strategies/search.py",
         ]
         assert writers == permitted, (
             f"the ranking is now written in {writers}; the final diagnosis can no "

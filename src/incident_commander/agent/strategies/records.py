@@ -155,6 +155,86 @@ class RevisionRecord:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class BranchRecord:
+    """One node of a ``search`` walk, as the trace holds it (plan 02 § 14).
+
+    ``probe`` carries its ARGUMENTS as well as its tool name: a filtered read and an
+    unfiltered one share a name (INC-002), and "which read" is what a branch IS.
+    """
+
+    branch_id: str
+    #: ``""`` on the root node — the step the generator proposed before any branch ran.
+    parent_id: str = ""
+    depth: int
+    evidence_snapshot_ref: str
+    #: The candidate whose proposed read opened this branch, so a reader can join a branch to
+    #: the diagnosis that wanted it. ``""`` on the root.
+    candidate_id: str = ""
+    #: The read that was taken to reach this node; ``None`` on the root.
+    probe: str | None = None
+    probe_arguments: dict[str, Any] = field(default_factory=dict)
+    #: The read this node would take next; ``None`` when its path would stop or act.
+    proposed_probe: str | None = None
+    #: Plan 02 § 257's score and each of its four terms, so a reader can see which term
+    #: decided the path rather than only that one number beat another.
+    score: float
+    selector_confidence: float
+    tool_cost: float
+    token_cost: float
+    safety_risk: float
+    #: This node's own ledger deltas — the per-branch cost the report reads.
+    tool_calls_used: int = 0
+    tokens_used: int = 0
+    usd_used: Decimal = Decimal("0")
+    #: Exactly one node per step is the path the run took.
+    chosen: bool = False
+    #: Why this branch never became a scored node (a tier refusal, a replay miss, the
+    #: shared ledger). ``None`` on every node that ran.
+    refused: str | None = None
+
+    def as_record(self) -> dict[str, Any]:
+        """JSON-safe dict. ``usd_used`` is stringified, as ``LLMCallRecord``'s is."""
+        return {**asdict(self), "usd_used": str(self.usd_used)}
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SearchRecord:
+    """One ``search`` step's whole walk: every branch, and the bounds it ran under.
+
+    ``None`` on every other strategy. The bounds are written, not implied, so a reader of an
+    archive never has to know this release's constants; ``pruned_by_ledger`` is what makes a
+    short walk readable as "the shared budget stopped it" rather than as a defect.
+    """
+
+    depth_allowed: int
+    depth_used: int
+    branch_allowed: int
+    branches_taken: int
+    branches_refused: int
+    pruned_by_ledger: int = 0
+    nodes: tuple[BranchRecord, ...] = ()
+    chosen_branch_id: str = ""
+    #: What the whole walk spent, branches and chosen path together — the number the
+    #: shared-ceiling claim is checked against.
+    tool_calls_used: int = 0
+    tokens_used: int = 0
+
+    def as_record(self) -> dict[str, Any]:
+        return {
+            "depth_allowed": self.depth_allowed,
+            "depth_used": self.depth_used,
+            "branch_allowed": self.branch_allowed,
+            "branches_taken": self.branches_taken,
+            "branches_refused": self.branches_refused,
+            "pruned_by_ledger": self.pruned_by_ledger,
+            "nodes": [node.as_record() for node in self.nodes],
+            "chosen_branch_id": self.chosen_branch_id,
+            "tool_calls_used": self.tool_calls_used,
+            "tokens_used": self.tokens_used,
+        }
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class LLMCallRecord:
     """What one LLM call inside a planner step billed.
 
@@ -200,6 +280,8 @@ class StepRecord:
     selector: SelectorRecord | None = None
     #: The ``reflection`` pass over this step, or ``None`` when none ran (every other strategy).
     revision: RevisionRecord | None = None
+    #: The ``search`` walk over this step, or ``None`` when none ran (WP-12.1).
+    search: SearchRecord | None = None
     #: The ``InvestigationStep`` handed back to the loop — the one thing in
     #: this record that has consequences for the run.
     emitted_step: InvestigationStep
@@ -232,6 +314,7 @@ class StepRecord:
             "candidate_set": [candidate.as_record() for candidate in self.candidate_set],
             "selector": None if self.selector is None else self.selector.as_record(),
             "revision": None if self.revision is None else self.revision.as_record(),
+            "search": None if self.search is None else self.search.as_record(),
             "emitted_step": self.emitted_step.model_dump(mode="json"),
             "hypothesis_state_before": [
                 hypothesis.model_dump(mode="json") for hypothesis in self.hypothesis_state_before

@@ -1433,7 +1433,11 @@ def run_scenario(
     # Phase 6 remediation loop: PLANNING → REMEDIATING → VERIFYING. A client per role,
     # so canned queues stay partitioned and tracer records label each call.
     transitions[IncidentState.PLANNING] = make_llm_plan(
-        remediation_planner_llm, model=settings.agent_model
+        remediation_planner_llm,
+        model=settings.agent_model,
+        # The cap lives in Settings since ADR 0056; both transitions that read it are
+        # wired from the same field so a run cannot be capped at two numbers.
+        max_attempts=settings.max_remediation_attempts,
     )
     transitions[IncidentState.REMEDIATING] = make_remediate(
         mcp_client,
@@ -1457,6 +1461,7 @@ def run_scenario(
         # The loop's own clock, so a multi-minute polling window stamps each attempt
         # with when it happened rather than reusing the transition's entry read.
         clock=tick,
+        max_attempts=settings.max_remediation_attempts,
     )
     # RECORDED mode stops where the plan is made (04:117). AFTER the two transitions it
     # replaces, and over BOTH: an approval against a recording is as meaningless as an

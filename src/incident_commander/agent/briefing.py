@@ -12,6 +12,7 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from incident_commander.agent.planner_context import render_already_attempted
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 
 
@@ -114,7 +115,7 @@ def render_briefing(run_state: RunState) -> EscalationBriefing:
         incident_id=str(run_state.incident_id),
         final_state=run_state.state,
         alert_summary=_render_alert_summary(run_state),
-        escalation_reason=_escalation_reason(terminal_marker),
+        escalation_reason=_escalation_reason(terminal_marker, run_state.evidence),
         attempted_action=_attempted_action(terminal_marker),
         # ``trail_of`` filters out the escalation marker; the reason it carries
         # is read back out above into its own field, never faked as a probe.
@@ -145,12 +146,20 @@ def _terminal_marker(run_state: RunState) -> EvidenceEntry | None:
     return last if last.tool_name.startswith("_") else None
 
 
-def _escalation_reason(marker: EvidenceEntry | None) -> str:
-    """Why the agent stopped, in the words the writer recorded.
+def _escalation_reason(marker: EvidenceEntry | None, evidence: Sequence[EvidenceEntry]) -> str:
+    """Why the agent stopped, in the words the writer recorded, plus any earlier attempt.
 
-    From ``result_summary``, not ``arguments["reason"]``: every writer sets it.
+    From ``result_summary``, not ``arguments["reason"]``: every writer sets it. A run that
+    retried (ADR 0056) appends its attempt records: the trail filters underscore markers, so
+    without this a human handed a reinvestigated escalation would not be told about the
+    Tier-1 write already made on their system — the honesty ``remediate_verify_fails``
+    grades. Empty for every run that made no failed attempt.
     """
-    return marker.result_summary if marker is not None else ""
+    reason = marker.result_summary if marker is not None else ""
+    attempted = render_already_attempted(evidence)
+    if not attempted:
+        return reason
+    return f"{reason}\n\n{attempted}" if reason else attempted
 
 
 def _attempted_action(marker: EvidenceEntry | None) -> AttemptedAction | None:

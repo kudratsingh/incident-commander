@@ -22,6 +22,18 @@ _CONNECTIONS_PER_RUN: Final[int] = 2
 # (ADR 0006), so a window that must observe a change has to outlast this.
 PLATFORM_METRICS_INTERVAL_SECONDS: Final[float] = 60.0
 
+# Tier-1 attempts one incident may make: the initial action plus one retry with
+# reinvestigation (ADR 0056, which supersedes ADR 0008's single attempt). The ONE
+# place the number lives — ``MAX_REMEDIATION_ATTEMPTS`` defaults to it and the
+# PLANNING and VERIFYING transitions take it as their own default, so a run
+# nobody configured and a run reading Settings agree.
+DEFAULT_MAX_REMEDIATION_ATTEMPTS: Final[int] = 2
+
+# Ceiling on that knob. Not a safety limit in itself — the scenarios that would
+# justify a third attempt do not exist yet, and raising it without them would
+# buy autonomy no eval measures (ADR 0056 § consequences).
+_MAX_REMEDIATION_ATTEMPTS_CEILING: Final[int] = 3
+
 
 # The id every model ROLE resolves to unless an operator overrides it — one
 # constant so the pin cannot drift. A change needs docs.claude.com and a
@@ -214,6 +226,13 @@ class Settings(BaseSettings):
     # Default 0 keeps canned runs byte-identical; the runner wires it for live.
     investigate_reprobe_attempts: int = Field(default=0, ge=0, le=3)
     investigate_reprobe_delay_seconds: float = Field(default=20.0, ge=0.0)
+
+    # Tier-1 attempts one incident may make (ADR 0056, supersedes ADR 0008). The
+    # transitions take their default from the constant above this class, so this
+    # field is the only place the number is decided.
+    max_remediation_attempts: int = Field(
+        default=DEFAULT_MAX_REMEDIATION_ATTEMPTS, ge=1, le=_MAX_REMEDIATION_ATTEMPTS_CEILING
+    )
 
     # Tier-1 action tools do real work and can outlast a read, so they get their
     # own knob rather than escalating a slow success as a transport error.

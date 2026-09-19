@@ -24,16 +24,22 @@ from incident_commander.agent.accounting import (
 )
 from incident_commander.agent.hypothesis import ReadToolName
 from incident_commander.agent.investigation import (
+    FIX_MAP,
     HINT_ROUTED_TOOLS,
     AlertSubject,
     SubjectMatch,
     alert_subject,
+)
+from incident_commander.agent.planner_context import (
+    ATTEMPT_FAILED_MARKER,
+    render_already_attempted,
 )
 from incident_commander.agent.state import (
     EvidenceEntry,
     IncidentState,
     RunState,
 )
+from incident_commander.config import DEFAULT_MAX_REMEDIATION_ATTEMPTS
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.repair import (
@@ -52,9 +58,10 @@ from incident_commander.tools.policies import (
     Tier,
     resolution_class_of,
     tier_of,
+    tools_at_or_below,
 )
 from incident_commander.tools.registry import TOOL_REGISTRY, description_of
-from incident_commander.tools.wire import wire_arguments
+from incident_commander.tools.wire import arguments_hash, wire_arguments
 
 # Every Tier-1 tool, hand-listed: Pydantic Literals need literal args at import time.
 # Drift caught by ``test_policies.py::
@@ -70,9 +77,6 @@ Tier1ToolName = Literal[
 ]
 
 _IDEMPOTENCY_KEY_LEN: Final[int] = 32
-# One Tier-1 attempt per incident. If the first attempt didn't fix it,
-# a human should look at the escalation briefing before we try again.
-_MAX_REMEDIATION_ATTEMPTS: Final[int] = 1
 
 # How many times one PLANNING transition may refuse a plan whose verify probe cannot observe
 # the acted-on resource. One, not the investigation loop's two (see
@@ -124,6 +128,15 @@ _PLAN_REFUSED_ARGUMENT_MARKER: Final[str] = "_plan_refused_argument"
 # Fifth marker (ADR 0032). Carries the alert field naming the subject, its value and the target
 # test that failed, so an archive can be asked "was the action even aimed at the incident?".
 _PLAN_REFUSED_SUBJECT_TARGET_MARKER: Final[str] = "_plan_refused_subject_target"
+
+# The failed attempt itself (ADR 0056) is ``planner_context.ATTEMPT_FAILED_MARKER``, named
+# there because both planner contexts render it. Underscore-prefixed like every other marker,
+# so it spends no tool budget and stays out of the briefing trail; ``_attempted_calls`` never
+# reads it either — the executed call is on the ledger under its own tool name.
+#
+# How much of the verify reading the attempt record quotes. A whole DLQ listing would crowd
+# out the rest of the context; the reading itself is on the ledger under the probe's own name.
+_ATTEMPT_READING_CHARS: Final[int] = 400
 
 # Every marker ``_format_plan_context`` must render whole and last. Derived membership, not a
 # match on one name: the renderer once matched ``_PLAN_REFUSED_MARKER`` alone, so a refusal
@@ -447,11 +460,13 @@ def build_idempotency_key(incident_id: str, action_tool: str, arguments: dict[st
 def make_llm_plan(
     llm_client: LLMClientProtocol,
     model: str,
+    max_attempts: int = DEFAULT_MAX_REMEDIATION_ATTEMPTS,
 ) -> Callable[[RunState, datetime], RunState]:
     """Bind the LLM to the PLANNING transition: hypothesis + evidence → a ``RemediationPlan``.
 
-    Non-Tier-1 actions are rejected, then every pre-execution guard runs (ADR 0024): two
+    Non-Tier-1 actions are rejected, then every pre-execution guard runs (ADR 0024): three
     escalate, and five refuse and re-ask once (ADR 0030, 0032, 0027, 0028, 0025).
+    ``max_attempts`` is ``MAX_REMEDIATION_ATTEMPTS`` (ADR 0056).
     """
 
     def transition_plan(run_state: RunState, at: datetime) -> RunState:
@@ -459,17 +474,19 @@ def make_llm_plan(
             return _escalate_remediation(
                 run_state, at, "planning entered with no hypotheses on RunState"
             )
-        if run_state.remediation_attempts >= _MAX_REMEDIATION_ATTEMPTS:
-            # Invariant guard (ADR 0008): PLANNING is only reachable from
-            # INVESTIGATING (attempts == 0), so reaching here means the transition
-            # graph changed or a RunState bypassed dispatch.
+        if run_state.remediation_attempts >= max_attempts:
+            # A real limit since ADR 0056, not the unreachability assertion ADR 0008 made:
+            # VERIFYING may now hand back to INVESTIGATING, so PLANNING can be entered with
+            # attempts already spent. VERIFYING declines the edge at the cap, so this fires
+            # on a run whose graph or RunState was built some other way — and it is the
+            # backstop either way, which is why the number is the same one.
             return _escalate_remediation(
                 run_state,
                 at,
-                f"invariant violation (ADR 0008): PLANNING reached with "
-                f"remediation_attempts={run_state.remediation_attempts} "
-                f"(cap={_MAX_REMEDIATION_ATTEMPTS}); the allowed-transition "
-                "graph should make this state unreachable",
+                f"remediation attempt cap reached (ADR 0056): PLANNING entered with "
+                f"remediation_attempts={run_state.remediation_attempts} of "
+                f"max_attempts={max_attempts}. No further Tier-1 action is planned; "
+                "this incident needs a human.",
             )
         remaining_calls = run_state.budget.max_tool_calls - run_state.budget.tool_calls_used
         if remaining_calls < 2:
@@ -517,6 +534,18 @@ def make_llm_plan(
             if isinstance(outcome, RunState):
                 return outcome
             plan = outcome
+
+            # ADR 0056's structural half, and it escalates rather than re-asking: an
+            # identical call is not a plan that needs correcting, it is the first attempt
+            # again with worse justification (ADR 0008's own words). Compared on the WIRED
+            # form, because ``wire_arguments`` default-fills every omitted optional — two
+            # plans one `delay_seconds` apart on paper are one call on the wire.
+            # No ``attempted_tool`` on the marker: this call was never sent, so recording it
+            # as an attempt would have the SAFETY dimension grade a write that never
+            # happened. The reason names the tool in words instead.
+            repeated = _repeated_attempt(plan, run_state)
+            if repeated is not None:
+                return _escalate_remediation(run_state, at, repeated)
 
             # FIRST of the plan-shape guards (ADR 0032), and the order is the priority
             # order of the diagnoses: "not aimed at the incident" is upstream of asking
@@ -741,6 +770,63 @@ def _plan_once(
             f"; {plan.verify_tool} must observe the same resource."
         )
     return run_state, plan
+
+
+def _tier_1_tools() -> frozenset[str]:
+    """The Tier-1 slice, derived from the policy map rather than from the Literal above."""
+    return tools_at_or_below(Tier.TIER_1) - tools_at_or_below(Tier.READ)
+
+
+def _wired_call_id(tool: str, arguments: Mapping[str, Any]) -> str | None:
+    """``tool`` plus the hash of its WIRED arguments, or ``None`` when they do not validate.
+
+    The comparison ADR 0056 refuses a repeat on. ``idempotency_key`` is dropped from both
+    sides: it is a deterministic function of (incident, tool, args), so keeping it would
+    compare the same thing twice, and a call that differs in nothing else mints the same key
+    and would be replayed from the platform's store (LESSONS 2026-09-07).
+    """
+    spec = TOOL_REGISTRY.get(tool)
+    if spec is None:
+        return None
+    try:
+        wired = wire_arguments(spec, {**arguments, "idempotency_key": "0" * _IDEMPOTENCY_KEY_LEN})
+    except ValidationError:
+        return None
+    wired.pop("idempotency_key", None)
+    return f"{tool}:{arguments_hash(wired)}"
+
+
+def _attempted_calls(run_state: RunState) -> frozenset[str]:
+    """Every Tier-1 call this run has already EXECUTED, as ``_wired_call_id`` values.
+
+    Read off the ledger rather than from a new state field: ``make_remediate`` records each
+    executed action under its own tool name with the exact wired arguments it sent, so the
+    ledger already answers "what has this run done" (invariant 6's shape, one layer in).
+    """
+    tier_1 = _tier_1_tools()
+    return frozenset(
+        call_id
+        for entry in run_state.evidence
+        if entry.tool_name in tier_1
+        and (call_id := _wired_call_id(entry.tool_name, entry.arguments)) is not None
+    )
+
+
+def _repeated_attempt(plan: RemediationPlan, run_state: RunState) -> str | None:
+    """The escalation reason for a plan repeating a call this run already made, or ``None``."""
+    candidate = _wired_call_id(plan.action_tool, plan.action_arguments)
+    if candidate is None or candidate not in _attempted_calls(run_state):
+        return None
+    return (
+        f"identical second attempt refused (ADR 0056): "
+        f"{plan.action_tool}({json.dumps(plan.action_arguments, sort_keys=True)}) is the same "
+        f"call this incident already executed — the same tool with the same arguments once "
+        f"every omitted optional is filled in at wire time. The action was NOT executed a "
+        f"second time. A retry earns its attempt by targeting a different hypothesis or a "
+        f"different resource; re-sending the first attempt would re-use its idempotency key "
+        f"and read back as a success that changed nothing. Escalating with the attempt "
+        f"already on the ledger."
+    )
 
 
 def _collect_strings(node: Any, out: set[str]) -> None:
@@ -1636,10 +1722,13 @@ def _format_plan_context(run_state: RunState, top_hypothesis_name: str) -> str:
     # lines are truncated to 200 characters, which would cut a refusal mid-sentence, and a
     # refusal is an instruction about the planner's own last output, so last position is best.
     refusals = [e for e in run_state.evidence if e.tool_name in _PLAN_REFUSAL_MARKERS]
+    # An attempt record is pulled out for the same reason and rendered by the same function
+    # the investigation planner's context uses (ADR 0056).
+    attempted_dump = render_already_attempted(run_state.evidence)
     evidence_dump = "\n".join(
         f"  - [{e.tool_name}] {e.result_summary[:200]}"
         for e in run_state.evidence
-        if e.tool_name not in _PLAN_REFUSAL_MARKERS
+        if e.tool_name not in _PLAN_REFUSAL_MARKERS and e.tool_name != ATTEMPT_FAILED_MARKER
     )
     refusal_dump = (
         "\nYour previous plan was REFUSED. Correct it:\n"
@@ -1663,6 +1752,7 @@ def _format_plan_context(run_state: RunState, top_hypothesis_name: str) -> str:
         f"Evidence collected during investigation:\n{evidence_dump}\n\n"
         f"Tier-1 remediation tools (pick exactly one):\n{tier_1_dump}\n\n"
         f"Read tools (pick one for verification):\n{read_dump}\n"
+        f"{f'\n{attempted_dump}\n' if attempted_dump else ''}"
         f"{refusal_dump}"
     )
 
@@ -1772,6 +1862,122 @@ def make_remediate(
 # VERIFYING
 
 
+class RetryDeclined(NamedTuple):
+    """Why a finished attempt may NOT reinvestigate (ADR 0056)."""
+
+    kind: Literal["cap", "no_alternative", "budget"]
+    """Which precondition failed. Recorded so an archive can be asked which."""
+    reason: str
+    """The escalation reason, used only by a run that had already retried once."""
+
+
+def _alternative_targets(run_state: RunState, plan: RemediationPlan) -> tuple[str, ...]:
+    """Ranked hypotheses other than the attempted one that a Tier-1 action could address."""
+    return tuple(
+        hypothesis.name
+        for hypothesis in run_state.hypotheses
+        if hypothesis.name != plan.target_hypothesis and hypothesis.category in FIX_MAP
+    )
+
+
+def _retry_declined(
+    run_state: RunState, plan: RemediationPlan, *, max_attempts: int, verdict: str
+) -> RetryDeclined | None:
+    """Whether this attempt may hand back to INVESTIGATING, and why not (ADR 0056).
+
+    Three deterministic preconditions, checked in this order: the cap, the budget, and
+    somewhere else to go. The third is what keeps the retry from being ADR 0008's rejected
+    shape — with no other ranked hypothesis carrying a Tier-1 fix, the only plan a
+    reinvestigation could reach is the one ``_repeated_attempt`` refuses, so the outcome is
+    already known and spending a planner call to arrive at it buys nothing.
+    """
+    attempts = run_state.remediation_attempts
+    if attempts >= max_attempts:
+        return RetryDeclined(
+            "cap",
+            f"no fix converged after {attempts} Tier-1 attempts (cap "
+            f"MAX_REMEDIATION_ATTEMPTS={max_attempts}, ADR 0056). The last attempt "
+            f"({plan.action_tool}) ended {verdict}; every attempt this run made is on the "
+            "ledger with its verify reading. No further action will be taken autonomously — "
+            "the agent's model of this incident is wrong and a human needs the briefing.",
+        )
+    remaining_calls = run_state.budget.max_tool_calls - run_state.budget.tool_calls_used
+    if run_state.budget.is_exhausted or remaining_calls < 2:
+        return RetryDeclined(
+            "budget",
+            f"budget cannot fund a second attempt (remaining tool calls={remaining_calls}); "
+            f"the {verdict} verdict on {plan.action_tool} stands and the run escalates. "
+            "Budgets are not reset between attempts (ADR 0056).",
+        )
+    if not _alternative_targets(run_state, plan):
+        return RetryDeclined(
+            "no_alternative",
+            f"no second attempt is available: every ranked hypothesis other than "
+            f"{plan.target_hypothesis!r} has no Tier-1 fix, so reinvestigation could only "
+            f"re-propose the {plan.action_tool} call already on the ledger (ADR 0056).",
+        )
+    return None
+
+
+def _attempt_failed_entry(
+    run_state: RunState,
+    at: datetime,
+    plan: RemediationPlan,
+    *,
+    max_attempts: int,
+    verdict: str,
+    reading: str,
+    why: str,
+) -> EvidenceEntry:
+    """The structured record of one failed attempt, rendered under "Already attempted"."""
+    trimmed = (
+        reading
+        if len(reading) <= _ATTEMPT_READING_CHARS
+        else f"{reading[:_ATTEMPT_READING_CHARS]}…"
+    )
+    return EvidenceEntry(
+        tool_name=ATTEMPT_FAILED_MARKER,
+        # Deliberately NOT ``attempted_tool``: that key means "a call the platform refused"
+        # to ``evals/graders/deterministic.py``, and this call executed and is already on
+        # the ledger under its own name. A second spelling would double-count it.
+        arguments={
+            "attempt": run_state.remediation_attempts,
+            "of": max_attempts,
+            "action_tool": plan.action_tool,
+            "action_arguments": dict(plan.action_arguments),
+            "verify_tool": plan.verify_tool,
+            "verify_arguments": dict(plan.verify_arguments),
+            "verdict": verdict,
+        },
+        result_summary=(
+            f"attempt {run_state.remediation_attempts} of {max_attempts}: "
+            f"{plan.action_tool}({json.dumps(plan.action_arguments, sort_keys=True)}) executed, "
+            f"then {plan.verify_tool}({json.dumps(plan.verify_arguments, sort_keys=True)}) read "
+            f"{trimmed} — verdict {verdict}. {why} Do not propose this call again; target a "
+            "different hypothesis or a different resource, or stop."
+        ),
+        timestamp=at,
+    )
+
+
+def _reinvestigate(run_state: RunState, at: datetime, entry: EvidenceEntry) -> RunState:
+    """Hand back to INVESTIGATING with the failed attempt on the ledger (ADR 0056).
+
+    ``hypotheses`` carry over so the planner RE-RANKS given the failure instead of starting
+    over; ``budget`` and ``remediation_attempts`` are untouched, so the second attempt spends
+    from the first's ledger. The spent plan is dropped: the next PLANNING writes its own, and
+    a stale plan on the state is the re-plan-against-stale-evidence shape ADR 0008 refused.
+    """
+    return run_state.model_copy(
+        update={
+            "state": IncidentState.INVESTIGATING,
+            "remediation_plan": None,
+            "evidence": (*run_state.evidence, entry),
+            "updated_at": at,
+        }
+    )
+
+
 def make_llm_verify(
     mcp_client: MCPClientProtocol,
     llm_client: LLMClientProtocol,
@@ -1780,16 +1986,20 @@ def make_llm_verify(
     probe_delay_seconds: float = 0.0,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], datetime] | None = None,
+    max_attempts: int = DEFAULT_MAX_REMEDIATION_ATTEMPTS,
 ) -> Callable[[RunState, datetime], RunState]:
     """Bind clients + model to the VERIFYING transition.
 
     Probe, then judge the result against the plan's expectation: ``verified`` → RESOLVED,
-    ``not_verified`` → re-probe after ``probe_delay_seconds`` until ``probe_attempts`` is spent,
-    then ESCALATED (VERIFYING has no PLANNING successor, ADR 0008). Polling exists because live
-    probes are eventually consistent; defaults (attempts=1, delay=0) keep the single-probe
-    behaviour canned runs rely on. Attempt 1 always runs (ADR 0006, why loop.py exempts
-    VERIFYING from the loop-level short-circuit); later ones need budget. ``clock`` stamps each
-    poll for real, ``None`` with ``at``.
+    ``not_verified`` → re-probe after ``probe_delay_seconds`` until ``probe_attempts`` is spent.
+    An attempt that did not end the incident — ``not_verified``, a verified stabilizer
+    (ADR 0026) or a verified action that left the alerted condition standing — then either
+    hands back to INVESTIGATING for one more attempt or escalates, per ``_retry_declined``
+    (ADR 0056, superseding ADR 0008). Polling exists because live probes are eventually
+    consistent; defaults (attempts=1, delay=0) keep the single-probe behaviour canned runs
+    rely on. Attempt 1 always runs (ADR 0006, why loop.py exempts VERIFYING from the
+    loop-level short-circuit); later ones need budget. ``clock`` stamps each poll for real,
+    ``None`` with ``at``.
     """
 
     def transition_verify(run_state: RunState, at: datetime) -> RunState:
@@ -1812,6 +2022,11 @@ def make_llm_verify(
 
         # Seeded with the transition's `at` so the clock=None path is unchanged (#59).
         at_attempt = at
+        # The last poll's reading and the judge's words, for the attempt record ADR 0056
+        # writes when this attempt does not end the incident. Seeded so the no-poll case
+        # (unreachable while probe_attempts >= 1) still types.
+        last_reading = ""
+        last_reasoning = ""
         for attempt in range(probe_attempts):
             if attempt > 0:
                 if run_state.budget.is_exhausted:
@@ -1869,6 +2084,8 @@ def make_llm_verify(
                 )
 
             judgment = judge_call.result.output
+            last_reading = probe_summary
+            last_reasoning = judgment.reasoning
             # {attempt, of} on the evidence arguments is what lets a reader tell poll
             # #2/4 from #4/4 (issue #59); ordinals stay authoritative for canned runs.
             ordinal = {"attempt": attempt + 1, "of": probe_attempts}
@@ -1909,10 +2126,32 @@ def make_llm_verify(
                     # Fail closed: an unclassified Tier-1 tool is a missing safety decision.
                     return _escalate_remediation(run_state, at_attempt, str(err))
                 if policy.resolution is Resolution.STABILIZES:
+                    stabilized = _stabilized_reason(plan, policy.rationale)
+                    # ADR 0026's outcome is unchanged when no retry is available, and
+                    # unchanged in the end when one is: a stabilizer never resolves. What
+                    # ADR 0056 adds is that a stabilized incident may reinvestigate once
+                    # before handing off, carrying the sentence below onto the ledger.
+                    declined = _retry_declined(
+                        run_state, plan, max_attempts=max_attempts, verdict="verified_stabilizer"
+                    )
+                    if declined is None:
+                        return _reinvestigate(
+                            run_state,
+                            at_attempt,
+                            _attempt_failed_entry(
+                                run_state,
+                                at_attempt,
+                                plan,
+                                max_attempts=max_attempts,
+                                verdict="verified_stabilizer",
+                                reading=last_reading,
+                                why=stabilized,
+                            ),
+                        )
                     return _escalate_remediation(
                         run_state,
                         at_attempt,
-                        _stabilized_reason(plan, policy.rationale),
+                        stabilized,
                         # `make_remediate` already charged the action, so no
                         # `executed=True` here — it would bill twice. This carries it
                         # onto the briefing's `attempted_action` field.
@@ -1924,6 +2163,25 @@ def make_llm_verify(
                 # none, the queue's rows answer (WO-R2-164).
                 condition = _uncleared_alert_condition(plan, run_state)
                 if condition is not None:
+                    # Same shape as the stabilizer above: the action worked and the incident
+                    # is not over, so it is an attempt that may earn one reinvestigation.
+                    declined = _retry_declined(
+                        run_state, plan, max_attempts=max_attempts, verdict="verified_unresolved"
+                    )
+                    if declined is None:
+                        return _reinvestigate(
+                            run_state,
+                            at_attempt,
+                            _attempt_failed_entry(
+                                run_state,
+                                at_attempt,
+                                plan,
+                                max_attempts=max_attempts,
+                                verdict="verified_unresolved",
+                                reading=last_reading,
+                                why=condition.reason,
+                            ),
+                        )
                     return _escalate_remediation(
                         run_state,
                         at_attempt,
@@ -1935,6 +2193,36 @@ def make_llm_verify(
                     )
                 return run_state.with_state(IncidentState.RESOLVED, at_attempt)
 
+        # Every poll spent on ``not_verified``. One more attempt, or hand off (ADR 0056).
+        declined = _retry_declined(
+            run_state, plan, max_attempts=max_attempts, verdict="not_verified"
+        )
+        if declined is None:
+            return _reinvestigate(
+                run_state,
+                at_attempt,
+                _attempt_failed_entry(
+                    run_state,
+                    at_attempt,
+                    plan,
+                    max_attempts=max_attempts,
+                    verdict="not_verified",
+                    reading=last_reading,
+                    why=last_reasoning,
+                ),
+            )
+        # A run that has NOT yet retried escalates exactly as it did under ADR 0008: the
+        # judge's `not_verified` verdict is the last entry and so the briefing's reason, and
+        # every canned run predating the edge is byte-identical. Only a run that already
+        # spent a retry adds a reason of its own, because "we tried twice" is new information.
+        if run_state.remediation_attempts > 1:
+            return _escalate_remediation(
+                run_state,
+                at_attempt,
+                declined.reason,
+                attempted_tool=plan.action_tool,
+                attempted_arguments=plan.action_arguments,
+            )
         return run_state.with_state(IncidentState.ESCALATED, at_attempt)
 
     return transition_verify

@@ -273,6 +273,14 @@ class Settings(BaseSettings):
     # own knob rather than escalating a slow success as a transport error.
     action_tool_timeout_seconds: float = Field(default=60.0, ge=1.0)
 
+    # AGENT_RUN_REPORTING (ADR 0068): report each transition to the platform so a
+    # human watching the operator console can follow the run. Default FALSE, and
+    # that default is the decision — reporting is for a demo and a live operator,
+    # and a graded eval must not start making extra platform calls because a
+    # setting drifted. `make demo-live` is the only caller that turns it on.
+    # Fail-open whatever it is set to: a refused report never changes a run.
+    agent_run_reporting: bool = False
+
     @property
     def verify_polling_window_seconds(self) -> float:
         """Wall-clock span of the ADR 0006 verify window: 0.0 at the defaults,

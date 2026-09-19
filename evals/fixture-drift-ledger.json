@@ -77,23 +77,23 @@
       "tool": "get_consumer_lag",
       "path": "lag",
       "kind": "value",
-      "context": "canned-only",
-      "why": "the premise is the absence of a measurement: a degraded Redis stops the metrics loop refreshing the cached lag and the previous entry expires, so `lag` is null where a warm stack reads a measured 0. `lag_known` is already volatile and this is the half that is not \u2014 the null IS the fault, and see the group comment for why it cannot be manufactured"
+      "context": "warm-stack",
+      "why": "the premise is the ABSENCE of a measurement: a degraded Redis stops the metrics loop refreshing the cached lag and the previous entry expires, so `lag` is null. A stack that has been up long enough to measure one reads 0 and this drifts; a fresh one has no measurement either and it does not. `lag_known` is already volatile and this is the half that is not \u2014 the null IS the fault, and the cold-stack rows on the `jobs_not_progressing` worlds are this one's mirror"
     },
     {
       "scenario": "cascading_redis_starves_backpressure",
       "tool": "get_consumer_lag",
       "path": "recent_samples[].lag",
       "kind": "live_only_field",
-      "context": "canned-only",
-      "why": "the recorded window goes quiet with the value it dates: the loop writes the number and then the samples under the same 90s TTL, so a fixture whose value is absent carries no samples either, and every row field a live stack sends reads as live-only. The empty list is part of the premise (the tool's own description: an empty window is missing history, never a flat line)"
+      "context": "warm-stack",
+      "why": "the recorded window goes quiet with the value it dates: the loop writes the number and then the samples under the same 90s TTL, so a fixture whose value is absent carries no samples either. A warm volume has a window and every row field it sends reads as live-only; a fresh one has none and nothing drifts. The empty list is part of the premise (the tool's own description: an empty window is missing history, never a flat line)"
     },
     {
       "scenario": "cascading_redis_starves_backpressure",
       "tool": "get_consumer_lag",
       "path": "recent_samples[].measured_at",
       "kind": "live_only_field",
-      "context": "canned-only",
+      "context": "warm-stack",
       "why": "same quiet window, its other absent row field"
     },
     {

@@ -60,7 +60,10 @@ _ESCALATION_MARKER: Final[str] = "_investigate_escalate"
 # a run can collect one of each, naming different missing reads.
 _WHOLE_QUEUE_REFUSED_MARKER: Final[str] = "_handoff_refused_unlisted_queue"
 _DEFAULT_MAX_ITERATIONS: Final[int] = 5
-_REMEDIATE_CONFIDENCE_THRESHOLD: Final[float] = 0.7
+# The bar a hypothesis must clear before the loop will act on it. Public because two
+# other readers need the SAME number: ADR 0059's resolve gate in `remediation.py` and
+# the diagnosis set the ROOT_CAUSE grader reads.
+REMEDIATE_CONFIDENCE_THRESHOLD: Final[float] = 0.7
 
 # How many remediate handoffs may be refused for never probing the alert's subject before
 # the run escalates instead. A refusal steers the planner, but a third ask would not land.
@@ -521,14 +524,14 @@ def make_llm_investigate(
                             "escalating"
                         ),
                     )
-                if top.confidence < _REMEDIATE_CONFIDENCE_THRESHOLD:
+                if top.confidence < REMEDIATE_CONFIDENCE_THRESHOLD:
                     return _finalize(
                         run_state,
                         at,
                         (
                             f"planner emitted remediate but top confidence "
                             f"{top.confidence:.2f} is below threshold "
-                            f"{_REMEDIATE_CONFIDENCE_THRESHOLD}; escalating"
+                            f"{REMEDIATE_CONFIDENCE_THRESHOLD}; escalating"
                         ),
                     )
                 # Third guard: no remediation of an incident whose alerted signal nobody
@@ -808,13 +811,13 @@ def _cached_probe_contradiction(
     prior_top = prior[0]
     if prior_top.category not in FIX_MAP:
         return None
-    if prior_top.confidence < _REMEDIATE_CONFIDENCE_THRESHOLD:
+    if prior_top.confidence < REMEDIATE_CONFIDENCE_THRESHOLD:
         return None
     surviving = max(
         (h.confidence for h in updated if h.category == prior_top.category),
         default=0.0,
     )
-    if surviving >= _REMEDIATE_CONFIDENCE_THRESHOLD:
+    if surviving >= REMEDIATE_CONFIDENCE_THRESHOLD:
         return None
     return prior_top
 
@@ -830,7 +833,7 @@ def _note_freshness_reprobe(
     reason = (
         f"cached read {probe.tool_name} contradicted actionable hypothesis "
         f"{killed.category.value!r} ({killed.confidence:.2f} >= "
-        f"{_REMEDIATE_CONFIDENCE_THRESHOLD}); re-probing after {delay_seconds:g}s "
+        f"{REMEDIATE_CONFIDENCE_THRESHOLD}); re-probing after {delay_seconds:g}s "
         "before accepting the contradiction"
     )
     entry = EvidenceEntry(

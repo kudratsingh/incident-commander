@@ -29,6 +29,7 @@ from pydantic import (
 )
 
 from evals.graders.root_cause import (
+    diagnosis_set,
     final_diagnosis,
     is_not_graded_detail,
     not_graded_detail,
@@ -915,7 +916,9 @@ def _grade_root_cause(
     Independent of ``OUTCOME`` by construction — nothing here reads ``run.state``.
     Three outcomes: no label (vacuous), a label about a world this run was not in
     (vacuous, INC-003), or a real verdict. A declared label with no ranking at all
-    FAILS: a run that never said what was wrong did not diagnose it.
+    FAILS: a run that never said what was wrong did not diagnose it. The diagnosed
+    set is ``diagnosis_set`` (ADR 0059), which is the top label alone for every run
+    that asserts one cause.
     """
     if not ground_truth:
         return DimensionResult(
@@ -942,7 +945,7 @@ def _grade_root_cause(
                 f"ground truth {expected}"
             ),
         )
-    score = score_root_cause((top.category,), ground_truth)
+    score = score_root_cause(diagnosis_set(run), ground_truth)
     return DimensionResult(
         dimension=GradeDimension.ROOT_CAUSE,
         passed=score.exact_set,

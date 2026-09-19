@@ -977,6 +977,154 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         CANNED_ONLY,
         "same absent triage block, fifth field",
     ),
+    # The dual-fault worlds (WO-R3-228, WP-11.1, ADR 0059). `get_deploy_history` is
+    # deliberately absent from both: the second fault of the `bad_deploy` world is the
+    # SEEDED annotated marker, recorded entry for entry, so it agrees with the un-faulted
+    # world and needs no row.
+    ("dual_fault_dlq_and_consumer_lag", "get_consumer_lag", "lag", "value"): (
+        POST_FAULT,
+        "kill_consumer makes worker-dispatcher's lag climb; the check probes the "
+        "un-faulted world, so the canned backlog cannot match by design — the same "
+        "mechanism as consumer_lag_high. All three elements share this row: the "
+        "investigation probe, the reinvestigation's re-read after the replay verified, "
+        "and the post-restart verify",
+    ),
+    ("dual_fault_dlq_and_consumer_lag", "list_dlq_messages", "total", "value"): (
+        CANNED_ONLY,
+        "the premise is a queue holding exactly ONE actionable row, because this world's "
+        "replay has to clear the dead-letter side completely for the run to be able to "
+        "resolve on its second fix. The seeded queue holds four rows, a reset restores "
+        "them and no hook removes one, so a one-row DLQ is not a state the live world "
+        "reaches. Both elements share this row, and the second is also post-action: after "
+        "the replay the queue is drained and total is 0",
+    ),
+    (
+        "dual_fault_dlq_and_consumer_lag",
+        "list_dlq_messages",
+        "items[].created_at",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "the verify element records a DRAINED queue — the replay took the only row — so it "
+        "carries no rows at all, and every row field the platform sends reads as "
+        "live-only. The absence IS the verify signal (INC-001: a success that is an "
+        "absence is claimed on a field that exists when the set is empty, which is "
+        "`total` above). Thirteen rows, one mechanism: the ledger is keyed per path",
+    ),
+    (
+        "dual_fault_dlq_and_consumer_lag",
+        "list_dlq_messages",
+        "items[].dead_lettered_at",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "same drained queue, another of its absent row fields",
+    ),
+    (
+        "dual_fault_dlq_and_consumer_lag",
+        "list_dlq_messages",
+        "items[].error_message",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "same drained queue, another of its absent row fields",
+    ),
+    (
+        "dual_fault_dlq_and_consumer_lag",
+        "list_dlq_messages",
+        "items[].extra",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "same drained queue, another of its absent row fields",
+    ),
+    (
+        "dual_fault_dlq_and_consumer_lag",
+        "list_dlq_messages",
+        "items[].fenced_at",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "same drained queue, another of its absent row fields",
+    ),
+    (
+        "dual_fault_dlq_and_consumer_lag",
+        "list_dlq_messages",
+        "items[].fenced_by",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "same drained queue, another of its absent row fields",
+    ),
+    (
+        "dual_fault_dlq_and_consumer_lag",
+        "list_dlq_messages",
+        "items[].id",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "same drained queue, another of its absent row fields",
+    ),
+    (
+        "dual_fault_dlq_and_consumer_lag",
+        "list_dlq_messages",
+        "items[].remediation_hint",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "same drained queue, another of its absent row fields",
+    ),
+    (
+        "dual_fault_dlq_and_consumer_lag",
+        "list_dlq_messages",
+        "items[].retry_count",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "same drained queue, another of its absent row fields",
+    ),
+    (
+        "dual_fault_dlq_and_consumer_lag",
+        "list_dlq_messages",
+        "items[].trace_id",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "same drained queue, another of its absent row fields",
+    ),
+    (
+        "dual_fault_dlq_and_consumer_lag",
+        "list_dlq_messages",
+        "items[].triage",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "same drained queue, another of its absent row fields",
+    ),
+    (
+        "dual_fault_dlq_and_consumer_lag",
+        "list_dlq_messages",
+        "items[].type",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "same drained queue, another of its absent row fields",
+    ),
+    (
+        "dual_fault_dlq_and_consumer_lag",
+        "list_dlq_messages",
+        "items[].updated_at",
+        "live_only_field",
+    ): (
+        CANNED_ONLY,
+        "same drained queue, another of its absent row fields",
+    ),
+    ("dual_fault_consumer_lag_and_bad_deploy", "get_consumer_lag", "lag", "value"): (
+        POST_FAULT,
+        "same hook, same mechanism as its sibling above: kill_consumer makes the backlog "
+        "climb and the check probes the world before the kill. Both elements share this "
+        "row — the investigation probe and the post-restart verify",
+    ),
 }
 
 

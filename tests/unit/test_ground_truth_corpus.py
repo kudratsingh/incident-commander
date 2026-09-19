@@ -82,6 +82,20 @@ _DECIDED: Final[Mapping[str, tuple[Category, ...] | None]] = {
     "retry_identical_refused": (Category.STALE_CACHE,),
     "retry_second_hypothesis_succeeds": (Category.CONSUMER_SATURATION,),
     "stabilizer_then_reinvestigate": (Category.POISON_MESSAGE,),
+    # WO-R3-228 (WP-11.1, ADR 0059). The first two labels with TWO causes in them, and the
+    # first place the set arithmetic grades a set. Each label is read off the world's two
+    # hooks and the fixtures they produce: a killed group's climbing lag beside, in one
+    # world, a dead-lettered row whose hint and error agree, and in the other a prod
+    # release whose own deploy marker is annotated as correlated with the failures. Order
+    # is irrelevant to the grade (the score is set-shaped) and alphabetical here.
+    "dual_fault_consumer_lag_and_bad_deploy": (
+        Category.CONSUMER_SATURATION,
+        Category.DEPLOY_REGRESSION,
+    ),
+    "dual_fault_dlq_and_consumer_lag": (
+        Category.CONSUMER_SATURATION,
+        Category.POISON_MESSAGE,
+    ),
 }
 
 #: Families that measure the harness rather than a world: ``TOOL_FAULT``
@@ -182,10 +196,11 @@ class TestEveryScenarioCarriesADecision:
         """The number in the PR body, checked against the corpus that produced it."""
         corpus = _corpus()
         graded = [s for s in corpus if s.root_cause_graded]
-        assert (len(graded), len(corpus)) == (44, 53), (
+        assert (len(graded), len(corpus)) == (46, 55), (
             f"{len(graded)} of {len(corpus)} scenarios are root-cause graded; "
             "WO-R3-261 landed 32 of 41, WO-R3-202 took it to 36 of 45, WO-R3-214 "
-            "to 40 of 49 and WO-R3-226 to 44 of 53 — every `jobs_not_progressing`, "
+            "to 40 of 49, WO-R3-226 to 44 of 53 and WO-R3-228 to 46 of 55 — every "
+            "`jobs_not_progressing`, "
             "`workflow_stuck` and retry scenario carries a label, because ADR 0038 "
             "makes one mandatory for a new scenario. Update this number and the "
             "run summary's coverage line together."

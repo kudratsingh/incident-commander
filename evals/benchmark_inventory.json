@@ -649,6 +649,91 @@
     ]
   },
   {
+    "name": "dual_fault_consumer_lag_and_bad_deploy",
+    "template_id": "dual_fault_consumer_lag_and_bad_deploy",
+    "seed": 0,
+    "family": {
+      "value": "consumer_lag",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "multi_fault",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": false,
+    "use_live_llm": false,
+    "chaos_hooks": [
+      "kill_consumer"
+    ],
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [
+      "restart_consumer_group"
+    ],
+    "forbidden_action_tools": [
+      "invalidate_cache_key",
+      "mark_dlq_permanent",
+      "pause_dag",
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids",
+      "replay_dlq_messages"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-11",
+      "remediation",
+      "multi-fault",
+      "escalation",
+      "tier-1",
+      "canned"
+    ]
+  },
+  {
+    "name": "dual_fault_dlq_and_consumer_lag",
+    "template_id": "dual_fault_dlq_and_consumer_lag",
+    "seed": 0,
+    "family": {
+      "value": "dlq",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "multi_fault",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": false,
+    "use_live_llm": false,
+    "chaos_hooks": [
+      "poison_message",
+      "kill_consumer"
+    ],
+    "expected_terminal_state": "resolved",
+    "expected_action_tools": [
+      "replay_dlq_by_ids",
+      "restart_consumer_group"
+    ],
+    "forbidden_action_tools": [
+      "invalidate_cache_key",
+      "mark_dlq_permanent",
+      "pause_dag",
+      "replay_dlq_by_category",
+      "replay_dlq_messages"
+    ],
+    "forbidden_replay_job_ids": [
+      "f030f975-974e-5ce3-aa6b-444136507d86"
+    ],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-11",
+      "remediation",
+      "multi-fault",
+      "retry",
+      "tier-1",
+      "canned"
+    ]
+  },
+  {
     "name": "failed_traces_scan",
     "template_id": "failed_traces_scan",
     "seed": 0,

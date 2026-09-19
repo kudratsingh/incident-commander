@@ -736,6 +736,12 @@ class TestShippedScenariosRoundTripToPlans:
         )
         planned = sorted(s.name for s in scenarios if s.chaos_plan is not None)
         assert planned == [
+            # WO-R3-228 (WP-11.1). The dual-fault worlds: one needs two ordered hooks
+            # because two independent faults is what capability level 5 means, and its
+            # sibling declares a plan with one hook plus a seeded second fault, so both
+            # carry a `settle_seconds` the legacy field cannot express.
+            "dual_fault_consumer_lag_and_bad_deploy",
+            "dual_fault_dlq_and_consumer_lag",
             "workflow_stuck_dead_lettered_root",
             "workflow_stuck_healthy_chain",
             "workflow_stuck_paused_dag",
@@ -946,9 +952,9 @@ class TestTheGraderSideCanReadTheAnswerKey:
     def test_coverage_is_reportable_over_the_whole_corpus(self) -> None:
         corpus = load_scenarios(_SCENARIOS_DIR)
         graded = [s.name for s in corpus if s.root_cause_graded]
-        # 40 of 49 carry a ground-truth label (ADR 0038 makes one mandatory); the other
+        # 46 of 55 carry a ground-truth label (ADR 0038 makes one mandatory); the other
         # nine are recorded abstentions, pinned by test_ground_truth_corpus.py.
-        assert len(graded) == 44
+        assert len(graded) == 46
         assert len(corpus) >= 49
 
 

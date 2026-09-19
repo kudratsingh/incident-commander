@@ -54,6 +54,7 @@ from evals.scenarios.schema import (
     PreconditionField,
     PreconditionProbe,
     Scenario,
+    ScenarioDifficulty,
 )
 from incident_commander.agent import factory
 from incident_commander.agent.briefing import EscalationBriefing
@@ -2745,6 +2746,226 @@ class TestTwoFaultPreconditions:
         assert "UNKNOWN" in message
         assert "get_cache_key_info" in message
         assert "never manufactured" not in message
+
+
+class TestTheShippedDualFaultPreconditions(TestTwoFaultPreconditions):
+    """The same acceptance, on the SHIPPED worlds rather than a synthetic one.
+
+    WO-R3-184 proved the machinery with a fixture because no scenario had two faults;
+    WO-R3-228 shipped two, so the claim can now be made about the corpus. Inherits the
+    seeding/ordering harness above and swaps the scenario: these are canned worlds, so
+    the live flag is flipped for the drive and nothing else about them is touched.
+    """
+
+    #: The dual-fault world driven end to end here. Two probes, two tools, and its second
+    #: premise is a reading rather than a hook's own write, which is the harder half.
+    NAME: Final = "dual_fault_consumer_lag_and_bad_deploy"
+    GROUP: Final = "worker-dispatcher"
+
+    @staticmethod
+    def _shipped_dual_fault() -> list[Scenario]:
+        corpus = load_scenarios(Path(__file__).resolve().parents[2] / "evals" / "scenarios")
+        return [s for s in corpus if s.difficulty is ScenarioDifficulty.MULTI_FAULT]
+
+    @classmethod
+    def _live(cls) -> Scenario:
+        scenario = next(s for s in cls._shipped_dual_fault() if s.name == cls.NAME)
+        return scenario.model_copy(update={"use_live_mcp": True})
+
+    @pytest.fixture(autouse=True)
+    def _no_real_sleeping(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The shipped lag probe polls 10 x 15s; a real wait would be 2.5 minutes a case.
+
+        Autouse rather than per-test because every drive in this class goes through the
+        same probe, and the polling budget itself is asserted from the scenario below.
+        """
+        monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+    @staticmethod
+    def _deploys(note: str | None) -> ToolResult:
+        """The deploy history, with or without the annotation that IS the second fault."""
+        return ToolResult(
+            content=[
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {
+                            "total": 1,
+                            "source": "deploy_markers",
+                            "entries": [
+                                {
+                                    "version": "v0.4.2",
+                                    "revision": "c9f4d02",
+                                    "image_tag": "v0.4.2",
+                                    "deployed_at": "2026-07-28T06:00:00Z",
+                                    "environment": "prod",
+                                    "notes": note,
+                                }
+                            ],
+                        }
+                    ),
+                }
+            ]
+        )
+
+    @classmethod
+    def _lag(cls, lag: int) -> ToolResult:
+        return ToolResult(
+            content=[
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {
+                            "consumer_group": cls.GROUP,
+                            "lag": lag,
+                            "lag_known": True,
+                            "source": "live",
+                            "cache_key": f"kafka:consumer_lag:{cls.GROUP}",
+                        }
+                    ),
+                }
+            ]
+        )
+
+    def test_the_corpus_has_dual_fault_worlds_and_each_proves_every_fault(self) -> None:
+        """One probe per fault, and no fault proven by another fault's probe.
+
+        The shape claim, over the corpus rather than over one file: a world with two
+        faults and one precondition is a world where half the premise is assumed.
+        """
+        shipped = self._shipped_dual_fault()
+        assert len(shipped) >= 2, "no multi_fault scenario shipped — the sweep is vacuous"
+        for scenario in shipped:
+            assert scenario.ground_truth is not None
+            faults = len(scenario.ground_truth.root_causes)
+            probes = scenario.expected_precondition
+            assert len(probes) == faults, (
+                f"{scenario.name} names {faults} root cause(s) and declares "
+                f"{len(probes)} precondition probe(s). One per fault: a fault nobody "
+                "probes is a premise the run assumes."
+            )
+            tools = [probe.tool for probe in probes]
+            assert len(set(tools)) == len(tools), (
+                f"{scenario.name} proves two faults through {tools} — one read cannot "
+                "establish two independent faults, so one of them is unproven."
+            )
+            assert scenario.ground_truth.incident_count == faults
+
+    def test_both_faults_are_proven_before_the_first_model_call(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Seed, then prove both, and only then spend a token — on a shipped world."""
+        order, _built, _result = self._run(
+            monkeypatch,
+            self._live(),
+            {
+                "get_consumer_lag": self._lag(33400),
+                "get_deploy_history": self._deploys("correlated with billing failures"),
+                "restart_consumer_group": ToolResult(
+                    content=[{"type": "text", "text": json.dumps({"accepted": True})}]
+                ),
+            },
+        )
+        assert order[:3] == [
+            "hook:kill_consumer",
+            "tool:get_consumer_lag",
+            "tool:get_deploy_history",
+        ]
+        assert "llm" in order, "the agent never ran, so the ordering proves nothing"
+        assert order.index("llm") == 3
+
+    def test_an_unmet_first_fault_abandons_the_run_and_names_only_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The group is draining, so the world is not the one this scenario grades."""
+        with pytest.raises(runner_module.PreconditionNotMet) as caught:
+            self._run(
+                monkeypatch,
+                self._live(),
+                {
+                    "get_consumer_lag": self._lag(0),
+                    "get_deploy_history": self._deploys("correlated with billing failures"),
+                },
+            )
+        message = str(caught.value)
+        assert "never manufactured" in message
+        assert "get_consumer_lag: lag expected at_least 20.0, observed [0]" in message
+        assert "get_deploy_history" not in message
+
+    def test_an_unmet_second_fault_abandons_the_run_and_names_only_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The release is there and NOT annotated: one fault, not two.
+
+        The half that matters for a dual fault whose second premise is furniture the
+        world already holds — an unannotated marker is a deploy, not a regression, and a
+        run graded on two causes in that world would be graded on a fault nobody made.
+        """
+        with pytest.raises(runner_module.PreconditionNotMet) as caught:
+            self._run(
+                monkeypatch,
+                self._live(),
+                {
+                    "get_consumer_lag": self._lag(33400),
+                    "get_deploy_history": self._deploys(None),
+                },
+            )
+        message = str(caught.value)
+        assert "never manufactured" in message
+        assert "get_deploy_history" in message
+        assert "get_consumer_lag" not in message
+
+    def test_a_false_premise_in_either_fault_costs_no_model_call(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Zero either way, on the shipped world, asserted on the fakes' own counts."""
+        worlds = (
+            {
+                "get_consumer_lag": self._lag(0),
+                "get_deploy_history": self._deploys("correlated with billing failures"),
+            },
+            {
+                "get_consumer_lag": self._lag(33400),
+                "get_deploy_history": self._deploys(None),
+            },
+        )
+        for responses in worlds:
+            order: list[str] = []
+            built = self._record_llm(monkeypatch, order)
+            monkeypatch.setattr(
+                runner_module,
+                "invoke_chaos_hook",
+                lambda _url, _token, name, _arguments: {"seeded": name},
+            )
+            monkeypatch.setattr(
+                runner_module,
+                "make_client",
+                lambda *_a, _responses=responses, _order=order, **_kw: _OrderedCanned(
+                    _responses, _order
+                ),
+            )
+            with pytest.raises(runner_module.PreconditionNotMet):
+                run_scenario(
+                    self._live(), _test_settings(platform_mcp_url="http://real.host:8001/mcp")
+                )
+            assert "llm" not in order
+            assert all(not client.calls for client in built), "a model ran on a false premise"
+
+    def test_each_fault_polls_on_its_own_attempts_and_delay(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The shipped world's own budgets: the lag polls, the deploy marker does not.
+
+        A killed consumer's backlog trails the platform's metrics interval and a deploy
+        marker is written the moment the release lands, so a shared polling budget would
+        be wrong for one of them by construction.
+        """
+        scenario = self._live()
+        lag_probe, deploy_probe = scenario.expected_precondition
+        assert lag_probe.tool == "get_consumer_lag"
+        assert (lag_probe.attempts, lag_probe.delay_seconds) == (10, 15.0)
+        assert deploy_probe.tool == "get_deploy_history"
+        assert (deploy_probe.attempts, deploy_probe.delay_seconds) == (1, 0.0)
 
 
 class TestLiveRequiresAnExplicitSelection:

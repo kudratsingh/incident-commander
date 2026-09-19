@@ -82,9 +82,11 @@ make eval-reg         # the offline suite and the regression gate
 
 The agent's tool registry declares **23 tools** — 16 read tools (consumer lag, DLQ contents, traces, deploy history, DAG state, Redis and Postgres health, incidents, alerts, audit events, cache key info, outbox status, SLO status, circuit breakers) and 7 Tier-1 actions (`restart_consumer_group`, `replay_dlq_messages`, `replay_dlq_by_ids`, `replay_dlq_by_category`, `pause_dag`, `invalidate_cache_key`, `mark_dlq_permanent`).
 
-`contracts/platform-tools.snapshot.json` holds **38**. The extra fifteen are the platform's lab hooks — the fault injectors an evaluator uses to build a scenario's world. The agent never registers them, and since platform v0.6.5 its token cannot call them either.
+`contracts/platform-tools.snapshot.json` holds **40**. Fifteen of the extra seventeen are the platform's lab hooks — the fault injectors an evaluator uses to build a scenario's world. The agent never registers them, and since platform v0.6.5 its token cannot call them either.
 
-That snapshot is generated, never hand-edited. The contract test in CI pulls the pinned platform image by digest, starts it, fetches the live tool schemas and diffs them: a tool that disappears, a parameter that becomes required, an enum that changes or a response field that changes type fails the build. The platform is pinned to **v0.6.12 by digest** in `demo/compose.yml`, which is the single source of truth for that pin.
+The other two are the commander's own run telemetry (`report_agent_run`, `report_agent_briefing`, platform v0.6.13). The agent's token *can* call those, and they are still not in the registry, because a registered tool is a tool the planner may propose and reporting is not a choice the model gets to make — the loop calls them from its checkpoint seam. Both families are filtered out structurally, by the description prefix the platform stamps on them (`[chaos:`, `[commander:`). The telemetry is write-only in the strong sense: there is no tool that reads an agent run back, and the audit rows it writes are withheld from the agent's own `list_audit_events`, so the operator console is the only reader.
+
+That snapshot is generated, never hand-edited. The contract test in CI pulls the pinned platform image by digest, starts it, fetches the live tool schemas and diffs them: a tool that disappears, a parameter that becomes required, an enum that changes or a response field that changes type fails the build. The platform is pinned to **v0.6.13 by digest** in `demo/compose.yml`, which is the single source of truth for that pin — as is the separately-versioned operator-console image the demo stack serves on port 3000.
 
 ### Three principals, and the split is load-bearing
 

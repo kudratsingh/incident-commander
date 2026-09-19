@@ -1,11 +1,11 @@
 # Live demo: full platform footprint sufficient for remediation eval.
 #
-# Pinned to the incident-platform v0.6.12 release by digest so the agent's
+# Pinned to the incident-platform v0.6.13 release by digest so the agent's
 # contract expectations don't shift under us. Every platform-code service
 # below uses the SAME pinned digest. Bump the digest whenever the platform
 # ships a new release and rerun `make eval-live` to catch drift.
 #
-# Services (5 long-running + 2 one-shots):
+# Services (6 long-running + 2 one-shots):
 #   postgres      — platform's system of record (agent uses its own DB)
 #   redis         — platform's cache / pub-sub
 #   redpanda      — Kafka API (consumer-lag scenarios need real consumers);
@@ -18,6 +18,11 @@
 #                   worker process (8 consumer groups incl. worker-dispatcher)
 #                   lives inside this process. The traffic loop and future
 #                   bootstrap_agent_token REST mints need this too.
+#   console       — the platform's own operator console (React SPA behind
+#                   nginx) on 3000, added with v0.6.13 for the live demo. Its
+#                   nginx proxies /api/ to $API_UPSTREAM, which is why one
+#                   image serves both the platform's own compose (service
+#                   `app`) and this one (service `api`).
 #
 # The agent process is not part of this compose. It runs on the host so
 # `make eval-live` can reach the MCP endpoint at http://localhost:8001/mcp.
@@ -132,7 +137,7 @@ services:
     # One-shot schema migration, mirroring the dev compose's migrate
     # service: with two app-code services (mcp + api) neither should
     # race `alembic upgrade head` at boot.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.12@sha256:566303607a92714f94df1164ab8c18bee174b53b61959ebd5671d0525ad9890c
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.13@sha256:328f44a7fe9549149e5ee3771ad6f00ad99fd37cf5eb8035c756477bc078c992
     platform: linux/amd64
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
@@ -144,7 +149,7 @@ services:
     restart: "no"
 
   platform:
-    # incident-platform v0.6.12 (INDEX digest published by the platform
+    # incident-platform v0.6.13 (INDEX digest published by the platform
     # release, confirmed with `docker buildx imagetools inspect` — the
     # top-level `Digest:`, not a per-platform child manifest).
     #
@@ -275,10 +280,36 @@ services:
     #     it (platform ADR 0032).
     # Tool count with CHAOS_ENABLED=true: 37 → 38 (15 of them chaos); the
     # agent's read surface unchanged at 16.
+    #
+    # What v0.6.13 changed (plat #223 + #224, platform ADR 0035): TWO NEW
+    # WRITE TOOLS THE AGENT'S PLANNER NEVER SEES, one new scope, and one
+    # audit stream withheld from the agent. NOTHING joins the agent's read
+    # surface and no existing tool moved.
+    #   * `report_agent_run` and `report_agent_briefing` — the commander's own
+    #     telemetry, descriptions prefixed `[commander: telemetry]` and scoped
+    #     `agent_runs:write` (the 6th scope). They write the `agent_runs` table
+    #     the operator console reads: run state, phase history, current
+    #     hypothesis, last step, and once per run the rendered briefing. The
+    #     commander calls them from the loop's checkpoint hook, NOT from the
+    #     planner's tool list — `[commander:` is filtered out of the typed
+    #     registry exactly as `[chaos:` is, so the planner's page cannot move
+    #     when telemetry does. `report_agent_run` upserts by a
+    #     caller-supplied `run_id` and appends to `phase_history` on a state
+    #     change; a report after a terminal state 409s
+    #     (`agent_run_already_finished`) and a second briefing 409s
+    #     (`agent_run_briefing_already_recorded`).
+    #   * ADR 0012 still holds in BOTH directions, which is the point of the
+    #     design: there is no read tool for `agent_runs` at all, and the
+    #     agent's `list_audit_events` / `get_trace` now withhold the
+    #     `agent.run_reported` rows these two tools write. So the agent cannot
+    #     read back what it reported, and the console (a human operator over
+    #     REST) is the only reader.
+    # Tool count with CHAOS_ENABLED=true: 38 → 40 (15 of them chaos, 2 of them
+    # `[commander:`); the agent's read surface unchanged at 16.
     # Do not switch to `:latest` — the whole point of pinning by digest is
     # that a platform-side prompt or schema change can't shift agent
     # behavior without an explicit bump here.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.12@sha256:566303607a92714f94df1164ab8c18bee174b53b61959ebd5671d0525ad9890c
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.13@sha256:328f44a7fe9549149e5ee3771ad6f00ad99fd37cf5eb8035c756477bc078c992
     # v0.6.12 is an OCI index, but it still lists linux/amd64 ONLY (plus an
     # attestation manifest) — being an index is not the same as being
     # multi-arch, and this one is not. On Apple Silicon this runs under
@@ -383,7 +414,7 @@ services:
     # Env copied deliberately from the dev compose's `app` service
     # (drift between services is platform bug #69's class); minio/jaeger
     # endpoints omitted with the services (see header note).
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.12@sha256:566303607a92714f94df1164ab8c18bee174b53b61959ebd5671d0525ad9890c
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.13@sha256:328f44a7fe9549149e5ee3771ad6f00ad99fd37cf5eb8035c756477bc078c992
     platform: linux/amd64
     ports:
       - "${DEMO_API_HOST_PORT:-8000}:8000"
@@ -443,6 +474,47 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+
+  console:
+    # The platform's operator console, shipped as its own image by the
+    # platform release beside the backend one (plat #223, owner decision A:
+    # the console lives inside the demo stack rather than being run by hand).
+    # Pinned by the INDEX digest, same rule as the backend: still an OCI index
+    # listing linux/amd64 ONLY plus an attestation manifest, re-checked with
+    # `docker buildx imagetools inspect` rather than assumed, so the
+    # `platform: linux/amd64` override is required here too.
+    #
+    # It is a static React bundle behind nginx, and the one thing that makes
+    # it reusable across two compose files is `API_UPSTREAM`: the platform's
+    # own stack calls its backend `app`, this one calls it `api`, and the
+    # nginx template reads the variable instead of hardcoding either. The SPA
+    # itself talks to same-origin `/api/`, so the browser never needs to know.
+    #
+    # No `depends_on: service_healthy` on api, deliberately: nginx resolves
+    # the upstream per request, so the console coming up first only means a
+    # 502 until the backend is ready, and `make demo` waits on both anyway.
+    image: ghcr.io/kudratsingh/incident-platform-console:v0.6.13@sha256:725dc45591bea07bfda49d15b97c6a4db11a6724102cd30124c35b7e0ab13d14
+    platform: linux/amd64
+    environment:
+      API_UPSTREAM: http://api:8000
+    # Host port env-configurable for the same reason as the other two: 3000 is
+    # a common dev port. Override with DEMO_CONSOLE_HOST_PORT.
+    ports:
+      - "${DEMO_CONSOLE_HOST_PORT:-3000}:80"
+    depends_on:
+      - api
+    # 127.0.0.1, NOT localhost, and that is not a style choice. The image's
+    # nginx listens on IPv4 `0.0.0.0:80` only, while `localhost` inside it
+    # resolves to `::1` first, so `http://localhost:80/` answers "connection
+    # refused" from inside a container that is serving the page perfectly to
+    # the host. The first draft of this healthcheck read `localhost` and made
+    # `make demo` fail with `container … is unhealthy` on a healthy console.
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:80/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 volumes:
   demo_pgdata:

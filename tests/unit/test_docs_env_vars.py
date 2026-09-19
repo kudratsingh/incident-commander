@@ -47,6 +47,12 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "SOURCE_LISTING_FOR_ACTION",
         "TIER_1",  # Tier enum values, tools/policies.py
         "TIER_2",
+        "TOOL_REGISTRY",  # the typed tool table, tools/registry.py
+        # Which platform tools that table deliberately does not mirror, by the
+        # description prefix the platform stamps on them — tools/registry.py
+        "EXCLUDED_DESCRIPTION_PREFIXES",
+        # The agent principal's scope table, scripts/bootstrap_agent_token.py
+        "SERVICE_ACCOUNT_SCOPES",
         # Environment variables / make flags consumed outside Settings.
         "CHAOS_ENABLED",  # platform-side chaos gate (demo/compose.yml)
         # Platform-side SLO evaluator interval. v0.6.4 made the evaluator skip the seeded

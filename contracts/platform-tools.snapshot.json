@@ -3915,6 +3915,369 @@
       "is_idempotent": true
     },
     {
+      "name": "report_agent_briefing",
+      "description": "[commander: telemetry] Record your end-of-run write-up for the human operator reading the console. Like `report_agent_run`, a write with no matching read.\nONCE PER RUN. A second call for the same `run_id` is refused with `agent_run_briefing_already_recorded` — the write-up is not merged or overwritten, because an operator may already have read it. If you need to say more, say it in the one call.\nTHE RUN MUST EXIST. Report a state for the run first; a write-up for an unknown id is refused with `agent_run_not_found` rather than creating a record with no history.\nSTORED VERBATIM. `briefing` is a JSON object of your own shape. The platform stores it as sent, validates nothing inside it and interprets none of it; `prose` is stored inside that object so a reader cannot be shown half of it.\nIT CLOSES THE RUN. A write-up arrives at the end, so this call stamps the run finished if your last state report did not.\nTHIS IS NOT A TOOL TO CHOOSE, and a refusal here changes nothing about the incident or about what you have already done to it.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "description": "The run this write-up belongs to. The run must already exist — report its state first, or this is refused with `agent_run_not_found`.",
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "briefing": {
+            "additionalProperties": true,
+            "description": "The caller's own end-of-run write-up, as a JSON object. Stored verbatim and never interpreted, so its shape is the caller's to choose and the platform validates nothing inside it. Written ONCE per run: a second call is refused with `agent_run_briefing_already_recorded` rather than merged, so what an operator has read cannot change underneath them.",
+            "title": "Briefing",
+            "type": "object"
+          },
+          "prose": {
+            "anyOf": [
+              {
+                "maxLength": 20000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The written-out version, when the caller produced one. Stored inside the object above under `prose`, so a reader cannot be shown half the write-up. `null` when there is none.",
+            "title": "Prose"
+          },
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "When the write-up was produced — ISO-8601. Omit and the platform stamps its own clock, as `report_agent_run` does.",
+            "title": "At"
+          }
+        },
+        "required": [
+          "run_id",
+          "briefing"
+        ],
+        "title": "ReportAgentBriefingInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "run_id": {
+            "description": "The run the write-up landed on.",
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "state": {
+            "description": "The run's state, unchanged by this call: a write-up describes a run whose state the caller has already reported, and the platform does not infer one from it.",
+            "title": "State",
+            "type": "string"
+          },
+          "recorded_at": {
+            "description": "The time stored with the write-up — `at` when it was sent, otherwise the platform's clock when it landed.",
+            "format": "date-time",
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "finished_at": {
+            "description": "When the run closed. A write-up arrives at the end, so this is never null: if the caller never reported a terminal state, this call sets it.",
+            "format": "date-time",
+            "title": "Finished At",
+            "type": "string"
+          },
+          "accepted": {
+            "description": "Always true in a successful reply.",
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "run_id",
+          "state",
+          "recorded_at",
+          "finished_at",
+          "accepted"
+        ],
+        "title": "ReportAgentBriefingOutput",
+        "type": "object"
+      },
+      "required_scope": "agent_runs:write",
+      "is_idempotent": false
+    },
+    {
+      "name": "report_agent_run",
+      "description": "[commander: telemetry] Record where you are in the incident you are working, so a human operator watching the console can see it. This is a write with no matching read: nothing here can be read back, and there is no tool that returns what was reported.\nUPSERT BY `run_id`. The first call for an id creates the record; every later call with the same id updates it. Reporting the same state twice leaves the record exactly as it was, so retrying after a timeout or a dropped connection is safe and cannot double-count.\nWHAT IS KEPT AND WHAT IS REPLACED. `state` changes append one entry to an append-only phase history — one entry per transition, so the console can draw a timeline no later report can rewrite. `current_hypothesis` and `last_step` are the current reading and are REPLACED on every call, so omitting one clears it. `alert_id` and `run_label` are filled in when supplied and never cleared.\nTERMINAL STATES CLOSE THE RUN. `resolved`, `escalated` and `failed` stamp the run finished. A further report on a finished run is refused with `agent_run_already_finished`: a closed run is not reopened, because an operator may already have read its ending.\nWHICH CLOCK. `at` is your clock and is stored as sent; `started_at`, `updated_at` and `finished_at` in the reply are the platform's. Omit `at` and the platform stamps its own time rather than inventing yours.\nTHIS IS NOT A TOOL TO CHOOSE. It changes nothing about the incident and tells you nothing you did not already know — it exists so a person can follow along. Calling it is not progress and not investigation.\nIT CANNOT FAIL YOUR WORK. A refusal here means the report was not stored; the incident, and everything you have done to it, is untouched.",
+      "inputSchema": {
+        "$defs": {
+          "HypothesisReport": {
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "description": "The caller's own short name for its leading explanation. Free text — the platform has no list of valid names and does not check this one.",
+                "maxLength": 128,
+                "title": "Name",
+                "type": "string"
+              },
+              "category": {
+                "anyOf": [
+                  {
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The caller's coarse grouping for that explanation, when it has one. `null` means the caller did not supply one, never that it has no explanation — an absent explanation is a `null` hypothesis instead.",
+                "title": "Category"
+              },
+              "confidence": {
+                "anyOf": [
+                  {
+                    "maximum": 1.0,
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "How sure the caller says it is, 0.0 to 1.0. `null` when it did not say. Stored and shown as given; the platform never scales or compares it.",
+                "title": "Confidence"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "title": "HypothesisReport",
+            "type": "object"
+          },
+          "StepReport": {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "description": "`read` when the step only observed the platform, `action` when it changed something.",
+                "enum": [
+                  "read",
+                  "action"
+                ],
+                "title": "Kind",
+                "type": "string"
+              },
+              "tool": {
+                "description": "Name of the call the step made, as the caller knows it.",
+                "maxLength": 128,
+                "title": "Tool",
+                "type": "string"
+              },
+              "at": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "When the step happened — ISO-8601. `null` when the caller did not say, which is not the same as 'just now': the platform does not fill it in.",
+                "title": "At"
+              }
+            },
+            "required": [
+              "kind",
+              "tool"
+            ],
+            "title": "StepReport",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "description": "The caller's own id for this run, stable across every report in it. This call is an upsert on it: the first report creates the record, each later one updates the same record. Reporting the same state twice changes nothing, so a retry after a timeout is safe.",
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "state": {
+            "description": "Where the caller is now. `resolved`, `escalated` and `failed` are terminal: reporting one closes the run, and a further report on a closed run is refused with `agent_run_already_finished` rather than reopening it.",
+            "enum": [
+              "triage",
+              "investigating",
+              "planning",
+              "awaiting_approval",
+              "remediating",
+              "verifying",
+              "resolved",
+              "escalated",
+              "failed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "When this transition happened — ISO-8601. Omit and the platform stamps its own clock at the moment it stores the report, which is the honest reading it has; it never guesses a time the caller did not send.",
+            "title": "At"
+          },
+          "alert_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The alert this run answers, when there is one. Recorded the first time it is supplied and never unset by a later report that omits it — a caller that names it later is telling us something, one that stops naming it is not. Unknown ids are stored as given and read back as `null`.",
+            "title": "Alert Id"
+          },
+          "run_label": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A short stable name for this run, for an operator reading the record afterwards. Free text, treated the same way as `alert_id`: filled in when supplied, never cleared by a later report.",
+            "title": "Run Label"
+          },
+          "current_hypothesis": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/HypothesisReport"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The caller's leading explanation right now, or `null` when it has none. Replaced wholesale on every report — this is the current reading, not a history — so omitting it clears what was there."
+          },
+          "last_step": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/StepReport"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The most recent step the caller took, or `null` before its first. Replaced wholesale on every report, like `current_hypothesis`."
+          }
+        },
+        "required": [
+          "run_id",
+          "state"
+        ],
+        "title": "ReportAgentRunInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "run_id": {
+            "description": "The run this report landed on — the id that was sent.",
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "state": {
+            "description": "The state now stored for the run.",
+            "title": "State",
+            "type": "string"
+          },
+          "created": {
+            "description": "True when this report created the record, false when it updated one that already existed.",
+            "title": "Created",
+            "type": "boolean"
+          },
+          "phase_appended": {
+            "description": "True when the state changed and a phase entry was appended. False means the state was already this one and the history was left alone — the report still landed, and `accepted` says so.",
+            "title": "Phase Appended",
+            "type": "boolean"
+          },
+          "phase_count": {
+            "description": "How many phase entries the run now has. Never decreases: the history is append-only.",
+            "title": "Phase Count",
+            "type": "integer"
+          },
+          "started_at": {
+            "description": "When the first report of this run landed, on the platform's clock.",
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When this report landed, on the platform's clock.",
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "When the run reached a terminal state. `null` while it has not — which means the run is still open, not that its end was not recorded.",
+            "title": "Finished At"
+          },
+          "accepted": {
+            "description": "Always true in a successful reply; a refused report is an error, not an `accepted: false`. Present so a caller logging one field logs a meaningful one.",
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "run_id",
+          "state",
+          "created",
+          "phase_appended",
+          "phase_count",
+          "started_at",
+          "updated_at",
+          "accepted"
+        ],
+        "title": "ReportAgentRunOutput",
+        "type": "object"
+      },
+      "required_scope": "agent_runs:write",
+      "is_idempotent": false
+    },
+    {
       "name": "restart_consumer_group",
       "description": "Restart a stalled Kafka consumer group and clear any throttling applied to it, so its supervisor brings it back at full speed. `kill_key_cleared` / `latency_key_cleared` report whether each condition was actually present. Idempotent — repeat calls with the same idempotency_key are safe.\nWHAT `accepted` MEANS: the flag-clearing ran. It is true for any group name, including one that matches no consumer, and it does not assert that anything restarted. `group_recognized` reports whether the name matches a group the platform knows about; false there, with both `*_cleared` false, is a typo'd group name — the stalled consumer is still down. The name is never refused, so a group added after this build still works.\nVERIFYING: a real restart brings the consumer back within a few seconds (measured ~2s). Confirm via group membership and draining lag — not via get_consumer_lag alone, whose cached value keeps reading the pre-restart high for ~30s after a genuine recovery. `kill_key_cleared: false` with an unchanged consumer is the signature of a reused idempotency_key replaying an old success rather than acting.",
       "inputSchema": {

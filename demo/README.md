@@ -1,9 +1,9 @@
 # Demo
 
 Bring up the incident-platform stack the agent talks to — Postgres, Redis,
-Redpanda, the standalone MCP process, and the REST app that hosts the consumer
-groups — so you can exercise the agent against real HTTP tool calls instead of
-canned fixtures.
+Redpanda, the standalone MCP process, the REST app that hosts the consumer
+groups, and the platform's operator console — so you can exercise the agent
+against real HTTP tool calls instead of canned fixtures.
 
 `make demo` brings the stack **up and nothing else**. It does not run an eval;
 see [Running an eval against it](#running-an-eval-against-it) below.
@@ -16,11 +16,12 @@ see [Running an eval against it](#running-an-eval-against-it) below.
   `platform: linux/amd64` on the three platform services and they run under
   emulation until the platform ships a multi-arch build. Redpanda, Postgres,
   and Redis are multi-arch and run native.
-- Host ports 8001 (MCP) and 8000 (REST) free. If something already owns 8001,
-  either stop it or set `DEMO_MCP_HOST_PORT` in `.env` to a free port and
-  update `PLATFORM_MCP_URL` to match — see `.env.example`. `DEMO_API_HOST_PORT`
-  does the same for the REST app. If the thing on 8001 *is* a platform you want
-  to test against, skip `make demo` entirely and point `PLATFORM_MCP_URL` at it.
+- Host ports 8001 (MCP), 8000 (REST) and 3000 (console) free. If something
+  already owns 8001, either stop it or set `DEMO_MCP_HOST_PORT` in `.env` to a
+  free port and update `PLATFORM_MCP_URL` to match — see `.env.example`.
+  `DEMO_API_HOST_PORT` and `DEMO_CONSOLE_HOST_PORT` do the same for the REST app
+  and the console. If the thing on 8001 *is* a platform you want to test
+  against, skip `make demo` entirely and point `PLATFORM_MCP_URL` at it.
 - `.env` with `PLATFORM_TOKEN=sa_...` (a service-account token issued by the
   platform). If you don't have one yet, `make bootstrap-token` against a
   running stack mints it and prints the `.env` lines to copy. Idempotent.
@@ -37,20 +38,50 @@ see [Running an eval against it](#running-an-eval-against-it) below.
 make demo
 ```
 
-That is `docker compose -f demo/compose.yml up -d --wait` scoped to the five
-long-running services (postgres, redis, redpanda, platform, api). Two one-shots
-run first via `depends_on` and then exit: `migrate` (`alembic upgrade head`, so
-the two app services never race the schema) and `redpanda-init` (creates the
-6-partition job topics). A healthy stack is therefore **five running containers
-plus two exited one-shots** — the `--wait` list is scoped to the long-running
-five precisely because compose fails the wait when a one-shot exits during the
-watch window.
+That is `docker compose -f demo/compose.yml up -d --wait` scoped to the six
+long-running services (postgres, redis, redpanda, platform, api, console). Two
+one-shots run first via `depends_on` and then exit: `migrate` (`alembic upgrade
+head`, so the two app services never race the schema) and `redpanda-init`
+(creates the 6-partition job topics). A healthy stack is therefore **six running
+containers plus two exited one-shots** — the `--wait` list is scoped to the
+long-running six precisely because compose fails the wait when a one-shot exits
+during the watch window.
 
 Then mint a token:
 
 ```bash
 make bootstrap-token
 ```
+
+Re-minting is not optional on a stack you last used before v0.6.13: the agent
+account gained the `agent_runs:write` scope with that pin, and **a token minted
+before it does not carry the scope**. Reporting is fail-open, so a stale token
+costs you no run — it costs you an empty console, which reads like a frontend
+bug. `make bootstrap-token` corrects the live account and prints three fresh
+tokens; paste all three.
+
+## The operator console
+
+`make demo` brings up the platform's own console at
+**http://localhost:3000/** (or `$DEMO_CONSOLE_HOST_PORT`). It is the platform's
+React app served by nginx out of its own released image, and its `/api/` calls
+are proxied to the `api` service inside the compose network — which is why the
+image takes an `API_UPSTREAM` variable instead of hardcoding a service name:
+the platform's own compose calls its backend `app`, this one calls it `api`, and
+one image serves both.
+
+Log in with the demo operator account — the same one
+`scripts/bootstrap_agent_token.py` registers and promotes to platform admin, and
+the same one `scripts/traffic_loop.py` submits jobs as. Its email and password
+are the `DEFAULT_EMAIL` and `DEFAULT_PASSWORD` constants at the top of that
+script; this file does not repeat them, for the same reason it does not repeat
+the digests. That account is a **human** operator, and the distinction is the
+whole point of the demo: the console shows it things the agent's own principal
+cannot see — the `chaos.*` audit rows that say a fault was injected, and the
+`agent_runs` record the agent writes but has no tool to read back.
+
+`/demo` is the page the live demo drives; `make demo-live` prints its URL with
+the right `?mode=` already on it.
 
 ## Stopping: `demo-down` keeps your data, `demo-destroy` deletes it
 

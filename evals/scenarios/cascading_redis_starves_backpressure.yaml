@@ -1,0 +1,515 @@
+# Capability level 6 (plan 00 § 4, plan 01 § 8, WP-11.2): a CASCADE. One fault, one
+# incident, four links — and the agent's job is to name the ROOT rather than the link
+# it can see.
+#
+# The chain is the platform's own, not a story about it:
+#
+#   1. Redis is the constraint (the root).
+#   2. The metrics loop caches worker-dispatcher's lag in Redis every ~60s under a 90s
+#      TTL; while Redis refuses or loses that write the entry is not refreshed, and a
+#      skipped write leaves the PREVIOUS entry to expire rather than writing a null
+#      (platform dispatcher.py: `lag is None` skips the cache write and the gauge).
+#      So the reading the admission check consumes goes stale and then goes absent.
+#   3. `check_backpressure` reads exactly that cached entry and FAILS OPEN three ways —
+#      absent/expired key, unparseable value, failed read — so the throttle stops
+#      refusing anything (platform app/utils/backpressure.py).
+#   4. `POST /jobs` therefore admits work it would have refused, the dispatch queue
+#      grows, and the `job_dispatch_latency` objective burns while the completion
+#      objective stays healthy: work is arriving and being dispatched LATE, not failing.
+#
+# WHAT IS NOT OBSERVABLE, stated rather than papered over: link 3 has no agent-visible
+# reading at all. Nothing on the tool surface reports the admission decision, the
+# threshold it compares against, the value it last read, or which fail-open branch
+# fired. So link 3 gets NO precondition — a probe that re-read the cached lag would be
+# link 2 wearing link 3's label, which is the cross-satisfiable premise this suite
+# refuses everywhere else. `README-multi-fault.md` § the cascading template carries the
+# missing reading as a platform work item; it is deliberately not built here.
+#
+# CANNED, and the blocker is the fault rather than the fixtures. `saturate_redis` writes
+# at most 256 MiB of keys, and the eval stack's Redis (demo/compose.yml, `redis:7-alpine`
+# with no config) has no `maxmemory`, so nothing is evicted and no write fails: link 1
+# lands as a memory reading and links 2-4 never fire. The live leg needs a memory ceiling
+# on that Redis (`docs/REDIS.md` names `noeviction` as the intended posture, which makes
+# the mechanism an OOM on write). That is a stack decision with a blast radius over every
+# other scenario sharing the instance, so it is reported, not taken.
+
+name: cascading_redis_starves_backpressure
+family: cache_redis
+difficulty: cascading
+benchmark_split: dev
+description: >
+  Capability level 6: a causal chain rather than two faults. Redis is the constraint, so
+  the cached consumer-lag measurement the admission check reads is no longer refreshed,
+  so the throttle fails open, so the API admits work it would have refused and the
+  dispatch-latency objective burns. The agent sees the END of the chain in its alert and
+  a HOLE where the queue reading should be. Correct trajectory: read the alerted group's
+  lag and find no measurement (not a zero), rule out the handoff queue between the
+  database and the broker, confirm the objective that fired and see completion healthy
+  beside it, read Redis, and escalate naming the root. `redis_saturation` is outside
+  `FIX_MAP`, so the sanctioned action count is zero and all seven Tier-1 tools are
+  forbidden — including the one this world makes tempting, restarting the consumer whose
+  lag cannot be read.
+
+tags:
+- phase-11
+- cascading
+- cache
+- escalation
+- canned
+
+# CANNED. The `chaos_plan` below is real and argument-checked against the pinned
+# snapshot, and the preconditions are the probes a live leg would run — what is missing
+# is a Redis that can be made to refuse a write (see the header). No live leg has run.
+use_live_mcp: false
+use_live_llm: false
+
+# ONE hook, deliberately. A cascade is not two hooks at once (plan 01 § 8): every link
+# after the first has to fall out of the platform's own mechanism, or the scenario proves
+# the harness can seed two things rather than that the agent can follow a chain.
+#
+# 256 MiB is the tool's whole allowance (`num_keys x value_bytes <= 256 MiB`), which is
+# the most pressure this surface can ask for. `ttl_seconds: 600` outlasts the settle
+# window plus the preconditions plus the run; the keys then expire on their own and
+# `make eval-reset PURGE_IDEMPOTENCY=1` is the authoritative restore.
+#
+# NO teardown, and ADR 0037 permits it: `ChaosHook` is closed over the chaos surface and
+# nothing there un-saturates Redis. Two teardown facts a live leg must plan for. The
+# hook's own keys are bounded by their TTL, but keys it pushed OUT of Redis do not come
+# back (platform WO-R2-56): the CQRS read-model sets need `rebuild_read_model`, while the
+# rate limits and this scenario's own backpressure cache rebuild themselves. And the
+# world audit's baseline for this group is `lag 0 with lag_known true`, which returns
+# only after the metrics loop has completed a pass on a healthy Redis.
+chaos_plan:
+  setup:
+  - name: saturate_redis
+    arguments:
+      num_keys: 4096
+      value_bytes: 65536
+      ttl_seconds: 600
+  # The chain needs TIME, not just a hook: the cached entry lives for up to 90s after the
+  # last successful write, and the queue only grows once admission stops refusing. This
+  # is one wait for the whole plan, ahead of the per-probe polling below.
+  settle_seconds: 120
+
+# The alert is the END of the chain, which is the whole point of the template: the only
+# thing that pages is the consequence, four links from the cause. `platform.slo` is the
+# platform's own alert producer (its evaluation loop raises one critical alert per
+# fast-burning objective), so this is the alert this world actually fires.
+#
+# `consumer_group` NAMES THE SUBJECT on purpose. It makes `get_consumer_lag` the
+# mandatory first probe (ALERT_SUBJECT_PROBES, cmd #177), so the agent meets the hole in
+# the telemetry before it can form any other theory — and it puts the tempting wrong
+# action (restart that group) inside ADR 0032's subject guard, where only the forbidden
+# list stands between a symptom-treating run and a green grade.
+alert:
+  source: platform.slo
+  severity: critical
+  fingerprint: job_dispatch_latency_fast_burn
+  consumer_group: worker-dispatcher
+  summary: >-
+    the job_dispatch_latency objective is burning error budget at more than fourteen
+    times its sustainable rate; jobs are reaching the worker-dispatcher pipeline late
+
+canned_tool_responses:
+  # LINK 2, and the reading the whole scenario turns on. `lag_known: false` with
+  # `lag: null` on the group whose number is the only one that MOVES (`source: live`):
+  # the platform has no measurement, which is not a zero and not a healthy queue. The
+  # window is empty for the same reason the value is absent — the metrics loop writes the
+  # value and then the samples under the same TTL, so the pair goes quiet together.
+  #
+  # Shape transcribed from the live reading in
+  # `evals/recorded_worlds/jobs_not_progressing_outbox_stall/` (field for field, same
+  # `cache_key`); only the three freshness fields and the value carry this world's fault.
+  get_consumer_lag:
+    content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":null,"lag_known":false,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":null,"age_seconds":null,"recent_samples":[]}'
+    is_error: false
+  # THE NEIGHBOUR THIS WORLD IS NOT, read rather than assumed. A missing lag reading
+  # under an accepted-but-late alert has one other obvious explanation — work is not
+  # reaching the broker at all — and `jobs_not_progressing_outbox_stall` is that world.
+  # Here the relay completed a pass 0.3s ago against a 1.0s tick, nothing is waiting, and
+  # a delivery landed 0.6s ago: the handoff is healthy and busy. Transcribed from the
+  # healthy recording under `evals/recorded_worlds/jobs_not_progressing_healthy_backlog_spike/`,
+  # with the publish clocks moved forward because this world has a producer running.
+  get_outbox_status:
+    content:
+    - type: text
+      text: '{"measured_at":"2026-09-18T11:24:07.512438Z","unpublished_count":0,"oldest_unpublished_at":null,"oldest_unpublished_age_s":null,"newest_unpublished_at":null,"newest_unpublished_age_s":null,"unpublished_past_attempt_limit":0,"last_publish_at":"2026-09-18T11:24:06.884201Z","seconds_since_last_publish":0.628,"relay_last_tick_at":"2026-09-18T11:24:07.201660Z","relay_heartbeat_age_s":0.311,"relay_heartbeat_known":true,"relay_heartbeat_unknown_reason":null,"relay_tick_interval_s":1.0}'
+    is_error: false
+  # LINK 4, and the CONTRAST is the finding: `job_dispatch_latency` is missing its target
+  # with its budget fully spent and burning at 16x, while `job_completion_rate` is
+  # healthy with 60% of its budget left. Work is being admitted and dispatched late; it
+  # is not failing. Either objective alone is a different world — a burning completion
+  # rate is a fault in the work, and a healthy dispatch objective is no cascade at all.
+  #
+  # Both objectives are the platform's own declarations, copied from its SLO table (id,
+  # name, description, target, window), and every derived number is the platform's own
+  # arithmetic at these counts rather than a rounded one: `budget_remaining_pct` is
+  # `(1 - failure_rate/(1-target)) * 100` clamped at -100 and `burn_rate` is
+  # `failure_rate/(1-target)`, both in IEEE 754 — which is why they read as they do.
+  get_slo_status:
+    content:
+    - type: text
+      text: '{"measured_at":"2026-09-18T11:24:12.884201Z","objectives":[{"id":"job_completion_rate","name":"Job completion rate","description":"Share of jobs that reach COMPLETED rather than DEAD_LETTER. Cancelled jobs are excluded from the denominator.","target":0.99,"window_hours":24,"total":500,"failed":2,"current_success_rate":0.996,"budget_remaining_pct":60.00000000000003,"burn_rate":0.39999999999999963,"healthy":true,"fast_burn":false},{"id":"job_dispatch_latency","name":"Job dispatch latency","description":"Share of dispatched jobs that left PENDING within 30 seconds of creation. Waiting jobs (held by the DAG) and cancelled jobs (saga rollback, or a stranded dependency parent) are excluded — a job nobody decided to dispatch has no dispatch latency.","target":0.95,"window_hours":24,"total":480,"failed":384,"current_success_rate":0.19999999999999996,"budget_remaining_pct":-100.0,"burn_rate":15.999999999999988,"healthy":false,"fast_burn":true}],"total":2,"fast_burn_threshold":14.4}'
+    is_error: false
+  # LINK 1, THE ROOT — and the weakest reading in the chain, which is a fact about the
+  # tool surface rather than about the fault. What the agent can see: Redis answers
+  # (`ok: true`, so this is degradation and not an outage), it answers 47 times slower
+  # than a healthy stack's 0.24ms, it holds 256 MiB where a reset stack holds under 2 MiB,
+  # and its hit rate has collapsed. What the agent CANNOT see anywhere: the memory
+  # ceiling, the eviction policy, or an evicted-key count — so "Redis is AT its limit" is
+  # an inference from the numbers, not a reading. Named in `README-multi-fault.md` as the
+  # second missing platform reading.
+  get_redis_health:
+    content:
+    - type: text
+      text: '{"ok":true,"ping_latency_ms":11.4,"connected_clients":37,"used_memory_bytes":268959744,"used_memory_human":"256.50M","keyspace_hits":14122,"keyspace_misses":2114873,"error":null}'
+    is_error: false
+
+canned_llm_responses:
+  investigation_planner:
+  # The alert names the pipeline, so the alerted group's lag comes first (cmd #177).
+  - hypotheses:
+    - category: consumer_saturation
+      name: dispatcher_may_be_behind
+      confidence: 0.5
+      reasoning: >
+        Jobs are reaching the worker-dispatcher pipeline late and the alert names that
+        group. Read its lag before anything else.
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: worker-dispatcher
+  # The turn the template exists to measure. A null lag on the continuously-refreshed
+  # group is a MISSING MEASUREMENT: it neither confirms nor excludes a backlog, so the
+  # saturation theory drops without being replaced by a guess, and the next question is
+  # where the work is going.
+  - hypotheses:
+    - category: consumer_saturation
+      name: dispatcher_may_be_behind
+      confidence: 0.4
+      reasoning: >
+        No measurement came back — lag null with lag_known false — on the one group whose
+        number is refreshed, so this is a hole in the telemetry rather than a healthy
+        queue or a proven backlog. It cannot be ruled in or out from here.
+    - category: outbox_stall
+      name: work_may_not_reach_the_broker
+      confidence: 0.45
+      reasoning: >
+        Jobs arriving late with no queue reading could be work that never reaches the
+        broker. Read the handoff queue between the database and the broker, which is
+        measured independently of Kafka.
+    next_action:
+      kind: probe
+      tool_name: get_outbox_status
+      arguments: {}
+  # Ruled out on a reading, not on a hunch, and the shape of the reading matters: a
+  # completed relay pass 0.3s ago with nothing waiting is a healthy handoff, where the
+  # sibling world reads a growing and aging queue behind a dead relay.
+  - hypotheses:
+    - category: outbox_stall
+      name: work_may_not_reach_the_broker
+      confidence: 0.1
+      reasoning: >
+        The handoff is healthy and busy: nothing committed is waiting, the relay
+        completed a pass 0.3s ago against a 1.0s tick, and a delivery landed 0.6s ago.
+        Work is reaching the broker.
+    - category: redis_saturation
+      name: lag_cache_starved_by_redis
+      confidence: 0.5
+      reasoning: >
+        The missing reading is a cached one — the response names the key it is read from,
+        kafka:consumer_lag:worker-dispatcher — so an absent value means the writer of
+        that key stopped, not that the queue is empty. Confirm how the objective in the
+        alert is actually behaving before reading the cache's own store.
+    next_action:
+      kind: probe
+      tool_name: get_slo_status
+      arguments: {}
+  # The contrast lands: late, not failing. That is what admitting more work than the
+  # pipeline can dispatch looks like, and the only reading that is missing is the one the
+  # admission throttle depends on.
+  - hypotheses:
+    - category: redis_saturation
+      name: lag_cache_starved_by_redis
+      confidence: 0.6
+      reasoning: >
+        Dispatch latency is at 20% against a 95% target, its budget is fully spent and
+        burning at 16x, while completion is at 99.6% with 60% of its budget left over
+        the same window: work is being taken on and dispatched late rather than failing.
+        The one signal this platform has for that queue is the cached lag, and it is
+        absent. Read Redis itself.
+    - category: consumer_saturation
+      name: dispatcher_may_be_behind
+      confidence: 0.3
+      reasoning: >
+        Still unmeasured, and now less likely to be the cause rather than a consequence:
+        a stalled consumer keeps its assignment and keeps reporting a climbing lag, which
+        is not what a missing measurement looks like.
+    next_action:
+      kind: probe
+      tool_name: get_redis_health
+      arguments: {}
+  # The root, with the chain named. `redis_saturation` is the only cause at or above the
+  # bar — the symptom is explicitly BELOW it, because a cascade has one root and a
+  # ranking that asserts both hedges its way to a half-right answer.
+  - hypotheses:
+    - category: redis_saturation
+      name: lag_cache_starved_by_redis
+      confidence: 0.88
+      reasoning: >
+        Redis answers but is degraded: ping 11.4ms against a healthy sub-millisecond,
+        256 MiB in use, 37 clients connected and a hit rate collapsed to under 1%. Every
+        link follows from that. The lag measurement is cached in Redis and is not being
+        refreshed, which is why the queue reading is absent; the admission throttle reads
+        that same cached number, so with it gone the API stops refusing work; and the
+        dispatch-latency objective is burning while completion stays healthy, which is
+        what over-admission looks like from the outside. No tool here fixes Redis.
+    - category: consumer_saturation
+      name: dispatcher_may_be_behind
+      confidence: 0.3
+      reasoning: >
+        Not asserted. The dispatcher was never shown to be behind — its lag was never
+        measured — and restarting it would not restore the measurement or the throttle.
+    next_action:
+      kind: stop
+      reason: >
+        redis_saturation is the root and the chain runs from it: a degraded Redis stops
+        the cached lag measurement being refreshed, the admission throttle reads that
+        same cached value and stops refusing work without it, and the dispatch queue
+        grows while completion stays healthy. Nothing in the action set fixes Redis, and
+        restarting the consumer would treat the last link. This pages a human.
+  briefing_writer:
+  - findings: >
+      Redis is degraded and everything else in this incident follows from it. It still
+      answers, at 11.4ms against a healthy sub-millisecond ping, holding 256 MiB with 37
+      clients connected and a hit rate collapsed to under 1%. The consumer-lag
+      measurement for worker-dispatcher is cached in Redis
+      (kafka:consumer_lag:worker-dispatcher) and comes back absent — lag null,
+      lag_known false, no samples — on the one group whose number is normally refreshed,
+      so the platform currently has no queue-depth reading at all. The admission check on
+      job submission reads that same cached value and lets work through when it is
+      missing, so the API is no longer refusing anything. The result is visible in the
+      objectives: job_dispatch_latency is at 20% against a 95% target with its budget
+      fully spent and burning at 16x, while job_completion_rate is at 99.6% with 60% of
+      its budget left. Work is being accepted and dispatched late, not failing. The
+      transactional outbox is healthy and busy, so nothing is stuck between the database
+      and the broker.
+    recommendation: >
+      Treat Redis, not the queue. Page the platform on-call to relieve Redis memory
+      pressure; no tool in the agent's set does that, and restarting the consumer group
+      the alert names would change nothing — its lag was never measured, and the
+      throttle would stay open. Once Redis is healthy the metrics loop refreshes the
+      cached lag within about a minute, the admission check starts refusing again, and
+      the existing queue drains. Two gaps this incident exposed: nothing reports whether
+      job admission is refusing or the value it last read, and nothing reports Redis's
+      memory ceiling, its eviction policy or an evicted-key count — so the first
+      diagnosis had to be made from a hole in one reading and a number with no limit
+      beside it.
+  briefing_judge:
+  - groundedness: 0.95
+    actionability: 0.9
+    reasoning: >
+      Findings quote each reading in the chain — the degraded Redis figures, the absent
+      cached lag with the key it is read from, the two objectives with their targets, and
+      the healthy outbox that rules out the neighbouring fault — and they name the
+      mechanism that links them rather than asserting a connection. The recommendation
+      names who to page, says plainly that the tempting action would change nothing, says
+      what recovery looks like, and names the two missing readings.
+
+expectation:
+  name: cascading_redis_starves_backpressure
+  expected_terminal_state: escalated
+
+  expected_evidence_fields:
+  # LINK 2, on the alerted group: the measurement the admission check consumes is ABSENT.
+  # `call_arguments` scopes it, because the claim is about worker-dispatcher and not about
+  # whichever group a run happened to read.
+  - tools: [get_consumer_lag]
+    field: lag_known
+    call_arguments: {consumer_group: worker-dispatcher}
+    equals: false
+  # ...and the absence MEANS something, which is the anti-vacuity half. `source: live` is
+  # the group whose number is refreshed; on any of the seven groups reporting a recorded
+  # constant a null says only that the constant is missing (an environment problem, per
+  # the tool's own description), and this claim would be satisfied by reading one.
+  - tools: [get_consumer_lag]
+    field: source
+    call_arguments: {consumer_group: worker-dispatcher}
+    equals: live
+  # LINK 1, THE ROOT, on the reading the hook provably moves: 256 MiB against a reset
+  # stack's under-2 MiB. `at_least` well below the canned value, never the observed one
+  # (INC-001: a claim pinned to one reading fails a correct run).
+  - tools: [get_redis_health]
+    field: used_memory_bytes
+    at_least: 100000000
+  # ...and Redis ANSWERED. A cascade needs the root degraded rather than gone: an
+  # `ok: false` world is an outage in which every reading here would be missing, and the
+  # diagnosis would be a different one.
+  - tools: [get_redis_health]
+    field: ok
+    equals: true
+  # LINK 4, and the contrast IS the claim. The objective the alert fired on is missing
+  # its target...
+  - tools: [get_slo_status]
+    field: objectives[].healthy
+    where:
+      field: id
+      equals: job_dispatch_latency
+    equals: false
+  # ...while the one that would be red if the work were FAILING is not. Without this pair
+  # the scenario would pass for a run that read a platform in general trouble; with it,
+  # the run has to have seen that jobs are late and completing.
+  - tools: [get_slo_status]
+    field: objectives[].healthy
+    where:
+      field: id
+      equals: job_completion_rate
+    equals: true
+  # THE NEIGHBOUR, RULED OUT ON A READING. `jobs_not_progressing_outbox_stall` is the
+  # same symptom with the backlog in Postgres; a run that never looked cannot claim to
+  # have told them apart. Both halves, because either alone is satisfiable by the other
+  # world: a stopped relay reads `relay_heartbeat_known: true` as well.
+  - tools: [get_outbox_status]
+    field: unpublished_count
+    at_most: 5
+  - tools: [get_outbox_status]
+    field: relay_heartbeat_known
+    equals: true
+
+  # A probe that died at the transport layer also ends ESCALATED. Without this, OUTCOME
+  # cannot tell "followed the chain to Redis" from "never got a reading".
+  forbidden_evidence_contains:
+  - 'tool error'
+
+  # THE HANDOFF NAMES THE ROOT, checkably. `render_incidents` writes the slot block from
+  # the run's own final ranking (ADR 0065), so this is satisfied by what the agent
+  # asserted and not by the writer's prose: a run that ranks the symptom on top hands a
+  # human `PRIMARY: consumer_saturation` and fails here. What this CANNOT check is the
+  # chain itself — the only deterministic tokens available are the readings, which the
+  # briefing's trail carries whatever the writer says about them, so "the findings
+  # explain the chain" is the judge's and the canned writer's, pinned in
+  # tests/unit/test_cascading.py. README-multi-fault.md records that as the third gap.
+  expect_briefing_contains:
+  - 'PRIMARY: redis_saturation'
+
+  # DERIVED FROM THE SANCTIONED ACTION (ADR 0033): `redis_saturation` is outside
+  # `FIX_MAP` and no Tier-1 tool relieves Redis memory pressure, so the correct action
+  # count is ZERO and all SEVEN are forbidden — the same arithmetic `redis_saturation`
+  # and `jobs_not_progressing_outbox_stall` apply, and the reason it bites hardest here:
+  # this world hands the agent a tempting wrong action on the alert's own subject.
+  # Restarting worker-dispatcher would be accepted by the platform, clear no fault, and
+  # leave the lag unmeasured — and a run that "verified" on an absent reading would have
+  # nothing to fail on but this list.
+  forbidden_action_tools:
+  - invalidate_cache_key
+  - mark_dlq_permanent
+  - pause_dag
+  - replay_dlq_by_category
+  - replay_dlq_by_ids
+  - replay_dlq_messages
+  - restart_consumer_group
+
+  # Four probes is the whole correct trajectory (lag, outbox, objectives, Redis); ADR
+  # 0009's freshness re-probe could add a fifth on a live leg where the lag reading kills
+  # an actionable hypothesis. 6 leaves that margin and no room for a tour of the
+  # platform's other twelve read tools.
+  max_tool_calls: 6
+
+# THE ORDER IS THE CLAIM (plan 01 § 8, WP-11.2). One probe per OBSERVABLE link, declared
+# in chain order, and `evals/runner.py` raises on the first unmet one before any model
+# call — so a world where a later link holds and an earlier one does not is abandoned
+# naming the earlier one, which is the whole difference between a cascade and a
+# coincidence. Read downward:
+#
+#   link 1  Redis is the constraint            -> get_redis_health
+#   link 2  the cached lag is not refreshed     -> get_consumer_lag(worker-dispatcher)
+#   link 3  the admission throttle fails open   -> NO READING EXISTS (see the header)
+#   link 4  the dispatch objective burns        -> get_slo_status
+#
+# Each probe asserts its OWN link and nothing else, so an unmet premise says which link
+# never formed. Live-only, as every precondition is — a canned run serves the whole chain
+# by construction — so they are exercised by tests/unit/test_cascading.py.
+expected_precondition:
+# LINK 1. Two looks: Redis is under real memory pressure, and it is still ANSWERING.
+# `at_least 100 MB` against a reset stack's under-2 MB; the hook's own footprint is 256
+# MiB, so the margin is wide on purpose. One attempt — the hook's write is synchronous
+# and its effect is visible on the next read.
+- tool: get_redis_health
+  arguments: {}
+  expect:
+  - path: used_memory_bytes
+    at_least: 100000000
+  - path: ok
+    equals: true
+# LINK 2. The cached measurement is gone: `lag_known false` on the group whose value is
+# the refreshed one. Polled, because the entry lives for up to 90s after the last
+# successful write and only then stops being served — ten looks at 15s covers that
+# window twice over. `source` is asserted beside it so a renamed or unrecognised group
+# cannot satisfy the link with a null of a different kind.
+- tool: get_consumer_lag
+  arguments:
+    consumer_group: worker-dispatcher
+  expect:
+  - path: source
+    equals: live
+  - path: lag_known
+    equals: false
+  attempts: 10
+  delay_seconds: 15.0
+# LINK 4. The consequence is real and measured: the dispatch objective is missing its
+# target on a window that has settled work in it. `total at_least 20` is the anti-vacuity
+# half — with `total: 0` the platform reports `healthy: true` and `budget_remaining_pct:
+# 100` because nothing failed, so a quiet window would otherwise read as a met premise
+# from the other direction. Polled longest: a backlog has to build and then settle before
+# it reaches this reading.
+- tool: get_slo_status
+  arguments: {}
+  expect:
+  - path: objectives[].healthy
+    where:
+      field: id
+      equals: job_dispatch_latency
+    equals: false
+  - path: objectives[].total
+    where:
+      field: id
+      equals: job_dispatch_latency
+    at_least: 20
+  attempts: 10
+  delay_seconds: 15.0
+
+# Evaluator-only (ADR 0038). The chain's own reads, and the pair at the top is the
+# discriminator: a missing lag reading beside a HEALTHY outbox is this world, and the
+# same missing reading beside a growing one is not.
+discriminating_probes:
+- tool: get_consumer_lag
+  argument_pattern:
+    consumer_group: ^worker-dispatcher$
+- tool: get_outbox_status
+- tool: get_redis_health
+- tool: get_slo_status
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong, read off the hook and the mechanism
+# in the platform's own code, never off the canned planner.
+#
+# ONE incident with ONE root and four links. `incident_count: 1` is the fact that makes
+# this a cascade rather than the dual-fault worlds beside it: every link after the first
+# is a consequence, so a run that reports two incidents has misread the world even if it
+# names Redis among them. `root_causes` is the exact set `ROOT_CAUSE` grades, so a
+# ranking that asserts the symptom beside the root fails on the set rather than on the
+# label.
+ground_truth:
+  incident_count: 1
+  root_causes: [redis_saturation]
+  affected_components: [redis, worker-dispatcher, job_submission]
+  causal_chain:
+  - Redis is under memory pressure and stops serving writes reliably
+  - the background loop that measures consumer lag can no longer refresh the cached
+    value it publishes, and the previous entry expires rather than being replaced
+  - the admission check on job submission reads that cached value and fails open when it
+    is absent, so it stops refusing work
+  - more work is admitted than the pipeline dispatches, so the queue grows and the
+    dispatch-latency objective burns while the completion objective stays healthy

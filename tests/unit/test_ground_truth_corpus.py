@@ -101,6 +101,13 @@ _DECIDED: Final[Mapping[str, tuple[Category, ...] | None]] = {
     # about the TIMELINE, graded on ATTRIBUTION, and not a second root cause.
     "temporal_ttl_recovers_before_action": (Category.STALE_CACHE,),
     "temporal_ttl_recovers_during_verify": (Category.STALE_CACHE,),
+    # WO-R3-229 (WP-11.2, ADR 0067). ONE label for a four-link cascade: the hook degrades
+    # Redis and everything else in the world follows from it, so the absent lag reading,
+    # the open admission throttle and the burning dispatch objective are consequences
+    # rather than causes. The chain itself is recorded in `ground_truth.causal_chain`,
+    # which nothing grades; what is graded is that the run names the ROOT and nothing
+    # beside it.
+    "cascading_redis_starves_backpressure": (Category.REDIS_SATURATION,),
 }
 
 #: Families that measure the harness rather than a world: ``TOOL_FAULT``
@@ -201,14 +208,14 @@ class TestEveryScenarioCarriesADecision:
         """The number in the PR body, checked against the corpus that produced it."""
         corpus = _corpus()
         graded = [s for s in corpus if s.root_cause_graded]
-        assert (len(graded), len(corpus)) == (48, 57), (
+        assert (len(graded), len(corpus)) == (49, 58), (
             f"{len(graded)} of {len(corpus)} scenarios are root-cause graded; "
             "WO-R3-261 landed 32 of 41, WO-R3-202 took it to 36 of 45, WO-R3-214 "
-            "to 40 of 49, WO-R3-226 to 44 of 53, WO-R3-228 to 46 of 55 and WO-R3-236 to "
-            "48 of 57 — every `jobs_not_progressing`, `temporal_recovery`, "
-            "`workflow_stuck` and retry scenario carries a label, because ADR 0038 "
-            "makes one mandatory for a new scenario. Update this number and the "
-            "run summary's coverage line together."
+            "to 40 of 49, WO-R3-226 to 44 of 53, WO-R3-228 to 46 of 55, WO-R3-236 to "
+            "48 of 57 and WO-R3-229 to 49 of 58 — every `jobs_not_progressing`, "
+            "`temporal_recovery`, `workflow_stuck`, retry, multi-fault and cascading "
+            "scenario carries a label, because ADR 0038 makes one mandatory for a new "
+            "scenario. Update this number and the run summary's coverage line together."
         )
 
 

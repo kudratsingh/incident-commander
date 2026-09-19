@@ -803,6 +803,11 @@ class TestShippedScenariosRoundTripToPlans:
         )
         planned = sorted(s.name for s in scenarios if s.chaos_plan is not None)
         assert planned == [
+            # WO-R3-229 (WP-11.2). ONE hook, deliberately — a cascade whose later links
+            # came from a second hook would prove the harness rather than the agent — and
+            # the composable form because the chain needs the plan's own `settle_seconds`:
+            # the cached reading it starves lives for up to 90s after the last write.
+            "cascading_redis_starves_backpressure",
             # WO-R3-228 (WP-11.1). The dual-fault worlds: one needs two ordered hooks
             # because two independent faults is what capability level 5 means, and its
             # sibling declares a plan with one hook plus a seeded second fault, so both
@@ -1033,10 +1038,10 @@ class TestTheGraderSideCanReadTheAnswerKey:
     def test_coverage_is_reportable_over_the_whole_corpus(self) -> None:
         corpus = load_scenarios(_SCENARIOS_DIR)
         graded = [s.name for s in corpus if s.root_cause_graded]
-        # 48 of 57 carry a ground-truth label (ADR 0038 makes one mandatory); the other
+        # 49 of 58 carry a ground-truth label (ADR 0038 makes one mandatory); the other
         # nine are recorded abstentions, pinned by test_ground_truth_corpus.py.
-        assert len(graded) == 48
-        assert len(corpus) >= 57
+        assert len(graded) == 49
+        assert len(corpus) >= 58
 
 
 class TestTheAgentVisibleProjection:

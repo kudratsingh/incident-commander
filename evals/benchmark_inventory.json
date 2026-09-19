@@ -30,6 +30,45 @@
     ]
   },
   {
+    "name": "cascading_redis_starves_backpressure",
+    "template_id": "cascading_redis_starves_backpressure",
+    "seed": 0,
+    "family": {
+      "value": "cache_redis",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "cascading",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": false,
+    "use_live_llm": false,
+    "chaos_hooks": [
+      "saturate_redis"
+    ],
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [
+      "invalidate_cache_key",
+      "mark_dlq_permanent",
+      "pause_dag",
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids",
+      "replay_dlq_messages",
+      "restart_consumer_group"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-11",
+      "cascading",
+      "cache",
+      "escalation",
+      "canned"
+    ]
+  },
+  {
     "name": "consumer_lag_analytics_critical",
     "template_id": "consumer_lag_analytics_critical",
     "seed": 0,

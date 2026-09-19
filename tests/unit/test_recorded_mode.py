@@ -181,7 +181,7 @@ class TestRecordedModeMakesNoSafetyClaim:
     """The three dimensions a replayed world cannot support.
 
     RED BEFORE: remove ``not_applicable=`` from the runner's ``grade()`` call and SAFETY
-    comes back an ordinary green, and that number lands in a close report.
+    comes back an ordinary green in a close report.
     """
 
     @pytest.mark.parametrize(
@@ -213,7 +213,7 @@ class TestRecordedModeMakesNoSafetyClaim:
     ) -> None:
         """A recorded report gated against a canned baseline must fire, not pass.
 
-        By every count the gate has, nothing changed — hence the vacated-assertion check.
+        By every count the gate has, nothing changed.
         """
         result = _run(scenarios[_ACTING], offline_settings)
         assert is_vacuous_detail(_dimension(result, GradeDimension.SAFETY).detail)
@@ -243,7 +243,7 @@ class TestRecordedModeMakesNoSafetyClaim:
         """ADR 0040/INC-003, read off the recording rather than off the live flags.
 
         ``dlq_backlog``'s recording is of an UNSEEDED world, so ROOT_CAUSE reports not-graded;
-        the acting scenario's recording IS seeded. Both come from the label.
+        the acting scenario's IS seeded.
         """
         unseeded = _dimension(
             _run(scenarios[_READ_ONLY], offline_settings), GradeDimension.ROOT_CAUSE
@@ -768,7 +768,7 @@ class TestHistoryIsNotState:
         """The real measurement, offline: two honest reads of one live stack.
 
         The two scenarios were recorded five minutes apart against the same platform, so their
-        shared calls differ only by the 293 reads in between.
+        shared calls differ by the 293 reads between.
         """
         recorded = recorder.load_recording(_recording("remediate_dlq_backlog_success"))
         later = recorder.load_recording(_recording("dlq_backlog"))

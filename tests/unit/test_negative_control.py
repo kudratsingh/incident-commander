@@ -223,7 +223,7 @@ class TestTheControlWouldNoticeItsOwnDecay:
     def test_each_case_changes_something(self) -> None:
         """A mutation that no longer mutates is a test that passes for free.
 
-        If the canned shape moves, a mutator can silently become a no-op.
+        If the canned shape moves, a mutator becomes a no-op.
         """
         subject = _subject()
 
@@ -282,7 +282,7 @@ def test_the_watched_set_is_derived_from_the_enum() -> None:
 def test_every_gradeable_dimension_has_a_case(dimension: GradeDimension) -> None:
     """Coverage floor, so a dimension cannot join the grader unwatched.
 
-    Parametrized over the enum minus ``_EXEMPT_DIMENSIONS``: a new one fails here.
+    Parametrized over the enum minus ``_EXEMPT_DIMENSIONS``.
     """
     source = Path(__file__).read_text()
     assert f"fails_on_{dimension.name}" in source, (

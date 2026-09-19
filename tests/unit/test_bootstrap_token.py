@@ -413,8 +413,7 @@ class TestTwoPrincipalsNotOne:
     ) -> None:
         """Refused, not quietly dropped, and refused before the first call.
 
-        Silent narrowing would hand back a token that looks like what was asked for; minting
-        it would reopen the leak.
+        Silent narrowing would hand back a token that looks right; minting it reopens the leak.
         """
         platform = _fake_platform(monkeypatch)
         assert main(["--scope", "chaos:invoke"]) == 2
@@ -430,7 +429,7 @@ class TestTwoPrincipalsNotOne:
         """The case a widening-only bootstrap could never reach.
 
         The live `incident-commander` account HOLDS chaos:invoke, so "union the defaults in"
-        leaves the leak and reports success. Announced, not silent.
+        leaves the leak and reports success.
         """
         platform = _FakePlatform()
         platform.existing = {

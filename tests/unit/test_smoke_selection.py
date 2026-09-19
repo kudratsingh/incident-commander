@@ -45,8 +45,7 @@ def _derived(tree: Path) -> set[str]:
 def test_derivation_canary(scenarios: list[Scenario]) -> None:
     """Guard against a vacuous pass if the tree or the parse goes empty.
 
-    Every assertion below is a set comparison, and an empty set passes for the wrong
-    reason.
+    Every assertion below is a set comparison, and an empty set passes wrongly.
     """
     assert len(scenarios) > 20, f"only {len(scenarios)} scenarios loaded from {_SCENARIOS_DIR}"
     assert len([s for s in scenarios if s.smoke_eligible]) > 10, "almost nothing is smoke-eligible"
@@ -59,8 +58,7 @@ def test_derivation_canary(scenarios: list[Scenario]) -> None:
 def test_a_renamed_scenario_stays_in_the_pass(tmp_path: Path) -> None:
     """#151 case 1. Under ``SMOKE_ONLY`` this was red.
 
-    A rename left the pattern matching nothing while eighteen live ones kept the run green.
-    The rule now travels with the scenario.
+    A rename left the pattern matching nothing while eighteen live ones kept it green.
     """
     tree = _tree_copy(tmp_path / "renamed")
     original = tree / "redis_saturation.yaml"
@@ -162,7 +160,7 @@ def test_an_exclusion_without_a_real_reason_is_refused_at_load(tmp_path: Path) -
 def test_the_one_shipped_exclusion_is_the_one_we_expect(scenarios: list[Scenario]) -> None:
     """The tree ships exactly one hold-back, and it is the recorded one.
 
-    The set growing is a coverage decision that should show up in a diff.
+    Growth is a coverage decision and shows in a diff.
     """
     excluded = sorted(s.name for s in scenarios if s.smoke_exclusion is not None)
     assert excluded == ["dlq_backlog"], (

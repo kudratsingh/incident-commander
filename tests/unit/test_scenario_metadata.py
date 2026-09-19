@@ -86,7 +86,7 @@ class TestLegacyDefaults:
     ) -> None:
         """``template_id: ''`` is "unset", not "the empty template".
 
-        Left as ``""`` they would all be one template in every report.
+        Left as ``""`` they become one template.
         """
         _write(tmp_path, "solo", extra="template_id: ''\n")
         (scenario,) = load_scenarios(tmp_path)
@@ -138,8 +138,7 @@ class TestSplitsAreByTemplate:
     def test_the_shipped_corpus_loads(self) -> None:
         """49 scenarios, no straddle. The check is inert until it is not.
 
-        41 until WO-R3-202 added four `jobs_not_progressing`, 45 until WO-R3-214 added four
-        `workflow_stuck`. A pin, not a derivation.
+        41 until WO-R3-202's four, 45 until WO-R3-214's four. A pin, not a derivation.
         """
         assert len(CORPUS) == 49
 
@@ -203,7 +202,7 @@ class TestClosedVocabularies:
     def test_the_family_that_arrived_brought_its_scenarios_with_it(self) -> None:
         """The other direction, and the one that makes the rule above a rule.
 
-        A removal is only legitimate while the corpus manufactures that world.
+        A removal holds only while the corpus makes that world.
         """
         populated = {s.family.value for s in CORPUS if s.family is not None}
         unpopulated = sorted({m.value for m in ScenarioFamily} - populated)
@@ -502,6 +501,6 @@ class TestTheReportCanGroupWithoutASchemaChange:
     def test_the_key_defaults_to_none_so_archived_reports_still_parse(self, field: str) -> None:
         """Archived reports and the committed baseline predate this record.
 
-        Append-only evidence, so the reader tolerates absence (ADR 0013).
+        Append-only evidence, so absence is tolerated (ADR 0013).
         """
         assert ScenarioOutcome.model_fields[field].default is None

@@ -300,7 +300,7 @@ class TestNIsOneReproducesBaseline:
     ) -> None:
         """Named rather than papered over (ADR 0043).
 
-        ``DiagnosisCandidate`` has no ``reasoning``, so this arm derives it from citations.
+        ``DiagnosisCandidate`` has no ``reasoning``; the arm derives it from citations.
         """
         llm = CannedLLMClient([_stop_set([_candidate("c1")])])
         _, step, _ = _arm(n=1).plan_next_step(_investigating(run_state), now, _context(llm))
@@ -496,7 +496,7 @@ class TestEvidenceIdsAreOnThePage:
     def test_the_id_column_is_the_only_difference(self, run_state: RunState) -> None:
         """Nothing else about the context moves with the flag.
 
-        The confound ADR 0043 accepts is one ``evidence_id=<uuid> `` prefix per line.
+        ADR 0043 accepts one ``evidence_id=<uuid> `` prefix per line.
         """
         entry = _evidence()
         state = _with_evidence(run_state, entry)

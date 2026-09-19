@@ -107,7 +107,7 @@ class TestBothLoopsSleepExactlyThatLong:
     ) -> None:
         """The shipped lag precondition, driven against a world that stays 0.
 
-        The loop runs to exhaustion — the longest wait the probe can impose.
+        The loop runs to exhaustion: the longest wait it can impose.
         """
         scenario = next(
             s
@@ -132,8 +132,7 @@ class TestBothLoopsSleepExactlyThatLong:
 class TestAdr0006StatesTheOperativeNumbers:
     """Doc-drift tripwire, same shape as ``test_docs_env_vars`` (B-03).
 
-    ADR 0006 said "3 attempts × 15s = 45s" while no configuration used 3, so the figures
-    are built from the constants.
+    ADR 0006 said "3 attempts × 15s = 45s" while no configuration used 3.
     """
 
     @staticmethod

@@ -197,7 +197,7 @@ class TestTheSplitPreservedEveryTriageOutcome:
     ) -> None:
         """The 29 incidental rewrites must still reach INVESTIGATING.
 
-        On `info` one would escalate at TRIAGE with its budget unspent, still passing.
+        On `info` one escalates at TRIAGE, budget unspent, still passing.
         """
         by_name = {s.name: s for s in _shipped()}
         escalated = sorted(
@@ -217,7 +217,7 @@ class TestTheSplitPreservedEveryTriageOutcome:
     ) -> None:
         """The other direction: the deferred three must still be noise.
 
-        Each one's whole assertion is that TRIAGE escalated on the severity alone.
+        Each one asserts only that TRIAGE escalated on the severity.
         """
         not_noise = sorted(
             name
@@ -411,7 +411,7 @@ class TestTheUnclassifiedDlqAlertNamesTheScopeNotACategory:
         """The derived subject, and the shape of the probe it demands.
 
         The unfiltered page is the only read that shows this row, so the subject resolves to
-        `list_dlq_messages` on `remediation_hint` under `SubjectMatch.UNFILTERED`.
+        `list_dlq_messages` under `SubjectMatch.UNFILTERED`.
         """
         subject = alert_subject(_alert_of(self._scenario()))
         assert subject is not None

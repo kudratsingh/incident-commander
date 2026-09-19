@@ -115,7 +115,7 @@ class TestUnknownModel:
     def test_fallback_is_an_upper_bound_in_every_token_class(self) -> None:
         """The guarantee stated as a property, not as spot values.
 
-        The old form compared only ``rate_total``, which held for any table.
+        The old form compared only ``rate_total``, true of any table.
         """
         fallback = pricing_for("claude-nonexistent")
         for name, row in MODEL_PRICING.items():

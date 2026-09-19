@@ -146,8 +146,7 @@ class TestMakeInvestigate:
     ) -> None:
         """The whole point of escalating is telling a human why (WO-R2-119).
 
-        The marker was recorded under the *tool's* name, and the briefing reads a reason only
-        from an underscore-prefixed one.
+        The marker used the *tool's* name; the briefing reads only underscore markers.
         """
 
         def raise_error(_n: str, _a: Mapping[str, Any]) -> ToolResult:
@@ -169,8 +168,7 @@ class TestMakeInvestigate:
     ) -> None:
         """The happy path also ends ESCALATED, and must NOT gain a reason.
 
-        Widening the recognizer instead of renaming the marker would put a JSON blob under a
-        "why" heading.
+        Widening the recognizer instead of renaming the marker puts a JSON blob under "why".
         """
         transition = make_investigate(
             _FakeMCPClient(

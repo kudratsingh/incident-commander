@@ -106,8 +106,8 @@ _CORPUS_IDS: Final[list[str]] = [scenario.name for scenario in _CORPUS]
 def _run_state_for(scenario: Scenario) -> RunState:
     """A run built from the scenario's projection, carrying the world it serves.
 
-    The canned tool responses go onto the evidence ledger, as in a real offline run, because
-    the ledger is rendered verbatim into three prompts.
+    The canned tool responses go onto the evidence ledger, as in a real run, because
+    it is rendered verbatim into three prompts.
     """
     visible = scenario.agent_visible()
     run = start_run(
@@ -166,8 +166,7 @@ def rendered_agent_contexts(scenario: Scenario) -> dict[str, str]:
 def assert_no_ground_truth_leak(scenario: Scenario) -> None:
     """Attaching an answer key to ``scenario`` must change nothing the agent sees.
 
-    Shared by the corpus sweep and by the red-before, so the two cannot drift into
-    checking different things.
+    Shared by the corpus sweep and the red-before, so the two cannot drift apart.
     """
     plain = rendered_agent_contexts(scenario)
     with_answer_key = rendered_agent_contexts(
@@ -256,8 +255,7 @@ class TestTheProjectionIsTheOnlyWayIn:
     def test_a_field_on_neither_side_fails_at_import(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The import-time partition check, exercised.
 
-        ``_classify_every_scenario_field`` runs at import, so seeing it fire means calling
-        it again.
+        ``_classify_every_scenario_field`` runs at import, so seeing it fire means calling it.
         """
         from evals.scenarios.schema import _classify_every_scenario_field
 

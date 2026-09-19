@@ -298,7 +298,7 @@ class TestTheGeneratorSeam:
     def test_baseline_is_refused_as_a_generator(self) -> None:
         """A selector over a one-candidate set is a billed call with one answer.
 
-        ``baseline`` has no ``generate``, so the arm refuses it, not the registry.
+        ``baseline`` has no ``generate``, so the arm refuses it.
         """
         with pytest.raises(ValueError, match="cannot supply a candidate set"):
             _arm(generator=StrategyName.BASELINE.value)
@@ -306,7 +306,7 @@ class TestTheGeneratorSeam:
     def test_the_config_stamps_all_three_parts_of_the_arm(self) -> None:
         """Plan 02 § 12: the arm is (generator, N, selector).
 
-        A report keyed on the strategy name alone would average two gaps.
+        A report keyed on the name would average two gaps.
         """
         config = _arm(n=4, generator=StrategyName.BEST_OF_N_SAMPLED.value).config
         assert config["generator"] == "best_of_n_sampled"
@@ -352,8 +352,8 @@ class TestSelectEmitsTheSelectedCandidate:
     def test_a_more_confident_unselected_candidate_cannot_reach_index_zero(self) -> None:
         """The reason the step carries one hypothesis and not the set.
 
-        ``InvestigationStep._rank_by_confidence`` re-sorts at the schema boundary and three
-        gates read index 0, so emitting the set would gate the run on a rejected diagnosis.
+        ``InvestigationStep._rank_by_confidence`` re-sorts at the boundary and three
+        gates read index 0, so emitting the set could gate a rejected one.
         """
         planner = CannedLLMClient(
             [
@@ -459,8 +459,8 @@ class TestProbeMoreEmitsTheSelectedCandidatesProbe:
     def test_a_non_read_next_probe_is_refused_at_the_schema(self) -> None:
         """Red-before, and the refusal is structural rather than a check.
 
-        ``ProbeAction.tool_name`` is a ``ReadToolName`` literal, so a Tier-1 next probe fails
-        at the generator's schema; ``_execute_probe``'s ``tier_of`` is the second layer.
+        ``ProbeAction.tool_name`` is a ``ReadToolName`` literal, so a Tier-1 probe fails
+        at the generator's schema; ``tier_of`` is the second layer.
         """
         with pytest.raises(ValidationError), grounded_in(()):
             DiagnosisCandidate.model_validate(
@@ -471,7 +471,7 @@ class TestProbeMoreEmitsTheSelectedCandidatesProbe:
         """Fail-safe: nothing fabricated, nothing overruled, no crash.
 
         The candidate names no way to get the evidence, so the loop stops through its existing
-        terminal path rather than substituting the generator's own step.
+        terminal path, not the generator's own step.
         """
         planner = CannedLLMClient([_generator_payload(_candidate_payload("c1", probe=None))])
         selector = CannedLLMClient(
@@ -513,8 +513,7 @@ class TestSelectionIsNotAuthorization:
     def test_a_selected_candidate_below_the_threshold_still_escalates(self) -> None:
         """Plan 02 § 18, through the real loop.
 
-        The selector picks a fixable category and the 0.7 threshold refuses it anyway: the
-        gate is in the loop.
+        The selector picks a fixable category and the 0.7 threshold refuses it anyway.
         """
         planner = CannedLLMClient(
             [
@@ -557,8 +556,8 @@ class TestSelectionIsNotAuthorization:
     def test_the_strategy_holds_no_execution_policy(self) -> None:
         """The same claim ``test_strategies.py`` makes about the seam, on this file.
 
-        Scanned through the AST rather than the text, because the module docstring NAMES the
-        gates it must not hold and a substring scan would read that as the violation.
+        Scanned through the AST, not the text: the module docstring NAMES the gates it
+        must not hold, and a substring scan would read that as the violation.
         """
         source = (
             Path(__file__).resolve().parents[2]
@@ -652,7 +651,7 @@ class TestTheSelectorBlockIsOnEveryStep:
     def test_the_whole_record_is_the_generators_with_the_selector_added(self) -> None:
         """One record per step, and the generator's own measurements survive.
 
-        Rebuilt from the generator's record: two assemblies are two definitions.
+        Rebuilt from the generator's: two assemblies are two definitions.
         """
         sink: list[StepRecord] = []
         planner = CannedLLMClient([_generator_payload(_candidate_payload("c1"))])
@@ -740,8 +739,7 @@ class TestTheSelectorIsItsOwnMeteredRole:
     def test_a_selector_failure_carries_the_generations_bill(self) -> None:
         """ADR 0045's trap, one layer up.
 
-        The generation is paid for BEFORE the selector is asked, so a selector exception
-        would charge it to nobody.
+        The generation is paid for BEFORE the selector is asked.
         """
         planner = CannedLLMClient(
             [_generator_payload(_candidate_payload("c1"))],
@@ -890,7 +888,7 @@ class TestAGapIsPairedWithinOneWorld:
         """ADR 0043: a recording IS a world, so two arms over one recording pair.
 
         Keyed on ``recorder.world_fingerprint``, not the path or the archive: a path is a
-        name, an archive is a run, and two archives replaying one recording are the pair.
+        name, an archive is a run, and two archives of one recording are the pair.
         """
         left = world_key(
             scenario="s", execution_mode="recorded", archive="aaa", world_fingerprint="w1"
@@ -913,7 +911,7 @@ class TestAGapIsPairedWithinOneWorld:
         """The rule is reachable now that recorded mode exists (cmd #277, #279).
 
         ``runner._replay_record`` puts ``world_fingerprint`` on every recorded outcome;
-        asserted against the runner's own key name, not a literal.
+        asserted against the runner's key name.
         """
         recorded = _outcome(mode=ExecutionMode.RECORDED, replay={"world_fingerprint": "abc123"})
         assert research_report.recorded_fingerprint(recorded) == "abc123"

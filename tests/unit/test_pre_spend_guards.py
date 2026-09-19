@@ -56,8 +56,7 @@ def test_eval_live_refuses_a_missing_only_at_parse_time() -> None:
 def test_eval_live_recipe_no_longer_makes_only_optional() -> None:
     """The ``$(if $(ONLY),...)`` that made the filter optional must be gone.
 
-    Inside the else-branch ONLY is non-empty, so it would only tell readers the flag
-    is optional.
+    Inside the else-branch ONLY is non-empty, so it only misleads the reader.
     """
     recipe = _MAKEFILE.read_text(encoding="utf-8").split("\nelse\neval-live:", 1)[1]
     recipe = recipe.split("\nendif", 1)[0]
@@ -71,7 +70,7 @@ def test_eval_live_recipe_no_longer_makes_only_optional() -> None:
 def test_the_makefile_guard_has_a_subject() -> None:
     """Canary: ``eval-live`` is still a target here.
 
-    A rename would turn both text assertions into checks on a dead string.
+    A rename turns both assertions into checks on a dead string.
     """
     assert re.search(r"^eval-live:", _MAKEFILE.read_text(encoding="utf-8"), re.MULTILINE), (
         "no `eval-live:` rule in the Makefile — the guard tests above have no subject"

@@ -435,7 +435,7 @@ class TestThePerRoleSumEqualsTheLedger:
     def test_an_evaluator_side_role_is_reported_but_not_reconciled(self) -> None:
         """The briefing judge is the evaluator's spend, never the agent's.
 
-        Billed, so recorded; never in ``BudgetLedger``, so not reconciled.
+        Billed, so recorded; never in ``BudgetLedger``.
         """
         accounting = RunAccounting()
         metered = accounting.meter(
@@ -479,7 +479,7 @@ class TestContextSizeIsMeasuredPerStep:
     ) -> None:
         """The fake client bills nothing, and 0 is the true number it charged.
 
-        Hence the character measurement beside it (divergence D1).
+        Hence the character measurement (divergence D1).
         """
         accounting = RunAccounting()
         _run_investigation(accounting, CannedLLMClient([_STOP_STEP]), budget, now)
@@ -562,8 +562,7 @@ class TestTheRunReportCarriesTheAccounting:
     """Divergence D3, the half WP-0.3 left: a report with no cost in it.
 
     WP-0.3 answered "what did this run spend in total?" and could not answer "on which
-    role?" or "over how many planner steps?" — the columns the accuracy/cost frontier is
-    drawn from.
+    role?" or "over how many planner steps?" — the accuracy/cost frontier's columns.
     """
 
     def _outcome(self) -> ScenarioOutcome:
@@ -585,7 +584,7 @@ class TestTheRunReportCarriesTheAccounting:
         """WO-R3-260: the briefing writer is the agent's cost, so it is charged.
 
         The flag separates whose money a call is, not when it happened: ``briefing_writer``
-        runs on the agent's model after the terminal state, metered, never a gate.
+        runs on the agent's model, metered, never a gate.
         """
         accounting = self._outcome().accounting
         assert accounting is not None
@@ -595,7 +594,7 @@ class TestTheRunReportCarriesTheAccounting:
     def test_only_the_evaluators_own_role_stays_out_of_the_ledger(self) -> None:
         """The judge grades the run; it is not part of it.
 
-        Two post-terminal roles, and the line between them is ownership.
+        Two post-terminal roles; the line between them is ownership.
         """
         scenario = _accounted_scenario()
         judged = scenario.model_copy(

@@ -151,8 +151,7 @@ class TestScenarioExpectation:
     def test_singular_expected_action_tool_is_rejected(self) -> None:
         """A-16: the stale documented name is not an alias — it fails the load.
 
-        ``extra="forbid"``, so the singular spelling is a load failure rather than a
-        silently ungraded ACTION dimension.
+        ``extra="forbid"``, so the singular spelling is a load failure.
         """
         with pytest.raises(ValidationError, match="expected_action_tool"):
             ScenarioExpectation.model_validate(
@@ -196,8 +195,7 @@ def _snapshot_payload(*tools: tuple[str, str]) -> dict[str, Any]:
 class TestChaosHookClosedSet:
     """S-03: a chaos hook name is a closed set, not an arbitrary string.
 
-    The name is forwarded verbatim under the full write+chaos principal, so a plain
-    ``str`` lets any YAML call any tool.
+    The name is forwarded verbatim under the write+chaos principal, so ``str`` is open.
     """
 
     def test_tier1_write_tool_name_rejected(self) -> None:
@@ -470,7 +468,7 @@ class TestChaosHookArgumentClosure:
 
     The name closure (#116) left half of every invocation unchecked. ``arguments`` go
     verbatim to ``tools/call`` and every chaos ``inputSchema`` is ``additionalProperties:
-    false``, so a typo'd name or flipped type is a guaranteed live ``ChaosInvocationError``.
+    false``, so a typo'd name is a guaranteed live ``ChaosInvocationError``.
     """
 
     def test_missing_required_argument_rejected(self) -> None:
@@ -542,7 +540,7 @@ class TestChaosPlan:
     """WP-1.1: many hooks, in order, with their teardown and a settle wait.
 
     Both halves of the plan validate alike: a teardown checked more loosely would be a
-    second door into the same write+chaos principal.
+    second door into the same principal.
     """
 
     def test_one_hook_plan_validates(self) -> None:
@@ -823,7 +821,7 @@ class TestGroundTruth:
     def test_an_unknown_root_cause_label_is_rejected(self) -> None:
         """The label is the enum the agent classifies into, or it is nothing.
 
-        A free string could never be compared with a ``Hypothesis.category``.
+        A free string cannot be compared with a category.
         """
         with pytest.raises(ValidationError, match="root_causes"):
             GroundTruth.model_validate({"incident_count": 1, "root_causes": ["outbox_stalled"]})

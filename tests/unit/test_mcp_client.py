@@ -241,7 +241,7 @@ class TestMalformedResultEnvelope:
 
     ``ToolResult.model_validate`` used to sit *outside* the error wrapping, so an unparseable
     result raised a raw ``ValidationError``; every transition catches ``MCPError`` only, so
-    the incident ended FAILED (invariant 5 inverted).
+    the incident ended FAILED (invariant 5).
     """
 
     def test_non_list_content_raises_mcp_error(self) -> None:

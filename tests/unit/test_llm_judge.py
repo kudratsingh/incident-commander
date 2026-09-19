@@ -382,7 +382,7 @@ class TestTheArchivedJudgeContextCarriesTheFilter:
     """Run E's own trail, rebuilt from the archive. Read-only, and no live judge.
 
     The archived final checkpoint IS the ``RunState`` the briefing was rendered from, so
-    rendering it again is the experiment rather than a model of it.
+    rendering it again is the experiment, not a model of it.
     """
 
     def test_the_archive_is_present(self) -> None:

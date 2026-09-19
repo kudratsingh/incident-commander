@@ -110,7 +110,7 @@ def _audit(
     """One audit row in the PLATFORM's real shape.
 
     From v0.4.9's AuditEventEntry: the first version built {"items": [...]}, which the
-    platform never emits, so the guard was a no-op (F-004).
+    platform never emits (F-004).
     """
     return {
         "id": "aud_" + tool[:6] + when.strftime("%H%M%S%f"),
@@ -128,8 +128,7 @@ def _audit(
 def _result(items: list[dict[str, Any]], total: int | None = None) -> ToolResult:
     """The platform's envelope: {"total": N, "events": [...]}.
 
-    ``total`` counts the same filter unlimited (audit.py:86), so a bigger ``total``
-    means withheld rows.
+    ``total`` counts the same filter unlimited, so a bigger one means withheld rows.
     """
     return ToolResult(
         content=[
@@ -341,7 +340,7 @@ class TestSelfOwnedPrincipals:
     """A-13's other half: a shared platform's other tenants are not us.
 
     The filter set is {agent SA, smoke SA} — NOT the smoke SA alone: the F-001 failure
-    this guard exists for is the stage running under the FULL agent token.
+    this guard exists for is the stage under the FULL agent token.
     """
 
     _SINCE = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
@@ -461,7 +460,7 @@ class TestWriteCapablePrincipal:
         """The leak, caught before a single model call.
 
         A principal that passes BOTH probes on arguments is the pre-v0.6.5 four-scope token:
-        it can act, and the platform serves it the `chaos.%` audit rows.
+        it can act and read the `chaos.%` audit rows.
         """
         client = _ByTool(
             {
@@ -475,8 +474,7 @@ class TestWriteCapablePrincipal:
     def test_a_vanished_probe_tool_fails_closed(self) -> None:
         """ "Tool not found" is not proof that the principal can act.
 
-        The guard used to pass on ANY non-scope MCP error, so a renamed
-        ``mark_dlq_permanent`` makes it green vacuously for a read-scoped token.
+        The guard used to pass on ANY non-scope MCP error, so a rename makes it green.
         """
         client = _Client(MCPError(-32601, f"Unknown tool: {_PROBE_TOOL}"))
         with pytest.raises(PrincipalGuardError, match="-32601"):
@@ -504,7 +502,7 @@ class TestChaosBlindPrincipal:
 
     Not blast radius: the platform hides every ``chaos.%`` audit row from principals
     without ``chaos:invoke``, so the scope is a read of the answer key — hook name and
-    arguments, stamped seconds before the alert. Asserted at the point of use (F-001).
+    arguments, stamped seconds before the alert (F-001).
     """
 
     def test_a_scope_refusal_passes(self) -> None:
@@ -553,8 +551,7 @@ class TestChaosBlindPrincipal:
     def test_the_two_chaos_guards_are_exact_opposites(self) -> None:
         """One platform response, two verdicts — one per principal.
 
-        The same probe with inverted expectations is what makes "two different
-        principals" checkable.
+        The same probe with inverted expectations makes "two principals" checkable.
         """
         scope_refused = _Client(MCPError(-32002, "missing required scope: chaos:invoke"))
         assert_chaos_blind_principal(scope_refused)  # the agent: correct

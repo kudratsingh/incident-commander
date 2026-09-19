@@ -451,8 +451,7 @@ class TestTheBriefingWriter:
 class TestTheVerificationJudge:
     """WO-R2-174: the same wrapper and cap on the judge that says "did it work?".
 
-    A schema-rejected reply answers nothing, and the run used to escalate on it with a
-    Tier-1 action already executed.
+    A schema-rejected reply answers nothing, and the run escalated with a Tier-1 done.
     """
 
     def test_a_malformed_first_judgment_does_not_end_the_run(
@@ -556,7 +555,7 @@ class TestTheEvalBriefingJudge:
         """The column stays EMPTY and says why.
 
         ``OutputRepairExhausted`` is an ``LLMError``, which the runner catches to leave
-        ``judge_score`` ``None``. A default would be invented.
+        ``judge_score`` ``None``.
         """
         llm = _ScriptedLLM([_BAD_SCORE, _BAD_SCORE])
         judge_score: JudgeScore | None = None
@@ -634,7 +633,7 @@ class TestTheFailureClass:
     ) -> None:
         """Two of the three prefixes contain both "LLM" and "invalid".
 
-        Without a more specific bucket a rejection is filed as network.
+        Without a specific bucket it is filed as network.
         """
         final = self._final(run_state, now, "planner LLM invalid: output failed schema validation")
         assert _classify_failure(self._failing_report(), final)[0] != "transport"
@@ -654,7 +653,7 @@ class TestTheLiveRunEndToEnd:
     ) -> None:
         """The decoder handles it, so the repair budget is never touched.
 
-        ADR 0035's two halves: the seen shape costs nothing extra.
+        The seen shape is free (ADR 0035).
         """
         from tests.unit.test_structured_output import LIVE_RECORD_OUTPUT_INPUT
 

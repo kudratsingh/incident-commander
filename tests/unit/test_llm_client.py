@@ -441,8 +441,7 @@ class TestUnexpectedApiErrorsAreWrapped:
 class TestFailuresAreTraced:
     """A billed call that did not return must leave a record.
 
-    `llm_error` was in tracing.py's kind set from the start and nothing wrote one, so an
-    exhausted 429 left a gap.
+    `llm_error` was in tracing.py's kind set from the start and nothing wrote one.
     """
 
     @staticmethod
@@ -640,8 +639,7 @@ class TestBilledWorkLeavesTheClient:
 class TestPreflightWrapsEverySdkError:
     """The point of preflight is one labeled line, never a traceback.
 
-    ``evals/runner.py`` catches ``LLMError`` for exit 3; an SDK error that escapes skips
-    that handler.
+    ``evals/runner.py`` catches ``LLMError`` for exit 3; an escaping error skips it.
     """
 
     def test_an_unexpected_api_error_becomes_an_llm_error(
@@ -680,7 +678,7 @@ class TestTheClientTimesItsOwnCalls:
     def _clock(self, *readings: float) -> Callable[[], float]:
         """A clock that returns each reading once, then holds the last.
 
-        Holding rather than raising: the number of reads per call is an implementation detail.
+        Holding rather than raising: the read count is incidental.
         """
         ticks = list(readings)
 

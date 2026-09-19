@@ -152,7 +152,7 @@ class TestFabricatedTierOneFixtures:
         """The named remaining hole, pinned so nobody assumes otherwise.
 
         Both defects this check was built alongside were VALUES in correctly shaped fields,
-        which no JSON Schema and no offline check can express.
+        which no JSON Schema can express.
         """
         defects = check_call(
             _call(

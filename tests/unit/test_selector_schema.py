@@ -163,8 +163,7 @@ class TestScoresResolveToTheSet:
     def test_an_unknown_scored_id_is_refused_by_name(self) -> None:
         """The red-before case: this is what the schema exists to reject.
 
-        A ``scores`` key naming no candidate corrupts the ranking: the selected id and
-        ``probe_more`` look up the same id space.
+        A ``scores`` key naming no candidate corrupts the ranking.
         """
         with pytest.raises(ValidationError) as caught:
             _validate(_payload(scores={"c1": 0.9, "c2": 0.2, "c9": 0.1}), _pair())
@@ -175,8 +174,7 @@ class TestScoresResolveToTheSet:
     def test_an_unscored_candidate_is_refused_by_name(self) -> None:
         """The strengthening, and it is the half that keeps the ranking total.
 
-        A candidate with no score reads in the record as one that scored zero, and leaves
-        ``probe_more`` able to point at an unranked candidate.
+        A candidate with no score reads as one that scored zero.
         """
         with pytest.raises(ValidationError) as caught:
             _validate(_payload(scores={"c1": 0.9}), _pair())
@@ -200,7 +198,7 @@ class TestASelectionIsStatedExactlyWhenThereIsOne:
     def test_a_non_select_decision_refuses_an_id(self, decision: str) -> None:
         """An id on a decision that does not act on it reads as a diagnosis.
 
-        It looks like a run that committed and then did not act.
+        It reads as a run that committed and did not act.
         """
         with pytest.raises(ValidationError) as caught:
             _validate(_payload(decision=decision, selected="c1"), _pair())
@@ -242,8 +240,7 @@ class TestTheScaleIsDeclared:
 class TestNothingBoundIsARefusal:
     """Fail-closed, which is the only reason a context variable is tolerable.
 
-    With nothing bound a ``SelectionResult`` could name any id, so the absence of a
-    binding must be loud.
+    With nothing bound a ``SelectionResult`` could name any id.
     """
 
     def test_validation_with_no_set_bound_refuses(self) -> None:
@@ -297,7 +294,7 @@ class TestTheContextRendersArgumentsBeforeResults:
     def test_an_unfiltered_read_is_distinguishable_from_a_filtered_one(self) -> None:
         """The absence of a filter is itself the fact, so it is rendered.
 
-        Two lines differing only in a dropped key cannot be told apart.
+        A dropped key makes two lines look alike.
         """
         state = _state(
             _entry("list_dlq_messages", {"remediation_hint": None}, json.dumps({"total": 4})),
@@ -312,8 +309,7 @@ class TestTheContextRendersArgumentsBeforeResults:
     def test_the_trail_comes_from_the_shared_renderer(self) -> None:
         """Not a fourth renderer: the same function, byte for byte.
 
-        The selector's context is assembled through ``briefing.render_trail``, asserted by
-        requiring every directly rendered line to appear in it.
+        The selector's context is assembled through ``briefing.render_trail``.
         """
         state = _state(
             _entry("get_consumer_lag", {"consumer_group": "billing"}, "lag 42"),
@@ -408,8 +404,7 @@ class TestNoGroundTruthReachesTheSelector:
     def test_the_renderer_cannot_be_handed_an_answer_key(self) -> None:
         """The structural half: the function's arguments cannot carry a label.
 
-        ``format_selection_context`` takes a ``RunState`` and a candidate set — nothing
-        a ``GroundTruth`` could arrive through.
+        ``format_selection_context`` takes a ``RunState`` and a candidate set.
         """
         joined = " ".join(
             str(parameter.annotation)
@@ -421,8 +416,7 @@ class TestNoGroundTruthReachesTheSelector:
     def test_the_selector_is_its_own_accounting_role(self) -> None:
         """So the cost of selection is a number, not a share of the planner's.
 
-        WP-6.2 meters the selector client under this role and
-        ``StepAccounting.selector_calls`` counts the calls.
+        ``StepAccounting.selector_calls`` counts the calls (WP-6.2).
         """
         assert SELECTOR_ROLE == "candidate_selector"
         assert SELECTOR_ROLE != "investigation_planner"
@@ -432,8 +426,7 @@ class TestTheCallSendsNoTemperature:
     """Decision O-24, and the divergence from plan 04:161's "temperature 0".
 
     The newest model families reject ``temperature`` with a 400
-    (``llm/client.SAMPLING_REJECTED_MODELS``), so requiring it would make the experiment
-    un-runnable under a newer pin.
+    (``llm/client.SAMPLING_REJECTED_MODELS``), so requiring it would break a newer pin.
     """
 
     def test_neither_leg_of_the_call_sends_a_temperature(self) -> None:
@@ -455,7 +448,7 @@ class TestTheCallSendsNoTemperature:
     def test_an_unresolvable_id_buys_one_repair_and_then_escalates(self) -> None:
         """ADR 0035 covers the selector because the validator raises inside the call.
 
-        Two billed legs, then ``OutputRepairExhausted`` — not a crash outside the loop.
+        Two billed legs, then ``OutputRepairExhausted``.
         """
         bad = _payload(scores={"c1": 0.9, "c2": 0.2, "ghost": 0.1})
         llm = CannedLLMClient([bad, bad])
@@ -475,8 +468,8 @@ class TestTheCallSendsNoTemperature:
 class TestTheSelectorPointsAtOneCandidate:
     """``chosen_candidate_id`` — one spelling of the rule WP-6.2 reads.
 
-    Plan 02's two rules cannot both be literally true; resolved here: ``select`` names a
-    candidate, ``probe_more`` the highest-scored one, ``escalate`` nothing.
+    Plan 02's two rules cannot both be true; resolved here: ``select`` names a
+    candidate, ``probe_more`` the highest-scored, ``escalate`` nothing.
     """
 
     def test_select_points_at_the_candidate_it_named(self) -> None:

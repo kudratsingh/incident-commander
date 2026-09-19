@@ -109,8 +109,7 @@ class TestTracerFor:
 class TestNoTruncationAcrossInvocations:
     """Regression: the tracer must never delete a prior attempt's records.
 
-    Until 2026-08-07 ``__post_init__`` truncated the file, so Run 001's killed attempt
-    was erased (F-002).
+    Until 2026-08-07 ``__post_init__`` truncated the file (F-002).
     """
 
     def _records(self, path: Path) -> list[dict[str, object]]:
@@ -193,7 +192,7 @@ def _test_settings(**overrides: Any) -> Settings:
 def _two_iteration_scenario() -> Scenario:
     """A canned scenario whose planner runs exactly twice: probe, then stop.
 
-    A once-per-run record passes every one-step test.
+    Once per run passes any one-step test.
     """
     return Scenario(
         name="step_record_two_iterations",
@@ -269,7 +268,7 @@ class TestStepRecordsReachTheTraceStore:
     """The offline landing place for per-step research data (divergence D1).
 
     Only the live targets export ``EVAL_TRACE_DIR``, so a ``StepRecord`` was built on
-    every run and read on none. What a canned run decided is as real.
+    every run and read on none.
     """
 
     def _run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -373,7 +372,7 @@ class TestStepRecordsReachTheTraceStore:
     ) -> None:
         """Invariant 9 for the new kind (F-002 is what it is for).
 
-        A tracer that truncated would make every comparison a comparison of the last run.
+        A tracer that truncated would compare only the last run.
         """
         monkeypatch.setenv("EVAL_TRACE_DIR", str(tmp_path))
         scenario = _two_iteration_scenario()
@@ -395,7 +394,7 @@ class TestNoChainOfThoughtIsStored:
     for — nothing else.
 
     A hidden chain-of-thought is unreviewed model text stored under the evaluator's name,
-    so the ban is structural: a field whose name looks like one fails here.
+    so the ban is structural.
     """
 
     #: Names a hidden-reasoning field once separators are stripped, so the three spellings

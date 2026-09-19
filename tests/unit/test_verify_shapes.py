@@ -73,8 +73,7 @@ def _shipped_expectation() -> ScenarioExpectation:
 def _trace_wire_calls() -> list[tuple[str, dict[str, Any]]]:
     """Every MCP call run D actually put on the wire, in order.
 
-    The tracer records a call twice — as the planner named it and as ``wire.py`` sent it;
-    the ledger keeps the second.
+    The tracer records a call twice; the ledger keeps the wire form.
     """
     calls: list[tuple[str, dict[str, Any]]] = []
     for line in _TRACE.read_text().splitlines():
@@ -139,7 +138,7 @@ class TestTheArchivedRunGradesGreen:
     def test_the_report_names_the_verify_shape_that_satisfied_the_group(self) -> None:
         """A green ``any_of`` still says which branch held.
 
-        Otherwise the report loses which admissible verify shape the agent chose.
+        Otherwise the report loses which verify shape the agent chose.
         """
         detail = _dim(
             grade(_archived_run(), _shipped_expectation(), briefing=_archived_briefing()),
@@ -210,7 +209,7 @@ class TestTheOldClaimsReproduceTheRed:
         """The mechanism, named: ``rows: all`` refuses the empty final read.
 
         An empty listing contributes no values, so ``which: last`` falls back to the previous
-        non-empty entry. Hence ``total`` plus ``after_tools``.
+        non-empty entry. Hence ``after_tools``.
         """
         detail = self._graded_with_old_claims()
         assert "expected EVERY value not_equals 'replay_safe'" in detail
@@ -272,7 +271,7 @@ def _run(run_state: RunState, *evidence: EvidenceEntry) -> RunState:
 def _verify_group() -> AnyOfExpectation:
     """The shipped ``any_of`` group, pulled from the scenario itself.
 
-    Read out of the YAML: a copy would drift from the file.
+    Read out of the YAML: a copy would drift.
     """
     groups = [
         claim
@@ -378,7 +377,7 @@ class TestLazyShapesStayRed:
     ) -> None:
         """The other shape, failing on its own terms.
 
-        One ``replay_safe`` row in the final unfiltered listing fails member 2.
+        One ``replay_safe`` row in the final listing fails it.
         """
         run = _run(
             run_state,
@@ -531,7 +530,7 @@ class TestCallArguments:
     def test_null_means_absent_or_null(self, run_state: RunState) -> None:
         """One reading, because the platform cannot tell the two apart.
 
-        ``wire.py`` fills defaults, so an omitted argument and a ``null`` arrive alike.
+        ``wire.py`` fills defaults, so omitted and ``null`` arrive alike.
         """
         claim = self._claim(call_arguments={"remediation_hint": None}, equals=4)
         omitted = _run(run_state, _entry("list_dlq_messages", {}, _FOUR_ROWS_NO_SAFE, 1))
@@ -554,7 +553,7 @@ class TestCallArguments:
     ) -> None:
         """ "That call was never made" and "it returned the wrong thing" differ.
 
-        One detail for both hides which (INC-001).
+        One detail for both hides which.
         """
         run = _run(run_state, _entry("list_dlq_messages", _UNFILTERED, _FOUR_ROWS_NO_SAFE, 1))
         report = grade(run, self._expectation(self._claim()))

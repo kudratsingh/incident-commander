@@ -59,7 +59,7 @@ def _translate(pattern: str) -> str:
 def _github_match(pattern: str, path: str) -> bool:
     """True if a GitHub Actions path-filter pattern matches a repo-relative path.
 
-    Positive patterns only: a leading ``!`` is the caller's business.
+    Positive patterns only: ``!`` is the caller's business.
     """
     assert not pattern.startswith("!"), (
         f"{pattern!r} is an exclusion; polarity belongs to _covered, not the matcher"
@@ -89,8 +89,7 @@ def _gate_paths() -> list[str]:
 def _covered(path: str, patterns: list[str] | None = None) -> bool:
     """Whether the eval gate fires for ``path``, honouring exclusions.
 
-    GitHub evaluates in order and the LAST match wins, so a literal ``!`` left the earlier
-    positive standing and reported an excluded path as gated.
+    GitHub evaluates in order and the LAST match wins, so a literal ``!`` failed open.
     """
     covered = False
     for pattern in patterns if patterns is not None else _gate_paths():

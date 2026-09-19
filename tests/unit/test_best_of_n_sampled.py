@@ -271,7 +271,7 @@ class TestNIndependentCallsAllAccrue:
     ) -> None:
         """ADR 0045's failure path, through the real loop.
 
-        The three draws that returned are charged only if the exception carried them.
+        The three returned draws are charged only if the exception carried them.
         """
         llm = _RaisesOnCall(
             [_step()], fail_on=4, usage=CannedUsage(input_tokens=100, output_tokens=40)
@@ -313,7 +313,7 @@ class TestNIndependentCallsAllAccrue:
     ) -> None:
         """A transport failure that reports no usage is charged nothing invented.
 
-        A transport ``LLMError`` rather than a ``ValueError``, which would be repairable.
+        A transport ``LLMError``, not a repairable ``ValueError``.
         """
         llm = _RaisesOnCall(
             [_step()],
@@ -400,7 +400,7 @@ class TestTheUnionDeduplicates:
     def test_branch_count_follows_the_union(self, run_state: RunState, now: datetime) -> None:
         """WP-2.3's ``branch_count`` is candidates beyond the emitted one.
 
-        Four draws with two distinct diagnoses branch once, not three times.
+        Four draws, two diagnoses: one branch, not three.
         """
         accounting = RunAccounting()
         llm = CannedLLMClient(
@@ -655,7 +655,7 @@ class TestTheCostMultiplierIsDeclared:
     def test_an_unfunded_arm_is_not_silently_rescued(self, now: datetime) -> None:
         """Multiplier 1 is legal and is a budget experiment, not a strategy one.
 
-        Nothing refuses it: the arm stamps ``n`` and the provenance carries the seeded ledger
+        Nothing refuses it: the arm stamps ``n`` and the provenance carries the ledger
         (decision C4).
         """
         settings = _settings(inference_strategy="best_of_n_sampled", best_of_n=8)
@@ -669,7 +669,7 @@ class TestTheCostMultiplierIsDeclared:
     ) -> None:
         """The deferred check needs a number; this is where it comes from.
 
-        Planner-role tokens against ``baseline``, within ±20%.
+        Planner tokens vs ``baseline``, ±20%.
         """
         accounting = RunAccounting()
         usage = CannedUsage(input_tokens=100, output_tokens=40)
@@ -708,7 +708,7 @@ class TestTheSamplingRejectionTripwire:
     def test_it_is_a_tripwire_and_not_a_refusal(self) -> None:
         """Nothing blocks a model that is not on the list.
 
-        A wrong refusal stops a real run; a wrong allow costs one escalation.
+        A wrong refusal stops a real run.
         """
         anthropic = _RecordingAnthropic(_step())
         client = LLMClient(api_key="k", client=anthropic)  # type: ignore[arg-type]

@@ -58,7 +58,7 @@ def _scripted(monkeypatch: pytest.MonkeyPatch, outcomes: list[Any]) -> list[Any]
 class TestReadinessGate:
     """``--await-fixtures`` exists to survive a platform that is still booting.
 
-    It only caught ``UnseededPlatformError``, so a not-yet-up platform killed the loop.
+    It only caught ``UnseededPlatformError``, so a not-yet-up platform killed it.
     """
 
     def test_survives_a_platform_that_has_not_opened_its_port(

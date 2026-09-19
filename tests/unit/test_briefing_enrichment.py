@@ -115,7 +115,7 @@ class TestEnrichBriefing:
         """The schema still rejects it; ADR 0035 buys one re-ask first.
 
         Two canned payloads and only two, so a cap that stopped holding would surface as "no
-        more canned responses". ``findings=""`` is still invalid.
+        more canned responses". ``findings=""`` is invalid.
         """
         client = CannedLLMClient(
             [{"findings": "", "recommendation": "x"}, {"findings": "", "recommendation": "y"}]
@@ -158,7 +158,7 @@ class TestBriefingContent:
 class TestServiceAndEvalPathParity:
     """R2-38: the eval graded a briefing shape production never produced.
 
-    Enrichment stays eval-only, so the difference must be bounded to the two LLM strings.
+    Enrichment stays eval-only, so the difference is bounded to the two LLM strings.
     """
 
     def test_enrichment_changes_only_findings_and_recommendation(
@@ -208,8 +208,7 @@ class TestServiceAndEvalPathParity:
 class _BillsThenSucceeds:
     """Fails validation once, billing for it, then answers.
 
-    ``CannedLLMClient`` raises before building an ``LLMResult``, so a canned repair costs
-    nothing; a real rejected reply carries its usage.
+    ``CannedLLMClient`` raises before building an ``LLMResult``, so a canned repair is free.
     """
 
     def __init__(self, usage: LLMUsage, output: BriefingContent) -> None:

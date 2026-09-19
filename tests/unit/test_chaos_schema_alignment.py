@@ -82,7 +82,7 @@ def _scenario_files_declaring_chaos() -> tuple[str, ...]:
     """Scenario files whose YAML carries a ``chaos_setup`` key, read raw.
 
     Deliberately independent of ``load_scenarios``: this is the reference the loader is
-    checked against, so it must not share its failure modes.
+    checked against, so it shares no failure modes.
     """
     names: list[str] = []
     for path in sorted(_SCENARIOS_DIR.rglob("*.yaml")):

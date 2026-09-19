@@ -190,7 +190,7 @@ class TestDomainMembershipIsTypeAware:
     """`in` uses `==`, and in Python `True == 1`. That is a contract change.
 
     `FieldComparator.satisfied_by` compares `is` when either side is a bool, so this
-    mirrors it: type first, value second.
+    mirrors it.
     """
 
     def test_canned_true_against_a_live_one_is_type_drift(self) -> None:
@@ -270,8 +270,8 @@ class TestCannedCallDerivation:
     def test_chaos_seeded_reads_the_plan_not_the_legacy_field(self, spelling: str) -> None:
         """Both spellings of one fault mark the call chaos-seeded.
 
-        `chaos_seeded` decides whether "does not exist" is an observation or a probe error;
-        off `chaos_setup` a plan-declaring scenario answers False (ADR 0037).
+        `chaos_seeded` decides whether "does not exist" is an observation or an error;
+        off `chaos_setup` a plan answers False (ADR 0037).
         """
         from evals.graders.deterministic import ScenarioExpectation
         from evals.scenarios.schema import ChaosHook, ChaosPlan, Scenario
@@ -432,7 +432,7 @@ class TestVolatileListEmptinessSaysNothing:
 
     `get_consumer_lag.recent_samples` is `[]` for a stack's first minute, so without the
     exemption the drift KIND depended on when the check ran — the `_differs_in_type`
-    lesson applied to list emptiness.
+    lesson, for list emptiness.
     """
 
     def test_an_empty_live_window_is_not_reported(self) -> None:
@@ -615,7 +615,7 @@ class TestProbeErrorChannels:
     """A call that could not be made is RECORDED, never fatal.
 
     Only an MCP-level JSON-RPC error reached ``ProbeError``: an HTTP status, a non-JSON
-    body and a refused connection all escaped ``_call_tool`` and took the whole check.
+    body and a refused connection escaped ``_call_tool`` and took the check.
     """
 
     _REQUEST = httpx.Request("POST", "http://x/mcp")
@@ -735,7 +735,7 @@ class TestBlessOnlyDropsWhatTheRunDisproved:
     """The ledger is the burn-down list, so a bless may not shrink it by accident.
 
     ``dump_ledger`` wrote the whole file from one run, so an unreached entry vanished.
-    A ratchet a flake can turn is not a ratchet.
+    A ratchet a flake can turn is not one.
     """
 
     def _drift(self, scenario: str, tool: str, path: str = "lag") -> Drift:
@@ -833,7 +833,7 @@ class TestLedgerContext:
         """The case that rules out inferring context from the scenario.
 
         `create_stale_cache` writes ONE Redis key; it cannot explain a fixture claiming 1.00G
-        of memory against a live 1.60M. It stays work.
+        of memory against a live 1.60M. Still work.
         """
         context, _ = context_of(
             ("remediate_stale_cache_success", "get_redis_health", "used_memory_human", "value")

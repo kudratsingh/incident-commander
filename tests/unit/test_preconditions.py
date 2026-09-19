@@ -196,7 +196,7 @@ class TestARowSelectorOnAPrecondition:
     def test_the_rule_is_the_graders_own(self) -> None:
         """One statement of "what a selector attaches to", not two copies.
 
-        A second implementation is how the two sides come to disagree.
+        A second implementation is how the two would disagree.
         """
         assert where_path_errors("total", RowSelector(field="id", equals="a")) is not None
         assert where_path_errors("items[].hint", RowSelector(field="id", equals="a")) is None

@@ -235,8 +235,7 @@ def _verify_window(run: RunState) -> list[EvidenceEntry]:
 class TestVerifyBudgetGate:
     """B-12: the polling window re-checks the ledger between attempts.
 
-    ADR 0006 blesses ONE extra probe over budget; without an in-loop gate a run could
-    spend ten plus judge calls.
+    ADR 0006 blesses ONE extra probe over budget; without a gate a run spends ten.
     """
 
     def test_entering_verifying_exhausted_allows_exactly_one_attempt(self) -> None:
@@ -442,7 +441,7 @@ class TestVerifyJudgeSeesTheActionResult:
     """Some fixes report their effect rather than show it.
 
     A delayed replay reports `scheduled` / `execute_at`, so the DLQ cannot shrink inside
-    the verify window and the judge escalated a correct agent.
+    the verify window; the judge escalated a correct agent.
     """
 
     @staticmethod
@@ -490,7 +489,7 @@ class TestVerifyJudgeSeesTheActionResult:
     def test_the_transition_actually_passes_it_through(self) -> None:
         """The wiring, not just the formatter.
 
-        Testing `format_verify_context` alone would pass if nothing looked it up.
+        `format_verify_context` alone passes if nobody looks.
         """
         plan = self._plan()
         judge = CannedLLMClient([{"verdict": "verified", "reasoning": "scheduled"}])

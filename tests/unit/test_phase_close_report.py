@@ -39,8 +39,7 @@ PHASES: list[int] = sorted(close.SCOPES)
 def _document_cases() -> list[tuple[close.PhaseScope, Path, Path]]:
     """Every committed document beside the scope that produced it.
 
-    Parametrizing on this keeps a superseded document under test — invariant 9 says it
-    is still evidence.
+    Parametrizing on this keeps a superseded document under test (invariant 9).
     """
     return [(scope, halves[0], halves[1]) for scope, halves in close.committed_documents()]
 
@@ -57,8 +56,7 @@ _ASSEMBLY_TIME_FACTS: Final[tuple[tuple[str, str], ...]] = ()
 def _unexplained_drift(committed: str, regenerated: str) -> list[str]:
     """Every differing line that is NOT an assembly-time fact.
 
-    Line-level rather than a normalising rewrite: a normaliser hides what it touched,
-    and the offending line is what a reader needs.
+    Line-level, not a normalising rewrite: a normaliser hides what it touched.
     """
     changed = [
         line
@@ -162,8 +160,7 @@ def test_each_phase_resolves_its_own_artifact_by_its_own_sweep(phase: int) -> No
 def test_every_committed_document_has_a_declared_scope_and_vice_versa() -> None:
     """The registry that keeps a superseded document regenerable.
 
-    Red before ``COMMITTED_SCOPES``: writing the FINAL left the DRAFT's bytes with
-    nothing able to reproduce them.
+    Red before ``COMMITTED_SCOPES``: writing the FINAL left the DRAFT unreproducible.
     """
     cases = _document_cases()
     assert len(cases) == len(close.COMMITTED_SCOPES) == 3
@@ -215,7 +212,7 @@ def test_writing_twice_refuses_rather_than_replacing(tmp_path: Path) -> None:
 def test_rendering_a_document_against_another_phases_scope_is_refused() -> None:
     """The markdown carries prose the JSON does not, so the pairing matters.
 
-    A phase-number lookup rendered the DRAFT with the FINAL's paragraph.
+    A phase-number lookup gave the DRAFT the FINAL's paragraph.
     """
     draft = close.assemble(close.REPO_ROOT, close.PHASE2_DRAFT)
     with pytest.raises(ValueError, match="phase 1"):
@@ -267,7 +264,7 @@ def test_an_empty_section_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_a_development_role_run_in_scope_marks_the_report_non_closing() -> None:
     """Plan 03 § 14: any development run in a phase report makes it non-closing.
 
-    Red before ``closing_verdict``: the sweep's own flag says ``True``.
+    Red before ``closing_verdict``: the sweep's flag says ``True``.
     """
     benchmark = _report("32ae38f6b38b", ModelRole.BENCHMARK)
     development = _report("deadbeefcafe", ModelRole.DEVELOPMENT)
@@ -313,7 +310,7 @@ def test_the_committed_report_is_closing_and_says_why(phase: int) -> None:
 def test_the_gating_grep_is_reproducible_and_still_finds_nothing(phase: int) -> None:
     """The committed command is re-run here, against the committed evidence.
 
-    A pasted grep is a claim; one the suite re-runs is a check.
+    A pasted grep is a claim; a re-run one is a check.
     """
     document = _committed(phase)
     recorded = document["sections"]["leak_hunt"]["committed_commands"]["trajectories"]
@@ -360,7 +357,7 @@ def test_the_chaos_mentions_are_ours_and_the_harness_s_and_none_are_the_platform
 def test_the_last_chaos_token_on_our_own_side_is_gone_by_phase_2() -> None:
     """The one bucket that moved between the two closes.
 
-    Phase 1 found `chaos` in `remediation_planner.md` (WO-R3-255); cmd #258 removed it.
+    Phase 1 found `chaos` in `remediation_planner.md` (WO-R3-255).
     """
     assert (
         _committed(1)["sections"]["leak_hunt"]["traces_by_author"]["totals"]["commander_prompt"][
@@ -713,8 +710,7 @@ def test_each_phase_names_its_own_scope_decision_and_incident_answer() -> None:
 def test_the_draft_mark_is_derived_from_the_scope_not_hand_set() -> None:
     """A status field anyone can type is one that will be typed wrong.
 
-    The only way to reach FINAL is to hold the evidence: put the pending archives in
-    ``live_legs``.
+    The only way to reach FINAL is to put the pending archives in ``live_legs``.
     """
     drafted = close.draft_status(close.PHASE2_DRAFT)
     assert drafted["status"] == "DRAFT"

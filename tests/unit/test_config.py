@@ -86,7 +86,7 @@ class TestEnvIsolation:
     """The isolation fixture must cover the settings surface, not a copy of it.
 
     ``_ENV_VARS`` was hand-kept and had drifted — the principal ids and the ADR-0022 pool
-    group were missing, so an exported one ran the tests against a real environment.
+    group were missing, so an exported one ran against a real environment.
     """
 
     def test_the_fixture_clears_every_variable_settings_reads(
@@ -394,8 +394,8 @@ class TestTheChaosPrincipalIsSeparateAndRequiredAtUse:
     """`PLATFORM_CHAOS_TOKEN`: optional to load, mandatory at the point of use.
 
     v0.6.5 split one four-scope principal into two (O-4), because the platform withholds
-    `chaos.%` audit rows from principals that cannot fire chaos. An absent value never
-    blocks the offline world, and a seeding path never degrades to the agent's token.
+    `chaos.%` audit rows from principals without it. An absent value never
+    blocks the offline world, and seeding never degrades to the agent's token.
     """
 
     def test_it_is_optional_at_load(self, valid_kwargs: dict[str, Any]) -> None:

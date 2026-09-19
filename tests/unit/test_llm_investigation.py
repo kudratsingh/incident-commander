@@ -259,7 +259,7 @@ class TestErrorPaths:
     ) -> None:
         """UUID fields must serialize to strings so httpx.json can encode them.
 
-        Regression: a `.model_dump()` without `mode="json"` crashed the saga_stuck batch.
+        A `.model_dump()` without `mode="json"` crashed a whole batch.
         """
         captured: dict[str, Any] = {}
 
@@ -752,7 +752,7 @@ class TestUnorderedRankingGate:
 def _dlq_response(total: int = 4) -> ToolResult:
     """The platform's four seeded dead-letter rows — the live run's distractor.
 
-    Present in every run whatever the incident, so the DLQ always has entries.
+    Present in every run, so the DLQ always has entries.
     """
     return ToolResult(
         content=[
@@ -822,7 +822,7 @@ class TestAlertSubjectProbeGuard:
     ) -> None:
         """The marquee case: DLQ distractor chased, alerted consumer never read.
 
-        Before the guard the same canned sequence reached PLANNING.
+        Before the guard this reached PLANNING.
         """
         llm = CannedLLMClient([_probe_step("list_dlq_messages", {}), _remediate_step()])
         mcp = _multi_tool_mcp()
@@ -867,8 +867,7 @@ class TestAlertSubjectProbeGuard:
     ) -> None:
         """The live failure exactly: right tool, wrong resource.
 
-        No arguments, so ``wire_arguments`` fills the schema default
-        (`worker-dispatcher`) — a real probe of a consumer the alert never named.
+        No arguments, so ``wire_arguments`` fills `worker-dispatcher` — a consumer nobody named.
         """
         llm = CannedLLMClient([_probe_step("get_consumer_lag", {}), _remediate_step()])
         mcp = _multi_tool_mcp()
@@ -983,7 +982,7 @@ class TestDlqCategoryIsTheAlertSubject:
     ) -> None:
         """Run B's trajectory, exactly: whole-queue read, then handoff.
 
-        The red-before: the same two steps reached PLANNING while the guard was inert.
+        The red-before: PLANNING reached while the guard was inert.
         """
         llm = CannedLLMClient([_probe_step("list_dlq_messages", {}), _remediate_step()])
         mcp = _multi_tool_mcp()
@@ -1043,7 +1042,7 @@ class TestDlqCategoryIsTheAlertSubject:
     ) -> None:
         """Refused once, told which call to make, recovers inside the run.
 
-        The claim the guard rests on: it steers rather than ends.
+        It steers rather than ends.
         """
         llm = CannedLLMClient(
             [
@@ -1082,7 +1081,7 @@ class TestDlqCategoryIsTheAlertSubject:
     ) -> None:
         """Value-matched, like every other entry in the map.
 
-        ADR 0028's failure from the other side: read `replay_safe`, claim the wait backlog.
+        ADR 0028 from the other side: read `replay_safe`, claim the wait backlog.
         """
         llm = CannedLLMClient(
             [
@@ -1108,7 +1107,7 @@ class TestDlqCategoryIsTheAlertSubject:
         """`dlq_mixed_partial` and `dlq_backlog`: same payload, hint None.
 
         The inert case stays inert for the right reason — a mixed queue names no slice. Its
-        steering lives in the planner prompt, which is why it keeps no category.
+        steering lives in the planner prompt, so it keeps no category.
         """
         llm = CannedLLMClient([_probe_step("list_dlq_messages", {}), _remediate_step()])
         transition = make_llm_investigate(_multi_tool_mcp(), llm, model="m")
@@ -1140,8 +1139,7 @@ class TestDlqCategoryIsTheAlertSubject:
     def test_a_hint_inside_extra_data_is_found(self) -> None:
         """Where a real webhook would put it.
 
-        ``alert_subject`` reads one level into ``extra_data``: the corpus is flat, the
-        platform's real alert body is not.
+        ``alert_subject`` reads one level into ``extra_data``: the corpus is flat, live is not.
         """
         subject = alert_subject(
             {"source": "platform.dlq", "extra_data": {"remediation_hint": "human_required"}}
@@ -1167,7 +1165,7 @@ class TestWholeQueueBeforeDlqAction:
     ) -> None:
         """Run ``fc896b25a09c``'s trajectory exactly. This is the red-before.
 
-        The subject guard was satisfied by the alerted slice.
+        Satisfied by the alerted slice alone.
         """
         llm = CannedLLMClient(
             [
@@ -1368,8 +1366,7 @@ class TestWholeQueueBeforeDlqAction:
     ) -> None:
         """A consumer-lag handoff has no queue to read whole.
 
-        ``DLQ_ACTING_CATEGORIES`` is derived from the routing maps, so it excludes as
-        well as includes.
+        ``DLQ_ACTING_CATEGORIES`` is derived, so it excludes as well as includes.
         """
         llm = CannedLLMClient(
             [
@@ -1392,8 +1389,7 @@ class TestWholeQueueBeforeDlqAction:
     ) -> None:
         """`runaway_saga` routes at `replay_dlq_by_ids`, so it is in scope.
 
-        It reaches the queue through `FIX_MAP`, and the rule is the same: the row is a
-        dead-letter row.
+        It reaches the queue through `FIX_MAP`, and the row is a dead-letter row.
         """
         llm = CannedLLMClient(
             [
@@ -1547,8 +1543,7 @@ class TestAlertSubjectDerivation:
     def test_reads_the_wire_shaped_alert_through_extra_data(self) -> None:
         """The platform's webhook nests everything under ``extra_data``.
 
-        The corpus is flat and live traffic nested, so reading one would be green
-        offline and asleep in production.
+        The corpus is flat and live traffic nested: reading one would sleep in production.
         """
         alert = {
             "alert_id": "a-1",

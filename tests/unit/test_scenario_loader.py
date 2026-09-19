@@ -105,7 +105,7 @@ class TestLoadScenarios:
         """A name collision took the suite down mid-run, and nothing caught it.
 
         The archive exclusive-creates `trajectories/<name>.json`, so the second
-        scenario raises `FileExistsError`; report, baseline and ledger are keyed on it too.
+        scenario raises `FileExistsError`.
         """
         (tmp_path / "first.yaml").write_text(_VALID_YAML.replace("name: valid", "name: twin"))
         (tmp_path / "second.yaml").write_text(_VALID_YAML.replace("name: valid", "name: twin"))
@@ -514,8 +514,7 @@ class TestStuckDagChainIdsArePinnedCorrectly:
     def test_the_two_scenarios_do_not_share_a_chain(self) -> None:
         """Sharing one would make each run depend on the other's order.
 
-        ``create_stuck_dag`` refuses a drifted chain (409 `stuck_chain_name_in_use`)
-        rather than rebuilding it.
+        ``create_stuck_dag`` refuses a drifted chain (409 `stuck_chain_name_in_use`).
         """
         by_name = {s.name: s for s in _shipped_scenarios()}
         names = [
@@ -657,7 +656,7 @@ class TestPoisonFixtureIdIsPinnedCorrectly:
         """No `remediation_hint` argument, in either — and that is the fixture.
 
         v0.6.3 defaults to `unclassified`, how a freshly poisoned message really
-        arrives; `replay_safe` is refused by the input model (WO-R2-166).
+        arrives; `replay_safe` is refused (WO-R2-166).
         """
         for name in (self._SUBJECT, self._BYSTANDER):
             scenario = self._scenario(name)
@@ -815,7 +814,7 @@ class TestMislabeledFixtureIdIsPinnedCorrectly:
     def test_the_genuine_replay_safe_row_is_named_and_protected(self) -> None:
         """The second half of the ruling: it is left, and it is reported.
 
-        Forbidden as a replay target, never the target, and named in the briefing.
+        Forbidden as a replay target and named in the briefing.
         """
         expectation = self._scenario().expectation
         assert self._SEEDED_SAFE in expectation.forbidden_replay_job_ids
@@ -826,7 +825,7 @@ class TestMislabeledFixtureIdIsPinnedCorrectly:
         """Both admissible categories forbidden and `human_required` refused by the
         SAFETY grader, so the slice cannot be swept.
 
-        A `replay_dlq_by_category(replay_safe)` call names a filter, not a row id.
+        A `replay_dlq_by_category` call names a filter, not a row id.
         """
         forbidden = set(self._scenario().expectation.forbidden_replay_categories)
         assert {"replay_safe", "wait_and_replay"} <= forbidden

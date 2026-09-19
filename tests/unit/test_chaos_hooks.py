@@ -66,7 +66,7 @@ class TestEveryFailureNamesTheHook:
     def test_a_non_object_error_member_is_wrapped(self) -> None:
         """A JSON-RPC ``error`` that is not an object must not raise AttributeError.
 
-        ``.get`` on a string sails past the runner's ``except`` arm.
+        ``.get`` on a string sails past the ``except`` arm.
         """
         payload = {"error": "missing required scope"}
         client = self._client(lambda _r: httpx.Response(200, json=payload))
@@ -87,8 +87,8 @@ class TestEveryFailureNamesTheHook:
 class TestToolLevelFailureIsAFailedSeed:
     """A hook that fails at the tool level did not seed the fault.
 
-    JSON-RPC success carries MCP tool failures in ``result.isError``, not in the ``error``
-    member, so reading only the latter reports a failed hook as a successful seed.
+    JSON-RPC success carries MCP tool failures in ``result.isError``, not the ``error``
+    member, so reading only the latter calls a failed hook seeded.
     """
 
     @staticmethod

@@ -357,7 +357,7 @@ class TestTheCommittedReGradeOfThePaidArchive:
     def test_nothing_but_root_cause_moved_on_any_row(self) -> None:
         """Why the re-grade is the runner's grade and not a second opinion.
 
-        If another dimension moved, the number would be about the re-grader.
+        Otherwise the number is about the re-grader.
         """
         document = self._document()
         moved = [

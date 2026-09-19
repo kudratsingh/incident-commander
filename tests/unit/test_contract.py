@@ -264,7 +264,7 @@ class TestScopeAndIdempotencyAreVisibleToTheDiff:
     def test_defaults_match_the_platforms_own(self) -> None:
         """A tool that advertises neither reads as unscoped, non-idempotent.
 
-        The platform defaults them to None and False, so the snapshot has to agree.
+        The platform defaults them to None and False.
         """
         raw = {"tools": [{"name": "a", "description": "d", "inputSchema": {}}]}
         result = normalize(raw)

@@ -264,7 +264,7 @@ class TestMainGate:
 def _graded(name: str, dimensions: dict[GradeDimension, str]) -> ScenarioOutcome:
     """A passing outcome whose dimensions carry the given detail strings.
 
-    A suite that stays green while checking less.
+    A suite green while checking less.
     """
     return ScenarioOutcome(
         scenario=name,
@@ -322,8 +322,7 @@ class TestCoverageLossWithoutRedScenarios:
     def test_the_legacy_baseline_safety_phrasing_is_not_a_false_positive(self) -> None:
         """The committed baseline says "no forbidden replay ids set".
 
-        The grader says "no safety expectations set" now; both are the same vacuous state, so
-        a rename must not read as an assertion appearing or leaving.
+        The grader says "no safety expectations set" now; both are the same vacuous state.
         """
         baseline = _report((_graded("a", {GradeDimension.SAFETY: "no forbidden replay ids set"}),))
         latest = _report((_graded("a", {GradeDimension.SAFETY: "no safety expectations set"}),))
@@ -478,7 +477,7 @@ class TestVacuityClassifier:
     def test_every_nothing_asserted_branch_in_the_grader_is_classified(self) -> None:
         """Walks the grader for the literal it emits when nothing is set.
 
-        A new dimension passing vacuously with other wording is invisible.
+        A new dimension with other wording would be invisible.
         """
         source = (
             Path(__file__).resolve().parents[2] / "evals" / "graders" / "deterministic.py"

@@ -40,7 +40,7 @@ _SEEDED_PROPERTIES = ("seeded_max_tokens", "seeded_max_usd")
 def _settings(**overrides: Any) -> Settings:
     """A Settings with the four budgets seeded explicitly.
 
-    ``_env_file=None`` disables dotenv, and the budgets are passed, not defaulted.
+    ``_env_file=None`` disables dotenv; the budgets are passed in.
     """
     defaults: dict[str, Any] = {
         "anthropic_api_key": SecretStr("sk-ant-test"),
@@ -91,7 +91,7 @@ class TestTheMultiplierIsAppliedAtTheLedgerSeed:
     def test_a_fractional_token_budget_floors_to_whole_tokens(self, now: datetime) -> None:
         """No fraction of a token can be spent, so none is granted.
 
-        Rounding up would hide a budget of nothing behind a budget of one.
+        Rounding up would hide a budget of nothing behind one.
         """
         settings = _settings(budget_max_tokens=1_001, token_budget_multiplier=Decimal("0.5"))
         run = start_run({"source": "s"}, settings, now)
@@ -147,7 +147,7 @@ class TestTheToolCallCeilingIsNeverMultiplied:
     ) -> None:
         """No wall-clock multiplier is declared (02 § 8 names three knobs).
 
-        Raising ``BUDGET_MAX_SECONDS`` is a visible act for the whole invocation.
+        Raising ``BUDGET_MAX_SECONDS`` is a visible operator act.
         """
         settings = _settings(
             budget_max_seconds=1_800,
@@ -173,7 +173,7 @@ class TestBaselineIsBitForBitUnchanged:
     ) -> None:
         """Identical to the pre-WP-2.4 seed, field for field.
 
-        Written out rather than compared against another ``start_run`` call.
+        Written out rather than compared against another ``start_run``.
         """
         settings = _settings()
         run = start_run({"source": "s"}, settings, now)
@@ -245,7 +245,7 @@ class TestADegenerateMultiplierIsRefused:
 
     ``start_run`` already ignores a ``max_tool_calls`` of 0 (a zero ledger is born
     exhausted). Tokens, dollars and wall seconds have no such guard, so a multiplier
-    seeding one at zero is indistinguishable from a ceiling working as designed.
+    seeding one at zero looks like a ceiling working as designed.
     """
 
     def test_a_zero_token_multiplier_is_refused_naming_the_dimension(self) -> None:

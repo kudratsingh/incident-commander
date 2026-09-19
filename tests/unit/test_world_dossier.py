@@ -166,7 +166,7 @@ class TestKindByFieldIsTotal:
     def test_every_resource_arg_field_has_a_kind(self) -> None:
         """``RESOURCE_ARG_FIELDS`` names arguments; ``_KIND_BY_FIELD`` says which name one thing.
 
-        A field missing here silently drops a probe (``_fill`` writes a note and moves on).
+        A field missing here silently drops a probe.
         """
         fields = {field for fields in RESOURCE_ARG_FIELDS.values() for field in fields}
         missing = sorted(fields - set(dossier._KIND_BY_FIELD))
@@ -200,7 +200,7 @@ class TestCoherenceLint:
     def test_replay_safe_on_a_timeout_is_clean(self) -> None:
         """A transient error is what `replay_safe` means (platform enums.py).
 
-        Silence means POSITIVELY coherent: an odd text has its own finding.
+        Silence means POSITIVELY coherent.
         """
         assert (
             dossier.lint_dlq_row(
@@ -252,7 +252,7 @@ class TestCoherenceLint:
     def test_a_null_hint_contradicts_nothing_and_still_gets_read(self) -> None:
         """ "Not categorised" is the platform's UNKNOWN, so it cannot disagree with a text.
 
-        No incoherence finding, but the row still appears in §5.1's table.
+        No incoherence finding; the row still appears in §5.1.
         """
         assert (
             dossier.lint_dlq_row(
@@ -439,7 +439,6 @@ class TestSelectionGuard:
         """The runner backstop, in the shape `eval-live` has one.
 
         ``python -m evals.dossier`` never comes through make and this one SEEDS CHAOS.
-        ``Settings`` is poisoned to prove the refusal happens first.
         """
 
         def _explode() -> None:
@@ -922,7 +921,7 @@ class TestAPlanDeclaringScenarioIsSeededAndReportedInFull:
     ) -> None:
         """§5.1's exemption survives the migration, and only for real rows.
 
-        Read off the hook's OWN reply, so an unfired plan exempts nothing.
+        Read off the hook's OWN reply.
         """
         plan = ChaosPlan(
             setup=(

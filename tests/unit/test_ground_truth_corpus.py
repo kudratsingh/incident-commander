@@ -88,8 +88,7 @@ _UNDIAGNOSABLE_FAMILIES: Final[frozenset[ScenarioFamily]] = frozenset(
 def may_abstain(scenario: Scenario) -> bool:
     """Whether "no ground truth" is an admissible decision for this scenario.
 
-    Two derived shapes: a harness or tool-failure family, or a zero tool-call budget —
-    a run that never probes never ranks.
+    Two derived shapes: a harness or tool-failure family, or a zero tool-call budget.
     """
     if scenario.family in _UNDIAGNOSABLE_FAMILIES:
         return True

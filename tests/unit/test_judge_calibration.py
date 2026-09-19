@@ -126,7 +126,7 @@ class TestTheTrapSetsAreGroundTruth:
     def test_a_trap_set_covers_both_sides_of_its_approval_line(self, judge: str) -> None:
         """At least one case the judge should bless and one it should not.
 
-        A one-sided set is passed by a judge that refuses, or blesses, everything.
+        A one-sided set passes under a judge that refuses everything.
         """
         verdicts = [case.asserts for case in traps_for(judge)]
         assert any(is_approval(judge, verdict) for verdict in verdicts)
@@ -145,7 +145,7 @@ class TestTheTrapSetsAreGroundTruth:
         """Two renders of one trap are the same bytes.
 
         The scripted fake is keyed on the rendered context, so a fresh uuid would make the
-        script miss; ``evidence_id`` defaults to ``uuid4()``.
+        script miss.
         """
         for judge in CALIBRATED_ROLES:
             for case in traps_for(judge):
@@ -154,8 +154,7 @@ class TestTheTrapSetsAreGroundTruth:
     def test_the_selector_traps_cite_only_readings_in_their_own_trail(self) -> None:
         """ADR 0042's validator, exercised over the committed trap data.
 
-        A candidate citing an id the trap's ledger does not hold raises, so the set cannot
-        drift.
+        A candidate citing an id the trap's ledger lacks raises.
         """
         for case in traps_for(CANDIDATE_SELECTOR):
             subject = case.subject
@@ -210,7 +209,7 @@ class TestTheHarnessMeasuresWhatItSays:
     def test_a_wrong_approval_is_neither_a_false_approve_nor_a_false_reject(self) -> None:
         """The selector's own error: committed, and to the wrong candidate.
 
-        Folding ``select:c1`` for ``select:c2`` into either rate would hide it.
+        Folding it into either rate would hide it.
         """
         case = "cs-02-wrong-candidate-plausible-evidence"
         client = _agreeing(CANDIDATE_SELECTOR, wrong={case: f"{SELECT_PREFIX}c1"})
@@ -251,7 +250,7 @@ class TestTheHarnessMeasuresWhatItSays:
     def test_a_judge_that_cannot_answer_is_an_error_not_a_disagreement(self) -> None:
         """A malformed reply twice over is a harness event (ADR 0035).
 
-        In neither numerator nor denominator: an envelope failure is not judgement.
+        An envelope failure is not judgement.
         """
         case = "av-01-read-shows-recovery"
         script = answers_for(ACTION_VERIFIER)
@@ -287,8 +286,7 @@ class TestTheHarnessMeasuresWhatItSays:
     def test_no_temperature_is_sent(self, judge: str) -> None:
         """ADR 0048 and owner decision O-24, asserted on the call.
 
-        A pinned temperature 0 would 400 on the next re-pin
-        (``SAMPLING_REJECTED_MODELS``).
+        A pinned temperature 0 would 400 on the next re-pin.
         """
         client = _agreeing(judge)
         report = calibrate(judge, client=client, model=_MODEL, now=_AT)
@@ -369,7 +367,7 @@ class TestTheRepairSurvivedTheExtraction:
     """WO-R2-174's repair, through the function WP-6.3 extracted.
 
     ``judge_verification`` is the one spelling of the ``action_verifier``'s call, and
-    losing the wrapper would measure a judge that escalates on its own parse failure.
+    losing the wrapper measures a judge that escalates on a parse failure.
     """
 
     _CASE: Final[str] = "av-01-read-shows-recovery"
@@ -421,8 +419,7 @@ class TestTheReportIsEvidence:
     def test_one_family_per_judge(self, tmp_path: Path) -> None:
         """Three judges must not share one resolution.
 
-        A flat stem has no room for the judge's name, so ``newest()`` would return whichever
-        was written last.
+        A flat stem has no room for the judge's name, so ``newest()`` picks the last.
         """
         written = {}
         for judge in CALIBRATED_ROLES:
@@ -534,8 +531,7 @@ class TestTheTrackRecord:
     def test_a_canned_runs_scripted_verdict_is_never_scanned(self) -> None:
         """A fixture is not a judge.
 
-        Most archives carry a scripted ``_verify_judge`` entry; every scanned row's archive
-        has a ``live_llm`` outcome.
+        Most archives carry a scripted ``_verify_judge``; scanned rows have ``live_llm``.
         """
         for row in track_record.scan():
             report = json.loads(

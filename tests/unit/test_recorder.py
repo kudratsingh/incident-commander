@@ -192,7 +192,7 @@ class TestKeysAreTheWiredArguments:
     def test_two_probes_that_wire_to_one_call_are_recorded_once(self) -> None:
         """``{}`` and ``{"limit": 50}`` are the same request after wiring.
 
-        The merge runs again on the WIRED form, or two entries land under one key.
+        The merge runs again on the WIRED form, or two entries collide.
         """
         probes, _notes = recorder.wire_probes(
             [
@@ -269,7 +269,7 @@ class TestDeterminism:
     ) -> None:
         """Byte-identical apart from timestamps, stated as a diff over the JSON.
 
-        Checked as well as the fingerprint, which could be wrong in the same direction.
+        Checked as well as the fingerprint, which could be wrong too.
         """
         scenario = scenarios["remediate_dlq_backlog_success"]
         first = json.loads(
@@ -539,7 +539,7 @@ class TestThePremiseIsEstablishedBeforeAnythingIsRecorded:
     ) -> None:
         """The consumer-lag case: ``lag >= 20`` behind a 60-second gauge cadence.
 
-        Single-shot would refuse every consumer-lag scenario.
+        Single-shot would refuse every lag scenario.
         """
         scenario = scenarios["remediate_consumer_lag_success"]
         probe = scenario.expected_precondition[0]
@@ -634,7 +634,7 @@ class TestTheCallSet:
     ) -> None:
         """The scenario's own declared argument values — the filtered forms (04:110).
 
-        The derivation reads UNFILTERED, so both routes are recorded.
+        The derivation reads UNFILTERED.
         """
         scenario = scenarios["remediate_dlq_backlog_success"]
         assert scenario.expected_precondition, "this test needs a scenario with preconditions"
@@ -757,7 +757,7 @@ class TestNothingAgentVisibleNamesTheLab:
 
     A live agent's `PLATFORM_TOKEN` lacks `chaos:invoke` so it cannot read the `chaos.`
     audit stream (ADR 0012); the recorder reads under `PLATFORM_SMOKE_TOKEN`, and what
-    that principal sees reaches a replayed agent.
+    it sees reaches a replayed agent.
     """
 
     def test_the_term_set_is_derived_from_the_contract_not_typed(self) -> None:
@@ -797,7 +797,7 @@ class TestNothingAgentVisibleNamesTheLab:
     ) -> None:
         """ADR 0040 needs the label to say which hooks built the world.
 
-        It is evaluator-side and unreachable through `answer()`, so it is not a leak.
+        It is evaluator-side and unreachable through `answer()`.
         """
         label = recorder.world_label(scenarios["remediate_consumer_lag_success"], chaos_seeded=True)
         assert "kill_consumer" in label.label
@@ -882,7 +882,7 @@ class TestTheCommittedRecordings:
     def test_no_committed_recording_holds_a_credential(self) -> None:
         """A recording is read from a live platform, so this is not hypothetical.
 
-        Identifier-shaped values (principal UUIDs) are NOT credentials.
+        Principal UUIDs are NOT credentials.
         """
         secrets = re.compile(r"sk-ant-|sa_[A-Za-z0-9_]{10,}|Bearer\s+\S|ANTHROPIC_API_KEY")
         folder = _REPO_ROOT / "evals" / "recorded_worlds"

@@ -232,8 +232,7 @@ class TestStartRunToolCallOverride:
     def test_zero_override_is_ignored(self, now: datetime) -> None:
         """A zero ledger is born exhausted, so it cannot be a runtime ceiling.
 
-        ``is_exhausted`` is ``used >= max``, so at 0 the loop escalates before TRIAGE runs. The
-        claim is graded post-hoc.
+        ``is_exhausted`` is ``used >= max``, so at 0 the loop escalates before TRIAGE runs.
         """
         settings = _test_settings(budget_max_tool_calls=25)
         run = start_run({"source": "s"}, settings, now, max_tool_calls=0)

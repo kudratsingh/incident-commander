@@ -141,7 +141,7 @@ class TestThePlan:
     def test_the_newest_render_of_each_run_is_the_one_that_stays(self, tmp_path: Path) -> None:
         """ "The same run" is read from the report's headers, not from its name.
 
-        Two renders carry two ids and identical ``Invocation:`` headers.
+        Two renders carry two ids and one ``Invocation:`` header.
         """
         root = _tree(tmp_path)
         by_reason = {
@@ -284,7 +284,7 @@ class TestTheRails:
     def test_it_refuses_a_folder_that_is_not_named_reports(self, tmp_path: Path) -> None:
         """Pointed at ``evals/runs/`` — or a home directory — it does nothing.
 
-        Archives are outside this work order and locked by ADR 0021.
+        Archives are locked by ADR 0021.
         """
         runs = tmp_path / "runs"
         (runs / "deadbeefcafe").mkdir(parents=True)
@@ -326,7 +326,7 @@ class TestLocks:
     def test_a_uchg_file_is_unlocked_moved_and_re_flagged(self, tmp_path: Path) -> None:
         """macOS ``uchg`` refuses a rename outright, so it must come off and go back.
 
-        Skipped where there are no file flags; the mode half runs everywhere.
+        Skipped without file flags; the mode half runs everywhere.
         """
         assert _CHFLAGS is not None  # guarded by the skipif above
         root = _tree(tmp_path)

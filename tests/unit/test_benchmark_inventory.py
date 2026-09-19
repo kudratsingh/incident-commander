@@ -119,8 +119,8 @@ def test_provisional_family_precedence(
 def test_provisional_difficulty(tmp_path: Path, name: str, difficulty: str) -> None:
     """The fallback rule, in plan 03 § 3's vocabulary.
 
-    WO-R3-179 spelled these 0 and 1, the same rungs under other names. `alert_storm` is one
-    the rule guesses wrong — `single` where the scenario declares `noisy`.
+    WO-R3-179 spelled these 0 and 1, the same rungs under other names. `alert_storm` is
+    one the rule gets wrong: `single`, not the declared `noisy`.
     """
     _write_scenario(tmp_path, name)
     assert generate_inventory(tmp_path)[0]["difficulty"] == {

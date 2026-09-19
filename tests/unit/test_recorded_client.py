@@ -174,9 +174,9 @@ def _committed() -> list[Path]:
 class TestTheKeyIsTheWiredCall:
     """Divergence F2 on the lookup side — the property the whole mode rests on.
 
-    RED BEFORE: replace ``replay_key``'s ``wire_arguments`` with ``dict(arguments)`` and both
-    tests fail — ``list_dlq_messages({})`` hashes to something no recording holds, so the
-    client answers ``not_recorded`` to every read.
+    RED BEFORE: replace ``wire_arguments`` with ``dict(arguments)`` and both
+    tests fail: ``list_dlq_messages({})`` hashes to nothing a recording holds, so every
+    read answers ``not_recorded``.
     """
 
     def test_an_omitted_optional_is_answered_because_the_lookup_wires_first(self) -> None:
@@ -205,7 +205,7 @@ class TestTheKeyIsTheWiredCall:
     def test_the_raw_key_cannot_find_the_answer(self) -> None:
         """The red-before, stated as a fact about the two keys.
 
-        A lookup keyed on what the planner wrote computes a different hash.
+        A lookup keyed on what the planner wrote hashes differently.
         """
         world = _world(_recorded_call("list_dlq_messages", {}, _DLQ_PAYLOAD))
         raw_key = recorder.call_key("list_dlq_messages", {})
@@ -215,7 +215,7 @@ class TestTheKeyIsTheWiredCall:
     def test_the_key_function_is_the_recorders_own(self) -> None:
         """One function computes the key on both sides (ADR 0043 § 1).
 
-        Read off the syntax tree: the replay module IMPORTS it and defines no second one.
+        Read off the syntax tree: the replay module IMPORTS it.
         """
         tree = ast.parse((_REPO_ROOT / "evals" / "recorded_client.py").read_text())
         imported = {
@@ -478,7 +478,7 @@ class TestTheClockIsRebased:
     def test_the_written_down_list_covers_every_time_field_the_registry_declares(self) -> None:
         """Derived here, written down there — so a new field fails this test.
 
-        The module states which fields move and why; this states that none was left out.
+        The module states which fields move and why; none was left out.
         """
         expected_clocks: dict[str, set[str]] = {}
         expected_durations: dict[str, set[str]] = {}
@@ -510,7 +510,7 @@ def _is_duration_name(name: str) -> bool:
 def _time_fields(model: type[BaseModel], prefix: str = "") -> tuple[set[str], set[str]]:
     """Every datetime path and every duration-named number path in one output model.
 
-    A local walk, not an import: the hand-written table is the subject.
+    A local walk, not an import: the table is the subject.
     """
     clocks: set[str] = set()
     durations: set[str] = set()
@@ -567,7 +567,7 @@ class TestItRefusesToConstructWithoutARecording:
     def test_nothing_in_this_module_could_reach_a_real_platform(self) -> None:
         """The structural half of "never falls back to a real client" (ADR 0013).
 
-        Read off the syntax tree, so prose may name ``make_client``.
+        Read off the syntax tree, so prose may name it.
         """
         tree = ast.parse((_REPO_ROOT / "evals" / "recorded_client.py").read_text())
         modules: set[str] = set()
@@ -654,7 +654,7 @@ class TestTheCommittedRecordingsAllReplay:
     """Every recording this repo carries, exercised through the client that replays it.
 
     ``test_recorder.py`` holds them to loading and answering; this is the client a run is
-    handed, at a replay clock that is not the recording's.
+    handed, at a clock that is not the recording's.
     """
 
     def test_every_recording_serves_every_call_it_holds(self) -> None:

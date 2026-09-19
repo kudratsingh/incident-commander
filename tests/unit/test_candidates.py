@@ -83,7 +83,7 @@ def _candidate(
 def _observed_stray_closer() -> str:
     """What run ``779b19a287a7`` left after the JSON value in its string field.
 
-    Derived from the imported evidence rather than retyped.
+    Derived from the imported evidence, not retyped.
     """
     text = str(LIVE_RECORD_OUTPUT_INPUT["next_action"])
     _, end = json.JSONDecoder().raw_decode(text)
@@ -97,7 +97,7 @@ def _live_candidates(ledger: tuple[EvidenceEntry, ...]) -> list[dict[str, Any]]:
     """The two diagnoses run ``779b19a287a7``'s payload actually contains.
 
     Its ranked hypothesis verbatim, plus the alternative its own ``next_action`` reason
-    states, not invented furniture.
+    states, not invented.
     """
     return [
         _candidate(
@@ -335,8 +335,7 @@ class TestDuplicatesAreRejected:
     def test_names_differing_only_in_case_are_not_folded_together(self) -> None:
         """A deliberate non-normalisation, pinned so it cannot drift.
 
-        ``name`` is operator-facing free text, and the duplicate rate measures what the model
-        produced.
+        ``name`` is operator-facing free text, and the rate measures what the model produced.
         """
         payload = [_candidate("c1", name="Stale cache"), _candidate("c2", name="stale cache")]
         with grounded_in(_ledger()):
@@ -458,7 +457,7 @@ class TestTheRepairPathAppliesToACandidateSet:
         """F-007: the assertion is the guard's own marker, not just "it raised".
 
         ``OutputRepairExhausted`` is an ``LLMError``, which the loop's existing ``except`` arm
-        turns into an escalation; WP-5.1 has no call site yet.
+        turns into an escalation.
         """
         ledger = _ledger()
         unknown = uuid4()
@@ -529,7 +528,7 @@ class TestTheSchemaShownToTheModel:
     def test_no_model_carries_a_class_docstring(self, model: type[StructuredOutput]) -> None:
         """A class docstring becomes the schema's ``description`` and reaches the model.
 
-        Their prose lives in the module docstring.
+        The prose lives in the module docstring.
         """
         assert model.__doc__ is None
         assert "description" not in model.model_json_schema()

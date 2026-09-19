@@ -73,7 +73,7 @@ class TestHypothesisCategory:
     def test_a_new_category_exists_with_its_planned_value(self, name: str, value: str) -> None:
         """The nine labels plan 02 § 5 names, spelled as it names them.
 
-        ``ground_truth.root_causes`` and the root-cause grader are written against them.
+        The root-cause grader is written against them.
         """
         assert HypothesisCategory[name].value == value
 
@@ -83,8 +83,7 @@ class TestHypothesisCategory:
     ) -> None:
         """The spelling O-19 decided, which ``trace_investigation`` now declares.
 
-        A drifted value would fail the corpus as "unknown category", which does not say the
-        decision named a different string.
+        A drifted value fails the corpus as "unknown category", which says less.
         """
         assert HypothesisCategory[name].value == value
 

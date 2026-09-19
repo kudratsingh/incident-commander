@@ -114,7 +114,7 @@ class TestFlatOutputsAreVersioned:
     def test_a_collision_raises_and_keeps_the_first_file(self, tmp_path: Path) -> None:
         """Exclusive-create is the load-bearing half — same as the archive writes.
 
-        Nothing legitimate replays one run's exact identity, so it must crash.
+        Nothing legitimate replays a run's identity.
         """
         write_trajectories([_trajectory("first", _INV1)], directory=tmp_path, timestamp=_T1)
 
@@ -246,7 +246,7 @@ class TestNewestResolution:
     def test_orders_by_stamp_not_by_mtime(self, tmp_path: Path) -> None:
         """The older run is written to disk LAST. Filename ordering must win.
 
-        A resolver a backup tool can re-order is not a resolver.
+        A resolver a backup can re-order is not one.
         """
         newer = self._touch(tmp_path, "s.20260906T140000Z.bbbbbbbb0002.json", '{"n": 2}')
         older = self._touch(tmp_path, "s.20260906T101112Z.aaaaaaaa0001.json", '{"n": 1}')
@@ -377,7 +377,7 @@ class TestTheLayoutIsOneFamilyPerFolder:
         """The transition window: merged, not yet migrated, and nothing breaks.
 
         Until ``scripts/migrate_reports_layout.py`` runs, every artifact is still flat; a
-        new-folder-only resolver would report an empty reports folder.
+        new-folder-only resolver would see an empty folder.
         """
         for kind, expected in self._EXPECTED.items():
             scenario = self._scenario_for(kind)
@@ -411,8 +411,7 @@ class TestTheLayoutIsOneFamilyPerFolder:
     def test_a_superseded_render_is_still_resolved(self, tmp_path: Path) -> None:
         """Moved aside for readability is not moved out of the record.
 
-        ``human/_superseded/`` renders are evidence, so ``versions()`` returns them; being
-        older, none can become ``newest()``.
+        ``human/_superseded/`` renders are evidence, so ``versions()`` returns them.
         """
         kept = artifacts.write_versioned(
             "human",
@@ -438,7 +437,7 @@ class TestTheLayoutIsOneFamilyPerFolder:
     def test_the_two_pinned_files_are_not_members_of_any_family(self, tmp_path: Path) -> None:
         """``baseline.json`` and ``latest.json`` stay at the top and stay themselves.
 
-        The gate reads ``baseline.json`` by a literal path, so it must not acquire a folder.
+        The gate reads ``baseline.json`` by a literal path: no folder.
         """
         (tmp_path / "baseline.json").write_text("{}")
         latest = tmp_path / "latest.json"

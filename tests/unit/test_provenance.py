@@ -73,8 +73,7 @@ def _settings(**overrides: Any) -> Settings:
 def _scenario(name: str = "provenance_probe", *, max_tool_calls: int = 7) -> Scenario:
     """A scenario that terminates at TRIAGE on an info-severity alert.
 
-    The smallest one that still produces a complete run: the record is about identity,
-    not trajectory.
+    The smallest one that still produces a complete run: identity, not trajectory.
     """
     return Scenario(
         name=name,
@@ -428,8 +427,7 @@ class TestCrossModelRefusal:
     ) -> None:
         """Exit 2 with no table printed — the gate's output IS the table.
 
-        Pointed at ``tmp_path``: ``evals/reports/`` is append-only evidence and a test
-        never writes there.
+        Pointed at ``tmp_path``: ``evals/reports/`` is append-only evidence.
         """
         reports = tmp_path / "reports"
         reports.mkdir()
@@ -556,7 +554,7 @@ class TestArchivedReportsStillParse:
 
     The archives under ``evals/runs/`` are locked, append-only evidence, several of them
     paid live runs, so the reader tolerates the absence of every field this packet adds.
-    Both halves: unstamped archives say they do not know, stamped ones answer in full.
+    Both halves: unstamped archives say so, stamped ones answer in full.
     """
 
     def test_the_committed_baseline_is_stamped_all_the_way_through(self) -> None:

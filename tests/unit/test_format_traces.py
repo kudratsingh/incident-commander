@@ -117,7 +117,7 @@ def _llm(
 def _llm_parse_failed(invocation: str, when: str) -> dict[str, Any]:
     """Shaped exactly like ``dict(trace, parse_failed=True)`` in llm/client.py.
 
-    The billed response is there; there is no ``output`` key.
+    The billed response is there; no ``output`` key.
     """
     return _stamp(
         {
@@ -443,7 +443,7 @@ def test_one_corrupt_file_does_not_abort_the_rest(
 def test_main_renders_a_partial_archive_trace_slice(tmp_path: Path) -> None:
     """A run directory with NO report.json is still renderable evidence (ADR 0017).
 
-    The trace slices cost real money, so no completion marker is required.
+    The slices cost real money; no marker is required.
     """
     archive = tmp_path / "runs" / "deadbeefcafe"
     slice_dir = archive / "traces"
@@ -559,8 +559,7 @@ class TestARunRendersOnlyWhatItRan:
     def test_a_scenario_whose_newest_attempt_is_unrendered_catches_up(self, tmp_path: Path) -> None:
         """The second half of the rule, and the reason it is not "only the last run".
 
-        A render can be missing for reasons unrelated to this invocation, so the test is
-        coverage, not recency.
+        A render can be missing for unrelated reasons, so the test is coverage, not recency.
         """
         trace_dir, out_dir = _suite(tmp_path, ("alpha", "beta"))
         assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir), "beta"]) == 0
@@ -686,7 +685,7 @@ class TestEveryKindRenders:
     """The renderer's formatter table must cover the tracer's enumeration.
 
     ``llm_error`` and ``precondition`` rendered as ``STEP N — unknown kind=…``, a JSON dump
-    of the record, including an ``llm_error``'s system prompt.
+    of the record, including the system prompt.
     """
 
     def test_the_formatter_table_covers_every_tracer_kind(self) -> None:
@@ -718,8 +717,7 @@ class TestEveryKindRenders:
     def test_trace_records_name_their_kind_through_the_enumeration(self) -> None:
         """No bare ``"kind": "..."`` literal in the two writers.
 
-        A literal bypasses the enumeration — which is how ``precondition`` came to exist
-        unrendered.
+        A literal bypasses the enumeration — how ``precondition`` came to exist unrendered.
         """
         repo_root = Path(__file__).resolve().parents[2]
         offenders = [
@@ -767,7 +765,7 @@ def test_a_retried_llm_error_says_so(tmp_path: Path) -> None:
 def test_llm_errors_count_toward_the_llm_call_total(tmp_path: Path) -> None:
     """The billed-but-failed calls the tracer captures are spend, not gaps.
 
-    ``llm_error`` was counted nowhere: burned calls read as zero.
+    ``llm_error`` was counted nowhere.
     """
     path = _write_jsonl(
         tmp_path / "redis_saturation.jsonl",
@@ -805,8 +803,7 @@ def test_precondition_renders_its_verdict(tmp_path: Path) -> None:
 def test_an_unverifiable_precondition_is_not_reported_as_not_met(tmp_path: Path) -> None:
     """The two failures send a reader to different halves of the system.
 
-    NOT MET means seeding; UNVERIFIABLE means the platform never answered. The report
-    must not collapse them.
+    NOT MET means seeding; UNVERIFIABLE means the platform never answered.
     """
     path = _write_jsonl(
         tmp_path / "redis_saturation.jsonl",
@@ -853,7 +850,7 @@ class TestTheRepairedCallIsLabeled:
     """ADR 0035: a repair re-ask is one logical step, not a second attempt.
 
     Without the label run ``779b19a287a7``'s successor renders as two consecutive planner
-    calls, and nobody can tell which was billed.
+    calls.
     """
 
     def test_the_repair_re_ask_is_labeled_and_names_its_original(self, tmp_path: Path) -> None:
@@ -897,7 +894,7 @@ class TestTheRepairedCallIsLabeled:
     def test_the_renderers_cap_matches_the_one_the_harness_enforces(self) -> None:
         """The literal in the script is a copy. Copies drift; this one may not.
 
-        ``format_traces.py`` stays stdlib-only, so a test imports both.
+        ``format_traces.py`` stays stdlib-only.
         """
         from incident_commander.llm.repair import MAX_OUTPUT_REPAIRS
         from scripts.format_traces import _MAX_OUTPUT_REPAIRS

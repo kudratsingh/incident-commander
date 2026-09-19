@@ -116,7 +116,7 @@ def test_parser_canary() -> None:
 def test_every_documented_make_target_exists() -> None:
     """A documented target that is not a rule is a command that cannot run.
 
-    ``eval-live-remediation`` was deleted; a doc naming it reads as a broken checkout.
+    ``eval-live-remediation`` was deleted; a doc naming it reads as broken.
     """
     targets = _make_targets()
     missing = sorted(
@@ -158,8 +158,7 @@ def test_documented_defaults_match_the_makefile() -> None:
 def test_eval_reset_names_the_service_the_makefile_shells_into() -> None:
     """The container name is half the reset target, and it drifted with the file.
 
-    ``PLATFORM_SERVICE`` is not stated as a default, so the check is keyed on the
-    sentence describing the reset.
+    ``PLATFORM_SERVICE`` is not stated as a default, so the check reads the sentence.
     """
     service = _make_defaults()["PLATFORM_SERVICE"]
     wrong = [
@@ -192,7 +191,7 @@ def test_documented_eval_live_invocations_are_filtered() -> None:
     """So the documented way to run a live eval must not be the refused one.
 
     ``make eval-live`` unfiltered was the runbook's step 2 for the whole life of the
-    refusals above. Every invocation has to carry ``ONLY=``.
+    refusals above. Every invocation carries ``ONLY=``.
     """
     unfiltered = [
         line.strip()
@@ -212,7 +211,7 @@ def test_documented_compose_waits_are_scoped_to_services() -> None:
     """`docker compose up --wait` unscoped fails whenever a one-shot re-runs.
 
     The Makefile's ``demo`` target scopes the wait to the five long-running services; the
-    image-bump procedure told the reader to run the unscoped form.
+    image-bump procedure used the unscoped form.
     """
     offenders = [
         line.strip()
@@ -238,7 +237,7 @@ def test_documented_compose_waits_are_scoped_to_services() -> None:
 def test_documented_suite_size_matches_the_scenario_tree(scenarios: list[Scenario]) -> None:
     """A cost estimate is only useful if its scenario count is the real one.
 
-    The runbook advertised 33 long after the tree grew.
+    It advertised 33 long after the tree grew.
     """
     total, live = len(scenarios), len([s for s in scenarios if not s.canned_only])
     claims = [
@@ -304,8 +303,7 @@ def _env_example_names() -> frozenset[str]:
 def test_env_example_documents_every_settings_field() -> None:
     """The file an operator copies must offer every knob the agent reads.
 
-    ``Settings`` has ``extra="ignore"``, so an undocumented field is a default nobody
-    knew about.
+    ``Settings`` has ``extra="ignore"``, so an undocumented field is a silent default.
     """
     from incident_commander.config import Settings
 
@@ -321,7 +319,7 @@ def test_env_example_documents_every_overridable_make_default() -> None:
     """`VAR ?= x` in the Makefile is an operator knob, and `.env` is where it goes.
 
     ``-include .env`` means each can be set once instead of remembered per invocation.
-    ``PLATFORM_SERVICE`` appeared in no operator-facing file at all.
+    ``PLATFORM_SERVICE`` appeared in no operator-facing file.
     """
     missing = sorted(set(_make_defaults()) - _env_example_names())
     assert missing == [], (

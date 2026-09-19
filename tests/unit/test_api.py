@@ -527,7 +527,7 @@ class TestDurableIncidentIdentity:
     on the SAME incident, unlike the process-local replay cache (ADR 0014).
 
     Every test defeats that cache, so a green can only come from derivation; two spawns
-    prove both deliveries ran the full ingress path.
+    prove both ran the full ingress path.
     """
 
     def _post(self, client: TestClient, alert: dict[str, Any]) -> Any:
@@ -734,7 +734,7 @@ class TestFailureRail:
     """B-04: a crashing background run must still leave a terminal record.
 
     ``test_api.py`` injects ``run_task=capture`` everywhere else, so ``_run_investigation``
-    was never exercised; monkeypatching ``run_to_completion`` is the seam.
+    was never exercised. ``run_to_completion`` is the seam.
     """
 
     def _run(self) -> RunState:
@@ -864,8 +864,7 @@ class TestFailureRail:
     ) -> None:
         """R2-38: the service path is where a real on-call reads the handoff.
 
-        The reason lived on a filtered-out marker, so the line never said why — or that a
-        Tier-1 action had fired.
+        The reason lived on a filtered-out marker, so the line never said why.
         """
         from incident_commander.agent.briefing import EscalationBriefing
 

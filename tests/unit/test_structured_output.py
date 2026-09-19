@@ -98,8 +98,8 @@ class TestTheLiveRunPayload:
     def test_a_strict_json_load_of_that_string_still_fails(self) -> None:
         """Why plain ``json.loads`` was not enough — the stray ``]``.
 
-        A complete object followed by one array terminator, which ``json.loads`` reports as
-        ``Extra data`` — what ``_decode_leading_value`` tolerates.
+        A complete object plus one array terminator, which ``json.loads`` calls
+        ``Extra data``, what ``_decode_leading_value`` tolerates.
         """
         with pytest.raises(json.JSONDecodeError, match="Extra data"):
             json.loads(LIVE_RECORD_OUTPUT_INPUT["next_action"])
@@ -113,7 +113,7 @@ class TestTheLiveRunPayload:
     def test_the_decision_survives_the_decode_unchanged(self) -> None:
         """The point of repairing rather than escalating: the answer is kept.
 
-        The reason string is handed to the remediation planner.
+        The reason string goes to the planner.
         """
         step = InvestigationStep.model_validate(LIVE_RECORD_OUTPUT_INPUT)
         assert isinstance(step.next_action, RemediateAction)
@@ -259,8 +259,7 @@ class TestEveryRecordOutputModel:
     def test_the_list_matches_the_call_sites(self) -> None:
         """``RECORD_OUTPUT_MODELS`` is checked against the source, not trusted.
 
-        A model reaching ``call`` without ``StructuredOutput`` is back to escalating a run
-        over its wrapping.
+        A model reaching ``call`` without ``StructuredOutput`` escalates on its wrapping.
         """
         names: set[str] = set()
         for root in ("src", "evals"):

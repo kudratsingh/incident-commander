@@ -601,8 +601,7 @@ _DELIBERATE_ROW_CHANGES: Final[tuple[str, ...]] = (
 def _without_the_deliberate_changes(payload: Any) -> Any:
     """The document with the enumerated keys dropped from every row that has them.
 
-    Identified by ``judge_mean_overall``, which both sides have: an added field would
-    strip one side only.
+    Identified by ``judge_mean_overall``, which both sides have.
     """
     if isinstance(payload, dict):
         gated = "judge_mean_overall" in payload

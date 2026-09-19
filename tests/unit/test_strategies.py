@@ -159,8 +159,7 @@ def _settings(**overrides: Any) -> Settings:
 class TestBaselineIsTheExistingCall:
     """``baseline`` is the control group: the same call, the same result.
 
-    Not "equivalent behaviour" — the same values, or the campaign numbers stop
-    describing the loop.
+    Not "equivalent behaviour" — the same values, or the numbers stop describing.
     """
 
     def test_it_returns_what_plan_next_step_returns(
@@ -337,8 +336,7 @@ class TestTheStepRecordCarriesTheCallsOwnDuration:
     def _live_shaped_client(self, payload: dict[str, Any], *, took_seconds: float) -> LLMClient:
         """A real ``LLMClient`` over a stubbed SDK — the live path, offline.
 
-        Not a ``CannedLLMClient``: this measurement only exists on the client that makes real
-        calls.
+        Not a ``CannedLLMClient``: the measurement exists only on the real client.
         """
         block = MagicMock()
         block.type = "tool_use"
@@ -519,7 +517,7 @@ def _imported_modules(tree: ast.AST) -> dict[str, tuple[str, ...]]:
 def _referenced_names(tree: ast.AST) -> set[str]:
     """Every identifier the module's *code* uses.
 
-    AST nodes, not text: naming a thing in prose is not depending on it.
+    AST nodes, not text: prose is not a dependency.
     """
     names: set[str] = set()
     for node in ast.walk(tree):
@@ -571,8 +569,7 @@ _FORBIDDEN_NAMES: Final[frozenset[str]] = frozenset(
 class TestStrategiesHoldNoExecutionPolicy:
     """The seam replaces one call. It does not carry the policy around it.
 
-    Plan 02 § 2: the same execution policy gates every real action — a property of the
-    import graph, so it is scanned.
+    Plan 02 § 2: the same execution policy gates every action — an import-graph property.
     """
 
     @pytest.mark.parametrize("module", _strategy_modules(), ids=lambda path: path.name)

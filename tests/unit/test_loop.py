@@ -252,7 +252,7 @@ _PLAN: dict[str, object] = {
 def _exhausted(budget: BudgetLedger) -> BudgetLedger:
     """A ledger with no tool calls left — the resume-time normal case.
 
-    The wall meter is anchored on ``created_at`` (ADR 0015).
+    Anchored on ``created_at`` (ADR 0015).
     """
     return budget.model_copy(update={"tool_calls_used": budget.max_tool_calls})
 
@@ -342,7 +342,7 @@ class TestBudgetExemptsResumedRemediating:
     ) -> None:
         """The briefing must name the Tier-1 action that was re-invoked.
 
-        RED at HEAD: the short-circuit writes a marker the trail filters out.
+        RED at HEAD: the short-circuit writes a filtered-out marker.
         """
         calls: list[str] = []
         resumed = _resumed_remediating(budget, now)
@@ -357,8 +357,7 @@ class TestBudgetExemptsResumedRemediating:
     ) -> None:
         """The exemption is for RESUME only, not for REMEDIATING in general.
 
-        A run that reached REMEDIATING inside this process has dispatched nothing, so escalating
-        pre-execution is the safe direction.
+        A run that reached REMEDIATING in-process has dispatched nothing, so escalating is safe.
         """
         calls: list[str] = []
         fresh = RunState(
@@ -387,8 +386,7 @@ class TestBudgetExemptsResumedRemediating:
     ) -> None:
         """No stored plan means nothing was ever dispatched — nothing to re-invoke.
 
-        REMEDIATING is only reachable through PLANNING committing a plan, so this is a corrupt
-        row, not a crash-resume.
+        REMEDIATING is only reachable through PLANNING, so this is a corrupt row.
         """
         calls: list[str] = []
         resumed = _resumed_remediating(budget, now).model_copy(update={"remediation_plan": None})

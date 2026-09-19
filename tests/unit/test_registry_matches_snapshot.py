@@ -46,8 +46,7 @@ def _strip_descriptions(node: Any) -> Any:
 def _strip_doc_keys(node: Any) -> Any:
     """Drop ``description`` AND ``title`` keys — input side only.
 
-    Titles differ legitimately there; on the output side stripping them would weaken the
-    comparison.
+    Titles differ legitimately there; stripping them on the output side weakens it.
     """
     return _strip_keys(node, frozenset({"description", "title"}))
 
@@ -78,7 +77,7 @@ class TestInputModelMatchesSnapshot:
     """Input leg of the contract triangle (C-12/S-17).
 
     ``wire_arguments`` default-fills every outgoing body from these models and the platform
-    hashes those bytes, so a default drift breaks dedup with 409s.
+    hashes those bytes, so a default drift breaks dedup.
     """
 
     @pytest.mark.parametrize("tool_name", sorted(TOOL_REGISTRY.keys()))

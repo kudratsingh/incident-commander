@@ -144,8 +144,7 @@ def test_partial_archive_trace_slice_is_priceable(
 def test_rates_agree_with_the_pinned_pricing_module() -> None:
     """Single source of truth: no silent drift from ``llm/pricing.py``.
 
-    The estimator keeps its own tier table for historical ids, but where the two overlap they
-    must agree to the cent.
+    The estimator keeps its own tier table for historical ids; overlaps agree to the cent.
     """
     for model, row in MODEL_PRICING.items():
         tier = next(name for name in RATES if name in model)
@@ -192,7 +191,7 @@ class TestSinceAcceptsWhatAnOperatorTypes:
     ) -> None:
         """Not just "does not crash": the cutoff has to actually apply.
 
-        Exactly one of the July and September records may be priced.
+        Exactly one of the two records may be priced.
         """
         _write_jsonl(tmp_path / "run.jsonl", self._two_dated_records())
         assert _run(monkeypatch, tmp_path, "--since", "2026-08-01") == 0

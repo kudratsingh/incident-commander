@@ -262,6 +262,8 @@ class TestTheScopeFlagThreePlacesDocument:
         """Not a hardcoded list: the contract job diffs `required_scope` live (WO-R2-130)."""
         assert known_scopes() == {
             "actions:execute",
+            # The 5th, on the v0.6.13 pin: the commander's own run telemetry.
+            "agent_runs:write",
             "chaos:invoke",
             "incidents:read",
             "telemetry:read",
@@ -357,7 +359,26 @@ class TestTwoPrincipalsNotOne:
             "telemetry:read",
             "incidents:read",
             "actions:execute",
+            # The mirror of the platform's seeder (v0.6.13, ADR 0035). A WRITE-only
+            # scope: it adds nothing the agent can read, which is what keeps ADR
+            # 0012 intact while the console watches the run.
+            "agent_runs:write",
         }
+
+    def test_the_reporting_scope_buys_no_reading(self) -> None:
+        """The agent may report its run and may not read one back.
+
+        The scope exists for two write tools; if the pinned platform ever grows a read
+        tool needing it, this account would silently gain the ability to read what it
+        reported, which is the leak ADR 0035's design exists to prevent.
+        """
+        payload = json.loads(
+            (_REPO_ROOT / "contracts" / "platform-tools.snapshot.json").read_text(encoding="utf-8")
+        )
+        scoped = {
+            t["name"] for t in payload["tools"] if t.get("required_scope") == "agent_runs:write"
+        }
+        assert scoped == {"report_agent_run", "report_agent_briefing"}
 
     def test_the_chaos_account_can_seed_and_verify_but_not_act(self) -> None:
         # Reads included so the runner can verify what it seeded; actions:execute excluded.
@@ -443,8 +464,12 @@ class TestTwoPrincipalsNotOne:
         _install_fake(monkeypatch, platform)
         assert main([]) == 0
         out = capsys.readouterr().out
+        # The strip and the widening in one PATCH: chaos:invoke off, and the
+        # v0.6.13 reporting scope on, because an account predating the pin has
+        # neither the right scopes nor a usable token.
         assert platform.patched[SERVICE_ACCOUNT_NAME] == [
             "actions:execute",
+            "agent_runs:write",
             "incidents:read",
             "telemetry:read",
         ]

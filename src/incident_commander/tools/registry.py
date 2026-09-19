@@ -776,6 +776,32 @@ _SNAPSHOT_PATH: Final[Path] = (
     Path(__file__).resolve().parents[3] / "contracts" / "platform-tools.snapshot.json"
 )
 
+#: Description prefixes the platform stamps on tools this registry deliberately does
+#: NOT mirror. Both are structural filters rather than hand-lists, because a hand-list
+#: of excluded tools has drifted three times in this repo.
+#:
+#: ``[chaos:`` is the lab's (v0.4.9). The agent's principal holds no ``chaos:invoke``
+#: and the evaluator fires hooks through ``evals/chaos_hooks.py``, so a hook has no
+#: typed model here and never reaches the planner's page.
+#:
+#: ``[commander:`` is the commander's OWN telemetry (v0.6.13, platform ADR 0035):
+#: ``report_agent_run`` and ``report_agent_briefing``, which the run reporter calls
+#: from the loop's checkpoint seam. They are excluded for the opposite reason to the
+#: chaos hooks — the agent's principal CAN call them — and the reason is the same
+#: shape: a tool in this registry is a tool the planner may propose, and reporting
+#: is not a choice the model gets to make. Keeping them out is also what holds
+#: ``format_tool_block()`` byte-identical across a telemetry-only pin.
+EXCLUDED_DESCRIPTION_PREFIXES: Final[tuple[str, ...]] = ("[chaos:", "[commander:")
+
+
+def mirrored_in_registry(description: str) -> bool:
+    """Whether a snapshot tool carrying this description belongs in ``TOOL_REGISTRY``.
+
+    The one predicate the coverage pin reads, so "which tools the agent mirrors" is
+    answered in the code that mirrors them rather than in a test's local copy.
+    """
+    return not description.startswith(EXCLUDED_DESCRIPTION_PREFIXES)
+
 
 def _load_snapshot_descriptions(path: Path = _SNAPSHOT_PATH) -> dict[str, str]:
     """Tool descriptions, mirrored verbatim from the committed contract snapshot.

@@ -16,10 +16,12 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from incident_commander.tools.registry import (
+    EXCLUDED_DESCRIPTION_PREFIXES,
     TOOL_REGISTRY,
     GetConsumerLagInput,
     GetConsumerLagOutput,
     ToolSpec,
+    mirrored_in_registry,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -43,12 +45,13 @@ def snapshot() -> dict[str, Any]:
 
 class TestCoverage:
     def test_registry_covers_every_snapshot_tool(self, snapshot: dict[str, Any]) -> None:
-        # Chaos/seed tools live on the platform but the agent never invokes them through the typed
-        # registry. Since v0.4.9 a "[chaos: ...]" description prefix makes the filter structural.
+        # Two families live on the platform and are deliberately absent from the typed
+        # registry: the chaos hooks (`[chaos:`, v0.4.9) the agent cannot fire, and the
+        # commander's own telemetry (`[commander:`, v0.6.13) the loop calls but the
+        # planner never chooses. Both are selected by description prefix, structurally,
+        # through the registry's own predicate.
         expected = {
-            t["name"]
-            for t in snapshot["tools"]
-            if not t.get("description", "").startswith("[chaos:")
+            t["name"] for t in snapshot["tools"] if mirrored_in_registry(t.get("description", ""))
         }
         assert set(TOOL_REGISTRY) == expected, (
             f"Registry drift vs snapshot. "
@@ -62,6 +65,70 @@ class TestCoverage:
                 f"{action} is a Tier-1 write action and must be registered "
                 "for the remediation planner (Phase 6)."
             )
+
+
+class TestTheExclusionFilterIsStructural:
+    """The two description prefixes that keep a platform tool out of the registry.
+
+    The coverage test above is only as strong as this filter, and a filter that
+    silently matched nothing would make it vacuous — v0.6.0 took the snapshot from 27
+    tools to 29 without anybody noticing, which is why the prefixes exist at all.
+    Each prefix is held to naming a NON-EMPTY family in the pinned snapshot, so the
+    day the platform stops stamping one the pin fails instead of widening.
+    """
+
+    def test_the_prefixes_are_exactly_these_two(self) -> None:
+        # A third one is a decision, not a drive-by: it silently widens what the
+        # planner is allowed not to know about.
+        assert EXCLUDED_DESCRIPTION_PREFIXES == ("[chaos:", "[commander:")
+
+    @pytest.mark.parametrize("prefix", EXCLUDED_DESCRIPTION_PREFIXES)
+    def test_each_prefix_names_a_family_the_snapshot_actually_has(
+        self, snapshot: dict[str, Any], prefix: str
+    ) -> None:
+        named = [
+            t["name"] for t in snapshot["tools"] if t.get("description", "").startswith(prefix)
+        ]
+        assert named, (
+            f"no tool in the pinned snapshot carries {prefix!r}, so the filter keying "
+            "on it excludes nothing and the coverage pin above is vacuous"
+        )
+        assert not set(named) & set(TOOL_REGISTRY), (
+            f"{prefix!r} tools must not be mirrored in the typed registry: "
+            f"{sorted(set(named) & set(TOOL_REGISTRY))}"
+        )
+
+    def test_the_commander_family_is_the_two_reporting_tools(
+        self, snapshot: dict[str, Any]
+    ) -> None:
+        """Named here so a THIRD telemetry tool is a reviewed change (platform ADR 0035).
+
+        These two are called by the run reporter on the loop's checkpoint seam and are
+        never proposed by a model, which is the whole reason they are excluded — the
+        agent's principal can call them, unlike a chaos hook.
+        """
+        commander = {
+            t["name"]
+            for t in snapshot["tools"]
+            if t.get("description", "").startswith("[commander:")
+        }
+        assert commander == {"report_agent_run", "report_agent_briefing"}
+        scopes = {t["required_scope"] for t in snapshot["tools"] if t["name"] in commander}
+        assert scopes == {"agent_runs:write"}
+
+    def test_no_read_tool_returns_what_was_reported(self, snapshot: dict[str, Any]) -> None:
+        """ADR 0012's other direction: the agent cannot read its own run record.
+
+        The platform ships no read for `agent_runs` at all — the console reads it over
+        REST as a human operator. A tool appearing here would be a contract change worth
+        stopping on, not a convenience.
+        """
+        readable = [
+            t["name"]
+            for t in snapshot["tools"]
+            if "agent_run" in t["name"] and not t["name"].startswith("report_")
+        ]
+        assert readable == [], f"the agent gained a way to read agent_runs: {readable}"
 
 
 class TestSchemaAlignment:

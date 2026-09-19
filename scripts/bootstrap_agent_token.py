@@ -54,6 +54,16 @@ SERVICE_ACCOUNT_SCOPES = [
     "telemetry:read",
     "incidents:read",
     "actions:execute",
+    # v0.6.13 (platform ADR 0035), mirroring the platform's own
+    # `scripts/seed_incident_commander.py`: lets the run reporter write
+    # `report_agent_run` / `report_agent_briefing` so a human watching the console
+    # can follow the run. It buys the agent NO reading — there is no read tool for
+    # `agent_runs`, and the `agent.run_reported` rows it writes are withheld from
+    # this principal's own `list_audit_events`. Tokens minted before this line was
+    # added do not carry it: re-run `make bootstrap-token` and paste the new
+    # PLATFORM_TOKEN, or the first report 403s (fail-open, so the run is unharmed
+    # and the console simply stays empty).
+    "agent_runs:write",
 ]
 # The evaluator: chaos:invoke to seed a fault world, reads to verify its own seeding, and
 # NOT actions:execute — remediating is the thing being measured.

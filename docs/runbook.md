@@ -1183,8 +1183,9 @@ and on `main` until the other half lands. Bless the new snapshot locally
 from the new pinned stack, then commit the compose bump, the snapshot, and
 any registry realignment together.
 
-Platform ships a new digest → six steps on the agent side (the sixth arrived
-with v0.6.11, the first pin to make an existing tool's output field required):
+Platform ships a new digest → eight steps on the agent side (the sixth arrived
+with v0.6.11, the first pin to make an existing tool's output field required; the
+seventh with v0.6.12; the eighth with v0.6.13):
 
 1. Update `demo/compose.yml` — **all THREE platform-code services**
    (`migrate`, `platform`, `api`) and the prose that names the version:
@@ -1194,6 +1195,24 @@ with v0.6.11, the first pin to make an existing tool's output field required):
    They must carry the identical string. A bump that moves `platform` and
    leaves `api` behind runs the MCP surface and the consumer groups on two
    different builds, which is the drift the pin exists to close.
+
+   **Since v0.6.13 there is a FOURTH image with its own digest**, the operator
+   console (`ghcr.io/kudratsingh/incident-platform-console`), built by the same
+   platform release workflow and published in the same release notes. It is a
+   separate repository and therefore a **separate digest** — do not paste the
+   backend's. It is pinned by the same rule (the INDEX digest, `docker buildx
+   imagetools inspect`, top-level `Digest:`), and it is amd64-only plus an
+   attestation manifest exactly like the backend, so it carries
+   `platform: linux/amd64` too — re-check that rather than assuming it, the same
+   way the backend's is re-checked at every pin.
+
+   One thing about the console's healthcheck is worth knowing before you write
+   one: its nginx listens on IPv4 `0.0.0.0:80` only, while `localhost` inside
+   that image resolves to `::1` first. So `wget http://localhost:80/` answers
+   "connection refused" from inside a container that is serving the page fine to
+   the host, and `make demo` fails with `container … is unhealthy` on a perfectly
+   healthy console. Use the IPv4 literal (`http://127.0.0.1:80/`). Found the hard
+   way on the v0.6.13 pin.
 2. Regenerate the contract snapshot:
    ```bash
    make demo                    # scoped `up --wait`; see below
@@ -1391,6 +1410,17 @@ with v0.6.11, the first pin to make an existing tool's output field required):
    every hook out of the typed registry the block is assembled from, whatever
    happens to that hook's schema.
 
+   v0.6.13 is the third such reading and the one that needed a second filter to
+   stay true. Its two new tools are `report_agent_run` and
+   `report_agent_briefing`, and unlike a chaos hook **the agent's own principal
+   can call them** — so nothing about scope kept them out. What keeps them out is
+   `[commander:`, added beside `[chaos:` in
+   `registry.EXCLUDED_DESCRIPTION_PREFIXES`, and the block stayed byte-identical
+   at 28,323 characters with the hash unmoved at `04a49645…`. Say which of the
+   two reasons a pin's silence rests on: "no scope to call it" and "not a choice
+   the model gets to make" both produce an unmoved hash, and only the second one
+   needs a filter somebody remembered to add.
+
    The lab-vocabulary assertion in that file is the one part to write
    carefully, and v0.6.11 is the example. Its two hooks are `saturate_db_pool`
    and `degrade_downstream`, and a filter on their word stems went red
@@ -1459,6 +1489,48 @@ with v0.6.11, the first pin to make an existing tool's output field required):
    `remediate_verify_fails` is the scenario a sticky kill is FOR; flipping it
    to live is its own decision with its own first-paid-run review and is
    deliberately not part of a re-pin.
+
+8. A pin can add a tool **the agent's own principal may call and the planner must
+   never see**, and v0.6.13 is the first one. Until then the surface split in two
+   and the split was scope-shaped: a tool the agent could call was a tool the
+   agent might be asked to choose, and the tools it could not call were the chaos
+   hooks, filtered out of `TOOL_REGISTRY` by their `[chaos:` description prefix.
+   `report_agent_run` and `report_agent_briefing` are neither. They are the
+   commander's own telemetry, `agent_runs:write` is on the agent account, and the
+   loop's checkpoint seam calls them — no model chooses them.
+
+   So there are now TWO prefixes, `registry.EXCLUDED_DESCRIPTION_PREFIXES ==
+   ("[chaos:", "[commander:")`, and one predicate (`mirrored_in_registry`) that
+   `tests/unit/test_registry.py` reads instead of keeping its own copy. Three
+   things follow for a re-pin that adds a `[commander:` tool.
+
+   **Nothing is registered and that is the point.** No typed input or output
+   model, no tier entry, no policy line. The reporter calls
+   `MCPClientProtocol.call_tool` by name with a dict, the way
+   `evals/chaos_hooks.py` fires a hook, and a registry entry would put the tool on
+   the planner's page — which is the one outcome the design forbids.
+
+   **Check the read direction explicitly, in the snapshot, not in the release
+   notes.** The property ADR 0035 rests on is that the agent cannot read back what
+   it reported: there is no read tool for `agent_runs` at all, and the platform
+   withholds the `agent.run_reported` audit rows from this principal's
+   `list_audit_events` and `get_trace`. `TestTheExclusionFilterIsStructural`
+   pins both halves, and the day a convenience read tool appears the pin fails
+   rather than the property quietly ending.
+
+   **A withheld audit stream means the agent sees FEWER rows than before, so
+   `list_audit_events` totals move DOWN.** That direction is easy to misread as a
+   lost row. Ledger it in the rebless entry, and expect canned
+   `list_audit_events` fixtures to need re-recording on the first pin where
+   anything has actually reported — not on this one, where nothing has yet.
+
+   The scope is the other half, and it is not automatic: `scripts/
+   bootstrap_agent_token.py` mirrors the platform's `seed_incident_commander.py`,
+   so the new scope goes in `SERVICE_ACCOUNT_SCOPES` **and every existing token
+   has to be re-minted**. `make bootstrap-token` PATCHes the live account and
+   prints three fresh tokens; paste all three. A stale token does not error
+   loudly — reporting is fail-open, so the run is unharmed and the console simply
+   stays empty, which is the failure that looks like a frontend bug.
 
 ## Connection pool and run capacity ([ADR 0022](ADR/0022-connection-pool-sizing-and-the-run-concurrency-ceiling.md))
 

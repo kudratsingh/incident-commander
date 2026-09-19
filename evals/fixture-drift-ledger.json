@@ -11,9 +11,9 @@
     "no-hook": "the fixture describes a fault no chaos hook can produce, so the canned value is the scenario's premise and the check probes a world that never had it. Not a defect; the fix, if that scenario is ever to run live, is a platform hook"
   },
   "_counts": {
-    "recorded": 137,
+    "recorded": 147,
     "fixture-defect": 0,
-    "explained": 137
+    "explained": 147
   },
   "known_drift": [
     {
@@ -71,6 +71,86 @@
       "kind": "value",
       "context": "canned-only",
       "why": "same scenario, same premise: the audit total counts events from that invented narrative"
+    },
+    {
+      "scenario": "cascading_redis_starves_backpressure",
+      "tool": "get_consumer_lag",
+      "path": "lag",
+      "kind": "value",
+      "context": "canned-only",
+      "why": "the premise is the absence of a measurement: a degraded Redis stops the metrics loop refreshing the cached lag and the previous entry expires, so `lag` is null where a warm stack reads a measured 0. `lag_known` is already volatile and this is the half that is not \u2014 the null IS the fault, and see the group comment for why it cannot be manufactured"
+    },
+    {
+      "scenario": "cascading_redis_starves_backpressure",
+      "tool": "get_consumer_lag",
+      "path": "recent_samples[].lag",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "the recorded window goes quiet with the value it dates: the loop writes the number and then the samples under the same 90s TTL, so a fixture whose value is absent carries no samples either, and every row field a live stack sends reads as live-only. The empty list is part of the premise (the tool's own description: an empty window is missing history, never a flat line)"
+    },
+    {
+      "scenario": "cascading_redis_starves_backpressure",
+      "tool": "get_consumer_lag",
+      "path": "recent_samples[].measured_at",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "same quiet window, its other absent row field"
+    },
+    {
+      "scenario": "cascading_redis_starves_backpressure",
+      "tool": "get_slo_status",
+      "path": "objectives[].budget_remaining_pct[]",
+      "kind": "not_live_reachable",
+      "context": "canned-only",
+      "why": "same derivation, clamped at -100 for the spent objective"
+    },
+    {
+      "scenario": "cascading_redis_starves_backpressure",
+      "tool": "get_slo_status",
+      "path": "objectives[].burn_rate[]",
+      "kind": "not_live_reachable",
+      "context": "canned-only",
+      "why": "same derivation again: 16x the sustainable rate is the premise, and it is the number the platform's own alert threshold (14.4) is read against"
+    },
+    {
+      "scenario": "cascading_redis_starves_backpressure",
+      "tool": "get_slo_status",
+      "path": "objectives[].current_success_rate[]",
+      "kind": "not_live_reachable",
+      "context": "canned-only",
+      "why": "derived from the two counts above by the platform's own arithmetic, so it drifts exactly where they do"
+    },
+    {
+      "scenario": "cascading_redis_starves_backpressure",
+      "tool": "get_slo_status",
+      "path": "objectives[].failed[]",
+      "kind": "not_live_reachable",
+      "context": "canned-only",
+      "why": "same link, its numerator: 384 of the 480 dispatched jobs left PENDING later than 30s because admission stopped refusing work, where an un-faulted world counts almost none. The contrast with the completion objective's 2 is the finding this world grades \u2014 late, not failing"
+    },
+    {
+      "scenario": "cascading_redis_starves_backpressure",
+      "tool": "get_slo_status",
+      "path": "objectives[].fast_burn[]",
+      "kind": "not_live_reachable",
+      "context": "canned-only",
+      "why": "same reason as `healthy`: nothing burns fast on a stack where nothing failed, and a fast burn is what raised this world's alert"
+    },
+    {
+      "scenario": "cascading_redis_starves_backpressure",
+      "tool": "get_slo_status",
+      "path": "objectives[].healthy[]",
+      "kind": "not_live_reachable",
+      "context": "canned-only",
+      "why": "an un-faulted stack reports every objective healthy, so the `false` this world's dispatch objective carries is not a value it can emit. The `true` beside it agrees with live and rides this row because both objectives merge into one"
+    },
+    {
+      "scenario": "cascading_redis_starves_backpressure",
+      "tool": "get_slo_status",
+      "path": "objectives[].total[]",
+      "kind": "not_live_reachable",
+      "context": "canned-only",
+      "why": "the fourth link of the chain, counted: 500 settled jobs and 480 dispatched over the window, against an un-faulted stack whose window holds whatever its own traffic put there. Both objectives share this row, because the ledger is keyed per path and the check reads a list of objects as one merged row"
     },
     {
       "scenario": "consumer_lag_high",

@@ -809,6 +809,11 @@ class TestShippedScenariosRoundTripToPlans:
             # carry a `settle_seconds` the legacy field cannot express.
             "dual_fault_consumer_lag_and_bad_deploy",
             "dual_fault_dlq_and_consumer_lag",
+            # WO-R3-236 (WP-14.1): not for a second hook — each seeds one — but because the
+            # composable form is where a hook can carry a `ttl_from_windows` derivation and
+            # the plan can carry its own `settle_seconds`.
+            "temporal_ttl_recovers_before_action",
+            "temporal_ttl_recovers_during_verify",
             "workflow_stuck_dead_lettered_root",
             "workflow_stuck_healthy_chain",
             "workflow_stuck_paused_dag",
@@ -822,8 +827,17 @@ class TestShippedScenariosRoundTripToPlans:
                 continue
             for hook in scenario.chaos_plan.setup + scenario.chaos_plan.teardown:
                 # Re-validating through `ChaosHook` is the closed-name and
-                # snapshot-argument check (S-03).
-                assert ChaosHook(name=hook.name, arguments=dict(hook.arguments)) == hook, (
+                # snapshot-argument check (S-03). `ttl_from_windows` travels because it is
+                # part of the hook (WP-14.1) and its own validators — no written TTL beside
+                # it, and only on a hook the snapshot gives a TTL — run on the way through.
+                assert (
+                    ChaosHook(
+                        name=hook.name,
+                        arguments=dict(hook.arguments),
+                        ttl_from_windows=hook.ttl_from_windows,
+                    )
+                    == hook
+                ), (
                     f"{scenario.name}: plan hook {hook.name!r} does not re-validate against "
                     "contracts/platform-tools.snapshot.json"
                 )
@@ -1019,10 +1033,10 @@ class TestTheGraderSideCanReadTheAnswerKey:
     def test_coverage_is_reportable_over_the_whole_corpus(self) -> None:
         corpus = load_scenarios(_SCENARIOS_DIR)
         graded = [s.name for s in corpus if s.root_cause_graded]
-        # 46 of 55 carry a ground-truth label (ADR 0038 makes one mandatory); the other
+        # 48 of 57 carry a ground-truth label (ADR 0038 makes one mandatory); the other
         # nine are recorded abstentions, pinned by test_ground_truth_corpus.py.
-        assert len(graded) == 46
-        assert len(corpus) >= 49
+        assert len(graded) == 48
+        assert len(corpus) >= 57
 
 
 class TestTheAgentVisibleProjection:

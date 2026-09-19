@@ -932,8 +932,9 @@ class TestAggregate:
         assert report.passed is True
         assert report.scenario == "happy"
         # Every dimension is emitted for every scenario, graded or vacuous — OUTCOME,
-        # EVIDENCE, BUDGET, ACTION, SAFETY, ROOT_CAUSE (see TestRootCauseDimension).
-        assert len(report.dimensions) == 6
+        # EVIDENCE, BUDGET, ACTION, SAFETY, ROOT_CAUSE (see TestRootCauseDimension) and
+        # ATTRIBUTION (WP-14.1, vacuous wherever no timed fault was seeded).
+        assert len(report.dimensions) == 7
 
     def test_any_dimension_fails_report_fails(self, run_state: RunState, now: datetime) -> None:
         run = _with_terminal(run_state, IncidentState.RESOLVED)
@@ -5709,18 +5710,19 @@ class TestRootCauseCoverageIsReported:
         assert "1 not graded" in capsys.readouterr().out
 
     def test_the_shipped_corpus_reports_partial_root_cause_coverage(self) -> None:
-        """Coverage is 46 of 55, and the report must say so rather than round it.
+        """Coverage is 48 of 57, and the report must say so rather than round it.
 
         It was 0 of 41 until WO-R3-261, and it did NOT move to 41: nine scenarios carry a
         recorded decision not to grade them on diagnosis, because none produces a
         diagnosis and a label there would fail the dimension for correct behaviour.
-        WO-R3-202, WO-R3-214 and WO-R3-226 each added four labelled worlds and WO-R3-228 two,
-        with no abstentions, so numerator and denominator moved together and nine stayed nine.
+        WO-R3-202, WO-R3-214 and WO-R3-226 each added four labelled worlds, WO-R3-228 two
+        and WO-R3-236 two, with no abstentions, so numerator and denominator moved together
+        and nine stayed nine.
         """
         shipped = _shipped()
         graded = [s.name for s in shipped if s.root_cause_graded]
-        assert len(shipped) == 55, "the corpus size is read from the loader, never a literal"
-        assert len(graded) == 46, (
+        assert len(shipped) == 57, "the corpus size is read from the loader, never a literal"
+        assert len(graded) == 48, (
             f"{len(graded)} of {len(shipped)} scenarios declare a ground truth — update "
             "this test, ``tests/unit/test_ground_truth_corpus.py``'s record and the "
             "root-cause accuracy reported in the PR body together."

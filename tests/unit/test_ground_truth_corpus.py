@@ -96,6 +96,11 @@ _DECIDED: Final[Mapping[str, tuple[Category, ...] | None]] = {
         Category.CONSUMER_SATURATION,
         Category.POISON_MESSAGE,
     ),
+    # WO-R3-236 (WP-14.1, ADR 0062). Both temporal templates seed one stale hot key, so
+    # the diagnosis is the same in each; that the entry then expires on its own is a fact
+    # about the TIMELINE, graded on ATTRIBUTION, and not a second root cause.
+    "temporal_ttl_recovers_before_action": (Category.STALE_CACHE,),
+    "temporal_ttl_recovers_during_verify": (Category.STALE_CACHE,),
 }
 
 #: Families that measure the harness rather than a world: ``TOOL_FAULT``
@@ -196,11 +201,11 @@ class TestEveryScenarioCarriesADecision:
         """The number in the PR body, checked against the corpus that produced it."""
         corpus = _corpus()
         graded = [s for s in corpus if s.root_cause_graded]
-        assert (len(graded), len(corpus)) == (46, 55), (
+        assert (len(graded), len(corpus)) == (48, 57), (
             f"{len(graded)} of {len(corpus)} scenarios are root-cause graded; "
             "WO-R3-261 landed 32 of 41, WO-R3-202 took it to 36 of 45, WO-R3-214 "
-            "to 40 of 49, WO-R3-226 to 44 of 53 and WO-R3-228 to 46 of 55 — every "
-            "`jobs_not_progressing`, "
+            "to 40 of 49, WO-R3-226 to 44 of 53, WO-R3-228 to 46 of 55 and WO-R3-236 to "
+            "48 of 57 — every `jobs_not_progressing`, `temporal_recovery`, "
             "`workflow_stuck` and retry scenario carries a label, because ADR 0038 "
             "makes one mandatory for a new scenario. Update this number and the "
             "run summary's coverage line together."

@@ -11,7 +11,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from functools import lru_cache
@@ -35,6 +35,7 @@ from evals import artifacts
 from evals.chaos_hooks import ChaosInvocationError, invoke_chaos_hook
 from evals.fakes import CannedMCPClient
 from evals.graders.deterministic import (
+    FALSE_ATTRIBUTION_CLASS,
     DimensionResult,
     GradeDimension,
     GradeReport,
@@ -61,7 +62,7 @@ from evals.guards import (
 from evals.preconditions import unmet
 from evals.recorded_client import RecordedMCPClient, matching_recordings
 from evals.scenarios.loader import load_scenarios
-from evals.scenarios.schema import ChaosHook, ChaosPlan, Scenario
+from evals.scenarios.schema import TTL_ARGUMENT, ChaosHook, ChaosPlan, Scenario
 from evals.tracing import JsonlTracer, TraceKind, tracer_for
 from incident_commander.agent.accounting import RunAccounting, accrue_llm_error
 from incident_commander.agent.briefing import EscalationBriefing, render_briefing
@@ -842,6 +843,16 @@ class ChaosHookRecord(BaseModel):
     ok: bool = True
     result: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
+    # WP-14.1's evaluator timeline. ``fired_at`` is the evaluator's clock at the moment
+    # the hook was sent; ``expires_at`` is when the fault this hook seeded recovers ON ITS
+    # OWN, which is the fact the false-attribution grade compares a verdict against.
+    # Populated only where the hook's TTL was DERIVED (``ttl_from_windows``) — a hook with
+    # a long written TTL is not making a temporal claim, and stamping one would let a
+    # grade read a recovery that the run never came near. ``None`` on every archived
+    # record, which is why all three default (ADR 0013's precedent).
+    fired_at: datetime | None = None
+    ttl_seconds: int | None = None
+    expires_at: datetime | None = None
 
 
 #: ``ChaosHookRecord.phase`` for a hook that MANUFACTURED the world, as
@@ -860,6 +871,117 @@ def seeded_chaos(records: Iterable[ChaosHookRecord]) -> bool:
     return any(record.phase == CHAOS_SETUP_PHASE and record.ok for record in records)
 
 
+def _timeline_of(hook: ChaosHook, arguments: Mapping[str, Any], *, phase: str) -> dict[str, Any]:
+    """The evaluator's timeline for one hook that fired, or an empty update (WP-14.1).
+
+    Stamped only for a SETUP hook whose TTL was derived: a teardown puts the world back
+    and a written TTL is not a temporal claim. The clock is read AFTER the call returns,
+    deliberately — the flag is certainly set by then, so the recorded expiry is at or
+    slightly after the real one, and the grade errs toward NOT calling false attribution.
+    A false red about attribution is INC-001's failure in a new dimension.
+    """
+    if hook.ttl_from_windows is None or phase != CHAOS_SETUP_PHASE:
+        return {}
+    ttl = arguments.get(TTL_ARGUMENT)
+    if not isinstance(ttl, int):  # pragma: no cover — the resolver always writes an int
+        return {}
+    fired_at = datetime.now(UTC)
+    return {
+        "fired_at": fired_at,
+        "ttl_seconds": ttl,
+        "expires_at": fired_at + timedelta(seconds=ttl),
+    }
+
+
+def temporal_timing_refusal(scenario: Scenario, settings: Settings) -> str | None:
+    """Why this run's knobs cannot carry this temporal template — or ``None`` (WP-14.1).
+
+    The fault has to still be there when the agent's first probe lands, and the run
+    spends fault-time before that probe happens: the plan's settle, then the
+    preconditions' own polling. If the derived TTL does not outlast that, the template
+    measures the HARNESS — "a fault so short the agent never sees it" grades as an agent
+    that missed it (LESSONS 2026-08-31, run B). Not a margin anybody chose: it is the
+    run's own pre-agent cost, compared against the TTL these knobs resolve to.
+
+    And the mirror of that, which the derivation cannot express on its own: a template
+    that positions its expiry inside a window the knobs have collapsed to zero is not
+    the experiment its YAML declares. At the canned-equivalent knobs
+    ``_canned_equivalent_knob_warning`` only warns about, both windows are 0 and every
+    derivation falls back to its floor — the TTL stops tracking the investigation it was
+    written against. That is the silent substitution WP-14.1 exists to prevent, so here
+    it is a refusal rather than a warning.
+    """
+    if not scenario.is_temporal:
+        return None
+    plan = scenario.chaos
+    investigation_window = settings.investigation_reprobe_window_seconds
+    verify_window = settings.verify_polling_window_seconds
+    spent = plan.settle_seconds + scenario.precondition_window_seconds
+    knobs = (
+        f"INVESTIGATE_REPROBE_ATTEMPTS={settings.investigate_reprobe_attempts}, "
+        f"INVESTIGATE_REPROBE_DELAY_SECONDS={settings.investigate_reprobe_delay_seconds}, "
+        f"VERIFY_PROBE_ATTEMPTS={settings.verify_probe_attempts}, "
+        f"VERIFY_PROBE_DELAY_SECONDS={settings.verify_probe_delay_seconds}"
+    )
+    for hook in plan.setup:
+        derivation = hook.ttl_from_windows
+        if derivation is None:
+            continue
+        collapsed = [
+            name
+            for name, multiple, window in (
+                ("investigation", derivation.investigation_multiple, investigation_window),
+                ("verify", derivation.verify_multiple, verify_window),
+            )
+            if multiple > 0.0 and window <= 0.0
+        ]
+        if collapsed:
+            return (
+                f"scenario {scenario.name!r} hook {hook.name!r} positions its expiry "
+                f"inside the {', '.join(collapsed)} window, and this run's knobs "
+                f"collapse that window to zero ({knobs}). The derived TTL would fall "
+                "back to its floor and stop tracking the window it was written "
+                "against, which makes this a different experiment wearing the same "
+                "name. Set the live probe knobs (docs/runbook.md, environment variable "
+                "knobs) or do not run this template."
+            )
+        ttl = derivation.seconds(
+            precondition_window=scenario.precondition_window_seconds,
+            investigation_window=investigation_window,
+            verify_window=verify_window,
+        )
+        if ttl > spent:
+            continue
+        return (
+            f"scenario {scenario.name!r} hook {hook.name!r} resolves to "
+            f"ttl_seconds={ttl} under this run's knobs ({knobs}), and the run spends "
+            f"{spent:g}s before the agent's first probe (settle "
+            f"{plan.settle_seconds:g}s + preconditions "
+            f"{scenario.precondition_window_seconds:g}s). The fault would be gone "
+            "before the agent could observe it, so the run would grade the agent for "
+            "missing something that had already expired. Raise the derivation's "
+            "floor_seconds, shorten the precondition, or run with the live knobs this "
+            "template was derived against (docs/runbook.md, environment variable knobs)."
+        )
+    return None
+
+
+def self_recovery_at(records: Iterable[ChaosHookRecord]) -> datetime | None:
+    """When this run's fault world starts putting itself back, or ``None`` (WP-14.1).
+
+    The EARLIEST expiry among the setup hooks that fired, because the first fault to
+    expire is the first recovery an agent could mistake for its own work. Reads the
+    RECORDS rather than the scenario, for ``seeded_chaos``' reason: the question is what
+    this run's world actually did.
+    """
+    expiries = [
+        record.expires_at
+        for record in records
+        if record.phase == CHAOS_SETUP_PHASE and record.ok and record.expires_at is not None
+    ]
+    return min(expiries) if expiries else None
+
+
 def _invoke_plan_hook(
     scenario: Scenario,
     hook: ChaosHook,
@@ -875,14 +997,21 @@ def _invoke_plan_hook(
     the agent the hook (G3, O-4). Never raises for a hook failure — the callers disagree
     about what one MEANS. A MISSING credential DOES raise: nothing was attempted.
     """
-    record = ChaosHookRecord(phase=phase, name=hook.name, arguments=dict(hook.arguments))
+    # A derived TTL (WP-14.1) is resolved HERE, from the knobs this run actually carries,
+    # so the seeded value and the recorded timeline are the same number by construction.
+    arguments = hook.seeded_arguments(
+        precondition_window=scenario.precondition_window_seconds,
+        investigation_window=settings.investigation_reprobe_window_seconds,
+        verify_window=settings.verify_polling_window_seconds,
+    )
+    record = ChaosHookRecord(phase=phase, name=hook.name, arguments=arguments)
     chaos_token = settings.require_chaos_token()
     try:
         result = invoke_chaos_hook(
             str(settings.platform_mcp_url),
             chaos_token,
             hook.name,
-            dict(hook.arguments),
+            arguments,
         )
     except ChaosInvocationError as err:
         # ``err`` carries the platform's own refusal NAME (evals/chaos_hooks.py), which
@@ -890,7 +1019,9 @@ def _invoke_plan_hook(
         # and an anonymous -32011 that reads like flakiness. Verbatim for that reason.
         record = record.model_copy(update={"ok": False, "error": str(err)})
     else:
-        record = record.model_copy(update={"result": result})
+        record = record.model_copy(
+            update={"result": result, **_timeline_of(hook, arguments, phase=phase)}
+        )
     if tracer is not None:
         tracer.write(
             {
@@ -901,7 +1032,12 @@ def _invoke_plan_hook(
                 "scenario": scenario.name,
                 "phase": phase,
                 "hook": hook.name,
-                "arguments": dict(hook.arguments),
+                "arguments": arguments,
+                **(
+                    {"expires_at": record.expires_at.isoformat()}
+                    if record.expires_at is not None
+                    else {}
+                ),
                 "result": record.result,
                 **({"error": record.error} if record.error is not None else {}),
             }
@@ -1204,6 +1340,13 @@ def run_scenario(
     if refusal is not None:
         raise ValueError(refusal)
 
+    # WP-14.1, before anything is replayed, called or billed: the backstop to
+    # ``recordings_for``'s CLI refusal. ``run_all`` is driven directly from tests and
+    # from ``world_drift``, and a temporal scenario replayed anywhere would produce a row
+    # claiming a timeline the replay does not have.
+    if recorded and (temporal := scenario.recorded_refusal) is not None:
+        raise ChaosSetupFailed(temporal)
+
     # use_live_* means "prefer live if env is real, else fall back to canned."
     # Nothing skips just because env is placeholder — canned data is the
     # deterministic offline fallback for `make eval` / CI.
@@ -1316,6 +1459,13 @@ def run_scenario(
         # at the first failed hook and raises, and the hooks that already
         # fired are exactly what ``plan.teardown`` compensates.
         try:
+            # WP-14.1: a temporal template whose derived TTL cannot outlast this run's
+            # own pre-agent cost measures the harness, so the world is not built at all.
+            # Inside the live branch, because an offline run seeds nothing — there is no
+            # clock to lose the race to, and the canned fixtures carry the observation
+            # sequence instead.
+            if (timing := temporal_timing_refusal(scenario, settings)) is not None:
+                raise ChaosSetupFailed(timing)
             chaos_records = _seed_chaos_plan(scenario, chaos_plan, settings, tracer)
             # One wait for the whole plan, ahead of the preconditions' per-probe
             # polling: a cascade's second-order effect is not visible instantly.
@@ -1591,6 +1741,10 @@ def run_scenario(
             # Which world the run was in (INC-003), decided above because the answer
             # differs by mode and nobody reads a conditional inside an argument list.
             world_matches_ground_truth=world_matches_ground_truth,
+            # WP-14.1's timeline, off the setup records: when this run's fault starts
+            # putting itself back. ``None`` on every run that seeded no timed fault,
+            # which grades ATTRIBUTION vacuously.
+            self_recovery_at=self_recovery_at(chaos_records),
             # Which dimensions this MODE cannot make a claim about (WP-3.3).
             # ``None`` for every other mode, so nothing else changes.
             not_applicable=(recorded_not_applicable(truncated=handoff.fired) if recorded else None),
@@ -1784,6 +1938,16 @@ def _classify_failure(report: GradeReport, final: RunState | None) -> tuple[str,
         return "llm-variance", ""
     if failing == {GradeDimension.EVIDENCE}:
         return "grader-brittleness", _grader_drift_detail(report, evidence)
+    if GradeDimension.ATTRIBUTION in failing:
+        # Its own bucket, and ahead of "unclassified": a false-attribution red is a
+        # finding ABOUT THE AGENT (it credited itself with a recovery the fault's own
+        # clock produced), and the noise taxonomy has no other word for it. Named on
+        # membership rather than on an exact set, because the same run usually reds
+        # OUTCOME too — the attribution is the reason, and the reason is the bucket.
+        return FALSE_ATTRIBUTION_CLASS, next(
+            (d.detail for d in report.dimensions if d.dimension is GradeDimension.ATTRIBUTION),
+            "",
+        )
     return "unclassified", ""
 
 
@@ -2527,7 +2691,18 @@ def recordings_for(scenarios: Sequence[Scenario], world: str | None) -> tuple[di
     REFUSAL rather than a canned fallback. With ``--world <id>`` one recording is pinned,
     which is what makes a number reproducible; a scenario NAME means its newest, and the
     two cannot collide. Either way: exactly one recording, exactly that scenario.
+
+    A TEMPORAL scenario is refused before either question is asked (WP-14.1): its
+    recording would be a world that never expires, and no recording — present, pinned or
+    missing — changes that.
     """
+    temporal = [
+        (scenario.name, refusal)
+        for scenario in scenarios
+        if (refusal := scenario.recorded_refusal) is not None
+    ]
+    if temporal:
+        return {}, "RECORDED FAIL: " + " ".join(refusal for _, refusal in temporal)
     if world is None:
         found: dict[str, Path] = {}
         missing: list[str] = []

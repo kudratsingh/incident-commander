@@ -37,7 +37,17 @@ _SUBJECTLESS = "dlq_mixed_partial"
 
 # BUDGET is exempt BY NAME: since ADR 0019 the cap is the runtime ceiling the loop enforces,
 # so an offline agent cannot exceed it; its red lives in test_grader.py (WO-R2-79).
-_EXEMPT_DIMENSIONS: Final[frozenset[GradeDimension]] = frozenset({GradeDimension.BUDGET})
+#
+# ATTRIBUTION is exempt for a different reason and the same shape (WP-14.1, ADR 0062): it
+# grades a verdict against the evaluator's TIMELINE — when the seeded fault expires on its
+# own — and an offline run seeds nothing, so there is no timeline and the dimension is
+# vacuous however wrong the canned agent is. Reddening it here would need a canned run to
+# carry a fabricated expiry, which is the fixture-that-lies class this suite keeps finding.
+# Its red-before lives in tests/unit/test_temporal_recovery.py, on a canned trajectory that
+# claims a TTL recovery as its own, and its live acceptance is a deferred paid row.
+_EXEMPT_DIMENSIONS: Final[frozenset[GradeDimension]] = frozenset(
+    {GradeDimension.BUDGET, GradeDimension.ATTRIBUTION}
+)
 
 # Derived, never hand-maintained: every dimension the grader scores, minus exemptions.
 _WATCHED_DIMENSIONS: Final[tuple[GradeDimension, ...]] = tuple(

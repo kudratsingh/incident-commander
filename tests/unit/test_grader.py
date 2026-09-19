@@ -5359,18 +5359,18 @@ class TestRootCauseCoverageIsReported:
         assert "1 not graded" in capsys.readouterr().out
 
     def test_the_shipped_corpus_reports_partial_root_cause_coverage(self) -> None:
-        """Coverage is 40 of 49, and the report must say so rather than round it.
+        """Coverage is 44 of 53, and the report must say so rather than round it.
 
         It was 0 of 41 until WO-R3-261, and it did NOT move to 41: nine scenarios carry a
         recorded decision not to grade them on diagnosis, because none produces a
         diagnosis and a label there would fail the dimension for correct behaviour.
-        WO-R3-202 and WO-R3-214 each added four labelled worlds and no abstentions, so
-        numerator and denominator moved together and the nine stayed nine.
+        WO-R3-202, WO-R3-214 and WO-R3-226 each added four labelled worlds and no
+        abstentions, so numerator and denominator moved together and the nine stayed nine.
         """
         shipped = _shipped()
         graded = [s.name for s in shipped if s.root_cause_graded]
-        assert len(shipped) == 49, "the corpus size is read from the loader, never a literal"
-        assert len(graded) == 40, (
+        assert len(shipped) == 53, "the corpus size is read from the loader, never a literal"
+        assert len(graded) == 44, (
             f"{len(graded)} of {len(shipped)} scenarios declare a ground truth — update "
             "this test, ``tests/unit/test_ground_truth_corpus.py``'s record and the "
             "root-cause accuracy reported in the PR body together."

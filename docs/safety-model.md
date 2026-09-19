@@ -40,7 +40,7 @@ All seven are idempotent (caller-supplied `idempotency_key`, see below) with a b
 
 Tier answers "how much damage can this do?". A second, independent classification answers "can a successful call END the incident?" — `RESOLUTION_CLASS` in the same module, total over the Tier-1 slice. See [A stabilizer is not a resolution](#a-stabilizer-is-not-a-resolution).
 
-A third question sits beside it and cannot be answered by a map at all: **did the call end THIS incident?** A tool that resolves, applied to a condition it only partly covers, leaves the incident open — one replay on a four-row mixed queue is the case, and ADR 0008 allows exactly one action. That is a property of the run rather than of the tool, so it is decided from the run's own evidence at the same `RESOLVED` transition (`remediation._uncleared_alert_condition`, WO-R2-164 / [ADR 0031](ADR/0031-an-alerted-dlq-category-is-the-incident.md)'s 2026-09-08 amendment) and escalates with every unaddressed row named. Inert wherever the alert names a subject, since no plan aimed elsewhere executes there ([ADR 0032](ADR/0032-the-action-must-address-the-alerts-subject.md)).
+A third question sits beside it and cannot be answered by a map at all: **did the call end THIS incident?** A tool that resolves, applied to a condition it only partly covers, leaves the incident open — one replay on a four-row mixed queue is the case, and one plan is one action ([ADR 0056](ADR/0056-a-retry-earns-its-attempt-by-reinvestigating.md)). That is a property of the run rather than of the tool, so it is decided from the run's own evidence at the same `RESOLVED` transition (`remediation._uncleared_alert_condition`, WO-R2-164 / [ADR 0031](ADR/0031-an-alerted-dlq-category-is-the-incident.md)'s 2026-09-08 amendment) and escalates with every unaddressed row named. Inert wherever the alert names a subject, since no plan aimed elsewhere executes there ([ADR 0032](ADR/0032-the-action-must-address-the-alerts-subject.md)).
 
 No `TIER_2` tools ship today. When they land, they use the platform's propose/approve/execute flow (Wave 3 PR F on the platform side).
 
@@ -67,14 +67,30 @@ No `TIER_2` tools ship today. When they land, they use the platform's propose/ap
           ▼
        VERIFYING
           │ probe verify_tool + judge LLM
-          │ verdict "not_verified" ─────────────────────────► ESCALATED
+          │ verdict "not_verified" ──► retry available? ──► INVESTIGATING
+          │                             else ─────────────► ESCALATED
           │ verdict "verified"
-          │   └─ action is STABILIZE-ONLY ───────────────► ESCALATED
+          │   └─ action is STABILIZE-ONLY ──► retry? ────► INVESTIGATING
+          │                                   else ──────► ESCALATED
           ▼
         RESOLVED
 ```
 
-One attempt, one way ([ADR 0008](ADR/0008-single-attempt-remediation.md)): `ALLOWED_TRANSITIONS` in `src/incident_commander/agent/orchestrator.py` gives VERIFYING no PLANNING successor — a `not_verified` verdict escalates for human review rather than re-planning autonomously — and REMEDIATING always proceeds through a real tool call, with no client-side skip-ahead branch (see crash recovery below).
+**Up to two attempts, and the second one has to be a different attempt ([ADR 0056](ADR/0056-a-retry-earns-its-attempt-by-reinvestigating.md), superseding [ADR 0008](ADR/0008-single-attempt-remediation.md)).** This is the one place in the system where the agent may write to a customer's platform twice without a human, so it is worth stating plainly what bounds it.
+
+`ALLOWED_TRANSITIONS` in `src/incident_commander/agent/orchestrator.py` gives VERIFYING an INVESTIGATING successor and still no PLANNING successor: a retry re-enters the investigation loop and is planned from evidence gathered AFTER the failure, never re-planned from the ledger that produced it. The edge is taken only when all three of these hold, and every one of them is deterministic code rather than a prompt:
+
+1. `remediation_attempts < MAX_REMEDIATION_ATTEMPTS` (`Settings`, default 2, ceiling 3). At the cap the run escalates with a reason naming the cap.
+2. The remaining budget can fund an action and its verify. **Budgets are not reset between attempts** — invariant 7 is per incident, not per attempt.
+3. Some ranked hypothesis other than the one just attempted carries a `FIX_MAP` category. With nowhere else to go the run escalates on the verdict exactly as it did under ADR 0008.
+
+And the second plan cannot be the first one again: a plan whose `(tool, wired arguments)` pair this run already executed is refused before execution and the run escalates naming the refusal. The comparison is on the wired form, so an omitted optional cannot disguise a repeat, and because the idempotency key is a deterministic function of (incident, tool, arguments), refusing the repeat is what stops a re-send from returning the first attempt's cached success.
+
+**The new risk, stated honestly.** A run may now leave two Tier-1 writes on a system before a human looks at it, and the second one is chosen by a model that has just been wrong once. What bounds the harm: both writes are Tier-1 (reversible, no approval needed by policy — Tier 2 still requires one), each passes every plan-time gate independently (the subject guard, both read-before-act guards, the argument guards, the FIX_MAP check), the two writes cannot be the same call, and the whole sequence is capped by one budget. What is NOT claimed: that two wrong-but-different writes are safer than one. Setting `MAX_REMEDIATION_ATTEMPTS=1` restores the single-attempt posture exactly.
+
+Every failed attempt is written to the evidence ledger as a structured record (tool, arguments, verify probe, verify reading, verdict), rendered to both planners under "Already attempted in this incident — do NOT repeat:", and carried into the briefing's `escalation_reason` — because the investigation trail filters bookkeeping markers, and a human must be told about a write already made on their system.
+
+REMEDIATING always proceeds through a real tool call, with no client-side skip-ahead branch (see crash recovery below).
 
 Every escalation carries the failure reason on evidence. `EscalationBriefing` is the artifact a human reads.
 
@@ -217,7 +233,7 @@ So the investigation loop carries a third handoff guard, beside the existing cat
 
 | Check | Rejects | Failure it prevents |
 |---|---|---|
-| `_alert_subject_probed` | a `remediate` handoff when no probe in the evidence read the resource **or slice** the alert names, with the value the alert gave | remediating a bystander while the alerted signal sits unexplained; or scoping an incident to a whole collection when the alert named one slice of it, which under [ADR 0008](ADR/0008-single-attempt-remediation.md)'s single-attempt limit converts into an escalation rather than a partial fix |
+| `_alert_subject_probed` | a `remediate` handoff when no probe in the evidence read the resource **or slice** the alert names, with the value the alert gave | remediating a bystander while the alerted signal sits unexplained; or scoping an incident to a whole collection when the alert named one slice of it, which under the bounded attempt limit ([ADR 0056](ADR/0056-a-retry-earns-its-attempt-by-reinvestigating.md)) converts into an escalation rather than a partial fix |
 
 The subject is derived mechanically, never guessed. `ALERT_SUBJECT_PROBES` (`src/incident_commander/agent/investigation.py`) maps an alert payload field to the read tool and argument that observe it; it is keyed on the field rather than on `fingerprint` because fingerprints are free text the platform's alert rules author (this corpus alone spells one family three ways), so matching them would mean prefix-matching, and because the field is what carries the value the check needs. `tests/unit/test_policies.py::TestAlertSubjectProbes` holds the map against the registry, the read tier, and `RESOURCE_ARG_FIELDS`.
 
@@ -391,7 +407,7 @@ Three mechanisms (the first two introduced in [PR #35](https://github.com/kudrat
 
    Crash-resume leans on this contract harder as of WO-R2-39: a run whose checkpoint reads REMEDIATING is now re-invoked rather than escalated when its budget is exhausted ([ADR 0006](ADR/0006-verification-is-a-polling-window.md), amended).
 
-2. **Attempt cap as an invariant guard.** `RunState.remediation_attempts` starts at 0 and increments once per executed action. Under `ALLOWED_TRANSITIONS`, PLANNING is only reachable from INVESTIGATING — where attempts is still 0 — and VERIFYING has no PLANNING successor, so no live run can re-enter PLANNING with `attempts >= 1`. The cap check in the PLANNING transition therefore guards an invariant-violating, should-be-unreachable state: hitting it means the transition graph was mutated without updating ADR 0008 (or a RunState was constructed bypassing dispatch), and the run escalates with a distinct reason instead of proposing another fix.
+2. **Attempt cap as a real limit.** `RunState.remediation_attempts` starts at 0 and increments once per executed action, and the PLANNING transition refuses to plan when it has reached `MAX_REMEDIATION_ATTEMPTS`. Under ADR 0008 this guard was an invariant assertion about a state the graph made unreachable; since [ADR 0056](ADR/0056-a-retry-earns-its-attempt-by-reinvestigating.md) PLANNING can legitimately be entered with an attempt already spent, so it is a limit again — the same number VERIFYING checks before taking the retry edge, kept here as the backstop for a RunState built some other way. A run that reaches it escalates naming the cap instead of proposing another fix.
 
 3. **Durable incident identity, a single-flight lease, and the resume entrypoint.** The incident id is derived at ingress from the triage dedup key — `uuid5(fixed namespace, blake2b(source|fingerprint))`, walking a deterministic generation chain past any generation whose run already ended, so a recurrence after resolution opens a new incident while every at-least-once redelivery of the same occurrence lands on the same id. An alert with no fingerprint declines to dedupe and gets a `uuid4`, because collapsing a fingerprint-less stream per source would merge it into one immortal incident. Before running, the background task takes `pg_try_advisory_lock(hashtext(incident_id))` on one pinned connection held for the whole run (`src/incident_commander/persistence/lease.py`); a task that does not get it logs and exits, so one incident has at most one live writer no matter how many deliveries arrive. Inside the lease the task loads the latest checkpoint and continues from it — a crashed run resumes where it died instead of re-spending its budget to rebuild evidence it already recorded. A terminal snapshot (including the FAILED crash record) is never resumed: that would arm a redelivery-driven retry loop around a deterministically-crashing run, and a genuinely new alert opens a new incident anyway. AWAITING_APPROVAL is not resumed either — approval-bound resume is Tier-2 design that has not shipped.
 

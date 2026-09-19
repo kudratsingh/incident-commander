@@ -39,6 +39,8 @@ from incident_commander.llm.prompts.shared_rules import STUCK_CHAIN_ROOT_RULE
 from incident_commander.llm.repair import (
     INVESTIGATION_PLANNER_INVALID,
     call_with_output_repair,
+    sum_usage,
+    usage_of,
 )
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError, ToolResult
 from incident_commander.tools.policies import Tier, is_cached_read, tier_of
@@ -406,6 +408,7 @@ def make_llm_investigate(
     strategy: InvestigationStrategy | None = None,
     record_step: StepSink | None = None,
     selector_llm_client: LLMClientProtocol | None = None,
+    critic_llm_client: LLMClientProtocol | None = None,
 ) -> Callable[[RunState, datetime], RunState]:
     """Bind clients + model to the Phase 2 INVESTIGATING transition.
 
@@ -423,10 +426,10 @@ def make_llm_investigate(
     subject-probe refusal, the ADR-0009 re-probe, ``_execute_probe`` and its tier re-check —
     stays here: strategies propose, this loop decides.
 
-    ``selector_llm_client`` is the ``candidate_selector`` role's client (WP-6.2), separate so
-    accounting meters the two roles apart. ``record_step`` takes each ``StepRecord``; ``None``
-    means nobody is recording (the tracer is opt-in via ``EVAL_TRACE_DIR``), but the record is
-    built either way.
+    ``selector_llm_client`` is the ``candidate_selector`` role's client (WP-6.2) and
+    ``critic_llm_client`` the ``reflection_critic`` role's (WP-9.1), each separate so accounting
+    meters the roles apart. ``record_step`` takes each ``StepRecord``; ``None`` means nobody is
+    recording (the tracer is opt-in via ``EVAL_TRACE_DIR``), but the record is built either way.
     """
     chosen: Final[InvestigationStrategy] = strategy if strategy is not None else _control_group()
 
@@ -454,6 +457,7 @@ def make_llm_investigate(
                         config=chosen.config,
                         record_step=record_step,
                         selector_llm_client=selector_llm_client,
+                        critic_llm_client=critic_llm_client,
                     ),
                 )
             except (ValueError, ValidationError, LLMError) as err:
@@ -623,6 +627,10 @@ def _plan_next_step(
         # The client's own measurement — a stopwatch here would also time
         # the accrual below and call it model time.
         elapsed_ms=result.elapsed_ms,
+        # Every leg this call billed. Unread by ``baseline``; a strategy that makes a
+        # SECOND call in the same step needs it, or the first call's bill is charged to
+        # nobody when the second fails (ADR 0015, ADR 0045).
+        billed_usage=sum_usage(*(usage_of(err) for err in call.failures), result),
     )
     return updated, result.output, measured
 

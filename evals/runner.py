@@ -73,6 +73,7 @@ from incident_commander.agent.investigation import (
 )
 from incident_commander.agent.loop import run_to_completion
 from incident_commander.agent.orchestrator import TRANSITIONS, Transition
+from incident_commander.agent.reflection import CRITIC_ROLE
 from incident_commander.agent.remediation import (
     make_llm_plan,
     make_llm_verify,
@@ -353,6 +354,9 @@ class RunAccountingRecord(BaseModel):
     # Zero for ``baseline``, WRITTEN rather than omitted: a reader comparing it to a
     # later strategy's row must not have to decide what a missing key meant.
     selector_calls: int = 0
+    # Zero for every arm but ``reflection``, WRITTEN for ``selector_calls``'s reason.
+    critic_calls: int = 0
+    revised_steps: int = 0
     branch_count: int = 0
     planner_steps: int = 0
     # Per step, in order, and the total beside it (plan 02 § 17).
@@ -397,6 +401,8 @@ def build_accounting(accounting: RunAccounting, budget: BudgetLedger) -> RunAcco
         ledger_usd_used=budget.usd_used,
         reconciled=accounting.reconciles_with(budget),
         selector_calls=accounting.selector_calls,
+        critic_calls=accounting.critic_calls,
+        revised_steps=accounting.revised_steps,
         branch_count=accounting.branch_count,
         planner_steps=len(accounting.steps),
         planner_input_tokens=accounting.planner_input_tokens,
@@ -1312,6 +1318,7 @@ def run_scenario(
 
     investigation_llm: LLMClientProtocol
     selector_llm: LLMClientProtocol
+    critic_llm: LLMClientProtocol
     remediation_planner_llm: LLMClientProtocol
     verification_judge_llm: LLMClientProtocol
     briefing_llm: LLMClientProtocol
@@ -1329,6 +1336,11 @@ def run_scenario(
         selector_llm = LLMClient(
             api_key=api_key,
             tracer=tracer.llm_hook(SELECTOR_ROLE) if tracer else None,
+        )
+        # WP-9.1's new role, its own client for the same reason.
+        critic_llm = LLMClient(
+            api_key=api_key,
+            tracer=tracer.llm_hook(CRITIC_ROLE) if tracer else None,
         )
         remediation_planner_llm = LLMClient(
             api_key=api_key,
@@ -1351,6 +1363,7 @@ def run_scenario(
             scenario.canned_llm_responses.get("investigation_planner", [])
         )
         selector_llm = CannedLLMClient(scenario.canned_llm_responses.get(SELECTOR_ROLE, []))
+        critic_llm = CannedLLMClient(scenario.canned_llm_responses.get(CRITIC_ROLE, []))
         remediation_planner_llm = CannedLLMClient(
             scenario.canned_llm_responses.get("remediation_planner", [])
         )
@@ -1380,6 +1393,8 @@ def run_scenario(
     # The selector is the AGENT's own cost — it decides the run's diagnosis — so
     # it is charged to the ledger like the planner and unlike the briefing judge.
     selector_llm = accounting.meter(selector_llm, SELECTOR_ROLE)
+    # The critic is the AGENT's own cost too: it decides whether the run re-plans.
+    critic_llm = accounting.meter(critic_llm, CRITIC_ROLE)
     remediation_planner_llm = accounting.meter(remediation_planner_llm, "remediation_planner")
     verification_judge_llm = accounting.meter(verification_judge_llm, "verification_judge")
     briefing_llm = accounting.meter(briefing_llm, "briefing_writer")
@@ -1399,9 +1414,10 @@ def run_scenario(
         # step's context size), and on to the trace store when one was built. The sink
         # composes, it does not choose.
         record_step=accounting.step_sink(_step_sink(tracer) if tracer is not None else None),
-        # Passed on every run, read by one arm: the strategies that make no selector
-        # call never touch it, and the one that does refuses rather than borrowing.
+        # Passed on every run, read by one arm each: the strategies that make no selector or
+        # critic call never touch these, and the ones that do refuse rather than borrowing.
         selector_llm_client=selector_llm,
+        critic_llm_client=critic_llm,
         # Freshness re-probe (ADR 0009) is live-only: canned responses are
         # instant-consistent, and a re-probe would eat an extra scripted response.
         reprobe_attempts=(settings.investigate_reprobe_attempts if live_mcp_available else 0),

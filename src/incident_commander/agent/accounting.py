@@ -180,6 +180,11 @@ class StepAccounting:
     candidates: int
     #: 1 when a ``candidate_selector`` decided between them, else 0.
     selector_calls: int
+    #: 1 when a ``reflection_critic`` read this step, else 0 (WP-9.1).
+    critic_calls: int = 0
+    #: 1 when the critique was acted on and a second planner call ran, else 0. Apart from
+    #: ``critic_calls`` because a pass that cost tokens and changed nothing is its own case.
+    revised: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +278,8 @@ class RunAccounting:
                 planner_context_chars=record.planner_context_chars or 0,
                 candidates=len(record.candidate_set),
                 selector_calls=0 if record.selector is None else 1,
+                critic_calls=0 if record.revision is None else 1,
+                revised=1 if record.revision is not None and record.revision.revised else 0,
             )
         )
 
@@ -365,6 +372,16 @@ class RunAccounting:
     def selector_calls(self) -> int:
         """0 for ``baseline``: with one candidate there is nothing to select."""
         return sum(step.selector_calls for step in self.steps)
+
+    @property
+    def critic_calls(self) -> int:
+        """0 for every arm but ``reflection``: nothing else critiques its own step."""
+        return sum(step.critic_calls for step in self.steps)
+
+    @property
+    def revised_steps(self) -> int:
+        """Steps whose critique was acted on. Below ``critic_calls`` by the kept ones."""
+        return sum(step.revised for step in self.steps)
 
     @property
     def branch_count(self) -> int:

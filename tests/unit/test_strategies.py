@@ -472,12 +472,12 @@ class TestTheDefaultIsBaseline:
         assert default_strategy().name == _settings().inference_strategy.value == "baseline"
 
     def test_an_unknown_configured_strategy_is_refused_at_construction(self) -> None:
-        # The placeholder used to be "best_of_n_sampled", which WP-5.3 made a
-        # real member. A name from plan 02 § 4 that has no implementation yet is
-        # the right stand-in: it is what an operator reading the plan would
-        # actually mistype, and it stays unknown until its packet lands.
+        # The placeholder used to be "best_of_n_sampled" and then "reflection", each made
+        # a real member by its packet (WP-5.3, WP-9.1). A name from plan 02 § 4 that has
+        # no implementation yet is the right stand-in: it is what an operator reading the
+        # plan would actually mistype, and it stays unknown until its packet lands.
         with pytest.raises(ValidationError) as caught:
-            _settings(inference_strategy="reflection")
+            _settings(inference_strategy="search")
         message = str(caught.value)
         assert "baseline" in message, (
             "the refusal must name the permitted values; an operator who typed "
@@ -685,14 +685,13 @@ class TestStrategiesHoldNoExecutionPolicy:
         # The context is the whole of a strategy's reach: models, its own
         # settings, a sink. No MCP client, no registry, no run.
         #
-        # ``selector_llm_client`` (WP-6.2) is a SECOND LLM client and not a
-        # widening of that reach: it is the same kind of thing as
-        # ``llm_client`` — something that answers a structured prompt — and it
-        # exists because the accounting splits on ROLE, so the selector's
-        # tokens have to be metered apart from the planner's. What this test is
-        # for is the other kind of addition: an MCP client, a tool registry, a
-        # tier map or the run itself, any of which would let a strategy act
-        # rather than propose.
+        # ``selector_llm_client`` (WP-6.2) and ``critic_llm_client`` (WP-9.1) are FURTHER
+        # LLM clients and not a widening of that reach: each is the same kind of thing as
+        # ``llm_client`` — something that answers a structured prompt — and each exists
+        # because the accounting splits on ROLE, so the selector's and the critic's tokens
+        # have to be metered apart from the planner's. What this test is for is the other
+        # kind of addition: an MCP client, a tool registry, a tier map or the run itself,
+        # any of which would let a strategy act rather than propose.
         fields = set(StrategyContext.__dataclass_fields__)
         assert fields == {
             "llm_client",
@@ -701,6 +700,7 @@ class TestStrategiesHoldNoExecutionPolicy:
             "config",
             "record_step",
             "selector_llm_client",
+            "critic_llm_client",
         }
         assert all("client" not in name or name.endswith("llm_client") for name in fields), (
             f"a non-LLM client reached StrategyContext: {sorted(fields)}. A "

@@ -17,6 +17,7 @@ from incident_commander.agent.strategies.candidate_selector import CandidateSele
 from incident_commander.agent.strategies.knobs import StrategyKnobs
 from incident_commander.agent.strategies.names import StrategyName
 from incident_commander.agent.strategies.protocol import InvestigationStrategy
+from incident_commander.agent.strategies.reflection import ReflectionStrategy
 
 #: One inference block in, one strategy object out. Every factory takes the block, even the
 #: ones with nothing to read from it, so ``create`` needs no special case.
@@ -76,6 +77,7 @@ STRATEGIES: Final[StrategyRegistry] = StrategyRegistry(
         StrategyName.BEST_OF_N_ENUMERATED.value: BestOfNEnumeratedStrategy,
         StrategyName.BEST_OF_N_SAMPLED.value: BestOfNSampledStrategy,
         StrategyName.CANDIDATE_SELECTOR.value: CandidateSelectorStrategy,
+        StrategyName.REFLECTION.value: ReflectionStrategy,
     }
 )
 

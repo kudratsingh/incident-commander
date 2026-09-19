@@ -27,3 +27,6 @@ class StrategyName(StrEnum):
     #: WP-6.2, plan 02 § 12: a generator arm plus a ``candidate_selector`` call over its set.
     #: The arm is ``(generator, N, selector)``, so ``strategy_config`` stamps all three.
     CANDIDATE_SELECTOR = "candidate_selector"
+    #: WP-9.1, plan 02 § 13: ``baseline``'s call, one critique of it, at most one revision.
+    #: One pass per step, capped in code rather than in the critic's instructions.
+    REFLECTION = "reflection"

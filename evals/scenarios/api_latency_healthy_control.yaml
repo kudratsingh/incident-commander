@@ -96,6 +96,30 @@ canned_tool_responses:
     - type: text
       text: '{"ok":true,"ping_latency_ms":0.178,"connected_clients":15,"used_memory_bytes":2351360,"used_memory_human":"2.24M","keyspace_hits":64658,"keyspace_misses":1121571,"error":null}'
     is_error: false
+  # CORRECTED, not transcribed, and the reason is recorded rather than hidden
+  # (WO-R3-221 rebase). The committed recording for this world carries
+  # `last_failure_reason_class: "other"` with a `last_failure_at` and a
+  # `last_state_change_at` — CONTAMINATION, not this world. Breaker state lives in
+  # Redis under `breaker:state:<name>`, OUTSIDE `chaos:*` and with a 24h TTL
+  # (platform ADR 0030), so `make eval-reset` does not clear it and an earlier
+  # `degrade_downstream` run in the same session left a failure on record that
+  # every later recording read back. Measured: the key still held a failure from
+  # 09:10 with 82,364s left on its TTL after four resets.
+  #
+  # What a dependency that has NEVER failed reads, observed directly after
+  # deleting that key AND restarting the process that holds the in-process
+  # registry (the record alone is not enough — the registry re-publishes its own
+  # remembered failure, so only a restart clears it):
+  #
+  #   state closed, failure_count 0, failure_threshold 3, recovery_timeout_s 30.0,
+  #   last_state_change_at null, seconds_since_state_change null,
+  #   last_failure_at null, last_failure_reason_class null
+  #
+  # That is also exactly what CI's freshly booted stack reads, which is how the
+  # contract job caught this. The four failure fields are nulled here to match —
+  # and on the CONTROL that matters more than anywhere else: a world claimed to be
+  # at baseline cannot carry a record of a failure. It is what makes
+  # `last_state_change_at: null` below a true statement rather than a hopeful one.
   # THE BASELINE. `bulk-api-sync` closed, 0 failures, and
   # `last_state_change_at` null — it has never changed state, which is a stronger
   # statement than "closed right now" and is the cleanest single separation from the
@@ -103,7 +127,7 @@ canned_tool_responses:
   get_circuit_breakers:
     content:
     - type: text
-      text: '{"measured_at":"2026-09-19T09:03:03.224250Z","breakers":[{"name":"bulk-api-sync","state":"closed","failure_count":0,"failure_threshold":3,"recovery_timeout_s":30.0,"last_state_change_at":"2026-09-19T09:01:32.753272Z","seconds_since_state_change":90.471,"last_failure_at":"2026-09-19T09:02:30.883912Z","last_failure_reason_class":"other","recorded_at":"2026-09-19T09:02:34.046770Z","reported_age_s":29.177}],"total":1,"unknown_reason":null}'
+      text: '{"measured_at":"2026-09-19T09:03:03.224250Z","breakers":[{"name":"bulk-api-sync","state":"closed","failure_count":0,"failure_threshold":3,"recovery_timeout_s":30.0,"last_state_change_at":null,"seconds_since_state_change":null,"last_failure_at":null,"last_failure_reason_class":null,"recorded_at":"2026-09-19T09:02:34.046770Z","reported_age_s":29.177}],"total":1,"unknown_reason":null}'
     is_error: false
   # THE DISTRACTOR, AND IT IS REAL. Three alerts the platform genuinely
   # holds in its own table from the boot seed, two of them CRITICAL: a 5xx rate above

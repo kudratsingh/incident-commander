@@ -122,12 +122,36 @@ canned_tool_responses:
     - type: text
       text: '{"ok":true,"ping_latency_ms":0.61,"active_connections":1,"dialect":"postgresql","error":null,"pool_size":5,"pool_checked_out":1,"pool_overflow":0,"pool_max_overflow":10,"pool_wait_timeouts_1m":0,"pool_stats_unknown_reason":null,"longest_active_query_ms":null,"active_queries_over_slow_threshold":0,"slow_query_threshold_ms":500.0,"p95_query_ms_1m":null,"slow_query_count_1m":null,"query_stats_unknown_reason":"the PostgreSQL extension that records per-query timings is not installed on this database, so no per-query timing history exists"}'
     is_error: false
+  # CORRECTED, not transcribed, and the reason is recorded rather than hidden
+  # (WO-R3-221 rebase). The committed recording for this world carries
+  # `last_failure_reason_class: "other"` with a `last_failure_at` and a
+  # `last_state_change_at` — and that is CONTAMINATION, not this world. Breaker
+  # state lives in Redis under `breaker:state:<name>`, OUTSIDE `chaos:*` and with
+  # a 24h TTL (platform ADR 0030), so `make eval-reset` does not clear it and an
+  # earlier `degrade_downstream` run in the same session left a failure on record
+  # that every later recording read back. Measured: the key still held a failure
+  # from 09:10 with 82,364s left on its TTL after four resets.
+  #
+  # What a dependency that has NEVER failed reads, observed directly after
+  # deleting that key AND restarting the process that holds the in-process
+  # registry (the record alone is not enough — the registry re-publishes its own
+  # remembered failure, so only a restart clears it):
+  #
+  #   state closed, failure_count 0, failure_threshold 3, recovery_timeout_s 30.0,
+  #   last_state_change_at null, seconds_since_state_change null,
+  #   last_failure_at null, last_failure_reason_class null
+  #
+  # That is also exactly what CI's freshly booted stack reads, which is how the
+  # contract job caught this. The four failure fields are nulled here to match.
+  # Three of them are volatile so nothing compared them; `last_failure_reason_class`
+  # is NOT, deliberately — it is a closed three-member vocabulary rather than a
+  # reading, and it is `api_latency_downstream`'s graded evidence.
   # NOT THE DEPENDENCY. `bulk-api-sync` closed with no failures — the read
   # that separates this world from the downstream one.
   get_circuit_breakers:
     content:
     - type: text
-      text: '{"measured_at":"2026-09-19T09:03:00.089197Z","breakers":[{"name":"bulk-api-sync","state":"closed","failure_count":0,"failure_threshold":3,"recovery_timeout_s":30.0,"last_state_change_at":"2026-09-19T09:01:32.753272Z","seconds_since_state_change":87.336,"last_failure_at":"2026-09-19T09:02:30.883912Z","last_failure_reason_class":"other","recorded_at":"2026-09-19T09:02:34.046770Z","reported_age_s":26.042}],"total":1,"unknown_reason":null}'
+      text: '{"measured_at":"2026-09-19T09:03:00.089197Z","breakers":[{"name":"bulk-api-sync","state":"closed","failure_count":0,"failure_threshold":3,"recovery_timeout_s":30.0,"last_state_change_at":null,"seconds_since_state_change":null,"last_failure_at":null,"last_failure_reason_class":null,"recorded_at":"2026-09-19T09:02:34.046770Z","reported_age_s":26.042}],"total":1,"unknown_reason":null}'
     is_error: false
 
 canned_llm_responses:

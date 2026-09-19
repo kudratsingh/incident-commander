@@ -11,9 +11,9 @@
     "no-hook": "the fixture describes a fault no chaos hook can produce, so the canned value is the scenario's premise and the check probes a world that never had it. Not a defect; the fix, if that scenario is ever to run live, is a platform hook"
   },
   "_counts": {
-    "recorded": 160,
+    "recorded": 161,
     "fixture-defect": 0,
-    "explained": 160
+    "explained": 161
   },
   "known_drift": [
     {
@@ -95,6 +95,14 @@
       "kind": "not_live_reachable",
       "context": "traffic-stack",
       "why": "the recording was taken under sustained `make traffic`, which this family's preconditions require (`total >= 1`, because `total: 0` is an absence of evidence rather than health); the drift walk probes a quiet stack, which answers 0"
+    },
+    {
+      "scenario": "api_latency_downstream",
+      "tool": "get_circuit_breakers",
+      "path": "breakers[].last_failure_reason_class[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the failure CLASS the breaker recorded \u2014 `other`, meaning neither a timeout nor a connection refusal, which is what a 503 is \u2014 where a dependency that has never failed reads null. This is the ONE world that earns the value, and the rebase proved it the hard way: the other three worlds' fixtures carried `other` too, because `breaker:state:<name>` lives outside `chaos:*` with a 24h TTL (platform ADR 0030) so `make eval-reset` never cleared this world's residue, and CI's freshly booted stack caught the four of them. The three were corrected to null; this one is the real reading and is ledgered"
     },
     {
       "scenario": "api_latency_downstream",

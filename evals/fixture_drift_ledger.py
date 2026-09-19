@@ -1335,6 +1335,22 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
     ),
     (
         "api_latency_downstream",
+        "get_circuit_breakers",
+        "breakers[].last_failure_reason_class[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "the failure CLASS the breaker recorded — `other`, meaning neither a timeout "
+        "nor a connection refusal, which is what a 503 is — where a dependency that has "
+        "never failed reads null. This is the ONE world that earns the value, and the "
+        "rebase proved it the hard way: the other three worlds' fixtures carried `other` "
+        "too, because `breaker:state:<name>` lives outside `chaos:*` with a 24h TTL "
+        "(platform ADR 0030) so `make eval-reset` never cleared this world's residue, "
+        "and CI's freshly booted stack caught the four of them. The three were corrected "
+        "to null; this one is the real reading and is ledgered",
+    ),
+    (
+        "api_latency_downstream",
         "get_slo_status",
         "objectives[].budget_remaining_pct[]",
         "not_live_reachable",

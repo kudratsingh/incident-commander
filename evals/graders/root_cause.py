@@ -3,10 +3,11 @@
 The arithmetic behind ``GradeDimension.ROOT_CAUSE`` (plan 03 § 7.1, WP-2.2), split
 out so the dependency points one way (``deterministic.py`` imports this) and so
 plan 03 § 12's reward and WP-2.5's aggregate report can reuse it. Four decisions:
-the final diagnosis is ``RunState.hypotheses[0]`` (plan 02 § 11.3); it is ONE
-label even against a multi-fault truth, so partial credit is reported beside the
-verdict; exact set is the pass condition; and a label is true of ONE world
-(INC-003, WO-R3-265) — see ``label_describes_this_world``, ``not_graded_detail``.
+the final diagnosis is ``RunState.hypotheses[0]`` (plan 02 § 11.3); the diagnosed
+SET is that label plus any other cause the ranking still asserts at the bar the
+loop acts on (ADR 0059, amending WO-R3-191's one-label reading); exact set is the
+pass condition; and a label is true of ONE world (INC-003, WO-R3-265) — see
+``label_describes_this_world``, ``not_graded_detail``.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from typing import Final
 from pydantic import BaseModel, ConfigDict
 
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
+from incident_commander.agent.investigation import REMEDIATE_CONFIDENCE_THRESHOLD
 from incident_commander.agent.state import RunState
 
 #: How a ROOT_CAUSE detail opens when the run's world is not the label's.
@@ -54,6 +56,25 @@ def is_not_graded_detail(detail: str) -> bool:
     By prefix, not equality: the label it names varies per scenario.
     """
     return detail.startswith(NOT_GRADED_PREFIX)
+
+
+def diagnosis_set(run: RunState) -> tuple[HypothesisCategory, ...]:
+    """Every cause the run's final ranking ASSERTS, not merely considers (ADR 0059).
+
+    The top hypothesis, plus any other the ranking still holds at or above the bar the
+    loop acts on. Hedging below the bar stays free and uncounted; naming a second cause
+    at the bar costs precision when it is wrong, which is why this cannot be padded.
+    Empty only when the run produced no ranking at all.
+    """
+    top = final_diagnosis(run)
+    if top is None:
+        return ()
+    asserted = {top.category} | {
+        hypothesis.category
+        for hypothesis in run.hypotheses
+        if hypothesis.confidence >= REMEDIATE_CONFIDENCE_THRESHOLD
+    }
+    return _sorted(frozenset(asserted))
 
 
 def final_diagnosis(run: RunState) -> Hypothesis | None:

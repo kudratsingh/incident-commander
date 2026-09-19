@@ -9,9 +9,9 @@
     "cold-stack": "the recording is of a warm stack and the check ran on a cold one: worker-dispatcher's lag is unmeasured for about the first minute after boot, so a fresh platform answers null where the recording says 0. Timing, not contract, and not fixable from either side"
   },
   "_counts": {
-    "recorded": 109,
+    "recorded": 125,
     "fixture-defect": 0,
-    "explained": 109
+    "explained": 125
   },
   "known_drift": [
     {
@@ -125,6 +125,134 @@
       "kind": "value",
       "context": "post-fault",
       "why": "poison_message injects the unclassified row this scenario exists to fence, so the faulted world holds five DLQ rows where the un-faulted world the check probes holds the four boot-seeded ones"
+    },
+    {
+      "scenario": "dual_fault_consumer_lag_and_bad_deploy",
+      "tool": "get_consumer_lag",
+      "path": "lag",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "same hook, same mechanism as its sibling above: kill_consumer makes the backlog climb and the check probes the world before the kill. Both elements share this row \u2014 the investigation probe and the post-restart verify"
+    },
+    {
+      "scenario": "dual_fault_dlq_and_consumer_lag",
+      "tool": "get_consumer_lag",
+      "path": "lag",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "kill_consumer makes worker-dispatcher's lag climb; the check probes the un-faulted world, so the canned backlog cannot match by design \u2014 the same mechanism as consumer_lag_high. All three elements share this row: the investigation probe, the reinvestigation's re-read after the replay verified, and the post-restart verify"
+    },
+    {
+      "scenario": "dual_fault_dlq_and_consumer_lag",
+      "tool": "list_dlq_messages",
+      "path": "items[].created_at",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "the verify element records a DRAINED queue \u2014 the replay took the only row \u2014 so it carries no rows at all, and every row field the platform sends reads as live-only. The absence IS the verify signal (INC-001: a success that is an absence is claimed on a field that exists when the set is empty, which is `total` above). Thirteen rows, one mechanism: the ledger is keyed per path"
+    },
+    {
+      "scenario": "dual_fault_dlq_and_consumer_lag",
+      "tool": "list_dlq_messages",
+      "path": "items[].dead_lettered_at",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "same drained queue, another of its absent row fields"
+    },
+    {
+      "scenario": "dual_fault_dlq_and_consumer_lag",
+      "tool": "list_dlq_messages",
+      "path": "items[].error_message",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "same drained queue, another of its absent row fields"
+    },
+    {
+      "scenario": "dual_fault_dlq_and_consumer_lag",
+      "tool": "list_dlq_messages",
+      "path": "items[].extra",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "same drained queue, another of its absent row fields"
+    },
+    {
+      "scenario": "dual_fault_dlq_and_consumer_lag",
+      "tool": "list_dlq_messages",
+      "path": "items[].fenced_at",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "same drained queue, another of its absent row fields"
+    },
+    {
+      "scenario": "dual_fault_dlq_and_consumer_lag",
+      "tool": "list_dlq_messages",
+      "path": "items[].fenced_by",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "same drained queue, another of its absent row fields"
+    },
+    {
+      "scenario": "dual_fault_dlq_and_consumer_lag",
+      "tool": "list_dlq_messages",
+      "path": "items[].id",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "same drained queue, another of its absent row fields"
+    },
+    {
+      "scenario": "dual_fault_dlq_and_consumer_lag",
+      "tool": "list_dlq_messages",
+      "path": "items[].remediation_hint",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "same drained queue, another of its absent row fields"
+    },
+    {
+      "scenario": "dual_fault_dlq_and_consumer_lag",
+      "tool": "list_dlq_messages",
+      "path": "items[].retry_count",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "same drained queue, another of its absent row fields"
+    },
+    {
+      "scenario": "dual_fault_dlq_and_consumer_lag",
+      "tool": "list_dlq_messages",
+      "path": "items[].trace_id",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "same drained queue, another of its absent row fields"
+    },
+    {
+      "scenario": "dual_fault_dlq_and_consumer_lag",
+      "tool": "list_dlq_messages",
+      "path": "items[].triage",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "same drained queue, another of its absent row fields"
+    },
+    {
+      "scenario": "dual_fault_dlq_and_consumer_lag",
+      "tool": "list_dlq_messages",
+      "path": "items[].type",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "same drained queue, another of its absent row fields"
+    },
+    {
+      "scenario": "dual_fault_dlq_and_consumer_lag",
+      "tool": "list_dlq_messages",
+      "path": "items[].updated_at",
+      "kind": "live_only_field",
+      "context": "canned-only",
+      "why": "same drained queue, another of its absent row fields"
+    },
+    {
+      "scenario": "dual_fault_dlq_and_consumer_lag",
+      "tool": "list_dlq_messages",
+      "path": "total",
+      "kind": "value",
+      "context": "canned-only",
+      "why": "the premise is a queue holding exactly ONE actionable row, because this world's replay has to clear the dead-letter side completely for the run to be able to resolve on its second fix. The seeded queue holds four rows, a reset restores them and no hook removes one, so a one-row DLQ is not a state the live world reaches. Both elements share this row, and the second is also post-action: after the replay the queue is drained and total is 0"
     },
     {
       "scenario": "jobs_not_progressing_dispatcher_stall",

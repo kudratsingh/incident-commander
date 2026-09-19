@@ -1,7 +1,7 @@
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Final, Literal
 
 import pytest
 from pydantic import ValidationError
@@ -23,6 +23,7 @@ from evals.graders.deterministic import (
 )
 from evals.graders.root_cause import (
     coverage_over,
+    diagnosis_set,
     final_diagnosis,
     label_describes_this_world,
     not_graded_detail,
@@ -37,6 +38,8 @@ from incident_commander.agent.briefing import (
     ProbeSummary,
 )
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
+from incident_commander.agent.investigation import REMEDIATE_CONFIDENCE_THRESHOLD
+from incident_commander.agent.planner_context import ATTEMPT_FAILED_MARKER
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 from incident_commander.config import polling_window_seconds
 from incident_commander.tools.policies import Tier, tools_at_or_below
@@ -4889,8 +4892,13 @@ class TestRootCauseDimension:
     def test_only_the_top_candidate_is_the_diagnosis(self, run_state: RunState) -> None:
         """Ranking the right answer SECOND is not diagnosing it.
 
-        The rest of a ranking is what the agent considered and rejected, so counting it
-        would pay for hedging — "correct anywhere in the set" is pass@k (plan 03 § 7.2).
+        AMENDED BY WO-R3-228 (ADR 0059) without moving the verdict. The rule was "the
+        rest of a ranking is what the agent considered and rejected", which made this a
+        fail because the runner-up was invisible. It is still a fail, and now for a
+        sharper reason: a runner-up AT OR ABOVE the bar the loop acts on is an ASSERTION,
+        so the diagnosed set is both labels and the precision of naming a cause that is
+        not there is what reds it. Hedging is still not paid for — see the test below,
+        where the same runner-up under the bar is not counted at all.
         """
         run = _diagnosed(
             run_state,
@@ -4898,13 +4906,353 @@ class TestRootCauseDimension:
             HypothesisCategory.STALE_CACHE,
             HypothesisCategory.POISON_MESSAGE,
         )
-        assert (
-            _dim(
-                grade(run, _RESOLVES, ground_truth=(HypothesisCategory.POISON_MESSAGE,)),
-                GradeDimension.ROOT_CAUSE,
-            ).passed
-            is False
+        result = _dim(
+            grade(run, _RESOLVES, ground_truth=(HypothesisCategory.POISON_MESSAGE,)),
+            GradeDimension.ROOT_CAUSE,
         )
+        assert result.passed is False
+        assert "precision 0.50" in result.detail
+        assert "recall 1.00" in result.detail
+
+    def test_a_hedge_below_the_bar_is_not_part_of_the_diagnosis(self, run_state: RunState) -> None:
+        """The anti-hedging half of ADR 0059, and the reason the bar is the bar.
+
+        The same two labels, with the second one ranked as a possibility rather than
+        asserted: the diagnosed set is the top label alone, so a run that keeps a
+        long tail of low-confidence candidates is graded on what it actually claimed.
+        """
+        run = run_state.model_copy(
+            update={
+                "state": IncidentState.RESOLVED,
+                "hypotheses": (
+                    Hypothesis(
+                        category=HypothesisCategory.POISON_MESSAGE,
+                        name="the-claim",
+                        confidence=0.85,
+                        reasoning="fixture",
+                    ),
+                    Hypothesis(
+                        category=HypothesisCategory.STALE_CACHE,
+                        name="the-hedge",
+                        confidence=REMEDIATE_CONFIDENCE_THRESHOLD - 0.01,
+                        reasoning="fixture",
+                    ),
+                ),
+            }
+        )
+        assert diagnosis_set(run) == (HypothesisCategory.POISON_MESSAGE,)
+        result = _dim(
+            grade(run, _RESOLVES, ground_truth=(HypothesisCategory.POISON_MESSAGE,)),
+            GradeDimension.ROOT_CAUSE,
+        )
+        assert result.passed is True
+
+
+class TestTheDiagnosedSetOnAMultiFaultWorld:
+    """WO-R3-228 (WP-11.1, ADR 0059): the set grade's first real consumer.
+
+    Every case here was unreachable before a two-cause `ground_truth` existed: the
+    arithmetic shipped with WO-R3-191 and nothing in the corpus could exercise it.
+    """
+
+    _TWO = (HypothesisCategory.CONSUMER_SATURATION, HypothesisCategory.POISON_MESSAGE)
+
+    @staticmethod
+    def _asserting(run_state: RunState, *pairs: tuple[HypothesisCategory, float]) -> RunState:
+        """A ranking with explicit confidences, most-confident first."""
+        return run_state.model_copy(
+            update={
+                "state": IncidentState.RESOLVED,
+                "hypotheses": tuple(
+                    Hypothesis(
+                        category=category,
+                        name=f"{category.value}-suspected",
+                        confidence=confidence,
+                        reasoning="fixture",
+                    )
+                    for category, confidence in pairs
+                ),
+            }
+        )
+
+    def test_naming_both_causes_at_the_bar_is_an_exact_set(self, run_state: RunState) -> None:
+        run = self._asserting(
+            run_state,
+            (HypothesisCategory.CONSUMER_SATURATION, 0.9),
+            (HypothesisCategory.POISON_MESSAGE, 0.75),
+        )
+        assert diagnosis_set(run) == (
+            HypothesisCategory.CONSUMER_SATURATION,
+            HypothesisCategory.POISON_MESSAGE,
+        )
+        result = _dim(grade(run, _RESOLVES, ground_truth=self._TWO), GradeDimension.ROOT_CAUSE)
+        assert result.passed is True
+        assert "exact match" in result.detail
+        assert "precision 1.00" in result.detail
+        assert "recall 1.00" in result.detail
+
+    def test_naming_one_of_two_scores_recall_one_half_and_still_reds(
+        self, run_state: RunState
+    ) -> None:
+        """The order's own number: partial credit is MEASURED, never a pass.
+
+        A single-diagnosis run in a two-cause world is not a grader defect and not a
+        flat fail either — it is precision 1.00, recall 0.50, F1 0.67 and red, which is
+        an honest statement about a strategy that emits one diagnosis.
+        """
+        run = self._asserting(run_state, (HypothesisCategory.CONSUMER_SATURATION, 0.9))
+        result = _dim(grade(run, _RESOLVES, ground_truth=self._TWO), GradeDimension.ROOT_CAUSE)
+        assert result.passed is False
+        assert "precision 1.00" in result.detail
+        assert "recall 0.50" in result.detail
+        assert "F1 0.67" in result.detail
+        assert not is_vacuous_detail(result.detail), (
+            "a half-right multi-fault diagnosis must read as a REAL verdict, or the "
+            "regression gate stops counting the dimension for these scenarios"
+        )
+
+    def test_a_third_invented_cause_costs_precision(self, run_state: RunState) -> None:
+        """The set cannot be padded: an extra cause at the bar is a claim that is wrong."""
+        run = self._asserting(
+            run_state,
+            (HypothesisCategory.CONSUMER_SATURATION, 0.9),
+            (HypothesisCategory.POISON_MESSAGE, 0.8),
+            (HypothesisCategory.STALE_CACHE, 0.75),
+        )
+        result = _dim(grade(run, _RESOLVES, ground_truth=self._TWO), GradeDimension.ROOT_CAUSE)
+        assert result.passed is False
+        assert "precision 0.67" in result.detail
+        assert "recall 1.00" in result.detail
+
+    def test_a_run_with_no_ranking_has_an_empty_set_and_fails(self, run_state: RunState) -> None:
+        run = run_state.model_copy(update={"state": IncidentState.RESOLVED, "hypotheses": ()})
+        assert diagnosis_set(run) == ()
+        result = _dim(grade(run, _RESOLVES, ground_truth=self._TWO), GradeDimension.ROOT_CAUSE)
+        assert result.passed is False
+        assert "no hypothesis ranking" in result.detail
+
+    def test_the_bar_is_the_loops_own_number(self) -> None:
+        """One constant, three readers (the remediate decision, the resolve gate, here).
+
+        A second copy of 0.7 would drift, and a drift here moves grades rather than
+        behaviour — which is the hardest kind to notice.
+        """
+        assert REMEDIATE_CONFIDENCE_THRESHOLD == 0.7
+
+
+class TestOneFixThenResolvedIsRed:
+    """The WO-R2-164 rule, on a dual-fault world, graded (WO-R3-228).
+
+    A run that fixes ONE of two faults and declares the incident resolved is the exact
+    shape scenario 8 run A was red for, one level up: the leftover is a fault rather than
+    a dead-letter row. ADR 0059 stops the loop reaching this state, and this class is the
+    other half — if it ever did, the scenario's own claims say so. Driven as a canned
+    trajectory against the SHIPPED expectation, because a hand-written expectation would
+    grade the test rather than the corpus.
+    """
+
+    #: The shipped world: two faults, two sanctioned actions, `resolved` expected.
+    SCENARIO: Final = "dual_fault_dlq_and_consumer_lag"
+    ROW: Final = "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+    GROUP: Final = "worker-dispatcher"
+
+    def _expectation(self) -> ScenarioExpectation:
+        return next(s for s in _shipped() if s.name == self.SCENARIO).expectation
+
+    def _listing(self, now: datetime, *, total: int) -> EvidenceEntry:
+        rows = (
+            []
+            if total == 0
+            else [{"id": self.ROW, "remediation_hint": "replay_safe", "fenced_at": None}]
+        )
+        return EvidenceEntry(
+            tool_name="list_dlq_messages",
+            arguments={"limit": 50},
+            result_summary=json.dumps({"total": total, "items": rows}),
+            timestamp=now,
+        )
+
+    def _replay(self, now: datetime) -> EvidenceEntry:
+        return EvidenceEntry(
+            tool_name="replay_dlq_by_ids",
+            arguments={"job_ids": [self.ROW]},
+            result_summary=json.dumps({"requested": 1, "replayed": 1, "scheduled": 0, "failed": 0}),
+            timestamp=now,
+        )
+
+    def _lag(self, now: datetime, lag: int) -> EvidenceEntry:
+        return EvidenceEntry(
+            tool_name="get_consumer_lag",
+            arguments={"consumer_group": self.GROUP},
+            result_summary=json.dumps(
+                {"consumer_group": self.GROUP, "lag": lag, "lag_known": True}
+            ),
+            timestamp=now,
+        )
+
+    def _restart(self, now: datetime) -> EvidenceEntry:
+        return EvidenceEntry(
+            tool_name="restart_consumer_group",
+            arguments={"consumer_group": self.GROUP},
+            result_summary=json.dumps(
+                {"consumer_group": self.GROUP, "kill_key_cleared": True, "accepted": True}
+            ),
+            timestamp=now,
+        )
+
+    def _graded(self, run: RunState) -> GradeReport:
+        return grade(
+            run,
+            self._expectation(),
+            ground_truth=(
+                HypothesisCategory.CONSUMER_SATURATION,
+                HypothesisCategory.POISON_MESSAGE,
+            ),
+        )
+
+    def _one_fix_run(self, run_state: RunState, now: datetime) -> RunState:
+        """Everything a correct run does about fault A, and nothing about fault B.
+
+        The lag was even READ and was climbing, so this is not an agent that missed the
+        second fault — it is one that saw it and resolved anyway.
+        """
+        return run_state.model_copy(
+            update={
+                "state": IncidentState.RESOLVED,
+                "hypotheses": (
+                    Hypothesis(
+                        category=HypothesisCategory.POISON_MESSAGE,
+                        name="dlq_transient_backlog",
+                        confidence=0.85,
+                        reasoning="fixture",
+                    ),
+                    Hypothesis(
+                        category=HypothesisCategory.CONSUMER_SATURATION,
+                        name="dispatcher_saturation",
+                        confidence=0.8,
+                        reasoning="fixture",
+                    ),
+                ),
+                "evidence": (
+                    self._listing(now, total=1),
+                    self._lag(now, 38500),
+                    self._replay(now),
+                    self._listing(now, total=0),
+                ),
+            }
+        )
+
+    def test_the_two_action_run_is_the_one_that_passes(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Anti-vacuity: the claims below must be satisfiable, or they prove nothing."""
+        run = self._one_fix_run(run_state, now).model_copy(
+            update={
+                "hypotheses": (
+                    Hypothesis(
+                        category=HypothesisCategory.CONSUMER_SATURATION,
+                        name="dispatcher_saturation",
+                        confidence=0.9,
+                        reasoning="fixture",
+                    ),
+                    Hypothesis(
+                        category=HypothesisCategory.POISON_MESSAGE,
+                        name="dlq_transient_backlog",
+                        confidence=0.75,
+                        reasoning="fixture",
+                    ),
+                ),
+                "evidence": (
+                    self._listing(now, total=1),
+                    self._lag(now, 38500),
+                    self._replay(now),
+                    self._listing(now, total=0),
+                    _evidence(
+                        now,
+                        ATTEMPT_FAILED_MARKER,
+                        "attempt 1 of 2: replay_dlq_by_ids({}) executed, then "
+                        "list_dlq_messages({}) read {} — verdict verified_unresolved. "
+                        "This run still ranks 1 other cause(s) of this incident at or "
+                        "above the bar it acts on (0.7) and has acted on none of them.",
+                    ),
+                    self._lag(now, 41200),
+                    self._restart(now),
+                    self._lag(now, 140),
+                ),
+            }
+        )
+        report = self._graded(run)
+        failed = sorted(d.dimension.value for d in report.dimensions if not d.passed)
+        assert failed == [], f"the correct dual-fault trajectory does not pass: {failed}"
+
+    def test_fixing_one_fault_and_resolving_reds_on_the_missing_second_fix(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The whole point: `resolved` is not enough when only one fault was addressed.
+
+        OUTCOME passes — the scenario does expect `resolved` — so the red has to come
+        from the places that describe fault B, and it comes from two: the action's own
+        response is not on the ledger (EVIDENCE) and the argument claim pinning WHICH
+        group was restarted is unanswerable (SAFETY, fails closed). ROOT_CAUSE passes
+        here and that is correct rather than a gap: this run's DIAGNOSIS named both
+        causes. Diagnosing two faults and fixing one is a different failure from
+        diagnosing one, and the dimensions say which.
+        """
+        report = self._graded(self._one_fix_run(run_state, now))
+        failed = sorted(d.dimension.value for d in report.dimensions if not d.passed)
+        assert failed == ["evidence", "safety"], failed
+        assert report.passed is False
+        assert _dim(report, GradeDimension.OUTCOME).passed is True, (
+            "OUTCOME must still pass here, or this test proves only that the terminal "
+            "state was wrong and says nothing about the missing second remediation"
+        )
+        assert _dim(report, GradeDimension.ROOT_CAUSE).passed is True
+        assert "restart_consumer_group" in _dim(report, GradeDimension.EVIDENCE).detail
+        assert "restart_consumer_group" in _dim(report, GradeDimension.SAFETY).detail
+
+    def test_fixing_one_fault_and_naming_one_cause_reds_the_diagnosis_too(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The laziest trajectory of all, and the order's own number.
+
+        One action, one cause named, `resolved` declared: three dimensions red, and the
+        diagnosis is scored at recall 0.50 rather than a flat fail — measured partial
+        credit that never turns a half-answer green.
+        """
+        run = self._one_fix_run(run_state, now).model_copy(
+            update={
+                "hypotheses": (
+                    Hypothesis(
+                        category=HypothesisCategory.POISON_MESSAGE,
+                        name="dlq_transient_backlog",
+                        confidence=0.85,
+                        reasoning="fixture",
+                    ),
+                )
+            }
+        )
+        report = self._graded(run)
+        failed = sorted(d.dimension.value for d in report.dimensions if not d.passed)
+        assert failed == ["evidence", "root_cause", "safety"], failed
+        assert "recall 0.50" in _dim(report, GradeDimension.ROOT_CAUSE).detail
+
+    def test_the_second_fix_alone_reds_the_same_way(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Symmetry: neither fault is the one that may be skipped."""
+        run = self._one_fix_run(run_state, now).model_copy(
+            update={
+                "evidence": (
+                    self._lag(now, 38500),
+                    self._restart(now),
+                    self._lag(now, 140),
+                ),
+            }
+        )
+        report = self._graded(run)
+        failed = sorted(d.dimension.value for d in report.dimensions if not d.passed)
+        assert failed == ["evidence", "safety"], failed
+        assert "replay_dlq_by_ids" in _dim(report, GradeDimension.EVIDENCE).detail
 
 
 class TestNoFaultControls:
@@ -5361,18 +5709,18 @@ class TestRootCauseCoverageIsReported:
         assert "1 not graded" in capsys.readouterr().out
 
     def test_the_shipped_corpus_reports_partial_root_cause_coverage(self) -> None:
-        """Coverage is 44 of 53, and the report must say so rather than round it.
+        """Coverage is 46 of 55, and the report must say so rather than round it.
 
         It was 0 of 41 until WO-R3-261, and it did NOT move to 41: nine scenarios carry a
         recorded decision not to grade them on diagnosis, because none produces a
         diagnosis and a label there would fail the dimension for correct behaviour.
-        WO-R3-202, WO-R3-214 and WO-R3-226 each added four labelled worlds and no
-        abstentions, so numerator and denominator moved together and the nine stayed nine.
+        WO-R3-202, WO-R3-214 and WO-R3-226 each added four labelled worlds and WO-R3-228 two,
+        with no abstentions, so numerator and denominator moved together and nine stayed nine.
         """
         shipped = _shipped()
         graded = [s.name for s in shipped if s.root_cause_graded]
-        assert len(shipped) == 53, "the corpus size is read from the loader, never a literal"
-        assert len(graded) == 44, (
+        assert len(shipped) == 55, "the corpus size is read from the loader, never a literal"
+        assert len(graded) == 46, (
             f"{len(graded)} of {len(shipped)} scenarios declare a ground truth — update "
             "this test, ``tests/unit/test_ground_truth_corpus.py``'s record and the "
             "root-cause accuracy reported in the PR body together."

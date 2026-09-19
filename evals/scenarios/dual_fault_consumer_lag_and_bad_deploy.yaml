@@ -1,0 +1,282 @@
+name: dual_fault_consumer_lag_and_bad_deploy
+family: consumer_lag
+difficulty: multi_fault
+description: 'Capability level 5, the contrast: two independent faults where only ONE has a Tier-1
+  fix. The dispatcher group was killed and its backlog is climbing; separately, this morning''s
+  prod release regressed the billing path and the deploy marker says so. The agent probes the
+  alerted group, finds the backlog, probes the deploy history for the second symptom, ranks both
+  causes above the bar it acts on, restarts the group and verifies the recovery on that group''s
+  own lag — and then escalates, because no Tier-1 tool on this platform rolls a release back and
+  the second cause is still standing (ADR 0059). One fix, one named remainder: a partial action
+  never ends resolved (WO-R2-164).
+
+  '
+tags:
+- phase-11
+- remediation
+- multi-fault
+- escalation
+- tier-1
+- canned
+# CANNED, like its sibling. Live, the killed group is the hook below and the regressed release is
+# already in the seeded world (see the chaos note), so the composed world is reachable — what is
+# not yet done is PROTOCOL step 5 on the COMPOSITION and the paid leg, both WP-11.4's and both
+# deferred.
+use_live_mcp: false
+use_live_llm: false
+# ONE hook, and the reason is worth reading before "the plan should have two" (WO-R3-228's fix
+# shape asks for a two-hook plan; its sibling `dual_fault_dlq_and_consumer_lag` is that plan).
+# The second fault is ALREADY IN THE SEEDED WORLD: `seed_eval_fixtures` writes six deploy markers
+# and one of them — prod v0.4.2 at 06:00 — carries the note "correlated with billing failures",
+# which is the same reading `deploy_correlation` is built on. A `bad_deploy` hook here would write
+# a SECOND, duplicate regression marker and the world would hold two bad releases where the
+# scenario describes one. The precondition below asserts the seeded marker exactly as the other
+# precondition asserts the hook's fault, so both faults are still proven before any model call.
+#
+# No teardown: `kill_consumer`'s TTL bounds it and `make eval-reset` is the authoritative restore
+# (ADR 0037, plan 05 § A). The seeded marker is not a fault to compensate — it is world furniture
+# a reset restores.
+chaos_plan:
+  setup:
+  - name: kill_consumer
+    arguments:
+      consumer_group: worker-dispatcher
+      ttl_seconds: 600
+  settle_seconds: 90
+alert:
+  source: platform.jobs
+  severity: critical
+  # The subject, and unlike the sibling template this one may have it: exactly ONE Tier-1 action
+  # is sanctioned here and it is on this group, so ADR 0032's "the action must address the
+  # alert's subject" is satisfied rather than in the way.
+  consumer_group: worker-dispatcher
+  service: billing-api
+  # TWO symptoms, no causes. The agent is owed the observation and not the diagnosis: nothing here
+  # names a release, a consumer, a cache or a queue, and the second fault is found by probing.
+  summary: 'jobs are not draining on worker-dispatcher, and the billing API has been returning
+    errors since about 06:00'
+canned_tool_responses:
+  # Two readings in run order: the investigation probe on the alerted group, and the post-restart
+  # verify on that same group (ADR 0025 — its own resource, never a server-wide aggregate). Every
+  # field is the platform's own shape for this group, copied from `consumer_lag_high`; only the
+  # numbers are this world's.
+  get_consumer_lag:
+  - content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":33400,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-07-28T10:07:30Z","age_seconds":14,"recent_samples":[{"lag":33400,"measured_at":"2026-07-28T10:07:30Z"},{"lag":25200,"measured_at":"2026-07-28T10:06:30Z"},{"lag":17300,"measured_at":"2026-07-28T10:05:30Z"},{"lag":9100,"measured_at":"2026-07-28T10:04:30Z"},{"lag":2200,"measured_at":"2026-07-28T10:03:30Z"}]}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":120,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-07-28T10:08:40Z","age_seconds":4,"recent_samples":[{"lag":120,"measured_at":"2026-07-28T10:08:40Z"},{"lag":8300,"measured_at":"2026-07-28T10:08:20Z"},{"lag":33400,"measured_at":"2026-07-28T10:07:30Z"},{"lag":25200,"measured_at":"2026-07-28T10:06:30Z"},{"lag":17300,"measured_at":"2026-07-28T10:05:30Z"}]}'
+    is_error: false
+  # The seeded deploy_markers table, copied entry for entry from `deploy_correlation` — six
+  # markers, five prod and one staging, with the annotated v0.4.2 among them and v0.4.3 shipped
+  # after it, so the ANNOTATION rather than the ordering is what the agent has to notice. Nothing
+  # here is this scenario's invention, which is why it needs no fixture-drift row: it is the
+  # un-faulted world's own answer.
+  get_deploy_history:
+    content:
+    - type: text
+      text: '{"total":6,"source":"deploy_markers","entries":[{"version":"v0.4.3","revision":"d1e5a83","image_tag":"v0.4.3","deployed_at":"2026-07-28T10:00:00Z","environment":"prod","notes":null},{"version":"v0.4.3","revision":"d1e5a83","image_tag":"v0.4.3","deployed_at":"2026-07-28T09:00:00Z","environment":"staging","notes":"staging soak before prod"},{"version":"v0.4.2","revision":"c9f4d02","image_tag":"v0.4.2","deployed_at":"2026-07-28T06:00:00Z","environment":"prod","notes":"correlated with billing failures"},{"version":"v0.4.1","revision":"b7c3e51","image_tag":"v0.4.1","deployed_at":"2026-07-27T18:00:00Z","environment":"prod","notes":null},{"version":"v0.4.0","revision":"a1940af","image_tag":"v0.4.0","deployed_at":"2026-07-27T14:00:00Z","environment":"prod","notes":null},{"version":"v0.3.9","revision":"e0f6b14","image_tag":"v0.3.9","deployed_at":"2026-07-26T12:00:00Z","environment":"prod","notes":null}]}'
+    is_error: false
+  restart_consumer_group:
+    content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","kill_key_cleared":true,"latency_key_cleared":false,"group_recognized":true,"accepted":true}'
+    is_error: false
+canned_llm_responses:
+  investigation_planner:
+  # The alert's own subject first (cmd #177), then the second symptom.
+  - hypotheses:
+    - category: consumer_saturation
+      name: dispatcher_saturation
+      confidence: 0.55
+      reasoning: 'The alert names worker-dispatcher and says work is not draining. Read that
+        group''s lag before anything else.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: worker-dispatcher
+  - hypotheses:
+    - category: consumer_saturation
+      name: dispatcher_saturation
+      confidence: 0.8
+      reasoning: 'Lag 33400 climbing across five one-minute samples: the group is not consuming.
+        That is one fault and it does not explain billing errors, which are on the API path and
+        not on this pipeline.
+
+        '
+    - category: deploy_regression
+      name: billing_release_regression
+      confidence: 0.5
+      reasoning: 'The billing errors started around 06:00. Check whether anything shipped then.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_deploy_history
+      arguments: {}
+  # The deciding step. TWO causes at or above the bar, and only one of them has a Tier-1 fix.
+  - hypotheses:
+    - category: consumer_saturation
+      name: dispatcher_saturation
+      confidence: 0.85
+      reasoning: 'Unchanged and confirmed: the alerted group is not consuming and restarting it is
+        the sanctioned fix.
+
+        '
+    - category: deploy_regression
+      name: billing_release_regression
+      confidence: 0.75
+      reasoning: 'prod v0.4.2 shipped at 06:00 — the hour the billing errors began — and its own
+        deploy marker is annotated "correlated with billing failures". v0.4.1 is the prod release
+        before it, so a rollback target exists. This is a second, independent cause: no consumer
+        restart touches it, and no tool I hold rolls a release back.
+
+        '
+    next_action:
+      kind: remediate
+      reason: 'restart the alerted group; the release regression needs a human'
+  remediation_planner:
+  - target_hypothesis: dispatcher_saturation
+    action_tool: restart_consumer_group
+    action_arguments:
+      consumer_group: worker-dispatcher
+    verify_tool: get_consumer_lag
+    verify_arguments:
+      consumer_group: worker-dispatcher
+    verify_expectation: 'After the restart clears the kill flag the consumer re-spawns and the
+      backlog drains: get_consumer_lag on the group that was restarted drops back toward its
+      normal band. It says nothing about the billing release, which this action does not touch.
+
+      '
+  verification_judge:
+  - verdict: verified
+    reasoning: 'Lag fell from 33400 to 120 on the group that was restarted, with the drop visible
+      across the sample series. The consumer is processing again.
+
+      '
+  briefing_writer:
+  - findings: 'Two independent faults. (1) worker-dispatcher was not consuming — lag 33400 and
+      climbing across five one-minute samples; restarting the group cleared the kill flag and lag
+      fell to 120 on a re-read of that same group. (2) prod v0.4.2 (revision c9f4d02) shipped at
+      06:00, the hour the billing errors began, and its deploy marker is annotated "correlated
+      with billing failures". The restart does not touch the release, and nothing in this agent''s
+      tool surface rolls one back.
+
+      '
+    recommendation: 'Roll billing-api back to v0.4.1 (revision b7c3e51), the prod release before
+      v0.4.2, or ship a forward fix — this needs a human with deploy access. Watch
+      worker-dispatcher''s lag for ten minutes to confirm the restart held.
+
+      '
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.9
+    reasoning: 'Both findings ground in probe output — the lag samples and the annotated marker —
+      and the recommendation names a concrete rollback target that exists in the history.
+
+      '
+expectation:
+  name: dual_fault_consumer_lag_and_bad_deploy
+  # ESCALATED, and by design rather than by failure: the sanctioned action ran and verified. What
+  # forbids `resolved` here is that the run itself still ranks a cause it did not act on — the
+  # sibling template resolves because it acted on both.
+  expected_terminal_state: escalated
+  expected_action_tools: [restart_consumer_group]
+  expected_evidence_contains:
+  # ADR 0059's own sentence, and the words that say WHICH cause is left. Not the bare word
+  # `verified`, which the grader refuses as fake-green.
+  - STABILIZED, NOT RESOLVED
+  - or above the bar it acts on
+  - billing_release_regression
+  expected_evidence_fields:
+  # The action really executed.
+  - tools: [restart_consumer_group]
+    field: kill_key_cleared
+    equals: true
+  # And the fault it addressed really recovered, read after the action on the group that was
+  # restarted (ADR 0025) rather than on any lag reading the run happens to hold.
+  - tools: [get_consumer_lag]
+    field: lag
+    call_arguments: {consumer_group: worker-dispatcher}
+    after_tools: [restart_consumer_group]
+    which: last
+    equals: 120
+  # The second fault was actually READ, before the action, and read from the marker's own
+  # annotation rather than from the ordering. Without this the scenario would pass on a run that
+  # never looked at the deploy history and merely escalated.
+  - tools: [get_deploy_history]
+    field: entries[].notes
+    where:
+      field: version
+      equals: v0.4.2
+    before_tools: [restart_consumer_group]
+    equals: correlated with billing failures
+  expected_action_arguments:
+  - tools: [restart_consumer_group]
+    argument: consumer_group
+    equals: worker-dispatcher
+  # The remainder is NAMED to the human, which is the whole of WO-R2-164's rule. Ids, versions and
+  # names only — never phrasing (docs/eval-methodology.md).
+  expect_briefing_contains:
+  - STABILIZED, NOT RESOLVED
+  - v0.4.2
+  - v0.4.1
+  # SIX, not five: this template sanctions ONE action out of seven Tier-1 tools, so its
+  # complement is one wider than its two-action sibling's. Derived from the sanctioned set, never
+  # from the terminal state (ADR 0033) — an escalating run that is also allowed one real fix
+  # forbids six, and a diagnosis-only escalation would forbid all seven.
+  forbidden_action_tools:
+  - invalidate_cache_key
+  - mark_dlq_permanent
+  - pause_dag
+  - replay_dlq_by_category
+  - replay_dlq_by_ids
+  - replay_dlq_messages
+  # 4 calls on a correct canned run: the lag probe, the deploy probe, the action, its verify. Cap
+  # 13 is the remediation class rule (2 probes + 1 ADR-0009 re-probe + 1 action + up to 6 ADR-0006
+  # verify polls) and since ADR 0019 it is also the run's own BudgetLedger ceiling.
+  max_tool_calls: 13
+# The premise, one probe per fault, each asserting its OWN fault (WO-R3-184): either failing
+# abandons the run before any model call, naming which. Live-only — a canned run serves both
+# broken states by construction.
+expected_precondition:
+# Fault 1: the killed group's backlog has actually climbed. Polled, because lag accumulates only
+# after the runner seeds the kill and only across the platform's 60s metrics interval (PR #178's
+# profile for a thin fault, LESSONS 2026-08-31).
+- tool: get_consumer_lag
+  arguments:
+    consumer_group: worker-dispatcher
+  expect:
+  - path: lag_known
+    equals: true
+  - path: lag
+    at_least: 20
+  attempts: 10
+  delay_seconds: 15.0
+# Fault 2: the regressed release is in the world, and it is the ANNOTATED marker rather than just
+# any deploy — `total at_least 1` would be satisfied by an unannotated history, which is the whole
+# difference between this world and `consumer_lag_high`'s.
+- tool: get_deploy_history
+  arguments: {}
+  expect:
+  - path: entries[].notes
+    where:
+      field: version
+      equals: v0.4.2
+    equals: correlated with billing failures
+
+# Evaluator-only (ADR 0038): what was actually wrong, read off the hook and the seeded markers and
+# never off the canned planner. TWO incidents: a Kafka consumer group that stopped consuming and a
+# prod release that regressed the billing path. No mechanism links them — the restart changes
+# nothing about v0.4.2 and a rollback changes nothing about the group — which is what makes this
+# independent rather than cascading. Only ONE of the two is inside `FIX_MAP`, and that asymmetry is
+# the scenario.
+ground_truth:
+  incident_count: 2
+  root_causes: [consumer_saturation, deploy_regression]
+  affected_components: [worker-dispatcher, billing-api]

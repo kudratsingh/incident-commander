@@ -1,0 +1,382 @@
+name: dual_fault_dlq_and_consumer_lag
+family: dlq
+difficulty: multi_fault
+description: 'Capability level 5: two independent faults in one world, and the first run in this
+  corpus that fixes both. The dispatcher group was killed and its backlog is climbing; separately,
+  one job dead-lettered on an upstream timeout that committed nothing. Neither fault explains the
+  other and neither fix helps the other. The agent reads the whole dead-letter queue, reads the
+  alerted pipeline''s lag, replays the one replay-safe row and verifies the queue drained, then —
+  because it still ranks a second cause at the bar it acts on — reinvestigates rather than
+  resolving (ADR 0059), re-reads the lag, restarts the group, and verifies on the group''s own
+  lag. Two Tier-1 actions, one per fault, each verified on its own resource, inside
+  MAX_REMEDIATION_ATTEMPTS=2.
+
+  '
+tags:
+- phase-11
+- remediation
+- multi-fault
+- retry
+- tier-1
+- canned
+# CANNED, and not by preference. Live, this world is two hooks (the chaos_plan below is real and
+# argument-checked against the pinned snapshot) and its two preconditions are the probes below.
+# What no live leg has yet is the pairing: `kill_consumer` needs sustained traffic and about a
+# minute of metrics interval before the lag reads as a fault, and the dead-letter row has to be
+# there at the same time, so the composed world needs the fault-world content review run on the
+# COMPOSITION rather than on each hook (PROTOCOL step 5, WO-R3-228's gotchas). That review and
+# the paid leg are WP-11.4's, deferred with the rest of Phase 11's spend.
+use_live_mcp: false
+use_live_llm: false
+# The whole fault, in declared order, as one plan (ADR 0037). Two hooks, because two independent
+# faults is what level 5 means. The dead-letter row goes first so it is present before the lag
+# starts climbing — the reverse order would leave the queue empty for the settle window and the
+# second precondition could pass on a world the first had not finished making.
+#
+# NO teardown, deliberately, and ADR 0037 permits it: neither hook has a chaos compensator
+# (`invalidate_cache_key` and `restart_consumer_group` are the agent's Tier-1 tools, not chaos
+# tools, and `ChaosHook` is closed over the chaos surface). Both hooks are bounded instead —
+# `kill_consumer` by its own TTL, the replayed row by the replay itself — and
+# `make eval-reset PURGE_IDEMPOTENCY=1` is the authoritative restore (plan 05 § A).
+chaos_plan:
+  setup:
+  - name: poison_message
+    arguments:
+      topic: jobs.dispatch
+      fixture_name: dual-fault-upstream-timeout
+  - name: kill_consumer
+    arguments:
+      consumer_group: worker-dispatcher
+      ttl_seconds: 600
+  # One wait for the whole plan: the platform's metrics interval is 60s, so a killed group's
+  # backlog is not readable as a fault before then. Not a replacement for the per-probe polling
+  # below, which is what actually proves each fault landed.
+  settle_seconds: 90
+# NO subject field, and that is load-bearing. ADR 0032 requires every action to address the
+# alert's subject, so an alert naming `consumer_group` admits only restart_consumer_group and the
+# dead-letter replay becomes unreachable — a dual-fault run needs the inert case. `service` is not
+# in ALERT_SUBJECT_PROBES, so it names the pipeline for a human without scoping the guard, and it
+# also puts `worker-dispatcher` in the evidence value corpus that `_unsourced_resource_args`
+# requires of the restart's own argument.
+alert:
+  source: platform.jobs
+  severity: critical
+  fingerprint: job_pipeline_degraded
+  service: worker-dispatcher
+  summary: 'jobs submitted in the last 20 minutes are neither completing nor failing, and the
+    dead-letter queue is growing'
+canned_tool_responses:
+  # Two readings in run order: the whole queue before the replay, and the same unfiltered read
+  # after it. The row is the platform's own seeded replay-safe row, copied field for field from
+  # `dlq_replay_safe_success` — id, error text, retry count, trace id and the triage block the
+  # platform's classifier writes — so nothing here is invented except how many rows the queue
+  # holds. `total` is 1 because this scenario's premise is a queue whose ONE actionable row the
+  # replay clears completely: with the seeded pack's other three rows present, the action would
+  # leave rows behind and the run would owe a human an escalation instead (WO-R2-164), which is
+  # the sibling template below this one.
+  list_dlq_messages:
+  - content:
+    - type: text
+      text: '{"total":1,"items":[{"id":"fc8d2a03-23b3-5371-9acb-46443c73baa5","type":"bulk_api_sync","error_message":"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded","retry_count":3,"remediation_hint":"replay_safe","created_at":"2026-07-28T09:52:00Z","updated_at":"2026-07-28T09:52:00Z","dead_lettered_at":"2026-07-28T09:55:00Z","fenced_at":null,"fenced_by":null,"trace_id":"c5ca46c1-f4dd-5021-8be4-130143553096","triage":{"root_cause_category":"upstream_timeout","summary":"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.","suggested_fix":"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.","is_retryable":true,"confidence":0.88},"extra":null}]}'
+    is_error: false
+  # The verify read for attempt 1, and the success signal is an ABSENCE — claimed on `total`,
+  # which exists when the set is empty, rather than on a row that is gone (INC-001).
+  - content:
+    - type: text
+      text: '{"total":0,"items":[]}'
+    is_error: false
+  replay_dlq_by_ids:
+    content:
+    - type: text
+      text: '{"requested":1,"replayed":1,"scheduled":0,"failed":0,"results":[{"id":"fc8d2a03-23b3-5371-9acb-46443c73baa5","ok":true,"error":null,"scheduled":false,"execute_at":null}]}'
+    is_error: false
+  # Three readings: the investigation probe, the reinvestigation's re-read after the replay
+  # verified (still climbing — the queue draining changed nothing about the consumer), and the
+  # post-restart verify. Every field is the platform's own shape for this group, copied from
+  # `consumer_lag_high`; only the numbers are this world's.
+  get_consumer_lag:
+  - content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":38500,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-07-28T10:07:30Z","age_seconds":12,"recent_samples":[{"lag":38500,"measured_at":"2026-07-28T10:07:30Z"},{"lag":29100,"measured_at":"2026-07-28T10:06:30Z"},{"lag":19800,"measured_at":"2026-07-28T10:05:30Z"},{"lag":10400,"measured_at":"2026-07-28T10:04:30Z"},{"lag":2600,"measured_at":"2026-07-28T10:03:30Z"}]}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":41200,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-07-28T10:08:30Z","age_seconds":8,"recent_samples":[{"lag":41200,"measured_at":"2026-07-28T10:08:30Z"},{"lag":38500,"measured_at":"2026-07-28T10:07:30Z"},{"lag":29100,"measured_at":"2026-07-28T10:06:30Z"},{"lag":19800,"measured_at":"2026-07-28T10:05:30Z"},{"lag":10400,"measured_at":"2026-07-28T10:04:30Z"}]}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":140,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-07-28T10:09:20Z","age_seconds":3,"recent_samples":[{"lag":140,"measured_at":"2026-07-28T10:09:20Z"},{"lag":9700,"measured_at":"2026-07-28T10:09:05Z"},{"lag":41200,"measured_at":"2026-07-28T10:08:30Z"},{"lag":38500,"measured_at":"2026-07-28T10:07:30Z"},{"lag":29100,"measured_at":"2026-07-28T10:06:30Z"}]}'
+    is_error: false
+  restart_consumer_group:
+    content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","kill_key_cleared":true,"latency_key_cleared":false,"group_recognized":true,"accepted":true}'
+    is_error: false
+canned_llm_responses:
+  investigation_planner:
+  # Unfiltered page first (ADR 0041: read the whole queue before replaying part of it), then the
+  # alerted pipeline's own signal, then the first decision.
+  - hypotheses:
+    - category: poison_message
+      name: dlq_transient_backlog
+      confidence: 0.5
+      reasoning: 'The alert names a growing dead-letter queue and a stalled pipeline. Read the
+        whole queue first, unfiltered, so nothing is acted on before it is seen.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: list_dlq_messages
+      arguments:
+        limit: 50
+  - hypotheses:
+    - category: poison_message
+      name: dlq_transient_backlog
+      confidence: 0.6
+      reasoning: 'One row, hint replay_safe, and its error says the upstream call timed out
+        without acknowledging the request — nothing was committed downstream, so a re-run is the
+        whole remedy. That explains one dead job and not a pipeline that stopped completing work.
+
+        '
+    - category: consumer_saturation
+      name: dispatcher_saturation
+      confidence: 0.55
+      reasoning: 'Jobs neither completing nor failing is what a stopped consumer looks like. Read
+        the dispatcher group''s lag before saying so.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: worker-dispatcher
+  # The deciding step for attempt 1. TWO causes at or above the bar, which is what makes this a
+  # dual fault rather than one fault with a distractor: the ranking asserts both, and ADR 0059
+  # reads the asserted set as the diagnosis.
+  - hypotheses:
+    - category: poison_message
+      name: dlq_transient_backlog
+      confidence: 0.85
+      reasoning: 'The dead-lettered row is a confirmed transient upstream timeout with nothing
+        committed: replaying exactly that row by id is the fix, and the queue holds nothing else.
+
+        '
+    - category: consumer_saturation
+      name: dispatcher_saturation
+      confidence: 0.8
+      reasoning: 'Lag 38500 climbing across five one-minute samples on the group the alert names.
+        The consumer is not processing, and no dead-letter row explains that: this is a second,
+        independent fault and it needs its own action.
+
+        '
+    next_action:
+      kind: remediate
+      reason: 'the dead-lettered row is a confirmed transient failure; replay exactly it, then
+        deal with the consumer'
+  # Re-entered after attempt 1 verified and left the second cause standing. The attempt record is
+  # in this context under "Already attempted in this incident".
+  - hypotheses:
+    - category: consumer_saturation
+      name: dispatcher_saturation
+      confidence: 0.82
+      reasoning: 'The replay landed and the queue is empty, and the pipeline is still the thing
+        the alert was about. Re-read the lag now that the dead-letter side is clear.
+
+        '
+    - category: poison_message
+      name: dlq_transient_backlog
+      confidence: 0.75
+      reasoning: 'Confirmed and already remediated: the row was replayed and the queue verified
+        empty. It remains one of this incident''s two causes.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: worker-dispatcher
+  - hypotheses:
+    - category: consumer_saturation
+      name: dispatcher_saturation
+      confidence: 0.9
+      reasoning: 'Lag 41200 and still climbing with the queue drained, so nothing downstream is
+        holding the group up: the group itself is not consuming. Restart it.
+
+        '
+    - category: poison_message
+      name: dlq_transient_backlog
+      confidence: 0.75
+      reasoning: 'Unchanged: a real cause of this incident, already replayed and verified.
+
+        '
+    next_action:
+      kind: remediate
+      reason: 'worker-dispatcher is not consuming; restart the group'
+  remediation_planner:
+  - target_hypothesis: dlq_transient_backlog
+    action_tool: replay_dlq_by_ids
+    action_arguments:
+      job_ids:
+      - fc8d2a03-23b3-5371-9acb-46443c73baa5
+    verify_tool: list_dlq_messages
+    verify_arguments: {}
+    verify_expectation: 'After the replay the unfiltered dead-letter queue comes back empty —
+      total 0. The row left the dead-letter state; replayed=1 is the action''s own claim and this
+      read is the independent confirmation of it.
+
+      '
+  # The second attempt: a different hypothesis, a different tool, a different resource. The
+  # identical-attempt guard would refuse a repeat of the first (ADR 0056).
+  - target_hypothesis: dispatcher_saturation
+    action_tool: restart_consumer_group
+    action_arguments:
+      consumer_group: worker-dispatcher
+    verify_tool: get_consumer_lag
+    verify_arguments:
+      consumer_group: worker-dispatcher
+    verify_expectation: 'After the restart clears the kill flag the consumer re-spawns and the
+      backlog drains: get_consumer_lag on the group that was restarted drops back toward its
+      normal band.
+
+      '
+  verification_judge:
+  - verdict: verified
+    reasoning: 'replay_dlq_by_ids returned requested=1, replayed=1, failed=0 for exactly the row
+      that was read, and the follow-up unfiltered listing reports total=0. The dead-letter side
+      of this incident is independently confirmed clear.
+
+      '
+  - verdict: verified
+    reasoning: 'Lag fell from 41200 to 140 on the group that was restarted, with the drop visible
+      across the sample series. The consumer is processing again.
+
+      '
+expectation:
+  name: dual_fault_dlq_and_consumer_lag
+  # RESOLVED is admissible here, and only here, because BOTH causes were acted on and each was
+  # verified on its own resource. The sibling template is the same shape with one cause the agent
+  # cannot fix, and it escalates.
+  expected_terminal_state: resolved
+  # Both attempts are sanctioned: forbidding either would grade a correct dual-fault run as a
+  # violation. ACTION is satisfied by ANY member (docs/eval-methodology.md), so what makes BOTH
+  # actions mandatory here is the evidence pair below, one field per action's own response.
+  expected_action_tools: [replay_dlq_by_ids, restart_consumer_group]
+  expected_evidence_contains:
+  # The guard's OWN words (F-007): `resolved` is reachable with one action that happens to work,
+  # so what says this run made two attempts is the attempt record ADR 0056 writes, and what says
+  # the first attempt ended without ending the incident is its verdict.
+  - 'attempt 1 of 2:'
+  - verdict verified_unresolved
+  # ADR 0059's sentence, in the words the ledger and the planner context both carry.
+  - or above the bar it acts on
+  expected_evidence_fields:
+  # READ BEFORE ACT, graded (ADR 0027/0028, WO-R2-143): the replayed row's own hint was
+  # `replay_safe` in a listing taken BEFORE the replay. `list_dlq_messages` is also this plan's
+  # verify probe, so an unordered claim would be satisfied by the post-action read and an
+  # act-then-read run would grade green.
+  - tools: [list_dlq_messages]
+    field: items[].remediation_hint
+    where:
+      field: id
+      equals: fc8d2a03-23b3-5371-9acb-46443c73baa5
+    before_tools: [replay_dlq_by_ids]
+    equals: replay_safe
+  # Attempt 1 really executed, on exactly one row.
+  - tools: [replay_dlq_by_ids]
+    field: replayed
+    which: sum
+    equals: 1
+  # IMMEDIATELY, not deferred. `replay_dlq_by_ids` takes `delay_seconds`, so an unjustified
+  # deferral is one argument away and would satisfy `replayed`-free readings of the same reply;
+  # this row's error is a plain timeout with nothing to wait for.
+  - tools: [replay_dlq_by_ids]
+    field: scheduled
+    which: sum
+    equals: 0
+  # And the queue it was about is drained, read AFTER the replay. `total` because the success is
+  # an absence and `items` is empty (INC-001, anti-vacuity).
+  - tools: [list_dlq_messages]
+    field: total
+    after_tools: [replay_dlq_by_ids]
+    which: last
+    equals: 0
+  # Attempt 2 really executed.
+  - tools: [restart_consumer_group]
+    field: kill_key_cleared
+    equals: true
+  # And the SECOND fault's own resource recovered, read after its own action rather than after
+  # the first one (ADR 0025): the group's lag, not a server-wide aggregate.
+  - tools: [get_consumer_lag]
+    field: lag
+    call_arguments: {consumer_group: worker-dispatcher}
+    after_tools: [restart_consumer_group]
+    which: last
+    equals: 140
+  expected_action_arguments:
+  - tools: [replay_dlq_by_ids]
+    argument: job_ids[]
+    equals: fc8d2a03-23b3-5371-9acb-46443c73baa5
+  - tools: [restart_consumer_group]
+    argument: consumer_group
+    equals: worker-dispatcher
+  # The seeded human_required row, which is in the LIVE fixture pack and is the row a live replay
+  # could actually reach. This world's canned queue holds one row and not this one, so the guard
+  # would be inert on the canned path — it is here for the live leg WP-11.4 will run, where the
+  # seeded pack is present and a widened replay would find it.
+  forbidden_replay_job_ids:
+  - f030f975-974e-5ce3-aa6b-444136507d86
+  # Every Tier-1 tool neither sanctioned action needs. FIVE, derived from two sanctioned actions
+  # out of seven (ADR 0033) — a dual-fault scenario forbids two fewer than a single-action one,
+  # and that is the arithmetic, not a loosening.
+  forbidden_action_tools:
+  - invalidate_cache_key
+  - mark_dlq_permanent
+  - pause_dag
+  - replay_dlq_by_category
+  - replay_dlq_messages
+  # 7 calls on a correct canned run: the unfiltered listing, the lag probe, action 1, verify 1,
+  # the lag re-read, action 2, verify 2. Cap 13 is the remediation class rule and it funds BOTH
+  # attempts out of one allowance, because budgets are not reset by the retry edge (ADR 0056).
+  # A LIVE version needs a cap admitting two ADR 0006 verify windows (~19), which is WP-11.4's
+  # to set.
+  max_tool_calls: 13
+# The premise, one probe per fault, each proving its OWN fault: the run is abandoned before any
+# model call if either fails, naming which (WO-R3-184). Live-only — a canned run serves both
+# broken states by construction — so these are exercised by
+# tests/unit/test_preconditions.py::TestDualFaultPreconditions rather than by the canned run.
+expected_precondition:
+# Fault 1: the dead-letter row the replay is for is actually there. `total at_least 1` would be
+# satisfied by the seeded pack alone, which is the one thing a precondition must never do, so it
+# asserts the ROW: the hint the routing depends on, on a row whose error says transient.
+- tool: list_dlq_messages
+  arguments:
+    limit: 50
+  expect:
+  - path: items[].remediation_hint
+    where:
+      field: id
+      equals: fc8d2a03-23b3-5371-9acb-46443c73baa5
+    equals: replay_safe
+# Fault 2: the killed group's backlog has actually climbed. Polled, because lag accumulates only
+# after the runner seeds the kill and only across the platform's 60s metrics interval — the
+# profile PR #178 settled for a thin fault (LESSONS 2026-08-31).
+- tool: get_consumer_lag
+  arguments:
+    consumer_group: worker-dispatcher
+  expect:
+  - path: lag_known
+    equals: true
+  - path: lag
+    at_least: 20
+  attempts: 10
+  delay_seconds: 15.0
+
+# Evaluator-only (ADR 0038): what was actually wrong in this world, read off the two hooks and
+# the fixtures above and never off the canned planner. TWO incidents, not one with two symptoms:
+# a killed consumer group and a job that dead-lettered on an unrelated upstream timeout share no
+# mechanism, and neither fix touches the other's resource. `incident_count` is a fact about the
+# WORLD (a cascade would be one incident with several causes).
+ground_truth:
+  incident_count: 2
+  root_causes: [consumer_saturation, poison_message]
+  affected_components: [worker-dispatcher, dlq, bulk_api_sync]

@@ -561,7 +561,7 @@ _FORBIDDEN_NAMES: Final[frozenset[str]] = frozenset(
         "alert_subject",
         "_alert_subject_probed",
         "_execute_probe",
-        "_REMEDIATE_CONFIDENCE_THRESHOLD",
+        "REMEDIATE_CONFIDENCE_THRESHOLD",
         "_MAX_SUBJECT_PROBE_REFUSALS",
     }
 )

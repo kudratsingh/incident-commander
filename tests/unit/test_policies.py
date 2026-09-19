@@ -26,6 +26,7 @@ from incident_commander.agent.investigation import (
     FIX_MAP,
     HINT_ROUTED_CATEGORIES,
     HINT_ROUTED_TOOLS,
+    REMEDIATE_CONFIDENCE_THRESHOLD,
     AlertSubject,
     SubjectMatch,
     alert_subject,
@@ -2713,3 +2714,108 @@ class TestWorkflowStuckFamily:
             "the planner prompt no longer tells the agent to fence a human_required row, so "
             "ADR 0053 § 4's contradiction may be resolved — re-read it before trusting the drop"
         )
+
+
+class TestTheDiagnosisSetIsInertOnSingleFaultWorlds:
+    """ADR 0059's blast radius, as a property of the corpus rather than a claim.
+
+    `diagnosis_set` widened what `ROOT_CAUSE` reads from the top label to every cause the
+    final ranking asserts at or above the remediate bar. That moves a grade only for a run
+    whose ranking holds TWO hypotheses at the bar at once, so the safety argument for
+    every scenario written before WP-11.1 is that none of their canned planners ever
+    emits such a step. Scanned, not asserted in prose: a scenario that changes it fails
+    here instead of moving a grade quietly.
+    """
+
+    #: The scenarios ADR 0059 was built for, and the only ones allowed to rank two causes
+    #: at the bar. Named rather than derived from `difficulty`, so adopting `multi_fault`
+    #: for a third world is a decision somebody makes here.
+    MULTI_FAULT: Final = frozenset(
+        {"dual_fault_dlq_and_consumer_lag", "dual_fault_consumer_lag_and_bad_deploy"}
+    )
+
+    @staticmethod
+    def _asserted_steps(scenario: Scenario) -> list[tuple[int, list[tuple[str, float]]]]:
+        """Every canned planner step that ranks two or more causes at or above the bar."""
+        found: list[tuple[int, list[tuple[str, float]]]] = []
+        steps = scenario.canned_llm_responses.get("investigation_planner", [])
+        for index, step in enumerate(steps):
+            asserted = [
+                (str(h["category"]), float(h["confidence"]))
+                for h in step.get("hypotheses") or []
+                if float(h.get("confidence", 0.0)) >= REMEDIATE_CONFIDENCE_THRESHOLD
+            ]
+            if len({category for category, _ in asserted}) >= 2:
+                found.append((index, asserted))
+        return found
+
+    def test_no_single_fault_scenario_asserts_two_causes_at_the_bar(self) -> None:
+        offenders = {
+            scenario.name: self._asserted_steps(scenario)
+            for scenario in load_scenarios(_SCENARIO_DIR)
+            if scenario.name not in self.MULTI_FAULT and self._asserted_steps(scenario)
+        }
+        assert offenders == {}, (
+            f"these single-fault scenarios rank two causes at or above "
+            f"{REMEDIATE_CONFIDENCE_THRESHOLD} in one planner step: {offenders}. ADR 0059 "
+            "reads the asserted set as the diagnosis, so such a step makes the scenario's "
+            "ROOT_CAUSE verdict a set comparison rather than a label one — decide whether "
+            "the world really has two causes (label it `multi_fault` and add it above) or "
+            "whether the second hypothesis is a hedge and belongs below the bar."
+        )
+
+    def test_the_multi_fault_scenarios_do_assert_two(self) -> None:
+        """The other direction, or the check above passes by there being nothing to find."""
+        for name in self.MULTI_FAULT:
+            scenario = next(s for s in load_scenarios(_SCENARIO_DIR) if s.name == name)
+            assert self._asserted_steps(scenario), (
+                f"{name} is declared multi-fault and no canned step asserts two causes at "
+                "the bar, so its ROOT_CAUSE set can never match a two-cause label"
+            )
+
+
+class TestTheDualFaultForbiddenSetsAreDerived:
+    """ADR 0033 on a world with TWO sanctioned actions (WO-R3-228).
+
+    The rule is "derive the forbidden set from the SANCTIONED ACTION, never from the
+    terminal state", and a dual-fault world is the first place the sanctioned set has two
+    members — so the complement has five where a single-action scenario's has six. Both
+    numbers are the arithmetic and neither is a loosening; stating them per scenario is
+    what stops the next author copying a six-entry list into a two-action world.
+    """
+
+    EXPECTED_FORBIDDEN: Final = {
+        "dual_fault_dlq_and_consumer_lag": 5,
+        "dual_fault_consumer_lag_and_bad_deploy": 6,
+    }
+
+    @pytest.mark.parametrize("name", sorted(EXPECTED_FORBIDDEN))
+    def test_the_forbidden_set_is_exactly_the_complement(self, name: str) -> None:
+        scenario = next(s for s in load_scenarios(_SCENARIO_DIR) if s.name == name)
+        tier_1 = set(tools_at_or_below(Tier.TIER_1)) - set(tools_at_or_below(Tier.READ))
+        sanctioned = set(scenario.expectation.expected_action_tools)
+        forbidden = set(scenario.expectation.forbidden_action_tools)
+        assert forbidden == tier_1 - sanctioned, (
+            f"{name} forbids {sorted(forbidden)}; the complement of its sanctioned "
+            f"{sorted(sanctioned)} over the Tier-1 surface is {sorted(tier_1 - sanctioned)}"
+        )
+        assert len(forbidden) == self.EXPECTED_FORBIDDEN[name]
+
+    def test_every_sanctioned_action_has_a_cause_that_routes_to_it(self) -> None:
+        """A sanctioned action nothing diagnoses is an action no correct run can reach."""
+        for name in sorted(self.EXPECTED_FORBIDDEN):
+            scenario = next(s for s in load_scenarios(_SCENARIO_DIR) if s.name == name)
+            assert scenario.ground_truth is not None
+            routed = {
+                FIX_MAP[category]
+                for category in scenario.ground_truth.root_causes
+                if category in FIX_MAP
+            }
+            for category in scenario.ground_truth.root_causes:
+                if category in HINT_ROUTED_CATEGORIES:
+                    routed |= set().union(*HINT_ROUTED_TOOLS.values())
+            sanctioned = set(scenario.expectation.expected_action_tools)
+            assert sanctioned <= routed, (
+                f"{name} sanctions {sorted(sanctioned - routed)}, which no cause in its "
+                "ground truth routes to — the steering and the grading disagree"
+            )

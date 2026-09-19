@@ -11,7 +11,7 @@ import hashlib
 import json
 import re
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import datetime
 from enum import StrEnum
 from typing import Any, Final, Literal, NamedTuple
@@ -22,10 +22,11 @@ from incident_commander.agent.accounting import (
     accrue_llm_error,
     accrue_structured_call,
 )
-from incident_commander.agent.hypothesis import ReadToolName
+from incident_commander.agent.hypothesis import Hypothesis, ReadToolName
 from incident_commander.agent.investigation import (
     FIX_MAP,
     HINT_ROUTED_TOOLS,
+    REMEDIATE_CONFIDENCE_THRESHOLD,
     AlertSubject,
     SubjectMatch,
     alert_subject,
@@ -1943,6 +1944,9 @@ def _attempt_failed_entry(
         arguments={
             "attempt": run_state.remediation_attempts,
             "of": max_attempts,
+            # Which cause this attempt aimed at, so ADR 0059's resolve gate can tell a
+            # cause the run has ADDRESSED from one it is still only naming.
+            "target_hypothesis": plan.target_hypothesis,
             "action_tool": plan.action_tool,
             "action_arguments": dict(plan.action_arguments),
             "verify_tool": plan.verify_tool,
@@ -2160,8 +2164,11 @@ def make_llm_verify(
                     )
                 # One question left, about the INCIDENT not the action: is the alerted
                 # condition cleared? Yes by construction with a subject (ADR 0032); with
-                # none, the queue's rows answer (WO-R2-164).
-                condition = _uncleared_alert_condition(plan, run_state)
+                # none, the queue's rows answer (WO-R2-164). Then the same question about
+                # the OTHER faults this run named, which no alert can answer (ADR 0059).
+                condition = _uncleared_alert_condition(plan, run_state) or (
+                    _unaddressed_second_cause(plan, run_state)
+                )
                 if condition is not None:
                     # Same shape as the stabilizer above: the action worked and the incident
                     # is not over, so it is an attempt that may earn one reinvestigation.
@@ -2403,6 +2410,99 @@ class ConditionMiss(NamedTuple):
     ``_escalate_remediation`` puts it on the marker's ``result_summary`` and
     ``agent/briefing.py`` reads it into ``EscalationBriefing.
     escalation_reason``."""
+
+
+def _stabilized_earlier(run_state: RunState) -> str | None:
+    """An earlier attempt in this run that STABILIZED rather than resolved (ADR 0026).
+
+    Read off the attempt records ADR 0056 writes, so the fact travels with the ledger
+    rather than with a flag; the returned string is that record's own summary. ADR 0026's
+    rule is unconditional — a stabilizer is never a resolution — and ADR 0056 put the
+    sentence on the ledger without stopping a LATER attempt resolving over it.
+    ``not_verified`` and ``verified_unresolved`` are deliberately not here: the first
+    changed nothing (``retry_second_hypothesis_succeeds`` resolves on its second attempt
+    and still does) and the second's own condition is re-asked of the current plan.
+    """
+    for entry in run_state.evidence:
+        if entry.tool_name != ATTEMPT_FAILED_MARKER:
+            continue
+        if str(entry.arguments.get("verdict", "")) == "verified_stabilizer":
+            return entry.result_summary
+    return None
+
+
+def _attempted_targets(run_state: RunState, plan: RemediationPlan) -> frozenset[str]:
+    """Every hypothesis this run has already aimed a Tier-1 action at."""
+    earlier = {
+        str(entry.arguments["target_hypothesis"])
+        for entry in run_state.evidence
+        if entry.tool_name == ATTEMPT_FAILED_MARKER and "target_hypothesis" in entry.arguments
+    }
+    return frozenset(earlier | {plan.target_hypothesis})
+
+
+def _is_attempted(hypothesis: Hypothesis, attempted: Collection[str]) -> bool:
+    """Whether a ranked hypothesis is one an attempt in this run aimed at.
+
+    Name OR category, because ``RemediationPlan.target_hypothesis`` is a free string and the
+    corpus spells it both ways (``jobs_not_progressing_dispatcher_stall`` names the category,
+    the retry scenarios name the hypothesis). Reading only one spelling would call an
+    already-remediated cause unaddressed and escalate a correct single-fault run.
+    """
+    return hypothesis.name in attempted or hypothesis.category.value in attempted
+
+
+def _standing_causes(run_state: RunState, plan: RemediationPlan) -> tuple[Hypothesis, ...]:
+    """Causes this run still ranks at the bar it acts on and has NOT acted on (ADR 0059).
+
+    The run's OWN ranking, at the loop's own threshold: below the bar is a cause the agent
+    is considering, not one it is asserting, so hedging costs nothing while claiming a
+    second cause costs precision if it is wrong. A cause an attempt already targeted is
+    addressed, however the ranking still scores it — otherwise a run that fixed both faults
+    could never say so.
+    """
+    attempted = _attempted_targets(run_state, plan)
+    return tuple(
+        hypothesis
+        for hypothesis in run_state.hypotheses
+        if not _is_attempted(hypothesis, attempted)
+        and hypothesis.confidence >= REMEDIATE_CONFIDENCE_THRESHOLD
+    )
+
+
+def _unaddressed_second_cause(plan: RemediationPlan, run_state: RunState) -> ConditionMiss | None:
+    """A verified action that leaves another cause of this incident standing (ADR 0059).
+
+    ``_uncleared_alert_condition``'s question asked of the run's own diagnosis instead of the
+    dead-letter queue, so it is live whatever the alert names: a second, independent fault is
+    not something an alert can name. Two ways to be unfinished — a stabilizer earlier in this
+    run, and a cause the run asserts and has not acted on.
+    """
+    if (stabilized := _stabilized_earlier(run_state)) is not None:
+        return ConditionMiss(
+            (),
+            f"STABILIZED, NOT RESOLVED. {plan.action_tool} executed successfully and "
+            f"{plan.verify_tool} confirmed it landed, and an earlier attempt in this same "
+            f"incident only stabilized what it addressed: {stabilized} A stabilizer is never "
+            "a resolution (ADR 0026), so this incident ends with a human however well the "
+            "later action worked.",
+        )
+    standing = _standing_causes(run_state, plan)
+    if not standing:
+        return None
+    named = "; ".join(
+        f"{hypothesis.name} ({hypothesis.category.value}, confidence {hypothesis.confidence:.2f})"
+        for hypothesis in standing
+    )
+    return ConditionMiss(
+        (),
+        f"STABILIZED, NOT RESOLVED. {plan.action_tool} executed successfully and "
+        f"{plan.verify_tool} confirmed it landed — this is an escalation by design, not a "
+        f"failed remediation. This run still ranks {len(standing)} other cause(s) of this "
+        f"incident at or above the bar it acts on ({REMEDIATE_CONFIDENCE_THRESHOLD}) and has "
+        f"acted on none of them: {named}. One fault fixed is not the incident fixed, and "
+        "RESOLVED here would tell the on-call that a fault this run itself named is gone.",
+    )
 
 
 def _evidence_before(

@@ -4346,3 +4346,205 @@ class TestResolvedRequiresTheAlertedConditionCleared:
         # ``unclassified`` is the key a null hint reads as: there is no row
         # hint for a row nobody classified.
         assert "unclassified" in _ROW_DISPOSITION
+
+
+class TestTheSecondCauseGate:
+    """ADR 0059: a verified action does not resolve an incident whose OTHER causes stand.
+
+    The verify transition's last question, and the one WO-R3-228 needed to make capability
+    level 5 reachable. Every case here drives a `verified` verdict, because the gate is
+    only ever asked after the action worked — what it decides is whether the INCIDENT is
+    over, which is a different question.
+    """
+
+    _VERIFIED: Final[dict[str, Any]] = {
+        "verdict": "verified",
+        "reasoning": "lag fell to 140 on the group that was restarted",
+    }
+
+    def _verify(self, *, max_attempts: int = DEFAULT_MAX_REMEDIATION_ATTEMPTS) -> Any:
+        return make_llm_verify(
+            _lag_mcp(140),
+            CannedLLMClient([self._VERIFIED]),
+            model=_MODEL,
+            max_attempts=max_attempts,
+        )
+
+    @staticmethod
+    def _ranked(*pairs: tuple[HypothesisCategory, str, float]) -> tuple[Hypothesis, ...]:
+        return tuple(
+            Hypothesis(category=category, name=name, confidence=confidence, reasoning="r")
+            for category, name, confidence in pairs
+        )
+
+    #: The attempted cause, on top and asserted. Every case below ends on this plus
+    #: whatever second cause it is about.
+    _ATTEMPTED: Final = (HypothesisCategory.CONSUMER_SATURATION, "consumer_saturation", 0.9)
+
+    def _run(
+        self,
+        *pairs: tuple[HypothesisCategory, str, float],
+        attempts: int = 1,
+        evidence: tuple[EvidenceEntry, ...] = (),
+    ) -> RunState:
+        return _run_state(
+            state=IncidentState.VERIFYING,
+            remediation_plan=_plan_dict(),
+            hypotheses=self._ranked(self._ATTEMPTED, *pairs),
+            remediation_attempts=attempts,
+            alert=_GROUP_ALERT,
+            evidence=evidence,
+        )
+
+    @staticmethod
+    def _earlier_attempt(*, verdict: str, target: str) -> EvidenceEntry:
+        """The record ADR 0056 writes for an attempt that did not end the incident."""
+        return EvidenceEntry(
+            tool_name=ATTEMPT_FAILED_MARKER,
+            arguments={
+                "attempt": 1,
+                "of": 2,
+                "target_hypothesis": target,
+                "action_tool": "replay_dlq_by_ids",
+                "action_arguments": {"job_ids": ["fc8d2a03-23b3-5371-9acb-46443c73baa5"]},
+                "verify_tool": "list_dlq_messages",
+                "verify_arguments": {},
+                "verdict": verdict,
+            },
+            result_summary=f"attempt 1 of 2: … — verdict {verdict}.",
+            timestamp=_now(),
+        )
+
+    def test_one_asserted_cause_still_resolves(self) -> None:
+        """The unchanged case, and the reason 53 scenarios did not move."""
+        result = self._verify()(self._run(), _now())
+        assert result.state is IncidentState.RESOLVED
+
+    def test_a_hedge_below_the_bar_still_resolves(self) -> None:
+        """Below the bar is a cause the run is considering, not one it is asserting."""
+        run = self._run((HypothesisCategory.STALE_CACHE, "stale_lag_sensor", 0.4))
+        assert self._verify()(run, _now()).state is IncidentState.RESOLVED
+
+    def test_a_second_cause_at_the_bar_earns_a_reinvestigation(self) -> None:
+        """Somewhere else to go, so the run acts again instead of resolving or escalating."""
+        run = self._run((HypothesisCategory.STALE_CACHE, "stale_lag_sensor", 0.8))
+        result = self._verify()(run, _now())
+        assert result.state is IncidentState.INVESTIGATING
+        marker = _attempt_marker(result)
+        assert marker is not None
+        assert marker.arguments["verdict"] == "verified_unresolved"
+        assert marker.arguments["target_hypothesis"] == "consumer_saturation"
+        assert "or above the bar it acts on" in marker.result_summary
+        assert "stale_lag_sensor" in marker.result_summary
+
+    def test_a_second_cause_with_no_tier_1_fix_escalates_naming_it(self) -> None:
+        """The other template's ending: fix one, name the remainder, hand it over.
+
+        `deploy_regression` is outside `FIX_MAP`, so ADR 0056's third precondition declines
+        the retry — and what the human is owed is which cause is left, at what confidence.
+        """
+        run = self._run((HypothesisCategory.DEPLOY_REGRESSION, "billing_release", 0.75))
+        result = self._verify()(run, _now())
+        assert result.state is IncidentState.ESCALATED
+        reason = result.evidence[-1].result_summary
+        assert "STABILIZED, NOT RESOLVED" in reason
+        assert "billing_release" in reason
+        assert "deploy_regression" in reason
+        assert "0.75" in reason
+
+    def test_a_cause_an_earlier_attempt_addressed_is_not_standing(self) -> None:
+        """Two faults fixed is two faults fixed: the run may say so.
+
+        The second attempt's ranking still scores the first cause highly — it WAS a cause —
+        so reading the ranking alone would escalate a run that did everything right.
+        """
+        run = self._run(
+            (HypothesisCategory.POISON_MESSAGE, "dlq_transient_backlog", 0.75),
+            attempts=2,
+            evidence=(
+                self._earlier_attempt(
+                    verdict="verified_unresolved", target="dlq_transient_backlog"
+                ),
+            ),
+        )
+        assert self._verify()(run, _now()).state is IncidentState.RESOLVED
+
+    def test_a_target_named_by_its_category_is_also_addressed(self) -> None:
+        """`target_hypothesis` is a free string and the corpus spells it both ways.
+
+        `jobs_not_progressing_dispatcher_stall` names the CATEGORY there while its ranking
+        carries a sentence as the name; reading only the name would call its own remediated
+        cause unaddressed and escalate a green single-fault run.
+        """
+        run = _run_state(
+            state=IncidentState.VERIFYING,
+            remediation_plan=_plan_dict(target_hypothesis="consumer_saturation"),
+            hypotheses=self._ranked(
+                (
+                    HypothesisCategory.CONSUMER_SATURATION,
+                    "worker-dispatcher stopped draining its assignment",
+                    0.85,
+                )
+            ),
+            remediation_attempts=1,
+            alert=_GROUP_ALERT,
+        )
+        assert self._verify()(run, _now()).state is IncidentState.RESOLVED
+
+    def test_an_earlier_stabilizer_is_never_resolved_over(self) -> None:
+        """ADR 0026 across the retry edge, which ADR 0056 left open.
+
+        The later action verified and cleared its own fault; the fence earlier in this run
+        still needs a human, so the incident ends with one.
+        """
+        run = self._run(
+            attempts=2,
+            evidence=(self._earlier_attempt(verdict="verified_stabilizer", target="poison_row"),),
+        )
+        result = self._verify()(run, _now())
+        assert result.state is IncidentState.ESCALATED
+        reason = result.evidence[-1].result_summary
+        assert "STABILIZED, NOT RESOLVED" in reason
+        assert "only stabilized what it addressed" in reason
+
+    def test_an_earlier_unverified_attempt_does_not_block_resolving(self) -> None:
+        """`retry_second_hypothesis_succeeds`, pinned: a failed attempt changed nothing."""
+        run = self._run(
+            attempts=2,
+            evidence=(self._earlier_attempt(verdict="not_verified", target="stale_lag_sensor"),),
+        )
+        assert self._verify()(run, _now()).state is IncidentState.RESOLVED
+
+    def test_a_third_attempt_is_refused_at_the_cap(self) -> None:
+        """Two remediations pass under the cap of 2; the gate cannot buy a third.
+
+        The dual-fault world uses the whole allowance, so this is what stops the gate
+        turning "another cause stands" into unbounded autonomy.
+        """
+        run = self._run(
+            (HypothesisCategory.STALE_CACHE, "stale_lag_sensor", 0.8),
+            attempts=2,
+        )
+        result = self._verify()(run, _now())
+        assert result.state is IncidentState.ESCALATED
+        # The standing cause is still what the human is told (the condition's reason is the
+        # escalation's, as ADR 0056 already had it), and no third attempt is recorded.
+        assert "stale_lag_sensor" in result.evidence[-1].result_summary
+        assert _attempt_marker(result) is None, (
+            "at the cap the run escalates rather than recording another attempt to make"
+        )
+        # And the cap is what made the difference, not the gate: one more allowance and
+        # the identical run reinvestigates.
+        assert self._verify(max_attempts=3)(run, _now()).state is IncidentState.INVESTIGATING
+
+    def test_the_gate_is_live_even_when_the_alert_names_a_subject(self) -> None:
+        """A second independent fault is not something an alert can name.
+
+        Its dead-letter sibling (`_uncleared_alert_condition`) is inert under a subject by
+        design — ADR 0032 has already scoped the action. This question is about the run's
+        own diagnosis, so scoping it the same way would make it inert exactly where a
+        dual-fault world needs it.
+        """
+        assert _GROUP_ALERT["consumer_group"], "the fixture alert must name a subject"
+        run = self._run((HypothesisCategory.STALE_CACHE, "stale_lag_sensor", 0.8))
+        assert self._verify()(run, _now()).state is IncidentState.INVESTIGATING

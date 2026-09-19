@@ -136,11 +136,12 @@ class TestSplitsAreByTemplate:
         }
 
     def test_the_shipped_corpus_loads(self) -> None:
-        """49 scenarios, no straddle. The check is inert until it is not.
+        """55 scenarios, no straddle. The check is inert until it is not.
 
-        41 until WO-R3-202's four, 45 until WO-R3-214's four. A pin, not a derivation.
+        41 until WO-R3-202's four, 45 until WO-R3-214's four, 49 until WO-R3-226's
+        four and 53 until WO-R3-228's two. A pin, not a derivation.
         """
-        assert len(CORPUS) == 53
+        assert len(CORPUS) == 55
 
 
 class TestClosedVocabularies:
@@ -405,6 +406,19 @@ class TestPromotionIsReconciled:
             "single",
             "ambiguous",
             "same two readings, and neither action clears the fault",
+        ),
+        # WO-R3-228 (WP-11.1). The provisional rule reads a NAME for `noise_`, so it
+        # cannot see a second fault: both of these worlds hold two independent faults,
+        # which is plan 03 § 3's `multi_fault` rung and the first two scenarios on it.
+        "dual_fault_dlq_and_consumer_lag": (
+            "single",
+            "multi_fault",
+            "two independent faults, two remediations, one run",
+        ),
+        "dual_fault_consumer_lag_and_bad_deploy": (
+            "single",
+            "multi_fault",
+            "two independent faults where only one has a Tier-1 fix",
         ),
     }
 

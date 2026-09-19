@@ -1,21 +1,9 @@
 """Per-strategy budget policy (WP-2.4): the multipliers, and where they apply.
 
-Plan 02 § 8: a strategy declares an inference multiplier in configuration, and
-it is applied when the ledger is seeded for that run. Two things are deliberate
-and both are pinned here:
-
-* **The tool-call budget is never multiplied.** Probing the world is the thing
-  the strategies compete on, so giving one of them more probes would measure the
-  budget rather than the strategy (02 § 8, 04:96).
-* **BUDGET is reported beside correctness, never folded into it.** A run that is
-  correct and over the *baseline* budget is a point on the cost/quality
-  frontier, not a failure (02 § 8, 04:97).
-
-The numbers in these tests are the repo's own defaults, never the paid
-protocol's. The protocol's budgets (1.00 USD / 25 calls / 200000 tokens / 600 s)
-live only in the operator's un-committed ``.env`` — divergence D7 — so a test
-can assert that the multiplier was applied at the seed and must not assert an
-absolute number the repo cannot see.
+Plan 02 § 8: a multiplier is declared in configuration and applied when the ledger is
+seeded. Two deliberate things — the tool-call budget is never multiplied (probing is what
+the strategies compete on), and BUDGET is reported beside correctness, never folded in.
+The numbers are the repo's defaults; the paid protocol's live only in ``.env`` (D7).
 """
 
 from __future__ import annotations
@@ -41,24 +29,18 @@ from incident_commander.config import ModelRole, Settings
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Every multiplier a strategy can declare, by the name it carries in
-# ``Settings``. The source scan below reads this tuple, so a fourth multiplier
-# added without a call-site decision fails that test rather than slipping in.
+# Every multiplier a strategy can declare, by its ``Settings`` name. The source scan
+# below reads this tuple.
 _MULTIPLIER_FIELDS = ("token_budget_multiplier", "usd_budget_multiplier")
 
-# The two derived budgets the multipliers produce. Named separately from the
-# fields above because the scan asks a different question about them: the
-# multipliers may only be *read* in config, and these may only be *applied*
-# where the ledger is seeded.
+# The two derived budgets: multipliers are READ in config, these APPLIED at the seed.
 _SEEDED_PROPERTIES = ("seeded_max_tokens", "seeded_max_usd")
 
 
 def _settings(**overrides: Any) -> Settings:
     """A Settings with the four budgets seeded explicitly.
 
-    ``_env_file=None`` disables dotenv; the four budgets are passed rather than
-    defaulted so a test that multiplies one is multiplying a number written
-    here, not one an operator could change under it.
+    ``_env_file=None`` disables dotenv, and the budgets are passed, not defaulted.
     """
     defaults: dict[str, Any] = {
         "anthropic_api_key": SecretStr("sk-ant-test"),
@@ -109,9 +91,7 @@ class TestTheMultiplierIsAppliedAtTheLedgerSeed:
     def test_a_fractional_token_budget_floors_to_whole_tokens(self, now: datetime) -> None:
         """No fraction of a token can be spent, so none is granted.
 
-        Flooring also matters for the refusal below: rounding a budget *up* to
-        the nearest token would hide the multiplier that produced a budget of
-        nothing behind a budget of one.
+        Rounding up would hide a budget of nothing behind a budget of one.
         """
         settings = _settings(budget_max_tokens=1_001, token_budget_multiplier=Decimal("0.5"))
         run = start_run({"source": "s"}, settings, now)
@@ -149,9 +129,7 @@ class TestTheToolCallCeilingIsNeverMultiplied:
     ) -> None:
         """A scenario's declared cap is the runtime ceiling, unscaled.
 
-        ``ScenarioExpectation.max_tool_calls`` is also the number the run is
-        graded against, so scaling it here would move the grading cap of every
-        scenario in the suite from a configuration knob.
+        It is also the number the run is graded against (ADR 0019).
         """
         settings = _settings(
             budget_max_tool_calls=25,
@@ -169,9 +147,7 @@ class TestTheToolCallCeilingIsNeverMultiplied:
     ) -> None:
         """No wall-clock multiplier is declared (02 § 8 names three knobs).
 
-        A strategy that needs more seconds than the fleet default gets them by
-        raising ``BUDGET_MAX_SECONDS`` for the whole invocation, which is a
-        visible operator act, not a per-strategy one.
+        Raising ``BUDGET_MAX_SECONDS`` is a visible act for the whole invocation.
         """
         settings = _settings(
             budget_max_seconds=1_800,
@@ -197,9 +173,7 @@ class TestBaselineIsBitForBitUnchanged:
     ) -> None:
         """Identical to the pre-WP-2.4 seed, field for field.
 
-        Written out rather than compared against another ``start_run`` call:
-        the claim is that the multipliers changed nothing, and a comparison
-        between two runs of the same code cannot make it.
+        Written out rather than compared against another ``start_run`` call.
         """
         settings = _settings()
         run = start_run({"source": "s"}, settings, now)
@@ -269,13 +243,9 @@ class TestNoOtherCallSiteScalesABudget:
 class TestADegenerateMultiplierIsRefused:
     """factory.py:94's trap, one dimension wider.
 
-    ``start_run`` already ignores a ``max_tool_calls`` of 0 because
-    ``BudgetLedger.is_exhausted`` is ``used >= max``: a zero ledger is born
-    exhausted and the run escalates before TRIAGE ever classifies the alert.
-    Tokens, dollars and wall seconds have no such guard, so a multiplier that
-    seeds one of them at zero produces exactly that run — and the outcome is
-    indistinguishable from a budget ceiling working as designed. It is refused
-    at Settings construction instead, where nothing is in flight.
+    ``start_run`` already ignores a ``max_tool_calls`` of 0 (a zero ledger is born
+    exhausted). Tokens, dollars and wall seconds have no such guard, so a multiplier
+    seeding one at zero is indistinguishable from a ceiling working as designed.
     """
 
     def test_a_zero_token_multiplier_is_refused_naming_the_dimension(self) -> None:

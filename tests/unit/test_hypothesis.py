@@ -11,11 +11,8 @@ from incident_commander.agent.hypothesis import (
     StopAction,
 )
 
-#: The eight values the enum shipped with, and their exact spellings. Kept
-#: as a literal table rather than derived, because the thing it protects is
-#: precisely that these strings never move: every committed run archive,
-#: every trajectory and every scenario's `ground_truth.root_causes` is read
-#: back against them. WP-1.6 added nine more and this table did not change.
+#: The eight values the enum shipped with, and their exact spellings. A literal table
+#: rather than a derivation, because what it protects is that these strings never move.
 _ORIGINAL_EIGHT: dict[str, str] = {
     "CONSUMER_SATURATION": "consumer_saturation",
     "POISON_MESSAGE": "poison_message",
@@ -27,11 +24,8 @@ _ORIGINAL_EIGHT: dict[str, str] = {
     "UNKNOWN": "unknown",
 }
 
-#: The nine WP-1.6 additions (plan 02 § 5): the level-0 control's label plus
-#: the eight new fault families' labels. Every one of them is outside
-#: ``FIX_MAP`` — that half is asserted in
-#: ``tests/unit/test_policies.py::TestEveryNewCategoryIsEscalateOnly``,
-#: because it is a statement about routing rather than about the enum.
+#: The nine WP-1.6 additions (plan 02 § 5). All are outside ``FIX_MAP``, asserted in
+#: ``test_policies.py::TestEveryNewCategoryIsEscalateOnly``.
 _WP_1_6_ADDITIONS: dict[str, str] = {
     "NO_FAULT": "no_fault",
     "OUTBOX_STALL": "outbox_stall",
@@ -44,23 +38,14 @@ _WP_1_6_ADDITIONS: dict[str, str] = {
     "READ_MODEL_DRIFT": "read_model_drift",
 }
 
-#: WO-R3-263's addition (owner decision O-19, 2026-09-17; ADR 0054), kept as
-#: its own table rather than folded into the nine above, because the two
-#: additions were decided for different reasons and the provenance of a label
-#: is the thing a reader of a committed archive wants. The nine were a planned
-#: taxonomy widening (plan 02 § 5); this one is a gap the ground-truth pass
-#: found empirically — ``trace_investigation``'s world could not be named, so
-#: its honest label was ``unknown``.
+#: WO-R3-263's addition (O-19, ADR 0054), its own table because a label's provenance is what
+#: a reader wants: a gap the ground-truth pass found on ``trace_investigation``.
 _WO_R3_263_ADDITION: dict[str, str] = {
     "RESOURCE_EXHAUSTION": "resource_exhaustion",
 }
 
-#: WO-R3-214's addition (WP-7.2, ADR 0053), its own table for the same reason
-#: the one above is: a label's provenance is what a reader of a committed
-#: archive wants. Same shape of discovery, too — the ``workflow_stuck`` family
-#: built a world whose cause the enum could not name. A chain that is held by a
-#: DAG pause is not broken, so ``runaway_saga``, ``resolver_stall`` and
-#: ``unknown`` are each wrong in a way that misdirects a human.
+#: WO-R3-214's addition (WP-7.2, ADR 0053), its own table for the same reason: a chain held
+#: by a DAG pause is not broken, so the other three labels would misdirect a human.
 _WO_R3_214_ADDITION: dict[str, str] = {
     "DAG_PAUSED": "dag_paused",
 }
@@ -68,9 +53,7 @@ _WO_R3_214_ADDITION: dict[str, str] = {
 
 class TestHypothesisCategory:
     def test_enum_values_are_stable(self) -> None:
-        # Adding a value is fine; renaming or removing one is a breaking
-        # change to persisted trajectories and eval scenarios. If this test
-        # fails, coordinate the rename across scenarios + baseline.
+        # Adding a value is fine; a rename breaks persisted trajectories and scenarios.
         assert {member.name: member.value for member in HypothesisCategory} == {
             **_ORIGINAL_EIGHT,
             **_WP_1_6_ADDITIONS,
@@ -82,10 +65,7 @@ class TestHypothesisCategory:
     def test_an_original_value_is_untouched(self, name: str, value: str) -> None:
         """WP-1.6's first rule: the existing eight keep their values.
 
-        Asserted per member rather than as one set comparison so a rename
-        names the member it broke. The set test above would go red too, but
-        it would go red for "the enum changed", which is the expected state
-        of affairs every time a category is added.
+        Per member rather than one set comparison, so a rename names the member it broke.
         """
         assert HypothesisCategory[name].value == value
 
@@ -93,9 +73,7 @@ class TestHypothesisCategory:
     def test_a_new_category_exists_with_its_planned_value(self, name: str, value: str) -> None:
         """The nine labels plan 02 § 5 names, spelled as it names them.
 
-        ``ground_truth.root_causes`` (WP-1.3) and the root-cause grader
-        (WP-2.2) are written against these strings, so a value that drifted
-        from the plan would not fail until a scenario declared it.
+        ``ground_truth.root_causes`` and the root-cause grader are written against them.
         """
         assert HypothesisCategory[name].value == value
 
@@ -105,20 +83,15 @@ class TestHypothesisCategory:
     ) -> None:
         """The spelling O-19 decided, which ``trace_investigation`` now declares.
 
-        A scenario's ``ground_truth.root_causes`` is validated against this
-        enum at load, so a value that drifted from the decision would fail the
-        corpus rather than this test — but it would fail it as "unknown
-        category", which does not say that the decision named a different
-        string.
+        A drifted value would fail the corpus as "unknown category", which does not say the
+        decision named a different string.
         """
         assert HypothesisCategory[name].value == value
 
     def test_no_fault_is_the_only_category_that_is_not_a_fault(self) -> None:
         """The level-0 control's label, named as its own thing.
 
-        Every other member answers "what is broken". ``NO_FAULT`` answers
-        "nothing is", which is why the capability ladder needs it and why it
-        can never gain a Tier-1 fix: there is nothing for one to act on.
+        ``NO_FAULT`` can never gain a Tier-1 fix: there is nothing to act on.
         """
         assert HypothesisCategory.NO_FAULT.value == "no_fault"
         assert HypothesisCategory.NO_FAULT not in set(_ORIGINAL_EIGHT.values())
@@ -333,10 +306,7 @@ class TestInvestigationStep:
 class TestInvestigationStepOrdering:
     """B-07: ranking is normalized at the schema boundary.
 
-    Three gates read ``hypotheses[0]`` as the top pick (remediate gate,
-    ADR-0009 reprobe prior, remediation-planner target). The validator
-    guarantees index 0 is the highest-confidence hypothesis regardless
-    of the order the model listed them in.
+    Three gates read ``hypotheses[0]`` as the top pick, whatever order the model listed.
     """
 
     def _hyp(self, category: str, name: str, confidence: float) -> dict[str, object]:

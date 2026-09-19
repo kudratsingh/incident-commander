@@ -1,19 +1,9 @@
 """Doc-drift tripwires: documented env vars (B-03) and documented paths (B-13).
 
-docs/safety-model.md once documented an ``AGENT_ENABLED`` kill switch that no
-code read — ``Settings`` has ``extra="ignore"``, so an operator following the
-runbook set a no-op variable during a live incident. This test makes that
-class of drift fail CI: every env-var-shaped token the operator docs mention
-must either be a real ``Settings`` field or be explicitly allowlisted as a
-known non-Settings variable.
-
-The same class of drift bit the path vocabulary. CLAUDE.md's repository layout
-described ``src/agent/``, ``src/tools/`` and ``src/agent/prompts/`` — a tree
-that never shipped (the package is ``src/incident_commander/``). That was not
-cosmetic: ``.github/workflows/evals.yml``'s path filter was written against the
-documented vocabulary, so the regression gate never fired on a prompt change
-(A-08). ``test_claude_md_layout_paths_exist`` and
-``test_claude_md_names_no_pre_package_src_paths`` make that drift fail CI too.
+docs/safety-model.md once documented an ``AGENT_ENABLED`` kill switch no code read, and
+``extra="ignore"`` made it a no-op an operator set during a live incident. The same drift
+bit the path vocabulary: CLAUDE.md described a ``src/agent/`` tree that never shipped, and
+``evals.yml``'s filter was written against it, so the gate never fired (A-08).
 """
 
 from __future__ import annotations
@@ -58,11 +48,8 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "TIER_2",
         # Environment variables / make flags consumed outside Settings.
         "CHAOS_ENABLED",  # platform-side chaos gate (demo/compose.yml)
-        # Platform-side SLO evaluator interval. It was pinned to 0 on both demo
-        # services so the eval world stopped alerting on its own seeded fixtures;
-        # platform v0.6.4 made the evaluator skip those rows, so the override is
-        # gone from demo/compose.yml and the loop runs at its default interval.
-        # Still named in the runbook, which tells that story — WO-R2-131/132.
+        # Platform-side SLO evaluator interval. v0.6.4 made the evaluator skip the seeded
+        # fixture rows, so the override is gone from demo/compose.yml — WO-R2-131/132.
         "SLO_EVALUATION_INTERVAL_SECONDS",
         "EVAL_TRACE_DIR",  # eval runner trace destination (evals/runner.py)
         "PLATFORM_COMPOSE",  # read by `make eval-reset`, not by the agent
@@ -70,10 +57,7 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "PURGE_IDEMPOTENCY",  # `make eval-reset` opt-in purge flag
         "SMOKE_ONLY",  # `make eval-smoke` scenario-list override
         "UNTIL_LAG",  # `make traffic` stop-at-this-backlog flag (scripts/traffic_loop.py)
-        # Settings on the PLATFORM, quoted in docs/safety-model.md "Rate
-        # limits" (platform #169). Named here because the ceilings the agent
-        # has to live under are the platform's, and a doc that states them
-        # without naming the knob cannot be checked against the platform.
+        # Settings on the PLATFORM, quoted in docs/safety-model.md (platform #169).
         "MCP_RATE_LIMIT_PER_PRINCIPAL",
         "MCP_RATE_LIMIT_WINDOW_SECONDS",
         "ADMIN_NL_QUERY_RATE_LIMIT",

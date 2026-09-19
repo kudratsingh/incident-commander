@@ -1,10 +1,7 @@
 """Preconditions: establishing a scenario's premise before grading the agent.
 
-The failure this closes is a paid one. `bb1fa70abb4c` graded FAIL and the
-report said the agent fixed the wrong thing; the truth was that the thing it
-was told about could not be made to exist. Nothing distinguished "the agent
-was wrong" from "the world was never broken", so the run described the agent
-and was believed.
+`bb1fa70abb4c` graded FAIL saying the agent fixed the wrong thing; the truth was that
+the fault never landed.
 """
 
 from __future__ import annotations
@@ -103,9 +100,7 @@ class TestUnmet:
         assert unmet(unmet_probe, _DLQ_PAYLOAD) != []
 
     def test_a_zero_reading_does_not_satisfy_at_least_one(self) -> None:
-        # The lag case: a healthy group reads 0, and the scenario needs a
-        # backlog. This is the assertion that stops a run against a world
-        # where the fault has not landed yet.
+        # The lag case: a healthy group reads 0 and the scenario needs a backlog.
         probe = _probe(tool="get_consumer_lag", expect=(PreconditionField(path="lag", at_least=1),))
         assert unmet(probe, {"lag": 0}) != []
         assert unmet(probe, {"lag": 1200}) == []
@@ -129,12 +124,8 @@ class TestUnmet:
 class TestARowSelectorOnAPrecondition:
     """`where` narrows a premise to ONE row (v0.6.3 re-pin, WO-R2-168).
 
-    The any-row reading every precondition field has is cross-satisfiable, and
-    in the world `remediate_dlq_backlog_success` runs in it was satisfied by
-    the wrong rows: "the chaos row is present" and "some row is unclassified"
-    are both true of a queue where the chaos row landed CLASSIFIED and a
-    different row happens to carry no hint. That is the same fake-green
-    `RowSelector` was minted for on the grader side, one moment earlier.
+    The any-row reading is cross-satisfiable: "the chaos row is present" and "some row is
+    unclassified" are both true of a queue where the chaos row landed CLASSIFIED.
     """
 
     def test_the_pair_of_any_row_claims_is_cross_satisfiable(self) -> None:
@@ -205,9 +196,7 @@ class TestARowSelectorOnAPrecondition:
     def test_the_rule_is_the_graders_own(self) -> None:
         """One statement of "what a selector attaches to", not two copies.
 
-        A second implementation is exactly how the two sides would come to
-        disagree about a path shape, and the disagreement would show up as a
-        scenario that loads and then grades nothing.
+        A second implementation is how the two sides come to disagree.
         """
         assert where_path_errors("total", RowSelector(field="id", equals="a")) is not None
         assert where_path_errors("items[].hint", RowSelector(field="id", equals="a")) is None
@@ -225,9 +214,7 @@ class TestProbeSchema:
             )
 
     def test_chaos_tool_rejected(self) -> None:
-        # Chaos hooks are not in TOOL_REGISTRY at all, so they fail earlier —
-        # but the point is the same: seeding is chaos_setup's job, and a
-        # precondition that seeded would be verifying its own handiwork.
+        # Seeding is chaos_setup's job; a precondition that seeded would verify its own work.
         with pytest.raises(ValidationError, match="not a registered tool"):
             PreconditionProbe(
                 tool="kill_consumer", expect=(PreconditionField(path="ok", equals=True),)
@@ -260,10 +247,7 @@ def _shipped() -> list[Scenario]:
     return list(load_scenarios(_SCENARIOS_DIR))
 
 
-# Remediation scenarios with no precondition, and why. Each entry is a claim
-# that the fault is not observable through any READ tool — not that nobody
-# got around to it. Adding a name here needs that justification; removing one
-# needs a precondition.
+# Each entry claims the fault is not observable through any READ tool.
 _JUSTIFIED_WITHOUT_PRECONDITION: dict[str, str] = {
     # use_live_mcp: false — it never runs live, and preconditions are about
     # the live world. Its canned responses ARE its premise.
@@ -316,17 +300,8 @@ class TestRemediationScenarioCoverage:
     def test_the_lag_precondition_waits_for_the_metrics_interval(self) -> None:
         """The one precondition that must poll, pinned so it cannot be flattened.
 
-        kill_consumer stops the consumer at once, but the platform recomputes
-        lag on a 60s interval, so the number stays 0 for up to a minute after
-        seeding. A single look would fail a correctly-seeded world.
-
-        The window is ``(attempts - 1) * delay`` — the runner sleeps BETWEEN
-        attempts, so 6 attempts at 15s wait 75s, not 90s. This guard used to
-        multiply ``attempts * delay`` and so overstated every window by one
-        delay: it passed a 5x14.9s probe (74.5s claimed, 59.6s real) that
-        cannot outlast the metrics interval it exists to outlast (WO-R2-88).
-        The arithmetic now comes from ``config.polling_window_seconds``, the
-        same helper the ADR 0006 verify window reports itself with.
+        The platform recomputes lag on a 60s interval, and the window is ``(attempts - 1) *
+        delay``: the old ``attempts * delay`` overstated every window by one delay (WO-R2-88).
         """
         scenario = next(s for s in _shipped() if s.name == "remediate_consumer_lag_success")
         probe = next(p for p in scenario.expected_precondition if p.tool == "get_consumer_lag")

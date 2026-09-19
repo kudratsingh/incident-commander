@@ -114,11 +114,8 @@ class TestEnrichBriefing:
     ) -> None:
         """The schema still rejects it; ADR 0035 buys one re-ask first.
 
-        Two canned payloads and only two: the client raises "no more canned
-        responses" on a third call, so a cap that stopped holding would show
-        up here as that message rather than as a silent extra call. What the
-        test is really pinning is that ``findings=""`` is still invalid —
-        the repair path must not have loosened the schema, only retried it.
+        Two canned payloads and only two, so a cap that stopped holding would surface as "no
+        more canned responses". ``findings=""`` is still invalid.
         """
         client = CannedLLMClient(
             [{"findings": "", "recommendation": "x"}, {"findings": "", "recommendation": "y"}]
@@ -161,10 +158,7 @@ class TestBriefingContent:
 class TestServiceAndEvalPathParity:
     """R2-38: the eval graded a briefing shape production never produced.
 
-    Enrichment stays eval-only (see the module docstring and
-    ``docs/safety-model.md``). What must hold is that the *difference* is
-    bounded to the two LLM-written strings, so nothing a human needs can
-    quietly become eval-only again.
+    Enrichment stays eval-only, so the difference must be bounded to the two LLM strings.
     """
 
     def test_enrichment_changes_only_findings_and_recommendation(
@@ -185,9 +179,7 @@ class TestServiceAndEvalPathParity:
     def test_reason_and_attempted_action_are_deterministic_not_enriched(
         self, run_state: RunState, now: datetime
     ) -> None:
-        # The two facts the handoff exists to deliver must survive with no
-        # LLM in the loop at all — that is what makes an eval-only writer an
-        # acceptable decision rather than a hole.
+        # The two facts the handoff delivers must survive with no LLM in the loop.
         run = run_state.model_copy(
             update={
                 "state": IncidentState.ESCALATED,
@@ -216,11 +208,8 @@ class TestServiceAndEvalPathParity:
 class _BillsThenSucceeds:
     """Fails validation once, billing for it, then answers.
 
-    ``CannedLLMClient`` raises its ``ValidationError`` before it builds an
-    ``LLMResult``, so a canned repair costs nothing and cannot show whether
-    both legs are charged. A real rejected reply was generated and billed
-    (``LLMOutputError`` carries its usage), which is the case ADR 0035 says
-    must not look cheap.
+    ``CannedLLMClient`` raises before building an ``LLMResult``, so a canned repair costs
+    nothing; a real rejected reply carries its usage.
     """
 
     def __init__(self, usage: LLMUsage, output: BriefingContent) -> None:
@@ -250,15 +239,9 @@ class _BillsThenSucceeds:
 class TestTheBriefingWriterIsChargedToTheRunLedger:
     """WO-R3-260, amending ADR 0015 § 4.
 
-    The briefing writer buys prose the AGENT hands a human, on the agent's own
-    model. ADR 0015 left it out of ``BudgetLedger`` because a ceiling cannot
-    gate a call that happens after the last budget check — true, and it
-    answered the wrong question. The ledger is the run's meter as well as its
-    ceiling, and leaving one call out made every cost-per-run number undercount
-    the agent by exactly one call, on every run, in the same direction.
-
-    So: metered, never gating. The evaluator's briefing judge stays out, and
-    that line is about whose money a call is, not when it happened.
+    The briefing writer buys prose the AGENT hands a human, on the agent's own model. The
+    ledger is the run's meter as well as its ceiling, so leaving it out undercounted every
+    run by one call. Metered, never gating.
     """
 
     def _billing_client(self, **usage: int) -> CannedLLMClient:
@@ -282,9 +265,7 @@ class TestTheBriefingWriterIsChargedToTheRunLedger:
     def test_the_ledger_it_was_given_is_not_mutated(
         self, run_state: RunState, now: datetime
     ) -> None:
-        # The caller holds the graded run's ledger. Enrichment returning a new
-        # one is what lets the runner keep the graded number and the metered
-        # number apart without copying anything by hand.
+        # The caller holds the graded run's ledger, so the two numbers stay apart.
         before = run_state.budget
         _briefing, ledger = enrich_briefing(
             _briefing_with_probe(run_state, now),
@@ -314,11 +295,8 @@ class TestTheBriefingWriterIsChargedToTheRunLedger:
     def test_it_is_metered_but_never_gating(self, run_state: RunState, now: datetime) -> None:
         """The whole of "post-terminal cost does not gate", as a test.
 
-        The ledger handed in is already exhausted — a run that spent its last
-        token reaching a terminal state. Enrichment still runs, still returns
-        the enriched briefing, and still charges. Nothing here consults
-        ``is_exhausted``, and that is the point: the gate lives in the loop,
-        which has already stopped.
+        The ledger handed in is already exhausted; enrichment still runs and still charges.
+        Nothing consults ``is_exhausted``.
         """
         spent = run_state.budget.model_copy(
             update={"tokens_used": run_state.budget.max_tokens, "usd_used": Decimal("5.00")}
@@ -338,11 +316,8 @@ class TestTheBriefingWriterIsChargedToTheRunLedger:
     ) -> None:
         """The property the report's ``reconciled`` column states.
 
-        Ledger total == accounting total, with the briefing call inside BOTH.
-        Built from the same ``LLMUsage`` object by the same two functions, so
-        it is an equality rather than a tolerance — and if the runner ever
-        meters this role as the evaluator's spend again, this is where it
-        fails rather than in a live report nobody re-reads.
+        Ledger total == accounting total with the briefing call inside BOTH, from the same
+        ``LLMUsage`` — an equality, not a tolerance.
         """
         accounting = RunAccounting()
         metered = accounting.meter(

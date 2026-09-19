@@ -1,19 +1,9 @@
 """WP-9.1 — the ``reflection`` strategy (plan 02 § 13, ADR 0055).
 
-The packet's whole claim is a bound and a measurement, so the tests are grouped that way:
-
-* ``TestTheCapIsStructural`` — a critic that asks for another pass forever gets ONE. Proved
-  three ways that do not share a mechanism: the pass token refuses a second ``spend``, the
-  module holds no loop over the critic, and a run against an always-revise fake bills exactly
-  two planner calls and one critic call per step.
-* ``TestTheVerdictFollowsTheFindings`` — a critique that names a contradiction and keeps the
-  step anyway is refused by the schema (LESSONS 2026-09-17), not asked not to in the prompt.
-* ``TestTheStrategyWidensNothing`` — the revised step meets the same gates: below the
-  threshold it escalates, outside ``FIX_MAP`` it escalates, and the critic cannot name a
-  non-read tool at all.
-* ``TestBothStepsAreOnTheRecord`` — initial and emitted, or the pass cannot be measured.
-* ``TestTheReportTellsFixedFromHarmed`` / ``TestThePairedComparison`` — the numbers, on
-  fixtures of each case.
+The claim is a bound and a measurement: a critic asking forever gets ONE pass, proved
+three independent ways; a critique naming a contradiction and keeping the step is
+refused by the schema; the revised step meets the same gates; both steps are on the
+record; and the report tells fixed from harmed.
 """
 
 from __future__ import annotations
@@ -335,9 +325,7 @@ class TestTheCapIsStructural:
     def test_the_module_holds_no_loop_over_the_critic(self) -> None:
         """Anti-vacuity for the two tests above: there is no code path that could loop.
 
-        The token refuses a second pass, and this says nothing tries: ``critique_step`` and
-        ``revise_step`` are each called exactly once in the module, and neither call sits
-        inside a ``for``, a ``while`` or a comprehension.
+        Each of the two calls happens once, and neither sits in a loop.
         """
         tree = ast.parse(_STRATEGY_MODULE.read_text(encoding="utf-8"))
         loops = [
@@ -506,11 +494,9 @@ class TestTheStrategyWidensNothing:
         assert result.state is not IncidentState.REMEDIATING
 
     def test_the_strategy_module_holds_no_execution_policy(self) -> None:
-        """``TestStrategiesHoldNoExecutionPolicy`` covers this module by parametrizing over
-        the directory; asserted here too, because this file must fail on its own.
+        """``TestStrategiesHoldNoExecutionPolicy`` covers this module; asserted here too.
 
-        On the AST, not the text: the module's docstring NAMES the gates it leaves in
-        ``investigation.py``, and naming a thing in prose is the opposite of depending on it.
+        On the AST, not the text: the docstring NAMES the gates it leaves in place.
         """
         tree = ast.parse(_STRATEGY_MODULE.read_text(encoding="utf-8"))
         referenced = {

@@ -1,28 +1,9 @@
 """Stringified nested output decodes; everything else still raises (ADR 0035).
 
-The first class here is the regression for paid run ``779b19a287a7``
-(2026-09-08, ``remediate_dlq_backlog_success`` run C). Its planner decided
-correctly — replay the one confirmed-safe DLQ row ``fc8d2a03…``, leave the
-poisoned ``eb798430…`` alone — and then handed ``record_output`` a
-``next_action`` that was a JSON *string* with the enclosing array's ``]``
-still stuck to the end. ``InvestigationStep`` rejected it, the run escalated
-on the first failure, and the scenario graded RED on outcome, evidence and
-action.
-
-``LIVE_RECORD_OUTPUT_INPUT`` below is that tool-use ``input`` verbatim, copied
-from ``evals/traces/remediate_dlq_backlog_success.jsonl`` (the record with
-``parse_failed: true``, invocation ``779b19a287a7``) and rendered in the human
-report at ``evals/reports/human/remediate_dlq_backlog_success.20260908T091545Z
-.6d34908ba8f4.txt``, STEP 11. On ``origin/main`` before this change
-``test_the_live_payload_parses`` fails with a ``ValidationError``; that is the
-red-before half.
-
-The rest of the file is the other half of the claim, and it is the half worth
-reading: the decoder must not become a general "try harder" parser. A string
-that is not JSON, one that decodes to the wrong shape, one with real content
-after the value, and a decoded object that violates ``extra="forbid"`` all
-still raise, so a genuinely broken payload still produces the model's own
-error rather than a quietly wrong object.
+The regression for paid run ``779b19a287a7``: the planner decided correctly and then
+handed ``record_output`` a ``next_action`` that was a JSON *string* with the enclosing
+array's ``]`` attached, so the run escalated and graded RED. The rest of the file is the
+other half — the decoder must not become a general "try harder" parser.
 """
 
 from __future__ import annotations
@@ -55,31 +36,24 @@ from incident_commander.llm.structured import (
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 
-# Every model the LLM fills in through the ``record_output`` tool. Not a
-# hand-kept list you have to remember to extend: ``TestEveryRecordOutputModel
-# ::test_the_list_matches_the_call_sites`` derives the same set from the
-# ``output_model=`` arguments in the source tree and fails if the two differ.
+# Every model the LLM fills in through ``record_output``. Not hand-kept:
+# ``test_the_list_matches_the_call_sites`` derives it from the source.
 RECORD_OUTPUT_MODELS: Final[tuple[type[StructuredOutput], ...]] = (
     InvestigationStep,
     RemediationPlan,
     VerificationJudgment,
     BriefingContent,
     JudgeScore,
-    # WP-6.1's new role. Listed here rather than only in the selector's own
-    # suite because this is the file that cross-checks the list against the
-    # source, and a model reaching ``record_output`` without
-    # ``StructuredOutput`` is a model whose nested fields are back to
-    # escalating a run over their wrapping.
+    # WP-6.1's new role, listed here because this is the file that cross-checks the list
+    # against the source.
     SelectionResult,
     # WP-9.1's, for the same reason: ``StepCritique`` nests ``LedgerContradiction``, so a
     # payload that arrived with that object stringified must decode rather than escalate.
     StepCritique,
 )
 
-# Verbatim evidence, not sample data: the two long lines below are the exact
-# strings the API returned and are `noqa: E501` rather than reflowed. Wrapping
-# them would make the regression a paraphrase of the failure instead of the
-# failure (evidence is append-only and quoted as-is; CLAUDE.md invariant 9).
+# Verbatim evidence: the two long lines below are the exact strings the API
+# returned, so `noqa: E501` rather than reflowed (invariant 9).
 LIVE_RECORD_OUTPUT_INPUT: Final[dict[str, Any]] = {
     "hypotheses": [
         {
@@ -124,11 +98,8 @@ class TestTheLiveRunPayload:
     def test_a_strict_json_load_of_that_string_still_fails(self) -> None:
         """Why plain ``json.loads`` was not enough — the stray ``]``.
 
-        The pre-fix coercion on this field was a bare ``json.loads``. It was
-        already there on the day of the run and it did not save it: the
-        string is a complete object followed by one array terminator, which
-        ``json.loads`` reports as ``Extra data``. That is the specific
-        malformation ``_decode_leading_value`` tolerates and nothing wider.
+        A complete object followed by one array terminator, which ``json.loads`` reports as
+        ``Extra data`` — what ``_decode_leading_value`` tolerates.
         """
         with pytest.raises(json.JSONDecodeError, match="Extra data"):
             json.loads(LIVE_RECORD_OUTPUT_INPUT["next_action"])
@@ -142,9 +113,7 @@ class TestTheLiveRunPayload:
     def test_the_decision_survives_the_decode_unchanged(self) -> None:
         """The point of repairing rather than escalating: the answer is kept.
 
-        The reason string is what the remediation planner is handed next, so
-        a decode that dropped or truncated it would turn a RED run into a
-        differently-wrong one.
+        The reason string is handed to the remediation planner.
         """
         step = InvestigationStep.model_validate(LIVE_RECORD_OUTPUT_INPUT)
         assert isinstance(step.next_action, RemediateAction)
@@ -290,10 +259,8 @@ class TestEveryRecordOutputModel:
     def test_the_list_matches_the_call_sites(self) -> None:
         """``RECORD_OUTPUT_MODELS`` is checked against the source, not trusted.
 
-        A model that reaches ``LLMClientProtocol.call`` without inheriting
-        ``StructuredOutput`` is a model whose nested fields are back to
-        escalating a run over their wrapping — and a hand-kept list is
-        exactly the thing that would not notice.
+        A model reaching ``call`` without ``StructuredOutput`` is back to escalating a run
+        over its wrapping.
         """
         names: set[str] = set()
         for root in ("src", "evals"):
@@ -301,9 +268,7 @@ class TestEveryRecordOutputModel:
                 names.update(
                     re.findall(r"output_model=([A-Za-z_][A-Za-z0-9_]*)\s*,", path.read_text())
                 )
-        # ``llm/repair.py`` forwards its own ``output_model`` parameter
-        # through to the client; that is a pass-through, not a call site
-        # that names a model.
+        # ``llm/repair.py`` forwards its own ``output_model``: a pass-through.
         names.discard("output_model")
         assert names == {model.__name__ for model in RECORD_OUTPUT_MODELS}, (
             "the record_output call sites and RECORD_OUTPUT_MODELS disagree; "
@@ -319,12 +284,8 @@ class TestEveryRecordOutputModel:
 class TestRecordOutputSchemaDeclaresObjects:
     """The contract half: the schema the model is shown says ``object``.
 
-    ``LLMClient`` advertises ``output_model.model_json_schema()`` as the
-    ``record_output`` tool's ``input_schema``, and that document is the only
-    thing telling the API what shape a nested field takes. If a field ever
-    came to be declared ``type: string`` there, the model would be *correct*
-    to send a string and the decoder above would be papering over a schema
-    bug. This asserts it never does.
+    ``model_json_schema()`` is the only thing telling the API what shape a nested field
+    takes; ``type: string`` there would make the model correct to send one.
     """
 
     @pytest.mark.parametrize("model", RECORD_OUTPUT_MODELS, ids=lambda m: m.__name__)
@@ -352,9 +313,7 @@ class TestRecordOutputSchemaDeclaresObjects:
 def _declared_types(node: dict[str, Any], defs: dict[str, Any]) -> set[str]:
     """Every JSON-Schema ``type`` a property node can resolve to.
 
-    Follows ``$ref``, ``anyOf``/``oneOf`` (a discriminated union) and
-    ``allOf``, because pydantic renders a nested model as a ``$ref`` and a
-    union as a branch list rather than as a bare ``type``.
+    Follows ``$ref``, ``anyOf``/``oneOf`` and ``allOf``.
     """
     if "$ref" in node:
         return _declared_types(defs[node["$ref"].rsplit("/", 1)[-1]], defs)

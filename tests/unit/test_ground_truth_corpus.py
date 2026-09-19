@@ -1,35 +1,9 @@
 """The corpus's root-cause decisions, pinned — including the deliberate abstentions.
 
-``Scenario.ground_truth`` is optional, which is right for the model and wrong
-for the corpus: an optional field that nobody has to fill is a field a new
-scenario silently skips, and root-cause coverage then drifts down while every
-suite stays green. WO-R3-261 wrote a decision for all 41 scenarios, and this
-file is what keeps a decision mandatory.
-
-Two guards, and the second is the one that matters:
-
-1. **The value pin.** ``_DECIDED`` records what each scenario's label IS —
-   or that it deliberately has none. A YAML whose label is edited without the
-   record moving fails here, and so does a record entry naming a scenario
-   that has left the corpus. This is a hand-maintained list on purpose: the
-   labels are a reviewed judgement about 49 worlds, and a test that derived
-   them from the YAMLs would assert that the files equal themselves.
-
-2. **The abstention rule.** "No label" is only admissible for a scenario that
-   cannot be graded on diagnosis at all: the tool-failure tests, the harness
-   control, and the noise controls that are filtered at TRIAGE with a budget
-   of zero tool calls and so never produce a hypothesis ranking. Any other
-   scenario must decide. Derived from the scenario rather than from a second
-   hand-list, so a future author cannot abstain on a diagnosable world by
-   adding a name to a set.
-
-Why a labelled noise control would be wrong, since it is the one entry a
-reader is likely to want to "fix": ``_grade_root_cause`` fails a labelled
-scenario whose run named no cause, and the graded behaviour of every
-``noise_*`` scenario is to reach ESCALATED from TRIAGE without a planner call.
-The dimension would go red for the agent doing exactly the right thing, which
-is a statement about the grader rather than about the agent (``INCIDENTS.md``,
-grader drift).
+``Scenario.ground_truth`` is optional, which is right for the model and wrong for the
+corpus, so WO-R3-261 wrote a decision for all 41. ``_DECIDED`` records what each label
+IS (hand-maintained on purpose), and "no label" is admissible only for a scenario that
+cannot be graded on diagnosis — derived from the scenario, not from a second hand-list.
 """
 
 from __future__ import annotations
@@ -44,10 +18,8 @@ from incident_commander.agent.hypothesis import HypothesisCategory as Category
 
 _SCENARIOS_DIR: Final[Path] = Path(__file__).resolve().parents[2] / "evals" / "scenarios"
 
-#: Scenario name → the labels its world declares, or ``None`` for a recorded
-#: decision NOT to grade it on diagnosis. Every entry was decided from the
-#: scenario's chaos hook and canned fixtures, and the reasoning sits in the
-#: comment above each ``ground_truth`` block in the YAML itself.
+#: Scenario name → the labels its world declares, or ``None`` for a recorded decision
+#: NOT to grade it. The reasoning sits in the YAML itself.
 _DECIDED: Final[Mapping[str, tuple[Category, ...] | None]] = {
     "alert_storm": (Category.DEPLOY_REGRESSION,),
     "consumer_lag_analytics_critical": (Category.CONSUMER_SATURATION,),
@@ -69,11 +41,8 @@ _DECIDED: Final[Mapping[str, tuple[Category, ...] | None]] = {
     "dlq_wait_and_replay_success": (Category.POISON_MESSAGE,),
     "failed_traces_scan": (Category.UNKNOWN,),
     "incidents_overview": (Category.UNKNOWN,),
-    # WO-R3-202 (WP-4.3), plan 01 section 7.1's Family B. One symptom, four
-    # worlds, three answers — and the pair of `outbox_stall` rows is the
-    # measurement: same world, same label, different alert, so only this
-    # dimension can tell a run that read the evidence from one that blamed the
-    # release the alert happened to name.
+    # WO-R3-202 (WP-4.3), Family B: one symptom, four worlds, three answers. The pair of
+    # `outbox_stall` rows is the measurement: same world, different alert.
     "jobs_not_progressing_dispatcher_stall": (Category.CONSUMER_SATURATION,),
     "jobs_not_progressing_healthy_backlog_spike": (Category.NO_FAULT,),
     "jobs_not_progressing_outbox_stall": (Category.OUTBOX_STALL,),
@@ -98,29 +67,19 @@ _DECIDED: Final[Mapping[str, tuple[Category, ...] | None]] = {
     "tool_missing_response": None,
     "tool_output_schema_mismatch": None,
     "tool_result_marked_error": None,
-    # Moved from UNKNOWN by WO-R3-263 (owner decision O-19, ADR 0054): the
-    # world is a `report_gen` worker that ran out of memory, and the taxonomy
-    # now has a member for that. The label did not change because the world
-    # did — it changed because the enum could finally say what the world was,
-    # and `unknown` ("the probes left me unable to tell") was never true of a
-    # trace that names the cause in its own error text.
+    # Moved from UNKNOWN by WO-R3-263 (O-19, ADR 0054): the world is a `report_gen` worker
+    # that ran out of memory, and the taxonomy now has a member for that.
     "trace_investigation": (Category.RESOURCE_EXHAUSTION,),
-    # WO-R3-214 (WP-7.2, ADR 0053). Family C: one chain under four faults, so
-    # four labels read off four worlds and never off a canned planner. The pair
-    # worth reading twice is `resolver_stall` and `dag_paused` — the same chain,
-    # one boolean apart in `get_dag_state`, and these two labels are the ONLY
-    # thing that separates them, because both worlds escalate with no action.
-    # `dag_paused` is the label WP-7.2 had to add: the chain is held, not broken.
+    # WO-R3-214 (WP-7.2, ADR 0053). Family C: one chain under four faults, and `resolver_stall`
+    # vs `dag_paused` — one boolean apart in `get_dag_state` — is separated by the labels alone.
     "workflow_stuck_dead_lettered_root": (Category.RUNAWAY_SAGA,),
     "workflow_stuck_healthy_chain": (Category.NO_FAULT,),
     "workflow_stuck_paused_dag": (Category.DAG_PAUSED,),
     "workflow_stuck_resolver_stall": (Category.RESOLVER_STALL,),
 }
 
-#: Families whose scenarios measure the harness rather than a world. Neither
-#: manufactures a fault to name: ``TOOL_FAULT`` breaks the probe before any
-#: reading exists, and ``HARNESS_CONTROL`` is documented on the enum itself as
-#: "the harness under test rather than a world ... with no fault to diagnose".
+#: Families that measure the harness rather than a world: ``TOOL_FAULT``
+#: breaks the probe before a reading exists, and ``HARNESS_CONTROL`` has none.
 _UNDIAGNOSABLE_FAMILIES: Final[frozenset[ScenarioFamily]] = frozenset(
     {ScenarioFamily.HARNESS_CONTROL, ScenarioFamily.TOOL_FAULT}
 )
@@ -129,10 +88,8 @@ _UNDIAGNOSABLE_FAMILIES: Final[frozenset[ScenarioFamily]] = frozenset(
 def may_abstain(scenario: Scenario) -> bool:
     """Whether "no ground truth" is an admissible decision for this scenario.
 
-    Two admissible shapes, both derived from the scenario rather than named:
-    a harness or tool-failure family, or a budget of zero tool calls — which
-    is how the corpus spells "this run is expected to terminate before it ever
-    probes", and a run that never probes never ranks a hypothesis to grade.
+    Two derived shapes: a harness or tool-failure family, or a zero tool-call budget —
+    a run that never probes never ranks.
     """
     if scenario.family in _UNDIAGNOSABLE_FAMILIES:
         return True

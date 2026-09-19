@@ -1,25 +1,9 @@
 """/health must answer while an ingest is stuck on the database (ADR 0022).
 
-``ingest_alert`` is an ``async def`` that used to call synchronous Postgres
-straight from the event loop — the identity walk (up to 64 indexed loads) and
-the ingress checkpoint. One thread runs every coroutine in the process, so a
-database slow enough to matter froze the whole API, /health included. That
-inverts the signal exactly when it is needed: an agent that is merely waiting
-on Postgres reports as dead, and whatever watches /health restarts it,
-throwing away the in-flight runs whose lease connections were the thing worth
-keeping.
-
-The blocking is simulated with ``time.sleep`` in a fake checkpointer, which is
-what a pool-timeout wait looks like from the event loop's point of view: a
-synchronous call that does not yield. No Postgres needed to prove a coroutine
-does not yield.
-
-Since WO-R2-86 /health probes that same database rather than answering ``ok``
-unconditionally, so it is no longer free — but it is still *bounded*, by
-``HEALTH_PROBE_TIMEOUT_SECONDS`` rather than by the database. Under a stall the
-honest answer is ``degraded``, delivered on the health check's own schedule;
-what must never happen is /health inheriting the wait. Both halves are asserted
-below.
+``ingest_alert`` used to call synchronous Postgres from the event loop, and one thread
+runs every coroutine, so a slow database froze the whole API including /health. The stall
+is simulated with ``time.sleep``. Since WO-R2-86 /health probes the store, so the honest
+answer under a stall is ``degraded``, bounded by ``HEALTH_PROBE_TIMEOUT_SECONDS``.
 """
 
 from __future__ import annotations
@@ -41,20 +25,14 @@ from incident_commander.api.app import create_app
 from incident_commander.api.hmac_verify import sign
 from incident_commander.config import Settings
 
-# Each blocking DB call costs this. One ingest makes three of them (the
-# identity walk's load, then the ingress load + write), so the request stays
-# busy for ~1s while the probe below runs.
+# Each blocking DB call costs this; one ingest makes three, so ~1s busy.
 _DB_STALL_SECONDS = 0.35
 # The probe yield. An order of magnitude below one stalled call, so "the
 # ingest is still running" is unambiguous rather than a photo finish.
 _YIELD_SECONDS = 0.05
-# Generous next to the stall but far below it: the claim is the
-# order-of-magnitude gap between a free loop and a blocked one, not a latency
-# budget anybody should tune.
+# Generous next to the stall but far below it: an order-of-magnitude claim.
 _HEALTH_BUDGET_SECONDS = 0.25
-# What /health waits for its datastore probe. Set well inside the budget
-# above, because that is the point: the endpoint answers on this schedule even
-# though the store it is asking about is the thing that is stuck.
+# What /health waits for its probe: well inside the budget above, on its own schedule.
 _HEALTH_PROBE_TIMEOUT_SECONDS = 0.05
 
 
@@ -122,13 +100,8 @@ def _signed_alert() -> tuple[bytes, dict[str, str]]:
 async def test_health_answers_while_an_ingest_is_blocked_on_the_database() -> None:
     """The regression: a stalled ingest must not take the event loop with it.
 
-    The assertion that carries this is the *ordering* one, not the stopwatch.
-    A blocked event loop cannot be caught by timing a later ``await``, because
-    the block swallows that await too — every coroutine, including the one
-    doing the measuring, resumes only once the loop is free again, by which
-    time the stall it was trying to observe is over. So the probe is: after
-    yielding, is the ingest still in flight? If the loop was blocked, the
-    ingest necessarily ran to completion first, and that is visible.
+    The ORDERING assertion carries this, not the stopwatch: a blocked loop swallows the
+    measuring await too, so the probe is whether the ingest is still in flight after a yield.
     """
     checkpointer = StallingCheckpointer(_DB_STALL_SECONDS)
     app = create_app(
@@ -149,9 +122,7 @@ async def test_health_answers_while_an_ingest_is_blocked_on_the_database() -> No
         async with anyio.create_task_group() as tasks:
             tasks.start_soon(ingest)
 
-            # Yield. With the DB work in a worker thread this returns on
-            # schedule with the ingest still stalled; on a blocked loop it
-            # returns only after the whole ingest is done.
+            # Yield. With the DB work in a thread this returns with the ingest still stalled.
             await anyio.sleep(_YIELD_SECONDS)
             assert not finished, (
                 f"the event loop was blocked: a {_DB_STALL_SECONDS}s-per-call ingest ran to "
@@ -165,9 +136,7 @@ async def test_health_answers_while_an_ingest_is_blocked_on_the_database() -> No
             elapsed = time.monotonic() - started
             finished.append("health")
 
-    # Degraded, and correctly so: the store this agent needs is stalled, and
-    # since WO-R2-86 /health says so instead of reporting ok. The claim under
-    # test is unchanged — it answered at all, and it answered early.
+    # Degraded, and correctly so since WO-R2-86: the claim is that it answered, early.
     assert health.status_code == 503
     assert health.json()["status"] == "degraded"
     assert finished == ["health", "ingest"], "/health did not overtake the stalled ingest"

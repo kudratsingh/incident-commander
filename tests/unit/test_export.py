@@ -1,28 +1,9 @@
 """The trajectory export (WP-15.1, `evals/export.py`) and the promises it has to keep.
 
-This is the artifact the buildout leaves behind, and the one that leaves the harness: a
-line of it can end up in a training set, where nobody re-reads it. So each test here is
-tied to a way that goes wrong.
-
-* **A holdout template is refused, by name, and the refusal is the whole export.** A
-  filter would emit the rest and leave the promise resting on somebody reading a warning
-  (plan 03 § 4; instance-level holdout is plan 06 D7's named failure).
-* **The manifest records what was emitted, and the report refuses to score it.** The third
-  of the three enforcement points: a number measured on a template the policy trained on
-  measures memorisation while still being labelled a benchmark score.
-* **Labels live in a separate file.** Ground truth is evaluator-only (ADR 0038). A
-  training set that carries the answer teaches the answer.
-* **Observations are refs.** Raw tool output is untrusted data (invariant 4): inline it and
-  whatever a DLQ payload said is in the training set.
-* **No hidden chain-of-thought, and no model prose at all.** Every value on a trajectory
-  line is a closed-enum label, an id, a number or a digest. The one exception is an
-  action's `arguments`, which the agent chose.
-* **Byte-reproducible, and the traces are untouched.** An export is evidence about what a
-  policy saw; if it cannot be re-derived, it proves nothing, and an export that consumed
-  its source would destroy the record it was built from (F-002's shape).
-
-Hermetic: `tmp_path` for every write, hand-built trace lines, inline scenarios. Nothing
-here runs a scenario, and nothing reads the repo's own trace store.
+A line of it can end up in a training set, so each test is tied to a way that goes wrong:
+a holdout template is refused BY NAME and the refusal is the whole export (plan 03 § 4);
+labels live in a separate file (ADR 0038); observations are refs, not inlined tool output
+(invariant 4); no model prose beyond an action's `arguments`; and the export re-derives.
 """
 
 from __future__ import annotations
@@ -52,9 +33,7 @@ from incident_commander.agent.hypothesis import HypothesisCategory
 from incident_commander.agent.state import IncidentState
 from incident_commander.api.schemas import AlertPayload
 
-# Imported under a non-collectable name so the trace store's own rule about what a
-# chain-of-thought field is called has ONE definition, and this file does not re-run the
-# trace-store tests.
+# Imported under a non-collectable name so the trace store's rule has ONE definition.
 from tests.unit.test_tracing import TestNoChainOfThoughtIsStored as _CoTNames
 
 _WHEN: Final[datetime] = datetime(2026, 9, 18, 21, 30, tzinfo=UTC)
